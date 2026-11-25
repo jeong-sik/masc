@@ -198,7 +198,7 @@ let fusion_detail_matches_active (m : Model.t) run_id =
       ( Nav.Dive_keeper _
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime (Nav.Tool_dive _)
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _)
       | Nav.Dive_infra _ ) ->
       false
   | None -> (
@@ -269,8 +269,11 @@ let mcp_call_owns_modal ~rpc_id (m : Model.t) =
 
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
-    Observed.fetch_failed ~reason:(Msg.http_error_detail err)
-      ~retryable:(Msg.http_error_retryable err) ~at:now slot
+    let reason =
+      Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+    in
+    Observed.fetch_failed ~reason ~retryable:(Msg.http_error_retryable err)
+      ~at:now slot
   in
   (* Every read failure lands on the slot its panel renders, so a failed fetch
      shows "조회 실패: <reason>" instead of the "서버 미보고" placeholder.
@@ -1037,6 +1040,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
         | Nav.Tool_execute_form _
+        | Nav.Skill_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Preset_create_form
+        | Nav.Runtime_param_set_form _
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
         | Nav.Runtime_lane_delete _
@@ -1133,6 +1142,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
             | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -1230,6 +1245,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -1335,6 +1356,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -2351,7 +2378,13 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Code_search_form
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
-        | Nav.Tool_execute_form _ ->
+        | Nav.Tool_execute_form _
+        | Nav.Skill_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Preset_create_form
+        | Nav.Runtime_param_set_form _ ->
             false
       in
       let close_modal =
@@ -2427,7 +2460,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
-            | Nav.Tool_execute_form _ ->
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2499,7 +2538,13 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Code_search_form
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
-                | Nav.Tool_execute_form _ );
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _ );
               _;
             }
         | None ->
@@ -2584,7 +2629,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
-            | Nav.Tool_execute_form _ ->
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2651,7 +2702,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
-            | Nav.Tool_execute_form _ ->
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2717,7 +2774,13 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
-                | Nav.Tool_execute_form _ );
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _ );
               _;
             }
         | None ->
@@ -2780,7 +2843,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
-            | Nav.Tool_execute_form _ ->
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2845,7 +2914,13 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_operator_note_form _
-                | Nav.Tool_execute_form _ );
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _ );
               _;
             }
         | None ->
@@ -2947,7 +3022,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_operator_note_form _
-            | Nav.Tool_execute_form _ ->
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
                 modal)
           m.inline_modal
       in
@@ -3354,6 +3435,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -3462,6 +3549,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -3732,11 +3825,26 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_runtime "tools") ~ko:"도구 목록 조회"
         ~en:"Tools catalog fetch" err
   | Msg.Reply_skills (Ok snap) ->
-      ( {
+      let next =
+        {
           m with
           runtime = Runtime_store.apply_skills ~observed_at:now snap m.runtime;
         }
-      , [] )
+      in
+      let followup =
+        match Model.active_dive next with
+        | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+            View_fetches.fetches_for_current_view next
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+            | Nav.Dive_infra _ )
+        | None ->
+            []
+      in
+      (next, followup)
   | Msg.Reply_skills (Error err) -> (
       match err with
       | Msg.Http_error { status = 401 | 403 | 404; _ } ->
@@ -4005,6 +4113,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -4096,6 +4210,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4367,6 +4487,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
             | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4399,6 +4525,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4435,6 +4567,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4472,6 +4610,12 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
              | Nav.Tool_execute_form _
+             | Nav.Skill_create_form
+             | Nav.Skill_edit_form _
+             | Nav.Skill_delete_confirm _
+             | Nav.Prompt_override_form _
+             | Nav.Preset_create_form
+             | Nav.Runtime_param_set_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _
@@ -4570,6 +4714,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
             | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4602,6 +4752,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4638,6 +4794,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4675,6 +4837,12 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
              | Nav.Tool_execute_form _
+             | Nav.Skill_create_form
+             | Nav.Skill_edit_form _
+             | Nav.Skill_delete_confirm _
+             | Nav.Prompt_override_form _
+             | Nav.Preset_create_form
+             | Nav.Runtime_param_set_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _
@@ -6143,6 +6311,1010 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next, cmds =
         record_http_incident ~now ~source:Health.Source_client_http
           ~context:label err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_skill_editor_sources (Ok sources) ->
+      let runtime =
+        Runtime_store.apply_skill_editor_sources ~observed_at:now sources
+          m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_skill_editor_sources (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  skill_editor_sources = Observed.absent;
+                  skill_editor_sources_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  skill_editor_sources = Observed.unreported;
+                  skill_editor_sources_auth_denied = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     skill_editor_sources =
+                       failed_slot err x.skill_editor_sources;
+                   }))
+            ~source:Health.Source_client_http ~ko:"스킬 편집 소스 목록 조회"
+            ~en:"Skill editor sources fetch" err)
+  | Msg.Reply_skill_editor_tools (Ok tools) ->
+      let runtime =
+        Runtime_store.apply_skill_editor_tools ~observed_at:now tools m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_skill_editor_tools (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  skill_editor_tools = Observed.absent;
+                  skill_editor_tools_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  skill_editor_tools = Observed.unreported;
+                  skill_editor_tools_auth_denied = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     skill_editor_tools = failed_slot err x.skill_editor_tools;
+                   }))
+            ~source:Health.Source_client_http ~ko:"스킬 작성 도구 목록 조회"
+            ~en:"Skill authoring tools fetch" err)
+  | Msg.Reply_skill_editor_loaded { reference; result = Ok loaded } ->
+      let matches_dive =
+        match Model.active_dive m with
+        | Some (Nav.Dive_runtime (Nav.Skill_dive cur)) ->
+            String.equal cur reference || String.equal cur loaded.reference
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+            | Nav.Dive_infra _ )
+        | None ->
+            false
+      in
+      if not matches_dive then (m, [])
+      else
+        let runtime =
+          Runtime_store.apply_skill_editor_loaded ~observed_at:now ~reference
+            loaded m.runtime
+        in
+        ({ m with runtime }, [])
+  | Msg.Reply_skill_editor_loaded { reference; result = Error err } -> (
+      let matches_dive =
+        match Model.active_dive m with
+        | Some (Nav.Dive_runtime (Nav.Skill_dive cur)) ->
+            String.equal cur reference
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+            | Nav.Dive_infra _ )
+        | None ->
+            false
+      in
+      if not matches_dive then (m, [])
+      else
+        let clean_err =
+          Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+        in
+        match err with
+        | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+            ( on_runtime
+                (fun (x : Runtime_store.t) ->
+                  {
+                    x with
+                    skill_editor_loaded =
+                      Observed.failed ~reason:clean_err ~retryable:false ~at:now;
+                  })
+                m
+            , [] )
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            err_reply
+              ~fail:
+                (on_runtime (fun (x : Runtime_store.t) ->
+                     {
+                       x with
+                       skill_editor_loaded =
+                         failed_slot err x.skill_editor_loaded;
+                     }))
+              ~source:Health.Source_client_http
+              ~ko:("스킬 원문 읽기: " ^ reference)
+              ~en:("Skill read: " ^ reference) err)
+  | Msg.Reply_skill_editor_preview (Ok preview) ->
+      let in_skill_dive =
+        match Model.active_dive m with
+        | Some (Nav.Dive_runtime (Nav.Skill_dive _)) -> true
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+            | Nav.Dive_infra _ )
+        | None ->
+            false
+      in
+      if not in_skill_dive then (m, [])
+      else
+        let runtime =
+          Runtime_store.apply_skill_editor_preview ~observed_at:now preview
+            m.runtime
+        in
+        let diag_n = List.length preview.diagnostics in
+        let toast =
+          if diag_n = 0 then
+            Say.make ~ko:"스킬 검증 통과 (진단 경고 없음)"
+              ~en:"Skill preview valid (0 diagnostics)"
+          else
+            Say.make
+              ~ko:(Printf.sprintf "스킬 검증 완료 (%d건 진단)" diag_n)
+              ~en:(Printf.sprintf "Skill preview completed (%d diagnostic(s))" diag_n)
+        in
+        ({ m with runtime } |> Model.with_toast ~now ~level:Model.Toast_info toast, [])
+  | Msg.Reply_skill_editor_preview (Error err) ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"스킬 검증 미리보기" ~en:"Skill preview") err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_skill_editor_outcome { action; reference; result = Ok outcome } ->
+      let is_matching_skill_modal kind =
+        match (action, kind) with
+        | `Create, Nav.Skill_create_form
+        | `Save, Nav.Skill_edit_form _
+        | `Delete, Nav.Skill_delete_confirm _ ->
+            true
+        | ( (`Create | `Save | `Delete)
+          , ( Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ) ) ->
+            false
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind; _ } -> is_matching_skill_modal kind
+        | None -> false
+      in
+      let nav =
+        if close_modal then { m.nav with overlay = None } else m.nav
+      in
+      let nav =
+        match (action, nav.dive_stack) with
+        | `Delete, top :: rest
+          when Nav.equal_dive top (Nav.Dive_runtime (Nav.Skill_dive reference))
+          ->
+            { nav with dive_stack = rest }
+        | (`Create | `Save | `Delete), ([] | _ :: _) -> nav
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let runtime =
+        {
+          m.runtime with
+          skills = Observed.mark_stale m.runtime.skills;
+          skill_editor_preview = Observed.absent;
+          skill_editor_loaded =
+            (match action with
+            | `Delete -> Observed.absent
+            | `Create | `Save -> Observed.mark_stale m.runtime.skill_editor_loaded);
+        }
+      in
+      let status_lower = String.lowercase_ascii outcome.status in
+      let has_sub sub =
+        let n = String.length status_lower and m = String.length sub in
+        let rec scan i =
+          if i + m > n then false
+          else if String.equal (String.sub status_lower i m) sub then true
+          else scan (i + 1)
+        in
+        m > 0 && scan 0
+      in
+      let is_warning = has_sub "unpublished" || has_sub "shadowed" in
+      let reason_suffix =
+        match outcome.reason with
+        | Some r when not (String.equal (String.trim r) "") ->
+            " — " ^ Chat_transcript.scrub_secrets_in_text (String.trim r)
+        | Some _ | None -> ""
+      in
+      let toast =
+        let act_ko, act_en =
+          match action with
+          | `Create -> ("생성", "created")
+          | `Save -> ("저장", "saved")
+          | `Delete -> ("삭제", "deleted")
+        in
+        Say.make
+          ~ko:
+            (Printf.sprintf "스킬 %s (%s · %s)%s" act_ko reference
+               outcome.status reason_suffix)
+          ~en:
+            (Printf.sprintf "Skill %s (%s · %s)%s" act_en reference
+               outcome.status reason_suffix)
+      in
+      let level =
+        if is_warning then Model.Toast_warning else Model.Toast_success
+      in
+      let next =
+        { m with nav; inline_modal; runtime }
+        |> Model.with_toast ~now ~level toast
+      in
+      (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
+  | Msg.Reply_skill_editor_outcome { action; reference; result = Error err } ->
+      let clean_err =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let is_matching_skill_modal kind =
+        match (action, kind) with
+        | `Create, Nav.Skill_create_form
+        | `Save, Nav.Skill_edit_form _
+        | `Delete, Nav.Skill_delete_confirm _ ->
+            true
+        | ( (`Create | `Save | `Delete)
+          , ( Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ) ) ->
+            false
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            if is_matching_skill_modal modal.kind then
+              { modal with submitting = false; error = Some clean_err }
+            else modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:("스킬 편집 오류: " ^ reference)
+               ~en:("Skill editor error: " ^ reference))
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_skills_refreshed (Ok receipt) ->
+      let runtime =
+        { m.runtime with skills = Observed.mark_stale m.runtime.skills }
+      in
+      let toast =
+        Say.make
+          ~ko:(Printf.sprintf "스킬 카탈로그 갱신 (%s)" receipt.publication)
+          ~en:(Printf.sprintf "Skill catalog refreshed (%s)" receipt.publication)
+      in
+      ( { m with runtime } |> Model.with_toast ~now ~level:Model.Toast_success toast
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ] )
+  | Msg.Reply_skills_refreshed (Error err) ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"스킬 카탈로그 새로고침" ~en:"Skill catalog refresh")
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_async_requests (Ok snap) ->
+      let runtime =
+        Runtime_store.apply_async_requests ~observed_at:now snap m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_async_requests (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  async_requests = Observed.absent;
+                  async_requests_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  async_requests = Observed.unreported;
+                  async_requests_auth_denied = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with async_requests = failed_slot err x.async_requests }))
+            ~source:Health.Source_client_http ~ko:"비동기 요청 관측 조회"
+            ~en:"Async requests fetch" err)
+  | Msg.Reply_prompts (Ok cat) ->
+      let runtime =
+        Runtime_store.apply_prompts_catalog ~observed_at:now cat m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_prompts (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  prompts_catalog = Observed.absent;
+                  prompts_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     prompts_catalog = failed_slot err x.prompts_catalog;
+                   }))
+            ~source:Health.Source_client_http ~ko:"프롬프트 레지스트리 조회"
+            ~en:"Prompts catalog fetch" err)
+  | Msg.Reply_prompt_override { key; cleared; result = Ok () } ->
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind = Nav.Prompt_override_form _; _ } -> true
+        | Some
+            {
+              kind =
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav = if close_modal then { m.nav with overlay = None } else m.nav in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let runtime =
+        {
+          m.runtime with
+          prompts_catalog = Observed.mark_stale m.runtime.prompts_catalog;
+        }
+      in
+      let toast =
+        if cleared then
+          Say.make ~ko:("프롬프트 오버라이드 해제 완료: " ^ key)
+            ~en:("Prompt override cleared: " ^ key)
+        else
+          Say.make ~ko:("프롬프트 오버라이드 저장 완료: " ^ key)
+            ~en:("Prompt override saved: " ^ key)
+      in
+      ( { m with nav; inline_modal; runtime }
+        |> Model.with_toast ~now ~level:Model.Toast_success toast
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_prompts } ] )
+  | Msg.Reply_prompt_override { key; cleared = _; result = Error err } ->
+      let clean_err =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Prompt_override_form _ ->
+                { modal with submitting = false; error = Some clean_err }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:("프롬프트 오버라이드: " ^ key)
+               ~en:("Prompt override: " ^ key))
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_presets (Ok listing) ->
+      let runtime =
+        Runtime_store.apply_presets_listing ~observed_at:now listing m.runtime
+      in
+      let next = { m with runtime } in
+      let detail_cmd =
+        if
+          (not next.runtime.presets_auth_denied)
+          && Nav.equal_workspace next.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_tools_usage
+          && Runtime_store.equal_tools_subview next.runtime.tools_subview
+               Runtime_store.Tools_prompts_presets
+          && Runtime_store.equal_prompts_presets_section next.runtime.pp_section
+               Runtime_store.Sec_presets
+        then
+          match Runtime_store.selected_preset_manifest next.runtime with
+          | Some p -> (
+              match next.runtime.preset_detail with
+              | Observed.Value { data = n, _; stale = false; _ }
+                when String.equal n p.name ->
+                  []
+              | Observed.Loading _ -> []
+              | Observed.Value _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  [
+                    Cmd.Http_get
+                      { epoch = m.epoch; req = Cmd.Get_preset_show { name = p.name } };
+                  ])
+          | None -> []
+        else []
+      in
+      (next, detail_cmd)
+  | Msg.Reply_presets (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  presets_listing = Observed.absent;
+                  presets_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  presets_listing = Observed.absent;
+                  presets_auth_denied = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     presets_listing = failed_slot err x.presets_listing;
+                   }))
+            ~source:Health.Source_client_http ~ko:"프리셋 목록 조회"
+            ~en:"Presets listing fetch" err)
+  | Msg.Reply_preset_detail { name; result = Ok detail } ->
+      let matches_selected =
+        match Runtime_store.selected_preset_manifest m.runtime with
+        | Some p -> String.equal p.name name
+        | None -> Option.equal String.equal m.runtime.pending_preset_select (Some name)
+      in
+      if not matches_selected then (m, [])
+      else
+        let runtime =
+          Runtime_store.apply_preset_detail ~observed_at:now ~name detail m.runtime
+        in
+        ({ m with runtime }, [])
+  | Msg.Reply_preset_detail { name; result = Error err } -> (
+      let matches_selected =
+        match Runtime_store.selected_preset_manifest m.runtime with
+        | Some p -> String.equal p.name name
+        | None -> Option.equal String.equal m.runtime.pending_preset_select (Some name)
+      in
+      if not matches_selected then (m, [])
+      else
+        let clean_err =
+          Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+        in
+        match err with
+        | Msg.Http_error { status = 401 | 403; _ } ->
+            ( on_runtime
+                (fun (x : Runtime_store.t) ->
+                  {
+                    x with
+                    presets_auth_denied = true;
+                    preset_detail =
+                      Observed.failed ~reason:clean_err ~retryable:false ~at:now;
+                  })
+                m
+            , [] )
+        | Msg.Http_error { status = 404; _ } ->
+            ( on_runtime
+                (fun (x : Runtime_store.t) ->
+                  {
+                    x with
+                    preset_detail =
+                      Observed.failed ~reason:clean_err ~retryable:false ~at:now;
+                  })
+                m
+            , [] )
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            err_reply
+              ~fail:
+                (on_runtime (fun (x : Runtime_store.t) ->
+                     { x with preset_detail = failed_slot err x.preset_detail }))
+              ~source:Health.Source_client_http
+              ~ko:("프리셋 상세 조회: " ^ name)
+              ~en:("Preset detail fetch: " ^ name) err)
+  | Msg.Reply_preset_restore { name; result = Ok rep } ->
+      let runtime =
+        {
+          m.runtime with
+          prompts_catalog = Observed.mark_stale m.runtime.prompts_catalog;
+          presets_listing = Observed.mark_stale m.runtime.presets_listing;
+          preset_detail = Observed.absent;
+          runtime_resolved = Observed.mark_stale m.runtime.runtime_resolved;
+        }
+      in
+      let toast =
+        Say.make
+          ~ko:
+            (Printf.sprintf "프리셋 복원 완료: %s (백업=%s, 오버라이드=%d, 지침=%d, 런타임=%s)"
+               name rep.autosave rep.overrides_applied_count
+               rep.instructions_applied_count rep.runtime_status)
+          ~en:
+            (Printf.sprintf "Preset restored: %s (autosave=%s, overrides=%d, instructions=%d, runtime=%s)"
+               name rep.autosave rep.overrides_applied_count
+               rep.instructions_applied_count rep.runtime_status)
+      in
+      ( { m with runtime } |> Model.with_toast ~now ~level:Model.Toast_success toast
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_prompts };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_presets };
+        ] )
+  | Msg.Reply_preset_restore { name; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:("프리셋 복원: " ^ name) ~en:("Preset restore: " ^ name))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_preset_mutation { label; result = Ok () } ->
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind = Nav.Preset_create_form; _ } -> true
+        | Some
+            {
+              kind =
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Runtime_param_set_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav = if close_modal then { m.nav with overlay = None } else m.nav in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let runtime =
+        {
+          m.runtime with
+          presets_listing = Observed.mark_stale m.runtime.presets_listing;
+          preset_detail = Observed.absent;
+        }
+      in
+      ( { m with nav; inline_modal; runtime }
+        |> Model.with_toast ~now ~level:Model.Toast_success label
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_presets } ] )
+  | Msg.Reply_preset_mutation { label; result = Error err } ->
+      let clean_err =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Preset_create_form ->
+                { modal with submitting = false; error = Some clean_err }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:label err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_runtime_params (Ok rp) ->
+      let runtime =
+        Runtime_store.apply_runtime_params ~observed_at:now rp m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_runtime_params (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  runtime_params = Observed.absent;
+                  runtime_params_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with runtime_params = failed_slot err x.runtime_params }))
+            ~source:Health.Source_client_http ~ko:"런타임 파라미터 조회"
+            ~en:"Runtime params fetch" err)
+  | Msg.Reply_runtime_param_mutation { param_key; cleared; result = Ok () } ->
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind = Nav.Runtime_param_set_form _; _ } -> true
+        | Some
+            {
+              kind =
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav = if close_modal then { m.nav with overlay = None } else m.nav in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let runtime =
+        {
+          m.runtime with
+          runtime_params = Observed.mark_stale m.runtime.runtime_params;
+        }
+      in
+      let toast =
+        if cleared then
+          Say.make ~ko:("파라미터 기본값 복원: " ^ param_key)
+            ~en:("Runtime param cleared: " ^ param_key)
+        else
+          Say.make ~ko:("파라미터 설정 완료: " ^ param_key)
+            ~en:("Runtime param updated: " ^ param_key)
+      in
+      ( { m with nav; inline_modal; runtime }
+        |> Model.with_toast ~now ~level:Model.Toast_success toast
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_params } ] )
+  | Msg.Reply_runtime_param_mutation { param_key; cleared = _; result = Error err } ->
+      let clean_err =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Runtime_param_set_form _ ->
+                { modal with submitting = false; error = Some clean_err }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:("런타임 파라미터: " ^ param_key)
+               ~en:("Runtime param: " ^ param_key))
+          err { m with inline_modal }
       in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next

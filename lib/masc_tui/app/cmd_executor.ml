@@ -125,7 +125,14 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_keeper_operator_note _
   | Cmd.Get_tool_approval_modes
   | Cmd.Get_late_approval_attempts
-  | Cmd.Get_keeper_waiting_inventory _ ->
+  | Cmd.Get_keeper_waiting_inventory _
+  | Cmd.Get_skill_editor_sources
+  | Cmd.Get_skill_editor_tools
+  | Cmd.Get_async_requests
+  | Cmd.Get_prompts
+  | Cmd.Get_presets
+  | Cmd.Get_preset_show _
+  | Cmd.Get_runtime_params ->
       standard_timeout_sec
   (* Heavy tier: dashboard/analytics aggregates, disk/git/ripgrep scans,
      memory/keeper context & history reads, probes, and published artifacts *)
@@ -269,7 +276,20 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_gate_retry _
   | Cmd.Post_keeper_tool_approval_mode _
   | Cmd.Post_hitl_ack_uncertain _
-  | Cmd.Post_hitl_late_approval_restore ->
+  | Cmd.Post_hitl_late_approval_restore
+  | Cmd.Post_skill_editor_read _
+  | Cmd.Post_skill_editor_preview_new _
+  | Cmd.Post_skill_editor_create _
+  | Cmd.Post_skill_editor_preview _
+  | Cmd.Post_skill_editor_save _
+  | Cmd.Post_skills_refresh
+  | Cmd.Post_prompt_override _
+  | Cmd.Post_preset_save _
+  | Cmd.Post_preset_create _
+  | Cmd.Post_preset_restore _
+  | Cmd.Post_preset_delete _
+  | Cmd.Post_runtime_param_set _
+  | Cmd.Post_runtime_param_clear _ ->
       standard_timeout_sec
   (* Heavy tier: probes, fusion launches, config patches, memory recovery,
      OAuth/GitHub/repo/browser CLI or external-service calls *)
@@ -453,6 +473,7 @@ type t = {
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
   active_memory_diagram_cancel : bool Atomic.t option Atomic.t;
   mcp_tools_list_in_flight : bool Atomic.t;
+  skill_read_in_flight : string option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
   editor_handoff : editor_handoff;
@@ -627,6 +648,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let in_flight_gets_mu = Stdlib.Mutex.create () in
   let in_flight_gets = Hashtbl.create 32 in
   let mcp_tools_list_in_flight = Atomic.make false in
+  let skill_read_in_flight = Atomic.make None in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -666,6 +688,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     owned_server;
     active_memory_diagram_cancel;
     mcp_tools_list_in_flight;
+    skill_read_in_flight;
     sse_hub;
     voice_runner;
     editor_handoff;
@@ -1006,7 +1029,14 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_late_approval_attempts
   | Cmd.Get_tool_quality _
   | Cmd.Get_gate_tool_events _
-  | Cmd.Get_keeper_waiting_inventory _ ->
+  | Cmd.Get_keeper_waiting_inventory _
+  | Cmd.Get_skill_editor_sources
+  | Cmd.Get_skill_editor_tools
+  | Cmd.Get_async_requests
+  | Cmd.Get_prompts
+  | Cmd.Get_presets
+  | Cmd.Get_preset_show _
+  | Cmd.Get_runtime_params ->
       Some base, Key_get path
 
 let rec execute_get t ~epoch req =
@@ -2153,6 +2183,59 @@ let rec execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_skill_editor_sources ->
+            let reply =
+              Msg.Reply_skill_editor_sources
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_skill_editor_sources)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_skill_editor_tools ->
+            let reply =
+              Msg.Reply_skill_editor_tools
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_skill_editor_tools)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_async_requests ->
+            let reply =
+              Msg.Reply_async_requests
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_async_requests)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_prompts ->
+            let reply =
+              Msg.Reply_prompts
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_prompts_catalog)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_presets ->
+            let reply =
+              Msg.Reply_presets
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_presets_listing)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_preset_show { name } ->
+            let reply =
+              Msg.Reply_preset_detail
+                {
+                  name;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_preset_detail;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_runtime_params ->
+            let reply =
+              Msg.Reply_runtime_params
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_runtime_params)
+            in
+            Msg.Http_reply { epoch; reply }
       in
       Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg;
       completed_ok := true);
@@ -3114,6 +3197,113 @@ let execute_post t ~epoch req =
                 ~decode:(Wire_runtime.decode_mcp_tools_call_result ~tool_name)
             in
             Some (Msg.Reply_mcp_tools_call { rpc_id; tool_name; result })
+        | Cmd.Post_skill_editor_read { reference; _ } ->
+            let acquired =
+              let rec claim () =
+                match Atomic.get t.skill_read_in_flight with
+                | Some cur when String.equal cur reference -> false
+                | (Some _ | None) as cur ->
+                    if
+                      Atomic.compare_and_set t.skill_read_in_flight cur
+                        (Some reference)
+                    then true
+                    else claim ()
+              in
+              claim ()
+            in
+            if acquired then
+              Fun.protect
+                ~finally:(fun () ->
+                  let cur = Atomic.get t.skill_read_in_flight in
+                  if Option.equal String.equal cur (Some reference) then
+                    ignore
+                      (Atomic.compare_and_set t.skill_read_in_flight cur None))
+                (fun () ->
+                  let result =
+                    post_and_decode t ~path ~body
+                      ~decode:Wire_runtime.decode_skill_editor_loaded
+                  in
+                  Some (Msg.Reply_skill_editor_loaded { reference; result }))
+            else None
+        | Cmd.Post_skill_editor_preview_new _ | Cmd.Post_skill_editor_preview _ ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_skill_editor_preview
+            in
+            Some (Msg.Reply_skill_editor_preview result)
+        | Cmd.Post_skill_editor_create { package_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_skill_editor_outcome
+            in
+            Some
+              (Msg.Reply_skill_editor_outcome
+                 { action = `Create; reference = package_id; result })
+        | Cmd.Post_skill_editor_save { reference; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_skill_editor_outcome
+            in
+            Some
+              (Msg.Reply_skill_editor_outcome
+                 { action = `Save; reference; result })
+        | Cmd.Post_skills_refresh ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_skill_refresh_receipt
+            in
+            Some (Msg.Reply_skills_refreshed result)
+        | Cmd.Post_prompt_override { key; value } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_prompt_override
+                 { key; cleared = Option.is_none value; result })
+        | Cmd.Post_preset_save { name; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_preset_mutation
+                 {
+                   label =
+                     Say.make ~ko:("프리셋 저장: " ^ name)
+                       ~en:("Preset saved: " ^ name);
+                   result;
+                 })
+        | Cmd.Post_preset_create { name; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_preset_mutation
+                 {
+                   label =
+                     Say.make ~ko:("프리셋 생성: " ^ name)
+                       ~en:("Preset created: " ^ name);
+                   result;
+                 })
+        | Cmd.Post_preset_restore { name } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_preset_restore_report
+            in
+            Some (Msg.Reply_preset_restore { name; result })
+        | Cmd.Post_preset_delete { name } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_preset_mutation
+                 {
+                   label =
+                     Say.make ~ko:("프리셋 삭제: " ^ name)
+                       ~en:("Preset deleted: " ^ name);
+                   result;
+                 })
+        | Cmd.Post_runtime_param_set { param_key; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_param_mutation
+                 { param_key; cleared = false; result })
+        | Cmd.Post_runtime_param_clear { param_key } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_param_mutation
+                 { param_key; cleared = true; result })
       in
       Option.iter
         (fun reply ->
@@ -3135,6 +3325,27 @@ let execute_put t ~epoch req =
           in
           Ui_bus.publish_stream t.bus
             (Msg.Http_reply { epoch; reply = Msg.Reply_wiki_put { page; result } }))
+
+let execute_delete t ~epoch req =
+  let path = Cmd.delete_request_path req in
+  let body = Cmd.delete_request_body req in
+  fork_safe t (fun () ->
+      match req with
+      | Cmd.Delete_skill_editor { reference; _ } ->
+          let ep = Atomic.get t.endpoint in
+          let result =
+            Http_client.delete_json ~io:t.io ~clock:t.clock ~body ep ~path
+              ~decode:Wire_runtime.decode_skill_editor_outcome
+            |> Result.map_error msg_error_of_http
+          in
+          Ui_bus.publish_stream t.bus
+            (Msg.Http_reply
+               {
+                 epoch;
+                 reply =
+                   Msg.Reply_skill_editor_outcome
+                     { action = `Delete; reference; result };
+               }))
 
 (* A chat operation keeps running when its stream drops: the server journals
    every event and answers a re-POST of the same request with the events
@@ -4164,6 +4375,7 @@ let rec execute t = function
   | Cmd.Http_get { epoch; req } -> execute_get t ~epoch req
   | Cmd.Http_post { epoch; req } -> execute_post t ~epoch req
   | Cmd.Http_put { epoch; req } -> execute_put t ~epoch req
+  | Cmd.Http_delete { epoch; req } -> execute_delete t ~epoch req
   | Cmd.Http_post_stream { epoch; req } -> execute_post_stream t ~epoch req
   | Cmd.Sync_streams { epoch; streams } ->
       (* On epoch transitions, fence & stop previous streams while stream_epoch

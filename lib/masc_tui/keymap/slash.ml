@@ -20,6 +20,9 @@ type command_id =
   | Cmd_ctl
   | Cmd_gate
   | Cmd_exec
+  | Cmd_skill
+  | Cmd_prompt
+  | Cmd_preset
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -66,6 +69,27 @@ type gate_action =
   | Gate_ack_uncertain of { keeper : string; consume_id : string }
   | Gate_restore_late
 
+type skill_action =
+  | Skill_refresh
+  | Skill_new
+  | Skill_read of string
+  | Skill_edit of string
+  | Skill_delete of string
+
+type prompt_action =
+  | Prompt_set of { key : string; value : string option }
+  | Prompt_clear of string
+  | Param_set of { key : string; value_raw : string option }
+  | Param_clear of string
+
+type preset_action =
+  | Preset_list
+  | Preset_show of string
+  | Preset_save of { name : string; description : string }
+  | Preset_create of { name : string option; description : string }
+  | Preset_restore of string
+  | Preset_delete of string
+
 type parsed =
   | Pulse
   | Work
@@ -85,6 +109,9 @@ type parsed =
   | Ctl of { action : keeper_ctl_action; target : string option }
   | Gate of gate_action
   | Exec of { tool_name : string; args_json : string option }
+  | Skill of skill_action
+  | Prompt of prompt_action
+  | Preset of preset_action
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -127,13 +154,16 @@ let command_id_rank = function
   | Cmd_ctl -> 15
   | Cmd_gate -> 16
   | Cmd_exec -> 17
-  | Cmd_tools -> 18
-  | Cmd_clear -> 19
-  | Cmd_theme -> 20
-  | Cmd_lang -> 21
-  | Cmd_help -> 22
-  | Cmd_restart -> 23
-  | Cmd_quit -> 24
+  | Cmd_skill -> 18
+  | Cmd_prompt -> 19
+  | Cmd_preset -> 20
+  | Cmd_tools -> 21
+  | Cmd_clear -> 22
+  | Cmd_theme -> 23
+  | Cmd_lang -> 24
+  | Cmd_help -> 25
+  | Cmd_restart -> 26
+  | Cmd_quit -> 27
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -208,6 +238,76 @@ let equal_gate_action a b =
       _ ->
         false
 
+let skill_action_rank = function
+  | Skill_refresh -> 0
+  | Skill_new -> 1
+  | Skill_read _ -> 2
+  | Skill_edit _ -> 3
+  | Skill_delete _ -> 4
+
+let equal_skill_action a b =
+  if not (Int.equal (skill_action_rank a) (skill_action_rank b)) then false
+  else
+    match (a, b) with
+    | Skill_refresh, Skill_refresh | Skill_new, Skill_new -> true
+    | Skill_read x, Skill_read y
+    | Skill_edit x, Skill_edit y
+    | Skill_delete x, Skill_delete y ->
+        String.equal x y
+    | (Skill_refresh | Skill_new | Skill_read _ | Skill_edit _ | Skill_delete _),
+      _ ->
+        false
+
+let prompt_action_rank = function
+  | Prompt_set _ -> 0
+  | Prompt_clear _ -> 1
+  | Param_set _ -> 2
+  | Param_clear _ -> 3
+
+let equal_prompt_action a b =
+  if not (Int.equal (prompt_action_rank a) (prompt_action_rank b)) then false
+  else
+    match (a, b) with
+    | Prompt_set x, Prompt_set y ->
+        String.equal x.key y.key && Option.equal String.equal x.value y.value
+    | Prompt_clear x, Prompt_clear y | Param_clear x, Param_clear y ->
+        String.equal x y
+    | Param_set x, Param_set y ->
+        String.equal x.key y.key
+        && Option.equal String.equal x.value_raw y.value_raw
+    | (Prompt_set _ | Prompt_clear _ | Param_set _ | Param_clear _), _ -> false
+
+let preset_action_rank = function
+  | Preset_list -> 0
+  | Preset_show _ -> 1
+  | Preset_save _ -> 2
+  | Preset_create _ -> 3
+  | Preset_restore _ -> 4
+  | Preset_delete _ -> 5
+
+let equal_preset_action a b =
+  if not (Int.equal (preset_action_rank a) (preset_action_rank b)) then false
+  else
+    match (a, b) with
+    | Preset_list, Preset_list -> true
+    | Preset_show x, Preset_show y
+    | Preset_restore x, Preset_restore y
+    | Preset_delete x, Preset_delete y ->
+        String.equal x y
+    | Preset_save x, Preset_save y ->
+        String.equal x.name y.name && String.equal x.description y.description
+    | Preset_create x, Preset_create y ->
+        Option.equal String.equal x.name y.name
+        && String.equal x.description y.description
+    | ( Preset_list
+      | Preset_show _
+      | Preset_save _
+      | Preset_create _
+      | Preset_restore _
+      | Preset_delete _ ),
+      _ ->
+        false
+
 let parsed_tag = function
   | Pulse -> 0
   | Work -> 1
@@ -227,13 +327,16 @@ let parsed_tag = function
   | Ctl _ -> 15
   | Gate _ -> 16
   | Exec _ -> 17
-  | Tools _ -> 18
-  | Clear -> 19
-  | Theme _ -> 20
-  | Lang _ -> 21
-  | Help -> 22
-  | Restart -> 23
-  | Quit -> 24
+  | Skill _ -> 18
+  | Prompt _ -> 19
+  | Preset _ -> 20
+  | Tools _ -> 21
+  | Clear -> 22
+  | Theme _ -> 23
+  | Lang _ -> 24
+  | Help -> 25
+  | Restart -> 26
+  | Quit -> 27
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -250,6 +353,9 @@ let equal_parsed a b =
     | Exec x, Exec y ->
         String.equal x.tool_name y.tool_name
         && Option.equal String.equal x.args_json y.args_json
+    | Skill x, Skill y -> equal_skill_action x y
+    | Prompt x, Prompt y -> equal_prompt_action x y
+    | Preset x, Preset y -> equal_preset_action x y
     | Tools x, Tools y -> Option.equal equal_tools_mode x y
     | Theme x, Theme y -> Option.equal Theme.equal_preset x y
     | Lang x, Lang y -> Option.equal Say.equal_lang x y
@@ -287,6 +393,9 @@ let equal_parsed a b =
       | Ctl _
       | Gate _
       | Exec _
+      | Skill _
+      | Prompt _
+      | Preset _
       | Tools _
       | Clear
       | Theme _
@@ -380,6 +489,27 @@ let all : spec list =
         (Say.make ~ko:"<tool_name> [json_args]" ~en:"<tool_name> [json_args]")
       ~ko:"MCP 도구 대화형 실행 (POST /mcp tools/call)"
       ~en:"Execute MCP tool interactively via POST /mcp tools/call"
+      Slash_interaction;
+    mk Cmd_skill "/skill"
+      ~arg_hint:
+        (Say.make ~ko:"<refresh|new|read|edit|delete> [ref]"
+           ~en:"<refresh|new|read|edit|delete> [ref]")
+      ~ko:"스킬 카탈로그 새로고침 · 생성 · 열람 · 편집 · 삭제"
+      ~en:"Refresh, create, read, edit, or delete Skill packages"
+      Slash_interaction;
+    mk Cmd_prompt "/prompt"
+      ~arg_hint:
+        (Say.make ~ko:"<set|clear|param-set|param-clear> <key> [value]"
+           ~en:"<set|clear|param-set|param-clear> <key> [value]")
+      ~ko:"프롬프트 오버라이드 및 런타임 파라미터 설정/해제"
+      ~en:"Override/clear prompts and set/clear runtime parameters"
+      Slash_interaction;
+    mk Cmd_preset "/preset"
+      ~arg_hint:
+        (Say.make ~ko:"<list|show|save|create|restore|delete> [name]"
+           ~en:"<list|show|save|create|restore|delete> [name]")
+      ~ko:"프롬프트 프리셋 조회 · 저장 · 생성 · 복원 · 삭제"
+      ~en:"List, inspect, save, create, restore, or delete prompt presets"
       Slash_interaction;
     mk Cmd_tools "/tools"
       ~arg_hint:(Say.make ~ko:"[compact|results|full]" ~en:"[compact|results|full]")
@@ -658,6 +788,141 @@ let parse raw =
         | Some raw_arg ->
             let tool_name, args_json = split_command_and_arg raw_arg in
             Ok (Exec { tool_name; args_json }))
+    | "/skill" -> (
+        let invalid ~expected got =
+          Error (Invalid_argument { command = cmd; expected; got })
+        in
+        match arg with
+        | None ->
+            invalid ~expected:(Say.literal "refresh|new|read|edit|delete") ""
+        | Some raw_arg -> (
+            let sub_raw, rest = split_command_and_arg raw_arg in
+            let sub = String.lowercase_ascii sub_raw in
+            match (sub, rest) with
+            | "refresh", None -> Ok (Skill Skill_refresh)
+            | "refresh", Some extra ->
+                Error
+                  (Unexpected_argument { command = "/skill refresh"; arg = extra })
+            | "new", None -> Ok (Skill Skill_new)
+            | "new", Some extra ->
+                Error (Unexpected_argument { command = "/skill new"; arg = extra })
+            | "read", Some r -> Ok (Skill (Skill_read r))
+            | "read", None -> invalid ~expected:(Say.literal "<skill_ref>") ""
+            | "edit", Some r -> Ok (Skill (Skill_edit r))
+            | "edit", None -> invalid ~expected:(Say.literal "<skill_ref>") ""
+            | "delete", Some r -> Ok (Skill (Skill_delete r))
+            | "delete", None -> invalid ~expected:(Say.literal "<skill_ref>") ""
+            | other, _ ->
+                invalid ~expected:(Say.literal "refresh|new|read|edit|delete")
+                  other))
+    | "/prompt" -> (
+        let invalid ~expected got =
+          Error (Invalid_argument { command = cmd; expected; got })
+        in
+        match arg with
+        | None ->
+            invalid ~expected:(Say.literal "set|clear|param-set|param-clear") ""
+        | Some raw_arg -> (
+            let sub_raw, rest = split_command_and_arg raw_arg in
+            let sub = String.lowercase_ascii sub_raw in
+            match (sub, rest) with
+            | "set", Some a ->
+                let k, v = split_command_and_arg a in
+                Ok (Prompt (Prompt_set { key = k; value = v }))
+            | "set", None ->
+                invalid ~expected:(Say.literal "<key> [value]") ""
+            | "clear", Some a -> (
+                let k, extra = split_command_and_arg a in
+                match extra with
+                | None -> Ok (Prompt (Prompt_clear k))
+                | Some tok ->
+                    Error
+                      (Unexpected_argument
+                         { command = "/prompt clear"; arg = tok }))
+            | "clear", None -> invalid ~expected:(Say.literal "<key>") ""
+            | "param-set", Some a ->
+                let k, v = split_command_and_arg a in
+                Ok (Prompt (Param_set { key = k; value_raw = v }))
+            | "param-set", None ->
+                invalid ~expected:(Say.literal "<param_key> [json_or_value]") ""
+            | "param-clear", Some a -> (
+                let k, extra = split_command_and_arg a in
+                match extra with
+                | None -> Ok (Prompt (Param_clear k))
+                | Some tok ->
+                    Error
+                      (Unexpected_argument
+                         { command = "/prompt param-clear"; arg = tok }))
+            | "param-clear", None ->
+                invalid ~expected:(Say.literal "<param_key>") ""
+            | other, _ ->
+                invalid
+                  ~expected:(Say.literal "set|clear|param-set|param-clear")
+                  other))
+    | "/preset" -> (
+        let invalid ~expected got =
+          Error (Invalid_argument { command = cmd; expected; got })
+        in
+        match arg with
+        | None -> Ok (Preset Preset_list)
+        | Some raw_arg -> (
+            let sub_raw, rest = split_command_and_arg raw_arg in
+            let sub = String.lowercase_ascii sub_raw in
+            match (sub, rest) with
+            | "list", None -> Ok (Preset Preset_list)
+            | "list", Some extra ->
+                Error
+                  (Unexpected_argument { command = "/preset list"; arg = extra })
+            | "show", Some a -> (
+                let name, extra = split_command_and_arg a in
+                match extra with
+                | None -> Ok (Preset (Preset_show name))
+                | Some tok ->
+                    Error
+                      (Unexpected_argument
+                         { command = "/preset show"; arg = tok }))
+            | "show", None -> invalid ~expected:(Say.literal "<name>") ""
+            | "save", Some a ->
+                let name, desc_opt = split_command_and_arg a in
+                Ok
+                  (Preset
+                     (Preset_save
+                        { name; description = Option.value desc_opt ~default:"" }))
+            | "save", None ->
+                invalid ~expected:(Say.literal "<name> [description]") ""
+            | "create", None ->
+                Ok (Preset (Preset_create { name = None; description = "" }))
+            | "create", Some a ->
+                let name, desc_opt = split_command_and_arg a in
+                Ok
+                  (Preset
+                     (Preset_create
+                        {
+                          name = Some name;
+                          description = Option.value desc_opt ~default:"";
+                        }))
+            | "restore", Some a -> (
+                let name, extra = split_command_and_arg a in
+                match extra with
+                | None -> Ok (Preset (Preset_restore name))
+                | Some tok ->
+                    Error
+                      (Unexpected_argument
+                         { command = "/preset restore"; arg = tok }))
+            | "restore", None -> invalid ~expected:(Say.literal "<name>") ""
+            | "delete", Some a -> (
+                let name, extra = split_command_and_arg a in
+                match extra with
+                | None -> Ok (Preset (Preset_delete name))
+                | Some tok ->
+                    Error
+                      (Unexpected_argument
+                         { command = "/preset delete"; arg = tok }))
+            | "delete", None -> invalid ~expected:(Say.literal "<name>") ""
+            | other, _ ->
+                invalid
+                  ~expected:(Say.literal "list|show|save|create|restore|delete")
+                  other))
     | "/tools" -> (
         match arg with
         | None -> Ok (Tools None)
@@ -838,6 +1103,15 @@ let complete ~prefix =
             "ack-uncertain";
             "restore-late";
           ]
+    | "/skill" ->
+        complete_args ~cmd ~arg_prefix
+          [ "refresh"; "new"; "read"; "edit"; "delete" ]
+    | "/prompt" ->
+        complete_args ~cmd ~arg_prefix
+          [ "set"; "clear"; "param-set"; "param-clear" ]
+    | "/preset" ->
+        complete_args ~cmd ~arg_prefix
+          [ "list"; "show"; "save"; "create"; "restore"; "delete" ]
     | "/tools" ->
         complete_args ~cmd ~arg_prefix [ "compact"; "results"; "full" ]
     | _ -> []

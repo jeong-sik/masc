@@ -3490,6 +3490,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
     | Nav.Tool_execute_form _
+    | Nav.Skill_create_form
+    | Nav.Skill_edit_form _
+    | Nav.Skill_delete_confirm _
+    | Nav.Prompt_override_form _
+    | Nav.Preset_create_form
+    | Nav.Runtime_param_set_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3664,6 +3670,25 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("MCP 도구 실행 · " ^ tool_name)
            ~en:("Execute MCP Tool · " ^ tool_name))
+  | Form_standard Nav.Skill_create_form ->
+      Say.resolve lang (Say.make ~ko:"새 스킬 생성" ~en:"Create New Skill")
+  | Form_standard (Nav.Skill_edit_form { reference }) ->
+      Say.resolve lang
+        (Say.make ~ko:("스킬 편집 · " ^ reference) ~en:("Edit Skill · " ^ reference))
+  | Form_standard (Nav.Skill_delete_confirm { reference }) ->
+      Say.resolve lang
+        (Say.make ~ko:("스킬 삭제 확인 · " ^ reference)
+           ~en:("Confirm Skill Delete · " ^ reference))
+  | Form_standard (Nav.Prompt_override_form { key }) ->
+      Say.resolve lang
+        (Say.make ~ko:("프롬프트 오버라이드 · " ^ key)
+           ~en:("Prompt Override · " ^ key))
+  | Form_standard Nav.Preset_create_form ->
+      Say.resolve lang (Say.make ~ko:"새 프리셋 생성" ~en:"Create Prompt Preset")
+  | Form_standard (Nav.Runtime_param_set_form { param_key }) ->
+      Say.resolve lang
+        (Say.make ~ko:("런타임 파라미터 설정 · " ^ param_key)
+           ~en:("Set Runtime Param · " ^ param_key))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3724,6 +3749,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
     | Nav.Tool_execute_form _
+    | Nav.Skill_create_form
+    | Nav.Skill_edit_form _
+    | Nav.Skill_delete_confirm _
+    | Nav.Prompt_override_form _
+    | Nav.Preset_create_form
+    | Nav.Runtime_param_set_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3785,6 +3816,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
       | Nav.Tool_execute_form _
+      | Nav.Skill_create_form
+      | Nav.Skill_edit_form _
+      | Nav.Skill_delete_confirm _
+      | Nav.Prompt_override_form _
+      | Nav.Preset_create_form
+      | Nav.Runtime_param_set_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3948,6 +3985,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
       | Nav.Tool_execute_form _
+      | Nav.Skill_create_form
+      | Nav.Skill_edit_form _
+      | Nav.Skill_delete_confirm _
+      | Nav.Prompt_override_form _
+      | Nav.Preset_create_form
+      | Nav.Runtime_param_set_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -4002,6 +4045,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
                 | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
@@ -4177,6 +4226,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
                 | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _

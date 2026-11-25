@@ -1728,9 +1728,40 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               m
           , [ Cmd.Copy_clipboard art.body.sha256 ] )
       | _ -> (m, []))
+  | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
+      match printable_char with
+      | Some "R" ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
+                 ~en:"Refreshing skill catalog…")
+              m
+          , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_skills_refresh } ]
+          )
+      | Some "p" -> (
+          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
+          | Some loaded ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"스킬 미리보기 검증 중…"
+                     ~en:"Validating skill preview…")
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_skill_editor_preview
+                          {
+                            reference = ref_s;
+                            reference_json = loaded.reference_json;
+                            source_text = loaded.source_text;
+                          };
+                    };
+                ] )
+          | None -> (m, []))
+      | _ -> (m, []))
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
-      | Nav.Dive_runtime _
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
       | Nav.Dive_infra
           ( Nav.Lane_dive _
           | Nav.Incident_dive _
@@ -1742,6 +1773,17 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       match m.nav.workspace with
       | Nav.Runtime -> (
           match printable_char with
+          | Some "R"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_tools_usage
+                 && Runtime_store.equal_tools_subview m.runtime.tools_subview
+                      Runtime_store.Tools_keeper_skills ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
+                     ~en:"Refreshing skill catalog…")
+                  m
+              , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_skills_refresh } ]
+              )
           | Some "u"
             when Nav.equal_runtime_tab m.runtime.active_tab
                    Nav.Runtime_quotas_credits ->
@@ -2649,6 +2691,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
                         | Nav.Tool_execute_form _
+                        | Nav.Skill_create_form
+                        | Nav.Skill_edit_form _
+                        | Nav.Skill_delete_confirm _
+                        | Nav.Prompt_override_form _
+                        | Nav.Preset_create_form
+                        | Nav.Runtime_param_set_form _
                         | Nav.Runtime_lane_create
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
@@ -2877,6 +2925,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
                         | Nav.Tool_execute_form _
+                        | Nav.Skill_create_form
+                        | Nav.Skill_edit_form _
+                        | Nav.Skill_delete_confirm _
+                        | Nav.Prompt_override_form _
+                        | Nav.Preset_create_form
+                        | Nav.Runtime_param_set_form _
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
                         | Nav.Task_create_form
@@ -3805,6 +3859,12 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
                   | Nav.Tool_execute_form _
+                  | Nav.Skill_create_form
+                  | Nav.Skill_edit_form _
+                  | Nav.Skill_delete_confirm _
+                  | Nav.Prompt_override_form _
+                  | Nav.Preset_create_form
+                  | Nav.Runtime_param_set_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _

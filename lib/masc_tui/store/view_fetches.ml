@@ -587,6 +587,21 @@ let fetches_for_dive ~force (m : Model.t) =
       []
       |> add_if (needs_fetch ~force m.runtime.fusion_runs) Cmd.Get_fusion_runs
       |> add_if detail_needed (Cmd.Get_fusion_run_detail { run_id })
+  | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+      []
+      |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
+      |> add_if
+           ((force
+            || (not m.runtime.skill_editor_sources_absent)
+               && not m.runtime.skill_editor_sources_auth_denied)
+           && needs_fetch ~force m.runtime.skill_editor_sources)
+           Cmd.Get_skill_editor_sources
+      |> add_if
+           ((force
+            || (not m.runtime.skill_editor_tools_absent)
+               && not m.runtime.skill_editor_tools_auth_denied)
+           && needs_fetch ~force m.runtime.skill_editor_tools)
+           Cmd.Get_skill_editor_tools
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
@@ -1033,7 +1048,8 @@ let fetches_for_workspace ~force (m : Model.t) =
                 Runtime_store.selected_tools_surface_keeper ~keeper_names
                   m.runtime
             | Runtime_store.Tools_usage_calls
-            | Runtime_store.Tools_catalog_tree ->
+            | Runtime_store.Tools_catalog_tree
+            | Runtime_store.Tools_prompts_presets ->
                 None
           in
           let quality_reqs =
@@ -1072,9 +1088,76 @@ let fetches_for_workspace ~force (m : Model.t) =
                      (Cmd.Get_gate_tool_events
                         { window_minutes = Some gate_win_mins }))
                 @ wait_req
-            | Runtime_store.Tools_usage_calls
-            | Runtime_store.Tools_catalog_tree
             | Runtime_store.Tools_keeper_skills ->
+                []
+                |> add_if
+                     ((force
+                      || (not m.runtime.skill_editor_sources_absent)
+                         && not m.runtime.skill_editor_sources_auth_denied)
+                     && needs_fetch ~force m.runtime.skill_editor_sources)
+                     Cmd.Get_skill_editor_sources
+                |> add_if
+                     ((force
+                      || (not m.runtime.skill_editor_tools_absent)
+                         && not m.runtime.skill_editor_tools_auth_denied)
+                     && needs_fetch ~force m.runtime.skill_editor_tools)
+                     Cmd.Get_skill_editor_tools
+            | Runtime_store.Tools_prompts_presets ->
+                let presets_allowed =
+                  force
+                  || (not m.runtime.presets_absent)
+                     && not m.runtime.presets_auth_denied
+                in
+                let preset_detail_req =
+                  if not presets_allowed then []
+                  else
+                    match m.runtime.pp_section with
+                    | Runtime_store.Sec_presets -> (
+                        match Runtime_store.selected_preset_manifest m.runtime with
+                        | Some p ->
+                            let needed =
+                              match m.runtime.preset_detail with
+                              | Observed.Value { data = n, _; stale = false; _ }
+                                ->
+                                  force || not (String.equal n p.name)
+                              | Observed.Loading _
+                              | Observed.Value { stale = true; _ }
+                              | Observed.Absent
+                              | Observed.Unreported
+                              | Observed.Failed _ ->
+                                  needs_fetch ~force m.runtime.preset_detail
+                            in
+                            if needed then
+                              [ Cmd.Get_preset_show { name = p.name } ]
+                            else []
+                        | None -> [])
+                    | Runtime_store.Sec_prompts
+                    | Runtime_store.Sec_params
+                    | Runtime_store.Sec_async_requests ->
+                        []
+                in
+                ([]
+                |> add_if
+                     ((force || not m.runtime.prompts_absent)
+                     && needs_fetch ~force m.runtime.prompts_catalog)
+                     Cmd.Get_prompts
+                |> add_if
+                     (presets_allowed
+                     && needs_fetch ~force m.runtime.presets_listing)
+                     Cmd.Get_presets
+                |> add_if
+                     ((force || not m.runtime.runtime_params_absent)
+                     && needs_fetch ~force m.runtime.runtime_params)
+                     Cmd.Get_runtime_params
+                |> add_if
+                     ((force
+                      || (not m.runtime.async_requests_absent)
+                         && not m.runtime.async_requests_auth_denied)
+                     && needs_fetch ~force m.runtime.async_requests)
+                     Cmd.Get_async_requests)
+                @ preset_detail_req
+            | Runtime_store.Tools_usage_calls
+            | Runtime_store.Tools_catalog_tree ->
                 []
           in
           ([]
@@ -1340,7 +1423,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
           ( Nav.Dive_keeper _
           | Nav.Dive_work _
           | Nav.Dive_knowledge _
-          | Nav.Dive_runtime (Nav.Fusion_dive _)
+          | Nav.Dive_runtime (Nav.Fusion_dive _ | Nav.Skill_dive _)
           | Nav.Dive_infra _ ) ->
           false
       | None ->
@@ -1372,7 +1455,60 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
       ]
     else []
   in
-  get_cmds @ post_cmds @ mcp_schema_cmds
+  let skill_read_cmds =
+    match Model.active_dive m with
+    | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
+        (* Wait for a fresh [skills] snapshot before reading SKILL.md so a
+           post-Save reload never sends a stale content_revision (HTTP 409). *)
+        let skills_fresh =
+          match m.runtime.skills with
+          | Observed.Value { stale = false; _ } -> true
+          | Observed.Value { stale = true; _ }
+          | Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              false
+        in
+        let need_read =
+          skills_fresh
+          &&
+          match m.runtime.skill_editor_loaded with
+          | Observed.Value { data = r, _; stale = false; _ }
+            when String.equal r ref_s ->
+              force
+          | Observed.Loading _ | Observed.Failed { retryable = false; _ } ->
+              force
+          | Observed.Value _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed { retryable = true; _ } ->
+              true
+        in
+        if not need_read then []
+        else
+          match Runtime_store.find_skill_surface ~reference:ref_s m.runtime with
+          | Some { reference_json = Some reference_json; _ } ->
+              [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Post_skill_editor_read
+                        { reference = ref_s; reference_json };
+                  };
+              ]
+          | Some { reference_json = None; _ } | None -> [])
+    | Some
+        ( Nav.Dive_keeper _
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+        | Nav.Dive_infra _ )
+    | None ->
+        []
+  in
+  get_cmds @ post_cmds @ mcp_schema_cmds @ skill_read_cmds
 
 let overlay_fetches (m : Model.t) =
   List.map

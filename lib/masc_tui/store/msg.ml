@@ -653,6 +653,50 @@ type http_reply =
       refresh_late : bool;
       result : (unit, http_error) result;
     }
+  | Reply_skill_editor_sources of (string list, http_error) result
+  | Reply_skill_editor_tools of
+      (Wire_runtime.skill_authoring_tool list, http_error) result
+  | Reply_skill_editor_loaded of {
+      reference : string;
+      result : (Wire_runtime.skill_editor_loaded, http_error) result;
+    }
+  | Reply_skill_editor_preview of
+      (Wire_runtime.skill_editor_preview, http_error) result
+  | Reply_skill_editor_outcome of {
+      action : [ `Create | `Save | `Delete ];
+      reference : string;
+      result : (Wire_runtime.skill_editor_outcome, http_error) result;
+    }
+  | Reply_skills_refreshed of
+      (Wire_runtime.skill_refresh_receipt, http_error) result
+  | Reply_async_requests of
+      (Wire_runtime.async_requests_snapshot, http_error) result
+  | Reply_prompts of (Wire_runtime.prompts_catalog, http_error) result
+  | Reply_prompt_override of {
+      key : string;
+      cleared : bool;
+      result : (unit, http_error) result;
+    }
+  | Reply_presets of (Wire_runtime.presets_listing, http_error) result
+  | Reply_preset_detail of {
+      name : string;
+      result : (Wire_runtime.preset_detail, http_error) result;
+    }
+  | Reply_preset_restore of {
+      name : string;
+      result : (Wire_runtime.preset_restore_report, http_error) result;
+    }
+  | Reply_preset_mutation of {
+      label : Say.t;
+      result : (unit, http_error) result;
+    }
+  | Reply_runtime_params of
+      (Wire_runtime.runtime_params_snapshot, http_error) result
+  | Reply_runtime_param_mutation of {
+      param_key : string;
+      cleared : bool;
+      result : (unit, http_error) result;
+    }
 
 let chat_status_reply ~keeper ~operation_id ~requested_at result =
   match result with

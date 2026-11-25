@@ -39,6 +39,26 @@ val keeper_waiting_inventory_path : keeper:string -> string
 val mcp_rpc_path : string
 val mcp_protocol_version : string
 val skills_path : string
+val skill_editor_sources_path : string
+val skill_editor_tools_path : string
+val skill_editor_read_path : string
+val skill_editor_preview_new_path : string
+val skill_editor_create_path : string
+val skill_editor_preview_path : string
+val skill_editor_save_path : string
+val skill_editor_delete_path : string
+val skills_refresh_path : string
+val async_requests_path : string
+val async_request_status_path : submitted_by:string -> request_id:string -> string
+val prompts_path : string
+val presets_path : string
+val preset_show_path : name:string -> string
+val preset_create_path : string
+val preset_restore_path : string
+val preset_delete_path : string
+val runtime_params_path : string
+val runtime_param_set_path : string
+val runtime_param_clear_path : string
 val connector_unbind_path : connector:string -> string
 val connector_names_path : connector:string -> ?scope:string -> ?limit:int -> unit -> string
 val fusion_runs_path : string
@@ -673,6 +693,7 @@ val classify_tool_domain_family : string -> string * string
 
 type skill_surface_entry = {
   reference : string;
+  reference_json : Yojson.Safe.t option;
   kind : string; (** ["instruction" | "composition" | "unavailable"] *)
   summary : string option;
   error : string option;
@@ -1295,3 +1316,212 @@ type mcp_tool_call_result = {
 
 val decode_mcp_tools_call_result :
   tool_name:string -> Yojson.Safe.t -> (mcp_tool_call_result, string) result
+
+(** {1 Wave 4 Layer 3: Skill Editor, Async Requests, Prompts, Presets & Runtime Params} *)
+
+type skill_access =
+  | Skill_read_only
+  | Skill_read_write
+
+val skill_access_to_string : skill_access -> string
+
+type skill_authoring_tool = {
+  name : string;
+  description : string option;
+  execution : string option;
+}
+
+type skill_editor_loaded = {
+  reference : string;
+  reference_json : Yojson.Safe.t;
+  snapshot_revision : string;
+  source_text : string;
+  access : skill_access;
+}
+
+type skill_editor_preview = {
+  reference : string option;
+  kind : string option;
+  activation_tool : string option;
+  execution : string option;
+  body_bytes : int option;
+  diagnostics : string list;
+}
+
+type skill_editor_outcome = {
+  status : string;
+  snapshot_revision : string option;
+  reason : string option;
+  recovery_id : string option;
+  audit_status : string option;
+  preview : skill_editor_preview option;
+}
+
+type skill_refresh_receipt = {
+  ok : bool;
+  snapshot_revision : string;
+  publication : string;
+}
+
+val encode_skill_read_body : reference_json:Yojson.Safe.t -> Yojson.Safe.t
+
+val encode_skill_preview_or_save_body :
+  reference_json:Yojson.Safe.t -> source_text:string -> Yojson.Safe.t
+
+val encode_skill_create_body :
+  source_id:string ->
+  package_id:string ->
+  kind:[ `Instruction | `Composition ] ->
+  source_text:string ->
+  Yojson.Safe.t
+
+val encode_skill_delete_body :
+  reference_json:Yojson.Safe.t -> confirmed:bool -> Yojson.Safe.t
+
+val decode_skill_editor_sources : Yojson.Safe.t -> (string list, string) result
+
+val decode_skill_editor_tools :
+  Yojson.Safe.t -> (skill_authoring_tool list, string) result
+
+val decode_skill_editor_loaded :
+  Yojson.Safe.t -> (skill_editor_loaded, string) result
+
+val decode_skill_editor_preview :
+  Yojson.Safe.t -> (skill_editor_preview, string) result
+
+val decode_skill_editor_outcome :
+  Yojson.Safe.t -> (skill_editor_outcome, string) result
+
+val decode_skill_refresh_receipt :
+  Yojson.Safe.t -> (skill_refresh_receipt, string) result
+
+type async_request_row = {
+  request_id : string;
+  keeper_name : string;
+  submitted_by : string;
+  status : string;
+  worker_ownership : string option;
+  submitted_at : float option;
+  elapsed_sec : float option;
+  completed_at : float option;
+  ok : bool option;
+  result_preview : string option;
+}
+
+type async_requests_snapshot = {
+  status : string;
+  active : int;
+  runtime_owned : int;
+  ownership_unknown : int;
+  record_errors_count : int;
+  requests : async_request_row list;
+  error_detail : string option;
+}
+
+val decode_async_requests :
+  Yojson.Safe.t -> (async_requests_snapshot, string) result
+
+type prompt_item = {
+  key : string;
+  category : string;
+  operator_surface : string;
+  description : string;
+  effective : string;
+  file_value : string option;
+  override_value : string option;
+  file_path : string option;
+  source : string;
+  has_override : bool;
+  override_default_moved : bool;
+  char_count : int;
+  template_variables : string list;
+}
+
+type prompt_held_back = {
+  key : string;
+  bytes : int;
+  reason : string;
+}
+
+type prompts_catalog = {
+  prompts : prompt_item list;
+  held_back : prompt_held_back list;
+}
+
+val encode_prompt_set : key:string -> value:string -> Yojson.Safe.t
+val encode_prompt_clear : key:string -> Yojson.Safe.t
+val decode_prompts_catalog : Yojson.Safe.t -> (prompts_catalog, string) result
+
+type preset_manifest = {
+  name : string;
+  description : string;
+  created_at : string;
+  override_count : int;
+  override_keys : string list;
+  keepers : string list;
+  assignment_count : int;
+  lane_count : int;
+}
+
+type preset_unreadable = {
+  name : string;
+  reason : string;
+}
+
+type presets_listing = {
+  presets : preset_manifest list;
+  unreadable : preset_unreadable list;
+}
+
+type preset_detail = {
+  name : string;
+  description : string;
+  created_at : string;
+  directory : string;
+  saved_settings_status : string;
+  saved_settings_reason : string option;
+  default_prompts_status : string;
+  default_prompts_changes_count : int;
+  override_keys : string list;
+  keeper_files : string list;
+  assignments : (string * string) list;
+  lane_ids : string list;
+}
+
+type preset_restore_report = {
+  restored : string;
+  autosave : string;
+  runtime_status : string;
+  overrides_applied_count : int;
+  instructions_applied_count : int;
+  skipped_count : int;
+}
+
+val encode_preset_save : name:string -> description:string -> Yojson.Safe.t
+val encode_preset_name : name:string -> Yojson.Safe.t
+val decode_presets_listing : Yojson.Safe.t -> (presets_listing, string) result
+val decode_preset_detail : Yojson.Safe.t -> (preset_detail, string) result
+val decode_preset_restore_report :
+  Yojson.Safe.t -> (preset_restore_report, string) result
+
+type runtime_param_item = {
+  key : string;
+  current : Yojson.Safe.t;
+  default : Yojson.Safe.t;
+  has_override : bool;
+  description : string option;
+  value_type : string option;
+  choices : string list;
+}
+
+type runtime_params_snapshot = {
+  parameters : runtime_param_item list;
+}
+
+val encode_runtime_param_set :
+  param_key:string -> value:Yojson.Safe.t -> Yojson.Safe.t
+
+val encode_runtime_param_clear : param_key:string -> Yojson.Safe.t
+
+val decode_runtime_params :
+  Yojson.Safe.t -> (runtime_params_snapshot, string) result

@@ -194,7 +194,9 @@ let slash_spec_takes_arg (spec : Slash.spec) = Option.is_some spec.arg_hint
 
 let slash_spec_requires_arg (spec : Slash.spec) =
   match spec.id with
-  | Slash.Cmd_btw | Slash.Cmd_ctl | Slash.Cmd_gate | Slash.Cmd_exec -> true
+  | Slash.Cmd_btw | Slash.Cmd_ctl | Slash.Cmd_gate | Slash.Cmd_exec
+  | Slash.Cmd_skill | Slash.Cmd_prompt ->
+      true
   | Slash.Cmd_pulse
   | Slash.Cmd_work
   | Slash.Cmd_knowledge
@@ -209,6 +211,7 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_voice
   | Slash.Cmd_queue
   | Slash.Cmd_context
+  | Slash.Cmd_preset
   | Slash.Cmd_tools
   | Slash.Cmd_clear
   | Slash.Cmd_theme
@@ -221,7 +224,7 @@ let slash_spec_requires_arg (spec : Slash.spec) =
 let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
   match spec.id with
   | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl
-  | Slash.Cmd_gate ->
+  | Slash.Cmd_gate | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_preset ->
       let prefix_matches = Slash.complete ~prefix:(spec.name ^ " " ^ arg_raw) in
       let all_for_cmd =
         if prefix_matches <> [] then prefix_matches
@@ -1028,6 +1031,33 @@ let push_dive (m : Model.t) dive =
         |> Knowledge_store.close_memory_diagram
         |> Knowledge_store.clear_pending_wiki_edit
   in
+  let runtime =
+    match dive with
+    | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
+        let skill_editor_loaded =
+          match m.runtime.skill_editor_loaded with
+          | Observed.Value { data = r, loaded; _ }
+            when String.equal r ref_s || String.equal loaded.reference ref_s ->
+              m.runtime.skill_editor_loaded
+          | Observed.Value _
+          | Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              Observed.absent
+        in
+        {
+          m.runtime with
+          skill_editor_loaded;
+          skill_editor_preview = Observed.absent;
+        }
+    | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+    | Nav.Dive_keeper _
+    | Nav.Dive_work _
+    | Nav.Dive_knowledge _
+    | Nav.Dive_infra _ ->
+        m.runtime
+  in
   let next =
     {
       m with
@@ -1038,6 +1068,7 @@ let push_dive (m : Model.t) dive =
       config;
       knowledge;
       infra;
+      runtime;
       inline_modal = None;
       ask_modal = None;
     }
@@ -1210,6 +1241,12 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
       | Nav.Tool_execute_form _
+      | Nav.Skill_create_form
+      | Nav.Skill_edit_form _
+      | Nav.Skill_delete_confirm _
+      | Nav.Prompt_override_form _
+      | Nav.Preset_create_form
+      | Nav.Runtime_param_set_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3304,7 +3341,7 @@ let enter_plan (m : Model.t) : enter_plan =
       ( Nav.Dive_work (Nav.Verification_dive _)
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _)
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _)
       | Nav.Dive_infra _ ) ->
       Enter_noop
   | None -> (
@@ -3500,6 +3537,30 @@ let enter_plan (m : Model.t) : enter_plan =
                   | Some entry ->
                       Enter_push (Nav.Dive_runtime (Nav.Tool_dive entry.name))
                   | None -> Enter_noop)
+              | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1 -> (
+                  match Runtime_store.selected_skill_surface m.runtime with
+                  | Some sf ->
+                      Enter_push
+                        (Nav.Dive_runtime (Nav.Skill_dive sf.reference))
+                  | None -> Enter_noop)
+              | Runtime_store.Tools_prompts_presets -> (
+                  match m.runtime.pp_section with
+                  | Runtime_store.Sec_presets -> (
+                      match Runtime_store.selected_preset_manifest m.runtime with
+                      | Some p ->
+                          Enter_dispatch
+                            [
+                              Cmd.Http_get
+                                {
+                                  epoch = m.epoch;
+                                  req = Cmd.Get_preset_show { name = p.name };
+                                };
+                            ]
+                      | None -> Enter_noop)
+                  | Runtime_store.Sec_prompts
+                  | Runtime_store.Sec_params
+                  | Runtime_store.Sec_async_requests ->
+                      Enter_noop)
               | Runtime_store.Tools_usage_calls
               | Runtime_store.Tools_keeper_skills
               | Runtime_store.Tools_quality_gate ->
@@ -3765,6 +3826,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
     | Nav.Tool_execute_form _
+    | Nav.Skill_create_form
+    | Nav.Skill_edit_form _
+    | Nav.Skill_delete_confirm _
+    | Nav.Prompt_override_form _
+    | Nav.Preset_create_form
+    | Nav.Runtime_param_set_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3859,6 +3926,12 @@ let submit_inline_modal ~now (m : Model.t) =
             let nav = { m_in.nav with overlay = None; filter_focused = false } in
             { m_in with nav; inline_modal = None }
             |> Model.with_toast ~now ~level:Model.Toast_info msg
+          in
+          let skill_write_reference reference =
+            match Runtime_store.skill_mutation_target ~reference m.runtime with
+            | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_write; reference_json; _ }
+                   | Catalog_skill reference_json) -> Some reference_json
+            | Some (Loaded_skill { access = Skill_read_only; _ }) | None -> None
           in
           let set_modal_error err =
             ({ m with inline_modal = Some { modal with error = Some err } }, [])
@@ -5317,6 +5390,148 @@ let submit_inline_modal ~now (m : Model.t) =
                     set_modal_error "Arguments must be a JSON object ({ ... })"
                 | exception Yojson.Json_error msg ->
                     set_modal_error ("Invalid JSON arguments: " ^ msg))
+          | Form_standard Nav.Skill_create_form -> (
+              let source_id =
+                String.trim (Model.modal_field_value ~key:"source_id" modal)
+              in
+              let package_id =
+                String.trim (Model.modal_field_value ~key:"package_id" modal)
+              in
+              let kind_raw =
+                String.lowercase_ascii
+                  (String.trim (Model.modal_field_value ~key:"kind" modal))
+              in
+              let source_text =
+                Model.unescape_inline_text
+                  (Model.modal_field_raw_value ~key:"source_text" modal)
+              in
+              let kind_res =
+                match kind_raw with
+                | "instruction" -> Ok `Instruction
+                | "composition" ->
+                    Error
+                      "Only 'instruction' skills are supported (composition skills are retired)"
+                | _ -> Error "Kind must be 'instruction'"
+              in
+              if String.equal source_id "" then
+                set_modal_error "source_id is required"
+              else if String.equal package_id "" then
+                set_modal_error "package_id is required"
+              else if String.equal (String.trim source_text) "" then
+                set_modal_error "source_text is required"
+              else
+                match kind_res with
+                | Error msg -> set_modal_error msg
+                | Ok kind ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_skill_editor_create
+                                { source_id; package_id; kind; source_text };
+                          };
+                      ] ))
+          | Form_standard (Nav.Skill_edit_form { reference }) -> (
+              let source_text =
+                Model.unescape_inline_text
+                  (Model.modal_field_raw_value ~key:"source_text" modal)
+              in
+              if String.equal (String.trim source_text) "" then
+                set_modal_error "source_text is required"
+              else
+                match skill_write_reference reference with
+                | None ->
+                    set_modal_error
+                      "Exact Skill reference JSON unavailable; refresh Skills first"
+                | Some reference_json ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_skill_editor_save
+                                { reference; reference_json; source_text };
+                          };
+                      ] ))
+          | Form_standard (Nav.Skill_delete_confirm { reference }) -> (
+              let typed =
+                String.trim (Model.modal_field_value ~key:"confirm" modal)
+              in
+              if not (String.equal (String.uppercase_ascii typed) "DELETE") then
+                set_modal_error "Type DELETE to confirm skill deletion"
+              else
+                match skill_write_reference reference with
+                | None ->
+                    set_modal_error
+                      "Exact Skill reference JSON unavailable; refresh Skills first"
+                | Some reference_json ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_delete
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Delete_skill_editor
+                                { reference; reference_json; confirmed = true };
+                          };
+                      ] ))
+          | Form_standard (Nav.Prompt_override_form { key }) ->
+              let value =
+                Model.unescape_inline_text
+                  (Model.modal_field_raw_value ~key:"value" modal)
+              in
+              if String.equal (String.trim value) "" then
+                set_modal_error "Prompt text is required (use [x] or /prompt clear to reset)"
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_prompt_override { key; value = Some value };
+                      };
+                  ] )
+          | Form_standard Nav.Preset_create_form ->
+              let name =
+                String.trim (Model.modal_field_value ~key:"name" modal)
+              in
+              let description =
+                String.trim (Model.modal_field_value ~key:"description" modal)
+              in
+              if String.equal name "" then
+                set_modal_error "Preset name is required"
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_preset_create { name; description };
+                      };
+                  ] )
+          | Form_standard (Nav.Runtime_param_set_form { param_key }) ->
+              let raw =
+                String.trim (Model.modal_field_value ~key:"value" modal)
+              in
+              if String.equal raw "" then
+                set_modal_error "Parameter value is required"
+              else
+                let value =
+                  try Yojson.Safe.from_string raw
+                  with Yojson.Json_error _ -> `String raw
+                in
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_runtime_param_set { param_key; value };
+                      };
+                  ] )
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -7843,6 +8058,30 @@ let runtime_detail_max_scroll (m : Model.t) =
           in
           let total_lines = rej_n + wait_n + 6 in
           if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
+      | Runtime_store.Tools_prompts_presets ->
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.46 ~top_ratio:0.48 bp body_rect
+          in
+          let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+          let total_lines =
+            match m.runtime.pp_section with
+            | Runtime_store.Sec_prompts -> (
+                match Runtime_store.selected_prompt_item m.runtime with
+                | None -> 1
+                | Some p ->
+                    4 + List.length (String.split_on_char '\n' p.effective))
+            | Runtime_store.Sec_presets -> (
+                match Runtime_store.selected_preset_manifest m.runtime with
+                | None -> 1
+                | Some pm -> (
+                    match Runtime_store.preset_detail_for ~name:pm.name m.runtime with
+                    | None -> 5
+                    | Some d -> 10 + Int.min 12 (List.length d.assignments)))
+            | Runtime_store.Sec_params -> 10
+            | Runtime_store.Sec_async_requests -> 12
+          in
+          if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
       | Runtime_store.Tools_usage_calls | Runtime_store.Tools_catalog_tree -> 0)
   | Nav.Runtime_fusion -> (
       match Runtime_store.selected_fusion_run m.runtime with
@@ -8532,6 +8771,15 @@ let dive_max_scroll (m : Model.t) active =
           List.length (fusion_detail_lines ~width:content.w m ~run_id)
         in
         max 0 (total - max 1 content.h)
+  | Nav.Dive_runtime (Nav.Skill_dive ref_s) -> (
+      let content = ui_card_inner br |> ui_pad_content ~bp in
+      if Rect.is_empty content then 0
+      else
+        match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
+        | Some loaded ->
+            let lines = List.length (String.split_on_char '\n' loaded.source_text) in
+            max 0 (lines + 10 - max 1 content.h)
+        | None -> 0)
   | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
       match
         List.find_opt
@@ -9681,6 +9929,12 @@ let apply_move (m : Model.t) dir =
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
                   | Nav.Tool_execute_form _
+                  | Nav.Skill_create_form
+                  | Nav.Skill_edit_form _
+                  | Nav.Skill_delete_confirm _
+                  | Nav.Prompt_override_form _
+                  | Nav.Preset_create_form
+                  | Nav.Runtime_param_set_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _
@@ -9725,6 +9979,12 @@ let apply_move (m : Model.t) dir =
               | Nav.Keeper_clear_form _
               | Nav.Keeper_operator_note_form _
               | Nav.Tool_execute_form _
+              | Nav.Skill_create_form
+              | Nav.Skill_edit_form _
+              | Nav.Skill_delete_confirm _
+              | Nav.Prompt_override_form _
+              | Nav.Preset_create_form
+              | Nav.Runtime_param_set_form _
               | Nav.Runtime_lane_create
               | Nav.Runtime_lane_edit _
               | Nav.Runtime_lane_delete _
@@ -11454,7 +11714,20 @@ let apply_move (m : Model.t) dir =
                               let c =
                                 ui_card_inner target_r |> ui_pad_content ~bp
                               in
-                              max 1 (c.h - 5))
+                              max 1 (c.h - 5)
+                          | Runtime_store.Tools_prompts_presets ->
+                              let left_rect, right_rect =
+                                Masc_tui_ui.Layout.adaptive_split_2
+                                  ~stack_on_compact:true ~left_ratio:0.46
+                                  ~top_ratio:0.48 bp body_rect
+                              in
+                              let target_r =
+                                if pane = 1 then right_rect else left_rect
+                              in
+                              let c =
+                                ui_card_inner target_r |> ui_pad_content ~bp
+                              in
+                              max 1 (c.h - 2))
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
@@ -11535,7 +11808,8 @@ let apply_move (m : Model.t) dir =
                         , ( Runtime_store.Tools_usage_calls
                           | Runtime_store.Tools_catalog_tree
                           | Runtime_store.Tools_keeper_skills
-                          | Runtime_store.Tools_quality_gate )
+                          | Runtime_store.Tools_quality_gate
+                          | Runtime_store.Tools_prompts_presets )
                         , _ ) ->
                           max_detail_scroll
                     in

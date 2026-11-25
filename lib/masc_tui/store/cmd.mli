@@ -191,6 +191,14 @@ type get_request =
   | Get_tool_quality of { n : int option; window_hours : int option }
   | Get_gate_tool_events of { window_minutes : int option }
   | Get_keeper_waiting_inventory of { keeper : string }
+  (* Wave 4 Layer 3: Skill Editor, Async Requests, Prompts, Presets & Runtime Params *)
+  | Get_skill_editor_sources
+  | Get_skill_editor_tools
+  | Get_async_requests
+  | Get_prompts
+  | Get_presets
+  | Get_preset_show of { name : string }
+  | Get_runtime_params
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -458,9 +466,51 @@ type post_request =
       tool_name : string;
       arguments : Yojson.Safe.t;
     }
+  (* Wave 4 Layer 3: Skill Editor, Prompts, Presets & Runtime Params *)
+  | Post_skill_editor_read of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+    }
+  | Post_skill_editor_preview_new of {
+      source_id : string;
+      package_id : string;
+      kind : [ `Instruction | `Composition ];
+      source_text : string;
+    }
+  | Post_skill_editor_create of {
+      source_id : string;
+      package_id : string;
+      kind : [ `Instruction | `Composition ];
+      source_text : string;
+    }
+  | Post_skill_editor_preview of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      source_text : string;
+    }
+  | Post_skill_editor_save of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      source_text : string;
+    }
+  | Post_skills_refresh
+  | Post_prompt_override of { key : string; value : string option }
+  | Post_preset_save of { name : string; description : string }
+  | Post_preset_create of { name : string; description : string }
+  | Post_preset_restore of { name : string }
+  | Post_preset_delete of { name : string }
+  | Post_runtime_param_set of { param_key : string; value : Yojson.Safe.t }
+  | Post_runtime_param_clear of { param_key : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
+
+type delete_request =
+  | Delete_skill_editor of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      confirmed : bool;
+    }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -485,6 +535,7 @@ type t =
   | Http_get of { epoch : Epoch.t; req : get_request }
   | Http_post of { epoch : Epoch.t; req : post_request }
   | Http_put of { epoch : Epoch.t; req : put_request }
+  | Http_delete of { epoch : Epoch.t; req : delete_request }
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
   | Update_workspace_guard of {
@@ -535,4 +586,6 @@ val post_request_body : post_request -> Yojson.Safe.t
 val mcp_tool_name_of_post_request : post_request -> string option
 val put_request_path : put_request -> string
 val put_request_body : put_request -> Yojson.Safe.t
+val delete_request_path : delete_request -> string
+val delete_request_body : delete_request -> Yojson.Safe.t
 val flatten : t list -> t list

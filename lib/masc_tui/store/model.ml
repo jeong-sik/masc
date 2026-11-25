@@ -919,7 +919,8 @@ let focusable_pane_count m =
               | Nav.Runtime_tools_usage -> (
                   match m.runtime.tools_subview with
                   | Runtime_store.Tools_keeper_skills
-                  | Runtime_store.Tools_quality_gate ->
+                  | Runtime_store.Tools_quality_gate
+                  | Runtime_store.Tools_prompts_presets ->
                       2
                   | Runtime_store.Tools_usage_calls
                   | Runtime_store.Tools_catalog_tree ->
@@ -1296,6 +1297,8 @@ let active_focus_label m =
             Say.make ~ko:("도구 · " ^ name) ~en:("TOOL · " ^ name)
         | Some (Nav.Dive_runtime (Nav.Fusion_dive id)) ->
             Say.make ~ko:("퓨전 · " ^ id) ~en:("FUSION · " ^ id)
+        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+            Say.make ~ko:("스킬 · " ^ ref_s) ~en:("SKILL · " ^ ref_s)
         | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
             Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
         | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
@@ -2075,6 +2078,103 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Skill_create_form ->
+        [
+          {
+            key = "source_id";
+            label = Say.make ~ko:"소스 ID (쓰기 가능 소스)" ~en:"Source ID (writable source)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "package_id";
+            label = Say.make ~ko:"패키지 ID (디렉토리명)" ~en:"Package ID (directory slug)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "kind";
+            label = Say.make ~ko:"종류 (instruction)" ~en:"Kind (instruction)";
+            value = "instruction";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "source_text";
+            label = Say.make ~ko:"SKILL.md 본문 (\\n 줄바꿈, \\\\ 백슬래시)" ~en:"SKILL.md source (\\n newline, \\\\ backslash)";
+            value = "---\\nname: new-skill\\ndescription: Skill summary\\n---\\n# Instructions\\n";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Skill_edit_form _ ->
+        [
+          {
+            key = "source_text";
+            label = Say.make ~ko:"SKILL.md 본문 (\\n 줄바꿈, \\\\ 백슬래시)" ~en:"SKILL.md source (\\n newline, \\\\ backslash)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Skill_delete_confirm { reference } ->
+        [
+          {
+            key = "confirm";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "삭제 확인: DELETE 입력 (%s)" reference)
+                ~en:(Printf.sprintf "Type DELETE to confirm (%s)" reference);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Prompt_override_form { key } ->
+        [
+          {
+            key = "value";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "프롬프트 본문 오버라이드 (%s · \\n 줄바꿈)" key)
+                ~en:(Printf.sprintf "Prompt override text (%s · \\n newline)" key);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Preset_create_form ->
+        [
+          {
+            key = "name";
+            label = Say.make ~ko:"프리셋 이름 ([A-Za-z0-9._-]+)" ~en:"Preset Name ([A-Za-z0-9._-]+)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "description";
+            label = Say.make ~ko:"설명 (선택)" ~en:"Description (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Runtime_param_set_form { param_key } ->
+        [
+          {
+            key = "value";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "파라미터 값 JSON/문자열 (%s)" param_key)
+                ~en:(Printf.sprintf "Parameter JSON or scalar value (%s)" param_key);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -2099,6 +2199,12 @@ let inline_modal_for kind =
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
     | Nav.Tool_execute_form _
+    | Nav.Skill_create_form
+    | Nav.Skill_edit_form _
+    | Nav.Skill_delete_confirm _
+    | Nav.Prompt_override_form _
+    | Nav.Preset_create_form
+    | Nav.Runtime_param_set_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -2117,11 +2223,11 @@ let inline_modal_for kind =
   in
   { kind; fields; active_field; submitting = false; error = None }
 
-let modal_field_value ~key modal =
+let modal_field_raw_value ~key modal =
   match
     List.find_opt (fun (f : modal_form_field) -> String.equal f.key key) modal.fields
   with
-  | Some f -> String.trim f.value
+  | Some f -> f.value
   | None -> ""
 
 let modal_active_field_value modal =
@@ -2308,6 +2414,43 @@ let modal_field_help ~key =
            ~ko:"마스킹 처리됨 — 화면·로그에 평문 미노출"
            ~en:"Masked input — never echoed in plain text")
   | _ -> None
+
+let modal_field_value ~key modal = String.trim (modal_field_raw_value ~key modal)
+
+let escape_inline_text s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> ()
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let unescape_inline_text s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then ()
+    else if Char.equal s.[i] '\\' && i + 1 < len then
+      match s.[i + 1] with
+      | '\\' ->
+          Buffer.add_char buf '\\';
+          loop (i + 2)
+      | 'n' ->
+          Buffer.add_char buf '\n';
+          loop (i + 2)
+      | next ->
+          Buffer.add_char buf '\\';
+          Buffer.add_char buf next;
+          loop (i + 2)
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0;
+  Buffer.contents buf
 
 let modal_update_active_field f modal =
   let fields =
@@ -3549,6 +3692,17 @@ let active_view_ssot_mode m =
               [
                 observed_at_opt m.runtime.fusion_detail;
                 observed_at_opt m.runtime.fusion_runs;
+              ];
+        }
+  | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.runtime.skill_editor_loaded;
+                observed_at_opt m.runtime.skills;
               ];
         }
   | Some (Nav.Dive_infra target) -> (

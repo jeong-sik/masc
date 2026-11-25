@@ -246,12 +246,19 @@ let has_get_health cmds =
               | Cmd.Get_late_approval_attempts
               | Cmd.Get_tool_quality _
               | Cmd.Get_gate_tool_events _
-              | Cmd.Get_keeper_waiting_inventory _ );
+              | Cmd.Get_keeper_waiting_inventory _
+              | Cmd.Get_skill_editor_sources
+              | Cmd.Get_skill_editor_tools
+              | Cmd.Get_async_requests
+              | Cmd.Get_prompts
+              | Cmd.Get_presets
+              | Cmd.Get_preset_show _
+              | Cmd.Get_runtime_params );
             _;
           }
       | Cmd.Batch _
       | Cmd.Http_post _
-      | Cmd.Http_put _
+      | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
       | Cmd.Update_workspace_guard _
@@ -272,7 +279,7 @@ let has_sync_streams cmds =
       | Cmd.Batch _
       | Cmd.Http_get _
       | Cmd.Http_post _
-      | Cmd.Http_put _
+      | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
@@ -292,7 +299,7 @@ let has_quit cmds =
       | Cmd.Batch _
       | Cmd.Http_get _
       | Cmd.Http_post _
-      | Cmd.Http_put _
+      | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
       | Cmd.Update_workspace_guard _
@@ -491,7 +498,7 @@ let test_three_channel_separation () =
               Wire_work.keeper_tool_approval_path
         | Cmd.Batch _
         | Cmd.Http_get _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -524,7 +531,7 @@ let test_three_channel_separation () =
               Wire_work.keeper_ask_answer_path
         | Cmd.Batch _
         | Cmd.Http_get _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -1040,7 +1047,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Batch _
         | Cmd.Http_get _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Voice_cmd _
@@ -1433,7 +1440,7 @@ let test_verifier_regressions () =
     | [
         ( Cmd.Batch _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -1704,7 +1711,7 @@ let test_verifier_regressions () =
     | Cmd.Http_post _ -> true
     | Cmd.Batch _
     | Cmd.Http_get _
-    | Cmd.Http_put _
+    | Cmd.Http_put _ | Cmd.Http_delete _
     | Cmd.Http_post_stream _
     | Cmd.Sync_streams _
     | Cmd.Update_workspace_guard _
@@ -1836,6 +1843,19 @@ let test_verifier_regressions () =
         | Cmd.Post_hitl_late_approval_restore
         | Cmd.Post_mcp_tools_list _
         | Cmd.Post_mcp_tools_call _
+        | Cmd.Post_skill_editor_read _
+        | Cmd.Post_skill_editor_preview_new _
+        | Cmd.Post_skill_editor_create _
+        | Cmd.Post_skill_editor_preview _
+        | Cmd.Post_skill_editor_save _
+        | Cmd.Post_skills_refresh
+        | Cmd.Post_prompt_override _
+        | Cmd.Post_preset_save _
+        | Cmd.Post_preset_create _
+        | Cmd.Post_preset_restore _
+        | Cmd.Post_preset_delete _
+        | Cmd.Post_runtime_param_set _
+        | Cmd.Post_runtime_param_clear _
         | Cmd.Post_task_create _
         | Cmd.Post_task_transition _
         | Cmd.Post_task_link_goal _
@@ -1851,7 +1871,7 @@ let test_verifier_regressions () =
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
-    | Cmd.Http_put _
+    | Cmd.Http_put _ | Cmd.Http_delete _
     | Cmd.Http_post_stream _
     | Cmd.Sync_streams _
     | Cmd.Update_workspace_guard _
@@ -1951,7 +1971,7 @@ let test_verifier_regressions () =
               (Wire_config.config_schema_path (Wire_config.Target_keeper "alpha"))
         | Cmd.Batch _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -2082,7 +2102,7 @@ let test_round1_settings_and_overlay_transitions () =
               (Wire_config.config_schema_path Wire_config.Target_runtime)
         | Cmd.Batch _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -2186,7 +2206,7 @@ let test_round2_store_regressions () =
         | Cmd.Http_get { req; _ } -> pred req
         | Cmd.Batch _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -2486,7 +2506,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
       (function
         | Cmd.Http_get { req; _ } ->
             String.equal (Cmd.get_request_path req) expected
-        | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
+        | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -2874,7 +2894,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
       (function
         | Cmd.Http_get { req; _ } ->
             String.equal (Cmd.get_request_path req) "/api/v1/runtime/metrics"
-        | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
+        | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -3593,7 +3613,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     List.filter_map
       (function
         | Cmd.Http_post { req; _ } -> Some req
-        | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _
+        | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
@@ -6041,7 +6061,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Batch _
         | Cmd.Http_get _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -6083,7 +6103,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Batch _
         | Cmd.Http_get _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -7447,7 +7467,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         | Cmd.Http_get { req; _ } -> Some (Cmd.get_request_path req)
         | Cmd.Batch _
         | Cmd.Http_post _
-        | Cmd.Http_put _
+        | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -8435,7 +8455,7 @@ let test_failure_is_asked_again_for_a_new_question () =
       (function
         | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper }; _ } ->
             String.equal keeper "beta"
-        | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
+        | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
@@ -8833,7 +8853,7 @@ let sent_get req cmds =
       | Cmd.Http_get { req = sent; _ } -> sent = req
       | Cmd.Batch _
       | Cmd.Http_post _
-      | Cmd.Http_put _
+      | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
       | Cmd.Update_workspace_guard _
@@ -19014,9 +19034,94 @@ let test_oauth_auto_open_input_and_tick_poll () =
   Alcotest.(check int) "subsequent Github_login_chunk does not re-open browser" 0
     (List.length (Cmd.flatten gh2_cmds))
 
+let test_skill_mutation_reference () =
+  let now = Clock.Mono.zero in
+  let initial = Model.initial () in
+  let reference_json name source revision =
+    `Assoc [ "identity", `Assoc [ "source_id", `String source; "package_id", `String name; "name", `String name ];
+             "content_revision", `String revision ]
+  in
+  let surface reference source : Wire_runtime.skill_surface_entry =
+    { reference; reference_json = Some (reference_json reference source "rev");
+      kind = "instruction"; summary = None; error = None }
+  in
+  let alpha = surface "compile-alpha" "workshop" and beta = surface "compile-beta" "team" in
+  let catalog surfaces =
+    let snap : Wire_runtime.skills_snapshot =
+      { state = "ready"; snapshot_revision = Some "rev"; surfaces; shadows = []; rejections = [] } in
+    { initial with runtime = Runtime_store.apply_skills ~observed_at:now snap initial.runtime }
+  in
+  let available = catalog [alpha; beta] in
+  let beta_json = reference_json beta.reference "team" "rev" in
+  let loaded reference_json access : Wire_runtime.skill_editor_loaded =
+    { reference = beta.reference; reference_json;
+      snapshot_revision = "rev"; source_text = "before"; access }
+  in
+  let cached ?(reference_json = beta_json) access =
+    { available with runtime = Runtime_store.apply_skill_editor_loaded ~observed_at:now
+        ~reference:"compile" (loaded reference_json access) available.runtime }
+  in
+  let submit m kind text =
+    let opened, _ = Update_nav.open_inline_modal m kind in
+    match opened.inline_modal with
+    | None -> Alcotest.fail "skill form did not open"
+    | Some form ->
+        let typed = Model.modal_update_active_field (fun _ -> text) form in
+        let _, cmds = Update_nav.submit_inline_modal ~now { opened with inline_modal = Some typed } in
+        Cmd.flatten cmds
+  in
+  let mutations m reference =
+    submit m (Nav.Skill_edit_form { reference }) "after",
+    submit m (Nav.Skill_delete_confirm { reference }) "DELETE"
+  in
+  let expect_none m reference =
+    Alcotest.(check bool) ("no save or delete for " ^ reference) true
+      (mutations m reference = ([], []))
+  in
+  let exact =
+    [Cmd.Http_post {epoch = initial.epoch; req = Cmd.Post_skill_editor_save
+         { reference = beta.reference; reference_json = beta_json; source_text = "after" }}],
+    [Cmd.Http_delete {epoch = initial.epoch; req = Cmd.Delete_skill_editor
+         { reference = beta.reference; reference_json = beta_json; confirmed = true }}]
+  in
+  List.iter (fun m ->
+    List.iter (expect_none m) [ "compile"; ""; "  "; "COMPILE-BETA"; " compile-beta " ];
+    Alcotest.(check bool) "exact operations keep the selected structured reference" true
+      (mutations m beta.reference = exact)) [available; cached Wire_runtime.Skill_read_write];
+  let alias = cached Wire_runtime.Skill_read_write in
+  let edit, _ = Update_actions.execute_slash ~now alias (Slash.Skill (Slash.Skill_edit "compile")) in
+  Alcotest.(check bool) "previous read alias cannot open another skill's edit form" true
+    (Option.is_none edit.inline_modal);
+  expect_none (catalog [beta; surface beta.reference "other-source"]) beta.reference;
+  expect_none (cached ~reference_json:(reference_json beta.reference "team" "earlier-revision")
+                 Wire_runtime.Skill_read_write) beta.reference;
+  expect_none (cached Wire_runtime.Skill_read_only) beta.reference
+
+let test_preset_denial_refresh () =
+  let now = Clock.Mono.zero in
+  let initial = Model.initial () in
+  let view, _ = Update_actions.execute_slash ~now initial (Slash.Preset Slash.Preset_list) in
+  let deny (m : Model.t) = fst (Update.step ~now m
+    (Msg.Http_reply {epoch = m.epoch; reply = Msg.Reply_presets
+      (Error (Msg.Http_error {status = 403; body = ""; api_error = None}))})) in
+  let get = Cmd.Http_get {epoch = view.epoch; req = Cmd.Get_presets} in
+  let denied = deny view in
+  Alcotest.(check bool) "denied presets suppress passive reads" true
+    (denied.runtime.presets_auth_denied && not (List.mem get (View_fetches.fetches_for_current_view denied)));
+  let refreshed, cmds = Update_actions.execute_action ~now denied Keymap.Refresh in
+  Alcotest.(check bool) "refresh clears the denial and requests the current presets" true
+    (not refreshed.runtime.presets_auth_denied && List.mem get (Cmd.flatten cmds));
+  let denied_again = deny refreshed in
+  Alcotest.(check bool) "a new denial suppresses subsequent passive reads" true
+    (denied_again.runtime.presets_auth_denied &&
+     not (List.mem get (View_fetches.fetches_for_current_view denied_again)))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "runtime_editor_authority",
+        [ Alcotest.test_case "exact skill mutation reference" `Quick test_skill_mutation_reference;
+          Alcotest.test_case "preset access recheck" `Quick test_preset_denial_refresh ] );
       ( "timeout_diagnostics"
       , [
           Alcotest.test_case "Timeout_detail KO/EN formatting, retryable & Update/Update_http parity"
@@ -19877,5 +19982,408 @@ let () =
                      | Cmd.Http_get { req = Cmd.Get_gate_pending; _ } -> true
                      | _ -> false)
                    cmds_gate_ref));
+          Alcotest.test_case
+            "Wave 4 Layer 3: Skills Editor/CRUD, Prompts, Presets, Runtime Params & Async Requests"
+            `Quick (fun () ->
+              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let ref_json =
+                `Assoc
+                  [
+                    ( "identity"
+                    , `Assoc
+                        [
+                          ("source_id", `String "workspace");
+                          ("package_id", `String "ocaml-coding");
+                          ("name", `String "ocaml-coding");
+                        ] );
+                    ("content_revision", `String "rev-1");
+                  ]
+              in
+              let snap : Wire_runtime.skills_snapshot =
+                {
+                  state = "ready";
+                  snapshot_revision = Some "snap-1";
+                  surfaces =
+                    [
+                      {
+                        reference = "ocaml-coding";
+                        reference_json = Some ref_json;
+                        kind = "instruction";
+                        summary = Some "OCaml pre-flight";
+                        error = None;
+                      };
+                    ];
+                  shadows = [];
+                  rejections = [];
+                }
+              in
+              let m1, _ =
+                Update.step ~now:t0 m0
+                  (Msg.Http_reply
+                     { epoch = m0.epoch; reply = Msg.Reply_skills (Ok snap) })
+              in
+              let run_slash m cmd_str =
+                match Slash.parse cmd_str with
+                | Ok p -> Update_actions.execute_slash ~now:t0 m p
+                | Error _ -> Alcotest.fail ("slash parse failed: " ^ cmd_str)
+              in
+              (* /skill refresh emits Post_skills_refresh *)
+              let _, cmds_ref = run_slash m1 "/skill refresh" in
+              Alcotest.(check bool) "/skill refresh emits Post_skills_refresh"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post { req = Cmd.Post_skills_refresh; _ } -> true
+                     | _ -> false)
+                   cmds_ref);
+              (* /skill read pushes Skill_dive and emits Post_skill_editor_read *)
+              let m_dive, cmds_read = run_slash m1 "/skill read ocaml-coding" in
+              Alcotest.(check bool) "/skill read pushes Skill_dive" true
+                (Model.active_dive m_dive
+                 = Some (Nav.Dive_runtime (Nav.Skill_dive "ocaml-coding")));
+              Alcotest.(check bool) "Skill_dive fetches Post_skill_editor_read"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_skill_editor_read
+                               { reference = "ocaml-coding"; _ };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_read);
+              (* /skill delete opens 2-step confirmation modal; requires DELETE *)
+              let m_del, _ = run_slash m1 "/skill delete ocaml-coding" in
+              let m_del_bad, cmds_del_bad =
+                Update_nav.submit_inline_modal ~now:t0 m_del
+              in
+              Alcotest.(check bool) "Skill_delete_confirm rejects blank" false
+                (List.exists
+                   (function
+                     | Cmd.Http_delete { req = Cmd.Delete_skill_editor _; _ } ->
+                         true
+                     | _ -> false)
+                   cmds_del_bad);
+              let m_del_typed =
+                match m_del_bad.inline_modal with
+                | Some modal ->
+                    {
+                      m_del_bad with
+                      inline_modal =
+                        Some
+                          (Model.modal_update_active_field
+                             (fun _ -> "DELETE") modal);
+                    }
+                | None -> Alcotest.fail "expected Skill_delete_confirm modal"
+              in
+              let _, cmds_del_ok =
+                Update_nav.submit_inline_modal ~now:t0 m_del_typed
+              in
+              Alcotest.(check bool)
+                "Skill_delete_confirm emits Delete_skill_editor on DELETE" true
+                (List.exists
+                   (function
+                     | Cmd.Http_delete
+                         {
+                           req =
+                             Cmd.Delete_skill_editor
+                               {
+                                 reference = "ocaml-coding";
+                                 confirmed = true;
+                                 _;
+                               };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_del_ok);
+              (* /prompt set & clear, param-set & param-clear *)
+              let _, cmds_ps =
+                run_slash m1 "/prompt set system.hello hi there"
+              in
+              Alcotest.(check bool) "/prompt set emits Post_prompt_override" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_prompt_override
+                               {
+                                 key = "system.hello";
+                                 value = Some "hi there";
+                               };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_ps);
+              let _, cmds_pc = run_slash m1 "/prompt clear system.hello" in
+              Alcotest.(check bool) "/prompt clear emits Post_prompt_override None"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_prompt_override
+                               { key = "system.hello"; value = None };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_pc);
+              let _, cmds_rp =
+                run_slash m1 "/prompt param-set keeper.max_turns 16"
+              in
+              Alcotest.(check bool) "/prompt param-set emits Post_runtime_param_set"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_runtime_param_set
+                               { param_key = "keeper.max_turns"; value = `Int 16 };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_rp);
+              (* /preset list jumps to Tools_prompts_presets and fetches prompts/presets/params/async *)
+              let m_pr, cmds_pr = run_slash m1 "/preset list" in
+              Alcotest.(check bool) "Tools_prompts_presets fetches Get_prompts"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_prompts; _ } -> true
+                     | _ -> false)
+                   cmds_pr);
+              Alcotest.(check bool) "Tools_prompts_presets fetches Get_presets"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_presets; _ } -> true
+                     | _ -> false)
+                   cmds_pr);
+              Alcotest.(check bool)
+                "Tools_prompts_presets fetches Get_runtime_params" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_runtime_params; _ } -> true
+                     | _ -> false)
+                   cmds_pr);
+              Alcotest.(check bool)
+                "Tools_prompts_presets fetches Get_async_requests" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_async_requests; _ } -> true
+                     | _ -> false)
+                   cmds_pr);
+              (* 403 silent auth latch on Get_async_requests *)
+              let m_403, _ =
+                Update.step ~now:t0 m_pr
+                  (Msg.Http_reply
+                     {
+                       epoch = m_pr.epoch;
+                       reply =
+                         Msg.Reply_async_requests
+                           (Error
+                              (Msg.Http_error
+                                 { status = 403; body = "admin only"; api_error = None }));
+                     })
+              in
+              Alcotest.(check bool) "async_requests_auth_denied latched" true
+                m_403.runtime.async_requests_auth_denied;
+              let vf_403 = View_fetches.fetches_for_current_view m_403 in
+              Alcotest.(check bool) "403 latched async-requests not refetched"
+                false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_async_requests; _ } -> true
+                     | _ -> false)
+                   vf_403);
+              (* /preset restore & delete *)
+              let _, cmds_rst = run_slash m1 "/preset restore baseline" in
+              Alcotest.(check bool) "/preset restore emits Post_preset_restore"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_preset_restore { name = "baseline" }; _ }
+                       ->
+                         true
+                     | _ -> false)
+                   cmds_rst);
+              (* P1-7: Lossless inline escape/unescape preserves literal \n and whitespace *)
+              let tricky = "  line1\nPrintf.printf \"hi\\n\"\n  indented  \n" in
+              Alcotest.(check string) "lossless escape/unescape round-trip"
+                tricky
+                (Model.unescape_inline_text (Model.escape_inline_text tricky));
+              (* P1-1 & P1-2: Real Msg.Key_event tests for [n]/[a]/[x]/[R] hotkeys *)
+              let press ch m_in =
+                let m_next, cmds = Update.step ~now:t0 m_in (Msg.Key_event (char_key ch)) in
+                (m_next, Cmd.flatten cmds)
+              in
+              let m_skills_view =
+                let nav =
+                  {
+                    m1.nav with
+                    workspace = Nav.Runtime;
+                    dive_stack = [];
+                    overlay = None;
+                    pane_index = 1;
+                  }
+                in
+                let runtime =
+                  m1.runtime
+                  |> Runtime_store.set_tab Nav.Runtime_tools_usage
+                  |> Runtime_store.set_tools_subview
+                       Runtime_store.Tools_keeper_skills
+                  |> Runtime_store.apply_skill_editor_sources ~observed_at:t0
+                       [ "workspace" ]
+                in
+                { m1 with nav; runtime }
+              in
+              let m_new_sk, _ = press "n" m_skills_view in
+              Alcotest.(check bool) "[n] on Tools_keeper_skills opens Skill_create_form"
+                true
+                (match m_new_sk.inline_modal with
+                | Some { kind = Nav.Skill_create_form; _ } -> true
+                | _ -> false);
+              Alcotest.(check string) "[n] prefills source_id from skill_editor_sources"
+                "workspace"
+                (match m_new_sk.inline_modal with
+                | Some modal -> Model.modal_field_value ~key:"source_id" modal
+                | None -> "");
+              let _, cmds_ref_k = press "R" m_skills_view in
+              Alcotest.(check bool) "[R] on Tools_keeper_skills emits Post_skills_refresh"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post { req = Cmd.Post_skills_refresh; _ } -> true
+                     | _ -> false)
+                   cmds_ref_k);
+              (* P2-4: Read-only skill blocks [e] and [x] with warning toast *)
+              let ro_loaded : Wire_runtime.skill_editor_loaded =
+                {
+                  reference = "my-skill";
+                  reference_json = ref_json;
+                  snapshot_revision = "rev-1";
+                  source_text = "# Read Only";
+                  access = Wire_runtime.Skill_read_only;
+                }
+              in
+              let m_ro_dive =
+                let m_d, _ =
+                  Update_nav.push_dive m_skills_view
+                    (Nav.Dive_runtime (Nav.Skill_dive "my-skill"))
+                in
+                {
+                  m_d with
+                  runtime =
+                    Runtime_store.apply_skill_editor_loaded ~observed_at:t0
+                      ~reference:"my-skill" ro_loaded m_d.runtime;
+                }
+              in
+              let m_ro_e, _ = press "e" m_ro_dive in
+              Alcotest.(check bool) "[e] on read-only skill does not open modal"
+                true (Option.is_none m_ro_e.inline_modal);
+              let m_ro_x, _ = press "x" m_ro_dive in
+              Alcotest.(check bool) "[x] on read-only skill does not open modal"
+                true (Option.is_none m_ro_x.inline_modal);
+              let m_ro_n, _ = press "n" m_ro_dive in
+              Alcotest.(check bool) "[n] on Skill_dive opens Skill_create_form"
+                true
+                (match m_ro_n.inline_modal with
+                | Some { kind = Nav.Skill_create_form; _ } -> true
+                | _ -> false);
+              (* P1-1, P1-2, P1-5, P1-6: Sec_presets [n], [a], /preset show idx>0, 403 latch *)
+              let presets_snap : Wire_runtime.presets_listing =
+                {
+                  presets =
+                    [
+                      {
+                        name = "alpha";
+                        description = "first";
+                        created_at = "2026-11-24T00:00:00Z";
+                        override_count = 1;
+                        override_keys = [ "k1" ];
+                        keepers = [ "alice" ];
+                        assignment_count = 1;
+                        lane_count = 1;
+                      };
+                      {
+                        name = "beta";
+                        description = "second";
+                        created_at = "2026-11-24T01:00:00Z";
+                        override_count = 2;
+                        override_keys = [ "k1"; "k2" ];
+                        keepers = [ "alice"; "bob" ];
+                        assignment_count = 2;
+                        lane_count = 1;
+                      };
+                    ];
+                  unreadable = [];
+                }
+              in
+              let m_presets =
+                let m_p, _ = run_slash m1 "/preset list" in
+                {
+                  m_p with
+                  runtime =
+                    Runtime_store.apply_presets_listing ~observed_at:t0
+                      presets_snap m_p.runtime;
+                }
+              in
+              let m_show_beta, cmds_beta = run_slash m_presets "/preset show beta" in
+              Alcotest.(check int) "/preset show beta selects index 1" 1
+                m_show_beta.runtime.pp_selected_index;
+              Alcotest.(check bool) "/preset show beta fetches beta" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_preset_show { name = "beta" }; _ }
+                       ->
+                         true
+                     | _ -> false)
+                   cmds_beta);
+              let m_pr_new, _ = press "n" m_show_beta in
+              Alcotest.(check bool) "[n] on Sec_presets opens Preset_create_form"
+                true
+                (match m_pr_new.inline_modal with
+                | Some { kind = Nav.Preset_create_form; _ } -> true
+                | _ -> false);
+              let _, cmds_pr_restore = press "a" m_show_beta in
+              Alcotest.(check bool) "[a] on Sec_presets restores selected preset beta"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_preset_restore { name = "beta" }; _ } ->
+                         true
+                     | _ -> false)
+                   cmds_pr_restore);
+              let m_p403, _ =
+                Update.step ~now:t0 m_pr
+                  (Msg.Http_reply
+                     {
+                       epoch = m_pr.epoch;
+                       reply =
+                         Msg.Reply_presets
+                           (Error
+                              (Msg.Http_error
+                                 { status = 403; body = "read_auth"; api_error = None }));
+                     })
+              in
+              Alcotest.(check bool) "presets_auth_denied latched on 403" true
+                m_p403.runtime.presets_auth_denied;
+              Alcotest.(check bool) "403 latched presets not refetched" false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_presets; _ } -> true
+                     | _ -> false)
+                   (View_fetches.fetches_for_current_view m_p403)));
         ] );
     ]

@@ -109,6 +109,7 @@ type dispatched_event =
       ; message_id : string
       ; author_id : string
       ; author_name : string option
+      ; guild_nickname : string option
       ; attachments : inbound_attachment list
       ; raw_content : string
             (* The message text as Discord sent it. Mentions stay
@@ -588,6 +589,14 @@ let decode_message_create ~bot_user_id ~payload =
     | None -> None
     | Some a -> user_display_name a
   in
+  let guild_nickname =
+    match guild_id, assoc_opt "member" payload with
+    | Some guild_id, Some member when String.trim guild_id <> "" ->
+        (match field_string_opt "nick" member with
+         | Some name when String.trim name <> "" -> Some (String.trim name)
+         | Some _ | None -> None)
+    | _ -> None
+  in
   let mentions, mention_user_ids =
     match assoc_opt "mentions" payload with
     | Some (`List items) ->
@@ -659,6 +668,7 @@ let decode_message_create ~bot_user_id ~payload =
            ; guild_id
            ; author_id
            ; author_name
+           ; guild_nickname
            ; raw_content
            ; resolved_mentions
            ; bot_user_id

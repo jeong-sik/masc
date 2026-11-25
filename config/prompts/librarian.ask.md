@@ -32,8 +32,9 @@ template_variables: []
      - `kind = "reset"`: `cause`(`"cleared"` | `"recovered"`), `items` 배열.
      - 항목(`items`/`unattributed`/`own`/`closed_after_admission`)은 `index`와 `kind`를 갖습니다:
        - `"message"`: `role`, `speaker`(User일 때) + `content`(`"text"`, `"tool_use"`, `"tool_result"`, `"image"`, `"document"`, `"audio"`; thinking 제외). 단, 런타임이 다시 넣어 준 기억·안내·복구 단서는 내용을 빼고 **`"runtime_context"`** 만 실으므로 **Keeper가 새로 본 관측으로 치지 마세요.**
-       - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`); 깨진 줄은 `"chat_unreadable"`.
-       - `"external"`: `actor`, `source`, `urgency`, `content`.
+       - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`). 외부 화자의 원본 좌표가 있으면 `surface`, `workspace_id`, `conversation_id`, `external_message_id`를 싣습니다. 깨진 줄은 `"chat_unreadable"`.
+       - `"external"`: `actor`, `source`, `surface`, `conversation_id`, `urgency`, `content`. 메시지 원본이 있으면 `external_message_id`도 싣습니다.
+       - 외부 화자에 대한 기억은 커넥터와 확인된 원본 범위 안의 `speaker.id` 또는 `actor.id`에 근거합니다. `name`은 해당 메시지의 표시 이름입니다. 이름이 같거나 바뀌었다는 사실로 서로 다른 계정을 연결하지 마세요.
        - `"tool_observation"`: `tool_name`, `outcome`(`"succeeded"` | `"failed"` | `"unknown"`); `"untagged"`.
      - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state`·`world_index` 없이 `u1` 한 항목만 실립니다.
    - **`Make_room`**: `units:` 줄 대신 `make_room: "..."` 줄이 실립니다. 값은 방금 읽은 항목이 이 Memory 와 함께는 어느 slot 에도 들어가지 않아 그 항목만 따로 읽었다는 문장 하나입니다. 몇 개로, 몇 바이트로 줄이라는 목표는 없습니다.

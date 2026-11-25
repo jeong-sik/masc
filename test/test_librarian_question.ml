@@ -153,6 +153,59 @@ let made ~shows units =
 
 let ask held units = made ~shows:(With_memory (memory held)) units
 
+let external_person_observation_keeps_its_scope () =
+  let surface =
+    Masc.Surface_ref.Discord
+      { guild_id = Some "guild"
+      ; channel_id = "thread"
+      ; channel_name = None
+      ; parent_channel_id = Some "channel"
+      ; thread_id = Some "thread"
+      }
+  in
+  let item : Masc.Keeper_external_attention.item =
+    { event_id = "event"
+    ; dedupe_key = "dedupe"
+    ; keeper_name = "luna"
+    ; conversation = { conversation_id = "discord:guild:channel:thread"; surface }
+    ; external_message = Some { surface; message_id = "message"; reply_to_message_id = None }
+    ; source_label = "discord"
+    ; actor = { actor_id = Some "account"; display_name = Some "Nickname"; authority = External }
+    ; urgency = Mention
+    ; content_preview = "I prefer summaries in Korean."
+    ; content_ref = None
+    ; received_at = 1_763_600_000.0
+    ; metadata = []
+    }
+  in
+  let unit : Read_unit.t =
+    { line = 120
+    ; at = item.received_at
+    ; kind = Reset { cause = Turn_log.Cleared; items =
+        [ { index = 0; name = { store = External; at = 0 }; body = External_row item } ]
+      }
+    ; missing = []
+    }
+  in
+  let _, text = ask [] [ unit ] in
+  let prefix = "units: " in
+  let line = List.find (String.starts_with ~prefix) (String.split_on_char '\n' text) in
+  let open Yojson.Safe.Util in
+  let observation =
+    String.sub line (String.length prefix) (String.length line - String.length prefix)
+    |> Yojson.Safe.from_string |> index 0 |> member "items" |> index 0
+  in
+  check string "account id" "account"
+    (observation |> member "actor" |> member "id" |> to_string);
+  check string "observed name" "Nickname"
+    (observation |> member "actor" |> member "name" |> to_string);
+  check string "message id" "message"
+    (observation |> member "external_message_id" |> to_string);
+  check string "conversation id" "discord:guild:channel:thread"
+    (observation |> member "conversation_id" |> to_string);
+  check bool "complete connector coordinates" true
+    (observation |> member "surface" |> Yojson.Safe.equal (Masc.Surface_ref.to_json surface))
+;;
 
 let same_inputs_same_bytes () =
   let question, text = ask (facts ()) (units ()) in
@@ -343,6 +396,8 @@ let () =
     "librarian_question"
     [ ( "question"
       , [ test_case "the same inputs give the same bytes" `Quick same_inputs_same_bytes
+        ; test_case "an external person's observation keeps its scope" `Quick
+            external_person_observation_keeps_its_scope
         ; test_case "the item alone shows no Memory" `Quick the_item_alone_shows_no_memory
         ; test_case "the room question reads no unit" `Quick the_room_question_reads_no_unit
         ; test_case

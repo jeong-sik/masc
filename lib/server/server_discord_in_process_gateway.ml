@@ -96,32 +96,26 @@ let discord_conversation_id ~guild_id ~channel_id =
   in
   Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
 
-let discord_attention_surface ~guild_id ~channel_id ~channel_name =
-  Keeper_external_attention.Discord
-    { guild_id
-    ; channel_id
-    ; channel_name
-    ; parent_channel_id = None
-    ; thread_id = None
-    }
-
-let discord_chat_metadata ~guild_id ~channel_id ~message_id =
-  [
-    ("conversation_id", discord_conversation_id ~guild_id ~channel_id);
-    ("external_message_id", message_id);
-  ]
-
-let discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id :
-    (Gate_keeper_backend.connector_delivery, string) result =
+let discord_conversation ~guild_id ~channel_id ~channel_name =
   let parent_channel_id = State.parent_channel_of_thread ~channel_id in
   let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+  let conversation : Keeper_external_attention.conversation_ref =
+    { conversation_id = discord_conversation_id ~guild_id ~channel_id
+    ; surface =
+        Surface_ref.Discord
+          { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
+    }
+  in
+  conversation, parent_channel_id, thread_id
+
+let discord_delivery ~(conversation : Keeper_external_attention.conversation_ref)
+    ~guild_id ~channel_id ~parent_channel_id ~thread_id ~message_id ~author_id :
+    (Gate_keeper_backend.connector_delivery, string) result =
   Result.map
     (fun continuation_channel ->
        { Gate_keeper_backend.continuation_channel
-       ; surface =
-           Surface_ref.Discord
-             { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
-       ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+       ; surface = conversation.surface
+       ; conversation_id = Some conversation.conversation_id
        ; external_message_id = Some message_id
        ; workspace_id = guild_id
        })
@@ -528,7 +522,8 @@ let request_directory_refresh ~sw ~clock ~base_dir =
             (Printexc.to_string exn))
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
-      ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
+      ~(conversation : Keeper_external_attention.conversation_ref)
+      ~message_id ~author_id ~author_name ~display_name ~content ~mentions_bot
       ~route ~urgency
   =
   Option.iter
@@ -536,25 +531,21 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       Keeper_connector_names.remember ~base_dir ~connector:State.channel
         ~scope:Keeper_connector_names.Person ~id:author_id ~name ())
     author_name;
-  let surface =
-    discord_attention_surface ~guild_id ~channel_id ~channel_name
-  in
-  let conversation_id = discord_conversation_id ~guild_id ~channel_id in
   let dedupe_key =
-    Printf.sprintf "discord:%s:%s" conversation_id message_id
+    Printf.sprintf "discord:%s:%s" conversation.conversation_id message_id
   in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
   let item : Keeper_external_attention.item =
     { event_id
     ; dedupe_key
     ; keeper_name
-    ; conversation = { conversation_id; surface }
+    ; conversation
     ; external_message =
-        Some { surface; message_id; reply_to_message_id = None }
+        Some { surface = conversation.surface; message_id; reply_to_message_id = None }
     ; source_label = State.channel
     ; actor =
         { actor_id = Some author_id
-        ; display_name = author_name
+        ; display_name
         ; authority = Keeper_chat_store.External
         }
     ; urgency
@@ -609,6 +600,10 @@ let render_for_keeper ~bot_user_id ~keeper_name ~resolved_mentions raw_content =
   in
   Discord_gateway_state.render_content ~self ~resolved_mentions raw_content
 
+let message_author_name ~author_name = function
+  | Some _ as nickname -> nickname
+  | None -> author_name
+
 (* Files, said as references rather than carried as bytes.
 
    Discord gives a url, a name and a size; the bytes live behind that url and
@@ -625,6 +620,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(guild_id : string option)
       ~base_dir
       ~(author_id : string) ~(author_name : string option)
+      ~guild_nickname
       ~(raw_content : string)
       ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
       ~(bot_user_id : string option)
@@ -662,9 +658,15 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
              raw_content)
         ~attachments
     in
+    let channel_name = resolve_channel_name ~base_dir ~channel_id in
+    let conversation, parent_channel_id, thread_id =
+      discord_conversation ~guild_id ~channel_id ~channel_name
+    in
+    let display_name = message_author_name ~author_name guild_nickname in
     let metadata =
-      discord_chat_metadata ~guild_id ~channel_id ~message_id
-      @ [ ("discord.channel_id", channel_id)
+      [ ("conversation_id", conversation.conversation_id)
+      ; ("external_message_id", message_id)
+      ; ("discord.channel_id", channel_id)
       ; ("discord.message_id", message_id)
       ; ("discord.bound_channel_id", resolution.bound_channel_id)
       ; ("discord.binding_via_parent", string_of_bool resolution.via_parent)
@@ -694,21 +696,18 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
         | None -> Keeper_external_attention.Direct_message
         | Some _ -> Keeper_external_attention.Ambient
     in
-    (* Resolved once for this message, so the attention record and the
-       durable chat row name the same room. *)
-    let channel_name = resolve_channel_name ~base_dir ~channel_id in
     (* Recorded as evidence; this route answers inline rather than queueing, so
        nothing downstream needs the id. *)
     let (_ : string option) =
-      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
-        ~message_id ~author_id ~author_name ~content ~mentions_bot
+      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~conversation
+        ~message_id ~author_id ~author_name ~display_name ~content ~mentions_bot
         ~route:"triggered" ~urgency
     in
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
       ; channel_user_id = author_id
-      ; channel_user_name = Option.value author_name ~default:author_id
-        (* NDT-OK: display name ([global_name] else [username]); the
+      ; channel_user_name = Option.value display_name ~default:author_id
+        (* NDT-OK: display name; the
            snowflake stands in only for malformed payloads missing both —
            the gate contract requires a non-empty name. *)
       ; channel_workspace_id = Option.value guild_id ~default:""
@@ -724,7 +723,8 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     in
     let outcome =
       match
-        discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id
+        discord_delivery ~conversation ~guild_id ~channel_id ~parent_channel_id
+          ~thread_id ~message_id ~author_id
       with
       | Error detail -> Error (Channel_gate.Internal detail)
       | Ok delivery ->
@@ -804,6 +804,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
       ; guild_id
       ; author_id
       ; author_name
+      ; guild_nickname
       ; raw_content
       ; resolved_mentions
       ; bot_user_id
@@ -819,7 +820,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
        gateway-state layer; nothing extra to check here. *)
     accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
-      ~guild_id ~base_dir ~author_name ~raw_content ~resolved_mentions
+      ~guild_id ~base_dir ~author_name ~guild_nickname ~raw_content ~resolved_mentions
       ~bot_user_id ~attachments ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id ()
@@ -856,6 +857,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
 let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option)
+      ~guild_nickname
       ~(raw_content : string)
       ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
       ~(bot_user_id : string option)
@@ -895,33 +897,27 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_too_long
     else begin
-      let parent_channel_id = State.parent_channel_of_thread ~channel_id in
-      let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
       (* Resolved once for this message, so the attention record and the
          durable chat row name the same room. *)
       let channel_name = resolve_channel_name ~base_dir ~channel_id in
+      let conversation, parent_channel_id, thread_id =
+        discord_conversation ~guild_id ~channel_id ~channel_name
+      in
+      let display_name = message_author_name ~author_name guild_nickname in
       let attention_event_id =
-        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
-          ~message_id ~author_id ~author_name ~content
+        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~conversation
+          ~message_id ~author_id ~author_name ~display_name ~content
           ~mentions_bot:false ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content
-        ~surface:
-          (Surface_ref.Discord
-             {
-               guild_id;
-               channel_id;
-               channel_name;
-               parent_channel_id;
-               thread_id;
-             })
-        ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
+        ~surface:conversation.surface
+        ~conversation_id:conversation.conversation_id
         ~external_message_id:message_id
         ~speaker:
           { Keeper_chat_store.speaker_id = Some author_id
-          ; speaker_name = author_name
+          ; speaker_name = display_name
           ; speaker_authority = Keeper_chat_store.External
           }
         ();
@@ -967,6 +963,7 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ; message_id
       ; author_id
       ; author_name
+      ; guild_nickname
       ; raw_content
       ; resolved_mentions
       ; bot_user_id
@@ -974,7 +971,7 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ; _
       } ->
     handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
-      ~message_id ~author_id ~author_name ~raw_content ~resolved_mentions
+      ~message_id ~author_id ~author_name ~guild_nickname ~raw_content ~resolved_mentions
       ~bot_user_id ~attachments ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 

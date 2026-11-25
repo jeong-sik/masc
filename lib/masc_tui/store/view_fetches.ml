@@ -460,7 +460,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
       else []
   | Nav.Keeper_work_sandbox ->
       let sandbox_needed =
-        needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
+        Infra_store.keeper_sandbox_needed ~force ~keeper:name m.infra
       in
       []
       |> add_if (needs_planning ~force m.work) Cmd.Get_planning
@@ -1248,8 +1248,7 @@ let fetches_for_workspace ~force (m : Model.t) =
           let keeper_req =
             match Infra_store.selected_sandbox_keeper m.infra with
             | Some keeper
-              when needs_fetch ~force
-                     (Infra_store.keeper_sandbox_for ~keeper m.infra) ->
+              when Infra_store.keeper_sandbox_needed ~force ~keeper m.infra ->
                 [ Cmd.Get_keeper_sandbox { keeper } ]
             | Some _ | None -> []
           in

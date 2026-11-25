@@ -1499,7 +1499,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       }
       if (url.includes('/infra/sandboxes')) {
         if (++sandboxReads === 1) return firstSandbox
-        if (sandboxReads === 2) return json({ error: 'No sandbox telemetry' }, 404)
+        if (sandboxReads === 2) return json({ error: { code: 'not_found', message: 'Route unavailable' } }, 404)
+        if (sandboxReads === 3) return json({ error: { code: 'sandbox_telemetry_missing', message: 'No sandbox telemetry' } }, 404)
         return json({ schema_version: 1, instance_id: 'i1', generated_at_unix: 1,
           data: { keeper, probe_state: { kind: 'fresh' }, sandbox: { backend: 'microvm' } } })
       }
@@ -1529,10 +1530,13 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(note.value).toBe('')
     await view.findByRole('alert')
     fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
+    await view.findByText(/Route unavailable/)
+    expect(view.queryByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
     await view.findByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')
     fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
     await view.findByText('microvm')
-    expect(sandboxReads).toBe(3)
+    expect(sandboxReads).toBe(4)
     expect(mockFetch.mock.calls.filter(([url]) => String(url).includes('/dashboard/execution'))).toHaveLength(1)
 
     fireEvent.input(note, { target: { value: 'Save this draft' } })
@@ -1589,6 +1593,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       const url = new URL(String(input), 'http://localhost')
       paths.push(url.pathname + url.search)
       if (url.pathname.endsWith('/execution')) return Response.json({ tasks: [], task_counts: { total: 0, shown: 0 } })
+      if (url.pathname === '/api/v1/infra/sandboxes/hermes') return Response.json(
+        { error: { code: 'sandbox_telemetry_missing', message: 'No sandbox telemetry' } }, { status: 404 },
+      )
       return Response.json({}, { status: 404 })
     })
     const work = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)

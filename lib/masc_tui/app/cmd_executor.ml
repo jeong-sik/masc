@@ -1866,7 +1866,11 @@ let rec execute_get t ~epoch req =
         | Cmd.Get_keeper_sandbox { keeper } ->
             let result =
               fetch_and_decode_get t ~path
-                ~decode:(Wire_infra.decode_keeper_sandbox ~observed_at)
+                ~decode:(fun json ->
+                  Result.bind (Wire_infra.decode_keeper_sandbox ~observed_at json)
+                    (fun (detail : Wire_infra.keeper_sandbox_response) ->
+                      if String.equal detail.keeper keeper then Ok detail
+                      else Error "sandbox telemetry belongs to another Keeper"))
             in
             Msg.Http_reply
               { epoch; reply = Msg.Reply_keeper_sandbox { keeper; result } }

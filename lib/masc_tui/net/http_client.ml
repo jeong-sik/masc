@@ -183,7 +183,8 @@ let classify_response ep ~status ~body =
           {
             code =
               ( Wire_common.Invalid_param | Wire_common.Unauthorized
-              | Wire_common.Not_found | Wire_common.Conflict_cas
+              | Wire_common.Not_found | Wire_common.Sandbox_telemetry_missing
+              | Wire_common.Conflict_cas
               | Wire_common.Validation_failed | Wire_common.Store_unavailable
               | Wire_common.Other_code _ );
             _;

@@ -88,11 +88,19 @@ type code_state = {
   git_scroll_offset : int;
 }
 
+type keeper_sandbox_read = {
+  observation : Wire_infra.keeper_sandbox_response Observed.t;
+  retained : (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option;
+  requested_at : Clock.Mono.t option;
+}
+(** The latest settlement, a retained detail after a failed refresh, and the
+    dispatch time of the pending read. *)
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
   sandboxes_fallback_404 : bool;
-  keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
+  keeper_sandboxes : keeper_sandbox_read String_map.t;
       (** One slot per keeper the sandbox route was asked about. *)
   repositories : Wire_infra.repository list Observed.t;
   repository_pulls : Wire_infra.repository_pulls_snapshot Observed.t;
@@ -145,8 +153,18 @@ val apply_sandboxes_fallback :
 val keeper_sandbox_for :
   keeper:string -> t -> Wire_infra.keeper_sandbox_response Observed.t
 (** [keeper]'s slot. [Unreported] until the route answers for [keeper]. *)
+
+val keeper_sandbox_read_for : keeper:string -> t -> keeper_sandbox_read
+val keeper_sandbox_detail :
+  keeper_sandbox_read -> (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option
+
 val set_keeper_sandbox :
-  keeper:string -> Wire_infra.keeper_sandbox_response Observed.t -> t -> t
+  keeper:string ->
+  ?retain_detail:bool -> Wire_infra.keeper_sandbox_response Observed.t -> t -> t
+
+val request_keeper_sandbox : keeper:string -> now:Clock.Mono.t -> t -> t
+val detach_keeper_sandbox_reads : t -> t
+val keeper_sandbox_needed : force:bool -> keeper:string -> t -> bool
 val apply_repositories :
   observed_at:Clock.Mono.t -> Wire_infra.repository list -> t -> t
 val apply_repository_pulls :

@@ -7010,9 +7010,9 @@ let sandbox_entry_info_for_keeper ~use_keeper_detail ~keeper
     if not use_keeper_detail then None
     else
       Option.map
-        (fun (resp : Wire_infra.keeper_sandbox_response) ->
+        (fun ((resp : Wire_infra.keeper_sandbox_response), _) ->
           sandbox_entry_info_of_detail ~sandboxes resp.sandbox)
-        (Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf))
+        (Infra_store.keeper_sandbox_detail (Infra_store.keeper_sandbox_read_for ~keeper inf))
   in
   match from_detail with
   | Some _ as found -> found

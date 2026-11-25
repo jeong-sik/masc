@@ -21,6 +21,35 @@ let display_target_keeper_of_model (m : Model.t) =
   | Some k -> k
   | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none")
 
+let sandbox_detail_notice ~(read : Infra_store.keeper_sandbox_read) ~using_fleet =
+  let source =
+    if using_fleet then [ Say.make ~ko:"플릿 스냅샷" ~en:"Fleet snapshot" ]
+    else if Option.is_some (Infra_store.keeper_sandbox_detail read) then
+      [ Say.make ~ko:"마지막 상세 관측" ~en:"Last detail observed" ]
+    else []
+  in
+  let notice tone label tail = Some (Say.concat ~sep:" · " (label :: (source @ tail)), tone) in
+  let loading () =
+    notice Theme.Status_active
+      (Say.make ~ko:"샌드박스 상세 불러오는 중…" ~en:"Reading sandbox detail…") []
+  in
+  match read.requested_at, read.observation with
+  | Some _, _ | None, Observed.Loading _ -> loading ()
+  | None, Observed.Absent ->
+      notice Theme.Status_historical
+        (Say.make ~ko:"현재 스냅샷에 상세 없음" ~en:"No detail in the current snapshot")
+        [ Say.make ~ko:"[r] 다시 읽기" ~en:"[r] Read again" ]
+  | None, Observed.Unreported ->
+      notice Theme.Status_historical
+        (Say.make ~ko:"샌드박스 상세 조회 전" ~en:"Sandbox detail awaiting a read") []
+  | None, Observed.Failed { reason; _ } ->
+      notice Theme.Status_critical
+        (Say.make ~ko:"샌드박스 상세 조회 실패" ~en:"Sandbox detail read failed")
+        [ Say.literal reason ]
+  | None, Observed.Value { stale = true; _ } ->
+      Some (Say.make ~ko:"마지막 상세 관측" ~en:"Last detail observed", Theme.Status_historical)
+  | None, Observed.Value { stale = false; _ } -> None
+
 let voice_state_of_drafts (drafts : Drafts.t) =
   match drafts.voice with
   | Drafts.Voice_off | Drafts.Voice_error _ ->

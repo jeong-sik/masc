@@ -4768,21 +4768,9 @@ let apply_http_reply ~now (m : Model.t) reply =
           && Nav.equal_infra_tab next.infra.active_tab Nav.Infra_sandboxes
         then
           match Infra_store.selected_sandbox_keeper next.infra with
-          | Some keeper -> (
-              match Infra_store.keeper_sandbox_for ~keeper next.infra with
-              | Observed.Value { stale = false; _ } | Observed.Loading _ -> []
-              | Observed.Value { stale = true; _ }
-              | Observed.Absent
-              | Observed.Unreported
-              | Observed.Failed _ ->
-                  [
-                    Cmd.Http_get
-                      {
-                        epoch = next.epoch;
-                        req = Cmd.Get_keeper_sandbox { keeper };
-                      };
-                  ])
-          | None -> []
+          | Some keeper when Infra_store.keeper_sandbox_needed ~force:false ~keeper infra ->
+              [Cmd.Http_get { epoch = next.epoch; req = Cmd.Get_keeper_sandbox { keeper } }]
+          | Some _ | None -> []
         else []
       in
       (next, cmds)
@@ -4821,14 +4809,31 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_keeper_sandbox { keeper; result = Error err } ->
-      err_reply
-        ~fail:
-          (on_infra (fun (x : Infra_store.t) ->
-               Infra_store.set_keeper_sandbox ~keeper
-                 (failed_slot err (Infra_store.keeper_sandbox_for ~keeper x))
-                 x))
-        ~source:(Health.Source_sandbox keeper) ~ko:"키퍼 샌드박스 조회"
-        ~en:"Keeper sandbox fetch" err
+      let missing =
+        match err with
+        | Msg.Http_error { status = 404; api_error; _ } ->
+            Option.exists
+              (fun (api : Wire_common.api_error) -> api.code = Wire_common.Sandbox_telemetry_missing)
+              api_error
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
+            false
+      in
+      if missing then
+        ({ m with infra = Infra_store.set_keeper_sandbox ~keeper Observed.absent m.infra }, [])
+      else
+        err_reply
+          ~fail:
+            (on_infra (fun (x : Infra_store.t) ->
+                 let retain_detail =
+                   match err with
+                   | Msg.Http_error { status = (401 | 403); _ } | Msg.Workspace_mismatch _ ->
+                       false
+                   | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> true
+                 in
+                 Infra_store.set_keeper_sandbox ~keeper ~retain_detail
+                   (failed_slot err Observed.unreported) x))
+          ~source:(Health.Source_sandbox keeper) ~ko:"키퍼 샌드박스 조회"
+          ~en:"Keeper sandbox fetch" err
   | Msg.Reply_repositories (Ok repos) ->
       let infra =
         Infra_store.apply_repositories ~observed_at:now repos m.infra

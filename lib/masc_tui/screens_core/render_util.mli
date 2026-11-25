@@ -20,6 +20,13 @@ val display_target_keeper_of_model : Model.t -> string
 
 val composer_state_of_model : Model.t -> Composer.state
 
+val sandbox_detail_notice :
+  read:Infra_store.keeper_sandbox_read ->
+  using_fleet:bool ->
+  (Say.t * Theme.status_token) option
+(** Lifecycle notice for the per-Keeper read, with the provenance of any rows
+    shown underneath it. *)
+
 val freshness_pill :
   model:Model.t ->
   compact:bool ->

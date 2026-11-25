@@ -2446,12 +2446,20 @@ let test_round2_store_regressions () =
           m_k.infra;
     }
   in
-  let _, cmds_ksb_beta =
+  let m_ksb_beta, cmds_ksb_beta =
     Update.step ~now:t2 m_ksb_alpha (Msg.Key_event (char_key "j"))
   in
   Alcotest.(check bool)
     "Keeper_work_sandbox move alpha->beta fetches Get_keeper_sandbox(beta)" true
     (has_get (is_sandbox_for "beta") cmds_ksb_beta);
+  let beta_read = Infra_store.keeper_sandbox_read_for ~keeper:"beta" m_ksb_beta.infra in
+  Alcotest.(check bool) "beta detail dispatch has an outstanding read" true
+    (Option.equal Clock.Mono.equal beta_read.requested_at (Some t2));
+  Alcotest.(check bool) "alpha detail stays settled" true
+    (Option.is_none (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m_ksb_beta.infra).requested_at);
+  Alcotest.(check bool) "pending beta read coalesces a refresh" false
+    (has_get (is_sandbox_for "beta")
+       (View_fetches.fetches_for_current_view ~force:true m_ksb_beta));
 
   (* 3. Keeper_config: switching to Keepers + moving alpha->beta syncs config.target
      and accepts Reply_config_schema into model.config.schema *)
@@ -8926,6 +8934,26 @@ let test_answers_land_on_their_own_target () =
        (Infra_store.keeper_sandbox_for ~keeper:"alpha" m1.infra));
   Alcotest.(check (option bool)) "beta's 400 lands on beta" (Some false)
     (retryable_failure (Infra_store.keeper_sandbox_for ~keeper:"beta" m1.infra));
+  let missing =
+    Wire_common.decode_api_error
+      (`Assoc [ "error", `Assoc [
+         "code", `String "sandbox_telemetry_missing";
+         "message", `String "keeper has no telemetry in the served snapshot";
+       ] ])
+    |> Result.to_option
+  in
+  let absent =
+    reply m1
+      (Msg.Reply_keeper_sandbox {
+         keeper = "alpha";
+         result = Error (Msg.Http_error { status = 404; body = ""; api_error = missing });
+       })
+  in
+  Alcotest.(check bool) "the named missing receipt settles as an empty observation"
+    true (Infra_store.keeper_sandbox_for ~keeper:"alpha" absent.infra = Observed.Absent);
+  let fault = reply m1 (sandbox_error "alpha" 404) in
+  Alcotest.(check (option bool)) "generic 404 stays a read failure" (Some false)
+    (retryable_failure (Infra_store.keeper_sandbox_for ~keeper:"alpha" fault.infra));
   let on_beta_sandbox =
     {
       m1 with

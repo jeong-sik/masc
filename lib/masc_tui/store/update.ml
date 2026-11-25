@@ -604,7 +604,10 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
     in
     {
       after with
-      infra = Infra_store.forget_log_cursor after.infra;
+      infra =
+        after.infra
+        |> Infra_store.forget_log_cursor
+        |> Infra_store.detach_keeper_sandbox_reads;
       fleet =
         Fleet_store.detach_chat_streams
           { after.fleet with worked = Fleet_store.String_map.empty }
@@ -717,4 +720,14 @@ let step ~now m msg =
     |> reconcile_memory_diagram ~before:m ~after:next
   in
   let next = reserve_board_view_read ~now next cmds in
+  let infra =
+    List.fold_left
+      (fun infra -> function
+        | Cmd.Http_get { epoch; req = Cmd.Get_keeper_sandbox { keeper } }
+          when Epoch.equal epoch next.epoch ->
+            Infra_store.request_keeper_sandbox ~keeper ~now infra
+        | _ -> infra)
+      next.infra (Cmd.flatten cmds)
+  in
+  let next = if infra == next.infra then next else { next with infra } in
   (reserve_work_reads ~now next cmds, final_cmds)

@@ -4318,9 +4318,8 @@ let active_view_ssot_mode m =
                           [
                             observed_at_opt m.work.planning;
                             observed_at_opt m.work.candle_ledger;
-                            observed_at_opt
-                              (Infra_store.keeper_sandbox_for ~keeper:name
-                                 m.infra);
+                            Infra_store.keeper_sandbox_read_for ~keeper:name m.infra
+                            |> Infra_store.keeper_sandbox_detail |> Option.map snd;
                             observed_at_opt m.infra.sandboxes;
                           ];
                     }

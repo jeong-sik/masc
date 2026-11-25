@@ -606,8 +606,12 @@ sandbox_profile = "remote_ssh"
       "vm-alpha"
       (json_string_exn "keeper" (json_member_exn "data" keeper_ok));
     match Sandbox_api.get_keeper_json ~now ~base_path ~keeper:"does-not-exist" () with
-    | Error (status, _) ->
-      Alcotest.(check int) "unknown keeper 404" 404 (Httpun.Status.to_code status)
+    | Error (status, body) ->
+      Alcotest.(check int) "missing telemetry 404" 404 (Httpun.Status.to_code status);
+      Alcotest.(check string)
+        "missing telemetry code"
+        "sandbox_telemetry_missing"
+        (json_string_exn "code" (json_member_exn "error" body))
     | Ok _ -> Alcotest.fail "unknown keeper should return 404")
 ;;
 

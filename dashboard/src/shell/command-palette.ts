@@ -409,6 +409,7 @@ export function CommandPalette(): VNode | null {
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const commands = useMemo(
     () => buildPaletteCommands(session),
@@ -429,6 +430,12 @@ export function CommandPalette(): VNode | null {
     queueMicrotask(() => inputRef.current?.focus())
   }, [open])
 
+  useEffect(() => {
+    if (!open) return
+    const selectedEl = listRef.current?.querySelector('.ap-cmdk-item.is-selected') as HTMLElement | null
+    selectedEl?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedIdx, open])
+
   if (!open) return null
 
   const execute = (cmd: PaletteCommand | undefined) => {
@@ -438,8 +445,10 @@ export function CommandPalette(): VNode | null {
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return
     if (event.key === 'Escape') {
       event.preventDefault()
+      event.stopPropagation()
       closeCommandPalette()
       return
     }
@@ -492,7 +501,7 @@ export function CommandPalette(): VNode | null {
           <kbd class="ap-kbd">ESC</kbd>
         </div>
 
-        <div id="ap-cmdk-list" class="ap-cmdk-list" role="listbox" aria-label="명령 결과">
+        <div ref=${listRef} id="ap-cmdk-list" class="ap-cmdk-list" role="listbox" aria-label="명령 결과">
           ${results.length === 0
             ? html`<div class="ap-cmdk-empty">일치하는 명령이 없습니다.</div>`
             : results.map((match, idx) => {

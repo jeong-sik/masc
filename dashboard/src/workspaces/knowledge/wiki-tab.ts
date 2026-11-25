@@ -83,6 +83,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [saving, setSaving] = useState(false)
   const [saveFeedback, setSaveFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
+  const submitSaveRef = useRef<() => Promise<void>>(async () => {})
 
   const loadIndex = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
@@ -164,6 +165,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     pageAbortRef.current?.abort()
     if (!selectedSlug || creatingNew) return
     setEditing(false)
+    setPageDetail(null)
     setCasConflict(null)
     setSaveFeedback(null)
     const ctrl = new AbortController()
@@ -279,6 +281,21 @@ export function WikiTab(props: WorkspaceViewProps) {
     pageAbortRef.current = ctrl
     await loadPage(res.value.slug, ctrl.signal)
   }
+
+  submitSaveRef.current = () => submitSave()
+
+  useEffect(() => {
+    if (!editing) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (!saving) void submitSaveRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [editing, saving])
 
   const conflictDiff = useMemo(() => {
     if (!casConflict) return []
@@ -680,6 +697,13 @@ export function WikiTab(props: WorkspaceViewProps) {
             class="kn-textarea kn-textarea--editor"
             value=${editBody}
             onInput=${(e: Event) => setEditBody((e.target as HTMLTextAreaElement).value)}
+            onKeyDown=${(e: KeyboardEvent) => {
+              if (e.isComposing || e.keyCode === 229) return
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !saving) {
+                e.preventDefault()
+                void submitSave()
+              }
+            }}
             aria-label="Markdown 본문 편집기"
           />
         </div>
@@ -791,6 +815,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${editing || pageDetail !== null || pageLoading || pageError !== null}
+      selectionKey=${creatingNew ? '__new__' : selectedSlug}
       masterLabel="Wiki 인덱스"
       detailLabel="Wiki 본문 및 CAS 편집기"
       emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 페이지를 선택하거나 "+ 새 페이지"를 눌러 문서를 작성하세요.</span></div>`}

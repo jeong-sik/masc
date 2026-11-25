@@ -33,8 +33,13 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   const [isPushViewport, setIsPushViewport] = useState(detectDesktopPush)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(props.onClose)
   onCloseRef.current = props.onClose
+
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
+  }, [props.title, props.subtitle, props.open])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
@@ -55,8 +60,10 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
     closeBtnRef.current?.focus?.()
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
         event.preventDefault()
+        event.stopPropagation()
         onCloseRef.current()
       }
     }
@@ -123,7 +130,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
           </button>
         </div>
       </header>
-      <div class="qpeek-body">
+      <div ref=${bodyRef} class="qpeek-body">
         ${props.children}
       </div>
     </aside>

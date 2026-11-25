@@ -303,6 +303,11 @@ export function MemoryTab(_props: WorkspaceViewProps) {
               setActKeeper(r.keeper)
               setActKind(r.snapshotSha ? 'adopt' : 'restart_reading')
               setActObserved(r.snapshotSha ?? '')
+              setActTurnLog('')
+              setActLine('0')
+              setActStore('')
+              setActAt('0')
+              setActOffset('0')
             }}
           >
             고급 복구…
@@ -310,7 +315,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         </div>
       `,
     },
-  ], [actBusy])
+  ], [actBusy, activeWin])
 
   const activeDiffList = diffData
     ? diffSubTab === 'added'

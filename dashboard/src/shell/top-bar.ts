@@ -139,7 +139,12 @@ function AccountWorkspaceSwitcher(): VNode {
       }
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', onOutside)
     document.addEventListener('keydown', onKey)
@@ -375,7 +380,12 @@ function ProvenancePill(): VNode {
       }
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', onOutside)
     document.addEventListener('keydown', onKey)

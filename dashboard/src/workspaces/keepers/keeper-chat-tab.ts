@@ -12,7 +12,7 @@
 
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { formatObserved } from '../../core/resource-cache'
 import { randomUuid } from '../../lib/uuid'
 import {
@@ -61,6 +61,19 @@ export interface KeeperChatTabProps {
 }
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 8.5
+const BOTTOM_STICKY_THRESHOLD_PX = 72
+const INITIAL_RENDER_WINDOW = 120
+const MAX_RENDER_WINDOW = 1000
+
+function formatChatTime(ts: number): string | null {
+  if (!Number.isFinite(ts) || ts <= 0) return null
+  const ms = ts < 1_000_000_000_000 ? ts * 1000 : ts
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return null
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
 
 function deliveryBadgeTone(state: ChatDeliveryState | undefined): 'ok' | 'warn' | 'bad' | 'info' | 'brass' | undefined {
   switch (state) {
@@ -115,12 +128,44 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   })
   const [btwOpen, setBtwOpen] = useState(false)
   const [btwInput, setBtwInput] = useState('')
+  const [renderWindow, setRenderWindow] = useState(INITIAL_RENDER_WINDOW)
+  const [isNearBottom, setIsNearBottom] = useState(true)
+  const [unseenBelowCount, setUnseenBelowCount] = useState(0)
 
+  const chatListRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const voiceInputRef = useRef<HTMLInputElement>(null)
   const streamAbortRef = useRef<AbortController | null>(null)
   const btwAbortRef = useRef<AbortController | null>(null)
   const sendingRef = useRef(false)
+  const stickToBottomRef = useRef(true)
+  const forceScrollBottomRef = useRef(true)
+  const pendingPrependAnchorRef = useRef<{ readonly prevScrollHeight: number; readonly prevScrollTop: number } | null>(null)
+  const prevTailSigRef = useRef('')
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = chatListRef.current
+    if (!el) return
+    stickToBottomRef.current = true
+    setIsNearBottom(true)
+    setUnseenBelowCount(0)
+    if (behavior === 'auto' || typeof el.scrollTo !== 'function') {
+      el.scrollTop = el.scrollHeight
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior })
+    }
+  }, [])
+
+  const handleChatScroll = useCallback(() => {
+    const el = chatListRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    const near = distanceFromBottom <= BOTTOM_STICKY_THRESHOLD_PX
+    stickToBottomRef.current = near
+    setIsNearBottom(near)
+    if (near) setUnseenBelowCount(0)
+  }, [])
 
   useEffect(() => {
     setControlToken(keeper.chat_control_token)
@@ -137,6 +182,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     if (!pageRes.ok) {
       setHistoryError(pageRes.error.message)
     } else {
+      forceScrollBottomRef.current = true
       setMessages((prev) => {
         const loadedIds = new Set(pageRes.value.messages.map((m) => m.id))
         const optimistic = prev.filter((m) => !loadedIds.has(m.id))
@@ -185,17 +231,27 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setHistoryError(res.error.message)
       return
     }
+    const el = chatListRef.current
+    if (el) {
+      pendingPrependAnchorRef.current = {
+        prevScrollHeight: el.scrollHeight,
+        prevScrollTop: el.scrollTop,
+      }
+    }
+    setRenderWindow((cur) => Math.min(MAX_RENDER_WINDOW, cur + res.value.messages.length))
     setMessages((prev) => [...res.value.messages, ...prev])
     setHasMore(res.value.hasMore)
     setNextCursor(res.value.nextCursor)
   }
 
-  const updateAssistantEntry = (
-    assistantId: string,
+  const updateEntryById = (
+    entryId: string,
     updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
   ) => {
-    setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)))
+    setMessages((prev) => prev.map((m) => (m.id === entryId ? updater(m) : m)))
   }
+
+  const updateAssistantEntry = updateEntryById
 
   const handleRecoverCut = async (assistantId: string, operationId: string) => {
     updateAssistantEntry(assistantId, (m) => ({
@@ -298,11 +354,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
 
     const currentAttachments = [...attachments]
+    const userId = userEntry.id
+    let acceptedByServer = false
     sendingRef.current = true
+    forceScrollBottomRef.current = true
     setMessages((prev) => [...prev, userEntry, assistantEntry])
     setDraft('')
     setAttachments([])
     setSending(true)
+    queueMicrotask(() => composerRef.current?.focus())
 
     let abortController: AbortController | null = null
     let outcome: { readonly terminal: boolean; readonly error: string | null } = {
@@ -334,6 +394,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         signal: abortController.signal,
         callbacks: {
           onAccepted: (info) => {
+            acceptedByServer = true
             if (info.controlToken) setControlToken(info.controlToken)
             const nextState: ChatDeliveryState =
               info.state === 'Queued'
@@ -341,12 +402,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 : info.state === 'Running'
                   ? 'Pending_processing'
                   : 'Delivered'
+            updateEntryById(userId, (m) => ({
+              ...m,
+              deliveryState: info.state === 'Queued' ? 'Queued' : 'Delivered',
+            }))
             updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: nextState }))
           },
           onRunStarted: () => {
+            acceptedByServer = true
+            updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Delivered' }))
             updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: 'Pending_processing' }))
           },
           onAttemptStarted: () => {
+            acceptedByServer = true
+            updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Delivered' }))
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: '',
@@ -354,6 +423,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onTextDelta: (delta) => {
+            acceptedByServer = true
+            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: m.content + delta,
@@ -400,6 +471,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             })
           },
           onReplyDetails: (reply, turnRef) => {
+            acceptedByServer = true
+            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: reply || m.content,
@@ -407,6 +480,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onError: (msg) => {
+            updateEntryById(userId, (m) => ({
+              ...m,
+              deliveryState: acceptedByServer ? 'Delivered' : 'Failed',
+            }))
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: 'Failed',
@@ -414,6 +491,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onFinished: () => {
+            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
@@ -428,6 +506,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
     // Mid-stream cut without RUN_FINISHED -> Confirming_delivery & journal recovery
     if (!outcome.terminal && !abortController?.signal.aborted) {
+      updateEntryById(userId, (m) => (m.deliveryState === 'Sending' ? { ...m, deliveryState: 'Delivered' } : m))
       updateAssistantEntry(assistantId, (m) => ({
         ...m,
         cutStream: true,
@@ -503,7 +582,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : RING_CIRCUMFERENCE
   const ringTone = ctxPct === null ? 'absent' : ctxPct >= 85 ? 'bad' : ctxPct >= 65 ? 'warn' : 'ok'
 
-  const recentSlice = messages.slice(-120)
+  const recentSlice = messages.slice(-renderWindow)
   const parsedEntries = recentSlice.map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) }))
   const hiddenInternalCount = parsedEntries.filter(
     ({ blocks }) => blocks.isInternalOnly && blockPrefs.internal === 'hidden',
@@ -511,6 +590,45 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const visibleEntries = parsedEntries.filter(({ msg, blocks }) =>
     shouldRenderChatEntry(msg, blocks, blockPrefs),
   )
+
+  const lastVisible = visibleEntries[visibleEntries.length - 1]?.msg
+  const tailSig = lastVisible
+    ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}`
+    : `${visibleEntries.length}:empty`
+
+  useLayoutEffect(() => {
+    const el = chatListRef.current
+    if (!el) return
+
+    // Preserve exact viewport anchor when older history pages are prepended
+    const anchor = pendingPrependAnchorRef.current
+    if (anchor) {
+      pendingPrependAnchorRef.current = null
+      const delta = el.scrollHeight - anchor.prevScrollHeight
+      el.scrollTop = anchor.prevScrollTop + Math.max(0, delta)
+      prevTailSigRef.current = tailSig
+      return
+    }
+
+    const tailChanged = tailSig !== prevTailSigRef.current
+    prevTailSigRef.current = tailSig
+
+    if (forceScrollBottomRef.current) {
+      if (visibleEntries.length > 0 || !loadingHistory) {
+        forceScrollBottomRef.current = false
+        scrollToBottom('auto')
+      }
+      return
+    }
+
+    if (!tailChanged) return
+
+    if (stickToBottomRef.current) {
+      scrollToBottom('auto')
+    } else if (visibleEntries.length > 0) {
+      setUnseenBelowCount((c) => c + 1)
+    }
+  }, [tailSig, loadingHistory, visibleEntries.length, scrollToBottom])
 
   return html`
     <div class="kp-chat-shell" data-companion-open=${companionOpen ? 'true' : 'false'}>
@@ -574,42 +692,52 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
         ${historyError && html`<div class="ap-error" role="alert">${historyError}</div>`}
 
-        <div class="kp-chat-list" role="log" aria-label="Keeper 대화 기록">
-          ${loadingHistory && messages.length === 0
-            ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
-            : visibleEntries.length === 0
-              ? html`<div class="kp-empty">${messages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
-              : visibleEntries.map(({ msg, blocks }) => html`
-                  <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
-                    <div class="kp-msg-head">
-                      <span>
-                        ${msg.role === 'user'
-                          ? (msg.speakerLabel ?? '사용자')
-                          : blocks.autonomousSummary !== null
-                            ? `${keeper.name} · Autonomous Turn`
-                            : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
-                              ? `${keeper.name} · Memory Recall`
-                              : msg.toolName
-                                ? `Tool · ${msg.toolName}`
-                                : keeper.name}
-                      </span>
-                      <div class="kp-pill-row">
-                        ${msg.deliveryState && html`
-                          <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
-                            ${msg.deliveryState}
-                          </span>
-                        `}
-                        ${msg.cutStream && msg.operationId && html`
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            onClick=${() => void handleRecoverCut(msg.id, msg.operationId!)}
-                          >
-                            저널 복구
-                          </button>
-                        `}
+        <div class="kp-chat-stage">
+          <div
+            ref=${chatListRef}
+            class="kp-chat-list"
+            role="log"
+            aria-label="Keeper 대화 기록"
+            onScroll=${handleChatScroll}
+          >
+            ${loadingHistory && messages.length === 0
+              ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
+              : visibleEntries.length === 0
+                ? html`<div class="kp-empty">${messages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
+                : visibleEntries.map(({ msg, blocks }) => {
+                    const timeLabel = formatChatTime(msg.ts)
+                    return html`
+                    <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
+                      <div class="kp-msg-head">
+                        <span>
+                          ${msg.role === 'user'
+                            ? (msg.speakerLabel ?? '사용자')
+                            : blocks.autonomousSummary !== null
+                              ? `${keeper.name} · Autonomous Turn`
+                              : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
+                                ? `${keeper.name} · Memory Recall`
+                                : msg.toolName
+                                  ? `Tool · ${msg.toolName}`
+                                  : keeper.name}
+                        </span>
+                        <div class="kp-pill-row">
+                          ${timeLabel && html`<time class="kp-msg-time tnum">${timeLabel}</time>`}
+                          ${msg.deliveryState && html`
+                            <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
+                              ${msg.deliveryState}
+                            </span>
+                          `}
+                          ${msg.cutStream && msg.operationId && html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              onClick=${() => void handleRecoverCut(msg.id, msg.operationId!)}
+                            >
+                              저널 복구
+                            </button>
+                          `}
+                        </div>
                       </div>
-                    </div>
 
                     ${blocks.thinkingText && blockPrefs.thinking !== 'hidden' && html`
                       <details
@@ -680,12 +808,25 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       </details>
                     `}
 
-                    ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
-                      <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
-                    `}
-                    ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
-                  </article>
-                `)}
+                      ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
+                        <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
+                      `}
+                      ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
+                    </article>
+                  `
+                  })}
+          </div>
+          ${!isNearBottom && visibleEntries.length > 0 && html`
+            <button
+              type="button"
+              class="kp-scroll-bottom-btn"
+              data-testid="chat-scroll-bottom"
+              data-has-unseen=${unseenBelowCount > 0 ? 'true' : 'false'}
+              onClick=${() => scrollToBottom('smooth')}
+            >
+              ${unseenBelowCount > 0 ? '↓ 새 응답 보기' : '↓ 맨 아래로'}
+            </button>
+          `}
         </div>
 
         ${queuedOps.length > 0 && html`
@@ -737,8 +878,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 value=${btwInput}
                 onInput=${(e: Event) => setBtwInput((e.currentTarget as HTMLInputElement).value)}
                 onKeyDown=${(e: KeyboardEvent) => {
+                  if (e.isComposing || e.keyCode === 229) return
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setBtwOpen(false)
+                    return
+                  }
                   if (e.key === 'Enter') {
                     e.preventDefault()
+                    if (btw.status === 'streaming' || !btwInput.trim()) return
                     const q = btwInput
                     setBtwInput('')
                     void runBtwQuery(q)
@@ -789,6 +938,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `}
 
           <textarea
+            ref=${composerRef}
             class="kp-textarea"
             rows=${3}
             placeholder=${`${keeper.name}에게 메시지 전송 (Enter: Queue · ⌘↵: Steer · /btw <질문>)`}

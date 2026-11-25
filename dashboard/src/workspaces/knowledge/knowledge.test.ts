@@ -235,6 +235,68 @@ describe('workspaces/knowledge', () => {
     expect(container.querySelector('h2.kn-heading')?.textContent).toBe('Archived post title')
   })
 
+  it('Board resets reply draft and parent reply target when switching posts and supports Cmd+Enter reply submit', async () => {
+    const commentPosts: unknown[] = []
+    const postA = { id: 'post-a', title: 'Post A', body: 'Body A', author: 'sangsu', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 1, created_at: '2026-11-24T05:00:00Z' }
+    const postB = { id: 'post-b', title: 'Post B', body: 'Body B', author: 'dreamer', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 0, created_at: '2026-11-24T05:01:00Z' }
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/tools/masc_board_comment' && init?.method === 'POST') {
+        commentPosts.push(JSON.parse(String(init.body)))
+        return jsonResponse({ ok: true })
+      }
+      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [] })
+      if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
+      if (url.startsWith('/api/v1/board/post-a')) {
+        return jsonResponse({
+          post: postA,
+          comments: [{ id: 'cmt-a1', post_id: 'post-a', author: 'sangsu', content: 'First comment', created_at: '2026-11-24T05:05:00Z', votes: 0 }],
+        })
+      }
+      if (url.startsWith('/api/v1/board/post-b')) {
+        return jsonResponse({ post: postB, comments: [] })
+      }
+      if (url.startsWith('/api/v1/board')) return jsonResponse({ posts: [postA, postB] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="board" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    // Click 답글 on Post A's comment and type a draft
+    const replyTargetBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '답글') as HTMLButtonElement
+    replyTargetBtn.click()
+    await flushUi(2)
+    expect(container.textContent).toContain('cmt-a1')
+
+    const textarea = container.querySelector('textarea.kn-textarea--reply') as HTMLTextAreaElement
+    textarea.value = 'Draft for post A'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(2)
+
+    // Switch to Post B -> replyParentId and replyText MUST reset cleanly
+    const postBBtn = [...container.querySelectorAll('button.kn-board-row')].find((b) => b.textContent?.includes('Post B')) as HTMLButtonElement
+    postBBtn.click()
+    await flushUi()
+
+    expect(container.textContent).not.toContain('cmt-a1')
+    const textareaAfter = container.querySelector('textarea.kn-textarea--reply') as HTMLTextAreaElement
+    expect(textareaAfter.value).toBe('')
+
+    // Submit reply on Post B with Cmd+Enter (and verify IME composing Cmd+Enter is ignored)
+    textareaAfter.value = 'Reply on Post B'
+    textareaAfter.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(2)
+    textareaAfter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, isComposing: true, bubbles: true }))
+    await flushUi(2)
+    expect(commentPosts).toHaveLength(0)
+
+    textareaAfter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
+    await flushUi()
+    expect(commentPosts).toEqual([{ post_id: 'post-b', author: 'operator', content: 'Reply on Post B' }])
+  })
+
   it('Board routes to GET /api/v1/dashboard/board in multi_account_signed_in mode with 0 calls to single-user /api/v1/board*', async () => {
     setMultiAccountSessionForTest()
     const fetchedUrls: string[] = []

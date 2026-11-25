@@ -285,4 +285,47 @@ describe('Proposal A+ Shell components', () => {
     })
     expect(container.querySelector('[data-testid="mobile-more-sheet"]')).not.toBeNull()
   })
+
+  it('CommandPalette ignores IME composing Enter, scrolls active option into view on ArrowDown, and FastApprovalStrip ignores shortcuts while palette is open', async () => {
+    commandPaletteOpen.value = true
+    pendingApprovals.value = [{
+      approvalId: 'apr-ime-1',
+      keeper: 'code-reviewer-sister',
+      toolCallId: 'tc-ime-1',
+      tool: 'git_push',
+      args: '{}',
+      question: 'Allow?',
+      because: 'guard',
+      askedAt: 1700000000,
+      workspaceId: 'default',
+      revision: 'rev-1',
+    }]
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+    const scrollSpy = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollSpy
+
+    await act(async () => {
+      render(h('div', {}, h(FastApprovalStrip, {}), h(CommandPalette, {})), container)
+    })
+
+    const dialog = container.querySelector('.ap-cmdk-dialog') as HTMLElement
+    // IME composing Enter must NOT execute or close CommandPalette
+    await act(async () => {
+      fireEvent.keyDown(dialog, { key: 'Enter', isComposing: true })
+    })
+    expect(commandPaletteOpen.value).toBe(true)
+
+    // ArrowDown scrolls selected command into view
+    scrollSpy.mockClear()
+    await act(async () => {
+      fireEvent.keyDown(dialog, { key: 'ArrowDown' })
+    })
+    expect(scrollSpy).toHaveBeenCalledWith({ block: 'nearest' })
+
+    // FastApprovalStrip must NOT fire approval when Y is pressed while CommandPalette is open
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'y' })
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
 })

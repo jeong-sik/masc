@@ -388,6 +388,11 @@ export function InboxTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
+    setGateRejectReason('')
+    setGateRememberRule(false)
+  }, [selectedKey])
+
+  useEffect(() => {
     if (selectedEntry?.kind === 'goal_confirmation') {
       const controller = new AbortController()
       void loadGoalConf(selectedEntry.goal, controller.signal)
@@ -883,6 +888,7 @@ export function InboxTab(props: WorkspaceViewProps) {
           master=${masterPane}
           detail=${detailPane}
           hasSelection=${selectedEntry !== null}
+          selectionKey=${selectedKey}
           masterLabel="HITL 대기열"
           detailLabel="HITL 승인 상세"
           emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">승인할 항목을 선택하세요. 모든 결정은 TargetLockedAction으로 보호됩니다.</span></div>`}

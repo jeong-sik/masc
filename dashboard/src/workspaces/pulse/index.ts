@@ -454,7 +454,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                           key=${g.id}
                           type="button"
                           class="pulse-goal-row"
-                          onClick=${() => props.onNavigate('/work/goals')}
+                          onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(g.id)}`)}
                         >
                           <span class="pulse-goal-title" title=${g.title}>${g.title}</span>
                           <div class="pulse-goal-badges">

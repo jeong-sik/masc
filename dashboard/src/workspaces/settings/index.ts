@@ -19,6 +19,7 @@ import {
   apiGet,
   resourceCache,
 } from '../../core'
+import { currentRoute } from '../../routes/router'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -105,18 +106,56 @@ function renderUnifiedDiff(diffText: string) {
   `
 }
 
+function mapSectionToCategoryId(rawSection: string | undefined): string | null {
+  const s = (rawSection ?? '').trim().toLowerCase()
+  if (!s) return null
+  if (s === 'general' || s === 'ui') return 'general'
+  if (s === 'provider' || s === 'providers' || s === 'model' || s === 'models') return 'providers'
+  if (s === 'routing' || s === 'route' || s === 'lane' || s === 'lanes' || s === 'failover') return 'routing'
+  if (s === 'keeper' || s === 'keepers' || s === 'company' || s === 'companies') return 'keepers'
+  if (s === 'sandbox' || s === 'ssh' || s === 'docker') return 'sandbox'
+  if (s === 'voice' || s === 'integrations' || s === 'gate') return 'voice'
+  if (s === 'board' || s === 'memory' || s === 'candle' || s === 'board_memory_candle') return 'board_memory_candle'
+  return s
+}
+
 function resolveInitialSearchKey(): string {
+  const routeKey = currentRoute.peek().query.key
+  if (routeKey) return routeKey
   if (typeof window === 'undefined') return ''
   return new URLSearchParams(window.location.search).get('key') ?? ''
+}
+
+function resolveInitialCategoryId(): string {
+  const routeSection = mapSectionToCategoryId(currentRoute.peek().query.section)
+  if (routeSection) return routeSection
+  if (typeof window !== 'undefined') {
+    const winSection = mapSectionToCategoryId(new URLSearchParams(window.location.search).get('section') ?? undefined)
+    if (winSection) return winSection
+  }
+  return 'general'
 }
 
 export function SettingsWorkspace(props: WorkspaceViewProps) {
   const target = props.entityId ? `keeper:${props.entityId}` : 'runtime'
   const schemaCacheKey = `settings:schema:${target}`
   const schemaObs = resourceCache.observe<ConfigSchemaData>(schemaCacheKey).value
+  const routeQuery = currentRoute.value.query
 
-  const [activeCategoryId, setActiveCategoryId] = useState<string>('general')
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(() => resolveInitialCategoryId())
   const [searchQuery, setSearchQuery] = useState<string>(() => resolveInitialSearchKey())
+
+  useEffect(() => {
+    if (routeQuery.key) {
+      setSearchQuery(routeQuery.key)
+    } else if (routeQuery.section) {
+      const mapped = mapSectionToCategoryId(routeQuery.section)
+      if (mapped) {
+        setSearchQuery('')
+        setActiveCategoryId(mapped)
+      }
+    }
+  }, [routeQuery.key, routeQuery.section])
   const [staged, setStaged] = useState<Readonly<Record<string, FieldDraft>>>({})
   const [preview, setPreview] = useState<ConfigPreview | null>(null)
   const [applyResult, setApplyResult] = useState<ConfigPatchResult | null>(null)

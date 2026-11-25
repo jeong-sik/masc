@@ -137,6 +137,121 @@ describe('workspaces/infra', () => {
     expect(calls.some((c) => c.url === '/api/v1/infra/sandboxes/probe' && c.method === 'POST')).toBe(true)
   })
 
+  it('renders authoritative OCaml sandboxes wire objects without [object Object] for microvm_guests, ssh_pools, and docker_keepers', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/infra/sandboxes') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-2',
+          generated_at_unix: 1_700_000_100,
+          data: {
+            probe_state: { kind: 'fresh', measured_at_unix: 1_700_000_100 },
+            summary: {
+              microvm_declared: 1,
+              microvm_running: 1,
+              microvm_sockets_present: 1,
+              microvm_shim_mismatch: 1,
+              ssh_pools: 2,
+              ssh_keepers: 2,
+              ssh_unbound_keepers: 0,
+              ssh_active_sessions: null,
+              ssh_max_sessions: 10,
+              docker_keepers: 1,
+            },
+            shim_parity: {
+              status: 'mismatch',
+              shim_identity: 'sha-shim-1',
+              server_identity: 'sha-srv-2',
+            },
+            microvm_guests: [
+              {
+                keeper: 'e-masc-the-leader',
+                backend: 'apple_container',
+                guest_name: 'masc-vm-e-masc-the-leader',
+                presence: 'present',
+                agent_socket: {
+                  status: 'socket_present',
+                  exists: true,
+                  path_basename: 'agent.sock',
+                },
+                shim_parity: {
+                  status: 'mismatch',
+                  shim_identity: 'sha-shim-1',
+                  server_identity: 'sha-srv-2',
+                },
+                network_mode: 'none',
+                guest_size: { cpus: 2, memory_mib: 2048 },
+                volume: { name: 'masc-work-leader', status: 'declared' },
+              },
+            ],
+            ssh_pools: [
+              {
+                pool_name: 'mac-worker-1',
+                host: '127.0.0.1',
+                port: 2222,
+                unix_user: 'dancer',
+                remote_root: '/srv/masc',
+                private_home: true,
+                max_sessions: 8,
+                active_sessions: null,
+                reachability: { status: 'reachable', rtt_ms: 1.4, measured_at_unix: 1_700_000_100 },
+                accounts: [{ unix_user: 'dancer', active_sessions: null, max_sessions: 8, keepers: ['alpha', 'beta'] }],
+                keeper_sessions: [
+                  { keeper: 'alpha', last_dispatch: null },
+                  { keeper: 'beta', last_dispatch: null },
+                ],
+              },
+              {
+                pool_name: 'mac-worker-2',
+                host: '127.0.0.1',
+                port: 2223,
+                unix_user: 'dancer',
+                max_sessions: 2,
+                active_sessions: null,
+                reachability: { status: 'unreachable', detail: 'Connection refused', measured_at_unix: 1_700_000_100 },
+                accounts: [{ unix_user: 'dancer', active_sessions: null, max_sessions: 2, keepers: [] }],
+                keeper_sessions: [],
+              },
+            ],
+            ssh_unbound_keepers: [],
+            docker_keepers: [
+              { keeper: 'dock-bot', backend: 'docker', network_mode: 'bridge' },
+            ],
+            volume_gc_report: null,
+            host_storage: null,
+            unobserved_reasons: [{ scope: 'remote_ssh_sessions', reason: 'ssh_active_sessions_unreported' }],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('[object Object]')
+    // MicroVM OCaml wire fields rendered cleanly
+    expect(text).toContain('e-masc-the-leader')
+    expect(text).toContain('present')
+    expect(text).toContain('mismatch')
+    expect(text).toContain('apple_container · 2c / 2048MiB · net:none')
+    // SSH pool OCaml wire fields rendered cleanly
+    expect(text).toContain('mac-worker-1')
+    expect(text).toContain('dancer@127.0.0.1:2222')
+    expect(text).toContain('1.4ms')
+    expect(text).toContain('mac-worker-2')
+    expect(text).toContain('연결 불가')
+    expect(text).toContain('미보고 / 8')
+    // Docker OCaml wire fields rendered cleanly
+    expect(text).toContain('dock-bot')
+    expect(text).toContain('bridge')
+  })
+
   it('reports repository access failure instead of an empty registration list', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ error: 'repository access denied' }, 403)) as typeof fetch
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
@@ -308,5 +423,18 @@ describe('workspaces/infra', () => {
     await flushUi(15)
     expect(container.querySelector('[data-testid="logs-kv-inspector"]')).not.toBeNull()
     expect(onInspect).toHaveBeenCalledTimes(1)
+
+    // Pause toggle pauses live updates and buffers incoming events until resumed
+    const pauseBtn = container.querySelector('[data-testid="logs-pause-toggle"]') as HTMLButtonElement
+    expect(pauseBtn).not.toBeNull()
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
+    pauseBtn.click()
+    await flushUi(10)
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('[data-testid="logs-stream-status"]')?.textContent).toContain('PAUSED')
+
+    pauseBtn.click()
+    await flushUi(10)
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
   })
 })

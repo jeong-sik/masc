@@ -7,32 +7,24 @@
  */
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
 import {
-  applyContrast,
-  applyTheme,
-  persistContrast,
-  persistTheme,
-  resolveInitialContrast,
-  resolveInitialTheme,
-  type ContrastId,
-  type ThemeId,
-} from '../../lib/theme'
+  activeContrast,
+  activeTheme,
+  setContrastMode,
+  setThemeMode,
+} from '../../shell/shell-state'
+import type { ContrastId, ThemeId } from '../../lib/theme'
 
 export function AppearancePanel() {
-  const [theme, setTheme] = useState<ThemeId>(() => resolveInitialTheme())
-  const [contrast, setContrast] = useState<ContrastId | null>(() => resolveInitialContrast())
+  const theme = activeTheme.value
+  const contrast = activeContrast.value
 
   const handleSelectTheme = (next: ThemeId) => {
-    setTheme(next)
-    applyTheme(next)
-    persistTheme(next)
+    setThemeMode(next)
   }
 
   const handleSelectContrast = (next: ContrastId | null) => {
-    setContrast(next)
-    applyContrast(next)
-    persistContrast(next)
+    setContrastMode(next)
   }
 
   return html`

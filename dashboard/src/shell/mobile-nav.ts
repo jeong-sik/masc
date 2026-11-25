@@ -40,7 +40,10 @@ export function MobileNav(): VNode {
   useEffect(() => {
     if (!moreOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
         mobileMoreOpen.value = false
       }
     }

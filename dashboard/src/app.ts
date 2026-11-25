@@ -11,7 +11,7 @@
 import { html } from 'htm/preact'
 import { Component, type ComponentChildren, type VNode } from 'preact'
 import { lazy, Suspense } from 'preact/compat'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import {
   authSession,
   bootstrapAuthSession,
@@ -352,6 +352,13 @@ export function App(): VNode {
   const mobile = isMobileViewport.value
   const route = currentRoute.value
   const paletteMounted = commandPaletteMounted.value
+  const mainRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0
+    }
+  }, [route.workspace, route.subroute])
 
   // Capability-gated bootstrap: `/health` -> `AuthSession` -> `startObserverStream()`
   useEffect(() => {
@@ -410,6 +417,7 @@ export function App(): VNode {
       if (mod || event.altKey || event.ctrlKey || event.metaKey) return
       if (isEditableTarget(event.target)) return
       if (commandPaletteOpen.peek()) return
+      if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
 
       if (lower === 'b') {
         event.preventDefault()
@@ -452,7 +460,7 @@ export function App(): VNode {
 
       <div class="ap-stage">
         ${!mobile && html`<${NavRail} />`}
-        <main id="main-content" tabindex=${-1} class="ap-main">
+        <main ref=${mainRef} id="main-content" tabindex=${-1} class="ap-main">
           <${WorkspaceHost} />
         </main>
         <${QuickPeekHost} />

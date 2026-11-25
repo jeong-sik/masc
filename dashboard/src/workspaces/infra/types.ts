@@ -32,31 +32,92 @@ export function normalizeInfraSubroute(raw: string): InfraSubroute {
 
 // ── Wire Types (authoritative OCaml schemas per #36) ──
 
+export type InfraShimParityStatus = 'matched' | 'mismatch' | 'undeclared' | 'unavailable'
+
+export interface InfraShimParity {
+  readonly status: InfraShimParityStatus
+  readonly build_identity?: string
+  readonly shim_identity?: string
+  readonly server_identity?: string | null
+  readonly detail?: string
+}
+
+export interface InfraMicroVmSocketStatus {
+  readonly status: 'socket_present' | 'socket_absent' | 'non_socket' | 'unreadable' | string
+  readonly exists?: boolean
+  readonly path_basename?: string
+  readonly file_kind?: string
+}
+
 export interface InfraMicroVmGuest {
   readonly id?: string
   readonly name?: string
+  readonly guest_name?: string
   readonly keeper?: string
+  readonly backend?: string
+  readonly presence?: 'present' | 'absent' | 'probe_pending' | 'unavailable' | string
   readonly state?: string
   readonly status?: string
+  readonly agent_socket?: InfraMicroVmSocketStatus | null
   readonly socket_present?: boolean
-  readonly shim_parity?: string
+  readonly shim_parity?: InfraShimParity | string | null
+  readonly network_mode?: string
+  readonly guest_size?: {
+    readonly cpus?: number | null
+    readonly memory_mib?: number | null
+  } | null
+  readonly volume?: {
+    readonly name?: string | null
+    readonly status?: string
+    readonly detail?: string
+  } | null
   readonly pid?: number | null
   readonly uptime_sec?: number | null
+}
+
+export interface InfraSshReachability {
+  readonly status: 'probe_pending' | 'reachable' | 'unreachable' | string
+  readonly rtt_ms?: number | null
+  readonly detail?: string
+  readonly measured_at_unix?: number
+}
+
+export interface InfraSshPoolAccount {
+  readonly unix_user?: string
+  readonly active_sessions?: number | null
+  readonly max_sessions?: number
+  readonly keepers?: readonly string[]
+}
+
+export interface InfraSshKeeperSession {
+  readonly keeper: string
+  readonly last_dispatch?: unknown
+  readonly tool_metrics_24h?: unknown
 }
 
 export interface InfraSshPool {
   readonly id?: string
   readonly name?: string
+  readonly pool_name?: string
   readonly host?: string
+  readonly port?: number
+  readonly unix_user?: string
+  readonly remote_root?: string
+  readonly private_home?: boolean
   readonly rtt_ms?: number | null
+  readonly reachability?: InfraSshReachability | null
   readonly max_sessions?: number
   readonly active_sessions?: number | null
   readonly keepers?: readonly string[]
+  readonly accounts?: readonly InfraSshPoolAccount[]
+  readonly keeper_sessions?: readonly InfraSshKeeperSession[]
   readonly status?: string
 }
 
 export interface InfraDockerKeeper {
   readonly keeper?: string
+  readonly backend?: string
+  readonly network_mode?: string
   readonly container_id?: string
   readonly image?: string
   readonly status?: string
@@ -80,13 +141,7 @@ export interface InfraSandboxesData {
     readonly ssh_max_sessions: number
     readonly docker_keepers: number
   }
-  readonly shim_parity: {
-    readonly status: 'matched' | 'mismatch' | 'undeclared' | 'unavailable'
-    readonly build_identity?: string
-    readonly shim_identity?: string
-    readonly server_identity?: string | null
-    readonly detail?: string
-  }
+  readonly shim_parity: InfraShimParity
   readonly microvm_guests: readonly InfraMicroVmGuest[]
   readonly ssh_pools: readonly InfraSshPool[]
   readonly ssh_unbound_keepers: readonly unknown[]

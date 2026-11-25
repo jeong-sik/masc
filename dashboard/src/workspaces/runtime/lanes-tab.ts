@@ -26,6 +26,7 @@ import {
 } from '../../core'
 import { DataTable, VirtualList, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { currentRoute } from '../../routes/router'
 import {
   buildLaneUnifiedDiff,
   deleteLaneFromToml,
@@ -95,6 +96,8 @@ export function partitionProbeRows(
 function resolveInitialMode(entityTab?: string): LanesMode {
   const t = (entityTab ?? '').trim().toLowerCase()
   if (t === 'exact' || t === 'fusion') return t
+  const routeMode = currentRoute.peek().query.mode?.toLowerCase()
+  if (routeMode === 'exact' || routeMode === 'fusion') return routeMode
   if (typeof window !== 'undefined') {
     const mode = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
     if (mode === 'exact' || mode === 'fusion') return mode
@@ -130,7 +133,15 @@ export function LanesTab(props: WorkspaceViewProps) {
   const [rawConfig, setRawConfig] = useState<LaneConfigSource | null>(null)
   const sourceRead = useRef<AbortController | null>(null)
   const previewRequest = useRef<AbortController | null>(null)
+  const inspectRequest = useRef<AbortController | null>(null)
   const epoch = sessionEpoch.value
+  const routeModeQuery = currentRoute.value.query.mode?.toLowerCase()
+
+  useEffect(() => {
+    if (routeModeQuery === 'failover' || routeModeQuery === 'exact' || routeModeQuery === 'fusion') {
+      setMode(routeModeQuery)
+    }
+  }, [routeModeQuery])
 
   // Visual Runtime Lane CRUD state (/api/v1/runtime/config/raw + /raw/preview)
   const [laneEditor, setLaneEditor] = useState<{
@@ -261,6 +272,7 @@ export function LanesTab(props: WorkspaceViewProps) {
     return () => {
       sourceRead.current?.abort()
       previewRequest.current?.abort()
+      inspectRequest.current?.abort()
     }
   }, [epoch])
 
@@ -602,6 +614,9 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleInspectExactRun = async (row: ExactLaneRunRow) => {
+    inspectRequest.current?.abort()
+    const ctrl = new AbortController()
+    inspectRequest.current = ctrl
     props.onInspect({
       title: `Exact Run · ${row.lane}`,
       subtitle: `${row.run_id} (${row.status})`,
@@ -611,7 +626,9 @@ export function LanesTab(props: WorkspaceViewProps) {
     })
     const res = await apiGet<{ readonly run?: ExactLaneRunRow } & ExactLaneRunRow>(
       `/api/v1/dashboard/exact-lane-runs/${encodeURIComponent(row.run_id)}`,
+      { signal: ctrl.signal },
     )
+    if (ctrl.signal.aborted) return
     const detail: ExactLaneRunRow = res.ok ? (res.value.run ?? res.value) : row
     const errMsg = res.ok ? null : res.error.message
 
@@ -662,7 +679,14 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleInspectFusionRun = async (row: FusionRunRow) => {
-    const res = await apiGet<unknown>(`/api/v1/dashboard/fusion-runs/${encodeURIComponent(row.run_id)}`)
+    inspectRequest.current?.abort()
+    const ctrl = new AbortController()
+    inspectRequest.current = ctrl
+    const res = await apiGet<unknown>(
+      `/api/v1/dashboard/fusion-runs/${encodeURIComponent(row.run_id)}`,
+      { signal: ctrl.signal },
+    )
+    if (ctrl.signal.aborted) return
     props.onInspect({
       title: `Fusion · ${row.preset}`,
       subtitle: `${row.run_id} (${row.topology} · ${row.status})`,
@@ -1092,6 +1116,20 @@ export function LanesTab(props: WorkspaceViewProps) {
                       onInput=${(e: Event) => {
                         const newCandidate = (e.target as HTMLInputElement).value
                         setLaneEditor((cur) => (cur ? { ...cur, newCandidate } : null))
+                      }}
+                      onKeyDown=${(e: KeyboardEvent) => {
+                        if (e.isComposing || e.keyCode === 229) return
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          const next = laneEditor.newCandidate.trim()
+                          if (!next) return
+                          setLaneEditor((cur) => {
+                            if (!cur) return null
+                            if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
+                            return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
+                          })
+                          discardLanePreview()
+                        }
                       }}
                       class="mono"
                       style=${{ flex: '1 1 200px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}

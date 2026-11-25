@@ -47,17 +47,15 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
   const [sandbox, setSandbox] = useState<KeeperSandboxData | null>(null)
   const [sandboxError, setSandboxError] = useState<string | null>(null)
 
-  const loadAll = useCallback(async (limit = toolLimit) => {
+  const loadStaticData = useCallback(async () => {
     setSandboxError(null)
-    const [tRes, tcRes, tsRes, nRes, sbRes] = await Promise.all([
+    const [tRes, tsRes, nRes, sbRes] = await Promise.all([
       fetchKeeperLinkedTasksApi(keeperName),
-      fetchKeeperToolCallsApi(keeperName, limit),
       fetchKeeperToolStatsApi(keeperName, 24),
       fetchKeeperOperatorNoteApi(keeperName),
       fetchKeeperSandboxApi(keeperName),
     ])
     if (tRes.ok) setTasks(tRes.value)
-    if (tcRes.ok) setToolCalls(tcRes.value)
     if (tsRes.ok) setToolStats(tsRes.value)
     if (nRes.ok) {
       setNote(nRes.value)
@@ -69,11 +67,19 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
       setSandbox(null)
       setSandboxError(sbRes.error.kind === 'not_found' ? '등록된 샌드박스 텔레메트리 없음' : sbRes.error.message)
     }
-  }, [keeperName, toolLimit])
+  }, [keeperName])
 
   useEffect(() => {
-    void loadAll(toolLimit)
-  }, [loadAll, toolLimit])
+    void loadStaticData()
+  }, [loadStaticData])
+
+  useEffect(() => {
+    let active = true
+    void fetchKeeperToolCallsApi(keeperName, toolLimit).then((tcRes) => {
+      if (active && tcRes.ok) setToolCalls(tcRes.value)
+    })
+    return () => { active = false }
+  }, [keeperName, toolLimit])
 
   const handleSaveNote = async () => {
     setNoteSaving(true)
@@ -190,9 +196,16 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
           class="kp-textarea"
           rows=${3}
           aria-label="운영자 노트 입력"
-          placeholder="다음 턴 시작 시 Keeper에게 전달할 운영자 지시를 작성하세요…"
+          placeholder="다음 턴 시작 시 Keeper에게 전달할 운영자 지시를 작성하세요… (⌘↵ 저장)"
           value=${noteDraft}
           onInput=${(e: Event) => setNoteDraft((e.currentTarget as HTMLTextAreaElement).value)}
+          onKeyDown=${(e: KeyboardEvent) => {
+            if (e.isComposing || e.keyCode === 229) return
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !noteSaving) {
+              e.preventDefault()
+              void handleSaveNote()
+            }
+          }}
         />
         <div class="kp-lifecycle-bar">
           <button type="button" class="btn-primary" disabled=${noteSaving} onClick=${() => void handleSaveNote()}>

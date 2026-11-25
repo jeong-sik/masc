@@ -3,7 +3,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -40,6 +40,19 @@ const PURGE_ARTIFACTS: readonly string[] = [
   '격리 작업 디렉터리 및 토큰',
 ]
 
+const UNBOOTED_PHASES = new Set(['offline', 'stopped', 'crashed'])
+const UNBOOTED_STATUSES = new Set(['unbooted', 'offline', 'stopped', 'crashed', 'dead'])
+const LIVE_PHASES = new Set(['running', 'failing', 'draining', 'restarting', 'paused'])
+
+export function isKeeperBooted(keeper: KeeperRosterItem): boolean {
+  if (keeper.keepalive_running) return true
+  if (keeper.paused) return true
+  const phase = keeper.phase.trim().toLowerCase()
+  const status = keeper.status.trim().toLowerCase()
+  if (UNBOOTED_PHASES.has(phase) || UNBOOTED_STATUSES.has(status)) return false
+  return LIVE_PHASES.has(phase) || status === 'running' || status === 'active'
+}
+
 export function KeeperHeader(props: KeeperHeaderProps) {
   const { keeper } = props
   const rawPortraitUrl = keeperPortraitUrl(keeper.name, 96)
@@ -49,10 +62,40 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const [statusMessage, setStatusMessage] = useState<{ readonly tone: 'ok' | 'bad'; readonly text: string } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deleteInputRef = useRef<HTMLInputElement>(null)
+
+  const closeDeleteModal = () => {
+    setDeleteOpen(false)
+    setDeleteConfirmName('')
+    setDeleteError(null)
+  }
+
+  useEffect(() => {
+    setStatusMessage(null)
+    closeDeleteModal()
+  }, [keeper.name])
+
+  useEffect(() => {
+    if (!deleteOpen) return
+    queueMicrotask(() => deleteInputRef.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeDeleteModal()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [deleteOpen])
 
   const ctxObs = observeRosterContextPct(keeper)
   const ctxText = formatObserved(ctxObs, (v) => `${v}%`)
   const failing = needsRosterAttention(keeper)
+  const booted = isKeeperBooted(keeper)
+  const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
 
   const runLifecycle = async (
     label: string,
@@ -73,14 +116,18 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const handleConfirmDelete = async () => {
     if (deleteConfirmName.trim() !== keeper.name) return
     setBusyAction('delete')
+    setDeleteError(null)
     const res = await deleteKeeperAction(keeper.name)
     setBusyAction(null)
     if (!res.ok) {
-      setStatusMessage({ tone: 'bad', text: `삭제 실패: ${res.error.message}` })
+      const msg = `삭제 실패: ${res.error.message}`
+      setDeleteError(msg)
+      setStatusMessage({ tone: 'bad', text: msg })
       return
     }
     setDeleteOpen(false)
     setDeleteConfirmName('')
+    setDeleteError(null)
     props.onDeleted()
   }
 
@@ -127,15 +174,17 @@ export function KeeperHeader(props: KeeperHeaderProps) {
         </div>
 
         <div class="kp-lifecycle-bar" role="group" aria-label="Keeper 수명주기 제어">
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busyAction !== null}
-            onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
-          >
-            Boot
-          </button>
-          ${keeper.paused
+          ${!booted && html`
+            <button
+              type="button"
+              class="btn-primary"
+              disabled=${busyAction !== null}
+              onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
+            >
+              Boot
+            </button>
+          `}
+          ${booted && (isPaused
             ? html`
                 <button
                   type="button"
@@ -155,15 +204,17 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 >
                   Pause
                 </button>
-              `}
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busyAction !== null}
-            onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
-          >
-            Interrupt Turn
-          </button>
+              `)}
+          ${(booted || keeper.active_turn !== null) && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              disabled=${busyAction !== null}
+              onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
+            >
+              Interrupt Turn
+            </button>
+          `}
           <button
             type="button"
             class="kp-btn-danger"
@@ -177,7 +228,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
 
       ${statusMessage && html`
         <div
-          class=${statusMessage.tone === 'bad' ? 'ap-error' : 'kp-pill'}
+          class=${statusMessage.tone === 'bad' ? 'ap-error' : 'kp-notice'}
           data-tone=${statusMessage.tone}
           role="status"
         >
@@ -201,12 +252,21 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       </nav>
 
       ${deleteOpen && html`
-        <div class="kp-modal-backdrop" role="dialog" aria-modal="true" aria-label="Keeper 영구 삭제 확인">
+        <div
+          class="kp-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Keeper 영구 삭제 확인"
+          onClick=${(e: MouseEvent) => {
+            if (e.target === e.currentTarget) closeDeleteModal()
+          }}
+        >
           <div class="kp-modal">
             <div class="kp-card-head">
               <h3>Keeper 영구 삭제: ${keeper.name}</h3>
-              <button type="button" class="btn-ghost" onClick=${() => setDeleteOpen(false)}>취소</button>
+              <button type="button" class="btn-ghost" onClick=${closeDeleteModal}>취소</button>
             </div>
+            ${deleteError && html`<div class="ap-error" role="alert">${deleteError}</div>`}
             <p class="ov-sub">다음 아티팩트가 영구 제거됩니다:</p>
             <ul>
               ${PURGE_ARTIFACTS.map((item) => html`<li key=${item}>${item}</li>`)}
@@ -220,12 +280,20 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               }}
             >
               <input
+                ref=${deleteInputRef}
                 type="text"
                 class="kp-input"
                 placeholder=${`확인하려면 "${keeper.name}" 입력`}
                 aria-label="삭제 확인 Keeper 이름"
                 value=${deleteConfirmName}
                 onInput=${(e: Event) => setDeleteConfirmName((e.currentTarget as HTMLInputElement).value)}
+                onKeyDown=${(e: KeyboardEvent) => {
+                  if (e.isComposing || e.keyCode === 229) return
+                  if (e.key === 'Enter' && deleteConfirmName.trim() === keeper.name && busyAction === null) {
+                    e.preventDefault()
+                    void handleConfirmDelete()
+                  }
+                }}
               />
               <button
                 type="button"

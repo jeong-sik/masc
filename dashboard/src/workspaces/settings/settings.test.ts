@@ -5,6 +5,8 @@ import {
   resetAuthStateForTests,
   resourceCache,
 } from '../../core'
+import { navigate, resetRouterForTests } from '../../routes/router'
+import { activeContrast, activeTheme, resetShellStateForTests } from '../../shell/shell-state'
 import {
   CANONICAL_SETTINGS_CATEGORIES,
   SettingsWorkspace,
@@ -75,6 +77,8 @@ describe('workspaces/settings', () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch
     resetAuthStateForTests()
+    resetRouterForTests('/settings')
+    resetShellStateForTests()
     resourceCache.clearAll()
     delete document.documentElement.dataset.theme
     delete document.documentElement.dataset.contrast
@@ -151,18 +155,20 @@ describe('workspaces/settings', () => {
       expect(navButtons.some((b) => b.textContent?.includes(cat.title))).toBe(true)
     }
 
-    // Verify Appearance Panel Dark/Light + Static High-Contrast toggles
+    // Verify Appearance Panel Dark/Light + Static High-Contrast toggles sync shell-state signals
     const lightBtn = Array.from(container.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('Light · Warm Paper'),
     ) as HTMLButtonElement
     lightBtn.click()
     expect(document.documentElement.dataset.theme).toBe('light')
+    expect(activeTheme.value).toBe('light')
 
     const hcBtn = Array.from(container.querySelectorAll('button')).find((b) =>
       b.textContent?.trim() === 'High Contrast',
     ) as HTMLButtonElement
     hcBtn.click()
     expect(document.documentElement.dataset.contrast).toBe('high')
+    expect(activeContrast.value).toBe('high')
 
     // Stage local edit on server.log_level -> Preview Diff (dry_run: true)
     const selectEl = container.querySelector('select[aria-label="server.log_level"]') as HTMLSelectElement
@@ -324,5 +330,26 @@ describe('workspaces/settings', () => {
 
     expect(schemaFetches).toBe(2)
     expect(container.querySelector('[data-testid="settings-cas-conflict"]')).toBeNull()
+  })
+
+  it('honors hash-route ?section= and ?key= query params from Command Palette and Quotas deep links', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      schema_version: 1,
+      instance_id: 'inst-1',
+      generated_at_unix: 1_700_000_000,
+      data: SAMPLE_SCHEMA,
+    })) as typeof fetch
+
+    navigate('/settings?section=candle')
+    render(html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    const activeCatBtn = container.querySelector('nav button[aria-current="page"]')
+    expect(activeCatBtn?.textContent).toContain('Board, Memory & Candle')
+
+    navigate('/settings?key=providers.openai')
+    await flushUi(20)
+    const searchInput = container.querySelector('input[aria-label="설정 키 검색"]') as HTMLInputElement
+    expect(searchInput.value).toBe('providers.openai')
+    expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
   })
 })

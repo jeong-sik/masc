@@ -459,6 +459,90 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await recoveredObserver
   })
 
+  it('invalidates in-flight earlier-page prepend and resets pagination when reconnect observes an authoritative empty history', async () => {
+    const keeper = makeRosterKeeper()
+    let observer: ReadableStreamDefaultController<Uint8Array> | undefined
+    let cleared = false
+    const heldEarlierReads: { signal?: AbortSignal | null; release: () => void }[] = []
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const stream = (onStart: (controller: ReadableStreamDefaultController<Uint8Array>) => void) =>
+      new Response(new ReadableStream<Uint8Array>({ start: onStart }), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') return stream((c) => { observer = c })
+      if (url.includes('/chat/history/page')) {
+        if (url.includes('cursor=cur-1')) {
+          return json({
+            messages: [{ id: 'old-1', role: 'assistant', content: 'Loaded earlier page 1', ts: 2 }],
+            has_more: true,
+            next_cursor: 'cur-2',
+          })
+        }
+        if (url.includes('cursor=cur-2')) {
+          const response = json({
+            messages: [{ id: 'old-0', role: 'assistant', content: 'Stale delayed earlier row', ts: 1 }],
+            has_more: true,
+            next_cursor: 'cur-3',
+          })
+          return new Promise<Response>((resolve) => {
+            heldEarlierReads.push({ signal: init?.signal, release: () => resolve(response) })
+          })
+        }
+        if (cleared) {
+          return json({ messages: [], has_more: false, next_cursor: null })
+        }
+        return json({
+          messages: [{ id: 'head-1', role: 'assistant', content: 'Latest before clear', ts: 3 }],
+          has_more: true,
+          next_cursor: 'cur-1',
+        })
+      }
+      if (url.includes('/chat/operations')) return json({ operations: [] })
+      return json({ rows: [] })
+    }))
+
+    const initialObserver = startObserverStream()
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await waitFor(() => expect(view.queryByText('Latest before clear')).toBeTruthy())
+
+    // 1. Load one earlier page so hasLoadedEarlierRef becomes true and nextCursor advances to cur-2
+    fireEvent.click(view.getByRole('button', { name: '이전 대화 불러오기' }))
+    await waitFor(() => expect(view.queryByText('Loaded earlier page 1')).toBeTruthy())
+
+    // 2. Start loading cur-2 and hold it in flight across disconnect + authoritative empty reconnect
+    fireEvent.click(view.getByRole('button', { name: '이전 대화 불러오기' }))
+    await waitFor(() => expect(heldEarlierReads).toHaveLength(1))
+
+    cleared = true
+    observer!.close()
+    await initialObserver
+    await waitFor(() => expect(observerConnected.value).toBe(false))
+
+    const recoveredObserver = startObserverStream()
+    await waitFor(() => {
+      expect(view.queryByText('Latest before clear')).toBeNull()
+      expect(view.queryByText('Loaded earlier page 1')).toBeNull()
+      expect(view.queryByRole('button', { name: '이전 대화 불러오기' })).toBeNull()
+    })
+    expect(heldEarlierReads[0]?.signal?.aborted).toBe(true)
+
+    // 3. Even if the delayed earlier-page response settles after abort, stale rows and old cursor stay dropped
+    await act(async () => heldEarlierReads[0]?.release())
+    await new Promise((r) => setTimeout(r, 30))
+    expect(view.queryByText('Stale delayed earlier row')).toBeNull()
+    expect(view.queryByRole('button', { name: '이전 대화 불러오기' })).toBeNull()
+
+    view.unmount()
+    observer!.close()
+    await recoveredObserver
+  })
+
   it('dispatches Queue (Enter) vs Steer (⌘↵) with own operation_id and toggles Debug Companion with ⌘.', async () => {
     const streamBodies: Record<string, unknown>[] = []
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

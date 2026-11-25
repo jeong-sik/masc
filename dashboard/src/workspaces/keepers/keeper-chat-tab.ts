@@ -211,6 +211,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeper.name)
   const hasLoadedEarlierRef = useRef(false)
+  const earlierAbortRef = useRef<AbortController | null>(null)
+  const earlierGenRef = useRef(0)
   const requestedExecIdsRef = useRef<Set<string>>(new Set())
   const toolFetchControllersRef = useRef<Set<AbortController>>(new Set())
 
@@ -244,13 +246,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     toolFetchControllersRef.current.clear()
   }, [])
 
+  const invalidateEarlierReads = useCallback(() => {
+    earlierGenRef.current += 1
+    earlierAbortRef.current?.abort()
+    earlierAbortRef.current = null
+  }, [])
+
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      invalidateEarlierReads()
       abortAllToolFetches()
     }
-  }, [abortAllToolFetches])
+  }, [abortAllToolFetches, invalidateEarlierReads])
 
   useEffect(() => {
     const switchedKeeper = activeKeeperRef.current !== keeper.name
@@ -262,6 +271,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setIsNearBottom(true)
     setUnseenBelowCount(0)
     hasLoadedEarlierRef.current = false
+    invalidateEarlierReads()
     abortAllToolFetches()
     requestedExecIdsRef.current.clear()
     setToolResultCache({})
@@ -274,7 +284,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setNextCursor(null)
       setQueuedOps([])
     }
-  }, [keeper.name, abortAllToolFetches])
+  }, [keeper.name, abortAllToolFetches, invalidateEarlierReads])
 
   useEffect(() => {
     let lastEpoch = currentSessionEpoch()
@@ -282,6 +292,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       if (ep !== lastEpoch) {
         lastEpoch = ep
         hasLoadedEarlierRef.current = false
+        invalidateEarlierReads()
         streamAbortRef.current?.abort('session_epoch_changed')
         btwAbortRef.current?.abort('session_epoch_changed')
         abortAllToolFetches()
@@ -289,7 +300,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         setToolResultCache({})
       }
     })
-  }, [abortAllToolFetches])
+  }, [abortAllToolFetches, invalidateEarlierReads])
 
   useEffect(() => {
     if (!keeper.active_turn) {
@@ -390,12 +401,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           setLoadingHistory(false)
           setHistoryError(result.ok ? null : result.error.message)
           if (result.ok) {
+            const authoritativeEmpty = result.value.messages.length === 0
+            if (authoritativeEmpty) {
+              invalidateEarlierReads()
+              hasLoadedEarlierRef.current = false
+            }
             setMessages((previous) => mergeLatestHistoryPage(
               previous, result.value.messages, sendingOperationRef.current,
             ))
-            if (!hasLoadedEarlierRef.current) {
-              setHasMore(result.value.hasMore)
-              setNextCursor(result.value.nextCursor)
+            if (authoritativeEmpty || !hasLoadedEarlierRef.current) {
+              setHasMore(authoritativeEmpty ? false : result.value.hasMore)
+              setNextCursor(authoritativeEmpty ? null : result.value.nextCursor)
             }
           }
           return
@@ -419,6 +435,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const recover = () => {
       // The preceding connection's reads cannot settle this observation.
       controller.abort()
+      invalidateEarlierReads()
       controller = new AbortController()
       running.clear()
       pending.clear()
@@ -485,6 +502,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     refresh('history', 'queue', 'waiting')
     return () => {
       controller.abort()
+      invalidateEarlierReads()
       unsubscribeFrames()
       unsubscribeResync()
       unsubscribeConnection()
@@ -493,7 +511,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
-  }, [keeper.name])
+  }, [keeper.name, invalidateEarlierReads])
 
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
@@ -517,9 +535,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     if (!nextCursor || loadingHistory) return
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
+    earlierAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    earlierAbortRef.current = ctrl
+    const reqGen = ++earlierGenRef.current
     setLoadingHistory(true)
-    const res = await fetchKeeperChatHistoryPageApi(targetKeeper, nextCursor, 40)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    const res = await fetchKeeperChatHistoryPageApi(targetKeeper, nextCursor, 40, ctrl.signal)
+    if (
+      !mountedRef.current
+      || activeKeeperRef.current !== targetKeeper
+      || !isEpochCurrent(startEpoch)
+      || ctrl.signal.aborted
+      || reqGen !== earlierGenRef.current
+    ) {
+      return
+    }
+    if (earlierAbortRef.current === ctrl) {
+      earlierAbortRef.current = null
+    }
     setLoadingHistory(false)
     if (!res.ok) {
       if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {

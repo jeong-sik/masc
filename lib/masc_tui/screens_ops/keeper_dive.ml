@@ -54,7 +54,6 @@ let single_span_row ?rail_rgb ?(prefix = "") ~prefix_fg
 let blank_row ~bg_rgb =
   make_row ~prefix_fg:bg_rgb ~bg_rgb []
 
-let wrap_plain_lines = Chat_transcript.wrap_plain_lines
 
 (* [Ops_common.say] for a language on its own: the history rows are laid out
    from a {!history_layout}, which carries the language and not the model. *)
@@ -161,14 +160,13 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(lang : Say.lang)
               ~text_fg:theme.status_ai ~attrs:Attr.bold ~bg_rgb:base_bg ()
           in
           let think_lines =
-            wrap_plain_lines ~width:(Int.max 12 (width - 6)) text
+            Chat_transcript.thinking_body_lines ~theme ~width text
           in
           hdr
           :: List.map
-               (fun ln ->
-                 single_span_row ~rail_rgb:theme.status_ai ~prefix:"  "
-                   ~prefix_fg:theme.status_ai ~text:ln ~text_fg:theme.text_muted
-                   ~attrs:Attr.italic ~bg_rgb:base_bg ())
+               (fun (line : Markdown.rendered_line) ->
+                 make_row ~rail_rgb:theme.status_ai ~prefix:"  "
+                   ~prefix_fg:theme.status_ai ~bg_rgb:base_bg line.spans)
                think_lines
   in
   match thinking with
@@ -282,17 +280,17 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(lang : Say.lang)
     | Slash.Tools_full -> (48, false)
   in
   let shown, hidden =
-    Chat_transcript.tool_output_display_lines ~tools_mode ~width raw
+    Chat_transcript.tool_output_display_lines ~theme ~tools_mode ~width raw
   in
   if shown = [] && hidden = 0 then []
   else
     let inset_bg = theme.surface_0 in
     let body_rows =
       List.map
-        (fun ln ->
-          single_span_row ~rail_rgb:theme.border_subtle ~prefix:"  "
-            ~prefix_fg:theme.text_muted ~text:ln ~text_fg:theme.text_secondary
-            ~bg_rgb:inset_bg ~full_bleed_bg:true ())
+        (fun (line : Markdown.rendered_line) ->
+          make_row ~rail_rgb:theme.border_subtle ~prefix:"  "
+            ~prefix_fg:theme.text_muted ~bg_rgb:inset_bg ~full_bleed_bg:true
+            line.spans)
         shown
     in
     if hidden > 0 then
@@ -891,14 +889,14 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
              ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold ~text:hdr
              ~text_fg:theme.status_ai ~attrs:Attr.bold ~bg_rgb:base_bg ());
         let think_lines =
-          wrap_plain_lines ~width:(Int.max 12 (width - 6)) buf.thinking
+          Chat_transcript.thinking_body_lines ~theme ~width buf.thinking
         in
         List.iter
-          (fun ln ->
+          (fun (line : Markdown.rendered_line) ->
             push
-              (single_span_row ~rail_rgb:theme.status_ai ~prefix:"  "
-                 ~prefix_fg:theme.status_ai ~text:ln ~text_fg:theme.text_muted
-                 ~attrs:Attr.italic ~bg_rgb:base_bg ()))
+              (make_row ~rail_rgb:theme.status_ai ~prefix:"  "
+                 ~prefix_fg:theme.status_ai ~bg_rgb:base_bg
+                 ~full_bleed_bg:false line.spans))
           think_lines
   end;
   (* 2. Collapsible Elevated Tool Cards (surface_2 header + recessed surface_0 preview) *)

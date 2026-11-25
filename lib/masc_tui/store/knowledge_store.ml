@@ -1251,10 +1251,13 @@ type reading_line_tone =
   | Reading_whisper of { italic : bool }
   | Reading_status of { tone : Theme.status_token; bold : bool }
 
+type reading_line_content =
+  | Reading_plain of reading_line_tone * string
+  | Reading_markdown of Masc_tui_ui.Markdown.rendered_line
+
 type reading_line = {
   rail : Theme.status_token option;
-  tone : reading_line_tone;
-  text : string;
+  content : reading_line_content;
 }
 
 let split_graphemes_to_width ~max_w text =
@@ -1448,12 +1451,18 @@ let reading_format_basis_lines ~lang = function
             (String.concat ", " d.premise_ids))
         derivs
 
-let project_memory_reading_lines ~width ~lang ~now_unix entry =
+let project_memory_reading_lines ~theme ~width ~lang ~now_unix entry =
   let text_w = Int.max 1 (width - 2) in
   let acc = ref [] in
-  let push ?rail ~tone text = acc := { rail; tone; text } :: !acc in
+  let push ?rail ~tone text =
+    acc := { rail; content = Reading_plain (tone, text) } :: !acc
+  in
   let push_wrapped ?rail ~tone text =
     List.iter (fun ln -> push ?rail ~tone ln) (wrap_lines ~max_width:text_w text)
+  in
+  let push_markdown ?rail text =
+    Masc_tui_ui.Markdown.render_lines ~theme ~width:text_w text
+    |> List.iter (fun line -> acc := { rail; content = Reading_markdown line } :: !acc)
   in
   let push_blank () = push ~tone:Reading_primary "" in
   let push_section ?rail label =
@@ -1477,7 +1486,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
       | Some r when not (String.equal (String.trim r) "") ->
           push_section ~rail:Theme.Status_attention
             (reading_say lang ~ko:"사유 (Reason)" ~en:"Reason");
-          push_wrapped ~rail:Theme.Status_attention ~tone:Reading_primary r;
+          push_markdown ~rail:Theme.Status_attention r;
           push_blank ()
       | Some _ | None -> ());
       push_section ~rail:Theme.Status_critical
@@ -1498,8 +1507,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
                 ~default:
                   (reading_say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
             in
-            push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary
-              claim_s)
+            push_markdown ~rail:Theme.Status_critical claim_s)
           event.before;
       push_blank ();
       push_section ~rail:Theme.Status_ok
@@ -1521,7 +1529,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
                 ~default:
                   (reading_say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
             in
-            push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary claim_s)
+            push_markdown ~rail:Theme.Status_ok claim_s)
           event.after;
       if notes <> [] then begin
         push_blank ();
@@ -1542,7 +1550,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
       push_blank ();
       push_section ~rail:Theme.Status_ok
         (reading_say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
-      push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary fact.claim;
+      push_markdown ~rail:Theme.Status_ok fact.claim;
       push_blank ();
       push_section
         (reading_say lang ~ko:"메타데이터 · 조회 이력" ~en:"Metadata & Retrieval");
@@ -1599,7 +1607,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
       push_blank ();
       push_section ~rail:Theme.Status_ai
         (reading_say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
-      push_wrapped ~rail:Theme.Status_ai ~tone:Reading_primary fact.claim
+      push_markdown ~rail:Theme.Status_ai fact.claim
   | Reading_source_invalidation { keeper; invalidation } ->
       push_wrapped ~rail:Theme.Status_attention
         ~tone:(Reading_status { tone = Theme.Status_attention; bold = true })
@@ -1632,7 +1640,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
           push_wrapped ~tone:(Reading_whisper { italic = true })
             ("ID: " ^ f.memory_id);
           push_blank ();
-          push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary f.text
+          push_markdown ~rail:Theme.Status_ok f.text
       | Keeper_updated u ->
           push_wrapped ~rail:Theme.Status_active
             ~tone:(Reading_status { tone = Theme.Status_active; bold = true })
@@ -1642,14 +1650,13 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
           push_blank ();
           push_section ~rail:Theme.Status_critical
             (reading_say lang ~ko:"이전 (Before)" ~en:"Before");
-          push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary
-            u.before.text;
+          push_markdown ~rail:Theme.Status_critical u.before.text;
           push_blank ();
           push_section ~rail:Theme.Status_ok
             (reading_say lang ~ko:"이후 (After)" ~en:"After");
           Option.iter (fun source -> push_wrapped ~rail:Theme.Status_ok ~tone:(Reading_whisper { italic = false }) source)
             (memory_successor_source ~lang u.after_source);
-          push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary u.after.text
+          push_markdown ~rail:Theme.Status_ok u.after.text
       | Keeper_retracted r ->
           push_wrapped ~rail:Theme.Status_critical
             ~tone:(Reading_status { tone = Theme.Status_critical; bold = true })
@@ -1659,7 +1666,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
           | Some rs -> push_kv (reading_say lang ~ko:"사유" ~en:"Reason") rs
           | None -> ());
           push_blank ();
-          push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary r.text
+          push_markdown ~rail:Theme.Status_critical r.text
       | Keeper_invalidated inv ->
           push_wrapped ~rail:Theme.Status_attention
             ~tone:(Reading_status { tone = Theme.Status_attention; bold = true })
@@ -1668,15 +1675,14 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
             (reading_say lang ~ko:"유실된 전제" ~en:"Missing premises")
             (String.concat ", " inv.missing_premise_ids);
           push_blank ();
-          push_wrapped ~rail:Theme.Status_attention ~tone:Reading_primary
-            inv.text
+          push_markdown ~rail:Theme.Status_attention inv.text
       | World_added e ->
           let tone = Theme.Status_ok in
           push_wrapped ~rail:tone ~tone:(Reading_status { tone; bold = true })
             (Printf.sprintf "+ %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
           push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
           push_blank ();
-          push_wrapped ~rail:tone ~tone:Reading_primary e.summary;
+          push_markdown ~rail:tone e.summary;
           let kvs = reading_json_kv_summary e.payload in
           if kvs <> [] then begin
             push_blank ();
@@ -1688,7 +1694,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
             (Printf.sprintf "- %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
           push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
           push_blank ();
-          push_wrapped ~rail:tone ~tone:Reading_primary e.summary;
+          push_markdown ~rail:tone e.summary;
           let kvs = reading_json_kv_summary e.payload in
           if kvs <> [] then begin
             push_blank ();
@@ -1700,7 +1706,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
             (Printf.sprintf "~ %s  ·  #%d [%s]" scope_s u.seq u.fact_id);
           push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") u.recorded_at;
           push_blank ();
-          push_wrapped ~rail:Theme.Status_active ~tone:Reading_primary u.summary;
+          push_markdown ~rail:Theme.Status_active u.summary;
           let b_kvs = reading_json_kv_summary u.before in
           if b_kvs <> [] then begin
             push_blank ();

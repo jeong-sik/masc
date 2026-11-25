@@ -205,7 +205,7 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
            hint);
     if not (Rect.is_empty body_rect) then begin
       let lines =
-        Knowledge_store.project_memory_reading_lines ~width:body_rect.w ~lang
+        Knowledge_store.project_memory_reading_lines ~theme ~width:body_rect.w ~lang
           ~now_unix entry
       in
       let vis_h = Int.max 1 body_rect.h in
@@ -224,11 +224,23 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                   body_rect.x + 2
               | None -> body_rect.x
             in
-            let style = style_of_reading_tone ~theme ~bg ln.tone in
-            ignore
-              (put_clipped ~grid ~clip:body_rect ~x:tx ~y:!y
-                 ~max_w:(Int.max 0 (Rect.right body_rect - tx))
-                 ~style ln.text);
+            (match ln.content with
+            | Reading_plain (tone, text) ->
+                let style = style_of_reading_tone ~theme ~bg tone in
+                ignore
+                  (put_clipped ~grid ~clip:body_rect ~x:tx ~y:!y
+                     ~max_w:(Int.max 0 (Rect.right body_rect - tx)) ~style text)
+            | Reading_markdown line ->
+                let x = ref tx in
+                List.iter
+                  (fun (span : Markdown.styled_span) ->
+                    let style =
+                      match span.hyperlink with
+                      | None -> span.style
+                      | Some uri -> Style.with_hyperlink (Cell_grid.intern_hyperlink grid uri) span.style
+                    in
+                    x := !x + Cell_grid.put_text ~clip:body_rect grid ~x:!x ~y:!y ~style span.text)
+                  line.spans);
             incr y
           end)
         (Store_scroll.drop skip lines)

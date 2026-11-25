@@ -21,10 +21,12 @@ type inline_kind =
   | Inl_plain
   | Inl_strong
   | Inl_emphasis
+  | Inl_strong_emphasis
   | Inl_strike
   | Inl_code
   | Inl_link of string
   | Inl_link_target
+  | Inl_nested of inline_kind * inline_kind
 
 type inline_piece = {
   text : string;
@@ -105,7 +107,7 @@ let has_non_space text ~from ~stop =
   in
   scan from
 
-let parse_inline ~osc8 text =
+let rec parse_inline ?(enclosing = []) ~osc8 text =
   let limit = String.length text in
   let out = ref [] in
   let pending = Buffer.create limit in
@@ -128,7 +130,9 @@ let parse_inline ~osc8 text =
      delimiters). *)
   let next_backtick = ref (-1) in
   let next_dstar = ref (-1) in
+  let next_tstar = ref (-1) in
   let next_dunder = ref (-1) in
+  let next_tunder = ref (-1) in
   let next_dtilde = ref (-1) in
   let next_star = ref (-1) in
   let next_under = ref (-1) in
@@ -162,6 +166,19 @@ let parse_inline ~osc8 text =
       cache := (match res with Some c -> c | None -> limit);
       res
   in
+  let links_allowed =
+    not
+      (List.exists
+         (function
+           | Inl_link _ -> true
+           | Inl_plain | Inl_strong | Inl_emphasis | Inl_strong_emphasis
+           | Inl_strike | Inl_code | Inl_link_target | Inl_nested _ -> false)
+         enclosing)
+  in
+  let emit_nested kind body =
+    parse_inline ~enclosing:(kind :: enclosing) ~osc8 body
+    |> List.iter (fun piece -> emit (Inl_nested (kind, piece.kind)) piece.text)
+  in
   let rec walk idx =
     if idx >= limit then ()
     else
@@ -171,18 +188,25 @@ let parse_inline ~osc8 text =
       in
       let styled ~cache ?(closes = fun _ -> true) marker kind =
         let opening = idx + String.length marker in
-        match find_cached_close ~cache ~closes ~marker ~opening with
+        match
+          if List.mem kind enclosing then None
+          else find_cached_close ~cache ~closes ~marker ~opening
+        with
         | None -> literal ()
         | Some close ->
             if not (has_non_space text ~from:opening ~stop:close) then
               literal ()
             else begin
               let body = String.sub text opening (close - opening) in
-              emit kind body;
+              (match kind with
+              | Inl_code -> emit kind body
+              | Inl_plain | Inl_strong | Inl_emphasis | Inl_strong_emphasis
+              | Inl_strike | Inl_link _ | Inl_link_target | Inl_nested _ ->
+                  emit_nested kind body);
               walk (close + String.length marker)
             end
       in
-      if is_url_prefix text idx then begin
+      if links_allowed && is_url_prefix text idx then begin
         let stop = scan_bare_url text idx in
         if stop > idx then begin
           let url = String.sub text idx (stop - idx) in
@@ -193,9 +217,19 @@ let parse_inline ~osc8 text =
       end
       else
         match text.[idx] with
+        | '\\' when idx + 1 < limit
+                      && String.contains {punct|!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~|punct} text.[idx + 1] ->
+            Buffer.add_char pending text.[idx + 1];
+            walk (idx + 2)
         | '`' -> styled ~cache:next_backtick "`" Inl_code
+        | '*' when starts_at text idx "***" ->
+            styled ~cache:next_tstar "***" Inl_strong_emphasis
         | '*' when starts_at text idx "**" ->
             styled ~cache:next_dstar "**" Inl_strong
+        | '_' when starts_at text idx "___" && underscore_opens text idx ->
+            styled ~cache:next_tunder
+              ~closes:(fun c -> underscore_closes text (c + 2))
+              "___" Inl_strong_emphasis
         | '_' when starts_at text idx "__" ->
             if underscore_opens text idx then
               styled ~cache:next_dunder
@@ -210,9 +244,12 @@ let parse_inline ~osc8 text =
               styled ~cache:next_under ~closes:(underscore_closes text) "_"
                 Inl_emphasis
             else literal ()
-        | '[' -> (
+        | ('[' | '!') when links_allowed
+                           && (Char.equal text.[idx] '[' || starts_at text idx "![") -> (
+            let image = Char.equal text.[idx] '!' in
+            let label_start = idx + if image then 2 else 1 in
             match
-              find_cached_char ~cache:next_rbracket ~ch:']' ~from:(idx + 1)
+              find_cached_char ~cache:next_rbracket ~ch:']' ~from:label_start
             with
             | Some close_lbl when starts_at text (close_lbl + 1) "(" -> (
                 match
@@ -220,7 +257,7 @@ let parse_inline ~osc8 text =
                     ~from:(close_lbl + 2)
                 with
                 | Some close_url ->
-                    let has_label = close_lbl > idx + 1 in
+                    let has_label = image || close_lbl > label_start in
                     let has_target =
                       let prev_lbl, prev_ok = !last_link_target_check in
                       if Int.equal prev_lbl close_lbl then prev_ok
@@ -235,14 +272,16 @@ let parse_inline ~osc8 text =
                     in
                     if has_label && has_target then begin
                       let label =
-                        String.sub text (idx + 1) (close_lbl - idx - 1)
+                        String.sub text label_start (close_lbl - label_start)
                       in
                       let target =
                         String.trim
                           (String.sub text (close_lbl + 2)
                              (close_url - close_lbl - 2))
                       in
-                      emit (Inl_link target) label;
+                      let kind = Inl_link target in
+                      if image then emit kind (if String.equal label "" then "▧" else "▧ ");
+                      emit_nested kind label;
                       if not osc8 then
                         emit Inl_link_target (Printf.sprintf " (%s)" target);
                       walk (close_url + 1)
@@ -256,7 +295,7 @@ let parse_inline ~osc8 text =
   flush ();
   List.rev !out
 
-let style_of_inline ~(theme : Theme.t) ~(base_style : Style.t) = function
+let rec style_of_inline ~(theme : Theme.t) ~(base_style : Style.t) = function
   | Inl_plain -> (base_style, None)
   | Inl_strong ->
       ( Style.make
@@ -266,17 +305,20 @@ let style_of_inline ~(theme : Theme.t) ~(base_style : Style.t) = function
           (),
         None )
   | Inl_emphasis -> (Style.add_attr Attr.italic base_style, None)
+  | Inl_strong_emphasis ->
+      let style, _ = style_of_inline ~theme ~base_style Inl_strong in
+      (Style.add_attr Attr.italic style, None)
   | Inl_strike -> (Style.add_attr Attr.strike base_style, None)
   | Inl_code ->
       ( Style.make
           ~fg:(Color.of_rgb theme.text_bright)
-          ~bg:(Color.of_rgb theme.surface_2) (),
+          ~bg:(Color.of_rgb theme.surface_2) ~attrs:base_style.attrs (),
         None )
   | Inl_link url ->
       ( Style.make
           ~fg:(Color.of_rgb theme.status_active)
           ~bg:base_style.bg
-          ~attrs:Attr.underline (),
+          ~attrs:Attr.(underline lor base_style.attrs) (),
         Some url )
   | Inl_link_target ->
       ( Style.make
@@ -284,6 +326,10 @@ let style_of_inline ~(theme : Theme.t) ~(base_style : Style.t) = function
           ~bg:base_style.bg
           ~attrs:Attr.italic (),
         None )
+  | Inl_nested (outer, inner) ->
+      let base_style, outer_link = style_of_inline ~theme ~base_style outer in
+      let style, inner_link = style_of_inline ~theme ~base_style inner in
+      (style, Option.fold ~none:outer_link ~some:Option.some inner_link)
 
 let wrap_styled_spans ~width ~prefix ~continuation spans =
   let width = Int.max 4 width in
@@ -422,18 +468,29 @@ let is_thematic_break trimmed =
     done;
     !ok && !n >= 3
 
-let is_fence_open trimmed =
-  if starts_at trimmed 0 "```" then
-    let info = String.trim (String.sub trimmed 3 (String.length trimmed - 3)) in
-    Some ('`', info)
-  else if starts_at trimmed 0 "~~~" then
-    let info = String.trim (String.sub trimmed 3 (String.length trimmed - 3)) in
-    Some ('~', info)
+type fence = { marker : char; length : int }
+
+let fence_run text marker =
+  let rec count i =
+    if i < String.length text && Char.equal text.[i] marker then count (i + 1)
+    else i
+  in
+  count 0
+
+let fence_open trimmed =
+  let marker = trimmed.[0] in
+  if Char.equal marker '`' || Char.equal marker '~' then
+    let length = fence_run trimmed marker in
+    if length < 3 then None
+    else
+      let info = String.sub trimmed length (String.length trimmed - length) |> String.trim in
+      if Char.equal marker '`' && String.contains info '`' then None
+      else Some ({ marker; length }, info)
   else None
 
-let is_fence_close ~fence trimmed =
-  let marker = String.make 3 fence in
-  starts_at trimmed 0 marker
+let fence_close { marker; length } trimmed =
+  fence_run trimmed marker >= length
+  && String.for_all (Char.equal marker) trimmed
 
 let split_table_cells line =
   let trimmed = String.trim line in
@@ -463,9 +520,6 @@ let is_table_rule line =
 
 let max_inline_mermaid_bytes = 8192
 let max_inline_mermaid_lines = 80
-
-let is_mermaid_lang_tag tag =
-  String.starts_with ~prefix:"mermaid" (String.lowercase_ascii tag)
 
 let is_diagram_line_cluster = function
   | "\xe2\x94\x80" (* ─ *) | "\xe2\x94\x82" (* │ *) | "\xe2\x94\x8c" (* ┌ *)
@@ -529,7 +583,15 @@ let try_render_mermaid_fence ~inner_w body_lines =
       | Ok (_ :: _ as rows) -> Some rows
       | Ok [] | Error _ -> None
 
-let first_info_token info =
+type fence_kind = Diagram | Score of { rhythm : bool } | Code
+
+let fence_kind tag rest =
+  match String.lowercase_ascii tag with
+  | "mermaid" | "pele" -> Diagram
+  | "alphatex" | "atex" -> Score { rhythm = String.equal rest "rhythm" }
+  | _ -> Code
+
+let fence_tokens info =
   let trimmed = String.trim info in
   let len = String.length trimmed in
   let rec stop i =
@@ -539,11 +601,12 @@ let first_info_token info =
       | ' ' | '\t' -> i
       | _ -> stop (i + 1)
   in
-  String.sub trimmed 0 (stop 0)
+  let tag_end = stop 0 in
+  (String.sub trimmed 0 tag_end, String.sub trimmed tag_end (len - tag_end) |> String.trim)
 
 let md_render_cache_mu = Stdlib.Mutex.create ()
 let md_render_cache :
-    (Theme.preset * Theme.rgb * int * bool * string, rendered_line list)
+    (Theme.t * Style.t * int * bool * string, rendered_line list)
     Hashtbl.t =
   Hashtbl.create 128
 
@@ -552,10 +615,10 @@ let max_md_render_cache_entries = 256
 let max_md_render_cache_entry_bytes = 524_288
 let max_md_render_cache_total_bytes = 4 * 1024 * 1024
 
-let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
+let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
   let width = Int.max 8 width in
-  let bg = Color.of_rgb theme.surface_1 in
-  let base_style = Typography.primary ~bg theme in
+  let base_style = Option.value base_style ~default:(Typography.primary theme) in
+  let bg = base_style.bg in
   let muted_style = Typography.whisper ~bg ~italic:false theme in
   let hairline_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
   let accent_style = Typography.accent ~bg ~bold:true theme in
@@ -590,16 +653,16 @@ let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
           walk rest
         end
         else
-          match is_fence_open trimmed with
+          match fence_open trimmed with
           | Some (fence, info) ->
               let rec collect acc = function
-                | [] -> (List.rev acc, [])
+                | [] -> (List.rev acc, [], false)
                 | l :: tl ->
-                    if is_fence_close ~fence (String.trim l) then (List.rev acc, tl)
+                    if fence_close fence (String.trim l) then (List.rev acc, tl, true)
                     else collect (l :: acc) tl
               in
-              let body_lines, after = collect [] rest in
-              let lang_tag = first_info_token info in
+              let body_lines, after, closed = collect [] rest in
+              let lang_tag, info_tail = fence_tokens info in
               let code_bg = Color.of_rgb theme.surface_0 in
               let code_pad = Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:code_bg () in
               let gutter_span =
@@ -628,34 +691,56 @@ let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
                 in
                 push_lines [ hdr_line ]
               end;
-              let rendered_mermaid =
-                if is_mermaid_lang_tag lang_tag then
-                  try_render_mermaid_fence ~inner_w body_lines
-                else None
+              let draw_special_rows ~style rows =
+                List.iter
+                  (fun text ->
+                    let span = { text; style; hyperlink = None } in
+                    let lines =
+                      if Grapheme.display_width text <= inner_w then
+                        [ { spans = [ gutter_span; span ] } ]
+                      else
+                        wrap_styled_spans ~width ~prefix:[ gutter_span ]
+                          ~continuation:[ gutter_span ] [ span ]
+                    in
+                    push_lines (List.map (pad_line_to_width ~width ~pad_style:code_pad) lines))
+                  rows
               in
-              (match rendered_mermaid with
-              | Some diagram_rows ->
-                  let line_style =
-                    Style.make ~fg:(Color.of_rgb theme.status_active)
-                      ~bg:code_bg ()
-                  in
-                  let label_style =
-                    Style.make ~fg:(Color.of_rgb theme.text_bright)
-                      ~bg:code_bg ()
-                  in
-                  List.iter
-                    (fun row ->
-                      let row_spans =
-                        style_mermaid_row ~line_style ~label_style
-                          ~max_width:inner_w row
-                      in
-                      let line_rec =
-                        pad_line_to_width ~width ~pad_style:code_pad
-                          { spans = gutter_span :: row_spans }
-                      in
-                      push_lines [ line_rec ])
-                    diagram_rows
-              | None ->
+              let rendered =
+                match fence_kind lang_tag info_tail, closed with
+                | Diagram, true ->
+                    (match try_render_mermaid_fence ~inner_w body_lines with
+                    | None -> false
+                    | Some rows ->
+                        let line_style =
+                          Style.make ~fg:(Color.of_rgb theme.status_active) ~bg:code_bg ()
+                        in
+                        let label_style =
+                          Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg:code_bg ()
+                        in
+                        List.iter
+                          (fun row ->
+                            let spans = style_mermaid_row ~line_style ~label_style ~max_width:inner_w row in
+                            push_lines
+                              [ pad_line_to_width ~width ~pad_style:code_pad
+                                  { spans = gutter_span :: spans } ])
+                          rows;
+                        true)
+                | Score { rhythm }, true ->
+                    let source = String.concat "\n" body_lines in
+                    (match Alphatex.render_tab ~rhythm ~max_width:inner_w source with
+                    | Ok rows ->
+                        draw_special_rows ~style:code_pad rows;
+                        true
+                    | Error reason ->
+                        let style = Typography.status ~bg:code_bg theme Theme.Status_attention in
+                        let span = { text = Alphatex.failure_text reason; style; hyperlink = None } in
+                        push_lines
+                          (wrap_styled_spans ~width ~prefix:[ gutter_span ]
+                             ~continuation:[ gutter_span ] [ span ]);
+                        false)
+                | (Diagram | Score _), false | Code, _ -> false
+              in
+              if not rendered then begin
                   let language = Code_lexer.language_of_tag lang_tag in
                   let lexed_rows =
                     Code_lexer.rows_of_source ~language
@@ -681,7 +766,8 @@ let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
                         |> List.map (pad_line_to_width ~width ~pad_style:code_pad)
                       in
                       push_lines wrapped)
-                    lexed_rows);
+                    lexed_rows
+              end;
               walk after
           | None -> (
               match heading_prefix trimmed with
@@ -873,20 +959,21 @@ let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   walk raw_lines;
   List.rev !out
 
-let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
+let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
   let width = Int.max 8 width in
+  let base_style = Option.value base_style ~default:(Typography.primary theme) in
   let raw_bytes = String.length raw in
   if raw_bytes > max_md_render_cache_entry_bytes then
-    render_lines_uncached ~theme ~width ~osc8 raw
+    render_lines_uncached ~theme ~width ~osc8 ~base_style raw
   else
-    let key = (theme.Theme.preset, theme.Theme.surface_1, width, osc8, raw) in
+    let key = (theme, base_style, width, osc8, raw) in
     match
       Stdlib.Mutex.protect md_render_cache_mu (fun () ->
           Hashtbl.find_opt md_render_cache key)
     with
     | Some hit -> hit
     | None ->
-        let rendered = render_lines_uncached ~theme ~width ~osc8 raw in
+        let rendered = render_lines_uncached ~theme ~width ~osc8 ~base_style raw in
         Stdlib.Mutex.protect md_render_cache_mu (fun () ->
             if
               Hashtbl.length md_render_cache >= max_md_render_cache_entries

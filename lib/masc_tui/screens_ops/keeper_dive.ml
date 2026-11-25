@@ -2153,7 +2153,7 @@ let find_ssh_pool_for_keeper (model : Model.t) ~name =
 
 let resolve_keeper_sandbox (model : Model.t) ~name ~detail =
   match detail with
-  | Some resp ->
+  | Some (resp : Wire_infra.keeper_sandbox_response) ->
       let pool_opt =
         match resp.sandbox with
         | Wire_infra.Sandbox_ssh_keeper { pool = Some p; _ } -> Some p

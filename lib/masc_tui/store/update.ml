@@ -676,6 +676,38 @@ let reserve_work_reads ~now (m : Model.t) cmds =
   let work = List.fold_left reserve m.work (Cmd.flatten cmds) in
   if work == m.work then m else { m with work }
 
+(* The full dive and its workspace can request different Keepers in one step. *)
+let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
+  match cmds with
+  | [] -> m
+  | _ :: _ ->
+      let dive_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; tab }) when Nav.equal_keeper_tab tab Nav.Keeper_sandbox ->
+            Some name
+        | Some (Nav.Dive_keeper _ | Nav.Dive_work _ | Nav.Dive_knowledge _
+                | Nav.Dive_runtime _ | Nav.Dive_infra _) | None -> None
+      in
+      let workspace_keeper =
+        if Nav.equal_workspace m.nav.workspace Nav.Keepers
+           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_sandbox then
+          Option.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+        else if Nav.equal_workspace m.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes then
+          Infra_store.selected_sandbox_keeper m.infra
+        else None
+      in
+      let emitted = Cmd.flatten cmds in
+      let reserve infra = function
+        | Some keeper when List.mem
+            (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper } }) emitted ->
+            Infra_store.request_keeper_sandbox ~keeper ~now infra
+        | Some _ | None -> infra
+      in
+      let infra = reserve (reserve m.infra dive_keeper) workspace_keeper in
+      if infra == m.infra then m else { m with infra }
+
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
@@ -720,14 +752,5 @@ let step ~now m msg =
     |> reconcile_memory_diagram ~before:m ~after:next
   in
   let next = reserve_board_view_read ~now next cmds in
-  let infra =
-    List.fold_left
-      (fun infra -> function
-        | Cmd.Http_get { epoch; req = Cmd.Get_keeper_sandbox { keeper } }
-          when Epoch.equal epoch next.epoch ->
-            Infra_store.request_keeper_sandbox ~keeper ~now infra
-        | _ -> infra)
-      next.infra (Cmd.flatten cmds)
-  in
-  let next = if infra == next.infra then next else { next with infra } in
+  let next = reserve_sandbox_view_reads ~now next cmds in
   (reserve_work_reads ~now next cmds, final_cmds)

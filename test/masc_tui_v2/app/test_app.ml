@@ -1219,6 +1219,51 @@ let test_planning_retains_completed_tasks_across_refresh () =
   Alcotest.(check (list string)) "failed refresh retains the last Task read" ["t-1"] (tasks ());
   Alcotest.(check (list string)) "failed Execution leaves latest Goals intact" ["g-2"] (goals ())
 
+let test_keeper_sandbox_current_epoch_survives_late_reply () =
+  let keeper = "alpha" in
+  let req = Cmd.Get_keeper_sandbox { keeper } in
+  let first, started = Eio.Promise.create () in
+  let release, finish = Eio.Promise.create () in
+  let calls = ref 0 in
+  let respond ~meth ~path =
+    Alcotest.(check string) "sandbox GET" "GET" meth;
+    Alcotest.(check string) "sandbox path" (Cmd.get_request_path req) path;
+    incr calls;
+    if !calls = 1 then begin
+      Eio.Promise.resolve started ();
+      Eio.Promise.await release;
+      503, `Assoc ["error", `String "old workspace"]
+    end else
+      200, `Assoc ["keeper", `String keeper;
+                   "sandbox", `Assoc ["keeper", `String keeper; "backend", `String "ssh";
+                                      "binding_state", `String "unbound"]]
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let old = Epoch.initial and current = Epoch.next Epoch.initial in
+  let get epoch = Cmd_executor.execute exec (Cmd.Http_get { epoch; req }) in
+  let rec published n =
+    let stats = Ui_bus.stats bus in
+    if stats.queued_snapshots + stats.total_coalesced_snapshots < n then
+      (Eio.Time.sleep clock 0.001; published n)
+  in
+  get old;
+  Eio.Promise.await first;
+  get current;
+  published 1;
+  Eio.Promise.resolve finish ();
+  published 2;
+  let model = Model.initial () in
+  let pending = { model with epoch = current;
+    infra = Infra_store.request_keeper_sandbox ~now:Clock.Mono.zero ~keeper model.infra } in
+  let settled = List.fold_left (fun m -> function
+    | Ui_bus.Snapshot (_, msg) -> fst (Update.step ~now:Clock.Mono.zero m msg)
+    | Ui_bus.Stream_event _ | Ui_bus.Stream_gap _ -> m) pending (Ui_bus.drain bus) in
+  let read = Infra_store.keeper_sandbox_read_for ~keeper settled.infra in
+  Alcotest.(check bool) "the late old failure cannot strand the new read" true
+    (Option.is_none read.requested_at
+     && Option.exists (fun (detail : Masc_tui_protocol.Wire_infra.keeper_sandbox_response) ->
+         String.equal detail.keeper keeper) (Observed.to_option read.observation))
+
 let test_board_replies_survive_epoch_change_and_stream_overflow () =
   let module Q = Board_quarantine in
   let keeper = "alpha" in
@@ -3357,6 +3402,8 @@ let () =
             `Quick test_tool_series_readers_each_receive_the_latest_reply;
           Alcotest.test_case "Planning keeps ordered Goal and Task receipts across refreshes"
             `Quick test_planning_retains_completed_tasks_across_refresh;
+          Alcotest.test_case "a Keeper sandbox reply survives a late previous workspace reply"
+            `Quick test_keeper_sandbox_current_epoch_survives_late_reply;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"

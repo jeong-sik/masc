@@ -731,6 +731,16 @@ let apply_planning_goals ~observed_at goals t =
   preserve_pipeline_selection t
     { t with planning_goals = Observed.value ~observed_at goals }
 
+let start_planning_tasks ~now t =
+  let planning =
+    match t.planning with
+    | Observed.Value _ as read -> Observed.mark_stale read
+    | Observed.Loading _ as read -> read
+    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+        Observed.loading ~since_ns:now
+  in
+  { t with planning }
+
 let apply_planning_tasks ~observed_at planning t =
   preserve_pipeline_selection t
     { t with planning = Observed.value ~observed_at planning }

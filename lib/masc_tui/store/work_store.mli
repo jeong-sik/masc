@@ -125,6 +125,8 @@ val cycle_tab : Keymap.cycle_dir -> t -> t
 val apply_planning :
   observed_at:Clock.Mono.t -> Wire_work.planning_snapshot -> t -> t
 
+val start_planning_tasks : now:Clock.Mono.t -> t -> t
+
 val apply_planning_tasks :
   observed_at:Clock.Mono.t -> Wire_work.planning_snapshot -> t -> t
 (** Apply a Tasks receipt after an independent Goals receipt. *)

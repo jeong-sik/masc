@@ -935,7 +935,10 @@ let apply_http_reply ~now (m : Model.t) reply =
           , inc_cmds
             @ View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next ))
   | Msg.Reply_planning_goals goals ->
-      let work = Work_store.apply_planning_goals ~observed_at:now goals m.work in
+      let work =
+        Work_store.apply_planning_goals ~observed_at:now goals m.work
+        |> Work_store.start_planning_tasks ~now
+      in
       (Model.rebuild_attention { m with work }, [])
   | Msg.Reply_planning (Ok planning) ->
       let work = Work_store.apply_planning_tasks ~observed_at:now planning m.work in
@@ -945,8 +948,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~fail:
           (on_work (fun work ->
                let planning =
-                 if Observed.is_loading work.planning then Observed.unreported
-                 else work.planning
+                 match work.planning with
+                 | Observed.Loading _ -> Observed.unreported
+                 | Observed.Value _ as read -> Observed.mark_stale read
+                 | (Observed.Unreported | Observed.Absent | Observed.Failed _) as read ->
+                     read
                in
                { work with
                  planning;

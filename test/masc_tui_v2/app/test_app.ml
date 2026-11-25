@@ -1173,14 +1173,20 @@ let test_planning_retains_completed_tasks_across_refresh () =
   in
   with_loopback_executor ~respond @@ fun clock bus exec ->
   let model = ref (Model.initial ()) in
+  let terminal_reads = ref 0 in
   let get () =
     Cmd_executor.execute exec (Cmd.Http_get { epoch = Epoch.initial; req = Cmd.Get_planning })
   in
   let drain () =
+    let apply msg = model := fst (Update.step ~now:(Clock.Mono.now ()) !model msg) in
     Ui_bus.drain bus
     |> List.iter (function
            | Ui_bus.Snapshot (_, msg) | Ui_bus.Stream_event msg ->
-               model := fst (Update.step ~now:(Clock.Mono.now ()) !model msg)
+               (match msg with
+               | Msg.Http_reply { reply = Msg.Reply_planning _; _ } ->
+                   incr terminal_reads
+               | _ -> ()) [@warning "-4"];
+               apply msg
            | Ui_bus.Stream_gap _ -> ())
   in
   let goals () =
@@ -1199,10 +1205,12 @@ let test_planning_retains_completed_tasks_across_refresh () =
   drain ();
   Alcotest.(check (list string)) "the next Goals read survives the same drain" ["g-2"] (goals ());
   Alcotest.(check (list string)) "the previous terminal Task success survives" ["t-1"] (tasks ());
+  Alcotest.(check bool) "the previous Task is marked as the last read" true
+    (Observed.is_stale (!model).work.planning);
   Eio.Promise.resolve release_second ();
   let rec await_failure () =
     drain ();
-    if not (Observed.is_stale (!model).work.planning) then begin
+    if !terminal_reads < 2 then begin
       Eio.Time.sleep clock 0.001;
       await_failure ()
     end

@@ -658,9 +658,8 @@ let reserve_work_reads ~now (m : Model.t) cmds =
                gate_pending = start work.gate_pending;
                gate_snapshot = start work.gate_snapshot }
          | Cmd.Get_planning ->
-             { work with
-               planning_goals = start (Work_store.goals_read work);
-               planning = start work.planning }
+             { work with planning_goals = start (Work_store.goals_read work) }
+             |> Work_store.start_planning_tasks ~now
          | Cmd.Get_verifications { view; _ } when view = work.verification_view ->
              { work with verifications = start work.verifications }
          | _ -> work)

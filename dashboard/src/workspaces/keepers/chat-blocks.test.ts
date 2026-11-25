@@ -732,14 +732,23 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       parseKeeperLiveObserverEvent('keeper_chat_appended', { type: 'keeper_chat_appended' }, 'code-reviewer-sister'),
     ).toBeNull()
 
-    // Turn completion emits turn_ended so live preview cards clear cleanly
+    // An agent-core iteration can finish before the Keeper's work settles.
     expect(
       parseKeeperLiveObserverEvent(
         'keeper_turn_complete',
         { type: 'keeper_turn_complete', name: 'code-reviewer-sister' },
         'code-reviewer-sister',
       ),
-    ).toEqual({ kind: 'turn_ended' })
+    ).toBeNull()
+
+    const receipt = {
+      type: 'keeper_turn_succeeded', name: 'code-reviewer-sister', elapsed_ms: 75_123, ts_unix: 1_700_000_502,
+    }
+    expect(parseKeeperLiveObserverEvent('message', receipt, 'code-reviewer-sister')).toEqual({
+      kind: 'turn_succeeded', elapsedMs: 75_123, atUnix: 1_700_000_502,
+    })
+    expect(parseKeeperLiveObserverEvent('message', receipt, 'another-keeper')).toBeNull()
+    expect(parseKeeperLiveObserverEvent('message', { ...receipt, elapsed_ms: -1 }, 'code-reviewer-sister')).toBeNull()
 
     const otherKeeperSig = parseKeeperLiveObserverEvent(
       'keeper_turn_preview_changed',
@@ -909,13 +918,14 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       expect(turnTrace).not.toBeNull()
       expect(turnTrace!.querySelector('[data-testid="chat-turn-tool-group"]')).not.toBeNull()
 
-      // Live autonomous turn preview card uses real `activity: 'tool'` -> '실행 중 · Execute'
+      // The snapshot is retained without a live Observer in this fixture.
       const liveCard = container.querySelector('[data-testid="chat-live-turn-card"]')
       expect(liveCard).not.toBeNull()
       expect(liveCard!.getAttribute('aria-live')).toBeNull()
       expect(liveCard!.textContent).toContain('자율 턴')
-      expect(liveCard!.textContent).toContain('도구 실행 중')
-      expect(liveCard!.textContent).toContain('실행 중 · Execute')
+      expect(container.querySelector('.kp-turn-progress-active')?.textContent).toContain('마지막 확인')
+      expect(container.querySelector('.kp-turn-progress-active')?.textContent).toContain('도구 실행 중')
+      expect(liveCard!.textContent).toContain('최근 도구 · Execute')
       expect(liveCard!.textContent).toContain('Evaluating diff hunks')
 
       // Waiting inventory strip rendered with canonical OCaml source label

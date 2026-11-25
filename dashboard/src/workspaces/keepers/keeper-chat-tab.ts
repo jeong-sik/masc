@@ -38,6 +38,7 @@ import {
   streamKeeperChat,
   transcribeVoiceAudio,
   type KeeperLiveToolPulse,
+  type KeeperObserverChatSignal,
 } from './keepers-api'
 import {
   dedupeHistoryToolRows,
@@ -97,6 +98,7 @@ const LazyKeeperDebugCompanion = lazy(async () => ({
 
 export interface KeeperChatTabProps {
   readonly keeper: KeeperRosterItem
+  readonly turnSnapshot?: { readonly updatedAt: number; readonly stale: boolean }
   readonly onInspect: (payload: WorkspaceInspectPayload) => void
   readonly onSelectKeeper?: (name: string) => void
   readonly onMutated: () => void
@@ -106,6 +108,22 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 8.5
 const BOTTOM_STICKY_THRESHOLD_PX = 72
 const INITIAL_RENDER_WINDOW = 120
 const MAX_RENDER_WINDOW = 1000
+
+function KeeperTurnElapsed({ startedAt, observedAt, live }: {
+  readonly startedAt: number
+  readonly observedAt: number
+  readonly live: boolean
+}) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!live) return
+    setNow(Date.now())
+    const interval = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [live, startedAt])
+  const seconds = ((live ? now : observedAt) - startedAt) / 1000
+  return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`
+}
 
 type ChatRead = 'history' | 'queue' | 'waiting'
 
@@ -278,8 +296,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [livePreview, setLivePreview] = useState<{
     readonly ownerKey: string | null
     readonly preview: KeeperActiveTurnPreview
+    readonly receivedAt: number
   } | null>(null)
   const [liveToolPulse, setLiveToolPulse] = useState<KeeperLiveToolPulse | null>(null)
+  const [lastWorked, setLastWorked] = useState<Extract<KeeperObserverChatSignal, { kind: 'turn_succeeded' }> | null>(null)
 
   const chatListRef = useRef<HTMLDivElement>(null)
   const chatFeedRef = useRef<HTMLDivElement>(null)
@@ -298,6 +318,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const prevTailSigRef = useRef('')
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeper.name)
+  const turnOwnerRef = useRef(keeper.active_turn?.owner_key)
+  turnOwnerRef.current = keeper.active_turn?.owner_key
   const hasLoadedEarlierRef = useRef(false)
   const earlierAbortRef = useRef<AbortController | null>(null)
   const earlierGenRef = useRef(0)
@@ -452,6 +474,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setWaitingInventory(null)
     setLivePreview(null)
     setLiveToolPulse(null)
+    setLastWorked(null)
     if (switchedKeeper) {
       setMessagesState({ keeperName: keeper.name, entries: [] })
       setHasMore(false)
@@ -699,16 +722,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
       switch (event?.kind) {
         case 'turn_preview':
+          if (turnOwnerRef.current && event.ownerKey !== turnOwnerRef.current) break
           setLivePreview((prev) => {
             if (prev !== null && prev.ownerKey === event.ownerKey
                 && prev.preview.revision !== null && event.preview.revision !== null
                 && event.preview.revision < prev.preview.revision) return prev
-            return { ownerKey: event.ownerKey, preview: event.preview }
+            return { ownerKey: event.ownerKey, preview: event.preview, receivedAt: Date.now() }
           })
           break
         case 'turn_ended':
           setLivePreview(null)
           setLiveToolPulse(null)
+          break
+        case 'turn_succeeded':
+          setLastWorked((previous) => previous && previous.atUnix >= event.atUnix ? previous : event)
           break
         case 'tool_pulse':
           setLiveToolPulse(event.pulse)
@@ -739,6 +766,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setHasMore(false)
       setNextCursor(null)
       setWaitingInventory(null)
+      setLastWorked(null)
       setHistoryError(null)
       setLoadingHistory(true)
       recover()
@@ -1600,30 +1628,40 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
   // Live autonomous / delegated / external turn status from roster + SSE preview override
   const activeTurn = keeper.active_turn
-  const effectivePreview: KeeperActiveTurnPreview | null = livePreview?.preview ?? activeTurn?.preview ?? null
+  const previewForSnapshot = activeTurn?.owner_key && livePreview?.ownerKey === activeTurn.owner_key
+    && (livePreview.preview.revision ?? 0) > (activeTurn.preview_observed_through ?? activeTurn.preview?.revision ?? 0)
+    ? livePreview.preview
+    : null
+  // An Owner preview can arrive before the next turn-list snapshot. Present
+  // that observation by itself, with no borrowed lane or start time.
+  const previewBeforeSnapshot = !activeTurn && livePreview?.ownerKey
+    && (props.turnSnapshot === undefined || livePreview.receivedAt > props.turnSnapshot.updatedAt)
+    ? livePreview.preview
+    : null
+  const effectivePreview = previewBeforeSnapshot ?? previewForSnapshot ?? activeTurn?.preview ?? null
+  const hasTurnObservation = activeTurn !== null || effectivePreview !== null
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
-  const showLiveTurnCard = (!sending || browserRequestQueued) && (activeTurn !== null || effectivePreview !== null)
+  const showLiveTurnCard = (!sending || browserRequestQueued) && hasTurnObservation
   const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
   const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
   const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
-  const liveTurnElapsedSec = activeTurn
-    ? (activeTurn.elapsed_ms !== null && activeTurn.elapsed_ms !== undefined
-        ? Math.floor(activeTurn.elapsed_ms / 1000)
-        : activeTurn.started_at_unix > 0
-          ? Math.max(0, Math.floor(Date.now() / 1000 - activeTurn.started_at_unix))
-          : null)
+  const turnLive = observerConnected.value
+    && (previewBeforeSnapshot !== null || props.turnSnapshot?.stale === false)
+  const turnAnimating = turnLive && liveTurnActivity.tone !== 'bad'
+  const progressLabel = turnLive
+    ? (turnAnimating ? 'Working' : liveTurnActivity.label)
+    : '마지막 확인'
+  const turnObservedAt = props.turnSnapshot?.updatedAt
+  const turnStartedAt = activeTurn && turnObservedAt !== undefined
+    ? (activeTurn.elapsed_ms != null && activeTurn.elapsed_ms >= 0
+        ? turnObservedAt - activeTurn.elapsed_ms
+        : activeTurn.started_at_unix > 0 ? activeTurn.started_at_unix * 1000 : null)
     : null
-  const liveToolName =
-    activeTurn?.tool_in_flight
-    ?? liveToolPulse?.toolName
-    ?? effectivePreview?.last_tool
-    ?? null
-  const isLiveToolInFlight = Boolean(
-    activeTurn?.tool_in_flight
-    || effectivePreview?.activity === 'tool'
-    || effectivePreview?.activity === 'tool_observed',
-  )
+  const activeTool = activeTurn?.tool_in_flight
+    ?? (effectivePreview?.activity === 'tool' ? effectivePreview.last_tool : null)
+  const liveToolName = activeTool ?? effectivePreview?.last_tool ?? liveToolPulse?.toolName ?? null
+  const isLiveToolInFlight = turnLive && activeTool !== null
 
   const renderToolPreSection = (
     label: string,
@@ -2374,16 +2412,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <section class="kp-live-turn-card" data-testid="chat-live-turn-card">
                 <div class="kp-msg-head">
                   <div class="kp-pill-row">
-                    <span class="kp-live-dot" aria-hidden="true"></span>
                     <span class="kp-pill" data-tone="brass">${liveTurnLaneLabel}</span>
-                    <span class="kp-pill" data-tone=${liveTurnActivity.tone}>${liveTurnActivity.label}</span>
                     ${activeTurn?.turn_ref && html`<span class="kp-pill">${activeTurn.turn_ref}</span>`}
                   </div>
                   <div class="kp-pill-row">
-                    ${liveTurnElapsedSec !== null && html`
-                      <span class="kp-pill">${formatElapsedCompact(liveTurnElapsedSec)}</span>
-                    `}
-                    ${lastObserved && html`<span class="kp-pill">마지막 진행 ${lastObserved}</span>`}
+                    ${lastObserved && html`<span class="kp-pill">마지막 관측 ${lastObserved}</span>`}
                   </div>
                 </div>
                 <div class="kp-hierarchy-rail">
@@ -2568,6 +2601,30 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   </button>
                 </span>
               `)}
+            </div>
+          `}
+
+          ${(hasTurnObservation || lastWorked) && html`
+            <div class="kp-turn-progress">
+              ${hasTurnObservation && html`
+                <div class="kp-turn-progress-active" data-tone=${liveTurnActivity.tone} data-live=${turnLive ? 'true' : 'false'}>
+                  ${turnAnimating && html`<span class="kp-live-dot" aria-hidden="true"></span>`}
+                  <span role="status">
+                    <strong>${progressLabel}</strong>
+                    <span> · ${liveTurnLaneLabel}</span>
+                    ${effectivePreview && (!turnLive || turnAnimating) && html`<span> · ${liveTurnActivity.label}</span>`}
+                  </span>
+                  ${turnStartedAt !== null && turnObservedAt !== undefined && html`
+                    <${KeeperTurnElapsed} startedAt=${turnStartedAt} observedAt=${turnObservedAt} live=${turnAnimating} />
+                  `}
+                </div>
+              `}
+              ${lastWorked && html`
+                <span class="kp-turn-worked" role="status">
+                  <span aria-hidden="true">✓ </span><strong>Worked</strong>
+                  ${` · ${formatElapsedCompact(lastWorked.elapsedMs / 1000)}${hasTurnObservation ? ' · 최근 성공' : ''}`}
+                </span>
+              `}
             </div>
           `}
 

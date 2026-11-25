@@ -370,9 +370,11 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
       ? {
           lane: asStr(activeRaw.lane) ?? 'chat',
           turn_ref: asStr(activeRaw.turn_ref),
+          owner_key: asStr(activeRaw.owner_key),
+          preview_observed_through: asNum(activeRaw.preview_observed_through),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
           phase: asStr(activeRaw.phase),
-          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool) ?? decodedPreview?.last_tool ?? null,
+          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
           elapsed_ms: asNum(activeRaw.elapsed_ms),
           preview: decodedPreview,
         }
@@ -949,6 +951,7 @@ export type KeeperObserverChatSignal =
       readonly preview: KeeperActiveTurnPreview
     }
   | { readonly kind: 'turn_ended' }
+  | { readonly kind: 'turn_succeeded'; readonly elapsedMs: number; readonly atUnix: number }
   | { readonly kind: 'tool_pulse'; readonly pulse: KeeperLiveToolPulse }
   | { readonly kind: 'chat_appended' }
   | { readonly kind: 'waiting_changed'; readonly queueChanged: boolean }
@@ -984,8 +987,11 @@ export function parseKeeperLiveObserverEvent(
   if (eventType === 'keeper_chat_appended') {
     return { kind: 'chat_appended' }
   }
-  if (eventType === 'keeper_turn_complete') {
-    return { kind: 'turn_ended' }
+  if (eventType === 'keeper_turn_succeeded' && payload) {
+    const elapsedMs = asNum(payload.elapsed_ms)
+    const atUnix = asNum(payload.ts_unix)
+    if (elapsedMs === null || !Number.isInteger(elapsedMs) || elapsedMs < 0 || atUnix === null) return null
+    return { kind: 'turn_succeeded', elapsedMs, atUnix }
   }
   if (eventType === 'keeper_turn_changed' && payload) {
     const status = asStr(payload.status) ?? asStr(payload.phase)

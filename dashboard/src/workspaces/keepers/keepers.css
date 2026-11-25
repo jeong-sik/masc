@@ -769,12 +769,43 @@
 }
 
 .kp-live-dot {
-  width: 8px;
-  height: 8px;
+  inline-size: 12px;
+  block-size: 12px;
+  border: 2px solid var(--brass-border);
+  border-top-color: var(--brass-1);
   border-radius: var(--radius-circle);
-  background: var(--brass-1);
-  box-shadow: 0 0 0 3px var(--brass-soft);
   flex: 0 0 auto;
+  animation: kp-turn-spin 900ms linear infinite;
+}
+
+@keyframes kp-turn-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kp-live-dot { animation: none; }
+}
+
+.kp-turn-progress,
+.kp-turn-progress-active {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.kp-turn-progress {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+.kp-turn-progress-active strong { color: var(--brass-1); }
+.kp-turn-progress-active[data-tone="bad"] strong { color: var(--err-fg); }
+.kp-turn-worked { color: var(--ok-fg); }
+.kp-turn-elapsed { font-variant-numeric: tabular-nums; }
+
+.kp-turn-progress-active[data-live="false"] strong {
+  color: var(--fg-2);
 }
 
 .kp-live-turn-status {

@@ -964,8 +964,9 @@ export function formatTurnActivityLabel(activity: string | undefined): {
     case 'streaming':
       return { label: '스트리밍 중', tone: 'brass' }
     case 'tool':
-    case 'tool_observed':
       return { label: '도구 실행 중', tone: 'info' }
+    case 'tool_observed':
+      return { label: '도구 관측', tone: 'info' }
     case 'failed':
       return { label: '시도 실패', tone: 'bad' }
     default:

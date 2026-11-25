@@ -369,6 +369,33 @@ let fit_prefix ~width select layout =
 let safe_link_depth raw =
   let max_link_depth = 8 in
   let length = String.length raw in
+  let rec backtick_run_end i =
+    if i < length && raw.[i] = '`' then backtick_run_end (i + 1) else i
+  in
+  (* The next equal-width run closes a code span. Index it once so many
+     unmatched runs take linear time too. Table cells parse independently. *)
+  let code_closers = lazy (
+    let closers = Hashtbl.create 16 in
+    let previous = Hashtbl.create 8 in
+    let rec index i =
+      if i < length then
+        match raw.[i] with
+        | '\n' | '\r' | '|' ->
+            Hashtbl.reset previous;
+            index (i + 1)
+        | '`' ->
+            let next = backtick_run_end (i + 1) in
+            let width = next - i in
+            Option.iter
+              (fun opener -> Hashtbl.add closers opener next)
+              (Hashtbl.find_opt previous width);
+            Hashtbl.replace previous width i;
+            index next
+        | _ -> index (i + 1)
+    in
+    index 0;
+    closers)
+  in
   let rec skip_indent i =
     if i < length && (raw.[i] = ' ' || raw.[i] = '\t') then skip_indent (i + 1)
     else i
@@ -393,10 +420,19 @@ let safe_link_depth raw =
              until the paragraph ends instead of trying to lex them twice. *)
           let depth = if opaque then depth else Int.max 0 (depth - 1) in
           scan (i + 1) depth false opaque
-      | '`' | '<' | '$' -> scan (i + 1) depth false (opaque || depth > 0)
+      | '`' ->
+          (match Hashtbl.find_opt (Lazy.force code_closers) i with
+          | Some next -> scan next depth false opaque
+          | None -> scan (backtick_run_end (i + 1)) depth false (opaque || depth > 0))
+      | '<' | '$' -> scan (i + 1) depth false (opaque || depth > 0)
       | '\\' when i + 1 < length ->
           (match raw.[i + 1] with
           | '[' | ']' | '\\' -> scan (i + 2) depth false opaque
+          | '`' ->
+              let next = backtick_run_end (i + 2) in
+              (* An escaped run may open with a different width. Keep the
+                 conservative paragraph fallback for that case. *)
+              scan next depth false (opaque || (next > i + 2 && depth > 0))
           | _ -> scan (i + 1) depth false opaque)
       | '\n' | '\r' ->
           let next =

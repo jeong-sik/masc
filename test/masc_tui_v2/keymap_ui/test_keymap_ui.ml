@@ -2285,27 +2285,36 @@ let test_markdown_parse_inline_linear_unmatched_delimiters () =
          String.equal s.text "site"
          && Option.equal String.equal s.hyperlink (Some "https://example.com"))
        spans);
-  let list_links =
+  let targets =
     List.init 12 (fun index -> Printf.sprintf "https://example.com/files/%d" index)
   in
-  let tight_items =
+  let code_links =
     List.mapi
-      (fun index target -> Printf.sprintf "- [`file[%d]`](%s)" index target)
-      list_links
-    |> String.concat "\r\n"
+      (fun index target -> Printf.sprintf "[``file[`%d]``](%s)" index target)
+      targets
   in
-  let linked_spans =
-    Markdown.render_lines ~theme ~width:120 ~osc8:true tight_items
-    |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+  let rows prefix suffix =
+    List.map (fun link -> prefix ^ link ^ suffix) code_links |> String.concat "\r\n"
   in
   List.iter
-    (fun target ->
-      Alcotest.(check bool) "tight list code link remains an OSC 8 target" true
-        (List.exists
-           (fun (span : Markdown.styled_span) ->
-             Option.equal String.equal span.hyperlink (Some target))
-           linked_spans))
-    list_links;
+    (fun (context, source) ->
+      let linked_spans =
+        Markdown.render_lines ~theme ~width:120 ~osc8:true source
+        |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+      in
+      List.iter
+        (fun target ->
+          Alcotest.(check bool) (context ^ " keeps the OSC 8 link " ^ target) true
+            (List.exists
+               (fun (span : Markdown.styled_span) ->
+                 Option.equal String.equal span.hyperlink (Some target))
+               linked_spans))
+        targets)
+    [ ("tight list", rows "- " "");
+      ("ordered list", rows "1. " "");
+      ("nested list in quote", "> - Files\r\n" ^ rows ">   - " "");
+      ("table", "| File |\r\n| --- |\r\n" ^ rows "| " " |");
+      ("paragraph", String.concat " " code_links) ];
   let nested = "- " ^ String.make 20 '[' ^ "[site](https://example.com)" in
   let fallback =
     Markdown.render_lines ~theme ~width:120 ~osc8:true nested

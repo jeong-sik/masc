@@ -44,6 +44,7 @@ type acp_client =
   ; mode : string option
   ; oauth_source : string option
   ; timeout_s : float
+  ; admission_timeout_s : float
   }
 
 type t =

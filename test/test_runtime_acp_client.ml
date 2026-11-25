@@ -334,6 +334,7 @@ let acp_execution_of_driver driver =
     ; mode = None
     ; oauth_source = None
     ; timeout_s = 1.
+    ; admission_timeout_s = 1.
     }
   in
   Runtime_execution.Acp config
@@ -4549,6 +4550,7 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     ; mode = Some "default"
     ; oauth_source = Some "/tmp/oauth-a"
     ; timeout_s = 120.0
+    ; admission_timeout_s = 30.0
     }
   in
   let h_base =

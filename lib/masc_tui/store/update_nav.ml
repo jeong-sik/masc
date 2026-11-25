@@ -9956,6 +9956,19 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
     pre_zoom_pane_index = m.nav.pre_zoom_pane_index;
     zoomed = m.nav.zoomed;
     overlay;
+    memory_diff_pin =
+      (match m.knowledge.memory_diff_window with
+       | Knowledge_store.Window_revs { from_rev; to_rev } ->
+           Some
+             {
+               Model.pin_keeper = m.knowledge.memory_diff_keeper;
+               from_rev;
+               to_rev;
+             }
+       | Knowledge_store.Window_24h
+       | Knowledge_store.Window_7d
+       | Knowledge_store.Window_30d ->
+           None);
   }
 
 let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
@@ -10080,7 +10093,7 @@ let pop_workspace_return (m : Model.t) =
           m.knowledge
         else Knowledge_store.set_tab frame.knowledge_tab m.knowledge
       in
-      let knowledge =
+      let knowledge1 =
         knowledge0
         |> Knowledge_store.unpin_memory_diff_revs
         |> Knowledge_store.close_memory_reading
@@ -10089,6 +10102,21 @@ let pop_workspace_return (m : Model.t) =
         |> Knowledge_store.close_memory_diagram
         |> Knowledge_store.clear_pending_wiki_edit
         |> close_board_recovery
+      in
+      (* The jump unpinned the revision range; the frame carries it back so
+         [Esc] returns to the same comparison, not the pre-pin window. *)
+      let knowledge =
+        match frame.memory_diff_pin with
+        | None -> knowledge1
+        | Some { Model.pin_keeper; from_rev; to_rev } ->
+            let keeper =
+              if Option.equal String.equal knowledge1.memory_diff_keeper
+                   pin_keeper
+              then None
+              else Some pin_keeper
+            in
+            Knowledge_store.pin_memory_diff_revs ?keeper ~from_rev ~to_rev
+              knowledge1
       in
       let runtime0 =
         if Nav.equal_runtime_tab m.runtime.active_tab frame.runtime_tab then

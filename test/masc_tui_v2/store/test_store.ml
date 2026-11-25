@@ -13546,6 +13546,64 @@ let test_ux_batch4_knowledge_runtime_infra () =
   Alcotest.(check int) "UX-28 [Enter] on Health subview pushes no dive" 0
     (List.length m_kmem_ret.nav.dive_stack);
 
+  (* A pinned revision range survives a sandbox detail round trip: the jump
+     unpins it, and Esc re-pins the same range on the same keeper. *)
+  let inc_pin, _ =
+    Incidents.push ~occurred_at_unix:1_795_254_000.0
+      ~source:(Health.Source_sandbox "alpha")
+      ~summary:(Say.literal "Sandbox error") ~detail:"sock missing"
+      ~status:Health.Resolved Incidents.empty
+  in
+  let m_pin_inc =
+    {
+      m0 with
+      nav =
+        { m0.nav with workspace = Nav.Knowledge; overlay = Some Nav.Incidents };
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.pin_memory_diff_revs ~keeper:(Some "alpha")
+             ~from_rev:2 ~to_rev:7;
+      incidents = inc_pin;
+    }
+  in
+  let pinned_2_7 (k : Knowledge_store.t) =
+    Knowledge_store.equal_memory_diff_window k.memory_diff_window
+      (Knowledge_store.Window_revs { from_rev = 2; to_rev = 7 })
+    && Option.equal String.equal k.memory_diff_keeper (Some "alpha")
+  in
+  let m_pin_jump, _ = step m_pin_inc (char_key "o") in
+  Alcotest.(check bool)
+    "Sandbox jump from a pinned Memory diff opens Infra and leaves the range"
+    true
+    (Nav.equal_workspace m_pin_jump.nav.workspace Nav.Infra
+    && not (Knowledge_store.is_memory_diff_pinned m_pin_jump.knowledge));
+  let m_pin_back, _ = step m_pin_jump (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool)
+    "Esc after the sandbox jump restores the pinned revision range" true
+    (Nav.equal_workspace m_pin_back.nav.workspace Nav.Knowledge
+    && Nav.equal_knowledge_tab m_pin_back.knowledge.active_tab
+         Nav.Knowledge_memory
+    && pinned_2_7 m_pin_back.knowledge
+    && Option.equal Knowledge_store.equal_memory_diff_window
+         m_pin_back.knowledge.prev_window_before_pin
+         (Some Knowledge_store.Window_24h));
+  (* The palette sandbox entry uses the same jump; drive it directly. *)
+  let m_pin_pal =
+    { m_pin_inc with nav = { m_pin_inc.nav with overlay = None } }
+  in
+  let m_pal_jump, _ =
+    Update_nav.jump_to_workspace ~pane_index:1 ~return_from:m_pin_pal
+      { m_pin_pal with
+        infra = Infra_store.set_tab Nav.Infra_sandboxes m_pin_pal.infra }
+      Nav.Infra
+  in
+  let m_pal_back, _ = step m_pal_jump (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool)
+    "Esc after a palette-style sandbox jump restores the pinned range" true
+    (Nav.equal_workspace m_pal_back.nav.workspace Nav.Knowledge
+    && pinned_2_7 m_pal_back.knowledge);
+
   (* UX-29: Wiki view fetches Get_wiki_log + multiline wiki modal warns and labels $EDITOR *)
   let m_wiki =
     {

@@ -24,6 +24,12 @@ type composer_mode =
   | Collapsed_bar
   | Expanded_multiline
 
+type memory_diff_pin_frame = {
+  pin_keeper : string option;
+  from_rev : int;
+  to_rev : int;
+}
+
 type workspace_return_frame = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
@@ -36,6 +42,9 @@ type workspace_return_frame = {
   pre_zoom_pane_index : int option;
   zoomed : bool;
   overlay : Nav.overlay option;
+  memory_diff_pin : memory_diff_pin_frame option;
+      (** A pinned Memory revision range left by the jump, re-pinned when
+          [Esc] returns to this frame. *)
 }
 
 type nav_state = {

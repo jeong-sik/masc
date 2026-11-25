@@ -116,6 +116,11 @@ type event =
       tool_calls : int option;
       at_unix : float;
     }
+  | Keeper_turn_succeeded of {
+      keeper : string;
+      elapsed_ms : int;
+      at_unix : float;
+    }
   | Keeper_tool_call of {
       keeper : string;
       turn : int option;

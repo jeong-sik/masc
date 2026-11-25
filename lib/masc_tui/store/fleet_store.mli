@@ -88,6 +88,8 @@ type t = {
       (** Roster rows whose effective meta did not read, from the last roster. *)
   turns : Wire_fleet.keeper_turn_row list Observed.t;
   turn_preview_updates : Wire_fleet.turn_preview_update String_map.t;
+  worked : (float * int) String_map.t;
+      (** Last observed successful completion per Keeper as (Unix time, elapsed ms). *)
   interrupting_turn_tokens : string String_map.t;
       (** In-flight interrupt token per keeper for observed turns without a
           local chat stream or pending tx. *)
@@ -246,6 +248,7 @@ val apply_execution_enrichments :
   t
 val enrich_scorecard :
   (Wire_fleet.daily_scorecard -> Wire_fleet.daily_scorecard) -> t -> t
+val observe_worked : keeper:string -> at_unix:float -> elapsed_ms:int -> t -> t
 val apply_turns :
   observed_at:Clock.Mono.t -> Wire_fleet.keeper_turn_row list -> t -> t
 val observe_turn_preview :

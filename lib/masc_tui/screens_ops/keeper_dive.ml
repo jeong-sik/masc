@@ -1511,8 +1511,8 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     let bg = Color.of_rgb theme.surface_1 in
     let activity =
       Option.map
-        (fun (glyph, tone, label) ->
-          (Glyph.to_utf8 glyph ^ " ", tone, Say.resolve model.lang label))
+        (Composer.activity_runs ~theme ~bg ~lang:model.lang
+           ~animate:(not (Chat_transcript.reduce_motion model)))
         activity
     in
     let voice_error =
@@ -1532,9 +1532,10 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           let budget =
             match activity with
             | None -> available
-            | Some (mark, _, activity_text) ->
+            | Some runs ->
                 let activity_w =
-                  Grapheme.display_width mark + Grapheme.display_width activity_text
+                  List.fold_left (fun width (_, s) -> width + Grapheme.display_width s)
+                    0 runs
                 in
                 Int.min available (Int.max label_w (available - activity_w - 2))
           in
@@ -1542,18 +1543,12 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           else (Int.min budget (Grapheme.display_width detail), detail)
     in
     Option.iter
-      (fun (mark, tone, label) ->
+      (fun runs ->
         let x = rect.x + 2 in
         let voice_reserve = if voice_w > 0 then voice_w + 2 else 0 in
         let max_w = Int.max 0 (available - voice_reserve) in
-        let glyph_w =
-          Ops_common.put_line ~clip:rect grid ~x ~y:rect.y ~max_w
-            ~style:(Typography.status ~bg ~bold:true theme tone) mark
-        in
-        ignore
-          (Ops_common.put_line ~clip:rect grid ~x:(x + glyph_w) ~y:rect.y
-             ~max_w:(Int.max 0 (max_w - glyph_w))
-             ~style:(Typography.primary ~bg theme) label))
+        Composer.draw_activity_runs grid
+          ~rect:(Rect.make ~x ~y:rect.y ~w:max_w ~h:1) runs)
       activity;
     if voice_w > 0 then
       let x =

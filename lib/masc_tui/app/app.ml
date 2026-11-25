@@ -9,7 +9,8 @@ type render_frame =
 
 let drain_budget_ns = 3_000_000L
 let voice_tick_interval_ns = 100_000_000L
-let keeper_progress_interval_ns = 250_000_000L
+let keeper_progress_interval_ns =
+  Int64.div 1_000_000_000L (Int64.of_int Chat_transcript.animation_frames_per_second)
 let keeper_elapsed_interval_ns = 1_000_000_000L
 let probe_timeout_s = 0.15
 let probe_grace_s = 2.0
@@ -631,12 +632,9 @@ let visible_keeper_progress_interval (m : Model.t) =
   (match Option.bind keeper (fun keeper ->
           Chat_transcript.live_chat_phase_badge ~model:m ~keeper) with
   | Some (Glyph.Live_working_frame _, _, _) ->
-      let reduce_motion =
-        Observed.to_option m.config.preferences
-        |> Option.exists (fun (prefs : Masc_tui_protocol.Wire_config.tui_preferences) ->
-               Option.value prefs.reduce_motion ~default:false)
-      in
-      Some (if reduce_motion then keeper_elapsed_interval_ns else keeper_progress_interval_ns)
+      Some
+        (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
+         else keeper_progress_interval_ns)
   | Some _ | None -> None) [@warning "-4"]
 
 let set_fd_nonblock fd enabled =

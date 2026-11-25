@@ -732,32 +732,48 @@ let active_turn_for_progress ~(model : Model.t) ~keeper =
   | Some (Wire_fleet.Turn_unavailable _) | None ->
       Fleet_store.active_turn_for ~keeper model.fleet
 
+let animation_frames_per_second = 8
+
+let reduce_motion (model : Model.t) =
+  Observed.to_option model.config.preferences
+  |> Option.exists (fun (prefs : Wire_config.tui_preferences) ->
+         Option.value prefs.reduce_motion ~default:false)
+
 let progress_glyph (model : Model.t) =
-  let reduce_motion =
-    Observed.to_option model.config.preferences
-    |> Option.exists (fun (prefs : Wire_config.tui_preferences) ->
-           Option.value prefs.reduce_motion ~default:false)
-  in
   let wall = model.freshness.last_wall_unix in
   let frame =
-    if reduce_motion || not (Float.is_finite wall) then 0
-    else Int.of_float (mod_float wall 1.0 *. 4.0)
+    if reduce_motion model || not (Float.is_finite wall) then 0
+    else Int.of_float (mod_float wall 1.0 *. float animation_frames_per_second)
   in
   Glyph.Live_working_frame frame
+
+let format_elapsed seconds =
+  Say.literal
+    (if seconds < 60 then Printf.sprintf "%ds" seconds
+     else if seconds < 3600 then Printf.sprintf "%dm %02ds" (seconds / 60) (seconds mod 60)
+     else Printf.sprintf "%dh %02dm" (seconds / 3600) (seconds mod 3600 / 60))
+
+let worked_badge ~(model : Model.t) ~keeper =
+  Fleet_store.String_map.find_opt keeper model.fleet.worked
+  |> Option.map (fun (_, elapsed_ms) ->
+       ( Glyph.Check_mark, Theme.Status_ok,
+         Say.concat ~sep:" · "
+           [ Say.literal "Worked"; format_elapsed (elapsed_ms / 1000);
+             Say.make ~ko:"최근 성공" ~en:"Last success" ] ))
+
+let started_chat_wait_badge ~(model : Model.t) ~keeper =
+  match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
+  | Some stream when stream.active && stream.run_started ->
+      Some (progress_glyph model, Theme.Status_ai,
+            Say.make ~ko:"응답 대기" ~en:"Waiting for response")
+  | Some _ | None -> None
 
 let active_turn_duration ~(model : Model.t) (turn : Wire_fleet.active_turn) =
   let wall = model.freshness.last_wall_unix in
   if turn.started_at_unix <= 0.0 || wall < turn.started_at_unix
      || not (Float.is_finite turn.started_at_unix && Float.is_finite wall)
   then None
-  else
-    let seconds = Int.of_float (wall -. turn.started_at_unix) in
-    let label =
-      if seconds < 60 then Printf.sprintf "%ds" seconds
-      else if seconds < 3600 then Printf.sprintf "%dm %02ds" (seconds / 60) (seconds mod 60)
-      else Printf.sprintf "%dh %02dm" (seconds / 3600) (seconds mod 3600 / 60)
-    in
-    Some (Say.literal label)
+  else Some (format_elapsed (Int.of_float (wall -. turn.started_at_unix)))
 
 let observed_turn_label ~model ~live (turn : Wire_fleet.active_turn) =
   let lane =
@@ -816,7 +832,17 @@ let observed_turn_badge ~model ~keeper (turn : Wire_fleet.active_turn) =
     match turn_running_kind_of_turn turn with
     | Composer.Turn_kind_attention -> Glyph.Action_required, Theme.Status_attention, label
     | Composer.Turn_kind_active | Composer.Turn_kind_tool ->
-        if live then progress_glyph model, Theme.Status_active, label
+        if live then
+          let tone =
+            match turn.tool_in_flight, turn.preview with
+            | None, Some { activity = Wire_fleet.Preview_waiting | Wire_fleet.Preview_preparing; _ } ->
+                Theme.Status_ai
+            | Some _, _
+            | None, Some { activity = Wire_fleet.Preview_streaming | Wire_fleet.Preview_tool_observed
+                                    | Wire_fleet.Preview_failed; _ }
+            | None, None -> Theme.Status_active
+          in
+          progress_glyph model, tone, label
         else Glyph.Live_idle, Theme.Status_historical, label
 
 let start_reason_label = function
@@ -839,6 +865,10 @@ let start_reason_label = function
   | "scheduled_automation_due" -> Say.make ~ko:"예약 작업 도래" ~en:"Scheduled work due"
   | "task_backlog" -> Say.make ~ko:"대기 중인 Task" ~en:"Task backlog"
   | reason -> Say.literal reason
+
+type keeper_work_row =
+  | Work_status of (Glyph.t * Theme.status_token * Say.t)
+  | Work_detail of Say.t
 
 let keeper_work_overview ~(model : Model.t) ~keeper =
   let labeled ~ko ~en text = Say.concat ~sep:"  " [ Say.make ~ko ~en; text ] in
@@ -894,10 +924,15 @@ let keeper_work_overview ~(model : Model.t) ~keeper =
     | (Some _ | None), (Some _ | None) -> task_rows
   in
   match turn with
-  | None -> task_rows
+  | None ->
+      let details = List.map (fun detail -> Work_detail detail) task_rows in
+      let status =
+        match started_chat_wait_badge ~model ~keeper with
+        | Some _ as status -> status
+        | None -> worked_badge ~model ~keeper
+      in
+      (match status with Some badge -> Work_status badge :: details | None -> details)
   | Some turn ->
-      let glyph, _, label = observed_turn_badge ~model ~keeper turn in
-      let status = Say.concat ~sep:" " [ Say.literal (Glyph.to_utf8 glyph); label ] in
       let starts =
         match work_context with
         | Some { start_reasons = first :: rest; _ } ->
@@ -912,7 +947,8 @@ let keeper_work_overview ~(model : Model.t) ~keeper =
             in
             [ labeled ~ko:"시작 계기" ~en:"Started by" source ]
       in
-      status :: (starts @ task_rows)
+      Work_status (observed_turn_badge ~model ~keeper turn)
+      :: List.map (fun detail -> Work_detail detail) (starts @ task_rows)
 
 let normalize_preview_inline s =
   String.trim
@@ -1208,7 +1244,9 @@ let live_chat_phase_badge ~(model : Model.t) ~keeper =
   if Option.equal Nav.equal_overlay model.nav.overlay
        (Some (Nav.Queue_context Nav.Drawer_queue))
   then
-    Option.map (observed_turn_badge ~model ~keeper) (active_turn_for_progress ~model ~keeper)
+    match active_turn_for_progress ~model ~keeper with
+    | Some turn -> Some (observed_turn_badge ~model ~keeper turn)
+    | None -> started_chat_wait_badge ~model ~keeper
   else
       let phase = status_strip_phase ~model ~keeper in
       match phase with
@@ -1226,7 +1264,12 @@ let live_chat_phase_badge ~(model : Model.t) ~keeper =
       | Phase_thinking | Phase_tool_running _ | Phase_tool_waiting _ | Phase_streaming ->
           Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
           |> Option.map (fun (_, tone, label) -> progress_glyph model, tone, label)
-      | Phase_idle | Phase_sending | Phase_queued _ | Phase_awaiting_turn
+      | Phase_awaiting_turn ->
+          (match started_chat_wait_badge ~model ~keeper with
+           | Some _ as status -> status
+           | None -> Composer.pending_tx_badge Composer.Tx_awaiting_turn)
+      | Phase_idle -> worked_badge ~model ~keeper
+      | Phase_sending | Phase_queued _
       | Phase_confirming | Phase_interrupting | Phase_failed _ ->
           Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
 

@@ -1638,10 +1638,11 @@ let run_keepalive_unified_turn
         else
           match !cycle_outcome_ref with
           | Some (Cycle.Rested _) -> Turn_cycle_rested
-          | Some
-              ( Cycle.Completed _
-              | Cycle.Checkpointed _
-              | Cycle.Input_required _ ) -> Turn_cycle_turn_succeeded
+          | Some (Cycle.Completed { meta }) ->
+            Keeper_turn_broadcast.succeeded ~base_path:ctx.config.base_path
+              ~keeper_name:meta.name ~elapsed_ms:meta.runtime.usage.last_latency_ms;
+            Turn_cycle_turn_succeeded
+          | Some (Cycle.Checkpointed _ | Cycle.Input_required _) -> Turn_cycle_turn_succeeded
           | Some (Cycle.Failed _) -> Turn_cycle_turn_failed
           (* The phase gate ended the cycle before a turn ran. *)
           | Some (Cycle.Cancelled _ | Cycle.Skipped _)

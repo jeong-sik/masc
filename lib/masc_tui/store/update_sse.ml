@@ -869,6 +869,9 @@ let apply_observer_event (m : Model.t) = function
         else []
       in
       (next, get_cmd m.epoch Cmd.Get_dashboard_shell :: view_cmds)
+  | Wire_observer.Keeper_turn_succeeded { keeper; elapsed_ms; at_unix } ->
+      let fleet = Fleet_store.observe_worked ~keeper ~elapsed_ms ~at_unix m.fleet in
+      ({ m with fleet }, [])
   | Wire_observer.Keeper_tool_call { keeper; tool; at_unix; _ } ->
       let infra =
         Infra_store.push_activity

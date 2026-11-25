@@ -16,3 +16,6 @@
 val changed_event : string
 
 val changed : base_path:string -> keeper_name:string -> unit
+
+val succeeded : base_path:string -> keeper_name:string -> elapsed_ms:int -> unit
+(** Reports the measured duration of a successful run to that workspace's observers. *)

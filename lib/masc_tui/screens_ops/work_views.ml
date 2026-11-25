@@ -741,8 +741,10 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let goals = Work_store.filtered_goals model.work in
+    let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
     let left_rect, right_rect =
-      if rect.w >= 96 then
+      if zoomed then (Rect.empty, rect)
+      else if rect.w >= 96 then
         match
           Layout.split_h_bp bp rect [ Layout.Ratio 0.46; Layout.Flex 1 ]
         with
@@ -789,7 +791,11 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     (* Anti-Void Adaptive Height: clamp(goal_count + 4, 6, 12) for Goals,
        reclaiming the entire bottom-left space for Linked Tasks & Verifications! *)
     let goals_rect, linked_card_rect =
-      if Model.work_pipeline_has_linked_card model && rect.w >= 96 && left_rect.h >= 14 then
+      if
+        (not zoomed)
+        && Model.work_pipeline_has_linked_card model
+        && rect.w >= 96 && left_rect.h >= 14
+      then
         let want_h =
           Layout.adaptive_list_height ~items:(List.length goals) ~overhead:4
             ~min_h:6 ~max_h:12 ()
@@ -972,10 +978,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       ~en:"Selected Goal Detail"))
               with
               focused =
-                Model.body_has_focus model
-                &&
-                if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
-                else model.nav.pane_index = 2;
+                Model.detail_pane_focused
+                  ~detail_index:(if Rect.is_empty linked_card_rect then 1 else 2)
+                  model;
             }
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
@@ -1003,10 +1008,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [Enter] 상세"
                      ~en:"[→/Tab] Scroll Detail · [Enter] Dive");
               focused =
-                Model.body_has_focus model
-                &&
-                if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
-                else model.nav.pane_index = 2;
+                Model.detail_pane_focused
+                  ~detail_index:(if Rect.is_empty linked_card_rect then 1 else 2)
+                  model;
             }
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
@@ -1438,7 +1442,9 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         else None
       in
       let tasks_rect, detail_rect =
-        if body_rect.w >= 96 then
+        if model.nav.zoomed && Model.can_zoom_current_view model then
+          (Rect.empty, body_rect)
+        else if body_rect.w >= 96 then
           match
             Layout.split_h_bp bp body_rect [ Layout.Ratio 0.54; Layout.Flex 1 ]
           with
@@ -1575,7 +1581,7 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           {
             (Card.default_spec ~title:d_title) with
             badge = d_badge;
-            focused = Model.pane_focused model 1;
+            focused = Model.detail_pane_focused ~detail_index:1 model;
           }
         in
         let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
@@ -1837,7 +1843,9 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       else None
     in
     let sched_rect, detail_rect =
-      if rect.w >= 96 then
+      if model.nav.zoomed && Model.can_zoom_current_view model then
+        (Rect.empty, rect)
+      else if rect.w >= 96 then
         match
           Layout.split_h_bp bp rect [ Layout.Ratio 0.60; Layout.Flex 1 ]
         with
@@ -2053,7 +2061,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           badge = d_badge;
           hotkey = Some (Ops_common.say model ~ko:"[n] 새 일정" ~en:"[n] New");
-          focused = Model.pane_focused model 1;
+          focused = Model.detail_pane_focused ~detail_index:1 model;
         }
       in
       let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
@@ -2713,7 +2721,9 @@ let render_inbox_rules ~(model : Model.t) ~cache ~(rect : Rect.t)
     | None -> None
   in
   let left_rect, right_rect =
-    if rect.w >= 96 then
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, rect)
+    else if rect.w >= 96 then
       match Layout.split_h_bp bp rect [ Layout.Ratio 0.56; Layout.Flex 1 ] with
       | [ l; r ] -> (l, r)
       | _ -> (rect, Rect.empty)
@@ -2842,7 +2852,7 @@ let render_inbox_rules ~(model : Model.t) ~cache ~(rect : Rect.t)
              (Ops_common.say model ~ko:"규칙 상세 · Gate 정책"
                 ~en:"Rule Detail · Gate Policy"))
         with
-        focused = Model.pane_focused model 1;
+        focused = Model.detail_pane_focused ~detail_index:1 model;
       }
     in
     let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
@@ -3127,6 +3137,8 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       let selected_attn = Option.bind sel_attn (List.nth_opt filtered_attn) in
       let left_rect, right_rect =
         if Option.is_none selected_attn then (rect, Rect.empty)
+        else if model.nav.zoomed && Model.can_zoom_current_view model then
+          (Rect.empty, rect)
         else if rect.w >= 96 then
           match
             Layout.split_h_bp bp rect [ Layout.Ratio 0.42; Layout.Flex 1 ]
@@ -3310,7 +3322,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                           | [] | _ :: _ :: _ -> false
                         in
                         if instant_single then
-                          if Model.pane_focused model 1 then
+                          if Model.detail_pane_focused ~detail_index:1 model then
                             Ops_common.say model
                               ~ko:"[a..d] 선택 · [Enter/Y] 모달 · [N] 건너뛰기 · [^B] 메뉴"
                               ~en:"[a..d] Choose · [Enter/Y] Modal · [N] Skip · [^B] Menu"
@@ -3334,7 +3346,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                         Ops_common.say model
                           ~ko:"[Enter/Y] 목표 상세"
                           ~en:"[Enter/Y] Goal Dive");
-                focused = Model.pane_focused model 1;
+                focused = Model.detail_pane_focused ~detail_index:1 model;
               }
             in
             let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme p_spec in
@@ -4619,8 +4631,11 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let left_rect, right_rect =
-      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
-        ~top_ratio:0.48 bp rect
+      if model.nav.zoomed && Model.can_zoom_current_view model then
+        (Rect.empty, rect)
+      else
+        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
+          ~top_ratio:0.48 bp rect
     in
     let hh_opt = Observed.to_option model.work.harness_health in
     let status_badge =
@@ -4763,7 +4778,7 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           Some
             (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"
                ~en:"[→/Tab] Scroll Detail · [y] Approve · [n] Reject");
-        focused = Model.pane_focused model 1;
+        focused = Model.detail_pane_focused ~detail_index:1 model;
       }
     in
     let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme right_spec in

@@ -25349,5 +25349,211 @@ let () =
                 (not (Observed.is_loading m_next.runtime.mcp_call_result));
               Alcotest.(check bool) "pending_addon_decl_path cleared" true
                 (Option.is_none m_next.runtime.pending_addon_decl_path));
+          Alcotest.test_case
+            "Universal zoom across Work/Runtime/Infra, detail_visible SSOT & workspace_return_stack"
+            `Quick
+            (fun () ->
+              let step m msg = Update.step ~now:t0 m msg in
+              let step_k m k = step m (Msg.Key_event k) in
+              (* 1. can_zoom_current_view enabled across Work/Runtime/Infra master-detail tabs *)
+              let base = Model.initial ~cols:140 ~rows:36 () in
+              Alcotest.(check bool) "Pulse stays non-zoomable" false
+                (Model.can_zoom_current_view base);
+              let m_work_tasks =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work; pane_index = 1 };
+                  work = Work_store.set_tab Nav.Work_tasks base.work;
+                }
+              in
+              Alcotest.(check bool) "Work_tasks can zoom" true
+                (Model.can_zoom_current_view m_work_tasks);
+              let m_wt_z, _ = step_k m_work_tasks (char_key "z") in
+              Alcotest.(check bool) "Work_tasks [z] enables zoom" true
+                m_wt_z.nav.zoomed;
+              Alcotest.(check int) "Work_tasks zoomed focusable_pane_count = 1" 1
+                (Model.focusable_pane_count m_wt_z);
+              let m_wt_un, _ = step_k m_wt_z (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Work_tasks Esc unzooms and restores pane 1"
+                true
+                ((not m_wt_un.nav.zoomed) && Int.equal m_wt_un.nav.pane_index 1);
+              let m_work_candle =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work };
+                  work = Work_store.set_tab Nav.Work_candle_scorecard base.work;
+                }
+              in
+              Alcotest.(check bool) "Work_candle_scorecard stays non-zoomable"
+                false (Model.can_zoom_current_view m_work_candle);
+              let m_rt_fusion =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime };
+                  runtime = Runtime_store.set_tab Nav.Runtime_fusion base.runtime;
+                }
+              in
+              Alcotest.(check bool) "Runtime_fusion can zoom" true
+                (Model.can_zoom_current_view m_rt_fusion);
+              let m_rt_lanes =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime };
+                  runtime =
+                    Runtime_store.set_tab Nav.Runtime_failover_lanes base.runtime;
+                }
+              in
+              Alcotest.(check bool) "Runtime_failover_lanes can zoom" true
+                (Model.can_zoom_current_view m_rt_lanes);
+              let m_rt_eff =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime };
+                  runtime =
+                    Runtime_store.set_tab Nav.Runtime_efficiency_spend
+                      base.runtime;
+                }
+              in
+              Alcotest.(check bool) "Runtime_efficiency_spend stays non-zoomable"
+                false (Model.can_zoom_current_view m_rt_eff);
+              (* 2. Compact 80x24 Infra_sandboxes: detail_visible flips false -> true on zoom *)
+              let compact_sb =
+                let c = Model.initial ~cols:80 ~rows:24 () in
+                {
+                  c with
+                  nav = { c.nav with workspace = Nav.Infra };
+                  infra = Infra_store.set_tab Nav.Infra_sandboxes c.infra;
+                }
+              in
+              Alcotest.(check bool)
+                "80x24 Infra_sandboxes unzoomed detail_visible = false" false
+                (Model.detail_visible compact_sb);
+              let compact_sb_z, _ = step_k compact_sb (char_key "z") in
+              Alcotest.(check bool)
+                "80x24 Infra_sandboxes zoomed detail_visible = true" true
+                (compact_sb_z.nav.zoomed && Model.detail_visible compact_sb_z);
+              (* 3. workspace_return_stack preserves Ask_answer draft and restores on Esc *)
+              let ask = sample_ask ~id:"ask-ws-ret" ~keeper:"alpha" () in
+              let m_ask =
+                {
+                  base with
+                  nav =
+                    {
+                      base.nav with
+                      workspace = Nav.Work;
+                      pane_index = 1;
+                      overlay = Some Nav.Ask_answer;
+                    };
+                  work = Work_store.set_tab Nav.Work_inbox base.work;
+                  ask_modal = Some (Model.ask_modal_for ask);
+                }
+              in
+              let m_jumped, _ =
+                Update_nav.jump_to_workspace ~zoomed:true m_ask Nav.Infra
+              in
+              Alcotest.(check bool)
+                "jump_to_workspace moves to Infra zoomed and preserves ask_modal"
+                true
+                (Nav.equal_workspace m_jumped.nav.workspace Nav.Infra
+                && m_jumped.nav.zoomed
+                && Option.is_none m_jumped.nav.overlay
+                && Option.is_some m_jumped.ask_modal
+                && Int.equal (List.length m_jumped.nav.workspace_return_stack) 1);
+              let m_esc1, _ = step_k m_jumped (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "First Esc unzooms jumped destination while keeping return frame"
+                true
+                ((not m_esc1.nav.zoomed)
+                && Nav.equal_workspace m_esc1.nav.workspace Nav.Infra
+                && Int.equal (List.length m_esc1.nav.workspace_return_stack) 1);
+              let m_esc2, _ = step_k m_esc1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Second Esc pops workspace_return_stack back to Ask_answer with draft intact"
+                true
+                (Nav.equal_workspace m_esc2.nav.workspace Nav.Work
+                && Nav.equal_work_tab m_esc2.work.active_tab Nav.Work_inbox
+                && Option.equal Nav.equal_overlay m_esc2.nav.overlay
+                     (Some Nav.Ask_answer)
+                && Option.is_some m_esc2.ask_modal
+                && m_esc2.nav.workspace_return_stack = []);
+              let m_sw, _ = Update_nav.switch_workspace m_jumped Nav.Pulse in
+              Alcotest.(check bool)
+                "Explicit switch_workspace clears workspace_return_stack and ask_modal"
+                true
+                (m_sw.nav.workspace_return_stack = []
+                && Option.is_none m_sw.ask_modal);
+              (* 4. P1-1: Help/sidebar/dive while workspace_return_stack holds Ask_answer preserves ask_modal *)
+              let m_j_help, _ = Update_nav.open_overlay m_jumped Nav.Help in
+              Alcotest.(check bool)
+                "Help opened after Ask_answer jump keeps ask_modal intact" true
+                (Option.is_some m_j_help.ask_modal);
+              let m_j_sb = Update_nav.enter_sidebar_focus m_jumped in
+              Alcotest.(check bool)
+                "Sidebar focus after Ask_answer jump keeps ask_modal intact"
+                true (Option.is_some m_j_sb.ask_modal);
+              let m_j_dive, _ =
+                Update_nav.push_dive m_jumped
+                  (Nav.Dive_work (Nav.Goal_dive "g-1"))
+              in
+              let m_j_dive_pop, _ =
+                step_k m_j_dive (key Keymap.Input.Escape)
+              in
+              Alcotest.(check bool)
+                "Dive push/pop after Ask_answer jump keeps ask_modal intact"
+                true
+                (Option.is_some m_j_dive.ask_modal
+                && Option.is_some m_j_dive_pop.ask_modal);
+              let m_j_pal, _ =
+                Update_nav.open_palette m_jumped Model.Palette_commands
+              in
+              let m_j_pal_esc, _ =
+                step_k m_j_pal (key Keymap.Input.Escape)
+              in
+              Alcotest.(check bool)
+                "Palette open/close after Ask_answer jump keeps ask_modal intact"
+                true
+                (Option.is_some m_j_pal.ask_modal
+                && Option.is_some m_j_pal_esc.ask_modal);
+              let m_j_from_dive, _ =
+                Update_nav.jump_to_workspace ~zoomed:false m_j_dive Nav.Runtime
+              in
+              let m_j_from_dive_back, _ =
+                step_k m_j_from_dive (key Keymap.Input.Escape)
+              in
+              Alcotest.(check bool)
+                "jump_to_workspace from inside dive preserves ask_modal and restores dive on Esc"
+                true
+                (Option.is_some m_j_from_dive.ask_modal
+                && Option.is_some (Model.active_dive m_j_from_dive_back)
+                && Option.is_some m_j_from_dive_back.ask_modal);
+              (* 5. P1-3: Subview flip clears zoom; stale zoom on non-zoomable view normalizes on Esc *)
+              let m_rules_z =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work; zoomed = true; pane_index = 0 };
+                  work =
+                    {
+                      (Work_store.set_tab Nav.Work_inbox base.work) with
+                      inbox_subview = Work_store.Inbox_rules;
+                    };
+                }
+              in
+              let m_hist, _ = step_k m_rules_z (char_key "v") in
+              Alcotest.(check bool)
+                "Work_inbox [v] subview flip clears zoomed" false
+                m_hist.nav.zoomed;
+              let m_stale_z =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work; zoomed = true };
+                  work = Work_store.set_tab Nav.Work_inbox base.work;
+                }
+              in
+              let m_stale_esc, _ =
+                step_k m_stale_z (key Keymap.Input.Escape)
+              in
+              Alcotest.(check bool)
+                "Esc clears stale zoomed on non-zoomable empty Work_inbox" false
+                m_stale_esc.nav.zoomed);
         ] );
     ]

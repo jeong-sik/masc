@@ -24,12 +24,30 @@ type composer_mode =
   | Collapsed_bar
   | Expanded_multiline
 
+type workspace_return_frame = {
+  workspace : Nav.workspace;
+  dive_stack : Nav.dive list;
+  dive_return_stack : (int * bool * Nav.overlay option) list;
+  work_tab : Nav.work_tab;
+  knowledge_tab : Nav.knowledge_tab;
+  runtime_tab : Nav.runtime_tab;
+  infra_tab : Nav.infra_tab;
+  pane_index : int;
+  pre_zoom_pane_index : int option;
+  zoomed : bool;
+  overlay : Nav.overlay option;
+}
+
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
   dive_return_stack : (int * bool * Nav.overlay option) list;
       (** Parallel return frames [(pane_index, zoomed, overlay)] captured on
           {!Update_nav.push_dive} and restored when [Esc] pops {!dive_stack}. *)
+  workspace_return_stack : workspace_return_frame list;
+      (** Explicit cross-workspace jump return frames captured by
+          {!Update_nav.jump_to_workspace} and restored on [Esc] without
+          relying on {!dive_stack} or discarding an open Ask draft. *)
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -52,6 +70,11 @@ type nav_state = {
   modal_edit_cursor : int;
   return_overlay : Nav.overlay option;
 }
+
+val has_preserved_ask_return : nav_state -> bool
+(** [true] when either {!nav_state.dive_return_stack} or
+    {!nav_state.workspace_return_stack} preserves a suspended {!Nav.Ask_answer}
+    overlay whose {!t.ask_modal} draft must stay alive. *)
 
 type pulse_pane =
   | Pulse_attention
@@ -331,8 +354,14 @@ val work_pipeline_verifs_visible : t -> bool
     sufficient vertical space to display at least one verification row. *)
 
 val can_zoom_current_view : t -> bool
-(** [true] iff [z] ([Toggle_zoom]) renders a zoomed view on the active screen
-    (Keeper detail, [Keepers] with a selected keeper, or [Knowledge]). *)
+(** [true] iff [z] ([Toggle_zoom]) renders a zoomed detail view on the active
+    screen (Keeper detail, [Keepers] with a selected keeper, [Knowledge], or a
+    master-detail tab in [Work], [Runtime], or [Infra]). *)
+
+val detail_visible : t -> bool
+(** Single responsive SSOT for whether the active screen currently renders a
+    detail/inspector surface (either split-visible at the current viewport
+    width or expanded via [zoomed = true]). *)
 
 val focusable_pane_count : t -> int
 (** Single source of truth for the exact number of interactive focusable panes
@@ -411,6 +440,9 @@ val body_has_focus : t -> bool
     appear simultaneously focused. *)
 val pane_focused : t -> int -> bool
 (** [body_has_focus m && m.nav.pane_index = idx]. *)
+val detail_pane_focused : detail_index:int -> t -> bool
+(** [body_has_focus m] when zoomed into the active detail surface, otherwise
+    {!pane_focused} [m detail_index]. *)
 val active_focus_label : t -> Say.t
 (** Concise human-readable indicator of the currently focused surface/pane for
     the footer focus pill (e.g. ["1/2 Fleet"], ["COMPOSER"], ["FILTER"]). *)

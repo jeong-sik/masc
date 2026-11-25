@@ -2886,14 +2886,13 @@ let install_client_of_driver = function
    reminder observers (the run's one tool is [submit_reminder_decision]). A
    Keeper already carries its own memory, goals and verification, so the host
    runs with every observer off. Measured 2026-11-24 on turns with one tool
-   call (two main model requests): 5 of the 8 sessions without the six
-   switches below had the run (one of the 5 named a non-existent id instead);
-   the other 3 had no run and differed in three ways, none tried alone: they
-   passed [-c approval_judge="off"] and [-c reasoning_effort="minimal"], and
-   ran under settings that selected the ":ask-me" permission profile. None of
-   the 8 sessions with the switches had it. The host estimated the run's prompt at
-   5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that prompt to the run's
-   tool call. Which id matters was measured with the echo provider only, one
+   call (two main model requests): all 5 sessions without the six switches
+   below had the run (one of the 5 named a non-existent id instead), and
+   none of the 12 sessions with them did (9 passed them as [-c], 3 set them
+   in settings.json, which the host reads the same way). The host estimated
+   the run's prompt at 5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that
+   prompt to the run's tool call. Which id matters was measured with the
+   echo provider only, one
    id at a time: the run's one-tool surface appeared with the goal reminder
    on and the other five off, and did not appear with only the goal reminder
    off; the other five changed nothing there. No live session switched one id
@@ -2921,9 +2920,13 @@ let muse_observer_capability_ids =
    and [full] run in the Keeper's repository, [none] in a fresh empty
    temporary directory (the host also walks up to an ancestor that has a VCS
    marker, so a temporary directory under a repository would load that
-   ancestor's [.mcp.json]). A repeated [-c] key makes the host refuse to run ("one setting,
-   one occurrence"), so an operator [args] must not repeat the observer keys
-   below. *)
+   ancestor's [.mcp.json]). A server named [masc] in such a [.mcp.json] or in
+   the operator's muse settings ([mcpServers]) makes session/new fail with
+   -32030 ("session MCP server name conflicts with a host or plugin
+   server"), because the session carries MASC's bridge under that name; MASC
+   gives the host no settings of its own. A repeated [-c] key makes the host
+   refuse to run ("one setting, one occurrence"), so an operator [args] must
+   not repeat the observer keys below. *)
 let muse_required_args =
   "--trust-workspace"
   :: List.concat_map
@@ -2956,8 +2959,12 @@ let muse_required_args =
    with every character outside [A-Za-z0-9_] replaced by [_] (a tool [a-b]
    is [mcp__masc__a_b], and [mcp__masc__a-b] is unknown), and a listed name
    that matches no registered tool fails every turn. The names in
-   config/tools use only [A-Za-z0-9_]; dynamic tools from other sources were
-   not checked. The glob cannot mismatch, so it stays.
+   config/tools use only [A-Za-z0-9_] and are at most 48 characters
+   (2026-11-24), so the glob matches all of them; dynamic tools from other
+   sources were not checked. The host registers nothing for an empty name or
+   for one whose whole [mcp__<server>__<name>] is longer than 256 characters
+   (names of 245 characters work, 246 fail), so a bridge that lists only
+   such names fails every turn too. The glob stays.
    The host refuses an unknown plain name when the session starts. A name
    that matches no tool fails the first turn with "invalid run
    configuration: unknown tool"; the message gives the name, not the cause.

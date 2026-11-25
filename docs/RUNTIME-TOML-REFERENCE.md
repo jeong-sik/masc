@@ -128,13 +128,12 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   `-c runtime_capabilities.<id>.enabled=false` per bundled reminder observer,
   and a `-c run.toolset=[...]` that follows the Keeper's native tool posture
   (next bullet). It also sets `MUSE_NO_AUTO_UPDATE=1`. The host refuses to
-  start when `args` repeats one of those `-c` keys. With the observers on, 5 of
-  8 measured turns (one tool call each) ended with one more model run, a
+  start when `args` repeats one of those `-c` keys. With the observers on, all
+  5 measured turns (one tool call each) ended with one more model run, a
   prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
-  tool call; the other 3 turns had none and differed in three ways, none tried
-  alone: `approval_judge`, `reasoning_effort`, and the `:ask-me` profile in the
-  operator's settings. With the observers off the run was absent in 8 of 8
-  turns.
+  tool call. With the observers off the run was absent in 12 of 12 turns (9
+  set them with `-c`, 3 in `settings.json`, which the host reads the same
+  way).
   Switching one observer at a time with the echo provider, only the goal
   reminder switch changed whether the run's tool surface appeared; the other
   five are kept without a measurement that shows they are needed.
@@ -163,8 +162,12 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   carry and one the host could not connect to all end that way, so MASC lists
   `mcp__masc__*` only when the bridge lists a tool. The glob also matches the
   tools of a server named `masc__<x>` from a trusted workspace `.mcp.json` or
-  the operator's muse settings. `args` must not contain `run.toolset`, because
-  the host refuses to start on a repeated key. Fusion and runtime verification
+  the operator's muse settings. A server named `masc` in either place makes
+  `session/new` fail with `session MCP server name conflicts with a host or
+  plugin server` (-32030), because the session carries MASC's bridge under that
+  name; MASC gives the host no settings of its own, so Muse Code cannot start
+  a session while such a server exists. `args` must not contain
+  `run.toolset`, because the host refuses to start on a repeated key. Fusion and runtime verification
   run Muse Code at `none`. MASC's own permission policy applies only to
   requests the host forwards. With the operator's muse settings on the
   `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default

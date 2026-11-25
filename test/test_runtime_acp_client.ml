@@ -520,13 +520,26 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
     Runtime_official_client_mcp_http.endpoint bridge in
   check string "name" (Runtime_official_client_mcp_http.server_name bridge)
     server.Runtime_acp_client.name;
+  check string "the Keeper names its bridge masc, the name the glob and the tool policy use"
+    "masc" server.Runtime_acp_client.name;
   check string "url" url server.Runtime_acp_client.url;
   check (list (pair string string)) "headers" headers server.Runtime_acp_client.headers;
   check (list string) "tool names, in order, without the spec that has no name"
     [ "masc_status"; "keeper_skill" ] server.Runtime_acp_client.tool_names;
   let _, empty = started [] in
   check (list string) "a bridge that lists no tool gives no name" []
-    empty.Runtime_acp_client.tool_names
+    empty.Runtime_acp_client.tool_names;
+  (* The record reaches the Muse argv: the glob for a bridge that lists tools,
+     an empty list for one that lists none. *)
+  let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
+  let toolset mcp_server =
+    Runtime_acp_client.For_testing.build_argv
+      ~native_posture:Runtime_native_tools.Native_none ~mcp_server cfg ~temp_gemini_dir:None
+    |> List.filter (String.starts_with ~prefix:"run.toolset=") in
+  check (list string) "a bridge that lists tools reaches the Muse argv as the glob"
+    [ {|run.toolset=["mcp__masc__*"]|} ] (toolset server);
+  check (list string) "a bridge that lists no tool reaches the Muse argv as an empty list"
+    [ "run.toolset=[]" ] (toolset empty)
 ;;
 
 let test_muse_permission_grammar () =

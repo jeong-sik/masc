@@ -43,6 +43,7 @@ import {
   type ProviderUsageHistoryResponse,
   type ProviderUsageScope,
   type RuntimeResolvedPayload,
+  type SetupAccountEmail,
   type SetupIntegration,
   type SetupInventoryPayload,
   type WorkspaceViewProps,
@@ -133,6 +134,14 @@ function scopeDisplayName(scope: ProviderUsageScope): string {
     return scope.providers.map((p) => p.display_name || p.id).join(' · ')
   }
   return scope.scope_id || scope.scope
+}
+
+/** The account line under a provider: its login email and the plan labels
+ *  the client reports, or why the login file was not read. */
+export function accountLine(row: SetupAccountEmail | undefined): string | null {
+  if (row === undefined) return null
+  if (row.state === 'not_read') return `계정 미확인 (${row.cause})`
+  return [row.email, ...row.plan].join(' · ')
 }
 
 function primaryProviderId(scope: ProviderUsageScope): string {
@@ -235,6 +244,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const restingRuntimes = useMemo(
     () => (resolvedData?.runtimes ?? []).filter((r) => r.quota_rest !== null),
     [resolvedData],
+  )
+
+  const accountEmails = new Map<string, SetupAccountEmail>(
+    inventoryObs.kind === 'value' && 'account_emails' in inventoryObs.data && Array.isArray(inventoryObs.data.account_emails)
+      ? inventoryObs.data.account_emails.map((row) => [row.integration_id, row] as const)
+      : [],
   )
 
   const historyState = useMemo(():
@@ -552,6 +567,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const pct = maxUtilizationPct(scope)
     const pid = primaryProviderId(scope)
     const name = scopeDisplayName(scope)
+    const accounts = scope.providers
+      .map((p) => accountLine(accountEmails.get(p.id)))
+      .filter((line): line is string => line !== null)
     const badgeStyle = costBadgeStyle(cls.kind)
 
     return html`
@@ -564,6 +582,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <div style=${{ minWidth: 0 }}>
             <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${name}</div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${scope.scope}</div>
+            ${accounts.map((line) => html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${line}</div>`)}
           </div>
           <span
             class="mono tnum"
@@ -1092,6 +1111,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
                           <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
                             ${integ.id} · ${integ.credential_kind ?? integ.protocol ?? '없음'}
                           </div>
+                          ${accountLine(accountEmails.get(integ.id)) !== null && html`
+                            <div data-testid="provider-account-line" class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                              ${accountLine(accountEmails.get(integ.id))}
+                            </div>
+                          `}
                         </div>
                         <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
                           ${integ.enabled === false ? '비활성' : '활성'}

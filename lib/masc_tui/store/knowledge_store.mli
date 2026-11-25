@@ -314,8 +314,9 @@ val toggle_thread_view : t -> t
 val restore_thread_comment : post_id:string -> previous:t -> t -> t
 (** Keep the same comment and scroll position when a thread refresh returns it. *)
 
-val thread_reading_rect : bp:Masc_tui_ui.Layout.breakpoint -> t -> Rect.t -> Rect.t
-(** Markdown area inside a thread with its tab bar, border, and metadata. *)
+val board_comment_reading_rect :
+  bp:Masc_tui_ui.Layout.breakpoint -> t -> Rect.t -> Rect.t
+(** Markdown area inside a Board detail card in [Thread_comments] view. *)
 
 val step_thread_comment : post_id:string -> delta:int -> t -> t
 (** Open the comment reader and advance within the loaded [post_id] thread. *)
@@ -616,8 +617,19 @@ val memory_flow_input_of_diff :
   memory_diff_window ->
   Masc_tui_ui.Memory_flow.input
 
+val select_post_by_id :
+  since_ns:Clock.Mono.t -> post_id:string -> t -> t
+(** Select [post_id] on [Knowledge_board], unfolding its succession chain or
+    clearing blocking filters if needed, resetting thread view, and marking
+    [active_thread] loading. *)
+val select_wiki_slug : slug:string -> t -> t
+(** Select [slug] on [Knowledge_wiki], clearing [filter_query] if hidden. *)
+val select_artifact_by_id : id_or_sha:string -> t -> t
+(** Select [id_or_sha] on [Knowledge_artifacts], clearing [filter_query] if
+    hidden and resetting in-document search state. *)
+
 val artifact_by_id : t -> string -> Wire_knowledge.artifact_entry option
-(** The loaded artifact an [Artifact_dive] names. *)
+(** Look up a loaded artifact by its exact [id]. *)
 
 val move_selection :
   ?pane_index:int ->

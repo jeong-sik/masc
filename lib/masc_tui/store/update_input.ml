@@ -174,11 +174,7 @@ let settings_dry_run_max_scroll (m : Model.t) =
 let keeper_config_dry_run_max_scroll (m : Model.t) =
   let name_opt, embedded =
     match Model.active_dive m with
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        ) ->
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
         (None, true)
     | None ->
         let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
@@ -1147,7 +1143,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             | Some _ | None -> (m, []))
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
             (m, [])
         | None -> (
@@ -1345,12 +1340,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
 
 let keeper_config_target_name (m : Model.t) =
   match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None ->
       if Model.is_keeper_config_active m then Model.selected_keeper_name m
       else None
@@ -2595,10 +2585,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 in
                                 Some ({ m with drafts }, [])
                             | None -> None)
-                        | ( ( Some
-                                ( Nav.Dive_work _
-                                | Nav.Dive_knowledge _
-                                | Nav.Dive_runtime _ )
+                        | ( ( Some (Nav.Dive_work _ | Nav.Dive_runtime _)
                             | None )
                           , ( Keymap.Input.Char _
                             | Keymap.Input.Enter
@@ -2655,13 +2642,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
                                     ~goal_id m
                                 , [] )
-                          | ( Some (Nav.Dive_knowledge (Nav.Artifact_dive _))
-                            , Keymap.Input.Char "M" )
-                            when is_printable_key replayed
-                                 && Option.is_some (Model.focused_artifact m) ->
-                              Some
-                                (Update_nav.open_overlay m
-                                   (Nav.System_gate Nav.Media_viewer))
                           | None, Keymap.Input.Char "M"
                             when is_printable_key replayed
                                  && Nav.equal_workspace m.nav.workspace
@@ -2682,10 +2662,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                       ( Nav.Goal_dive _
                                       | Nav.Task_dive _
                                       | Nav.Verification_dive _ )
-                                  | Nav.Dive_knowledge
-                                      ( Nav.Thread_dive _
-                                      | Nav.Wiki_dive _
-                                      | Nav.Artifact_dive _ )
                                   | Nav.Dive_runtime _ )
                               | None )
                             , ( Keymap.Input.Char _
@@ -2755,45 +2731,23 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             | Some "Y"
                               when Option.is_none
                                      (Model.fast_approval_strip_item m)
-                                   && (match Model.active_dive m with
-                                   | Some
-                                       (Nav.Dive_knowledge (Nav.Artifact_dive _))
-                                     ->
-                                       true
-                                   | Some
-                                       ( Nav.Dive_knowledge
-                                           (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                                       | Nav.Dive_work _
-                                       | Nav.Dive_runtime _
-                                       ) ->
-                                       false
-                                   | None ->
-                                       Nav.equal_workspace m.nav.workspace
-                                         Nav.Knowledge
-                                       && Nav.equal_knowledge_tab
-                                            m.knowledge.active_tab
-                                            Nav.Knowledge_artifacts) ->
+                                   && Option.is_none (Model.active_dive m)
+                                   && Nav.equal_workspace m.nav.workspace
+                                        Nav.Knowledge
+                                   && Nav.equal_knowledge_tab
+                                        m.knowledge.active_tab
+                                        Nav.Knowledge_artifacts ->
                                 Some Keymap.Copy_public_url
                             | Some "N"
                               when Model.is_artifact_dive_search_active m ->
                                 Some Keymap.Search_prev_match
                             | Some "p"
-                              when (match Model.active_dive m with
-                                   | Some
-                                       (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
-                                       true
-                                   | Some
-                                       ( Nav.Dive_knowledge
-                                           (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                                       | Nav.Dive_work _
-                                       | Nav.Dive_runtime _ ) ->
-                                       false
-                                   | None ->
-                                       (Nav.equal_workspace m.nav.workspace
+                              when Option.is_none (Model.active_dive m)
+                                   && ((Nav.equal_workspace m.nav.workspace
                                           Nav.Knowledge
-                                       && Nav.equal_knowledge_tab
-                                            m.knowledge.active_tab
-                                            Nav.Knowledge_board)
+                                        && Nav.equal_knowledge_tab
+                                             m.knowledge.active_tab
+                                             Nav.Knowledge_board)
                                        || (Nav.equal_workspace m.nav.workspace
                                              Nav.Infra
                                           && (Nav.equal_infra_tab
@@ -2830,7 +2784,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        ( Nav.Dive_work
                                            ( Nav.Goal_dive _
                                            | Nav.Verification_dive _ )
-                                       | Nav.Dive_knowledge _
                                        | Nav.Dive_runtime _
                                        ) ->
                                        false
@@ -2841,24 +2794,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                             Nav.Work_tasks) ->
                                 Some Keymap.Link_task_goal
                             | Some "R"
-                              when (match Model.active_dive m with
-                                   | Some
-                                       (Nav.Dive_knowledge (Nav.Thread_dive _))
-                                     ->
-                                       true
-                                   | Some
-                                       ( Nav.Dive_knowledge
-                                           (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                                       | Nav.Dive_work _
-                                       | Nav.Dive_runtime _
-                                       ) ->
-                                       false
-                                   | None ->
-                                       Nav.equal_workspace m.nav.workspace
-                                         Nav.Knowledge
-                                       && Nav.equal_knowledge_tab
-                                            m.knowledge.active_tab
-                                            Nav.Knowledge_board) ->
+                              when Option.is_none (Model.active_dive m)
+                                   && Nav.equal_workspace m.nav.workspace
+                                        Nav.Knowledge
+                                   && Nav.equal_knowledge_tab
+                                        m.knowledge.active_tab
+                                        Nav.Knowledge_board ->
                                 Some Keymap.Context_primary_action
                             | Some "t"
                               when Option.is_none (Model.active_dive m)

@@ -716,6 +716,11 @@ let set_tab active_tab t =
     memory_diff_window;
     prev_window_before_pin;
     armed_vote = None;
+    thread_view = Thread_post;
+    thread_selected_comment = None;
+    thread_comment_scroll = 0;
+    artifact_search_query = "";
+    artifact_search_match_idx = 0;
     pending_artifact_revision = None;
     selected_index = 0;
     scroll_offset = 0;
@@ -900,15 +905,14 @@ let toggle_thread_view t =
   in
   { t with thread_view; armed_vote = None }
 
-let thread_reading_rect ~bp t rect =
-  let card = Rect.inset ~left:1 ~right:1 ~top:2 ~bottom:1 rect in
-  let header =
-    match t.thread_view with
-    | Thread_post when card.h >= 7 -> 2
-    | Thread_post | Thread_comments -> 1
+let board_comment_reading_rect ~bp t rect =
+  let card = Masc_tui_ui.Card.inner_rect rect in
+  let vote_row =
+    match t.armed_vote with
+    | Some (Vote_comment _, _) -> 1
+    | Some (Vote_post _, _) | None -> 0
   in
-  let vote_row = if Option.is_some t.armed_vote then 1 else 0 in
-  Rect.inset ~top:(header + vote_row) card
+  Rect.inset ~top:(1 + vote_row) card
   |> Masc_tui_ui.Card.pad_inner ~pad_x:(Masc_tui_ui.Layout.card_pad_x bp)
 
 let step_thread_comment ~post_id ~delta t =
@@ -1966,6 +1970,110 @@ let selected_artifact t =
   let items = artifacts_filtered t in
   List.nth_opt items (clamp_index (List.length items) t.selected_index)
 
+let select_post_by_id ~since_ns ~post_id t =
+  let base0 = set_tab Nav.Knowledge_board t in
+  let base1 =
+    match Observed.to_option base0.board with
+    | Some feed -> (
+        match
+          List.find_opt
+            (fun (p : Wire_knowledge.board_post) -> String.equal p.id post_id)
+            feed.posts
+        with
+        | Some p -> (
+            let expanded_succession_chains =
+              match p.succession_chain_root_id with
+              | Some root -> String_set.add root base0.expanded_succession_chains
+              | None -> base0.expanded_succession_chains
+            in
+            let with_chain = { base0 with expanded_succession_chains } in
+            match index_of_post_id post_id (board_display_posts with_chain) with
+            | Some _ -> with_chain
+            | None ->
+                let cleared_filter = { with_chain with filter_query = "" } in
+                match
+                  index_of_post_id post_id (board_display_posts cleared_filter)
+                with
+                | Some _ -> cleared_filter
+                | None ->
+                    let cleared_hearth =
+                      { cleared_filter with board_hearth = None }
+                    in
+                    match
+                      index_of_post_id post_id
+                        (board_display_posts cleared_hearth)
+                    with
+                    | Some _ -> cleared_hearth
+                    | None -> { cleared_hearth with board_signal_only = false })
+        | None -> base0)
+    | None -> base0
+  in
+  let selected_index =
+    match index_of_post_id post_id (board_display_posts base1) with
+    | Some idx -> idx
+    | None -> base1.selected_index
+  in
+  let header_row, vis_row = visual_row_for_selection base1 ~selected_index in
+  let scroll_offset =
+    adjust_grouped_scroll ~scroll:base1.scroll_offset ~header_row vis_row
+  in
+  { base1 with selected_index; scroll_offset }
+  |> reset_thread_view
+  |> mark_thread_loading ~post_id ~since_ns
+
+let select_wiki_slug ~slug t =
+  let base0 = set_tab Nav.Knowledge_wiki t in
+  let base1 =
+    match index_of_wiki_slug slug (wiki_display_pages base0) with
+    | Some _ -> base0
+    | None -> { base0 with filter_query = "" }
+  in
+  let selected_index =
+    match index_of_wiki_slug slug (wiki_display_pages base1) with
+    | Some idx -> idx
+    | None -> base1.selected_index
+  in
+  let header_row, vis_row = visual_row_for_selection base1 ~selected_index in
+  let scroll_offset =
+    adjust_grouped_scroll ~scroll:base1.scroll_offset ~header_row vis_row
+  in
+  { base1 with selected_index; scroll_offset; detail_scroll_offset = 0 }
+
+let select_artifact_by_id ~id_or_sha t =
+  let base0 = set_tab Nav.Knowledge_artifacts t in
+  let find_idx items =
+    let rec loop i = function
+      | [] -> None
+      | (a : Wire_knowledge.artifact_entry) :: rest ->
+          if String.equal a.id id_or_sha || String.equal a.body.sha256 id_or_sha
+          then Some i
+          else loop (i + 1) rest
+    in
+    loop 0 items
+  in
+  let base1 =
+    match find_idx (artifacts_filtered base0) with
+    | Some _ -> base0
+    | None -> { base0 with filter_query = "" }
+  in
+  let selected_index =
+    match find_idx (artifacts_filtered base1) with
+    | Some idx -> idx
+    | None -> base1.selected_index
+  in
+  let scroll_offset =
+    Store_scroll.adjust_scroll ~viewport_rows:Store_scroll.default_viewport_rows
+      ~scroll:base1.scroll_offset selected_index
+  in
+  {
+    base1 with
+    selected_index;
+    scroll_offset;
+    detail_scroll_offset = 0;
+    artifact_search_query = "";
+    artifact_search_match_idx = 0;
+  }
+
 let artifact_by_id t id =
   match Observed.to_option t.artifacts with
   | Some items ->
@@ -2625,15 +2733,12 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
             ~header_row vis_row
         in
+        let same_selection = Int.equal selected_index t.selected_index in
         let detail_scroll_offset =
-          if Int.equal selected_index t.selected_index then
-            t.detail_scroll_offset
-          else 0
+          if same_selection then t.detail_scroll_offset else 0
         in
         let pending_wiki_edit_slug =
-          if Int.equal selected_index t.selected_index then
-            t.pending_wiki_edit_slug
-          else None
+          if same_selection then t.pending_wiki_edit_slug else None
         in
         {
           t with
@@ -2642,12 +2747,17 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           detail_scroll_offset;
           pending_wiki_edit_slug;
           pending_artifact_revision =
-            (if Int.equal selected_index t.selected_index then
-               t.pending_artifact_revision
-             else None);
-          armed_vote =
-            (if Int.equal selected_index t.selected_index then t.armed_vote
-            else None);
+            (if same_selection then t.pending_artifact_revision else None);
+          armed_vote = (if same_selection then t.armed_vote else None);
+          thread_view = (if same_selection then t.thread_view else Thread_post);
+          thread_selected_comment =
+            (if same_selection then t.thread_selected_comment else None);
+          thread_comment_scroll =
+            (if same_selection then t.thread_comment_scroll else 0);
+          artifact_search_query =
+            (if same_selection then t.artifact_search_query else "");
+          artifact_search_match_idx =
+            (if same_selection then t.artifact_search_match_idx else 0);
         }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then

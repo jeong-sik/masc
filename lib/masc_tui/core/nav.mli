@@ -58,11 +58,6 @@ type work_dive_target =
   | Task_dive of string
   | Verification_dive of string
 
-type knowledge_dive_target =
-  | Thread_dive of string
-  | Wiki_dive of string
-  | Artifact_dive of string
-
 type runtime_dive_target =
   | Tool_dive of string
   | Skill_dive of string
@@ -70,7 +65,6 @@ type runtime_dive_target =
 
 type dive =
   | Dive_work of work_dive_target
-  | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target
 
 type settings_tab =
@@ -267,7 +261,6 @@ val equal_runtime_tab : runtime_tab -> runtime_tab -> bool
 val equal_infra_tab : infra_tab -> infra_tab -> bool
 val equal_keeper_tab : keeper_tab -> keeper_tab -> bool
 val equal_work_dive_target : work_dive_target -> work_dive_target -> bool
-val equal_knowledge_dive_target : knowledge_dive_target -> knowledge_dive_target -> bool
 val equal_runtime_dive_target : runtime_dive_target -> runtime_dive_target -> bool
 val equal_dive : dive -> dive -> bool
 val equal_settings_tab : settings_tab -> settings_tab -> bool

@@ -462,11 +462,11 @@ val is_memory_diff_pin_surface : t -> bool
     uppercase [D] pins the diff range instead of arming keeper stop. *)
 
 val is_artifact_dive_search_active : t -> bool
-(** [true] iff no overlay/composer/filter/sidebar holds focus, the active dive
-    is [Artifact_dive], and [knowledge.artifact_search_query] is non-empty
-    after trimming. In this state bare [n]/[N] step search matches instead of
-    firing Approval Strip [Fast_deny_top] (which remains reachable via
-    [Alt+N]). *)
+(** [true] iff no overlay/composer/filter/sidebar holds focus,
+    [Knowledge > Artifacts] has detail focus (pane 1 or zoomed), and
+    [knowledge.artifact_search_query] is non-empty after trimming. In this
+    state bare [n]/[N] step search matches instead of firing Approval Strip
+    [Fast_deny_top] (which remains reachable via [Alt+N]). *)
 
 val target_keeper_for_lifecycle : t -> string option
 (** Single-SSOT target keeper for lifecycle actions ([W]/[D], slash commands,
@@ -500,6 +500,13 @@ val detail_pane_focused : detail_index:int -> t -> bool
 val active_focus_label : t -> Say.t
 (** Concise human-readable indicator of the currently focused surface/pane for
     the footer focus pill (e.g. ["1/2 Fleet"], ["COMPOSER"], ["FILTER"]). *)
+val is_board_detail_active : t -> bool
+(** [true] when no overlay or dive is open and [3 Knowledge > Board] has
+    detail focus ([pane_index >= 1] or zoomed). *)
+val is_artifact_doc_search_active : t -> bool
+(** [true] when no overlay or dive is open and [3 Knowledge > Artifacts] has
+    detail focus ([pane_index >= 1] or zoomed), routing [/], [n], and [N] to
+    in-document artifact search. *)
 val is_text_capture_active : t -> bool
 (** [true] when a free-text input surface (composer, filter bar, palette,
     settings field editor, or inline modal) owns printable characters. *)
@@ -507,7 +514,7 @@ val is_text_capture_active : t -> bool
 val inline_modal_for : Nav.inline_action_kind -> inline_modal_state
 val is_viewing_wiki_slug : slug:string -> t -> bool
 (** [true] when no overlay is open and the user is currently viewing [slug]
-    either in the Knowledge Wiki tab or in a [Wiki_dive slug]. *)
+    in the Knowledge Wiki tab. *)
 val open_wiki_edit_modal_for_detail :
   Wire_knowledge.wiki_page_detail -> t -> t
 (** Open the inline Wiki edit modal seeded with [detail], recording [detail]
@@ -664,9 +671,7 @@ val build_commit_mismatch : t -> bool
 
 val focused_artifact : t -> Wire_knowledge.artifact_entry option
 (** Authoritative artifact for [Nav.Media_viewer] rendering, scrolling, and
-    actions: resolves the [Nav.Artifact_dive] target when diving into an
-    artifact (never falling back to an unrelated list selection), otherwise
-    returns [Knowledge_store.selected_artifact m.knowledge]. *)
+    actions: returns [Knowledge_store.selected_artifact m.knowledge]. *)
 
 type keeper_banner_row = {
   tone : Theme.status_token;

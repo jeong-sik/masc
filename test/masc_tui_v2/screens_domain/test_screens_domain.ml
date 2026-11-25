@@ -1601,25 +1601,33 @@ let test_knowledge_all_tabs_and_dives () =
                    in
                    assert_grid_invariants ~label:(lbl ^ "/WorldDiff") g_wd))
             tabs;
-          (* All 3 Knowledge Dives *)
-          let dives =
-            [
-              Nav.Thread_dive "p-chain-22";
-              Nav.Wiki_dive "release-runbook";
-              Nav.Artifact_dive "artifact-e3b0c44298fc1c149afbf4c8996fb924";
-            ]
-          in
+          (* Zoomed Knowledge surfaces (Board Post/Comments, Wiki 66/34 Links+Lint, Artifacts) *)
           List.iter
-            (fun target ->
+            (fun (lbl, knowledge) ->
+              let m_z =
+                {
+                  m_base with
+                  nav = { m_base.nav with workspace = Nav.Knowledge; zoomed = true };
+                  knowledge;
+                }
+              in
               let g =
                 render_into ~cols ~rows (fun ~cache ~rect gr ->
-                    Screen_knowledge.render_dive ~target ~model:m_base ~cache
-                      ~rect gr)
+                    Screen_knowledge.render ~model:m_z ~cache ~rect gr)
               in
               assert_grid_invariants
-                ~label:(Printf.sprintf "KnowledgeDive/%dx%d" cols rows)
+                ~label:(Printf.sprintf "KnowledgeZoom/%s/%dx%d" lbl cols rows)
                 g)
-            dives)
+            [
+              ("BoardPost", Knowledge_store.set_tab Nav.Knowledge_board m_base.knowledge);
+              ( "BoardComments"
+              , m_base.knowledge
+                |> Knowledge_store.set_tab Nav.Knowledge_board
+                |> Knowledge_store.toggle_thread_view );
+              ("Wiki", Knowledge_store.set_tab Nav.Knowledge_wiki m_base.knowledge);
+              ( "Artifacts"
+              , Knowledge_store.set_tab Nav.Knowledge_artifacts m_base.knowledge );
+            ])
         langs)
     sizes
 
@@ -2052,16 +2060,23 @@ let test_p1_p2_verifier_regressions () =
     (contains_sub ~needle:"Beta Report" ~haystack:txt_af);
   Alcotest.(check bool) "P1-4 filtered Artifacts hides Alpha Report" false
     (contains_sub ~needle:"Alpha Report" ~haystack:txt_af);
-  (* P1-5: Wiki_dive slug matching prevents stale page body/backlinks bleed *)
+  (* P1-5: Zoomed Knowledge > Wiki slug matching prevents stale page body/backlinks bleed *)
+  let m_wzoom =
+    {
+      m_base with
+      nav = { m_base.nav with workspace = Nav.Knowledge; zoomed = true };
+      knowledge =
+        Knowledge_store.select_wiki_slug ~slug:"orphan-notes" m_base.knowledge;
+    }
+  in
   let g_wdive =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect g ->
-        Screen_knowledge.render_dive ~target:(Nav.Wiki_dive "orphan-notes")
-          ~model:m_base ~cache ~rect g)
+        Screen_knowledge.render ~model:m_wzoom ~cache ~rect g)
   in
   let txt_wdive = grid_all_text g_wdive in
-  Alcotest.(check bool) "P1-5 Wiki_dive does not leak release-runbook body" false
+  Alcotest.(check bool) "P1-5 zoomed Wiki does not leak release-runbook body" false
     (contains_sub ~needle:"let ok = true" ~haystack:txt_wdive);
-  Alcotest.(check bool) "P1-5 Wiki_dive does not leak release-runbook backlinks"
+  Alcotest.(check bool) "P1-5 zoomed Wiki does not leak release-runbook backlinks"
     false
     (contains_sub ~needle:"ops-checklist" ~haystack:txt_wdive);
   (* P1-6: Memory recovery acts drop conflicting [1]..[5] workspace-switch prefixes *)
@@ -3806,28 +3821,21 @@ let test_pr54465_p2_render_regressions () =
   in
   Alcotest.(check bool) "P2-3: list detail renders body fetch failure" true
     (contains_sub ~needle:"Body fetch failed" ~haystack:(grid_all_text g_list));
-  (* P2-2: Artifact_dive renders explicit not-found notice when target missing *)
-  let g_dive_missing =
+  (* P2-3: Zoomed Artifacts renders failure reason for selected artifact *)
+  let g_zoom_fail =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_knowledge.render_dive
-          ~target:(Nav.Artifact_dive "art-missing")
-          ~model:{ m0 with knowledge = k_fail }
+        Screen_knowledge.render
+          ~model:
+            {
+              m0 with
+              nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
+              knowledge = k_fail;
+            }
           ~cache ~rect gr)
   in
-  Alcotest.(check bool) "P2-2: Artifact_dive renders unmatched target notice" true
-    (contains_sub ~needle:"not found in list"
-       ~haystack:(grid_all_text g_dive_missing));
-  (* P2-3: Artifact_dive renders failure reason for matching artifact *)
-  let g_dive_fail =
-    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_knowledge.render_dive
-          ~target:(Nav.Artifact_dive "art-fail-01")
-          ~model:{ m0 with knowledge = k_fail }
-          ~cache ~rect gr)
-  in
-  Alcotest.(check bool) "P2-3: Artifact_dive renders body fetch failure" true
+  Alcotest.(check bool) "P2-3: zoomed Artifacts renders body fetch failure" true
     (contains_sub ~needle:"Body fetch failed"
-       ~haystack:(grid_all_text g_dive_fail))
+       ~haystack:(grid_all_text g_zoom_fail))
 
 let test_wave2_tools_artifacts_board_renders () =
   let m_base = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
@@ -4136,9 +4144,11 @@ let test_wave2_tools_artifacts_board_renders () =
   let m_art_doc =
     {
       m_base with
+      nav = { m_base.nav with workspace = Nav.Knowledge; zoomed = true };
       knowledge =
         m_base.knowledge
         |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.select_artifact_by_id ~id_or_sha:sel_art.id
         |> Knowledge_store.apply_artifact_detail ~observed_at:now_mono html_detail
         |> Knowledge_store.apply_artifact_checks ~observed_at:now_mono [ chk ]
         |> Knowledge_store.set_artifact_search "Val2";
@@ -4146,14 +4156,13 @@ let test_wave2_tools_artifacts_board_renders () =
   in
   let g_doc =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_knowledge.render_dive ~target:(Nav.Artifact_dive sel_art.id)
-          ~model:m_art_doc ~cache ~rect gr)
+        Screen_knowledge.render ~model:m_art_doc ~cache ~rect gr)
   in
-  assert_grid_invariants ~label:"Wave2/ArtifactDiveDoc" g_doc;
+  assert_grid_invariants ~label:"Wave2/ArtifactZoomDoc" g_doc;
   let txt_doc = grid_all_text g_doc in
-  Alcotest.(check bool) "Artifact_dive Doc strips <script>" false
+  Alcotest.(check bool) "Zoomed Artifacts Doc strips <script>" false
     (contains_sub ~needle:"BAD_SCRIPT_TOKEN" ~haystack:txt_doc);
-  Alcotest.(check bool) "Artifact_dive Doc renders table values & Checked/Shared" true
+  Alcotest.(check bool) "Zoomed Artifacts Doc renders table values & Checked/Shared" true
     (contains_sub ~needle:"Val2" ~haystack:txt_doc
      && contains_sub ~needle:"Checked" ~haystack:txt_doc
      && contains_sub ~needle:"Shared" ~haystack:txt_doc);
@@ -4165,11 +4174,10 @@ let test_wave2_tools_artifacts_board_renders () =
   in
   let g_raw =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_knowledge.render_dive ~target:(Nav.Artifact_dive sel_art.id)
-          ~model:m_art_raw ~cache ~rect gr)
+        Screen_knowledge.render ~model:m_art_raw ~cache ~rect gr)
   in
-  assert_grid_invariants ~label:"Wave2/ArtifactDiveRaw" g_raw;
-  Alcotest.(check bool) "Artifact_dive Raw shows raw HTML source" true
+  assert_grid_invariants ~label:"Wave2/ArtifactZoomRaw" g_raw;
+  Alcotest.(check bool) "Zoomed Artifacts Raw shows raw HTML source" true
     (contains_sub ~needle:"<h1>Wave 2 Table</h1>" ~haystack:(grid_all_text g_raw));
 
   (* 3. Board thread view and nested comment selection. *)
@@ -4209,10 +4217,16 @@ let test_wave2_tools_artifacts_board_renders () =
   in
   let g_th =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_knowledge.render_dive ~target:(Nav.Thread_dive p_root.id)
-          ~model:{ m_base with knowledge = k_armed } ~cache ~rect gr)
+        Screen_knowledge.render
+          ~model:
+            {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Knowledge; zoomed = true };
+              knowledge = k_armed;
+            }
+          ~cache ~rect gr)
   in
-  assert_grid_invariants ~label:"Wave2/ThreadDiveThreaded" g_th;
+  assert_grid_invariants ~label:"Wave2/BoardZoomThreaded" g_th;
   let selected_reply =
     k_armed
     |> Knowledge_store.toggle_thread_view
@@ -4333,7 +4347,7 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
   Alcotest.(check int) "an undisplayed pull leaves the final diff line reachable"
     (diff_end compact) (diff_end two_pulls);
 
-  (* Board preview & Thread_dive: multi-line comments, closed/audience tags, failed load state *)
+  (* Board preview & zoomed Board: multi-line comments, closed/audience tags, failed load state *)
   let p_root = Option.get (Knowledge_store.selected_post m_base.knowledge) in
   let multi_c : Wire_knowledge.board_comment =
     {

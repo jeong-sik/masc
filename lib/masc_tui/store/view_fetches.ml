@@ -551,48 +551,6 @@ let fetches_for_dive ~force (m : Model.t) =
            (Cmd.Get_verifications
               { view = m.work.verification_view; limit = 50; offset = 0 }))
       @ extra
-  | Some (Nav.Dive_knowledge target) -> (
-      match target with
-      | Nav.Thread_dive post_id ->
-          [ Cmd.Get_board_thread { post_id; comment_limit = Some 100 } ]
-      | Nav.Wiki_dive slug ->
-          [
-            Cmd.Get_wiki_page { page = slug };
-            Cmd.Get_wiki_log { limit = Some 30; page = Some slug };
-          ]
-      | Nav.Artifact_dive target ->
-          let art_id, rev =
-            match Knowledge_store.find_artifact_by_id_or_sha target m.knowledge with
-            | Some a -> (a.id, Some a.revision)
-            | None -> (target, None)
-          in
-          let detail_needed =
-            match m.knowledge.active_artifact_detail with
-            | Observed.Value { data; stale = false; _ } ->
-                force
-                || not
-                     (String.equal data.artifact.id target
-                      || String.equal data.artifact.body.sha256 target)
-            | Observed.Failed { retryable = false; _ } when not force -> (
-                match m.knowledge.active_artifact_detail_target with
-                | Some failed_id ->
-                    not
-                      (String.equal failed_id target
-                       || String.equal failed_id art_id)
-                | None -> true)
-            | Observed.Loading _
-            | Observed.Value { stale = true; _ }
-            | Observed.Absent
-            | Observed.Unreported
-            | Observed.Failed _ ->
-                true
-          in
-          []
-          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
-          |> add_if
-               (needs_fetch ~force m.knowledge.artifact_checks)
-               Cmd.Get_artifact_checks
-          |> add_if detail_needed (Cmd.Get_artifact_detail { id = art_id; revision = rev }))
   | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
       let bucket, since_hours =
         Runtime_store.tools_window_params m.runtime.tools_window
@@ -1475,9 +1433,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
       | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> true
       | Some
           ( Nav.Dive_work _
-          | Nav.Dive_knowledge _
-          | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
-          ) ->
+          | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _) ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -1554,9 +1510,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
           | Some { reference_json = None; _ } | None -> [])
     | Some
         ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-        )
+        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
     | None ->
         []
   in
@@ -1571,12 +1525,7 @@ let overlay_fetches (m : Model.t) =
    with no dive open. *)
 let chat_tab_shown ~keeper (m : Model.t) =
   match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
@@ -1591,7 +1540,7 @@ let cut_reply_fetches ~keeper (m : Model.t) =
 
 let active_chat_keeper (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) -> None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Keepers

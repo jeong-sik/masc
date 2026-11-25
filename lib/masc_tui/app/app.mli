@@ -180,7 +180,7 @@ val stop_input_reader : input_reader_handle -> unit
 (** Signal the input reader daemon to stop and await its clean termination. *)
 
 val can_launch_pending_wiki_editor : Model.t -> bool
-(** [true] iff the TUI is still viewing Wiki ([Knowledge_wiki] or [Wiki_dive])
+(** [true] iff the TUI is still viewing Wiki ([Knowledge_wiki])
     with no active overlay, text-capture surface, or micro/too-small viewport
     gate, so a completed async wiki pre-fetch may safely suspend the terminal
     for [$EDITOR]. *)

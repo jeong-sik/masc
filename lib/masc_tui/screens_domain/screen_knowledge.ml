@@ -53,8 +53,155 @@ let format_karma_badge ~lang (p : Wire_knowledge.board_post) =
   else score_part ^ Typography.sep_dot ^ karma_part
 
 let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~now_unix ~(k : Knowledge_store.t)
+    ~lang ~now_unix ~(model : Model.t) ~(k : Knowledge_store.t)
     (post_opt : Wire_knowledge.board_post option) ~focused =
+  let chain_subtitle (p : Wire_knowledge.board_post) =
+    let hearth_s =
+      match p.hearth with Some h -> "#" ^ h | None -> "#general"
+    in
+    let all_posts =
+      match Observed.to_option k.board with Some f -> f.posts | None -> []
+    in
+    match p.succession_chain_root_id with
+    | Some root ->
+        let chain =
+          List.filter
+            (fun (bp : Wire_knowledge.board_post) ->
+              match bp.succession_chain_root_id with
+              | Some r -> String.equal r root
+              | None -> false)
+            all_posts
+        in
+        let n =
+          Int.max (List.length chain)
+            (match p.chain_depth with Some d -> d | None -> 1)
+        in
+        let cur = match p.chain_depth with Some d -> d | None -> n in
+        if n > 1 then Printf.sprintf "Chain #%d/%d · %s" cur n hearth_s
+        else hearth_s
+    | None -> (
+        match p.chain_depth with
+        | Some d when d > 1 -> Printf.sprintf "[x%d] %s" d hearth_s
+        | Some _ | None -> hearth_s)
+  in
+  let reading_comments =
+    match k.thread_view, post_opt with
+    | Knowledge_store.Thread_comments, Some _ -> true
+    | Knowledge_store.Thread_comments, None
+    | Knowledge_store.Thread_post, _ ->
+        false
+  in
+  if reading_comments then
+    match post_opt with
+    | None -> ()
+    | Some p ->
+        let post_id = p.id in
+        let selected = Knowledge_store.selected_thread_comment_at ~post_id k in
+        let thread =
+          match k.active_thread with
+          | Observed.Value { data = post, _; _ } as slot
+            when String.equal post.id post_id ->
+              slot
+          | (Observed.Loading _ | Observed.Failed _) as slot
+            when Option.equal String.equal k.active_thread_target (Some post_id)
+            ->
+              slot
+          | Observed.Value _
+          | Observed.Loading _
+          | Observed.Failed _
+          | Observed.Absent
+          | Observed.Unreported ->
+              Observed.loading ~since_ns:model.freshness.last_mono
+        in
+        let karma_b =
+          H.make_badge ~glyph:Glyph.Delta_up ~tone:Theme.Status_ok
+            (format_karma_badge ~lang p)
+        in
+        let hotkey =
+          match selected with
+          | Some _ ->
+              Say.make
+                ~ko:"[v] 본문 · < / > 댓글 이동 · [c] 답글 · + / - 투표(2회)"
+                ~en:"[v] Post · < / > Comment · [c] Reply · + / - Vote (2x)"
+          | None -> Say.make ~ko:"[v] 본문" ~en:"[v] Post"
+        in
+        let inner =
+          Card.draw ~cache grid ~rect ~theme
+            (H.card_spec ~subtitle:(chain_subtitle p) ~badge:karma_b ~focused
+               ~hotkey:(Say.resolve lang hotkey) p.title)
+        in
+        if not (Rect.is_empty inner) then
+          match selected, Observed.to_option thread with
+          | Some (index, tc), Some (_, comments) ->
+              let c = tc.comment in
+              let age = H.format_age ~now_unix c.created_at_unix in
+              let aud_s =
+                match
+                  Knowledge_store.comment_audience_for ~post_id
+                    ~comment_id:c.id k
+                with
+                | Some a -> " · " ^ a
+                | None -> ""
+              in
+              let pos_s =
+                match Knowledge_store.active_comment_page_for ~post_id k with
+                | Some cp when cp.total > cp.returned ->
+                    Printf.sprintf "%d/%d (%d/%d%s)" (index + 1)
+                      (List.length comments) cp.returned cp.total
+                      (if Option.is_some cp.next_offset || cp.offset > 0 then "+"
+                       else "")
+                | Some _ | None ->
+                    Printf.sprintf "%d/%d" (index + 1) (List.length comments)
+              in
+              let author =
+                Printf.sprintf "%s · %s@%s%s" pos_s
+                  (if Option.is_some c.parent_id then "↳ " else "")
+                  c.author aud_s
+              in
+              let meta =
+                Printf.sprintf "%s%d · %s" (Glyph.to_utf8 Glyph.Delta_up) c.score
+                  age
+              in
+              let header = Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1 in
+              Card.draw_section_band ~pad_x:(Layout.card_pad_x bp) grid
+                ~rect:header ~theme ~left_title:author ~right_meta:meta ();
+              let content =
+                Knowledge_store.board_comment_reading_rect ~bp k rect
+              in
+              (match k.armed_vote with
+              | Some (Knowledge_store.Vote_comment _, dir)
+                when content.w > 0 && content.y - 1 >= inner.y
+                     && content.y - 1 < Rect.bottom inner ->
+                  let y = content.y - 1 in
+                  let key = match dir with `Up -> "[+]" | `Down -> "[-]" in
+                  Card.draw_left_rail ~tone:Theme.Status_attention grid
+                    ~x:content.x ~y ~h:1 ~theme;
+                  ignore
+                    (H.put_clipped ~grid ~clip:inner ~x:(content.x + 2) ~y
+                       ~max_w:(Int.max 0 (content.w - 2))
+                       ~style:
+                         (H.status_style ~theme ~attrs:Attr.bold
+                            Theme.Status_attention)
+                       (key ^ " "
+                        ^ Say.resolve lang
+                            (Say.make ~ko:"한 번 더 눌러 댓글 투표 확정"
+                               ~en:"Press again to confirm the comment vote")))
+              | Some ((Knowledge_store.Vote_post _ | Knowledge_store.Vote_comment _), _)
+              | None ->
+                  ());
+              ignore
+                (Markdown.draw grid ~rect:content ~theme ~osc8:true
+                   ~scroll:k.thread_comment_scroll c.body)
+          | None, Some _ ->
+              let content = H.pad_content ~bp inner in
+              ignore
+                (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
+                   ~max_w:content.w ~style:(H.secondary_style ~theme ())
+                   (Say.resolve lang (Say.make ~ko:"댓글 없음" ~en:"No comments")))
+          | (Some _ | None), None ->
+              H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
+                ~theme ~lang thread
+  else
   let title, subtitle, badge =
     match post_opt with
     | None ->
@@ -62,20 +209,12 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         , None
         , None )
     | Some p ->
-        let hearth_s =
-          match p.hearth with Some h -> "#" ^ h | None -> "#general"
-        in
-        let chain_s =
-          match p.chain_depth with
-          | Some d when d > 1 -> Printf.sprintf "[x%d] %s" d hearth_s
-          | Some _ | None -> hearth_s
-        in
         let karma_b =
           H.make_badge ~glyph:Glyph.Delta_up ~tone:Theme.Status_ok
             (format_karma_badge ~lang p)
         in
         ( Say.resolve lang (Say.make ~ko:"타래 미리보기" ~en:"Thread Preview")
-        , Some chain_s
+        , Some (chain_subtitle p)
         , Some karma_b )
   in
   let inner =
@@ -84,8 +223,8 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[→/Tab] 댓글 스크롤 · [Enter] 스레드 상세 · [c] 댓글 · + / - 투표(2회 확정)"
-                 ~en:"[→/Tab] Scroll Comments · [Enter] Open Thread · [c] Reply · + / - Vote (2x)"))
+                 ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
+                 ~en:"[Enter/z] Zoom · [v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -182,11 +321,12 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           (match p.succession_chain_root_id, p.chain_depth with
            | Some _, Some d when d > 1 && !y < bottom ->
                let strip =
-                 Printf.sprintf "%s %s #%d %s #%d · [Enter]"
+                 Printf.sprintf "%s %s #%d %s #%d%s"
                    (Glyph.to_utf8 Glyph.Flow_down)
                    (Say.resolve lang (Say.make ~ko:"계승 체인" ~en:"Chain"))
                    (Int.max 1 (d - 1))
                    "→" d
+                   (if focused then "" else " · [Enter]")
                in
                ignore
                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
@@ -537,8 +677,8 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   ignore (H.draw_pills ~grid ~rect:filter_rect ~theme pills);
   let selected_post = Knowledge_store.selected_post k in
   if model.nav.zoomed then
-    draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix ~k
-      selected_post ~focused:(Model.body_has_focus model)
+    draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix
+      ~model ~k selected_post ~focused:(Model.body_has_focus model)
   else
     let list_rect, preview_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
@@ -873,7 +1013,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~theme ~lang obs)
     end;
     draw_board_preview ~grid ~cache ~rect:preview_rect ~theme ~bp ~lang
-      ~now_unix ~k selected_post ~focused:(Model.pane_focused model 1)
+      ~now_unix ~model ~k selected_post ~focused:(Model.pane_focused model 1)
 
 (* --- 2 & 3. Wiki and Artifacts Sub-Tabs (38/62 Split + Wide TOC Rail) --- *)
 
@@ -899,63 +1039,45 @@ let extract_markdown_headings (md : string) : (int * string) list =
            Some (1, String.trim (String.sub s 2 (String.length s - 2)))
          else None)
 
-let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
+let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang ~(k : Knowledge_store.t)
     ~focused =
-  let sel_summary =
-    match target_slug with
-    | Some want -> (
-        match Observed.to_option k.wiki_index with
-        | Some idx ->
-            List.find_opt
-              (fun (p : Wire_knowledge.wiki_page_summary) ->
-                String.equal p.slug want)
-              idx.pages
-        | None -> None)
-    | None -> Knowledge_store.selected_wiki_page k
-  in
+  let sel_summary = Knowledge_store.selected_wiki_page k in
   let page_obs =
-    match target_slug, sel_summary with
-    | Some slug, _ -> Knowledge_store.wiki_page_for ~slug k
-    | None, Some s -> Knowledge_store.wiki_page_for ~slug:s.slug k
-    | None, None -> Observed.unreported
+    match sel_summary with
+    | Some s -> Knowledge_store.wiki_page_for ~slug:s.slug k
+    | None -> Observed.unreported
   in
   let page_detail = Observed.to_option page_obs in
   let title, badge =
-    (
-        match page_detail, sel_summary with
-        | Some d, _ ->
-            ( d.frontmatter.title
-            , Some
-                (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_active
-                   (Printf.sprintf "r%d · %s" d.frontmatter.revision
-                      (wiki_source_badge ~lang d.frontmatter.source))) )
-        | None, Some s ->
-            ( s.title
-            , Some
-                (H.make_badge ~tone:Theme.Status_active
-                   (Printf.sprintf "r%d · %s" s.revision
-                      (wiki_source_badge ~lang s.source))) )
-        | None, None ->
-            let fallback_title =
-              match target_slug with
-              | Some want -> want
-              | None -> Say.resolve lang (Say.make ~ko:"위키 페이지" ~en:"Wiki Page")
-            in
-            (fallback_title, None))
+    match page_detail, sel_summary with
+    | Some d, _ ->
+        ( d.frontmatter.title
+        , Some
+            (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_active
+               (Printf.sprintf "r%d · %s" d.frontmatter.revision
+                  (wiki_source_badge ~lang d.frontmatter.source))) )
+    | None, Some s ->
+        ( s.title
+        , Some
+            (H.make_badge ~tone:Theme.Status_active
+               (Printf.sprintf "r%d · %s" s.revision
+                  (wiki_source_badge ~lang s.source))) )
+    | None, None ->
+        (Say.resolve lang (Say.make ~ko:"위키 페이지" ~en:"Wiki Page"), None)
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
          ~hotkey:
            (Say.resolve lang
-              (match target_slug with
-               | Some _ ->
-                   Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [Esc] 뒤로"
-                     ~en:"[e] Edit · [Ctrl+E] $EDITOR · [Esc] Back"
-               | None ->
-                   Say.make ~ko:"[→/Tab] 스크롤 · [Enter] 전체보기 · [e] 편집 · [Ctrl+E] $EDITOR"
-                     ~en:"[→/Tab] Scroll · [Enter] Dive · [e] Edit · [Ctrl+E] $EDITOR"))
+              (if zoomed then
+                 Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [z/Esc] 축소"
+                   ~en:"[e] Edit · [Ctrl+E] $EDITOR · [z/Esc] Unzoom"
+               else
+                 Say.make
+                   ~ko:"[→/Tab] 스크롤 · [Enter/z] 확대 · [e] 편집 · [Ctrl+E] $EDITOR"
+                   ~en:"[→/Tab] Scroll · [Enter/z] Zoom · [e] Edit · [Ctrl+E] $EDITOR"))
          title)
   in
   if Rect.is_empty inner then ()
@@ -975,7 +1097,8 @@ let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
             let total_md_lines =
               let pw =
                 let show_toc =
-                  Layout.equal_breakpoint bp Layout.Wide
+                  show_inline_rail
+                  && Layout.equal_breakpoint bp Layout.Wide
                   && inner.w >= 68
                   && inner.h >= 10
                 in
@@ -1220,15 +1343,128 @@ let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
                   ignore
                     (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
                        s.summary)
-            | None -> (
+            | None ->
                 let content = H.pad_content ~bp inner in
-                match target_slug with
-                | Some _ ->
-                    H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
-                      page_obs
-                | None ->
-                    H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
-                      k.wiki_index)))
+                H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+                  k.wiki_index))
+
+let draw_wiki_links_lint_card ~slug ~lang ~(k : Knowledge_store.t) ~cache
+    ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =
+  let side_inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ?subtitle:slug
+         (Say.resolve lang
+            (Say.make ~ko:"역링크 · 외부 링크 · 린트"
+               ~en:"Backlinks · Links · Lint")))
+    |> H.pad_content ~bp
+  in
+  if not (Rect.is_empty side_inner) then begin
+    let y = ref side_inner.y and bottom = Rect.bottom side_inner in
+    match slug with
+    | None ->
+        H.draw_observed_placeholder ~grid ~rect:side_inner ~theme ~lang
+          k.wiki_index
+    | Some sl -> (
+        let page_obs = Knowledge_store.wiki_page_for ~slug:sl k in
+        match Observed.to_option page_obs with
+        | Some d ->
+            if !y < bottom then begin
+              H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme
+                ~label:
+                  (Printf.sprintf "%s (%d)"
+                     (Say.resolve lang (Say.make ~ko:"역링크" ~en:"Backlinks"))
+                     (List.length d.backlinks))
+                ();
+              incr y
+            end;
+            List.iter
+              (fun bl ->
+                if !y < bottom then begin
+                  ignore
+                    (H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
+                       ~max_w:side_inner.w ~style:(H.accent_style ~theme ())
+                       ~uri:("masc://wiki/" ^ bl)
+                       (Glyph.to_utf8 Glyph.External_arrow ^ " " ^ bl));
+                  incr y
+                end)
+              (H.safe_take 6 d.backlinks);
+            if !y < bottom then begin
+              H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme
+                ~label:
+                  (Printf.sprintf "%s (%d)"
+                     (Say.resolve lang
+                        (Say.make ~ko:"나가는 링크" ~en:"Outgoing"))
+                     (List.length d.outgoing_links))
+                ();
+              incr y
+            end;
+            List.iter
+              (fun (ol : Wire_knowledge.wiki_outgoing_link) ->
+                if !y < bottom then begin
+                  let tone, g, shown, uri =
+                    match ol.target with
+                    | Wire_knowledge.Link_page { slug; exists = true } ->
+                        ( Theme.Status_ok,
+                          Glyph.Check_mark,
+                          slug,
+                          Some ("masc://wiki/" ^ slug) )
+                    | Wire_knowledge.Link_page { slug; exists = false } ->
+                        ( Theme.Status_critical,
+                          Glyph.Live_failing,
+                          slug,
+                          Some ("masc://wiki/" ^ slug) )
+                    | Wire_knowledge.Link_invalid_name raw ->
+                        (Theme.Status_critical, Glyph.Live_failing, raw, None)
+                    | Wire_knowledge.Link_external url ->
+                        (Theme.Status_active, Glyph.Focus_caret, url, Some url)
+                    | Wire_knowledge.Link_own_file file ->
+                        (Theme.Status_active, Glyph.Focus_caret, file, None)
+                    | Wire_knowledge.Link_unsupported _ ->
+                        (Theme.Status_active, Glyph.Focus_caret, ol.raw, None)
+                  in
+                  let lbl =
+                    Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text shown
+                  in
+                  let style = H.status_style ~theme tone in
+                  ignore
+                    (match uri with
+                    | Some uri ->
+                        H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
+                          ~max_w:side_inner.w ~style ~uri lbl
+                    | None ->
+                        H.put_clipped ~grid ~clip:side_inner ~x:side_inner.x
+                          ~y:!y ~max_w:side_inner.w ~style lbl);
+                  incr y
+                end)
+              (H.safe_take 6 d.outgoing_links);
+            if d.lint_findings <> [] && !y < bottom then begin
+              H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme ~label:"Lint"
+                ();
+              incr y;
+              List.iter
+                (fun (lf : Wire_knowledge.wiki_lint_finding) ->
+                  if !y < bottom then begin
+                    Card.draw_left_rail ~tone:Theme.Status_attention grid
+                      ~x:side_inner.x ~y:!y ~h:1 ~theme;
+                    let txt =
+                      Printf.sprintf "%s %s"
+                        (Glyph.to_utf8 Glyph.Warning_triangle)
+                        lf.subject
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:side_inner
+                         ~x:(side_inner.x + 2) ~y:!y
+                         ~max_w:(Int.max 0 (side_inner.w - 2))
+                         ~style:(H.status_style ~theme Theme.Status_attention)
+                         txt);
+                    incr y
+                  end)
+                (H.safe_take 4 d.lint_findings)
+            end
+        | None ->
+            H.draw_observed_placeholder ~grid ~rect:side_inner ~theme ~lang
+              page_obs)
+  end
 
 let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
     grid =
@@ -1333,10 +1569,22 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
-  if model.nav.zoomed then
-    draw_wiki_preview ~show_inline_rail:true ~target_slug:None
-      ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:body_rect ~theme ~bp
-      ~lang ~k ~focused:(Model.body_has_focus model)
+  if model.nav.zoomed then begin
+    let main_rect, side_rect =
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
+        ~top_ratio:0.68 bp body_rect
+    in
+    draw_wiki_preview ~show_inline_rail:false ~zoomed:true
+      ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:main_rect ~theme ~bp
+      ~lang ~k ~focused:(Model.body_has_focus model);
+    let slug =
+      Option.map
+        (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+        (Knowledge_store.selected_wiki_page k)
+    in
+    draw_wiki_links_lint_card ~slug ~lang ~k ~cache ~rect:side_rect ~theme ~bp
+      grid
+  end
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
@@ -1557,14 +1805,14 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
           (H.safe_take (log_rows - 1) log_entries)
       end
     end;
-    draw_wiki_preview ~show_inline_rail:true ~target_slug:None
+    draw_wiki_preview ~show_inline_rail:true ~zoomed:false
       ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:right_rect ~theme ~bp
       ~lang ~k ~focused:(Model.pane_focused model 1)
 
 (* --- 2b. Rich HTML & Markdown Artifacts Renderer (1st-class sub-tab + Dive) --- *)
 
 let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~(k : Knowledge_store.t) ~scroll ~is_dive ?dive_target_id ~focused
+    ~lang ~(k : Knowledge_store.t) ~scroll ~show_published_fallback ~focused
     (art_opt : Wire_knowledge.artifact_entry option) =
   let detail_opt =
     match art_opt with
@@ -1622,7 +1870,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           , match fmt with `Html -> "HTML" | `Markdown -> "MD" )
       | None -> (".md", "MD")
     in
-    if is_dive then
+    if show_published_fallback then
       Say.resolve lang
         (Say.make
            ~ko:
@@ -1638,15 +1886,15 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         (Say.make
            ~ko:
              (Printf.sprintf
-                "[v] 뷰 · [y] %s · [e] %s · [→/Tab] 스크롤 · [c] 확인 · [P] 공유 · [Enter] 전체뷰"
+                "[v] 뷰 · [y] %s · [e] %s · [/] 검색 · [c] 확인 · [P] 공유 · [Enter/z] 확대"
                 fmt_s ext_s)
            ~en:
              (Printf.sprintf
-                "[v] View · [y] %s · [e] %s · [→/Tab] Scroll · [c] Check · [P] Share · [Enter] Dive"
+                "[v] View · [y] %s · [e] %s · [/] Search · [c] Check · [P] Share · [Enter/z] Zoom"
                 fmt_s ext_s))
   in
   let title =
-    if is_dive then
+    if show_published_fallback then
       Say.resolve lang
         (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")
     else Say.resolve lang (Say.make ~ko:"아티팩트 프리뷰" ~en:"Artifact Preview")
@@ -1658,22 +1906,9 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
   if Rect.is_empty inner then ()
   else
     match art_opt with
-    | None -> (
+    | None ->
         let content = H.pad_content ~bp inner in
-        match (dive_target_id, Observed.to_option k.artifacts) with
-        | Some target_id, Some (_ :: _) ->
-            H.draw_empty_notice ~grid ~rect:content ~theme
-              (Say.resolve lang
-                 (Say.make
-                    ~ko:
-                      (Printf.sprintf "아티팩트 '%s'을(를) 목록에서 찾을 수 없음"
-                         (H.short_hash ~len:14 target_id))
-                    ~en:
-                      (Printf.sprintf "Artifact '%s' not found in list"
-                         (H.short_hash ~len:14 target_id))))
-        | _ ->
-            H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
-              k.artifacts)
+        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
     | Some a ->
         let pad_x = Layout.card_pad_x bp in
         let title_s =
@@ -1757,9 +1992,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             | `Document, (`Html | `Markdown) | `Raw_source, (`Html | `Markdown) ->
                 None
           in
-          let search_q =
-            if is_dive then String.trim k.artifact_search_query else ""
-          in
+          let search_q = String.trim k.artifact_search_query in
           let active_match_line =
             if not (String.equal search_q "") && !y < bot then begin
               let matches =
@@ -1830,24 +2063,24 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           in
           if not (Rect.is_empty doc_r) then begin
             let rev_lines =
-              if not is_dive then []
-              else
-                match detail_opt with
-                | Some d when d.revisions <> [] ->
-                    ("── "
-                    ^ Say.resolve lang
-                        (Say.make ~ko:"리비전 이력 (< / >)"
-                           ~en:"Revision History (< / >)"))
-                    :: List.map
-                         (fun (r : Wire_knowledge.artifact_revision_summary) ->
-                           let cur =
-                             if Int.equal r.revision a.revision then "● "
-                             else "  "
-                           in
-                           Printf.sprintf "%sr%d · %s · %s · %s" cur r.revision
-                             r.title r.author (H.short_hash ~len:8 r.sha256))
-                         d.revisions
-                | Some _ | None -> (
+              match detail_opt with
+              | Some d when d.revisions <> [] ->
+                  ("── "
+                  ^ Say.resolve lang
+                      (Say.make ~ko:"리비전 이력 (< / >)"
+                         ~en:"Revision History (< / >)"))
+                  :: List.map
+                       (fun (r : Wire_knowledge.artifact_revision_summary) ->
+                         let cur =
+                           if Int.equal r.revision a.revision then "● "
+                           else "  "
+                         in
+                         Printf.sprintf "%sr%d · %s · %s · %s" cur r.revision
+                           r.title r.author (H.short_hash ~len:8 r.sha256))
+                       d.revisions
+              | Some _ | None ->
+                  if not show_published_fallback then []
+                  else (
                     match Observed.to_option k.artifacts with
                     | Some items when List.length items > 1 ->
                         ("── "
@@ -1887,13 +2120,15 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                   (Store_scroll.drop rev_skip rev_lines)
               end
             in
-            if String.equal (String.trim raw_body) "" && rev_lines = [] then
+            if String.equal (String.trim raw_body) "" then
               (match detail_opt with
               | Some _ ->
-                  H.draw_empty_notice ~grid ~rect:doc_r ~theme
-                    (Say.resolve lang
-                       (Say.make ~ko:"(아티팩트 본문이 비어 있습니다)"
-                          ~en:"(Empty artifact body)"))
+                  if rev_lines <> [] then draw_trailing_revs ~body_total:0
+                  else
+                    H.draw_empty_notice ~grid ~rect:doc_r ~theme
+                      (Say.resolve lang
+                         (Say.make ~ko:"(아티팩트 본문이 비어 있습니다)"
+                            ~en:"(Empty artifact body)"))
               | None -> (
                   match Knowledge_store.artifact_detail_failure_for_entry a k with
                   | Some reason ->
@@ -1915,8 +2150,6 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                             (Say.resolve lang
                                (Say.make ~ko:"아티팩트 본문을 불러오는 중..."
                                   ~en:"Loading artifact body...")))))
-            else if String.equal (String.trim raw_body) "" then
-              draw_trailing_revs ~body_total:0
             else
               let body_total =
                 match (k.artifact_view_mode, fmt) with
@@ -2018,7 +2251,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
   let sel_art = Knowledge_store.selected_artifact k in
   if model.nav.zoomed then
     draw_rich_artifact_pane ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
-      ~scroll:k.detail_scroll_offset ~is_dive:false ~focused:(Model.body_has_focus model) sel_art
+      ~scroll:k.detail_scroll_offset ~show_published_fallback:true
+      ~focused:(Model.body_has_focus model) sel_art
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
@@ -2029,8 +2263,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         (H.card_spec ~focused:(Model.pane_focused model 0)
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[c] 확인 · [P] 공유 · [M] 뷰어 · [Enter] 상세"
-                   ~en:"[c] Check · [P] Share · [M] Viewer · [Enter] Dive"))
+                (Say.make ~ko:"[c] 확인 · [P] 공유 · [M] 뷰어 · [Enter/z] 확대"
+                   ~en:"[c] Check · [P] Share · [M] Viewer · [Enter/z] Zoom"))
            (Say.resolve lang
               (Say.make ~ko:"발행 아티팩트 / 보고서"
                  ~en:"Published Artifacts & Reports")))
@@ -2167,7 +2401,7 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
             ~theme ~lang obs
     end;
     draw_rich_artifact_pane ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
-      ~scroll:k.detail_scroll_offset ~is_dive:false
+      ~scroll:k.detail_scroll_offset ~show_published_fallback:false
       ~focused:(Model.pane_focused model 1) sel_art
 
 (* --- 3. Memory (World MVCC Conflicts with Violet/Amber Rails + Stacked_bar Heat) --- *)
@@ -2985,466 +3219,3 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_artifacts ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Knowledge_memory ->
         render_memory ~model ~cache ~rect:body ~theme ~bp grid
-
-let thread_reading_tabs ~lang (view : Knowledge_store.thread_view) =
-  let reading_comments =
-    match view with
-    | Knowledge_store.Thread_post -> false
-    | Knowledge_store.Thread_comments -> true
-  in
-  [
-    {
-      H.label =
-        Say.resolve lang
-          (if reading_comments then Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Post"
-           else Say.make ~ko:"본문" ~en:"Post");
-      active = not reading_comments;
-      tone = Some Theme.Status_active;
-      glyph = None;
-    };
-    {
-      H.label =
-        Say.resolve lang
-          (if reading_comments then Say.make ~ko:"댓글 전문" ~en:"Comments"
-           else Say.make ~ko:"[Tab] 댓글 전문" ~en:"[Tab] Comments");
-      active = reading_comments;
-      tone = Some Theme.Status_active;
-      glyph = None;
-    };
-  ]
-
-let draw_thread_vote ~grid ~theme ~lang ~(inner : Rect.t) ~(content : Rect.t) = function
-  | Some (target, direction) when content.w > 0 && content.y <= Rect.bottom inner ->
-      let y = content.y - 1 in
-      let key = match direction with `Up -> "[+]" | `Down -> "[-]" in
-      let text =
-        match target with
-        | Knowledge_store.Vote_post _ ->
-            Say.make ~ko:"한 번 더 눌러 게시글 투표 확정"
-              ~en:"Press again to confirm the post vote"
-        | Knowledge_store.Vote_comment _ ->
-            Say.make ~ko:"한 번 더 눌러 댓글 투표 확정"
-              ~en:"Press again to confirm the comment vote"
-      in
-      Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:content.x
-        ~y ~h:1 ~theme;
-      ignore
-        (H.put_clipped ~grid ~clip:inner ~x:(content.x + 2) ~y
-           ~max_w:(Int.max 0 (content.w - 2))
-           ~style:(H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention)
-           (key ^ " " ^ Say.resolve lang text))
-  | Some _ | None -> ()
-
-let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let k = model.knowledge in
-  let now_unix = model.freshness.last_wall_unix in
-  let post_and_comments =
-    match Observed.to_option k.active_thread with
-    | Some (p, cs) when String.equal p.id post_id -> Some (p, cs)
-    | Some _ | None -> (
-        match Observed.to_option k.board with
-        | Some f -> (
-            match
-              List.find_opt
-                (fun (bp : Wire_knowledge.board_post) ->
-                  String.equal bp.id post_id)
-                f.posts
-            with
-            | Some bp -> Some (bp, [])
-            | None -> None)
-        | None -> None)
-  in
-  let bar_rect, body_rect =
-    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
-    | [ a; b ] -> (a, b)
-    | _ -> (Rect.empty, rect)
-  in
-  let chain_pills =
-    let depth_info =
-      match post_and_comments with
-      | Some (p, _) -> (
-          let all_posts =
-            match Observed.to_option k.board with Some f -> f.posts | None -> []
-          in
-          match p.succession_chain_root_id with
-          | Some root ->
-              let chain =
-                List.filter
-                  (fun (bp : Wire_knowledge.board_post) ->
-                    match bp.succession_chain_root_id with
-                    | Some r -> String.equal r root
-                    | None -> false)
-                  all_posts
-              in
-              let n =
-                Int.max (List.length chain)
-                  (match p.chain_depth with Some d -> d | None -> 1)
-              in
-              let cur = match p.chain_depth with Some d -> d | None -> n in
-              Printf.sprintf "Chain #%d/%d" cur n
-          | None -> "Standalone")
-      | None -> H.short_hash ~len:10 post_id
-    in
-    thread_reading_tabs ~lang k.thread_view
-    @ [
-      {
-        H.label = depth_info;
-        active = true;
-        tone = Some Theme.Status_ok;
-        glyph = None;
-      };
-      {
-        H.label = Say.resolve lang (Say.make ~ko:"[c] 댓글" ~en:"[c] Comment");
-        active = false;
-        tone = Some Theme.Status_active;
-        glyph = None;
-      };
-      {
-        H.label =
-          Say.resolve lang
-            (Say.make ~ko:"+ / - 투표(2회 확정)" ~en:"+ / - Vote (2x)");
-        active = Option.is_some k.armed_vote;
-        tone =
-          Some
-            (if Option.is_some k.armed_vote then Theme.Status_attention
-             else Theme.Status_ok);
-        glyph = Some Glyph.Delta_up;
-      };
-    ]
-  in
-  ignore (H.draw_pills ~grid ~rect:bar_rect ~theme chain_pills);
-  let title, badge =
-    match post_and_comments with
-    | Some (p, _) ->
-        ( Printf.sprintf "%s > %s"
-            (Say.resolve lang (Say.make ~ko:"지식 · 타래" ~en:"Knowledge > Thread"))
-            p.title
-        , Some
-            (H.make_badge ~glyph:Glyph.Delta_up ~tone:Theme.Status_ok
-               (format_karma_badge ~lang p)) )
-    | None ->
-        ( Printf.sprintf "%s > %s"
-            (Say.resolve lang (Say.make ~ko:"지식 · 타래" ~en:"Knowledge > Thread"))
-            post_id
-        , None )
-  in
-  let inner =
-    Card.draw ~cache grid ~rect:body_rect ~theme
-      (H.card_spec ?badge ~focused:(Model.body_has_focus model)
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make
-                 ~ko:"[Tab] 댓글 전문 · [↑↓] 스크롤 · [Esc] 뒤로"
-                 ~en:"[Tab] Comments · [↑↓] Scroll · [Esc] Back"))
-         title)
-  in
-  if Rect.is_empty inner then ()
-  else
-    match post_and_comments with
-    | None ->
-        let slot =
-          match k.active_thread with
-          | Observed.Value { data = tp, _; _ }
-            when not (String.equal tp.id post_id) ->
-              Observed.loading ~since_ns:model.freshness.last_mono
-          | Observed.Failed _
-            when not
-                   (Option.equal String.equal k.active_thread_target
-                      (Some post_id)) ->
-              Observed.loading ~since_ns:model.freshness.last_mono
-          | Observed.Loading _
-          | Observed.Value _
-          | Observed.Absent
-          | Observed.Unreported
-          | Observed.Failed _ ->
-              k.active_thread
-        in
-        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
-          ~lang slot
-    | Some (p, comments) ->
-        let pad_x = Layout.card_pad_x bp in
-        let hearth = match p.hearth with Some h -> "#" ^ h | None -> "#general" in
-        let eff_ts =
-          match p.updated_at_unix with
-          | Some u when u > p.created_at_unix -> u
-          | Some _ | None -> p.created_at_unix
-        in
-        let age = H.format_age ~now_unix eff_ts in
-        let extras = Knowledge_store.post_extras_for ~post_id:p.id k in
-        let extra_tags =
-          match extras with
-          | None -> ""
-          | Some ex ->
-              let closed_tag =
-                if Option.is_some ex.closed_by || Option.is_some ex.closed_successor_id
-                then
-                  match ex.closed_successor_id with
-                  | Some sid -> Some (Printf.sprintf "[CLOSED → %s]" sid)
-                  | None -> Some "[CLOSED]"
-                else None
-              in
-              let items =
-                List.filter_map Fun.id
-                  [
-                    closed_tag;
-                    ex.flair_label;
-                    ex.audience_label;
-                    ex.reaction_summary;
-                  ]
-              in
-              if items = [] then ""
-              else Typography.sep_dot ^ String.concat Typography.sep_dot items
-        in
-        let meta =
-          Printf.sprintf "@%s · %s · %d %s%s" p.author hearth
-            (Int.max p.comment_count (List.length comments))
-            (Say.resolve lang (Say.make ~ko:"댓글" ~en:"comments"))
-            extra_tags
-        in
-        let band_h = if inner.h >= 7 then 2 else 1 in
-        Card.draw_section_band ~pad_x grid
-          ~rect:(Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:band_h)
-          ~theme ~left_title:p.title ~right_meta:age
-          ?subtitle:(if band_h >= 2 then Some meta else None)
-          ();
-        let content = Knowledge_store.thread_reading_rect ~bp k rect in
-        draw_thread_vote ~grid ~theme ~lang ~inner ~content k.armed_vote;
-        ignore
-          (Markdown.draw grid ~rect:content ~theme ~osc8:true
-             ~scroll:model.nav.dive_scroll_offset p.body)
-
-let render_dive_thread_comment ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let knowledge = model.knowledge in
-  let bar_rect, body_rect =
-    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
-    | [ bar; body ] -> bar, body
-    | _ -> Rect.empty, rect
-  in
-  ignore
-    (H.draw_pills ~grid ~rect:bar_rect ~theme
-       (thread_reading_tabs ~lang knowledge.thread_view));
-  let selected = Knowledge_store.selected_thread_comment_at ~post_id knowledge in
-  let thread =
-    match knowledge.active_thread with
-    | Observed.Value { data = post, _; _ } as slot
-      when String.equal post.id post_id -> slot
-    | (Observed.Loading _ | Observed.Failed _) as slot
-      when Option.equal String.equal knowledge.active_thread_target (Some post_id) ->
-        slot
-    | Observed.Value _ | Observed.Loading _ | Observed.Failed _
-    | Observed.Absent | Observed.Unreported ->
-        Observed.loading ~since_ns:model.freshness.last_mono
-  in
-  let title =
-    match Observed.to_option thread with
-    | Some (post, _) -> post.title
-    | None -> Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments")
-  in
-  let hotkey =
-    match selected with
-    | Some _ ->
-        Say.make ~ko:"[Tab] 본문 · < / > 댓글 이동 · [c] 답글"
-          ~en:"[Tab] Post · < / > Next/prev comment · [c] Reply"
-    | None -> Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Post"
-  in
-  let inner =
-    Card.draw ~cache grid ~rect:body_rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model)
-         ~hotkey:(Say.resolve lang hotkey) title)
-  in
-  if not (Rect.is_empty inner) then
-    match selected, Observed.to_option thread with
-    | Some (index, tc), Some (_, comments) ->
-        let c = tc.comment in
-        let age = H.format_age ~now_unix:model.freshness.last_wall_unix c.created_at_unix in
-        let aud_s =
-          match
-            Knowledge_store.comment_audience_for ~post_id ~comment_id:c.id
-              knowledge
-          with
-          | Some a -> " · " ^ a
-          | None -> ""
-        in
-        let pos_s =
-          match Knowledge_store.active_comment_page_for ~post_id knowledge with
-          | Some cp when cp.total > cp.returned ->
-              Printf.sprintf "%d/%d (%d/%d%s)" (index + 1) (List.length comments)
-                cp.returned cp.total
-                (if Option.is_some cp.next_offset || cp.offset > 0 then "+"
-                 else "")
-          | Some _ | None ->
-              Printf.sprintf "%d/%d" (index + 1) (List.length comments)
-        in
-        let author =
-          Printf.sprintf "%s · %s@%s%s" pos_s
-            (if Option.is_some c.parent_id then "↳ " else "") c.author aud_s
-        in
-        let meta = Printf.sprintf "%s%d · %s" (Glyph.to_utf8 Glyph.Delta_up) c.score age in
-        let header = Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1 in
-        Card.draw_section_band ~pad_x:(Layout.card_pad_x bp) grid ~rect:header
-          ~theme ~left_title:author ~right_meta:meta ();
-        let content = Knowledge_store.thread_reading_rect ~bp knowledge rect in
-        draw_thread_vote ~grid ~theme ~lang ~inner ~content knowledge.armed_vote;
-        ignore
-          (Markdown.draw grid ~rect:content ~theme ~osc8:true
-             ~scroll:knowledge.thread_comment_scroll c.body)
-    | None, Some _ ->
-        let content = H.pad_content ~bp inner in
-        ignore
-          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
-             ~max_w:content.w ~style:(H.secondary_style ~theme ())
-             (Say.resolve lang (Say.make ~ko:"댓글 없음" ~en:"No comments")))
-    | (Some _ | None), None ->
-        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
-          ~theme ~lang thread
-
-let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let k = model.knowledge in
-  let main_rect, side_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
-      ~top_ratio:0.68 bp rect
-  in
-  draw_wiki_preview ~show_inline_rail:false ~target_slug:(Some slug)
-    ~scroll:model.nav.dive_scroll_offset ~grid ~cache ~rect:main_rect ~theme
-    ~bp ~lang ~k ~focused:(Model.body_has_focus model);
-  let side_inner =
-    Card.draw ~cache grid ~rect:side_rect ~theme
-      (H.card_spec ~subtitle:slug
-         (Say.resolve lang
-            (Say.make ~ko:"역링크 · 외부 링크 · 린트"
-               ~en:"Backlinks · Links · Lint")))
-    |> H.pad_content ~bp
-  in
-  if not (Rect.is_empty side_inner) then begin
-    let y = ref side_inner.y and bottom = Rect.bottom side_inner in
-    let page_obs = Knowledge_store.wiki_page_for ~slug k in
-    match Observed.to_option page_obs with
-    | Some d ->
-        if !y < bottom then begin
-          H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme
-            ~label:
-              (Printf.sprintf "%s (%d)"
-                 (Say.resolve lang (Say.make ~ko:"역링크" ~en:"Backlinks"))
-                 (List.length d.backlinks))
-            ();
-          incr y
-        end;
-        List.iter
-          (fun bl ->
-            if !y < bottom then begin
-              ignore
-                (H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
-                   ~max_w:side_inner.w ~style:(H.accent_style ~theme ())
-                   ~uri:("masc://wiki/" ^ bl)
-                   (Glyph.to_utf8 Glyph.External_arrow ^ " " ^ bl));
-              incr y
-            end)
-          (H.safe_take 6 d.backlinks);
-        if !y < bottom then begin
-          H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme
-            ~label:
-              (Printf.sprintf "%s (%d)"
-                 (Say.resolve lang (Say.make ~ko:"나가는 링크" ~en:"Outgoing"))
-                 (List.length d.outgoing_links))
-            ();
-          incr y
-        end;
-        List.iter
-          (fun (ol : Wire_knowledge.wiki_outgoing_link) ->
-            if !y < bottom then begin
-              let tone, g, shown, uri =
-                match ol.target with
-                | Wire_knowledge.Link_page { slug; exists = true } ->
-                    ( Theme.Status_ok,
-                      Glyph.Check_mark,
-                      slug,
-                      Some ("masc://wiki/" ^ slug) )
-                | Wire_knowledge.Link_page { slug; exists = false } ->
-                    ( Theme.Status_critical,
-                      Glyph.Live_failing,
-                      slug,
-                      Some ("masc://wiki/" ^ slug) )
-                | Wire_knowledge.Link_invalid_name raw ->
-                    (Theme.Status_critical, Glyph.Live_failing, raw, None)
-                | Wire_knowledge.Link_external url ->
-                    (Theme.Status_active, Glyph.Focus_caret, url, Some url)
-                | Wire_knowledge.Link_own_file file ->
-                    (Theme.Status_active, Glyph.Focus_caret, file, None)
-                | Wire_knowledge.Link_unsupported _ ->
-                    (Theme.Status_active, Glyph.Focus_caret, ol.raw, None)
-              in
-              let lbl =
-                Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text shown
-              in
-              let style = H.status_style ~theme tone in
-              ignore
-                (match uri with
-                | Some uri ->
-                    H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
-                      ~max_w:side_inner.w ~style ~uri lbl
-                | None ->
-                    H.put_clipped ~grid ~clip:side_inner ~x:side_inner.x
-                      ~y:!y ~max_w:side_inner.w ~style lbl);
-              incr y
-            end)
-          (H.safe_take 6 d.outgoing_links);
-        if d.lint_findings <> [] && !y < bottom then begin
-          H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme ~label:"Lint" ();
-          incr y;
-          List.iter
-            (fun (lf : Wire_knowledge.wiki_lint_finding) ->
-              if !y < bottom then begin
-                Card.draw_left_rail ~tone:Theme.Status_attention grid
-                  ~x:side_inner.x ~y:!y ~h:1 ~theme;
-                let txt =
-                  Printf.sprintf "%s %s"
-                    (Glyph.to_utf8 Glyph.Warning_triangle)
-                    lf.subject
-                in
-                ignore
-                  (H.put_clipped ~grid ~clip:side_inner ~x:(side_inner.x + 2)
-                     ~y:!y ~max_w:(Int.max 0 (side_inner.w - 2))
-                     ~style:(H.status_style ~theme Theme.Status_attention) txt);
-                incr y
-              end)
-            (H.safe_take 4 d.lint_findings)
-        end
-    | None ->
-        H.draw_observed_placeholder ~grid ~rect:side_inner ~theme ~lang
-          page_obs
-  end
-
-let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let k = model.knowledge in
-  let target = Knowledge_store.find_artifact_by_id_or_sha id k in
-  draw_rich_artifact_pane ~grid ~cache ~rect ~theme ~bp ~lang ~k
-    ~scroll:model.nav.dive_scroll_offset ~is_dive:true ~dive_target_id:id
-    ~focused:(Model.body_has_focus model) target
-
-let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
-    ~(rect : Rect.t) grid =
-  if Rect.is_empty rect then ()
-  else
-    let theme = Theme.of_preset model.theme_preset in
-    let bp = H.layout_bp ~model ~rect in
-    let body = H.body_rect ~bp rect in
-    match target with
-    | Nav.Thread_dive post_id -> (
-        match model.knowledge.thread_view with
-        | Knowledge_store.Thread_post ->
-            render_dive_thread ~post_id ~model ~cache ~rect:body ~theme ~bp grid
-        | Knowledge_store.Thread_comments ->
-            render_dive_thread_comment ~post_id ~model ~cache ~rect:body ~theme
-              ~bp grid)
-    | Nav.Wiki_dive slug ->
-        render_dive_wiki ~slug ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Artifact_dive id ->
-        render_dive_artifact ~id ~model ~cache ~rect:body ~theme ~bp grid

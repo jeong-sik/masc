@@ -205,7 +205,6 @@ let verification_evidence_matches_active (m : Model.t) verification_id =
       String.equal vid verification_id
   | Some
       ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
-      | Nav.Dive_knowledge _
       | Nav.Dive_runtime _ )
   | None ->
       true
@@ -224,10 +223,7 @@ let runtime_trace_matches_active (m : Model.t) keeper =
           then String.equal k keeper
           else true
       | None -> true)
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _ )
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _)
   | None ->
       true
 
@@ -1261,14 +1257,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_board_thread { post_id; result = Ok ((tp, _) as thread) } ->
       let matches_active =
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
-            String.equal pid post_id || String.equal pid tp.id
-        | Some
-            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _
-            ) ->
-            false
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
             | Some p -> String.equal p.id post_id || String.equal p.id tp.id
@@ -1287,14 +1276,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_board_thread_meta meta ->
       let matches_active =
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
-            String.equal pid meta.post_id
-        | Some
-            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _
-            ) ->
-            false
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
             | Some p -> String.equal p.id meta.post_id
@@ -1310,14 +1292,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_board_thread { post_id; result = Error err } ->
       let matches_active =
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
-            String.equal pid post_id
-        | Some
-            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _
-            ) ->
-            false
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
             | Some p -> String.equal p.id post_id
@@ -1546,25 +1521,27 @@ let apply_http_reply ~now (m : Model.t) reply =
           m
       in
       let thread_cmds =
-        match Model.active_dive next with
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid))
-          when String.equal pid post_id ->
-            [
-              Cmd.Http_get
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Get_board_thread { post_id; comment_limit = Some 100 };
-                };
-            ]
-        | Some
-            ( Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _
-            )
-        | None ->
-            []
+        let viewing_voted_post =
+          Option.is_none (Model.active_dive next)
+          && Nav.equal_workspace next.nav.workspace Nav.Knowledge
+          && Nav.equal_knowledge_tab next.knowledge.active_tab Nav.Knowledge_board
+          &&
+          match Knowledge_store.selected_post next.knowledge with
+          | Some p -> String.equal p.id post_id
+          | None ->
+              Option.equal String.equal next.knowledge.active_thread_target
+                (Some post_id)
+        in
+        if viewing_voted_post then
+          [
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req =
+                  Cmd.Get_board_thread { post_id; comment_limit = Some 100 };
+              };
+          ]
+        else []
       in
       let feed_cmd =
         Cmd.Http_get
@@ -1652,21 +1629,26 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some modal -> modal.submitting && matches_delete_modal modal.kind
         | None -> false
       in
-      let dive_stack, dive_return_stack =
-        match m.nav.dive_stack with
-        | top :: rest
-          when Nav.equal_dive top (Nav.Dive_knowledge (Nav.Thread_dive post_id))
-          ->
-            let return_rest =
-              match m.nav.dive_return_stack with
-              | _ :: r -> r
-              | [] -> []
-            in
-            (rest, return_rest)
-        | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
+      let viewing_deleted_post =
+        Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+        && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
+        &&
+        match Knowledge_store.selected_post m.knowledge with
+        | Some p -> String.equal p.id post_id
+        | None -> false
       in
       let nav =
-        let nav0 = { m.nav with dive_stack; dive_return_stack } in
+        let nav0 =
+          if viewing_deleted_post then
+            {
+              m.nav with
+              zoomed = false;
+              pre_zoom_pane_index = None;
+              pane_index = 0;
+            }
+          else m.nav
+        in
         if not close_modal then nav0
         else
           match nav0.overlay with
@@ -1684,9 +1666,15 @@ let apply_http_reply ~now (m : Model.t) reply =
           | None ->
               nav0
       in
+      let knowledge =
+        if viewing_deleted_post then
+          m.knowledge |> Knowledge_store.reset_thread_view
+          |> Knowledge_store.clear_armed_vote
+        else m.knowledge
+      in
       let inline_modal = if close_modal then None else m.inline_modal in
       let next =
-        { m with nav; inline_modal }
+        { m with nav; knowledge; inline_modal }
         |> Model.with_toast ~now ~level:Model.Toast_success
              (Say.make ~ko:"게시글이 삭제되었습니다" ~en:"Board post deleted")
       in
@@ -1922,13 +1910,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let detail_cmds =
         let target_artifact_opt =
           match Model.active_dive next with
-          | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
-              Knowledge_store.find_artifact_by_id_or_sha target next.knowledge
-          | Some
-              ( Nav.Dive_work _
-              | Nav.Dive_runtime _
-              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) ) ->
-              None
+          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
           | None ->
               if
                 Nav.equal_workspace next.nav.workspace Nav.Knowledge
@@ -1985,13 +1967,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           || String.equal t detail.artifact.body.sha256
         in
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
-            matches_target target
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime _
-            | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
-        | None -> (
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
             | Some sel ->
                 matches_target sel.id || matches_target sel.body.sha256
@@ -2013,18 +1989,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_artifact_detail { id; result = Error err } ->
       let matches_active =
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
-            String.equal target id
-            ||
-            match Knowledge_store.find_artifact_by_id_or_sha target m.knowledge with
-            | Some art ->
-                String.equal art.id id || String.equal art.body.sha256 id
-            | None -> false)
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime _
-            | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
-        | None -> (
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
             | Some sel ->
                 String.equal sel.id id || String.equal sel.body.sha256 id
@@ -4421,9 +4386,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             View_fetches.fetches_for_current_view next
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            )
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
         | None ->
             []
       in
@@ -6211,11 +6174,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_memory_health_keeper { keeper; result = Ok row } ->
       let matches_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6234,11 +6193,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_memory_health_keeper { keeper; result = Error err } ->
       let active_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -6247,11 +6202,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let matches_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6369,11 +6320,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_keeper_memory_journal { keeper; result = Ok journal } ->
       let matches_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6392,11 +6339,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_keeper_memory_journal { keeper; result = Error err } -> (
       let active_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -6405,11 +6348,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let matches_keeper =
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -7184,9 +7123,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             String.equal cur reference || String.equal cur loaded.reference
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            )
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
         | None ->
             false
       in
@@ -7204,9 +7141,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             String.equal cur reference
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            )
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
         | None ->
             false
       in
@@ -7245,9 +7180,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some (Nav.Dive_runtime (Nav.Skill_dive _)) -> true
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            )
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
         | None ->
             false
       in
@@ -8298,7 +8231,6 @@ let apply_http_reply ~now (m : Model.t) reply =
             String.equal cur run_id
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
             | Nav.Dive_runtime
                 (Nav.Tool_dive _ | Nav.Skill_dive _)
             )
@@ -8321,7 +8253,6 @@ let apply_http_reply ~now (m : Model.t) reply =
             String.equal cur run_id
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
             | Nav.Dive_runtime
                 (Nav.Tool_dive _ | Nav.Skill_dive _)
             )

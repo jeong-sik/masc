@@ -6,12 +6,7 @@ let active_memory_reading (m : Model.t) :
     Knowledge_store.memory_reading_entry option =
   let scope_opt =
     match Model.active_dive m with
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        ) ->
-        None
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
     | None -> (
         match m.nav.workspace with
         | Nav.Knowledge
@@ -79,7 +74,7 @@ let extract_first_http_url (text : string) : string option =
    workspace (whether in split view or zoomed Focus Mode). *)
 let viewed_keeper_name (m : Model.t) : string option =
   match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) -> None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None -> (
       match m.nav.workspace with
       | Nav.Keepers -> Model.selected_keeper_name m
@@ -170,12 +165,7 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
   let m0 = { m with nav = { m.nav with overlay = None } } in
   let target_keeper =
     match Model.active_dive m0 with
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        ) ->
-        None
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
     | None ->
         if
           Nav.equal_workspace m0.nav.workspace Nav.Keepers
@@ -1179,23 +1169,7 @@ let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
 
 let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
   match Model.active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
-      match Observed.to_option m.knowledge.active_thread with
-      | Some (p, _) when String.equal p.id post_id -> Some p
-      | Some _ | None -> (
-          match Observed.to_option m.knowledge.board with
-          | Some feed ->
-              List.find_opt
-                (fun (p : Wire_knowledge.board_post) ->
-                  String.equal p.id post_id)
-                feed.posts
-          | None -> None))
-  | Some
-      ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_work _
-      | Nav.Dive_runtime _
-      ) ->
-      None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -1204,30 +1178,22 @@ let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post optio
       else None
 
 let open_board_comment_for_selected (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
-      (match m.knowledge.thread_view with
-      | Knowledge_store.Thread_post ->
-          Update_nav.open_inline_modal m
-            (Nav.Board_comment { post_id; parent_id = None })
-      | Knowledge_store.Thread_comments -> (
-          match Knowledge_store.selected_thread_comment ~post_id m.knowledge with
-          | Some tc ->
-              Update_nav.open_inline_modal m
-                (Nav.Board_comment { post_id; parent_id = Some tc.comment.id })
-          | None -> (m, [])))
-  | Some
-      ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_work _
-      | Nav.Dive_runtime _
-      ) ->
-      (m, [])
-  | None -> (
-      match Knowledge_store.selected_post m.knowledge with
-      | Some p ->
-          Update_nav.open_inline_modal m
-            (Nav.Board_comment { post_id = p.id; parent_id = None })
-      | None -> (m, []))
+  match selected_board_post_for_crud m with
+  | None -> (m, [])
+  | Some p ->
+      if
+        Model.is_board_detail_active m
+        && m.knowledge.thread_view = Knowledge_store.Thread_comments
+      then
+        match Knowledge_store.selected_thread_comment ~post_id:p.id m.knowledge with
+        | Some tc ->
+            Update_nav.open_inline_modal m
+              (Nav.Board_comment
+                 { post_id = p.id; parent_id = Some tc.comment.id })
+        | None -> (m, [])
+      else
+        Update_nav.open_inline_modal m
+          (Nav.Board_comment { post_id = p.id; parent_id = None })
 
 let thread_vote_target ~post_id (knowledge : Knowledge_store.t) =
   match knowledge.thread_view with
@@ -1239,43 +1205,50 @@ let thread_vote_target ~post_id (knowledge : Knowledge_store.t) =
         (Knowledge_store.selected_thread_comment ~post_id knowledge)
 
 let upvote_board_target ~now (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
-      let req =
-        match thread_vote_target ~post_id m.knowledge with
+  match selected_board_post_for_crud m with
+  | None -> (m, [])
+  | Some p ->
+      if
+        Model.is_board_detail_active m
+        && m.knowledge.thread_view = Knowledge_store.Thread_comments
+      then
+        match thread_vote_target ~post_id:p.id m.knowledge with
         | Some (Knowledge_store.Vote_comment { post_id; comment_id }) ->
-            Some (Cmd.Post_board_comment_vote { post_id; comment_id; direction = `Up })
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"추천 전송 중..." ~en:"Submitting upvote...")
+                m
+            , [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Post_board_comment_vote
+                        { post_id; comment_id; direction = `Up };
+                  };
+              ] )
         | Some (Knowledge_store.Vote_post post_id) ->
-            Some (Cmd.Post_board_vote { post_id; direction = `Up })
-        | None -> None
-      in
-      match req with
-      | None -> (m, [])
-      | Some req ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"추천 전송 중..." ~en:"Submitting upvote...")
-              m
-          , [ Cmd.Http_post { epoch = m.epoch; req } ] ))
-  | Some
-      ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_work _
-      | Nav.Dive_runtime _
-      ) ->
-      (m, [])
-  | None -> (
-      match Knowledge_store.selected_post m.knowledge with
-      | Some p ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:("추천 전송: " ^ p.title) ~en:("Upvoting: " ^ p.title))
-              m
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req = Cmd.Post_board_vote { post_id = p.id; direction = `Up };
-                };
-            ] )
-      | None -> (m, []))
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:("추천 전송: " ^ p.title) ~en:("Upvoting: " ^ p.title))
+                m
+            , [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req = Cmd.Post_board_vote { post_id; direction = `Up };
+                  };
+              ] )
+        | None -> (m, [])
+      else
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make ~ko:("추천 전송: " ^ p.title) ~en:("Upvoting: " ^ p.title))
+            m
+        , [
+            Cmd.Http_post
+              {
+                epoch = m.epoch;
+                req = Cmd.Post_board_vote { post_id = p.id; direction = `Up };
+              };
+          ] )
 
 let toggle_board_pin ~now (m : Model.t) =
   match selected_board_post_for_crud m with
@@ -1307,12 +1280,7 @@ let keeper_is_offline = function
 let selected_keeper_for_lifecycle (m : Model.t) :
     Wire_fleet.keeper_summary option =
   match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
         Fleet_store.selected_keeper_summary m.fleet
@@ -1320,12 +1288,7 @@ let selected_keeper_for_lifecycle (m : Model.t) :
 
 let selected_keeper_name_for_lifecycle (m : Model.t) : string option =
   match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      None
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
         Model.selected_keeper_name m
@@ -1517,12 +1480,7 @@ let active_keeper_for_tab target_tab (m : Model.t) =
   if Option.is_some m.nav.overlay then None
   else
     match Model.active_dive m with
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        ) ->
-        None
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
     | None ->
         if
           Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -1662,14 +1620,7 @@ let active_artifact_target (m : Model.t) =
       None
   | None -> (
       match Model.active_dive m with
-      | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
-          Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
-      | Some
-          ( Nav.Dive_work _
-          | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-          | Nav.Dive_runtime _
-          ) ->
-          None
+      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
       | None ->
           if
             Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -1699,11 +1650,7 @@ let active_keeper_for_context (m : Model.t) =
       None
   | None -> (
       match Model.active_dive m with
-      | Some
-          ( Nav.Dive_work _
-          | Nav.Dive_knowledge _
-          | Nav.Dive_runtime _ ) ->
-          None
+      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
       | None ->
           if
             Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -1737,7 +1684,35 @@ let artifact_search_match_lines (m : Model.t) (a : Wire_knowledge.artifact_entry
     | None -> []
     | Some raw -> (
         let theme = Theme.of_preset m.theme_preset in
-        let width = max 20 (Model.inner_body_width m - 6) in
+        let bp =
+          match m.breakpoint with
+          | Model.Wide -> Masc_tui_ui.Layout.Wide
+          | Model.Standard -> Masc_tui_ui.Layout.Standard
+          | Model.Compact -> Masc_tui_ui.Layout.Compact
+          | Model.Micro -> Masc_tui_ui.Layout.Micro
+        in
+        let br =
+          Rect.make ~x:0 ~y:0 ~w:(Model.inner_body_width m)
+            ~h:(Model.inner_body_height m)
+        in
+        let body_after_bar =
+          match
+            Masc_tui_ui.Layout.split_v br
+              [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+          with
+          | [ _; b ] -> b
+          | _ -> br
+        in
+        let right_rect =
+          if m.nav.zoomed then body_after_bar
+          else
+            snd
+              (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                 ~left_ratio:0.44 ~top_ratio:0.48 bp body_after_bar)
+        in
+        let inner_w = max 0 (right_rect.w - 2) in
+        let pad_x = Masc_tui_ui.Layout.card_pad_x bp in
+        let width = max 1 (inner_w - (2 * pad_x)) in
         let is_json = Knowledge_store.is_json_artifact a in
         match
           (m.knowledge.artifact_view_mode, Wire_knowledge.artifact_format_of_entry a)
@@ -1775,7 +1750,7 @@ let artifact_search_match_lines (m : Model.t) (a : Wire_knowledge.artifact_entry
               lines;
             List.rev !acc
         | `Raw_source, (`Html | `Markdown) ->
-            let lines = Knowledge_store.artifact_preview_lines a detail_opt in
+            let lines = String.split_on_char '\n' raw in
             let needle = String.lowercase_ascii q in
             let acc = ref [] in
             List.iteri
@@ -1796,17 +1771,20 @@ let step_artifact_search ~now ~delta (m : Model.t) =
               m
           , [] )
       | _ ->
-          let knowledge =
+          let knowledge0 =
             Knowledge_store.step_artifact_search_match ~delta
               ~match_count:(List.length matches) m.knowledge
           in
           let line_idx =
             Option.value ~default:0
-              (List.nth_opt matches knowledge.artifact_search_match_idx)
+              (List.nth_opt matches knowledge0.artifact_search_match_idx)
           in
-          let nav = { m.nav with dive_scroll_offset = line_idx } in
-          ( { m with nav; knowledge }
-          , [] ))
+          let max_scroll = Update_nav.knowledge_detail_max_scroll m in
+          let detail_scroll_offset =
+            Store_scroll.clamp_scroll ~max_scroll line_idx
+          in
+          let knowledge = { knowledge0 with detail_scroll_offset } in
+          ({ m with knowledge }, []))
 
 let focus_composer_for_slash (m : Model.t) =
   let cur = (Drafts.current_draft m.drafts).text in
@@ -3999,11 +3977,11 @@ and confirm_palette ~now (m : Model.t) =
           | Update_nav.Pal_dive_task id ->
               Update_nav.push_dive m_closed (Nav.Dive_work (Nav.Task_dive id))
           | Update_nav.Pal_dive_thread id ->
-              Update_nav.push_dive m_closed
-                (Nav.Dive_knowledge (Nav.Thread_dive id))
+              Update_nav.jump_to_knowledge_thread ~return_from:m_closed m_closed
+                id
           | Update_nav.Pal_dive_wiki slug ->
-              Update_nav.push_dive m_closed
-                (Nav.Dive_knowledge (Nav.Wiki_dive slug))
+              Update_nav.jump_to_knowledge_wiki ~return_from:m_closed m_closed
+                slug
           | Update_nav.Pal_dive_sandbox keeper ->
               let infra =
                 m_closed.infra
@@ -4324,17 +4302,6 @@ and execute_action ~now (m : Model.t) action =
               in
               ({ m with ask_modal = Some next_modal }, []))
       | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
-      | None
-        when not (Model.sidebar_has_focus m)
-             && (match Model.active_dive m with
-                 | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
-                 | Some
-                     ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                     | Nav.Dive_work _
-                     | Nav.Dive_runtime _
-                     )
-                 | None -> false) ->
-          ({ m with knowledge = Knowledge_store.toggle_thread_view m.knowledge }, [])
       | None ->
           let n = Model.focusable_pane_count m in
           let sync_pane (base : Model.t) next_pane =
@@ -4438,18 +4405,7 @@ and execute_action ~now (m : Model.t) action =
               , [] )
             else
               match Model.active_dive m with
-              | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                  ( {
-                      m with
-                      nav = { m.nav with filter_focused = true };
-                      drafts = Drafts.set_focus false m.drafts;
-                    }
-                  , [] )
-              | Some
-                  ( Nav.Dive_work _
-                  | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                  | Nav.Dive_runtime _
-                  ) ->
+              | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
                   focus_composer_for_slash m
               | None -> (
                   match m.nav.workspace with
@@ -5054,25 +5010,7 @@ and execute_action ~now (m : Model.t) action =
                   request_keeper_interrupt ~from_escape:true ~now ~keeper ~target m
               | None -> (
                   match m.nav.dive_stack with
-                  | top :: rest -> (
-                      let clear_artifact_search =
-                        match top with
-                        | Nav.Dive_knowledge (Nav.Artifact_dive _) ->
-                            not
-                              (String.equal m.knowledge.artifact_search_query "")
-                        | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                        | Nav.Dive_work _
-                        | Nav.Dive_runtime _ ->
-                            false
-                      in
-                      if clear_artifact_search then
-                        ( {
-                            m with
-                            knowledge =
-                              Knowledge_store.set_artifact_search "" m.knowledge;
-                          }
-                        , [] )
-                      else
+                  | _ :: rest -> (
                         let (ret_pane, ret_zoom, ret_overlay), ret_rest =
                           match m.nav.dive_return_stack with
                           | hd :: tl -> (hd, tl)
@@ -5185,6 +5123,29 @@ and execute_action ~now (m : Model.t) action =
                           }
                         , [] )
                       else if
+                        Model.is_artifact_doc_search_active m
+                        && not
+                             (String.equal m.knowledge.artifact_search_query "")
+                      then
+                        ( {
+                            m with
+                            knowledge =
+                              Knowledge_store.set_artifact_search "" m.knowledge;
+                          }
+                        , [] )
+                      else if
+                        Model.is_board_detail_active m
+                        && m.knowledge.thread_view = Knowledge_store.Thread_comments
+                      then
+                        ( {
+                            m with
+                            knowledge =
+                              m.knowledge
+                              |> Knowledge_store.reset_thread_view
+                              |> Knowledge_store.clear_armed_vote;
+                          }
+                        , [] )
+                      else if
                         m.infra.show_raw_json
                         && Model.detail_visible m
                         && ((Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -5222,9 +5183,20 @@ and execute_action ~now (m : Model.t) action =
                         in
                         (next, View_fetches.fetches_for_current_view next)
                       else if m.nav.zoomed && Model.can_zoom_current_view m then
+                        let knowledge =
+                          if Nav.equal_workspace m.nav.workspace Nav.Knowledge
+                          then
+                            m.knowledge
+                            |> Knowledge_store.reset_thread_view
+                            |> Knowledge_store.clear_armed_vote
+                            |> Knowledge_store.clear_pending_wiki_edit
+                            |> Knowledge_store.set_artifact_search ""
+                          else m.knowledge
+                        in
                         let m0 =
                           {
                             m with
+                            knowledge;
                             nav =
                               {
                                 m.nav with
@@ -5555,7 +5527,7 @@ and execute_action ~now (m : Model.t) action =
                 |> Update_nav.clamp_for_pane
               in
               (next, [])
-          | Some (Nav.Dive_knowledge _ | Nav.Dive_runtime _) ->
+          | Some (Nav.Dive_runtime _) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -5876,20 +5848,10 @@ and execute_action ~now (m : Model.t) action =
           if Model.sidebar_has_focus m then (m, [])
           else (
           match Model.active_dive m with
-          | Some (Nav.Dive_knowledge (Nav.Artifact_dive _))
-            when not
-                   (String.equal
-                      (String.trim m.knowledge.artifact_search_query)
-                      "") ->
-              step_artifact_search ~now ~delta:1 m
           | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
               execute_slash ~now m (Slash.Skill Slash.Skill_new)
           | Some
               ( Nav.Dive_work _
-              | Nav.Dive_knowledge
-                  ( Nav.Artifact_dive _
-                  | Nav.Thread_dive _
-                  | Nav.Wiki_dive _ )
               | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
               (m, [])
           | None -> (
@@ -5898,6 +5860,13 @@ and execute_action ~now (m : Model.t) action =
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_board ->
                       Update_nav.open_inline_modal m Nav.Board_new_post
+                  | Nav.Knowledge_artifacts
+                    when Model.is_artifact_doc_search_active m
+                         && not
+                              (String.equal
+                                 (String.trim m.knowledge.artifact_search_query)
+                                 "") ->
+                      step_artifact_search ~now ~delta:1 m
                   | Nav.Knowledge_wiki
                   | Nav.Knowledge_artifacts
                   | Nav.Knowledge_memory ->
@@ -6101,16 +6070,7 @@ and execute_action ~now (m : Model.t) action =
         | Some (Nav.System_gate Nav.Media_viewer) -> (
             match Model.focused_artifact m with
             | Some a -> `Artifact a
-            | None -> (
-                match Model.active_dive m with
-                | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                    `Artifact_missing
-                | Some
-                    ( Nav.Dive_work _
-                    | Nav.Dive_runtime _
-                    | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
-                | None ->
-                    `Other))
+            | None -> `Other)
         | Some
             ( Nav.Palette
             | Nav.Settings _
@@ -6124,17 +6084,7 @@ and execute_action ~now (m : Model.t) action =
             `Other
         | None -> (
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
-                (match
-                   Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
-                 with
-                 | Some a -> `Artifact a
-                 | None -> `Artifact_missing)
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_runtime _
-                | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) ) ->
-                `Other
+            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> `Other
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -6148,12 +6098,6 @@ and execute_action ~now (m : Model.t) action =
       in
       match artifact_target_opt with
       | `Artifact art -> copy_artifact_body art
-      | `Artifact_missing ->
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
-                 ~en:"Artifact not found")
-              m
-          , [] )
       | `Other
         when Option.is_none m.nav.overlay
              && Option.is_none (Model.active_dive m)
@@ -6330,29 +6274,6 @@ and execute_action ~now (m : Model.t) action =
                     with
                     | Some v -> Some v.task_title
                     | None -> Some id))
-            | Some (Nav.Dive_knowledge kd) -> (
-                match kd with
-                | Nav.Thread_dive post_id -> (
-                    match m.knowledge.thread_view with
-                    | Knowledge_store.Thread_post ->
-                        Option.map (fun (p : Wire_knowledge.board_post) -> p.body)
-                          (selected_board_post_for_crud m)
-                    | Knowledge_store.Thread_comments ->
-                        Option.map
-                          (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.body)
-                          (Knowledge_store.selected_thread_comment ~post_id m.knowledge))
-                | Nav.Wiki_dive slug -> (
-                    match
-                      Observed.to_option
-                        (Knowledge_store.wiki_page_for ~slug m.knowledge)
-                    with
-                    | Some detail
-                      when not
-                             (String.equal (String.trim detail.body_markdown) "")
-                      ->
-                        Some detail.body_markdown
-                    | Some _ | None -> Some slug)
-                | Nav.Artifact_dive id -> Some id)
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) -> Some run_id
@@ -6360,10 +6281,21 @@ and execute_action ~now (m : Model.t) action =
                 match m.nav.workspace with
                 | Nav.Knowledge -> (
                     match m.knowledge.active_tab with
-                    | Nav.Knowledge_board ->
-                        Option.map
-                          (fun (p : Wire_knowledge.board_post) -> p.body)
-                          (Knowledge_store.selected_post m.knowledge)
+                    | Nav.Knowledge_board -> (
+                        match Knowledge_store.selected_post m.knowledge with
+                        | None -> None
+                        | Some p ->
+                            if
+                              Model.is_board_detail_active m
+                              && m.knowledge.thread_view
+                                 = Knowledge_store.Thread_comments
+                            then
+                              Option.map
+                                (fun (tc : Knowledge_store.threaded_comment) ->
+                                  tc.comment.body)
+                                (Knowledge_store.selected_thread_comment
+                                   ~post_id:p.id m.knowledge)
+                            else Some p.body)
                     | Nav.Knowledge_wiki -> (
                         match Knowledge_store.selected_wiki_page m.knowledge with
                         | None -> None
@@ -6673,20 +6605,7 @@ and execute_action ~now (m : Model.t) action =
       | Some (Nav.System_gate Nav.Media_viewer) -> (
           match Model.focused_artifact m with
           | Some art -> export_and_open_artifact art
-          | None -> (
-              match Model.active_dive m with
-              | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                  ( Model.with_toast ~now ~level:Model.Toast_warning
-                      (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
-                         ~en:"Artifact not found")
-                      m
-                  , [] )
-              | Some
-                  ( Nav.Dive_work _
-                  | Nav.Dive_runtime _
-                  | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
-              | None ->
-                  (m, [])))
+          | None -> (m, []))
       | Some
           ( Nav.Palette
           | Nav.Incidents
@@ -6731,30 +6650,6 @@ and execute_action ~now (m : Model.t) action =
             | None -> None
           in
           match Model.active_dive m with
-          | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
-              match
-                Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
-              with
-              | Some a -> export_and_open_artifact a
-              | None ->
-                  ( Model.with_toast ~now ~level:Model.Toast_warning
-                      (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
-                         ~en:"Artifact not found")
-                      m
-                  , [] ))
-          | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
-              open_url_or_notice (wiki_external_url ~expected_slug:slug ())
-          | Some (Nav.Dive_knowledge (Nav.Thread_dive id)) ->
-              let url_opt =
-                Option.bind
-                  (List.find_opt
-                     (fun (p : Wire_knowledge.board_post) ->
-                       String.equal p.id id)
-                     (Knowledge_store.filtered_posts m.knowledge))
-                  (fun (p : Wire_knowledge.board_post) ->
-                    extract_first_http_url p.body)
-              in
-              open_url_or_notice url_opt
           | Some (Nav.Dive_work (Nav.Goal_dive id)) ->
               let url_opt =
                 Option.bind
@@ -6970,9 +6865,19 @@ and execute_action ~now (m : Model.t) action =
                 };
             }
           else
+            let knowledge =
+              if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
+                m.knowledge
+                |> Knowledge_store.reset_thread_view
+                |> Knowledge_store.clear_armed_vote
+                |> Knowledge_store.clear_pending_wiki_edit
+                |> Knowledge_store.set_artifact_search ""
+              else m.knowledge
+            in
             let m0 =
               {
                 m with
+                knowledge;
                 nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
                 infra = { m.infra with show_raw_json = false };
               }
@@ -7020,11 +6925,7 @@ and execute_action ~now (m : Model.t) action =
             && (not (Model.sidebar_has_focus m))
             &&
             match Model.active_dive m with
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_knowledge _
-                | Nav.Dive_runtime _ ) ->
-                false
+            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge ->
@@ -7057,12 +6958,7 @@ and execute_action ~now (m : Model.t) action =
         && (not (Model.sidebar_has_focus m))
         &&
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
-            false
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge ->
@@ -7179,11 +7075,7 @@ and execute_action ~now (m : Model.t) action =
               (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now
               m
-        | Some
-            ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
-            (m, [])
+        | Some (Nav.Dive_runtime _) -> (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge
@@ -7221,10 +7113,6 @@ and execute_action ~now (m : Model.t) action =
             (next, View_fetches.fetches_for_current_view next)
         | Some
             ( Nav.Dive_work _
-            | Nav.Dive_knowledge
-                ( Nav.Thread_dive _
-                | Nav.Wiki_dive _
-                | Nav.Artifact_dive _ )
             | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
             ) ->
             (m, [])
@@ -7305,7 +7193,6 @@ and execute_action ~now (m : Model.t) action =
                     (next, View_fetches.fetches_for_current_view next)
                 | Some
                     ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
-                    | Nav.Dive_knowledge _
                     | Nav.Dive_runtime _
                     ) ->
                     (m, [])
@@ -7334,6 +7221,18 @@ and execute_action ~now (m : Model.t) action =
                         in
                         let next = { m with nav; work } in
                         (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Knowledge
+                      when Nav.equal_knowledge_tab m.knowledge.active_tab
+                             Nav.Knowledge_board
+                           && Model.is_board_detail_active m ->
+                        ( {
+                            m with
+                            knowledge =
+                              m.knowledge
+                              |> Knowledge_store.toggle_thread_view
+                              |> Knowledge_store.clear_armed_vote;
+                          }
+                        , [] )
                     | Nav.Knowledge
                       when Nav.equal_knowledge_tab m.knowledge.active_tab
                              Nav.Knowledge_memory ->
@@ -7470,8 +7369,6 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
-                open_board_comment_for_selected m
             | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
                 match
                   List.find_opt
@@ -7488,22 +7385,14 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some tk -> open_task_transition_modal ~now m tk
                 | None -> (m, []))
-            | Some
-                ( Nav.Dive_work (Nav.Verification_dive _)
-                | Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                | Nav.Dive_runtime _
-                ) ->
+            | Some (Nav.Dive_work (Nav.Verification_dive _) | Nav.Dive_runtime _) ->
                 (m, [])
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge
                   when Nav.equal_knowledge_tab m.knowledge.active_tab
-                         Nav.Knowledge_board -> (
-                    match Knowledge_store.selected_post m.knowledge with
-                    | Some p ->
-                        Update_nav.open_inline_modal m
-                          (Nav.Board_comment { post_id = p.id; parent_id = None })
-                    | None -> (m, []))
+                         Nav.Knowledge_board ->
+                    open_board_comment_for_selected m
                 | Nav.Keepers -> (
                     match Model.selected_keeper_name m with
                     | Some name ->
@@ -7754,22 +7643,21 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
-                let knowledge =
-                  Knowledge_store.step_thread_comment ~post_id ~delta
-                    m.knowledge
-                in
-                ({ m with knowledge }, [])
-            | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                step_artifact_revision ~now ~delta m
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_knowledge (Nav.Wiki_dive _)
-                | Nav.Dive_runtime _
-                ) ->
-                (m, [])
+            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
             | None -> (
                 match m.nav.workspace with
+                | Nav.Knowledge
+                  when Nav.equal_knowledge_tab m.knowledge.active_tab
+                         Nav.Knowledge_board
+                       && Model.is_board_detail_active m -> (
+                    match Knowledge_store.selected_post m.knowledge with
+                    | Some p ->
+                        let knowledge =
+                          Knowledge_store.step_thread_comment ~post_id:p.id
+                            ~delta m.knowledge
+                        in
+                        ({ m with knowledge }, [])
+                    | None -> (m, []))
                 | Nav.Knowledge
                   when Nav.equal_knowledge_tab m.knowledge.active_tab
                          Nav.Knowledge_artifacts ->
@@ -7834,12 +7722,7 @@ and execute_action ~now (m : Model.t) action =
       else
         let in_memory =
           match Model.active_dive m with
-          | Some
-              ( Nav.Dive_work _
-              | Nav.Dive_knowledge _
-              | Nav.Dive_runtime _
-              ) ->
-              false
+          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
           | None ->
               (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                && Nav.equal_knowledge_tab m.knowledge.active_tab
@@ -7879,14 +7762,7 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
-            upvote_board_target ~now m
-        | Some
-            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _
-            ) ->
-            (m, [])
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge
@@ -8035,14 +7911,7 @@ and execute_action ~now (m : Model.t) action =
             with
             | Some v -> Update_nav.approve_verification_request ~now m v
             | None -> (m, []))
-        | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
-            open_board_comment_for_selected m
-        | Some
-            ( Nav.Dive_work (Nav.Task_dive _)
-            | Nav.Dive_knowledge
-                ( Nav.Wiki_dive _
-                | Nav.Artifact_dive _ )
-            | Nav.Dive_runtime _ ) ->
+        | Some (Nav.Dive_work (Nav.Task_dive _) | Nav.Dive_runtime _) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -8236,10 +8105,7 @@ and execute_action ~now (m : Model.t) action =
                 , [] ))
         | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
             execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
-        | Some
-            ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            ) ->
+        | Some (Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -8440,14 +8306,6 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                ( Model.with_toast ~now ~level:Model.Toast_warning
-                    (Say.make ~ko:"해당 아티팩트를 목록에서 찾을 수 없습니다"
-                       ~en:"Artifact not found in list")
-                    m
-                , [] )
-            | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
-                open_wiki_edit_modal ~now m ~slug
             | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
                 match
                   List.find_opt
@@ -8476,9 +8334,7 @@ and execute_action ~now (m : Model.t) action =
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) -> (m, [])
-            | Some
-                ( Nav.Dive_knowledge (Nav.Thread_dive _)
-                | Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _) ) ->
+            | Some (Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)) ->
                 (m, [])
             | None ->
                 if
@@ -8826,18 +8682,7 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else (
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-                ( Model.with_toast ~now ~level:Model.Toast_warning
-                    (Say.make ~ko:"해당 아티팩트를 목록에서 찾을 수 없습니다"
-                       ~en:"Artifact not found in list")
-                    m
-                , [] )
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                | Nav.Dive_runtime _
-                ) ->
-                (m, [])
+            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Work
@@ -8861,11 +8706,7 @@ and execute_action ~now (m : Model.t) action =
               (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now
               m
-        | Some
-            ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            ) ->
-            (m, [])
+        | Some (Nav.Dive_runtime _) -> (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Keepers
@@ -8891,24 +8732,18 @@ and execute_action ~now (m : Model.t) action =
         if Option.is_some m.nav.overlay then None
         else
           match Model.active_dive m with
-          | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
-              thread_vote_target ~post_id m.knowledge
-          | Some
-              ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-              | Nav.Dive_work _
-              | Nav.Dive_runtime _
-              ) ->
-              None
+          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
           | None ->
               if
                 Nav.equal_workspace m.nav.workspace Nav.Knowledge
                 && Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_board
               then
-                Option.map
+                Option.bind (Knowledge_store.selected_post m.knowledge)
                   (fun (p : Wire_knowledge.board_post) ->
-                    Knowledge_store.Vote_post p.id)
-                  (Knowledge_store.selected_post m.knowledge)
+                    if Model.is_board_detail_active m then
+                      thread_vote_target ~post_id:p.id m.knowledge
+                    else Some (Knowledge_store.Vote_post p.id))
               else None
       in
       match target_opt with
@@ -9051,11 +8886,7 @@ and execute_action ~now (m : Model.t) action =
         if Option.is_some m.nav.overlay then None
         else
           match Model.active_dive m with
-          | Some
-              ( Nav.Dive_work _
-              | Nav.Dive_knowledge _
-              | Nav.Dive_runtime _ ) ->
-              None
+          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
           | None -> (
               match m.nav.workspace with
               | Nav.Infra
@@ -9132,7 +8963,9 @@ and execute_action ~now (m : Model.t) action =
       in
       open_memory_act_modal m ~keeper_default
   | Keymap.Search_prev_match ->
-      if not (String.equal (String.trim m.knowledge.artifact_search_query) "")
+      if
+        Model.is_artifact_doc_search_active m
+        && not (String.equal (String.trim m.knowledge.artifact_search_query) "")
       then step_artifact_search ~now ~delta:(-1) m
       else (m, [])
   | Keymap.Toggle_memory_chart ->
@@ -9143,11 +8976,7 @@ and execute_action ~now (m : Model.t) action =
         && (not (Model.sidebar_has_focus m))
         &&
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime _
-            | Nav.Dive_knowledge _ ) ->
-            false
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None ->
             (Nav.equal_workspace m.nav.workspace Nav.Knowledge
              && Nav.equal_knowledge_tab m.knowledge.active_tab
@@ -9173,12 +9002,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Open_external_editor -> (
       let wiki_slug =
         match Model.active_dive m with
-        | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) -> Some slug
-        | Some
-            ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_work _
-            | Nav.Dive_runtime _ ) ->
-            None
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
         | None ->
             if
               Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -9297,7 +9121,6 @@ and execute_action ~now (m : Model.t) action =
                 (Work_store.tasks m.work)
           | Some
               ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Verification_dive _)
-              | Nav.Dive_knowledge _
               | Nav.Dive_runtime _
               ) ->
               None

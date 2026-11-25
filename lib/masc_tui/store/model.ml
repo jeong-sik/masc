@@ -537,12 +537,7 @@ let target_keeper m =
 
 let target_keeper_for_lifecycle m =
   match active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      target_keeper m
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> target_keeper m
   | None -> (
       match m.nav.workspace with
       | Nav.Keepers -> (
@@ -782,12 +777,7 @@ let active_menu_target m =
       | Nav.Keepers -> (
           let tab_opt =
             match active_dive m with
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_knowledge _
-                | Nav.Dive_runtime _
-                ) ->
-                None
+            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
             | None -> Some m.fleet.keeper_dive_tab
           in
           match tab_opt with
@@ -932,9 +922,7 @@ let can_zoom_current_view m =
   then false
   else
     match active_dive m with
-    | Some
-        (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) ->
-        false
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
     | None -> (
         match m.nav.workspace with
         | Nav.Keepers -> Option.is_some (selected_keeper_name m)
@@ -1078,11 +1066,7 @@ let dive_work_json_pane_index m =
           | Nav.Task_dive task_id ->
               Some (if task_dive_has_two_main_panes m task_id then 2 else 1)
           | Nav.Verification_dive _ -> Some 1)
-    | Some
-        ( Nav.Dive_knowledge _
-        | Nav.Dive_runtime _ )
-    | None ->
-        None
+    | Some (Nav.Dive_runtime _) | None -> None
 
 let keeper_preview_has_inner_split m =
   match selected_keeper_name m with
@@ -1111,11 +1095,7 @@ let keeper_preview_has_inner_split m =
 let has_active_memory_reading m =
   let scope_opt =
     match active_dive m with
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _ ) ->
-        None
+    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
     | None -> (
         match m.nav.workspace with
         | Nav.Knowledge
@@ -1176,11 +1156,7 @@ let focusable_pane_count m =
         | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> 2
-        | Some
-            ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
-            ) ->
-            1
+        | Some (Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) -> 1
         | None ->
             if m.nav.zoomed && can_zoom_current_view m then
               if
@@ -1330,9 +1306,7 @@ let pane_rects m =
         let top_h = if br.h >= 20 then 9 else 6 in
         let t, b = split_v_fixed ~gap:gap_v br top_h in
         [ t; b ]
-    | Some
-        ( Nav.Dive_knowledge _
-        | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _) ) ->
+    | Some (Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) ->
         [ br ]
     | None -> (
         if m.nav.zoomed && can_zoom_current_view m then
@@ -1649,8 +1623,6 @@ let active_focus_label m =
                     if focusable_pane_count m > 1 then
                       pane_prefix ~ko:"검증 상세" ~en:"Verification"
                     else Say.make ~ko:"검증 상세" ~en:"VERIF DIVE"))
-        | Some (Nav.Dive_knowledge _) ->
-            Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
             if m.nav.pane_index = 1 then
               pane_prefix ~ko:(name ^ " · 시계열") ~en:(name ^ " · Series")
@@ -1898,16 +1870,25 @@ let active_focus_label m =
                         ~en:(Say.resolve Say.Lang_en mode_lbl)
                     else pane_prefix ~ko:"파일 트리" ~en:"Files")))
 
+let is_board_detail_active m =
+  Option.is_none m.nav.overlay
+  && Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+  && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
+  && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
+
+let is_artifact_doc_search_active m =
+  Option.is_none m.nav.overlay
+  && Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+  && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_artifacts
+  && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
+
 let is_keeper_config_active m =
   Option.is_none m.nav.overlay
   &&
   match active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_config
@@ -1935,23 +1916,14 @@ let is_keeper_lifecycle_surface m =
   && (not (sidebar_has_focus m))
   &&
   match active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
 
 let is_memory_explorer_surface m =
   Option.is_none m.nav.overlay
   &&
   match active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _ ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None ->
       (Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory)
@@ -1963,11 +1935,7 @@ let is_memory_diff_pin_surface m =
   is_memory_explorer_surface m
   &&
   match active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _ ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
         Knowledge_store.equal_memory_subview m.knowledge.memory_subview
@@ -1977,20 +1945,11 @@ let is_memory_diff_pin_surface m =
           m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow
 
 let is_artifact_dive_search_active m =
-  Option.is_none m.nav.overlay
+  is_artifact_doc_search_active m
   && (not (Drafts.is_focused m.drafts))
   && (not m.nav.filter_focused)
   && (not (sidebar_has_focus m))
-  && (not (String.equal (String.trim m.knowledge.artifact_search_query) ""))
-  &&
-  match active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> true
-  | Some
-      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-      | Nav.Dive_work _
-      | Nav.Dive_runtime _ )
-  | None ->
-      false
+  && not (String.equal (String.trim m.knowledge.artifact_search_query) "")
 
 let inline_modal_for kind =
   let fields =
@@ -3659,13 +3618,7 @@ let is_viewing_wiki_slug ~slug m =
   && (not (Drafts.is_focused m.drafts))
   &&
   match active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Wiki_dive dive_slug)) ->
-      String.equal dive_slug slug
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_runtime _
-      | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _) ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None -> (
       Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_wiki
@@ -4182,35 +4135,6 @@ let active_view_ssot_mode m =
                 observed_at_opt m.work.verifications;
               ];
         }
-  | Some (Nav.Dive_knowledge target) -> (
-      match target with
-      | Nav.Thread_dive _ ->
-          Synced_snapshot
-            {
-              observer = m.freshness.observer;
-              observed_at =
-                latest_observed_at
-                  [
-                    observed_at_opt m.knowledge.active_thread;
-                    observed_at_opt m.knowledge.board;
-                  ];
-            }
-      | Nav.Wiki_dive slug ->
-          Snapshot_only
-            {
-              observed_at =
-                observed_at_opt (Knowledge_store.wiki_page_for ~slug m.knowledge);
-            }
-      | Nav.Artifact_dive _ ->
-          Snapshot_only
-            {
-              observed_at =
-                latest_observed_at
-                  [
-                    observed_at_opt m.knowledge.active_artifact_detail;
-                    observed_at_opt m.knowledge.artifacts;
-                  ];
-            })
   | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
       Synced_snapshot
         {
@@ -4411,7 +4335,12 @@ let active_view_ssot_mode m =
               Synced_snapshot
                 {
                   observer = m.freshness.observer;
-                  observed_at = observed_at_opt m.knowledge.board;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.knowledge.active_thread;
+                        observed_at_opt m.knowledge.board;
+                      ];
                 }
           | Nav.Knowledge_wiki ->
               let page_obs =
@@ -4633,16 +4562,7 @@ let build_commit_mismatch m =
         not (String.equal (String.sub a 0 n) (String.sub b 0 n))
   | (Some _ | None), (Some _ | None) -> false
 
-let focused_artifact m =
-  match active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
-      Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_runtime _
-      | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
-  | None ->
-      Knowledge_store.selected_artifact m.knowledge
+let focused_artifact m = Knowledge_store.selected_artifact m.knowledge
 
 type keeper_banner_row = {
   tone : Theme.status_token;

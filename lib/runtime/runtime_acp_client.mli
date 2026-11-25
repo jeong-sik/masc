@@ -132,6 +132,19 @@ type mcp_identifier_syntax =
       (** Unqualified tool name paired with wire [kind = "mcp"]. *)
 [@@deriving show, eq]
 
+(** How a driver's host takes the name of the MCP server the Keeper passes with
+    [session/new]. The host puts the name in the names of its tools
+    ([mcp__<server>__<tool>] for muse). *)
+type bridge_naming =
+  | Shared_name of string
+      (** Every bridge of the driver has this name. *)
+  | Per_owner_name of string
+      (** The bridge is named [<stem>_<8 hex digits>], the digits from the
+          SHA-256 of the owner (see [bridge_server_name]). The host refuses a
+          session server named like one in the operator's settings, a plugin
+          or a [.mcp.json] it loads, and the operator can write any fixed
+          name. *)
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -139,11 +152,7 @@ type driver_profile =
   ; env_set : (string * string) list
   ; default_strip_env : string list
   ; mcp_wiring : mcp_wiring
-  ; bridge_server_name : string
-      (** The name of the MCP server the session carries, which the host puts
-          in the names of its tools ([mcp__<server>__<tool>] for muse). Only
-          [A-Za-z0-9_] and no [__]: hosts replace other characters in a tool
-          name, and a name with [__] cannot be read back from it. *)
+  ; bridge_naming : bridge_naming
   ; mcp_identifier_syntaxes : mcp_identifier_syntax list
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
@@ -160,12 +169,21 @@ type driver_profile =
 
 val profile_of_driver : driver -> driver_profile
 
-val bridge_server_name : driver -> string
-(** The name the Keeper, runtime verification and the ACP probe give the MCP
-    bridge they pass to the driver's host: [muse_code] uses [masc_keeper]
-    because its host refuses a session server named like one in the
-    operator's settings or a [.mcp.json] it loads, and an entry for MASC's
-    own server can be named [masc]; the other drivers use [masc]. *)
+val bridge_server_name : driver -> owner:string -> string
+(** The name the bridge of [owner] gives its MCP server in the host's session:
+    the profile's shared name, or for a [Per_owner_name] profile its stem and
+    eight hex digits of the SHA-256 of [owner]. [owner] is the Keeper's name
+    for a Keeper's bridge, the runtime id for runtime verification and the
+    driver's name for [masc-acp-probe]. The same driver and owner give the
+    same name on every call, so the history of a session resumed after the
+    host restarted names the tools the new bridge serves. The digits come from
+    a name that is not secret: no entry has the name by accident, but this is
+    no defense against an entry written to match it. Only [A-Za-z0-9_], no
+    [__] and no trailing [_]: the muse host replaces [-] and [.] in a server
+    name (other characters were not tried), and the Keeper reads the server
+    back from [mcp__<server>__<tool>] up to the first [__]. Read the name of a
+    started bridge from the bridge
+    ([Runtime_official_client_mcp_http.server_name]). *)
 
 val validate_session_effort :
   driver:driver -> Llm_provider.Reasoning_effort.t option -> (unit, string) result

@@ -183,7 +183,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
   : driver_report
   =
   let driver_name = Runtime_acp_client.driver_to_string driver in
-  let mcp_server_name = Runtime_acp_client.bridge_server_name driver in
+  let mcp_server_name = Runtime_acp_client.bridge_server_name driver ~owner:driver_name in
   let nonce = Printf.sprintf "masc-acp-%s-ok" driver_name in
   let expected_pong = "MASC_PONG:" ^ nonce in
   let skills_root = Filename.concat cwd ".agents/skills" in

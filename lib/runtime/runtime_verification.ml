@@ -704,7 +704,9 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
              | Error err -> map_err err
              | Ok isolated_cwd ->
                let active_client : Runtime_acp_client.t option Atomic.t = Atomic.make None in
-               let mcp_server_name = Runtime_acp_client.bridge_server_name execution.driver in
+               let mcp_server_name =
+                 Runtime_acp_client.bridge_server_name execution.driver ~owner:runtime.id
+               in
                let bridge =
                  Runtime_official_client_mcp_http.start
                    ~sw:acp_sw

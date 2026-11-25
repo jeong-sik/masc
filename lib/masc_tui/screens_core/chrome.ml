@@ -960,7 +960,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                 selected, show the selected keeper's inner preview tabs instead
                 of Fleet modes. *)
              match
-               if model.nav.pane_index = 1 || model.nav.zoomed then
+               if model.nav.pane_index >= 1 || model.nav.zoomed then
                  Fleet_store.selected_keeper_summary model.fleet
                else None
              with

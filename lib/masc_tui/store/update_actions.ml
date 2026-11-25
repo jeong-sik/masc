@@ -1347,9 +1347,7 @@ let selected_keeper_name_for_lifecycle (m : Model.t) : string option =
       None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
-        Option.map
-          (fun (k : Wire_fleet.keeper_summary) -> k.name)
-          (Fleet_store.selected_keeper_summary m.fleet)
+        Model.target_keeper_for_lifecycle m
       else None
 
 let open_keeper_lifecycle_modal (m : Model.t) ~keeper ~default_action =
@@ -7367,6 +7365,10 @@ and execute_action ~now (m : Model.t) action =
                 | None -> (
                     match m.nav.workspace with
                     | Nav.Work
+                      when Nav.equal_work_tab m.work.active_tab Nav.Work_tasks ->
+                        let work = Work_store.cycle_task_status_filter m.work in
+                        ({ m with work }, [])
+                    | Nav.Work
                       when Nav.equal_work_tab m.work.active_tab
                              Nav.Work_pipeline ->
                         let work = Work_store.toggle_verification_view m.work in
@@ -9290,18 +9292,36 @@ and execute_action ~now (m : Model.t) action =
             { m with knowledge }
         , [] )
   | Keymap.Open_external_editor -> (
-      match Knowledge_store.selected_wiki_page m.knowledge with
-      | Some p
-        when Nav.equal_workspace m.nav.workspace Nav.Knowledge
-             && Nav.equal_knowledge_tab m.knowledge.active_tab
-                  Nav.Knowledge_wiki ->
+      let wiki_slug =
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) -> Some slug
+        | Some
+            ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            None
+        | None ->
+            if
+              Nav.equal_workspace m.nav.workspace Nav.Knowledge
+              && Nav.equal_knowledge_tab m.knowledge.active_tab
+                   Nav.Knowledge_wiki
+            then
+              Option.map
+                (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+                (Knowledge_store.selected_wiki_page m.knowledge)
+            else None
+      in
+      match wiki_slug with
+      | Some slug ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
-                 ~ko:("외부 편집기로 위키 열기: " ^ p.slug)
-                 ~en:("Opening wiki page in $EDITOR: " ^ p.slug))
+                 ~ko:("외부 편집기로 위키 열기: " ^ slug)
+                 ~en:("Opening wiki page in $EDITOR: " ^ slug))
               m
-          , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page p.slug) ] )
-      | Some _ | None -> (m, []))
+          , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] )
+      | None -> (m, []))
   | Keymap.Interrupt_turn -> (
       let keeper_opt =
         match Model.active_dive m with
@@ -9369,6 +9389,28 @@ and execute_action ~now (m : Model.t) action =
                         (Nav.Addon_detach_confirm
                            { instance_id = inst.instance_id; title = inst.title })
                   | None -> (m, [])
+                else if Model.is_memory_explorer_surface m then
+                  let knowledge =
+                    Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+                      m.knowledge
+                  in
+                  let nav =
+                    match Model.active_dive m with
+                    | Some (Nav.Dive_keeper _) ->
+                        { m.nav with dive_scroll_offset = 0 }
+                    | Some
+                        ( Nav.Dive_work _
+                        | Nav.Dive_knowledge _
+                        | Nav.Dive_runtime _
+                        | Nav.Dive_infra _ ) ->
+                        m.nav
+                    | None ->
+                        if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+                          { m.nav with dive_scroll_offset = 0 }
+                        else m.nav
+                  in
+                  let next = { m with nav; knowledge } in
+                  (next, View_fetches.fetches_for_current_view next)
                 else
                   let in_keeper_config =
                     match Model.active_dive m with

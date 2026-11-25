@@ -3215,8 +3215,8 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ?subtitle:runs_subtitle
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[d] Exact 상세 · [f] 퓨전"
-                 ~en:"[d] Exact Detail · [f] Fusion"))
+              (Say.make ~ko:"[D] Exact 상세 · [f] 퓨전"
+                 ~en:"[D] Exact Detail · [f] Fusion"))
          (Say.resolve lang
             (Say.make ~ko:"Exact · Fusion 실행 이력"
                ~en:"Exact & Fusion Runs")))

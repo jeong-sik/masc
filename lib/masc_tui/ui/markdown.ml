@@ -548,6 +548,37 @@ let referenced_labels doc =
   in
   Folder.fold_doc (Folder.make ~inline ()) Labels.empty doc
 
+let alphatex_code_blocks raw =
+  let module Folder = Cmarkit.Folder in
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs:false raw in
+  let block _folder acc = function
+    | Block.Code_block (code, _) ->
+        let closed =
+          match Block.Code_block.layout code with
+          | `Fenced { closing_fence; _ } -> Option.is_some closing_fence
+          | `Indented -> false
+        in
+        let lang_tag, info_tail =
+          Option.bind (Block.Code_block.info_string code) (fun (info, _) ->
+              Block.Code_block.language_of_info_string info)
+          |> Option.value ~default:("", "")
+        in
+        let acc =
+          match fence_kind lang_tag info_tail, closed with
+          | Score _, true ->
+              let body =
+                Block.Code_block.code code
+                |> List.map Cmarkit.Block_line.to_string
+                |> String.concat "\n"
+              in
+              body :: acc
+          | Score _, false | (Diagram | Code), (true | false) -> acc
+        in
+        Folder.ret acc
+    | _ -> Folder.default
+  in
+  Folder.fold_doc (Folder.make ~block ()) [] doc |> List.rev
+
 let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw =
   let bg = base_style.bg in
   let muted_style = Typography.whisper ~bg ~italic:false theme in

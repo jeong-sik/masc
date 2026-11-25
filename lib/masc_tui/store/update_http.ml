@@ -2,6 +2,7 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
+  let m = { m with infra = Infra_store.clear_sandbox_observations m.infra } in
   let exp_s = match expected with Some s -> s | None -> "?" in
   let obs_s = match observed with Some s -> s | None -> "?" in
   let summary =

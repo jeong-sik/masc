@@ -477,6 +477,15 @@ let detach_keeper_sandbox_reads t =
   in
   { t with keeper_sandboxes }
 
+let clear_sandbox_observations t =
+  {
+    t with
+    sandboxes = Observed.unreported;
+    sandboxes_fallback_404 = false;
+    keeper_sandboxes = String_map.empty;
+    pending_sandbox_keeper = None;
+  }
+
 let keeper_sandbox_needed ~force ~keeper t =
   let read = keeper_sandbox_read_for ~keeper t in
   Option.is_none read.requested_at
@@ -1257,13 +1266,9 @@ let set_filter filter_query t =
   }
 
 let mark_stale_all t =
+  let t = invalidate_sandboxes t in
   {
     t with
-    sandboxes = Observed.mark_stale t.sandboxes;
-    keeper_sandboxes =
-      String_map.map
-        (fun read -> { read with observation = Observed.mark_stale read.observation })
-        t.keeper_sandboxes;
     repositories = Observed.mark_stale t.repositories;
     repository_pulls = Observed.mark_stale t.repository_pulls;
     repository_details = String_map.map Observed.mark_stale t.repository_details;

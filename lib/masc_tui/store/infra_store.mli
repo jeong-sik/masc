@@ -169,6 +169,9 @@ val set_keeper_sandbox :
 
 val request_keeper_sandbox : keeper:string -> now:Clock.Mono.t -> t -> t
 val detach_keeper_sandbox_reads : t -> t
+val clear_sandbox_observations : t -> t
+(** Discard fleet and named reads after the workspace guard reports a mismatch. *)
+
 val keeper_sandbox_needed : force:bool -> keeper:string -> t -> bool
 val invalidate_sandboxes : ?keeper:string -> t -> t
 (** A new sandbox dataset can replace a confirmed absence or a last value.

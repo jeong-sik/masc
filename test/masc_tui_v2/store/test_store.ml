@@ -990,7 +990,24 @@ let test_chat_stream_409_from_another_instance () =
 
 (* 4. 409 workspace_mismatch recovery without loop *)
 let test_workspace_mismatch_recovery () =
-  let m0 = Model.initial () in
+  let initial = Model.initial () in
+  let infra =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None initial.infra
+  in
+  let fleet = Option.get (Observed.to_option infra.sandboxes) in
+  let prior : Wire_infra.keeper_sandbox_response =
+    { keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers) }
+  in
+  let m0 =
+    { initial with
+      infra =
+        Infra_store.set_keeper_sandbox ~keeper:"alpha"
+          (Observed.value ~observed_at:t0 prior) infra }
+  in
   let e1 = m0.epoch in
   let mismatch =
     Msg.Workspace_mismatch
@@ -1013,6 +1030,13 @@ let test_workspace_mismatch_recovery () =
        Model.Mismatch_recovering);
   Alcotest.(check bool) "re-handshake Get_health emitted" true
     (has_get_health cmds1);
+  Alcotest.(check bool) "workspace mismatch clears previous Sandbox observations"
+    true
+    (Option.is_none (Observed.to_option m1.infra.sandboxes)
+     && not m1.infra.sandboxes_fallback_404
+     && Option.is_none
+          (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m1.infra
+           |> Infra_store.keeper_sandbox_detail));
   (* Parallel stale 409 from old epoch e1 is ignored cleanly *)
   let m2, cmds2 =
     Update.step ~now:t0 m1
@@ -1078,7 +1102,20 @@ let test_workspace_mismatch_recovery () =
             false)
       cmds3
   in
-  Alcotest.(check bool) "workspace guard updated" true guard_updated
+  Alcotest.(check bool) "workspace guard updated" true guard_updated;
+  let reply =
+    Msg.Reply_keeper_sandbox
+      { keeper = "alpha";
+        result = Error (Msg.Http_error { status = 503; body = ""; api_error = None }) }
+  in
+  let after_failure, _ =
+    Update.step ~now:t2 m3 (Msg.Http_reply { epoch = m3.epoch; reply })
+  in
+  Alcotest.(check bool) "transient failure in the new workspace keeps no old detail"
+    true
+    (Option.is_none
+       (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" after_failure.infra
+        |> Infra_store.keeper_sandbox_detail))
 
 (* 5. Subscriptions.plan bounded across all 6 workspaces + zero idle polling *)
 let test_subscriptions_bounded_and_zero_polling () =
@@ -9118,7 +9155,23 @@ let test_sandbox_probe_reopens_named_absence () =
   Alcotest.(check (list string)) "current absence sends no more requests" []
     (named_requests quiet);
   Alcotest.(check bool) "current absence settles again" true
-    (Infra_store.keeper_sandbox_for ~keeper:"alpha" settled.infra = Observed.Absent)
+    (Infra_store.keeper_sandbox_for ~keeper:"alpha" settled.infra = Observed.Absent);
+  let pending, _ = observe t1 settled probe in
+  let event =
+    Msg.Sse_observer_handshake
+      { handshake = None; identity = None; needs_cold_resync = true }
+  in
+  let resync, cmds =
+    Update.step ~now:t1 pending (Msg.Sse_event { epoch = pending.epoch; event })
+  in
+  Alcotest.(check (list string)) "cold resync coalesces the pending Sandbox read"
+    [] (named_requests cmds);
+  let rereading, cmds = settle_missing t2 resync in
+  Alcotest.(check (list string)) "absence from before the replay gap starts a new read"
+    [ "alpha" ] (named_requests cmds);
+  let _, cmds = settle_missing t2 rereading in
+  Alcotest.(check (list string)) "absence observed after the gap settles"
+    [] (named_requests cmds)
 
 let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
   let base = Model.initial () in

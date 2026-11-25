@@ -7,6 +7,7 @@ let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
 let basis_label fact =
   match fact.basis with
   | Observed Transcript -> "observed"
+  | Observed (Personal _) -> "personal"
   | Observed (Board { post_id; comment_id = None }) ->
     Printf.sprintf "observed board=%s" (Board_types.Post_id.to_string post_id)
   | Observed (Board { post_id; comment_id = Some comment_id }) ->
@@ -32,7 +33,9 @@ let render_facts facts =
 ;;
 
 let facts_payload_bytes ~ordinary_facts ~source_lines =
-  List.map render_fact ordinary_facts @ source_lines
+  List.filter_map (fun fact -> if is_ordinary fact then Some (render_fact fact) else None)
+    ordinary_facts
+  @ source_lines
   |> String.concat "\n"
   |> String.length
 ;;

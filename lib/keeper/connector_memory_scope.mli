@@ -16,3 +16,9 @@ val of_surface : account:Connector_account_ref.t -> Surface_ref.t -> t option
 val destination_to_json : t -> Yojson.Safe.t
 (** The destination coordinates. The question carries account identity
     separately, alongside the actor's observed display name. *)
+
+val to_json : t -> Yojson.Safe.t
+(** Canonical account plus destination, for stored Memory. *)
+
+val of_json : Yojson.Safe.t -> (t, string) result
+(** Closed decoder for the canonical stored scope. *)

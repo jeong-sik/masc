@@ -290,9 +290,19 @@ type board_ref =
   ; comment_id : Board_types.Comment_id.t option
   }
 
+type personal_observation = private
+  { scope : Connector_memory_scope.t
+  ; message_ids : string list
+  }
+
+val personal_observation
+  : scope:Connector_memory_scope.t -> message_ids:string list -> personal_observation option
+(** Evidence is a nonempty set of canonical message IDs in the given scope. *)
+
 type observation =
   | Transcript
   | Board of board_ref
+  | Personal of personal_observation
 
 (** Why a fact belongs to maintained current knowledge. [Observed] facts are
     base facts selected from evidence, and carry where that evidence was read.
@@ -369,18 +379,27 @@ val derived
   -> derivations:derivation list
   -> (fact, string) result
 
-(** True only for the canonical [sha256:] prefix followed by exactly 64
-    lowercase hexadecimal characters. *)
+(** True for a canonical ordinary or personal SHA-256 identity. *)
 val is_memory_id : string -> bool
 
+val is_ordinary_memory_id : string -> bool
+(** Recognizes the ordinary ID form used by unscoped Memory views. *)
+
 (** The shape {!is_memory_id} accepts, as a noun phrase a refusal can quote:
-    ["sha256:" followed by 64 lowercase hex digits]. Stated here so a surface
-    telling a model what it wanted cannot drift from the predicate. *)
+    stated here so a surface telling a model what it wanted cannot drift
+    from the predicate. *)
 val memory_id_shape : string
 
-(** SHA-256 of the exact claim bytes. This derived identifier is used only for
-    retention, duplicate rejection, and observability. *)
+(** Ordinary facts keep their exact claim identity. Personal facts identify
+    the exact claim bytes within one account and destination. Supporting
+    messages do not change the identity. *)
 val memory_id : fact -> string
+
+val is_ordinary : fact -> bool
+(** True when the fact can appear in an unscoped Memory projection. *)
+
+val in_personal_scope : Connector_memory_scope.t -> fact -> bool
+(** True only for personal facts in that exact account and destination. *)
 
 val memory_id_of_claim : string -> string
 (** The same identity from the exact claim bytes, without inventing fact

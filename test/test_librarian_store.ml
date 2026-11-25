@@ -144,6 +144,96 @@ let committed store ~at write =
 let port = "the port is 8935"
 let owner = "the owner is the release team"
 
+let test_personal_evidence_survives_replay () =
+  let module Attention = Masc.Keeper_external_attention in
+  let module Reader = Masc.Keeper_memory_os_current in
+  let place = started_place () in
+  let claim = "please summarize in Korean" in
+  let item actor_id channel_id message_id : Attention.item =
+    let account = Option.get (Masc.Connector_account_ref.discord_user actor_id) in
+    let surface : Attention.surface_ref =
+      Discord
+        { guild_id = Some "100"
+        ; channel_id
+        ; channel_name = None
+        ; parent_channel_id = None
+        ; thread_id = None
+        }
+    in
+    { event_id = message_id
+    ; dedupe_key = message_id
+    ; keeper_name = keeper_id
+    ; conversation = { conversation_id = channel_id; surface }
+    ; external_message = Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = "discord"
+    ; actor =
+        { actor_id = Some actor_id
+        ; display_name = Some "same nickname"
+        ; authority = External
+        ; account = Some (Account_of_original_message account)
+        }
+    ; urgency = Mention
+    ; content_preview = claim
+    ; content_ref = None
+    ; received_at = 100.
+    ; metadata = []
+    }
+  in
+  let write source = Direct.remember_personal ~claim ~category:Types.Constraint source in
+  let first_item = item "200" "300" "400" in
+  let other_person = item "201" "300" "401" in
+  let other_channel = item "200" "301" "402" in
+  let next = item "200" "300" "403" in
+  check bool "no proof, no personal write" true
+    (Option.is_none (write { first_item with actor = { first_item.actor with account = None } }));
+  let store, _ = committed (booted place) ~at:110. (remember claim) in
+  let store, _ = committed store ~at:120. (Option.get (write first_item)) in
+  let store, _ = committed store ~at:130. (Option.get (write other_person)) in
+  let store, _ = committed store ~at:140. (Option.get (write other_channel)) in
+  let previous_snapshot = file_bytes (snapshot_path place) in
+  let _store, _ = committed store ~at:150. (Option.get (write next)) in
+  let latest_snapshot = file_bytes (snapshot_path place) in
+  write_file (snapshot_path place) previous_snapshot;
+  let reopened = booted ~at:160. place in
+  check string "replay restores the exact snapshot" latest_snapshot (file_bytes (snapshot_path place));
+  let read source =
+    let scope = Option.get (Attention.original_message_scope source) in
+    match Reader.read_personal_facts ~keepers_dir:place.memory_dir ~keeper_id ~scope with
+    | Ok [ fact ] -> fact
+    | Ok _ | Error _ -> fail "expected one fact in this account and channel"
+  in
+  let first = read first_item in
+  let other_person = read other_person in
+  let other_channel = read other_channel in
+  let ordinary =
+    match Reader.read_for_keepers_dir ~keepers_dir:place.memory_dir ~keeper_id with
+    | Ok (Some { facts = [ fact ]; _ }) -> fact
+    | Ok _ | Error _ -> fail "expected only the ordinary fact in generic Memory"
+  in
+  (match Reader.read_classified_with_fingerprint ~keepers_dir:place.memory_dir ~keeper_id with
+   | Readable { facts = [ fact ]; _ }, Some (bytes, digest) ->
+     check string "classified view is ordinary" (Types.memory_id ordinary) (Types.memory_id fact);
+     check int "byte count includes stored personal facts" (String.length latest_snapshot) bytes;
+     check string "digest identifies the actual stored bytes"
+       (hex (Digest.digest_of_bytes latest_snapshot)) digest
+   | _ -> fail "expected an ordinary snapshot with a fingerprint");
+  check int "four distinct IDs for the same claim" 4
+    (List.length (List.sort_uniq String.compare
+      (List.map Types.memory_id [ first; other_person; other_channel; ordinary ])));
+  check string "ordinary ID remains the hash of exact claim bytes"
+    ("sha256:" ^ hex (Digest.digest_of_bytes claim)) (Types.memory_id ordinary);
+  check (float 0.) "first observation is preserved" 120. first.first_seen;
+  check (float 0.) "last observation is refreshed" 150. first.last_seen;
+  (match first.basis with
+   | Observed (Personal evidence) ->
+     check (list string) "both source messages are retained" [ "400"; "403" ] evidence.message_ids
+   | Observed (Transcript | Board _) | Derived _ -> fail "expected personal evidence");
+  let retract = Direct.Retract { id = Types.memory_id first; reason = "unscoped" } in
+  check bool "unscoped retraction cannot remove personal Memory" true
+    (Direct.plan ~by:Effects.Keeper ~at:170. ~trace_id:"turn" (Store.memory reopened).facts retract
+     = Already_absent)
+;;
+
 let test_first_boot_without_a_snapshot () =
   let place = started_place () in
   let store = booted place in
@@ -768,6 +858,7 @@ let () =
         ] )
     ; ( "commit"
       , [ test_case "commits chain" `Quick test_commits_chain
+        ; test_case "personal evidence survives replay" `Quick test_personal_evidence_survives_replay
         ; test_case "effects that make no snapshot" `Quick test_effects_that_make_no_snapshot
         ; test_case "the log moved under the store" `Quick test_log_moved_under_the_store
         ] )

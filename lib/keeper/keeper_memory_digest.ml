@@ -20,6 +20,7 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
 let provenance_tag (basis : Types.basis) =
   match basis with
   | Observed Transcript -> ""
+  | Observed (Personal _) -> " [personal]"
   | Observed (Board { post_id; comment_id }) ->
     let pid = Board_types.Post_id.to_string post_id in
     (match comment_id with
@@ -58,7 +59,7 @@ let canonical_sort_facts (facts : Types.fact list) =
            String.compare (Types.category_to_string a.category) (Types.category_to_string b.category)
          in
          if c <> 0 then c else String.compare (Types.memory_id a) (Types.memory_id b))
-    facts
+    (List.filter Types.is_ordinary facts)
 ;;
 
 let content_sha256 ~max_bytes ~keeper_id ~revision (sorted_facts : Types.fact list) =

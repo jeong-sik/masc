@@ -74,6 +74,9 @@ type t =
 
 val empty : t
 
+val ordinary_projection : t -> t
+(** Hide personal fact bodies, coordinates, and IDs from unscoped readers. *)
+
 (** Stable token for a metric label or a log field. *)
 val why_not_kind : why_not -> string
 

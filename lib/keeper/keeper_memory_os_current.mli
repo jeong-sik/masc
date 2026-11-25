@@ -63,13 +63,26 @@ type read_classified =
 val read_classified : keepers_dir:string -> keeper_id:string -> read_classified
 (** Non-mutating classified read. *)
 
+val read_classified_with_fingerprint
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> read_classified * (int * string) option
+(** A classified read with the byte count and SHA-256 of the exact bytes
+    behind a readable snapshot. *)
+
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
+(** Ordinary projection. Personal rows require an exact scoped read. *)
+
+val read_personal_facts :
+  keepers_dir:string -> keeper_id:string -> scope:Connector_memory_scope.t ->
+  (Keeper_memory_os_types.fact list, string) result
+(** Read only personal facts matching this exact account and destination. *)
 
 val read_with_snapshot_sha256 :
   keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result
-(** Read one atomically replaced snapshot and return the lowercase SHA-256 of
-    its exact stored bytes alongside the decoded value. *)
+(** Read one atomically replaced snapshot and return its ordinary projection
+    alongside the SHA-256 of the exact stored bytes. *)
 
 val keeper_id_of_filename : string -> string option
 (** Parse this store's filename suffix without filesystem access. *)

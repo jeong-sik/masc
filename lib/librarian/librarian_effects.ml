@@ -46,6 +46,15 @@ let empty =
   }
 ;;
 
+let ordinary_projection effects =
+  { effects with
+    added = List.filter is_ordinary effects.added
+  ; removed = List.filter (fun (fact, _) -> is_ordinary fact) effects.removed
+  ; touched = List.filter is_ordinary_memory_id effects.touched
+  ; sources = List.filter (fun (id, _) -> is_ordinary_memory_id id) effects.sources
+  }
+;;
+
 let why_not_kind = function
   | Unknown_ref -> "unknown_ref"
   | Ref_used_twice -> "ref_used_twice"
@@ -76,5 +85,6 @@ let apply ~at facts effects =
          else Some fact)
       facts
   in
-  kept @ effects.added
+  let ordinary, personal = List.partition is_ordinary effects.added in
+  List.fold_left Keeper_memory_os_support_core.insert_or_reobserve (kept @ ordinary) personal
 ;;

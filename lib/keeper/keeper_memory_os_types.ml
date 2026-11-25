@@ -234,6 +234,7 @@ let wire_at_element field index result =
 ;;
 
 let memory_id_prefix = "sha256:"
+let personal_id_prefix = "sha256-personal:"
 
 (* A memory identity is the hex SHA-256 of the claim bytes, so the digit count
    is the digest's, not a chosen width. *)
@@ -244,20 +245,27 @@ let is_lowercase_hex = function
   | _ -> false
 ;;
 
-let is_memory_id value =
-  let prefix_length = String.length memory_id_prefix in
+let has_digest ~prefix value =
+  let prefix_length = String.length prefix in
   String.length value = prefix_length + memory_id_digits
-  && String.starts_with ~prefix:memory_id_prefix value
+  && String.starts_with ~prefix value
   && String.for_all
        is_lowercase_hex
        (String.sub value prefix_length memory_id_digits)
+;;
+
+let is_ordinary_memory_id = has_digest ~prefix:memory_id_prefix
+
+let is_memory_id value =
+  is_ordinary_memory_id value || has_digest ~prefix:personal_id_prefix value
 ;;
 
 (* {!is_memory_id} answers a bool. A surface that refuses a value the model
    supplied has to say what it wanted instead, and spelling the grammar again
    there lets the two drift, so the predicate states its own shape. *)
 let memory_id_shape =
-  Printf.sprintf "%S followed by %d lowercase hex digits" memory_id_prefix memory_id_digits
+  Printf.sprintf "%S or %S followed by %d lowercase hex digits"
+    memory_id_prefix personal_id_prefix memory_id_digits
 ;;
 
 let non_empty_string value = not (String.equal (String.trim value) "")
@@ -492,9 +500,21 @@ type board_ref =
   ; comment_id : Board_types.Comment_id.t option
   }
 
+type personal_observation =
+  { scope : Connector_memory_scope.t
+  ; message_ids : string list
+  }
+
+let personal_observation ~scope ~message_ids =
+  if message_ids = [] || not (List.for_all Connector_account_ref.is_discord_snowflake message_ids)
+  then None
+  else Some { scope; message_ids = List.sort_uniq String.compare message_ids }
+;;
+
 type observation =
   | Transcript
   | Board of board_ref
+  | Personal of personal_observation
 
 type basis =
   | Observed of observation
@@ -533,7 +553,7 @@ let unique_non_empty_strings values =
 let valid_derivation ({ rule_id; premise_ids } : derivation) =
   non_empty_string rule_id
   && unique_non_empty_strings premise_ids
-  && List.for_all is_memory_id premise_ids
+  && List.for_all is_ordinary_memory_id premise_ids
 ;;
 
 let normalize_derivation ({ rule_id; premise_ids } : derivation) =
@@ -584,7 +604,7 @@ let derivation_rejection ~rule_id ~premise_ids =
           in
           if Wire_field_set.mem premise_id seen
           then at (Duplicate_entry premise_id)
-          else if not (is_memory_id premise_id)
+          else if not (is_ordinary_memory_id premise_id)
           then at (Not_a_memory_id premise_id)
           else check (index + 1) (Wire_field_set.add premise_id seen) rest
       in
@@ -668,12 +688,14 @@ let board_ref_of_json = function
 type basis_kind =
   | Basis_observed
   | Basis_derived
+  | Basis_personal
 
-let basis_kinds = [ Basis_observed; Basis_derived ]
+let basis_kinds = [ Basis_observed; Basis_derived; Basis_personal ]
 
 let basis_kind_token = function
   | Basis_observed -> "observed"
   | Basis_derived -> "derived"
+  | Basis_personal -> "personal"
 ;;
 
 let basis_kind_of_token token =
@@ -682,10 +704,19 @@ let basis_kind_of_token token =
 
 let basis_kind_field kind = wire_field_kind, `String (basis_kind_token kind)
 
+let wire_field_scope = "scope"
+let wire_field_message_ids = "message_ids"
+
 let basis_to_json = function
   | Observed Transcript -> `Assoc [ basis_kind_field Basis_observed ]
   | Observed (Board board) ->
     `Assoc [ basis_kind_field Basis_observed; wire_field_board, board_ref_to_json board ]
+  | Observed (Personal { scope; message_ids }) ->
+    `Assoc
+      [ basis_kind_field Basis_personal
+      ; wire_field_scope, Connector_memory_scope.to_json scope
+      ; wire_field_message_ids, `List (List.map (fun id -> `String id) message_ids)
+      ]
   | Derived derivations ->
     if not (valid_derivations derivations)
     then invalid_arg "derived memory basis must carry valid derivations";
@@ -739,6 +770,30 @@ let basis_of_json = function
             wire_at (Wire_field wire_field_board) (board_ref_of_json board_json)
           in
           Observed (Board board))
+     | Some Basis_personal ->
+       let* () = exact_fields_result
+           (wire_field_set [ wire_field_kind; wire_field_scope; wire_field_message_ids ]) fields in
+       let* scope_json = wire_json_field wire_field_scope fields in
+       let* scope =
+         match Connector_memory_scope.of_json scope_json with
+         | Ok scope -> Ok scope
+         | Error detail -> wire_fail [ Wire_field wire_field_scope ] (Unknown_token detail)
+       in
+       let* values = wire_list_field wire_field_message_ids fields in
+       let rec decode index previous acc = function
+         | [] -> Ok (List.rev acc)
+         | `String value :: rest when Connector_account_ref.is_discord_snowflake value ->
+           if Option.fold ~none:false ~some:(fun before -> String.compare before value >= 0) previous
+           then wire_at_element wire_field_message_ids index (wire_here Not_ascending)
+           else decode (index + 1) (Some value) (value :: acc) rest
+         | `String value :: _ ->
+           wire_at_element wire_field_message_ids index (wire_here (Unknown_token value))
+         | _ :: _ -> wire_at_element wire_field_message_ids index (wire_here Expected_string)
+       in
+       let* message_ids = decode 0 None [] values in
+       (match message_ids with
+        | [] -> wire_fail [ Wire_field wire_field_message_ids ] Empty_list
+        | _ :: _ -> Ok (Observed (Personal { scope; message_ids })))
      | Some Basis_derived ->
        let* () =
          exact_fields_result
@@ -825,7 +880,31 @@ let memory_id_of_claim claim =
   memory_id_prefix ^ Agent_core_sha256.(digest_string claim |> to_hex)
 ;;
 
-let memory_id (f : fact) = memory_id_of_claim f.claim
+let memory_id (f : fact) =
+  match f.basis with
+  | Observed (Personal { scope; _ }) ->
+    let input = Buffer.create 128 in
+    let field bytes =
+      Buffer.add_int64_be input (Int64.of_int (String.length bytes));
+      Buffer.add_string input bytes
+    in
+    Buffer.add_string input "masc.memory.personal.v1\000";
+    field (Yojson.Safe.to_string (Connector_memory_scope.to_json scope));
+    field f.claim;
+    personal_id_prefix ^ Agent_core_sha256.(digest_string (Buffer.contents input) |> to_hex)
+  | Observed (Transcript | Board _) | Derived _ -> memory_id_of_claim f.claim
+;;
+
+let is_ordinary (f : fact) =
+  match f.basis with
+  | Observed (Personal _) -> false
+  | Observed (Transcript | Board _) | Derived _ -> true
+;;
+
+let in_personal_scope scope (f : fact) =
+  match f.basis with
+  | Observed (Personal observation) -> scope = observation.scope
+  | Observed (Transcript | Board _) | Derived _ -> false
 ;;
 
 let fact_to_json (f : fact) =

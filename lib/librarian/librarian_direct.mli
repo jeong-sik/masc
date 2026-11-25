@@ -4,7 +4,8 @@
     A direct write is a Keeper's [memory_write] or retraction, or an
     operator's edit. No model is asked. The same write can arrive twice, so
     every state of Memory has an answer here and none of them depends on a
-    key carried by the write: a fact is named by its claim.
+    key carried by the write. An ordinary fact is named by its claim.
+    A personal fact additionally binds the claim to an account and destination.
 
     {b The table.}
 
@@ -53,6 +54,15 @@ type write =
       { id : string (** Memory id. *)
       ; reason : string
       }
+
+val remember_personal
+  :  claim:string
+  -> category:category
+  -> Keeper_external_attention.item
+  -> write option
+(** Bind a claim to a recorded original Discord author, destination, and
+    message. The writer accumulates additional evidence for the same fact
+    while preserving its first observation. *)
 
 type refusal =
   | Unknown_fact

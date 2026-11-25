@@ -108,7 +108,7 @@ let distinct_categories_of_facts (facts : Keeper_memory_os_types.fact list) =
   List.fold_left
     (fun acc (fact : Keeper_memory_os_types.fact) ->
        let key = Keeper_memory_os_types.category_to_string fact.category in
-       if Hashtbl.mem seen key
+       if not (Keeper_memory_os_types.is_ordinary fact) || Hashtbl.mem seen key
        then acc
        else (
          Hashtbl.add seen key ();
@@ -122,7 +122,8 @@ let category_has_facts store cat =
   let target = Keeper_memory_os_types.category_to_string cat in
   List.exists
     (fun (fact : Keeper_memory_os_types.fact) ->
-       String.equal (Keeper_memory_os_types.category_to_string fact.category) target)
+       Keeper_memory_os_types.is_ordinary fact
+       && String.equal (Keeper_memory_os_types.category_to_string fact.category) target)
     (Store.memory store).facts
 ;;
 

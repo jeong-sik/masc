@@ -1041,277 +1041,6 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
       | Keymap.Input.Function _ ) ) ->
       None
 
-let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
-  let drafts, removed = Drafts.dismiss_notices_for_keeper ~keeper m.drafts in
-  let had_err_stream =
-    match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-    | Some b -> (not b.active) && Option.is_some b.last_error
-    | None -> false
-  in
-  let fleet = Fleet_store.clear_inactive_chat_stream_error ~keeper m.fleet in
-  if removed > 0 || had_err_stream then
-    let count = Int.max 1 removed in
-    ( Model.with_toast ~now ~level:Model.Toast_info
-        (Say.make
-           ~ko:(Printf.sprintf "전송 알림 %d건 닫힘" count)
-           ~en:(Printf.sprintf "Dismissed %d transmission notice(s)" count))
-        { m with drafts; fleet }
-    , [] )
-  else (m, [])
-
-(* Single implementation lives in Update_actions; both input paths share it
-   so the confirmation fields cannot drift apart. *)
-let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
-    ~(criterion_revision : string) =
-  Update_actions.open_goal_confirmation_proof_modal m ~goal_id ~criterion_revision
-
-(* The route refuses a Goal transition that does not name the workspace the
-   operator saw. Until [/health] has named it there is nothing true to name,
-   so the key posts nothing and says why. *)
-let request_goal_transition ~now (m : Model.t) ~level ~toast
-    (g : Wire_work.goal) action =
-  match Update_nav.expected_workspace_of m with
-  | Some expected_workspace ->
-      ( Model.with_toast ~now ~level toast m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action; note = None; expected_workspace };
-            };
-        ] )
-  | None ->
-      ( Model.with_toast ~now ~level:Model.Toast_warning
-          (Say.make
-             ~ko:"목표 상태를 바꾸려면 서버 워크스페이스 정보가 필요합니다"
-             ~en:"Goal transitions need the server workspace identity")
-          m
-      , [] )
-
-let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
-  match g.phase with
-  | Wire_work.Awaiting_confirmation -> (
-      let rev_opt =
-        match g.criterion_revision with
-        | Some r when not (String.equal (String.trim r) "") -> Some (String.trim r)
-        | Some _ | None -> None
-      in
-      let ws_opt = m.server_identity.workspace in
-      let inst_opt =
-        match m.server_identity.observer_instance_id with
-        | Some id when not (String.equal (String.trim id) "") ->
-            Some (String.trim id)
-        | Some _ | None -> None
-      in
-      match rev_opt, ws_opt, inst_opt with
-      | Some criterion_revision, Some _, Some _ ->
-          open_goal_confirmation_proof_modal m ~goal_id:g.id ~criterion_revision
-      | _ ->
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make
-                 ~ko:
-                   "완료 확정에는 서버 발급 증명(criterion_revision / 워크스페이스 \
-                    / 런타임 인스턴스)이 필요합니다"
-                 ~en:
-                   "Goal confirmation requires loaded server identity \
-                    (criterion_revision / workspace / runtime instance)")
-              m
-          , [] ))
-  | Wire_work.Executing ->
-      request_goal_transition ~now m ~level:Model.Toast_info
-        ~toast:
-          (Say.make
-             ~ko:("목표 완료 검증 요청: " ^ g.title)
-             ~en:("Requesting goal completion verification: " ^ g.title))
-        g Wire_work.Request_complete
-  | Wire_work.Verifying ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make ~ko:"목표가 현재 검증 진행 중입니다"
-             ~en:"Goal is already verifying")
-          m
-      , [] )
-  | Wire_work.Paused _ ->
-      request_goal_transition ~now m ~level:Model.Toast_info
-        ~toast:
-          (Say.make ~ko:("목표 재개 요청: " ^ g.title) ~en:("Resuming goal: " ^ g.title))
-        g Wire_work.Resume
-  | Wire_work.Blocked _ ->
-      request_goal_transition ~now m ~level:Model.Toast_info
-        ~toast:
-          (Say.make ~ko:("목표 차단 해제: " ^ g.title) ~en:("Unblocking goal: " ^ g.title))
-        g Wire_work.Unblock
-  | Wire_work.Completed | Wire_work.Dropped ->
-      request_goal_transition ~now m ~level:Model.Toast_info
-        ~toast:
-          (Say.make ~ko:("목표 재개(Reopen): " ^ g.title) ~en:("Reopening goal: " ^ g.title))
-        g Wire_work.Reopen
-
-let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
-  match g.phase with
-  | Wire_work.Paused _ ->
-      Update_nav.open_inline_modal m (Nav.Goal_drop g.id)
-  | Wire_work.Executing
-  | Wire_work.Verifying
-  | Wire_work.Awaiting_confirmation
-  | Wire_work.Blocked _ ->
-      request_goal_transition ~now m ~level:Model.Toast_info
-        ~toast:
-          (Say.make ~ko:("목표 일시정지 요청: " ^ g.title) ~en:("Pausing goal: " ^ g.title))
-        g Wire_work.Pause
-  | Wire_work.Completed | Wire_work.Dropped ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make ~ko:"이미 종료된 목표입니다 ([a] 재개)"
-             ~en:"Goal is already terminal ([a] to reopen)")
-          m
-      , [] )
-
-let resolve_memory_act_keeper (m : Model.t) =
-  let keeper_tab_active =
-    Option.is_none (Model.active_dive m)
-    && Nav.equal_workspace m.nav.workspace Nav.Keepers
-    && (m.nav.pane_index >= 1 || m.nav.zoomed)
-    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
-  in
-  match if keeper_tab_active then Model.selected_keeper_name m else None with
-  | Some name -> Some name
-  | None -> (
-      match m.knowledge.memory_diff_keeper with
-      | Some k when not (String.equal (String.trim k) "") -> Some k
-      | Some _ | None -> (
-          match Observed.to_option m.knowledge.world_memory with
-          | Some wm -> (
-              match wm.librarian_writers with
-              | Wire_knowledge.Writers_running { keepers; _ } -> (
-                  match
-                    List.find_opt
-                      (fun (w : Wire_knowledge.librarian_writer_row) ->
-                        match w.state with
-                        | Wire_knowledge.Writer_stopped _
-                        | Wire_knowledge.Writer_refused_at_bottom ->
-                            true
-                        | Wire_knowledge.Writer_open
-                        | Wire_knowledge.Writer_idle
-                        | Wire_knowledge.Writer_asking
-                        | Wire_knowledge.Writer_resting
-                        | Wire_knowledge.Writer_booting
-                        | Wire_knowledge.Writer_retired
-                        | Wire_knowledge.Writer_no_writer ->
-                            w.available_act_tokens <> [])
-                      keepers
-                  with
-                  | Some w -> Some w.keeper
-                  | None -> (
-                      match keepers with
-                      | first :: _ -> Some first.keeper
-                      | [] -> Update_nav.resolve_target_keeper m))
-              | Wire_knowledge.Writers_none_in_process ->
-                  Update_nav.resolve_target_keeper m)
-          | None -> Update_nav.resolve_target_keeper m))
-
-let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
-  open_custom_inline_modal ~kind:Nav.Memory_act_form m
-    [
-      {
-        key = "memory_keeper";
-        label = Say.make ~ko:"대상 키퍼" ~en:"Target keeper";
-        value = keeper_default;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "memory_act";
-        label = Say.make ~ko:"복구 액션" ~en:"Recovery act";
-        value = "resume";
-        required = true;
-        secret = false;
-      };
-      {
-        key = "memory_arg";
-        label = Say.make ~ko:"인자 (선택)" ~en:"Argument (optional)";
-        value = "";
-        required = false;
-        secret = false;
-      };
-    ]
-
-(* The form opens only on a page held fresh: right after a save the slot
-   still holds the previous revision, marked stale, until the page is read
-   again. The page it opens on becomes the edit's base, so the save names the
-   revision the form's text came from. *)
-let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
-  match Knowledge_store.wiki_page_for ~slug m.knowledge with
-  | Observed.Value { data = d; stale = false; _ } ->
-      (Model.open_wiki_edit_modal_for_detail d m, [])
-  | Observed.Value _ | Observed.Loading _ | Observed.Absent
-  | Observed.Unreported | Observed.Failed _ ->
-      let m =
-        {
-          m with
-          knowledge = Knowledge_store.request_wiki_edit ~slug m.knowledge;
-        }
-      in
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:
-               ("위키 본문을 불러오는 중입니다 (" ^ slug
-              ^ ") — 불러오면 편집 창이 자동으로 열립니다")
-             ~en:
-               ("Loading wiki page body (" ^ slug
-              ^ ") — edit modal will open once loaded"))
-          m
-      , [
-          Cmd.Http_get
-            { epoch = m.epoch; req = Cmd.Get_wiki_page { page = slug } };
-        ] )
-
-let open_fusion_launch_modal (m : Model.t) =
-  let draft = m.runtime.fusion_launch_draft in
-  let keeper_default =
-    match draft.keeper with
-    | Some k when not (String.equal (String.trim k) "") -> k
-    | Some _ | None ->
-        Option.value (Update_nav.resolve_target_keeper m) ~default:""
-  in
-  let topo_default =
-    match draft.topology with
-    | Some t -> Wire_runtime.fusion_topology_to_string t
-    | None -> ""
-  in
-  let preset_default = Option.value draft.preset ~default:"" in
-  open_custom_inline_modal ~kind:Nav.Fusion_launch_form m
-    [
-      {
-        key = "fusion_keeper";
-        label = Say.make ~ko:"실행 키퍼" ~en:"Keeper";
-        value = keeper_default;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "fusion_prompt";
-        label = Say.make ~ko:"Fusion 프롬프트" ~en:"Fusion prompt";
-        value = draft.prompt;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "fusion_topology";
-        label = Say.make ~ko:"토폴로지 (선택)" ~en:"Topology (optional)";
-        value = topo_default;
-        required = false;
-        secret = false;
-      };
-      {
-        key = "fusion_preset";
-        label = Say.make ~ko:"프리셋 (선택)" ~en:"Preset (optional)";
-        value = preset_default;
-        required = false;
-        secret = false;
-      };
-    ]
-
 let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ?(runtime_default = "") () =
   open_custom_inline_modal ~kind:Nav.Runtime_assign_form m
@@ -1327,44 +1056,6 @@ let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
         key = "assign_runtime_id";
         label = Say.make ~ko:"런타임 / 레인 ID" ~en:"Runtime / lane ID";
         value = runtime_default;
-        required = false;
-        secret = false;
-      };
-    ]
-
-let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal ~kind:Nav.Setup_account_key_form m
-    [
-      {
-        key = "setup_key_integration";
-        label = Say.make ~ko:"통합 ID" ~en:"Integration ID";
-        value = integration_default;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "setup_key_secret";
-        label = Say.make ~ko:"API 키" ~en:"API key";
-        value = "";
-        required = true;
-        secret = true;
-      };
-    ]
-
-let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
-    [
-      {
-        key = "setup_login_integration";
-        label = Say.make ~ko:"로그인 통합 ID" ~en:"Login integration ID";
-        value = integration_default;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "setup_login_account_ref";
-        label = Say.make ~ko:"계정 참조 (선택)" ~en:"Account ref (optional)";
-        value = "";
         required = false;
         secret = false;
       };
@@ -1389,6 +1080,9 @@ let key_char_opt = function
   | Keymap.Input.Function _ ->
       None
 
+(* Fallback contextual hotkeys for keys not bound in Keymap Unfocused_nav/Global
+   or screen_context_intercept. Keys handled by Keymap.dispatch or
+   screen_context_intercept never reach this function. *)
 let dispatch_contextual_hotkey ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
@@ -1399,712 +1093,234 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   let printable_char =
     if is_printable_key norm then key_char_opt norm.key else None
   in
-  if Model.sidebar_has_focus m then
-    match printable_char with
-    | Some "l" -> Update_nav.apply_move m Keymap.Right
-    | _ -> (m, [])
+  if Model.sidebar_has_focus m then (m, [])
+  else if is_ctrl_e then
+    Update_actions.execute_action ~now m Keymap.Open_external_editor
   else
-  (* 0. Active Memory Diagram & Memory Explorer diagram triggers (., v) *)
-  match printable_char with
-  | Some "v" when Option.is_some (Memory_diagram.active_diagram m) ->
-      Update_nav.cycle_memory_diagram_mode ~now m
-  | Some "."
-    when Option.is_some (Memory_diagram.active_memory_content_rect m)
-         || (Option.is_none m.nav.overlay
-            && Option.is_none (Model.active_dive m)
-            && Nav.equal_workspace m.nav.workspace Nav.Knowledge
-            && Nav.equal_knowledge_tab m.knowledge.active_tab
-                 Nav.Knowledge_memory) ->
-      Update_nav.open_memory_diagram ~now
-        ~kind:Knowledge_store.Diagram_pele_card m
-  | _ -> (
-  (* 1. Active Dive contextual hotkeys *)
-  match Model.active_dive m with
-  | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
-      let ver_opt =
-        List.find_opt
-          (fun (v : Wire_work.verification_request) ->
-            String.equal v.request_id req_id)
-          (Work_store.verifications_list m.work)
-      in
-      match printable_char, ver_opt with
-      | Some "a", Some v -> Update_nav.approve_verification_request ~now m v
-      | Some "x", Some v -> Update_nav.reject_verification_request ~now m v
-      | Some "x", None ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"검증 요청을 찾을 수 없습니다"
-                 ~en:"Verification request not found")
-              m
-          , [] )
-      | Some "h", (Some _ | None) ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
-      | Some "X", (Some _ | None) ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
-      | _ -> (m, []))
-  | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-      let goal_opt =
-        List.find_opt
-          (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-          (Work_store.goals m.work)
-      in
-      match printable_char, goal_opt with
-      | Some "a", Some g -> goal_action_on_approve ~now m g
-      | Some "c", Some g -> Update_nav.request_goal_complete_guarded ~now m g
-      | Some "x", Some g -> goal_action_on_stop ~now m g
-      | Some "h", (Some _ | None) ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
-      | Some "X", (Some _ | None) ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
-      | _ -> (m, []))
-  | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
-      match printable_char with
-      | Some "x" -> Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
-      | Some "h" ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
-      | Some "X" ->
-          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
-      | _ -> (m, []))
-  | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
-      if is_ctrl_e then
-        ( Model.with_toast ~now ~level:Model.Toast_info
-            (Say.make
-               ~ko:("외부 편집기로 위키 열기: " ^ slug)
-               ~en:("Opening wiki page in $EDITOR: " ^ slug))
-            m
-        , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] )
-      else (
-        match printable_char with
-        | Some "e" -> open_wiki_edit_modal ~now m ~slug
-        | _ -> (m, []))
-  | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
-      let art_opt =
-        Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
-      in
-      match printable_char, art_opt with
-      | Some ("e" | "H"), None ->
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
-                 ~en:"Artifact not found")
-              m
-          , [] )
-      | Some "N", _
-        when not (String.equal (String.trim m.knowledge.artifact_search_query) "")
-        ->
-          Update_actions.step_artifact_search ~now ~delta:(-1) m
-      | Some "e", Some art ->
-          let ext =
-            Wire_knowledge.artifact_extension
-              (Wire_knowledge.artifact_format_of_entry art)
-          in
-          let filename_stem =
-            if String.trim art.title <> "" then art.title else art.id
-          in
-          let content_opt =
-            Option.map
-              (fun (d : Wire_knowledge.published_artifact_detail) -> d.content)
-              (Knowledge_store.artifact_detail_for_entry art m.knowledge)
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:(Printf.sprintf "%s 파일 내보내는 중…" ext)
-                 ~en:(Printf.sprintf "Exporting %s…" ext))
-              m
-          , [
-              Cmd.Export_artifact
-                {
-                  epoch = m.epoch;
-                  id = art.id;
-                  revision = Some art.revision;
-                  filename_stem;
-                  ext;
-                  content_opt;
-                  open_after = false;
-                };
-            ] )
-      | Some "H", Some art ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
-              m
-          , [ Cmd.Copy_clipboard art.body.sha256 ] )
-      | _ -> (m, []))
-  | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
-      match printable_char with
-      | Some "R" ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
-                 ~en:"Refreshing skill catalog…")
-              m
-          , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_skills_refresh } ]
-          )
-      | Some "p" -> (
-          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
-          | Some loaded ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make ~ko:"스킬 미리보기 검증 중…"
-                     ~en:"Validating skill preview…")
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_skill_editor_preview
-                          {
-                            reference = ref_s;
-                            reference_json = loaded.reference_json;
-                            source_text = loaded.source_text;
-                          };
-                    };
-                ] )
-          | None -> (m, []))
-      | _ -> (m, []))
-  | Some
-      ( Nav.Dive_knowledge (Nav.Thread_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
-      (m, [])
-  | None -> (
-      (* 2. Workspace-level contextual hotkeys *)
-      match m.nav.workspace with
-      | Nav.Runtime -> (
-          match printable_char with
-          | Some "R"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_failover_lanes -> (
-              match Runtime_store.selected_lane m.runtime with
-              | Some lane when Wire_runtime.is_named_routing_lane lane.id ->
-                  Update_nav.open_inline_modal m (Nav.Lane_rename_form { lane = lane.id })
-              | Some _ ->
-                  (Model.with_toast ~now ~level:Model.Toast_warning
-                     (Say.make ~ko:"일반 레인 이름만 변경할 수 있습니다"
-                        ~en:"Only named lanes can be renamed") m, [])
-              | None -> (m, []))
-          | Some "D"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_failover_lanes -> (
-              match Observed.to_option m.runtime.exact_lane_runs with
-              | Some (first :: _) ->
-                  Update_nav.push_dive m
-                    (Nav.Dive_runtime (Nav.Exact_run_dive first.run_id))
-              | Some [] | None -> (m, []))
-          | Some "O"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_addons_browser -> (
-              if m.nav.pane_index = 1 then
+    match printable_char with
+    | Some "."
+      when Option.is_some (Memory_diagram.active_memory_content_rect m)
+           || (Option.is_none m.nav.overlay
+               && Option.is_none (Model.active_dive m)
+               && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+               && Nav.equal_knowledge_tab m.knowledge.active_tab
+                    Nav.Knowledge_memory) ->
+        Update_nav.open_memory_diagram ~now
+          ~kind:Knowledge_store.Diagram_pele_card m
+    | Some _ | None -> (
+        match Model.active_dive m with
+        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
+            match printable_char with
+            | Some "R" ->
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
+                       ~en:"Refreshing skill catalog…")
+                    m
+                , [
+                    Cmd.Http_post
+                      { epoch = m.epoch; req = Cmd.Post_skills_refresh };
+                  ] )
+            | Some "p" -> (
                 match
-                  ( Runtime_store.selected_browser_client m.runtime
-                  , Runtime_store.selected_browser_tab m.runtime )
+                  Runtime_store.skill_editor_loaded_for ~reference:ref_s
+                    m.runtime
                 with
-                | Some cl, Some tb ->
+                | Some loaded ->
                     ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make
-                           ~ko:(Printf.sprintf "브라우저 장면 로드 중 (#%d)…" tb.id)
-                           ~en:(Printf.sprintf "Fetching browser scene (#%d)…" tb.id))
+                        (Say.make ~ko:"스킬 미리보기 검증 중…"
+                           ~en:"Validating skill preview…")
                         m
                     , [
                         Cmd.Http_post
                           {
                             epoch = m.epoch;
                             req =
-                              Cmd.Post_browser_scene
+                              Cmd.Post_skill_editor_preview
                                 {
-                                  client_id = cl.client_id;
-                                  tab_id = tb.id;
-                                  view = `Content;
+                                  reference = ref_s;
+                                  reference_json = loaded.reference_json;
+                                  source_text = loaded.source_text;
                                 };
                           };
                       ] )
-                | _ -> (m, [])
-              else if not m.runtime.addon_catalog_mode then
-                match Runtime_store.selected_addon_instance m.runtime with
-                | Some inst ->
+                | None -> (m, []))
+            | Some _ | None -> (m, []))
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
+            (m, [])
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Runtime -> (
+                match printable_char with
+                | Some "R"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_failover_lanes -> (
+                    match Runtime_store.selected_lane m.runtime with
+                    | Some lane when Wire_runtime.is_named_routing_lane lane.id
+                      ->
+                        Update_nav.open_inline_modal m
+                          (Nav.Lane_rename_form { lane = lane.id })
+                    | Some _ ->
+                        ( Model.with_toast ~now ~level:Model.Toast_warning
+                            (Say.make ~ko:"일반 레인 이름만 변경할 수 있습니다"
+                               ~en:"Only named lanes can be renamed")
+                            m
+                        , [] )
+                    | None -> (m, []))
+                | Some "D"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_failover_lanes -> (
+                    match Observed.to_option m.runtime.exact_lane_runs with
+                    | Some (first :: _) ->
+                        Update_nav.push_dive m
+                          (Nav.Dive_runtime (Nav.Exact_run_dive first.run_id))
+                    | Some [] | None -> (m, []))
+                | Some "O"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_addons_browser -> (
+                    if m.nav.pane_index = 1 then
+                      match
+                        ( Runtime_store.selected_browser_client m.runtime
+                        , Runtime_store.selected_browser_tab m.runtime )
+                      with
+                      | Some cl, Some tb ->
+                          ( Model.with_toast ~now ~level:Model.Toast_info
+                              (Say.make
+                                 ~ko:
+                                   (Printf.sprintf "브라우저 장면 로드 중 (#%d)…"
+                                      tb.id)
+                                 ~en:
+                                   (Printf.sprintf "Fetching browser scene (#%d)…"
+                                      tb.id))
+                              m
+                          , [
+                              Cmd.Http_post
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Post_browser_scene
+                                      {
+                                        client_id = cl.client_id;
+                                        tab_id = tb.id;
+                                        view = `Content;
+                                      };
+                                };
+                            ] )
+                      | Some _, None | None, (Some _ | None) -> (m, [])
+                    else if not m.runtime.addon_catalog_mode then
+                      match Runtime_store.selected_addon_instance m.runtime with
+                      | Some inst ->
+                          ( Model.with_toast ~now ~level:Model.Toast_info
+                              (Say.make
+                                 ~ko:("애드온 관측 트리거 중: " ^ inst.instance_id)
+                                 ~en:
+                                   ("Triggering addon observe: " ^ inst.instance_id))
+                              m
+                          , [
+                              Cmd.Http_post
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Post_lane_addon_observe
+                                      { instance_id = inst.instance_id };
+                                };
+                            ] )
+                      | None -> (m, [])
+                    else (m, []))
+                | Some "D"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_addons_browser
+                       && (not m.runtime.addon_catalog_mode)
+                       && m.nav.pane_index = 0 ->
+                    let lane_id =
+                      Option.map
+                        (fun (inst : Wire_runtime.addon_instance) ->
+                          inst.addon_id)
+                        (Runtime_store.selected_addon_instance m.runtime)
+                    in
                     ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make ~ko:("애드온 관측 트리거 중: " ^ inst.instance_id)
-                           ~en:("Triggering addon observe: " ^ inst.instance_id))
+                        (Say.make ~ko:"애드온 슬라이스 조회 중…"
+                           ~en:"Fetching addon slice…")
                         m
                     , [
-                        Cmd.Http_post
+                        Cmd.Http_get
                           {
                             epoch = m.epoch;
                             req =
-                              Cmd.Post_lane_addon_observe
-                                { instance_id = inst.instance_id };
+                              Cmd.Get_lane_addon_slice
+                                { run_id = None; lane_id };
                           };
                       ] )
-                | None -> (m, [])
-              else (m, []))
-          | Some "D"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_addons_browser
-                 && (not m.runtime.addon_catalog_mode)
-                 && m.nav.pane_index = 0 ->
-              let lane_id =
-                Option.map
-                  (fun (inst : Wire_runtime.addon_instance) -> inst.addon_id)
-                  (Runtime_store.selected_addon_instance m.runtime)
-              in
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make ~ko:"애드온 슬라이스 조회 중…"
-                     ~en:"Fetching addon slice…")
-                  m
-              , [
-                  Cmd.Http_get
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Get_lane_addon_slice { run_id = None; lane_id };
-                    };
-                ] )
-          | Some "W"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_addons_browser
-                 && m.nav.pane_index = 1 -> (
-              match
-                ( Runtime_store.selected_browser_client m.runtime
-                , Runtime_store.selected_browser_tab m.runtime )
-              with
-              | Some cl, Some tb ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:(Printf.sprintf "브라우저 스크린샷 캡처 중 (#%d)…" tb.id)
-                         ~en:(Printf.sprintf "Capturing browser screenshot (#%d)…" tb.id))
-                      m
-                  , [
-                      Cmd.Http_post
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Post_browser_screenshot
-                              { client_id = cl.client_id; tab_id = tb.id };
-                        };
-                    ] )
-              | _ -> (m, []))
-          | Some "R"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_tools_usage
-                 && Runtime_store.equal_tools_subview m.runtime.tools_subview
-                      Runtime_store.Tools_keeper_skills ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
-                     ~en:"Refreshing skill catalog…")
-                  m
-              , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_skills_refresh } ]
-              )
-          | Some "u"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_quotas_credits ->
-              ( {
-                  m with
-                  runtime = Runtime_store.toggle_unreported_accounts m.runtime;
-                }
-              , [] )
-          | Some "a" ->
-              let keeper_default =
-                Option.value (Update_nav.resolve_target_keeper m) ~default:""
-              in
-              let runtime_default =
-                match Runtime_store.selected_lane m.runtime with
-                | Some lane -> lane.id
-                | None -> (
-                    match Observed.to_option m.runtime.runtime_resolved with
-                    | Some snap -> Option.value snap.default_route ~default:""
-                    | None -> "")
-              in
-              open_runtime_assign_modal m ~keeper_default ~runtime_default ()
-          | Some "K" ->
-              let integration_default =
-                match Observed.to_option m.runtime.setup_inventory with
-                | Some { integrations = first :: _; _ } -> first.id
-                | Some { integrations = []; _ } | None -> ""
-              in
-              open_setup_account_key_modal m ~integration_default ()
-          | Some "l" -> open_setup_login_modal m ()
-          | Some "L" -> (
-              match m.runtime.setup_login_receipt with
-              | Some r ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:("로그인 영수증 상태 조회: " ^ r.login_id)
-                         ~en:("Polling login status: " ^ r.login_id))
-                      m
-                  , [
-                      Cmd.Http_get
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Get_setup_login_status { login_id = r.login_id };
-                        };
-                    ] )
-              | None -> open_setup_login_modal m ())
-          | Some "f"
-            when Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_failover_lanes ->
-              open_fusion_launch_modal m
-          | _ -> (m, []))
-      | Nav.Infra -> (
-          match m.infra.active_tab, printable_char with
-          | Nav.Infra_sandboxes, Some "p" ->
-              let target, label =
-                match Infra_store.selected_sandbox_keeper m.infra with
-                | Some k -> (`Keeper k, k)
-                | None -> (`All, "all")
-              in
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("샌드박스 프로브 실행: " ^ label)
-                     ~en:("Probing sandbox: " ^ label))
-                  m
-              , [
-                  Cmd.Http_post
-                    { epoch = m.epoch; req = Cmd.Post_sandbox_probe target };
-                ] )
-          | ( ( Nav.Infra_sandboxes
-              | Nav.Infra_repos_changes
-              | Nav.Infra_code
-              | Nav.Infra_activity_logs )
-            , (Some _ | None) ) ->
-              (m, []))
-      | Nav.Keepers -> (
-          let split_keeper_opt =
-            if
-              m.nav.pane_index >= 1
-              || (m.nav.zoomed && Model.can_zoom_current_view m)
-            then Model.selected_keeper_name m
-            else None
-          in
-          match split_keeper_opt, m.fleet.keeper_dive_tab, printable_char with
-          | Some name, Nav.Keeper_work_sandbox, Some "p"
-            when not
-                   (Board_recovery.shown ~keeper:name m.knowledge.board_recovery)
-            ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("샌드박스 프로브 실행: " ^ name)
-                     ~en:("Probing sandbox: " ^ name))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_sandbox_probe (`Keeper name);
-                    };
-                ] )
-          | Some _, Nav.Keeper_memory, Some "e" ->
-              let knowledge =
-                Knowledge_store.set_memory_view_mode
-                  Knowledge_store.View_evolution m.knowledge
-              in
-              let next =
-                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
-              in
-              (next, View_fetches.fetches_for_current_view next)
-          | Some _, Nav.Keeper_memory, Some "f" ->
-              let knowledge =
-                Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
-                  m.knowledge
-              in
-              let next =
-                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
-              in
-              (next, View_fetches.fetches_for_current_view next)
-          | Some _, Nav.Keeper_memory, Some "d" ->
-              let knowledge =
-                Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
-                  m.knowledge
-              in
-              let next =
-                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
-              in
-              (next, View_fetches.fetches_for_current_view next)
-          | Some name, Nav.Keeper_memory, Some "a" ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("사서 라이터 재개 요청: " ^ name)
-                     ~en:("Requesting librarian writer resume: " ^ name))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_memory_act
-                          { keeper = name; act = Wire_knowledge.Act_resume };
-                    };
-                ] )
-          | Some name, Nav.Keeper_memory, Some "A" ->
-              open_memory_act_modal m ~keeper_default:name
-          | Some name, Nav.Keeper_config, Some "a" ->
-              let runtime_default =
-                match Observed.to_option m.runtime.runtime_config_raw with
-                | Some meta ->
-                    Option.value (List.assoc_opt name meta.assignments)
-                      ~default:""
-                | None -> ""
-              in
-              open_runtime_assign_modal m ~keeper_default:name ~runtime_default
-                ()
-          | Some name, Nav.Keeper_config, Some "e" ->
-              let config =
-                m.config
-                |> Config_store.set_target (Wire_config.Target_keeper name)
-                |> Config_store.set_tab Nav.Settings_keepers_companies
-              in
-              Update_nav.open_overlay { m with config }
-                (Nav.Settings Nav.Settings_keepers_companies)
-          | _, _, Some "c" -> (
-              match Model.selected_keeper_name m with
-              | Some name ->
-                  let already_chat =
-                    Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
-                  in
-                  let detail_vis =
-                    Model.detail_visible
-                      { m with nav = { m.nav with zoomed = false } }
-                  in
-                  let zoomed =
-                    (m.nav.zoomed || not detail_vis)
-                    && Model.can_zoom_current_view m
-                  in
-                  let pre_zoom_pane_index =
-                    if zoomed && not m.nav.zoomed then Some m.nav.pane_index
-                    else m.nav.pre_zoom_pane_index
-                  in
-                  let pane_index = if zoomed then 0 else 1 in
-                  let nav =
-                    {
-                      m.nav with
-                      zoomed;
-                      pre_zoom_pane_index;
-                      pane_index;
-                      dive_scroll_offset = 0;
-                      filter_focused = false;
-                    }
-                  in
-                  let fleet =
-                    if already_chat then m.fleet
-                    else
-                      m.fleet
-                      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
-                      |> Fleet_store.mark_chat_history_loading ~keeper:name
-                  in
-                  let config =
-                    if already_chat then m.config
-                    else Config_store.cancel_edit_field m.config
-                  in
-                  let knowledge =
-                    if already_chat then m.knowledge
-                    else
-                      m.knowledge
-                      |> Knowledge_store.close_memory_reading
-                      |> Knowledge_store.close_memory_diagram
-                  in
-                  let drafts =
-                    m.drafts
-                    |> Drafts.set_active_keeper name
-                    |> Drafts.set_focus true
-                  in
-                  let next =
-                    { m with nav; fleet; config; knowledge; drafts }
-                  in
-                  let cmds =
-                    if already_chat && (m.nav.pane_index >= 1 || m.nav.zoomed)
-                    then []
-                    else View_fetches.fetches_for_current_view next
-                  in
-                  (next, cmds)
-              | None ->
-                  ( Model.with_toast ~now ~level:Model.Toast_warning
-                      (Say.make ~ko:"채팅할 키퍼를 먼저 선택하세요"
-                         ~en:"Select a keeper first")
-                      m
-                  , [] ))
-          | _, Nav.Keeper_chat, Some "X" -> (
-              match Model.selected_keeper_name m with
-              | Some name -> dismiss_keeper_chat_errors ~now ~keeper:name m
-              | None -> (m, []))
-          | ( (Some _ | None)
-            , ( Nav.Keeper_chat
-              | Nav.Keeper_trace
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_identity )
-            , (Some _ | None) ) ->
-              (m, []))
-      | Nav.Knowledge -> (
-          match m.knowledge.active_tab with
-          | Nav.Knowledge_memory -> (
-              match printable_char with
-              | Some "e" ->
-                  let knowledge =
-                    Knowledge_store.set_memory_view_mode
-                      Knowledge_store.View_evolution m.knowledge
-                  in
-                  let next = { m with knowledge } in
-                  (next, View_fetches.fetches_for_current_view next)
-              | Some "f" ->
-                  let knowledge =
-                    Knowledge_store.set_memory_view_mode
-                      Knowledge_store.View_facts m.knowledge
-                  in
-                  let next = { m with knowledge } in
-                  (next, View_fetches.fetches_for_current_view next)
-              | Some "d" ->
-                  let knowledge =
-                    Knowledge_store.set_memory_view_mode
-                      Knowledge_store.View_diff m.knowledge
-                  in
-                  let next = { m with knowledge } in
-                  (next, View_fetches.fetches_for_current_view next)
-              | Some "a" -> (
-                  match resolve_memory_act_keeper m with
-                  | Some keeper ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:("사서 라이터 재개 요청: " ^ keeper)
-                             ~en:("Requesting librarian writer resume: " ^ keeper))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req =
-                                Cmd.Post_memory_act
-                                  {
-                                    keeper;
-                                    act = Wire_knowledge.Act_resume;
-                                  };
-                            };
-                        ] )
-                  | None -> open_memory_act_modal m ~keeper_default:"")
-              | Some "A" ->
-                  let keeper_default =
-                    Option.value (resolve_memory_act_keeper m) ~default:""
-                  in
-                  open_memory_act_modal m ~keeper_default
-              | _ -> (m, []))
-          | Nav.Knowledge_wiki -> (
-              match Knowledge_store.selected_wiki_page m.knowledge with
-              | None -> (m, [])
-              | Some p ->
-                  if is_ctrl_e then
+                | Some "W"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_addons_browser
+                       && m.nav.pane_index = 1 -> (
+                    match
+                      ( Runtime_store.selected_browser_client m.runtime
+                      , Runtime_store.selected_browser_tab m.runtime )
+                    with
+                    | Some cl, Some tb ->
+                        ( Model.with_toast ~now ~level:Model.Toast_info
+                            (Say.make
+                               ~ko:
+                                 (Printf.sprintf
+                                    "브라우저 스크린샷 캡처 중 (#%d)…" tb.id)
+                               ~en:
+                                 (Printf.sprintf
+                                    "Capturing browser screenshot (#%d)…" tb.id))
+                            m
+                        , [
+                            Cmd.Http_post
+                              {
+                                epoch = m.epoch;
+                                req =
+                                  Cmd.Post_browser_screenshot
+                                    { client_id = cl.client_id; tab_id = tb.id };
+                              };
+                          ] )
+                    | Some _, None | None, (Some _ | None) -> (m, []))
+                | Some "R"
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_tools_usage
+                       && Runtime_store.equal_tools_subview
+                            m.runtime.tools_subview
+                            Runtime_store.Tools_keeper_skills ->
                     ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make
-                           ~ko:("외부 편집기로 위키 열기: " ^ p.slug)
-                           ~en:("Opening wiki page in $EDITOR: " ^ p.slug))
+                        (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
+                           ~en:"Refreshing skill catalog…")
                         m
                     , [
-                        Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page p.slug);
+                        Cmd.Http_post
+                          { epoch = m.epoch; req = Cmd.Post_skills_refresh };
                       ] )
-                  else (
-                    match printable_char with
-                    | Some "e" -> open_wiki_edit_modal ~now m ~slug:p.slug
-                    | _ -> (m, [])))
-          | Nav.Knowledge_artifacts -> (
-              match printable_char, Knowledge_store.selected_artifact m.knowledge with
-              | Some "e", Some art ->
-                  let ext =
-                    Wire_knowledge.artifact_extension
-                      (Wire_knowledge.artifact_format_of_entry art)
-                  in
-                  let filename_stem =
-                    if String.trim art.title <> "" then art.title else art.id
-                  in
-                  let content_opt =
-                    Option.map
-                      (fun (d : Wire_knowledge.published_artifact_detail) ->
-                        d.content)
-                      (Knowledge_store.artifact_detail_for_entry art
-                         m.knowledge)
-                  in
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:(Printf.sprintf "%s 파일 내보내는 중…" ext)
-                         ~en:(Printf.sprintf "Exporting %s…" ext))
-                      m
-                  , [
-                      Cmd.Export_artifact
-                        {
-                          epoch = m.epoch;
-                          id = art.id;
-                          revision = Some art.revision;
-                          filename_stem;
-                          ext;
-                          content_opt;
-                          open_after = false;
-                        };
-                    ] )
-              | Some "H", Some art ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
-                      m
-                  , [ Cmd.Copy_clipboard art.body.sha256 ] )
-              | _ -> (m, []))
-          | Nav.Knowledge_board -> (m, []))
-      | Nav.Work -> (
-          match m.work.active_tab with
-          | Nav.Work_pipeline -> (
-              let active_target =
-                match m.nav.pane_index with
-                | 1 when Model.work_pipeline_verifs_visible m -> (
-                    match Work_store.selected_verification m.work with
-                    | Some v -> `Verification v
-                    | None -> `None)
-                | 1 when Model.work_pipeline_has_linked_card m -> `Hidden_verif
-                | _ -> (
-                    match Work_store.selected_goal m.work with
-                    | Some g -> `Goal g
-                    | None -> `None)
-              in
-              match active_target with
-              | `Hidden_verif -> (
-                  match printable_char with
-                  | Some ("a" | "x" | "h" | "X") ->
-                      ( Model.with_toast ~now ~level:Model.Toast_warning
-                          (Update_nav.hidden_verif_toast_msg m)
-                          m
-                      , [] )
-                  | _ -> (m, []))
-              | `Goal g -> (
-                  match printable_char with
-                  | Some "a" -> goal_action_on_approve ~now m g
-                  | Some "c" -> Update_nav.request_goal_complete_guarded ~now m g
-                  | Some "x" -> goal_action_on_stop ~now m g
-                  | Some "h" ->
-                      Update_nav.open_harness_overrule_for_context
-                        ~verdict:"approve" ~now m
-                  | Some "X" ->
-                      Update_nav.open_harness_overrule_for_context
-                        ~verdict:"reject" ~now m
-                  | _ -> (m, []))
-              | `Verification v -> (
-                  match printable_char with
-                  | Some "a" -> Update_nav.approve_verification_request ~now m v
-                  | Some "x" -> Update_nav.reject_verification_request ~now m v
-                  | Some "h" ->
-                      Update_nav.open_harness_overrule_for_context
-                        ~verdict:"approve" ~now m
-                  | Some "X" ->
-                      Update_nav.open_harness_overrule_for_context
-                        ~verdict:"reject" ~now m
-                  | _ -> (m, []))
-              | `None -> (m, []))
-          | Nav.Work_tasks -> (
-              match Work_store.selected_task m.work, printable_char with
-              | Some task, Some "x" ->
-                  Update_nav.open_inline_modal m (Nav.Task_cancel task.id)
-              | Some _, Some "h" ->
-                  Update_nav.open_harness_overrule_for_context ~verdict:"approve"
-                    ~now m
-              | Some _, Some "X" ->
-                  Update_nav.open_harness_overrule_for_context ~verdict:"reject"
-                    ~now m
-              | _ -> (m, []))
-          | Nav.Work_inbox -> (
-              if
-                Work_store.equal_inbox_subview m.work.inbox_subview
-                  Work_store.Inbox_queue
-              then
+                | Some _ | None -> (m, []))
+            | Nav.Keepers -> (
                 match printable_char with
-                | Some "C" -> (
+                | Some "A"
+                  when (m.nav.pane_index >= 1
+                        || (m.nav.zoomed && Model.can_zoom_current_view m))
+                       && Option.is_some (Model.selected_keeper_name m)
+                       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                            Nav.Keeper_memory ->
+                    Update_actions.execute_action ~now m
+                      Keymap.Open_memory_recovery
+                | Some _ | None -> (m, []))
+            | Nav.Knowledge -> (
+                match printable_char with
+                | Some "A"
+                  when Nav.equal_knowledge_tab m.knowledge.active_tab
+                         Nav.Knowledge_memory ->
+                    Update_actions.execute_action ~now m
+                      Keymap.Open_memory_recovery
+                | Some _ | None -> (m, []))
+            | Nav.Work -> (
+                match printable_char with
+                | Some "C"
+                  when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+                       && Work_store.equal_inbox_subview m.work.inbox_subview
+                            Work_store.Inbox_queue -> (
                     match
                       Attention.current_filtered_item ~query:m.work.filter_query
                         m.attention
@@ -2124,13 +1340,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                             else (m, [])
                         | Attention.Payload_goal_confirmation _ -> (m, []))
                     | None -> (m, []))
-                | _ -> (m, [])
-              else (m, []))
-          | Nav.Work_schedules
-          | Nav.Work_candle_scorecard
-          | Nav.Work_harness ->
-              (m, []))
-      | Nav.Pulse -> (m, [])))
+                | Some _ | None -> (m, []))
+            | Nav.Infra | Nav.Pulse -> (m, [])))
 
 let keeper_config_target_name (m : Model.t) =
   match Model.active_dive m with

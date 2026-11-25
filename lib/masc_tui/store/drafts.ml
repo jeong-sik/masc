@@ -133,7 +133,7 @@ let absence_notice (tx : pending_message) =
 let tx_state_label = function
   | Queued -> Some (Say.make ~ko:"전송 대기" ~en:"Queued")
   | Sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
-  | Pending_processing -> Some (Say.make ~ko:"처리 대기" ~en:"Awaiting turn")
+  | Pending_processing -> Some (Say.make ~ko:"응답 대기" ~en:"Waiting for response")
   | Confirming_delivery -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
   | No_operation_record -> Some (Say.make ~ko:"상태 기록 없음" ~en:"No status record")
   | Interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")

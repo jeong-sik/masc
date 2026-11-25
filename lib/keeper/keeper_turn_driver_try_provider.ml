@@ -1358,13 +1358,27 @@ let input_limit_of_runtime (runtime : Runtime_instance.t option) =
   match runtime with
   | Some { Runtime_instance.execution = Runtime_execution.Agent_core sealed; _ } ->
     input_limit_of_provider_config (Runtime_account_access.api_declaration sealed)
+  | Some ({ Runtime_instance.execution = Runtime_execution.Acp _; _ } as runtime) ->
+    (* An ACP agent reserves its own output, so the operator's declared
+       window is the whole input limit. *)
+    (match Runtime_instance.resolve_max_context_of_runtime runtime with
+     | None -> None
+     | Some (max_context_tokens, (_ : Runtime_instance.max_context_source)) ->
+       (match
+          Llm_provider.Input_budget.of_agent_window
+            ~model_id:runtime.Runtime_instance.id
+            ~max_context_tokens
+        with
+        | Ok limit -> Some limit
+        | Error err ->
+          Log.Keeper.debug
+            "input budget unavailable for %s: %s"
+            runtime.Runtime_instance.id
+            (Llm_provider.Input_budget.error_to_string err);
+          None))
   | Some
       { Runtime_instance.execution =
-          Runtime_execution.(
-            Codex_app_server _
-            | Antigravity_cli _
-            | Claude_code _
-            | Acp _)
+          Runtime_execution.(Codex_app_server _ | Antigravity_cli _ | Claude_code _)
       ; _
       }
   | None -> None

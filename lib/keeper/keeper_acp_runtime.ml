@@ -10,7 +10,7 @@ module Muse_log = Runtime_muse_session_log
 let config_error = Host.config_error
 let internal_error = Host.internal_error
 let rollover_threshold = 0.80
-let default_acp_max_context_tokens = 262_144
+let unbounded_start_capacity_bytes = max_int
 let idle_ttl_s = 1800.0
 let rollover_subdir = "acp-rollover"
 
@@ -30,39 +30,47 @@ let compaction_detected ~prev_used ~cur_used =
   | _ -> false
 ;;
 
-let effective_context_limit_tokens ~context_size ~max_context_tokens =
-  match context_size, max_context_tokens with
-  | Some s, m when s > 0 && m > 0 -> min s m
-  | Some s, _ when s > 0 -> s
-  | _, m when m > 0 -> m
-  | _ -> 0
+(* Both values are counted or declared, never estimated: the window the agent
+   reports ([usage_update.size]) and the operator's declared limit. The
+   smaller one is where this session ends. *)
+let effective_context_limit_tokens ~context_size ~(input_limit : Llm_provider.Input_budget.t) =
+  let limit = Llm_provider.Input_budget.to_int input_limit in
+  match context_size with
+  | Some size when size > 0 -> min size limit
+  | Some _ | None -> limit
 ;;
 
-let should_rollover_context ~context_used ~context_size ~max_context_tokens =
-  let effective_limit =
-    effective_context_limit_tokens ~context_size ~max_context_tokens
-  in
+(* A session that has used [rollover_threshold] of its window by the agent's
+   own count ends after this turn, and the next turn opens a fresh one. *)
+type rollover =
+  { used_tokens : int
+  ; limit_tokens : int
+  }
+
+let rollover_of_usage ~context_used ~context_size ~input_limit =
+  let limit_tokens = effective_context_limit_tokens ~context_size ~input_limit in
   match context_used with
-  | Some used when used > 0 && effective_limit > 0 ->
-    Float.of_int used /. Float.of_int effective_limit >= rollover_threshold
-  | _ -> false
+  | Some used_tokens
+    when used_tokens > 0
+         && Float.of_int used_tokens /. Float.of_int limit_tokens >= rollover_threshold ->
+    Some { used_tokens; limit_tokens }
+  | Some _ | None -> None
 ;;
 
-let capacity_bytes_of_tokens tokens =
-  let effective = if tokens > 0 then tokens else default_acp_max_context_tokens in
-  if effective > max_int / 4 then max_int else effective * 4
-;;
-
-let resolve_max_context_tokens ~runtime_id ~override =
-  match override with
-  | Some n when n > 0 -> n
-  | _ ->
-    (match Runtime.get_runtime_by_id runtime_id with
-     | Some rt ->
-       (match Runtime_instance.resolve_max_context_of_runtime rt with
-        | Some (tokens, _) when tokens > 0 -> tokens
-        | _ -> default_acp_max_context_tokens)
-     | None -> default_acp_max_context_tokens)
+(* Load rejects a runtime that declares no [max-context]
+   ({!Runtime_config_validation.validate_runtime_max_context}), so a runtime
+   without one here was removed or redefined under the turn. *)
+let declared_input_limit ~runtime_id =
+  match
+    Keeper_turn_driver_try_provider.input_limit_of_runtime
+      (Runtime.get_runtime_by_id runtime_id)
+  with
+  | Some limit -> Ok limit
+  | None ->
+    Error
+      (config_error
+         ~field:"max-context"
+         (Printf.sprintf "ACP runtime %s has no declared max-context" runtime_id))
 ;;
 
 let rollover_dir_for_base_path ~base_path =
@@ -1669,8 +1677,7 @@ let compact_for_rollover
       ?blob_store
       ~keepers_dir
       ~keeper_id
-      ~effective_limit_tokens
-      ~context_used
+      ~(rollover : rollover)
       ~fallback_messages
       ()
   =
@@ -1684,10 +1691,8 @@ let compact_for_rollover
   then ()
   else (
     let trigger =
-      Keeper_compaction.Explicit_hard_limit
-        { capacity_bytes = capacity_bytes_of_tokens effective_limit_tokens
-        ; observed_bytes = capacity_bytes_of_tokens context_used
-        }
+      Keeper_compaction.Provider_counted_window
+        { used_tokens = rollover.used_tokens; limit_tokens = rollover.limit_tokens }
     in
     match
       Keeper_compaction.compact_evicted_messages
@@ -1792,12 +1797,116 @@ let reconcile_prepared_tools ?account_home ?continuation ~native_posture ~claim_
       Ok (Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256, tool_surface_sha256)
 ;;
 
+(* The start range a fresh session sent, as the host composed it. Kept until
+   the prompt answers so its counted [usage.inputTokens] is written against
+   that very range. *)
+type sent_start =
+  { source_messages : Agent_core.Types.message list
+  ; digest_at : int -> string option
+  ; sends_from : int
+  }
+
+(* The host reports where the request starts as a message position
+   ({!Keeper_request_start.sends_from}). The first atom whose opening message
+   sits at or past it is the range's first atom. *)
+let first_atom_of_sends_from messages ~sends_from =
+  let labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+  let rec first index = function
+    | [] -> atom_count
+    | (_, Runtime_model_input_tail_window.Atom atom) :: _ when index >= sends_from -> atom
+    | (_, (Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned))
+      :: rest -> first (index + 1) rest
+  in
+  first 0 labelled
+;;
+
+let ledger_request ~system_prompt ~tools { source_messages; digest_at; sends_from } =
+  let first_atom = first_atom_of_sends_from source_messages ~sends_from in
+  let _, atom_count = Runtime_model_input_tail_window.annotate source_messages in
+  let ends =
+    match digest_at first_atom, digest_at (atom_count - 1) with
+    | Some front_digest, Some end_digest when first_atom < atom_count ->
+      Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest }
+    | (Some _ | None), (Some _ | None) -> Keeper_model_input_ledger.No_atom_carried
+  in
+  { Keeper_model_input_ledger.prefix_digest =
+      Keeper_model_input_ledger.prefix_digest ~system_prompt ~tools
+  ; first_atom
+  ; atom_count
+  ; ends
+  ; tail_bytes = 0
+  ; turn_context = true
+  ; demote_before = 0
+  ; working_state = None
+  }
+;;
+
+(* The size signal on this lane (RFC keeper-context-window-in-tokens): the
+   ledger holds the agent's own count for the last start range this runtime
+   sent. When that count passed the declared limit, the next start opens
+   where {!Keeper_turn_driver_try_provider.past_max_context} moves it, ahead
+   of the stored seed, as the Agent Core lanes do. *)
+let seed_past_max_context
+      ~keeper_name
+      ~runtime_id
+      ~session_id
+      ~input_limit
+      ~librarian_front
+      ~turn_start
+      ~digest_at
+      carried_front_seed
+  =
+  let ledger =
+    match
+      Keeper_model_input_ledger.Table.lookup_in_history
+        ~keeper_name
+        ~runtime_id
+        ~session_id
+        ~digest_at
+    with
+    | Keeper_model_input_ledger.Table.Holds ledger -> Some ledger
+    | Keeper_model_input_ledger.Table.Dropped_stale _ | Keeper_model_input_ledger.Table.Absent ->
+      None
+  in
+  match
+    Keeper_turn_driver_try_provider.past_max_context
+      ~input_limit:(Some input_limit)
+      ~continuity:librarian_front
+      ~history_digest_at:digest_at
+      ~turn_boundary:turn_start
+      ledger
+  with
+  | None -> carried_front_seed
+  | Some { Keeper_turn_driver_try_provider.moved_to; window_first_atom; next_turn_peak; _ } ->
+    Log.Keeper.info
+      ~keeper_name
+      "ACP start range passed max context runtime=%s peak_tokens=%d limit_tokens=%d \
+       window_first_atom=%d moved_to_atom=%d"
+      runtime_id
+      next_turn_peak
+      (Llm_provider.Input_budget.to_int input_limit)
+      window_first_atom
+      moved_to.Keeper_carried_front.first_atom;
+    Some
+      (fun ~runtime_id ->
+        let read =
+          match carried_front_seed with
+          | Some read -> read ~runtime_id
+          | None -> Keeper_carried_front.no_seed_read
+        in
+        match read.Keeper_carried_front.seed with
+        | Some seed
+          when seed.Keeper_carried_front.first_atom
+               >= moved_to.Keeper_carried_front.first_atom -> read
+        | Some _ | None -> { read with Keeper_carried_front.seed = Some moved_to })
+;;
+
 let run_without_lifecycle
       ~on_guidance_prepared
       ~result_scope
       ~capacity_bytes
       ~unbounded_capacity_bytes
-      ~max_context_tokens
+      ~input_limit
       ~force_fresh_retry
       ~input_source
       ~media_store
@@ -2033,6 +2142,7 @@ let run_without_lifecycle
     + String.length goal_text
     + Option.fold ~none:0 ~some:Host.measure_message_bytes outbox_message
   in
+  let sent_start = ref None in
   let project_start_messages ~prefer_handoff messages =
     let hydrated =
       hydrate_start_messages
@@ -2041,6 +2151,27 @@ let run_without_lifecycle
         ~keeper_id:keeper_name
         ~prefer_handoff
         messages
+    in
+    (* The same list the host composes from, so atom positions agree. *)
+    let source_messages = Runtime_model_input_tail_window.for_compaction_replay hydrated in
+    let digest_at = Runtime_model_input_tail_window.atom_opening_digest source_messages in
+    let carried_front_seed =
+      match Keeper_request_source.trace_id input_source with
+      | None -> carried_front_seed
+      | Some session_id ->
+        seed_past_max_context
+          ~keeper_name
+          ~runtime_id
+          ~session_id
+          ~input_limit
+          ~librarian_front
+          ~turn_start
+          ~digest_at
+          carried_front_seed
+    in
+    let on_carried_front front ~transmitted_bytes ~sends_from =
+      sent_start := Some { source_messages; digest_at; sends_from };
+      Option.iter (fun observe -> observe front ~transmitted_bytes ~sends_from) on_carried_front
     in
     let* ranged =
       Host.start_range_projection
@@ -2055,7 +2186,7 @@ let run_without_lifecycle
         ?on_model_input_window_observation
         ?carried_front_seed
         ?librarian_front
-        ?on_carried_front
+        ~on_carried_front
         ~turn_start
         ~keeper_name
         ~runtime_id
@@ -2768,13 +2899,43 @@ let run_without_lifecycle
          | Some _ -> entry.last_context_used <- cur_used
          | None -> ());
         let compacted = compaction_detected ~prev_used ~cur_used in
-        let rollover_needed =
-          should_rollover_context
+        let rollover =
+          rollover_of_usage
             ~context_used:cur_used
             ~context_size:prompt_res.usage.context_size
-            ~max_context_tokens
+            ~input_limit
         in
-        if rollover_needed
+        (* A fresh session carried a range masc composed: write the agent's
+           count for it, so the next start can read the size signal. A resumed
+           session sent no range, so its count describes nothing masc chose. *)
+        (match resumed, !sent_start, Keeper_request_source.trace_id input_source with
+         | false, Some sent, Some session_id ->
+           let observation =
+             Keeper_model_input_ledger.Table.observe
+               ~keeper_name
+               ~runtime_id
+               ~session_id
+               ~digest_at:sent.digest_at
+               ~request:
+                 (ledger_request
+                    ~system_prompt:prepared.system_prompt
+                    ~tools:prepared.tools
+                    sent)
+               ~usage:
+                 (Keeper_model_input_ledger.usage_of_counts
+                    ~input_tokens:final_usage.Agent_core.Types.input_tokens
+                    ~cache_read_input_tokens:final_usage.Agent_core.Types.cache_read_input_tokens)
+           in
+           Log.Keeper.debug
+             ~keeper_name
+             "ACP model input ledger runtime=%s %s"
+             runtime_id
+             (Yojson.Safe.to_string
+                (Keeper_model_input_ledger.observation_to_json observation))
+         | true, (Some _ | None), (Some _ | None)
+         | false, None, (Some _ | None)
+         | false, Some _, None -> ());
+        if Option.is_some rollover
         then (
           close_session_best_effort session_id;
           evict_or_close ());
@@ -2786,7 +2947,7 @@ let run_without_lifecycle
               , cur_used
               , resumed
               , compacted
-              , rollover_needed
+              , rollover
               , stream.observed_tool_calls () ))
       | `Runtime (Error err) ->
         if persistent
@@ -3041,10 +3202,10 @@ let run_without_lifecycle
           (`Completed
               ( prompt_res
               , effective_model
-              , effective_used
+              , (_ : int option)
               , resumed
               , compacted
-              , rollover_needed
+              , rollover
               , acp_tool_calls_json )) ->
         natural_completion := true;
         let session_id = prompt_res.session_id in
@@ -3137,7 +3298,7 @@ let run_without_lifecycle
            planned resume fell back to a fresh ACP session, record the fresh start
            held_context so the next resume diffs against what this session holds. *)
         let* settled =
-          (if compacted || rollover_needed
+          (if compacted || Option.is_some rollover
            then
              Session_store.settle_holding
                ~held_context:[]
@@ -3193,30 +3354,24 @@ let run_without_lifecycle
            ~tool_calls_json:acp_tool_calls_json
            ~assistant_output:prompt_res.text
            ~usage_json);
-        if rollover_needed
-        then (
-          let effective_limit_tokens =
-            effective_context_limit_tokens
-              ~context_size:prompt_res.usage.context_size
-              ~max_context_tokens
-          in
-          let context_used = Option.value effective_used ~default:effective_limit_tokens in
+        (match rollover with
+         | Some rollover ->
           compact_for_rollover
             ~blob_store
             ~keepers_dir
             ~keeper_id:keeper_name
-            ~effective_limit_tokens
-            ~context_used
+            ~rollover
             ~fallback_messages:prepared.messages
             ();
           record_rollover_marker ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id;
           Log.Keeper.info
             ~keeper_name
             "ACP context occupancy reached >=80%% (%d/%d tokens); compacted anchor and armed fresh session rollover"
-            context_used
-            effective_limit_tokens)
-        else if planned_fresh_rollover || force_fresh_retry
-        then clear_rollover_marker ~base_path ~keeper_id:keeper_name;
+            rollover.used_tokens
+            rollover.limit_tokens
+         | None ->
+          if planned_fresh_rollover || force_fresh_retry
+          then clear_rollover_marker ~base_path ~keeper_id:keeper_name);
         let capture, _metrics =
           Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
         in
@@ -3305,8 +3460,7 @@ let compact_once_for_overflow_with
       ~already_compacted
       ~keepers_dir
       ~keeper_id
-      ~starting_capacity_bytes
-      ~effective_max_context_tokens
+      ~input_limit
       ~previous_capacity
       ~capacity
       ~initial_messages
@@ -3318,10 +3472,12 @@ let compact_once_for_overflow_with
     if evicted_messages <> []
     then (
       let trigger =
-        if previous_capacity = starting_capacity_bytes
+        if previous_capacity = unbounded_start_capacity_bytes
         then
           Keeper_compaction.Provider_context_overflow
-            { provider_limit_tokens = Some effective_max_context_tokens }
+            { provider_limit_tokens =
+                Some (Llm_provider.Input_budget.to_int input_limit)
+            }
         else
           Keeper_compaction.Explicit_hard_limit
             { capacity_bytes = capacity; observed_bytes = previous_capacity }
@@ -3343,8 +3499,7 @@ let compact_once_for_overflow
       ~already_compacted
       ~keepers_dir
       ~keeper_id
-      ~starting_capacity_bytes
-      ~effective_max_context_tokens
+      ~input_limit
       ~previous_capacity
       ~capacity
       ~initial_messages
@@ -3353,8 +3508,7 @@ let compact_once_for_overflow
     ~already_compacted
     ~keepers_dir
     ~keeper_id
-    ~starting_capacity_bytes
-    ~effective_max_context_tokens
+    ~input_limit
     ~previous_capacity
     ~capacity
     ~initial_messages
@@ -3363,7 +3517,6 @@ let compact_once_for_overflow
 
 let run
       ?(on_guidance_prepared = fun () -> Ok ())
-      ?max_context_tokens
       ~input_source
       ~media_store
       ?argument_source
@@ -3410,10 +3563,14 @@ let run
       ~config
       ()
   =
-  let effective_max_context_tokens =
-    resolve_max_context_tokens ~runtime_id ~override:max_context_tokens
+  (* Bytes of the start range the current attempt sent, measured by the host
+     projection. A typed overflow halves what was really sent, not a size
+     converted from tokens. [None] when the attempt resumed and sent no range. *)
+  let sent_start_bytes = ref None in
+  let on_carried_front front ~transmitted_bytes ~sends_from =
+    sent_start_bytes := Some transmitted_bytes;
+    Option.iter (fun observe -> observe front ~transmitted_bytes ~sends_from) on_carried_front
   in
-  let starting_capacity_bytes = capacity_bytes_of_tokens effective_max_context_tokens in
   let min_reserve_bytes = String.length system_prompt + String.length goal in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let blob_store = Tool_blob_store.create ~base_path in
@@ -3440,8 +3597,15 @@ let run
          Keeper_official_client_attempt.Effect_cell.read effect_cell
          = Keeper_provider_attempt_effect.Effect_attempted
        in
+       let* input_limit = declared_input_limit ~runtime_id in
        Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-         ~starting_capacity:starting_capacity_bytes
+         ~starting_capacity:unbounded_start_capacity_bytes
+         ~shrink_capacity:(fun ~capacity ~default_capacity ->
+           match !sent_start_bytes with
+           | Some sent when sent < capacity ->
+             Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+               ~capacity:sent
+           | Some _ | None -> default_capacity)
          ~same_run_retry_authorized:(fun () ->
            if Option.is_some official_client_continuation
            then false
@@ -3462,8 +3626,7 @@ let run
                 ~already_compacted:compacted_for_overflow
                 ~keepers_dir
                 ~keeper_id:keeper_name
-                ~starting_capacity_bytes
-                ~effective_max_context_tokens
+                ~input_limit
                 ~previous_capacity
                 ~capacity
                 ~initial_messages
@@ -3475,12 +3638,13 @@ let run
                 previous_capacity
                 capacity)
          ~attempt:(fun ~capacity:capacity_bytes ->
+           sent_start_bytes := None;
            run_without_lifecycle
              ~on_guidance_prepared
              ~result_scope
              ~capacity_bytes
-             ~unbounded_capacity_bytes:starting_capacity_bytes
-             ~max_context_tokens:effective_max_context_tokens
+             ~unbounded_capacity_bytes:unbounded_start_capacity_bytes
+             ~input_limit
              ~force_fresh_retry:!force_fresh_retry
              ~input_source
              ~media_store
@@ -3502,7 +3666,7 @@ let run
              ~on_model_input_window_observation
              ~carried_front_seed
              ~librarian_front
-             ~on_carried_front
+             ~on_carried_front:(Some on_carried_front)
              ~turn_start
              ~pre_tool_rejects
              ~base_path
@@ -3546,7 +3710,13 @@ module For_testing = struct
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
   let effective_context_limit_tokens = effective_context_limit_tokens
-  let should_rollover_context = should_rollover_context
+  let rollover_of_usage ~context_used ~context_size ~input_limit =
+    Option.map
+      (fun { used_tokens; limit_tokens } -> used_tokens, limit_tokens)
+      (rollover_of_usage ~context_used ~context_size ~input_limit)
+  ;;
+
+  let first_atom_of_sends_from = first_atom_of_sends_from
   let should_fence_tool_call_started = should_fence_tool_call_started
   let process_config_sha256 = process_config_sha256
   let rollover_threshold = rollover_threshold

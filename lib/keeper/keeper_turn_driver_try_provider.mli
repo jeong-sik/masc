@@ -222,8 +222,9 @@ val input_limit_of_provider_config :
 val input_limit_of_runtime :
   Runtime_instance.t option -> Llm_provider.Input_budget.t option
 (** Derive {!Llm_provider.Input_budget.t} from an [Agent_core] runtime's
-    non-secret declaration; [None] when absent, official-client owned, or when
-    {!Llm_provider.Input_budget.of_provider_config} returns [Error _]. Pure. *)
+    non-secret declaration, or from an ACP runtime's declared [max-context]
+    ({!Llm_provider.Input_budget.of_agent_window}); [None] when absent, for
+    the other official clients, or when the budget does not resolve. Pure. *)
 
 val past_max_context :
   input_limit:Llm_provider.Input_budget.t option ->

@@ -42,6 +42,13 @@ type compaction_anchor =
     by construction. *)
 type compaction_trigger =
   | Provider_context_overflow of { provider_limit_tokens : int option }
+  | Provider_counted_window of
+      { used_tokens : int
+      ; limit_tokens : int
+      }
+      (** An agent's own session reached its window by the tokens the agent
+          counted ([usage_update.used] of an ACP client), before it refused
+          anything. *)
   | Explicit_hard_limit of
       { capacity_bytes : int
       ; observed_bytes : int

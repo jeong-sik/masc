@@ -2694,9 +2694,9 @@ let run_named
 	     ([Keeper_carried_front.Hands_over_its_own_list]), so a range the last
 	     completed turn measured names the same atoms there. A front a refusal
 	     moved is the turn's, not one candidate's, so it stands for these
-	     candidates too. Those lanes hold no ledger of their own — it is
-	     written from the usage of a request this process composed — so this
-	     is their whole answer. *)
+	     candidates too. The ACP lane moves this seed further by its own
+	     ledger's size signal; the other official lanes hold no ledger, so
+	     this is their whole answer. *)
 	  let official_client_carried_front_seed ~runtime_id : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
 	    | Some seed ->

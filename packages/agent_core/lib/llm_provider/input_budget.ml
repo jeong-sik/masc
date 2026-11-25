@@ -191,6 +191,12 @@ let of_provider_config config =
   Result.map (fun b -> b.max_input_tokens) (resolve config)
 ;;
 
+let of_agent_window ~model_id ~max_context_tokens =
+  if max_context_tokens > 0
+  then Ok max_context_tokens
+  else Error (Non_positive_context_window { model_id; max_context_tokens })
+;;
+
 let admits (t : t) ~input_tokens = input_tokens >= 0 && input_tokens <= t
 
 let admit_receipt ?(model_id = "") ~max_context_tokens ~input_tokens receipt =

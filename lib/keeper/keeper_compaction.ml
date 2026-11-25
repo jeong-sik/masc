@@ -11,6 +11,13 @@ type compaction_anchor =
 
 type compaction_trigger =
   | Provider_context_overflow of { provider_limit_tokens : int option }
+  | Provider_counted_window of
+      { used_tokens : int
+      ; limit_tokens : int
+      }
+      (** An agent's own session reached its window by the tokens the agent
+          counted ([usage_update.used] of an ACP client), before it refused
+          anything. *)
   | Explicit_hard_limit of
       { capacity_bytes : int
       ; observed_bytes : int
@@ -226,6 +233,12 @@ let trigger_to_json = function
           | None -> `Null
           | Some n -> `Int n )
       ]
+  | Provider_counted_window { used_tokens; limit_tokens } ->
+    `Assoc
+      [ "kind", `String "provider_counted_window"
+      ; "limit_tokens", `Int limit_tokens
+      ; "used_tokens", `Int used_tokens
+      ]
   | Explicit_hard_limit { capacity_bytes; observed_bytes } ->
     `Assoc
       [ "kind", `String "explicit_hard_limit"
@@ -247,6 +260,11 @@ let trigger_of_json = function
        ; "observed_bytes", `Int observed_bytes
        ] ->
        Ok (Explicit_hard_limit { capacity_bytes; observed_bytes })
+     | [ "kind", `String "provider_counted_window"
+       ; "limit_tokens", `Int limit_tokens
+       ; "used_tokens", `Int used_tokens
+       ] ->
+       Ok (Provider_counted_window { used_tokens; limit_tokens })
      | _ -> Error "unknown or malformed compaction_trigger")
   | _ -> Error "expected JSON object for compaction_trigger"
 ;;
@@ -1960,7 +1978,8 @@ let compact_evicted_messages
         (match trigger with
          | Explicit_hard_limit { capacity_bytes; _ } ->
            anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
-         | Provider_context_overflow { provider_limit_tokens = Some tok } ->
+         | Provider_context_overflow { provider_limit_tokens = Some tok }
+         | Provider_counted_window { limit_tokens = tok; used_tokens = _ } ->
            let capacity_bytes = saturating_mul (max 0 tok) 4 in
            anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
          | Provider_context_overflow { provider_limit_tokens = None } ->

@@ -21,7 +21,6 @@ val evict_all : unit -> unit
 
 val run :
   ?on_guidance_prepared:(unit -> (unit, Agent_core.Error.t) result) ->
-  ?max_context_tokens:int ->
   input_source:Keeper_request_source.t ->
   media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->
@@ -117,14 +116,19 @@ module For_testing : sig
 
   val effective_context_limit_tokens
     :  context_size:int option
-    -> max_context_tokens:int
+    -> input_limit:Llm_provider.Input_budget.t
     -> int
 
-  val should_rollover_context
+  (** [Some (used_tokens, limit_tokens)] when the agent's own count reached
+      {!rollover_threshold} of the smaller of its reported window and the
+      declared limit. *)
+  val rollover_of_usage
     :  context_used:int option
     -> context_size:int option
-    -> max_context_tokens:int
-    -> bool
+    -> input_limit:Llm_provider.Input_budget.t
+    -> (int * int) option
+
+  val first_atom_of_sends_from : Agent_core.Types.message list -> sends_from:int -> int
 
   val should_fence_tool_call_started
     :  ?server_isolation:Runtime_acp_client.mcp_server_isolation
@@ -179,8 +183,7 @@ module For_testing : sig
     :  already_compacted:bool ref
     -> keepers_dir:string
     -> keeper_id:string
-    -> starting_capacity_bytes:int
-    -> effective_max_context_tokens:int
+    -> input_limit:Llm_provider.Input_budget.t
     -> previous_capacity:int
     -> capacity:int
     -> initial_messages:Agent_core.Types.message list

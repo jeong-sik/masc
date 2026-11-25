@@ -53,6 +53,7 @@ let request_of_json json =
   let* chat_id = string_field "chat_id" fields in
   let* content = string_field "content" fields in
   if not (Keeper_config.validate_name keeper_name) then Error "invalid Keeper name"
+  else if not (String.is_valid_utf_8 content) then Error "Discord reply content must be UTF-8"
   else
     let _, tail = Discord_rest_client.split_at_codepoint ~limit:Discord_rest_client.message_content_limit content in
     if tail <> "" then Error "Discord reply exceeds its message length limit"

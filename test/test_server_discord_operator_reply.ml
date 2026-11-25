@@ -104,6 +104,7 @@ let test_invalid_payload () =
     Eio.Switch.run (fun sw ->
       check_status 400 (submit ~sw ~root ~send (String.make 2001 'x'));
       check_status 400 (submit ~sw ~root ~send " ");
+      check_status 400 (submit ~sw ~root ~send (String.make 1 (Char.chr 255)));
       let forged =
         match payload "text" with
         | `Assoc fields -> `Assoc (text_field "channel_id" "999" :: fields)

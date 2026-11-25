@@ -138,6 +138,8 @@ val original_turn_ref : writer -> Ids.Turn_ref.t option
 
 val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
+(** Store a bounded failure preview after applying the writer's secret snapshot. *)
+
 val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
 val status_text : t -> string
 

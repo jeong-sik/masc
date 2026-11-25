@@ -154,7 +154,19 @@ let test_a_burst_is_sent_once_after_the_interval () =
             check bool "the wire hides the exact credential" false
               (String_util.contains_substring wire value))
             [ token; Keeper_owner.chat_control_token owner; secret ];
-          expect_quiet "the burst is sent once"
+          expect_quiet "the burst is sent once";
+          let reason = "provider refused input" in
+          Keeper_turn_preview.note_failure ~writer:(Some writer) ~now:(Unix.gettimeofday ())
+            ~runtime_id:"preview-fixture" (reason ^ " containing " ^ secret);
+          let failure = expect_one "the provider failure is sent" in
+          let failed_preview = preview failure in
+          check string "the observer sees the failure activity" "failed"
+            (failed_preview |> member "activity" |> to_string);
+          let status = failed_preview |> member "status_text" |> to_string in
+          check bool "the observer can read the failure reason" true
+            (String_util.contains_substring status reason);
+          check bool "the failure excludes the exact Keeper secret" false
+            (String_util.contains_substring (Yojson.Safe.to_string failure) secret)
         in
         match Keeper_owner.run_maintenance_if_idle owner observe_turn with
         | Ok (`Ran ()) -> ()

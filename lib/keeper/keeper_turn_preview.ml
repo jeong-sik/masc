@@ -269,10 +269,18 @@ let note_attempt ~writer ~now ~runtime_id =
       })
 
 let note_failure ~writer ~now ~runtime_id detail =
-  let detail = Observability_redact.redact_preview ~max_len:tail_bytes detail in
-  update ~writer ~now (fun old ->
-    { old with runtime_id = Some runtime_id; activity = Failed
-    ; last_tool = None; last_failure = Some detail })
+  Option.iter (fun writer ->
+    let redaction =
+      with_lock (fun () -> (!writer).text_intake.redaction)
+      |> Keeper_secret_redaction.copy_for_current_domain
+    in
+    let detail =
+      Keeper_secret_redaction.redact_text redaction detail
+      |> Observability_redact.redact_preview ~max_len:tail_bytes
+    in
+    update ~writer:(Some writer) ~now (fun old ->
+      { old with runtime_id = Some runtime_id; activity = Failed
+      ; last_tool = None; last_failure = Some detail })) writer
 
 (* The whole response text arrives here at once, so plain redaction sees
    every secret in it whole before the tail is cut. *)

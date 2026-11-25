@@ -359,6 +359,19 @@ let make_hooks
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
+    pre_tool_use = Some (fun event ->
+      match event with
+      | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+        (* Hooks composed around these run first and a refused call never
+           reaches this one, so this is where the tool's execution starts. *)
+        Keeper_turn_preview.note_tool_started ~writer:preview
+          ~now:(Time_compat.now ())
+          ~tool_use_id:
+            (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+          ~tool_name;
+        Agent_core.Hooks.Continue
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+
     after_turn = Some (fun event ->
       match event with
       | Agent_core.Hooks.AfterTurn { turn; response; tool_source_map } ->
@@ -716,12 +729,14 @@ let make_hooks
           } ->
         record_progress ("tool_completed:" ^ tool_name);
         (* The Answering overlay's live glance: the most recent tool this
-           turn ran. Written beside the progress stamp so the two facts
-           cannot drift apart. *)
-        Keeper_turn_preview.note_tool
+           turn ran, and the end of that call's open activity. Written beside
+           the progress stamp so the two facts cannot drift apart. *)
+        Keeper_turn_preview.note_tool_finished
           ~writer:preview
           ~now:(Time_compat.now ())
-          tool_name;
+          ~tool_use_id:
+            (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+          ~tool_name;
         incr tool_call_count_ref;
         (* AGENT_CORE exposes the provider-facing tool body here as text.  It is not a
            semantic authority: JSON-looking bytes must stay opaque.  The typed
@@ -1119,8 +1134,11 @@ let make_hooks
       | Agent_core.Hooks.PostToolUseFailure
           { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
-        Keeper_turn_preview.note_tool ~writer:preview
-          ~now:(Time_compat.now ()) tool_name;
+        Keeper_turn_preview.note_tool_finished ~writer:preview
+          ~now:(Time_compat.now ())
+          ~tool_use_id:
+            (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+          ~tool_name;
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
            is already emitted at ERROR by keeper_tools_agent_core before this

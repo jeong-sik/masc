@@ -5,6 +5,28 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
+type response_channel = No_content | Thinking | Text
+
+type tool_stage = Tool_requested | Tool_executing
+
+type open_response = { channel : response_channel; started_at : float; since : float }
+
+type open_tool =
+  { tool_use_id : string option
+  ; tool_name : string
+  ; stage : tool_stage
+  ; started_at : float
+  ; since : float
+  }
+
+(** Work that began in the running turn and has not ended. An event is a point
+    ("a tool was called"); an open activity lasts from its start to its end.
+    [started_at] is when the work began. [since] is when its channel or stage
+    last changed, and does not move while content keeps arriving. *)
+type open_activity =
+  | Response_open of open_response
+  | Tool_open of open_tool
+
 type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
   | Lane_inputs_preparation | Workspace_memory_preparation | Wiki_preparation
@@ -46,12 +68,149 @@ type t =
   ; revision : int
   ; runtime_id : string option
   ; activity : activity
+  ; open_activities : open_activity list
+  ; attempt_failed : bool
   ; last_failure : string option
   ; preparation : preparation option
   ; preparation_timeline : preparation_timeline
   ; execution_scope : Keeper_execution_scope_id.t option
   ; work_context : work_context option
   }
+
+(* The one place that says what the turn is doing. It reads what is open, so
+   no writer sets [activity] on its own and two sources cannot disagree. *)
+let activity_of (preview : t) =
+  match preview.preparation, preview.open_activities with
+  | Some _, _ -> Preparing
+  | None, Tool_open _ :: _ -> Tool_observed
+  | None, Response_open { channel = No_content; _ } :: _ -> Awaiting_response
+  | None, Response_open _ :: _ -> Receiving_response
+  | None, [] -> if preview.attempt_failed then Failed else Awaiting_response
+
+let open_response ~channel ~now = { channel; started_at = now; since = now }
+
+(* [drop] hands back the list itself when nothing matches, so a write can
+   tell that nothing changed and keep its revision. *)
+let drop (f : open_activity -> bool) work =
+  if List.exists f work then List.filter (fun activity -> not (f activity)) work
+  else work
+
+(* Applies [f] to the first activity it accepts. The result is the same list
+   when [f] accepted none or asked for no change. *)
+let change_first (f : open_activity -> open_activity option) work =
+  let rec loop before = function
+    | [] -> work
+    | activity :: rest ->
+        (match f activity with
+         | Some changed when changed == activity -> work
+         | Some changed -> List.rev_append before (changed :: rest)
+         | None -> loop (activity :: before) rest)
+  in
+  loop [] work
+
+(* Removes the first activity [f] accepts. The result is the same list when
+   [f] accepts none. *)
+let remove_first (f : open_activity -> bool) work =
+  let rec loop before = function
+    | [] -> work
+    | activity :: rest when f activity -> List.rev_append before rest
+    | activity :: rest -> loop (activity :: before) rest
+  in
+  loop [] work
+
+(* The response stays at the head of the list: every path puts it there. *)
+let note_channel ~now channel work =
+  match work with
+  | Response_open response :: rest when response.channel <> channel ->
+      Response_open { response with channel; since = now } :: rest
+  | Response_open _ :: _ -> work
+  | Tool_open _ :: _ | [] -> Response_open (open_response ~channel ~now) :: work
+
+(* A stream tool block and the tool hooks of one call carry the same id. When
+   the stream had no id, the name tells the calls apart. *)
+let same_tool ~tool_use_id ~tool_name (tool : open_tool) =
+  match tool_use_id, tool.tool_use_id with
+  | Some wanted, Some have -> String.equal wanted have
+  | Some _, None | None, Some _ | None, None -> String.equal tool_name tool.tool_name
+
+let open_tool_of ~tool_use_id ~tool_name work =
+  List.find_opt
+    (function
+      | Tool_open tool -> same_tool ~tool_use_id ~tool_name tool
+      | Response_open _ -> false)
+    work
+  |> Option.bind (function Tool_open tool -> Some tool | Response_open _ -> None)
+
+(* The model started calling the tool. Nothing says it runs yet. *)
+let tool_requested ~now ~tool_use_id ~tool_name work =
+  match open_tool_of ~tool_use_id ~tool_name work with
+  | Some _ -> work
+  | None ->
+      work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now } ]
+
+(* The before-tool hook runs once the gates before it said yes, so this is
+   where execution starts. Hearing it twice for one call changes nothing. *)
+let tool_executing ~now ~tool_use_id ~tool_name work =
+  match open_tool_of ~tool_use_id ~tool_name work with
+  | Some _ ->
+      change_first
+        (function
+          | Tool_open ({ stage = Tool_requested; _ } as current)
+            when same_tool ~tool_use_id ~tool_name current ->
+              Some (Tool_open { current with stage = Tool_executing; since = now })
+          | Tool_open _ | Response_open _ -> None)
+        work
+  | None ->
+      (* The stream never showed this call, so the hook is the first word of it. *)
+      work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } ]
+
+(* The after-tool hook ran, with a result or with a failure: the call is over.
+   The first open call that fits is the oldest one. *)
+let tool_ended ~tool_use_id ~tool_name work =
+  remove_first
+    (function Tool_open tool -> same_tool ~tool_use_id ~tool_name tool | Response_open _ -> false)
+    work
+
+(* What one provider event changes in the open work. *)
+let open_of_event ~now (preview : t) (event : Agent_core.Types.sse_event) =
+  let work = preview.open_activities in
+  match event with
+  | Agent_core.Types.MessageStart _ ->
+      (match work with
+       | Response_open _ :: _ -> work
+       | Tool_open _ :: _ | [] ->
+           Response_open (open_response ~channel:No_content ~now) :: work)
+  | Agent_core.Types.ContentBlockDelta { delta = TextDelta _; _ } ->
+      note_channel ~now Text work
+  | ContentBlockDelta { delta = TextSnapshot text; _ }
+    when not (String.equal (String.trim text) "") ->
+      note_channel ~now Text work
+  | ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _) | ReasoningDetailsDelta _; _ } ->
+      note_channel ~now Thinking work
+  | ContentBlockStart { tool_id; tool_name = Some tool_name; _ } ->
+      tool_requested ~now ~tool_use_id:tool_id ~tool_name work
+  | Agent_core.Types.MessageStop ->
+      (* The response ended. A call the model made in it stays open until the
+         before-tool hook moves it on, or the next provider request ends it:
+         every earlier call settles before a new request goes out. *)
+      drop (function Response_open _ -> true | Tool_open _ -> false) work
+  | Agent_core.Types.ContentBlockStart { tool_name = None; _ }
+  | Agent_core.Types.ContentBlockStop _
+  | Agent_core.Types.ContentBlockDelta
+      { delta =
+          ( Agent_core.Types.ThinkingSignatureDelta _
+          | Agent_core.Types.RedactedThinkingSnapshot _
+          | Agent_core.Types.InputJsonDelta _
+          | Agent_core.Types.InputJsonSnapshot _
+          | Agent_core.Types.MediaDelta _ ); _ }
+  | ContentBlockDelta { delta = TextSnapshot _; _ }
+  | Agent_core.Types.MessageDelta _ | Agent_core.Types.SSEError _
+  | Agent_core.Types.NDJSONError _ | Agent_core.Types.SSEParseFailed _
+  | Agent_core.Types.NDJSONParseFailed _ | Agent_core.Types.SSEUnknownEventType _
+  | Agent_core.Types.SSEUnsupportedPart _ | Agent_core.Types.SSEUnsupportedResponse _
+  | Agent_core.Types.Timeout _ | Agent_core.Types.StreamIncomplete _
+  | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _
+  | Agent_core.Types.Ping | Agent_core.Types.Connected -> work
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
    enough that the turns poll stays a light projection. The tail is cut with
@@ -119,7 +278,8 @@ let shown_after_write writer = if displayed writer then Some (!writer).shown_as 
 
 let empty ~execution_scope ~revision now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now; revision
-  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope; work_context = None }
+  ; runtime_id = None; activity = Preparing; open_activities = []; attempt_failed = false
+  ; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope; work_context = None }
 
 let note_work_context ~writer work_context =
   announce (with_lock (fun () ->
@@ -157,7 +317,8 @@ let current_for_turn ~keeper_name ~interrupt_token =
   snd (current_for_turn_with_revision ~keeper_name ~interrupt_token)
 
 (* [f] returns [None] when the note changes nothing, which leaves
-   [updated_at] where it was. *)
+   [updated_at] where it was. Every write takes its [activity] from what is
+   open, so no writer can leave the two apart. *)
 let change_entry ~writer ~now f =
   Option.iter (fun writer ->
     announce
@@ -165,7 +326,16 @@ let change_entry ~writer ~now f =
          match f !writer with
          | None -> None
          | Some entry ->
-           writer := { entry with preview = { entry.preview with updated_at = now; revision = next_revision () } };
+           let preview = entry.preview in
+           writer :=
+             { entry with
+               preview =
+                 { preview with
+                   updated_at = now
+                 ; revision = next_revision ()
+                 ; activity = activity_of preview
+                 }
+             };
            shown_after_write writer))) writer
 
 let update ~writer ~now f =
@@ -268,11 +438,13 @@ let note_attempt ~writer ~now ~runtime_id =
   change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; next_preparation_scope_id; shown_as; _ } ->
     Some
       { preview =
-          { preview with runtime_id = Some runtime_id; activity = Awaiting_response
+          { preview with runtime_id = Some runtime_id
           ; last_tool = None; text_tail = ""; preparation = None
+          ; open_activities = []; attempt_failed = false
           ; text_position = {generation=preview.text_position.generation + 1; start_byte=0} }
         (* A new attempt is a new provider stream. Text the previous stream
-           still held belongs to the tail this clears. *)
+           still held belongs to the tail this clears, and any work it left
+           open ended with it. *)
       ; tools = Tool_indexes.empty
       ; preparations = []
       ; owner
@@ -295,15 +467,25 @@ let note_failure ~writer ~now ~runtime_id detail =
       |> Observability_redact.redact_preview ~max_len:tail_bytes
     in
     update ~writer:(Some writer) ~now (fun old ->
-      { old with runtime_id = Some runtime_id; activity = Failed
-      ; last_tool = None; last_failure = Some detail })) writer
+      { old with runtime_id = Some runtime_id
+      ; last_tool = None; last_failure = Some detail
+      ; open_activities = []; attempt_failed = true })) writer
 
-(* The whole response text arrives here at once, so plain redaction sees
-   every secret in it whole before the tail is cut. *)
+(* [after_turn] calls this with the whole visible text of the model's turn, so
+   plain redaction sees every secret in it whole before the tail is cut. The
+   model's turn is over by then, so the response ends here even when the turn
+   showed no text. *)
 let note_text ~writer ~now text =
   let text = String.trim text in
-  if not (String.equal text "") then
-    change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
+  change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
+    let open_activities =
+      drop (function Response_open _ -> true | Tool_open _ -> false) preview.open_activities in
+    if String.equal text "" then
+      (* Blank text keeps the last visible words: a tool-only turn must not
+         erase them. *)
+      if open_activities == preview.open_activities then None
+      else Some { entry with preparations=[]; preview={preview with preparation=None; open_activities} }
+    else
       let text = Keeper_secret_redaction.redact_text text_intake.redaction text in
       let text_tail = String_util.utf8_suffix ~max_bytes:tail_bytes text in
       let released_bytes = String.length text in
@@ -311,39 +493,31 @@ let note_text ~writer ~now text =
         start_byte=released_bytes - String.length text_tail} in
       Some { entry with released_bytes; text_intake=redacting text_intake.redaction;
         preparations=[];
-        preview={preview with text_tail; text_position; activity=Receiving_response;preparation=None} })
+        preview={preview with text_tail; text_position; preparation=None; open_activities} })
 
 
-let note_tool ~writer ~now tool_name =
+(* The before-tool hook. It runs once the gates before it said yes. *)
+let note_tool_started ~writer ~now ~tool_use_id ~tool_name =
   update ~writer ~now (fun old ->
-    { old with last_tool = Some tool_name; activity = Tool_observed })
+    { old with last_tool = Some tool_name
+    ; open_activities =
+        tool_executing ~now ~tool_use_id ~tool_name old.open_activities })
+
+(* The after-tool hook, for a result and for a failure alike. *)
+let note_tool_finished ~writer ~now ~tool_use_id ~tool_name =
+  update ~writer ~now (fun old ->
+    { old with last_tool = Some tool_name
+    ; open_activities = tool_ended ~tool_use_id ~tool_name old.open_activities })
 
 let note_request ~writer ~now =
-  update ~writer ~now (fun old -> { old with activity = Awaiting_response })
-
-(* What a provider event says about the turn apart from its text. It reads
-   the event as it arrived, so the activity moves while the redactor still
-   holds the first line back. *)
-let activity_of_event preview (event : Agent_core.Types.sse_event) =
-  match event with
-  | Agent_core.Types.ContentBlockDelta { delta = TextDelta _; _ } ->
-    Some { preview with activity = Receiving_response }
-  | ContentBlockStart { tool_name = Some tool_name; _ } ->
-    Some { preview with last_tool = Some tool_name; activity = Tool_observed }
-  | ContentBlockDelta { delta = TextSnapshot text; _ }
-    when not (String.equal (String.trim text) "") ->
-    Some { preview with activity = Receiving_response }
-  | MessageStart _ | ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _) | ReasoningDetailsDelta _; _ } ->
-    Some { preview with activity = Receiving_response }
-  | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))));_}
-  | Agent_core.Types.ContentBlockStart { tool_name = None;_} | Agent_core.Types.MessageStop
-  | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping | Agent_core.Types.Connected | Agent_core.Types.ContentBlockStop _
-  | Agent_core.Types.MessageDelta _ | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
-  | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
-  | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
-  | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-  | Agent_core.Types.StreamIncomplete _
-  | ContentBlockDelta {delta=TextSnapshot _; _ } -> None
+  update ~writer ~now (fun old ->
+    let work =
+      drop (function Tool_open _ -> true | Response_open _ -> false) old.open_activities in
+    { old with
+        open_activities =
+          Response_open (open_response ~channel:No_content ~now)
+          :: drop (function Response_open _ -> true | Tool_open _ -> false) work
+    ; attempt_failed = false })
 
 (* Positions count only bytes actually emitted by this writer's redactor.
    A replacement starts a new source generation, even if its text repeats. *)
@@ -377,22 +551,20 @@ let released_text entry events =
 
 (* Deltas pass through the turn's stream redactor, which releases a line once
    it is complete, so a secret split between two deltas is replaced before any
-   part of it reaches the tail. *)
+   part of it reaches the tail. The same event says what opened, moved or
+   ended in the turn's work. *)
 let note_stream ~writer ~now event =
   change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
     let released_entry, text_changed =
       released_text entry
         (Keeper_stream_text_redaction.on_event text_intake.stream event)
     in
-    let tools, activity =
+    let tools, last_tool =
       match event with
       | Agent_core.Types.ContentBlockStart { index; tool_name = Some name; _ } ->
-        Tool_indexes.add index name entry.tools, activity_of_event preview event
+          Tool_indexes.add index name entry.tools, Some name
       | ContentBlockStop { index } ->
-        Tool_indexes.remove index entry.tools,
-        Option.map (fun name ->
-          { preview with last_tool = Some name; activity = Tool_observed })
-          (Tool_indexes.find_opt index entry.tools)
+          Tool_indexes.remove index entry.tools, preview.last_tool
       | Agent_core.Types.ContentBlockStart _
       | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping
       | Agent_core.Types.Connected | Agent_core.Types.MessageStart _
@@ -402,15 +574,22 @@ let note_stream ~writer ~now event =
       | Agent_core.Types.SSEUnknownEventType _
       | Agent_core.Types.SSEUnsupportedPart _
       | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-      | Agent_core.Types.StreamIncomplete _ ->
-        entry.tools, activity_of_event preview event
+      | Agent_core.Types.StreamIncomplete _ -> entry.tools, preview.last_tool
     in
-    let entry = { released_entry with tools } in
-    match activity, text_changed with
-    | None, false -> None
-    | Some activity_preview, _ -> Some {entry with preparations=[];preview={activity_preview with
-        text_tail=entry.preview.text_tail; text_position=entry.preview.text_position;preparation=None}}
-    | None, true -> Some {entry with preparations=[];preview={entry.preview with preparation=None}})
+    let open_activities = open_of_event ~now preview event in
+    let open_changed = not (open_activities == preview.open_activities) in
+    match open_changed, text_changed with
+    | false, false -> None
+    | true, _ | false, true ->
+        Some
+          { released_entry with tools; preparations = [];
+            preview =
+              { preview with
+                  last_tool
+                ; open_activities
+                ; preparation = None
+                ; text_tail = released_entry.preview.text_tail
+                ; text_position = released_entry.preview.text_position } })
 
 let preparation_phase_name = function
   | Task_preparation -> "task"
@@ -521,20 +700,29 @@ let preparation_timeline_of_json json =
   | _ -> Error "preparation timeline must be an array"
 ;;
 
+(* What is open comes first. [last observed tool] stays a fact about the turn,
+   not a claim that the tool runs. *)
+let open_activity_text = function
+  | Response_open { channel = No_content; _ } -> "waiting for provider response"
+  | Response_open { channel = Thinking; _ } -> "receiving reasoning"
+  | Response_open { channel = Text; _ } -> "receiving response"
+  | Tool_open { tool_name; stage = Tool_requested; _ } -> "tool called: " ^ tool_name
+  | Tool_open { tool_name; stage = Tool_executing; _ } -> "tool running: " ^ tool_name
+
 let status_text preview =
   let activity =
-    match preview.preparation, preview.activity with
+    match preview.preparation, preview.open_activities with
     | Some preparation, _ ->
       let phase = preparation_phase_name preparation.phase in
       (match preparation.state with
        | Preparation_active -> "preparing " ^ phase
        | Preparation_finished {outcome=Prepared;_} -> phase ^ " prepared; next activity unobserved"
        | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
-    | None, Preparing -> "preparing turn"
-    | None, Awaiting_response -> "waiting for provider response"
-    | None, Receiving_response -> "receiving response"
-    | None, Tool_observed -> "tool activity observed"
-    | None, Failed -> "provider attempt failed"
+    | None, _ when preview.activity = Preparing -> "preparing turn"
+    | None, work :: _ -> String.concat " · " (List.map open_activity_text work)
+    | None, [] ->
+      if preview.attempt_failed then "provider attempt failed"
+      else "waiting for provider response"
   in
   String.concat " · "
     (List.filter_map Fun.id
@@ -549,6 +737,29 @@ let activity_to_json = function
   | Tool_observed -> `String "tool"
   | Failed -> `String "failed"
 
+let open_activity_to_json = function
+  | Response_open { channel; started_at; since } ->
+    let channel =
+      match channel with
+      | No_content -> "none" | Thinking -> "thinking" | Text -> "text"
+    in
+    `Assoc
+      [ "kind", `String "response"
+      ; "channel", `String channel
+      ; "started_at_unix", `Float started_at
+      ; "since_unix", `Float since
+      ]
+  | Tool_open { tool_use_id; tool_name; stage; started_at; since } ->
+    let stage = match stage with Tool_requested -> "requested" | Tool_executing -> "executing" in
+    `Assoc
+      [ "kind", `String "tool"
+      ; "tool_use_id", Option.fold ~none:`Null ~some:(fun id -> `String id) tool_use_id
+      ; "name", `String tool_name
+      ; "stage", `String stage
+      ; "started_at_unix", `Float started_at
+      ; "since_unix", `Float since
+      ]
+
 let work_context_to_json { task_id; start_reasons } =
   `Assoc
     [ "task_id", Option.fold ~none:`Null ~some:(fun id -> `String id) task_id
@@ -558,6 +769,7 @@ let work_context_to_json { task_id; start_reasons } =
 let to_json ?(include_preparation_timeline = false) preview =
   `Assoc ["status_text", `String (status_text preview);
     "activity", activity_to_json preview.activity;
+    "open_activities", `List (List.map open_activity_to_json preview.open_activities);
     "text_tail", `String preview.text_tail;
     "text_position", `Assoc ["generation", `Int preview.text_position.generation;
       "start_byte", `Int preview.text_position.start_byte];

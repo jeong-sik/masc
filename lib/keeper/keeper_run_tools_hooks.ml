@@ -655,9 +655,12 @@ let assemble_hooks
           Some
             (fun event ->
               match event with
-              | Agent_core.Hooks.PreToolUse { tool_name; _ } ->
-                Keeper_turn_preview.note_tool ~writer:preview
-                  ~now:(Time_compat.now ()) tool_name;
+              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                Keeper_turn_preview.note_tool_started ~writer:preview
+                  ~now:(Time_compat.now ())
+                  ~tool_use_id:
+                    (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+                  ~tool_name;
                 Agent_core.Hooks.Continue
               | BeforeTurn _
               | BeforeTurnParams _

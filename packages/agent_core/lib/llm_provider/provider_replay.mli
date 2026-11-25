@@ -48,3 +48,12 @@ val encode_exact_next_block : payload:Yojson.Safe.t -> string
     typed [Malformed_replay] result.
     @since 0.211.3 *)
 val decode : string -> decoded
+
+(** [true] when [content] holds a {!Types.RedactedThinking} carrier that
+    decodes as an [Exact_next_block] envelope. Such a carrier binds the block
+    right after it, byte for byte. A reducer that merges, rewrites or drops
+    blocks of such content would strand the carrier, so it leaves the content
+    as it is, the same way it leaves content a metadata replay witness
+    ({!Types.Response_replay}, {!Types.Inline_content_replay}) names.
+    @since 0.234.0 *)
+val binds_adjacent_block : 'source Types.content_block_with list -> bool

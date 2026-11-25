@@ -1040,11 +1040,13 @@ describe('workspaces/knowledge', () => {
       return () => { listeners.delete(listener) }
     })
 
-    // Simulate a server that caps each page at 40 rows even if comment_limit > 40,
-    // AND let us hold an offset=80 load-more response across an overlapping SSE refresh.
+    // Enforce the real OCaml server contract (Board_types.Limits.max_comment_page_limit = 100):
+    // reject comment_limit outside 1..100 with HTTP 400 and slice by the requested limit.
+    // Also hold an offset=80 load-more response across an overlapping SSE refresh.
     let holdOffset80 = false
     let releaseOffset80!: () => void
     const requestedOffsets: number[] = []
+    const requestedLimits: number[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://local')
       if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
@@ -1052,9 +1054,18 @@ describe('workspaces/knowledge', () => {
       if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
       if (url.pathname === `/api/v1/board/${post.id}`) {
         const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(
+            JSON.stringify({ error: `comment_limit must be between 1 and 100 (got ${limitRaw})` }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          )
+        }
         requestedOffsets.push(offset)
+        requestedLimits.push(limit)
         const respond = () => {
-          const rows = allComments.slice(offset, offset + 40)
+          const rows = allComments.slice(offset, offset + limit)
           return jsonResponse({
             post,
             comments: rows,
@@ -1117,9 +1128,11 @@ describe('workspaces/knowledge', () => {
     await flushUi(6)
     expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
     expect(container.textContent).toContain('Comment #79')
+    expect(requestedLimits.length).toBeGreaterThan(0)
+    expect(requestedLimits.every((l) => l >= 1 && l <= 100)).toBe(true)
   })
 
-  it('BoardTab preserves >400 loaded comments across SSE refresh and retains existing comments with an alert if a continuation page fails', async () => {
+  it('BoardTab preserves >400 loaded comments across SSE refresh within server comment_limit <= 100 and retains existing comments on continuation failure', async () => {
     const post = { id: 'p-deep-thread', title: 'Deep Thread', body: 'Body', author: 'keeper', post_kind: 'direct' }
     const allComments = Array.from({ length: 480 }, (_, i) => ({
       id: `deep-${i}`,
@@ -1136,6 +1149,7 @@ describe('workspaces/knowledge', () => {
     })
 
     let failOffset40 = false
+    const requestedLimits: number[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://local')
       if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
@@ -1143,13 +1157,22 @@ describe('workspaces/knowledge', () => {
       if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
       if (url.pathname === `/api/v1/board/${post.id}`) {
         const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(
+            JSON.stringify({ error: `comment_limit must be between 1 and 100 (got ${limitRaw})` }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        requestedLimits.push(limit)
         if (offset === 40 && failOffset40) {
           return new Response(JSON.stringify({ error: 'temporary 503 on page 2' }), {
             status: 503,
             headers: { 'content-type': 'application/json' },
           })
         }
-        const rows = allComments.slice(offset, offset + 40)
+        const rows = allComments.slice(offset, offset + limit)
         return jsonResponse({
           post,
           comments: rows,
@@ -1170,7 +1193,7 @@ describe('workspaces/knowledge', () => {
     )
     await flushUi(4)
 
-    // Load 10 extra pages (total 440 / 480 comments > previous 400 cap!)
+    // Load 10 extra pages (total 440 / 480 comments > server 100 limit and > previous 400 cap!)
     for (let loaded = 40; loaded < 440; loaded += 40) {
       const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
         b.textContent?.includes(`댓글 더 불러오기 (${loaded} / 480)`),
@@ -1181,17 +1204,22 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
     expect(container.textContent).toContain('DeepComment #439')
 
-    // 1. SSE refresh succeeds across all 11 pages -> preserves all 440 comments & reading window!
+    // 1. SSE refresh succeeds across all 11 pages with every request comment_limit <= 100 -> preserves all 440 comments & reading window!
+    const requestsBeforeRefresh = requestedLimits.length
     for (const listener of listeners) {
       listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
     }
     await vi.waitFor(
       () => {
+        expect(requestedLimits.length).toBeGreaterThanOrEqual(requestsBeforeRefresh + 11)
         expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
         expect(container.textContent).toContain('DeepComment #439')
       },
       { timeout: 3000 },
     )
+    const refreshLimits = requestedLimits.slice(requestsBeforeRefresh)
+    expect(refreshLimits).toHaveLength(11)
+    expect(refreshLimits.every((l) => l >= 1 && l <= 100)).toBe(true)
 
     // 2. SSE refresh encounters 503 on continuation page (offset=40) -> preserves 440 comments & surfaces error alert!
     failOffset40 = true

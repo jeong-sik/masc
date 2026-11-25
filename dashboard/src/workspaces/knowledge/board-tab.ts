@@ -411,7 +411,7 @@ export function BoardTab(props: WorkspaceViewProps) {
         const focusId = replyView?.postId === postId ? replyView.commentId : null
         const params = new URLSearchParams({
           format: 'flat',
-          comment_limit: String(targetLoadedCount),
+          comment_limit: String(COMMENT_PAGE_LIMIT),
           comment_offset: '0',
         })
         if (focusId) params.set('comment_focus', focusId)
@@ -460,12 +460,13 @@ export function BoardTab(props: WorkspaceViewProps) {
           : null
         let commentPage = decodeCommentPageInfo(res.value.comment_page)
 
-        // When refreshing a post that already had multiple pages loaded, if the
-        // server capped `comment_limit` below `targetLoadedCount`, continue
-        // fetching contiguous pages until the entire previously read range is
-        // restored. On any continuation error or cursor mismatch, preserve the
-        // existing detail & reading window and surface an error rather than
-        // silently replacing with a truncated prefix.
+        // Each HTTP request stays at COMMENT_PAGE_LIMIT (<= server max 100 in
+        // Board_types.Limits.max_comment_page_limit). When refreshing a post
+        // that already had multiple pages loaded, continue fetching contiguous
+        // pages until the entire previously read range is restored. On any
+        // continuation error or cursor mismatch, preserve the existing detail &
+        // reading window and surface an error rather than silently replacing
+        // with a truncated prefix.
         let prevExpectedOffset = 0
         while (
           samePost

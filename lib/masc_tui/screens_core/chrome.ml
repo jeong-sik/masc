@@ -984,19 +984,27 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
         Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:rect.x
           ~y:rect.y ~h:1 ~theme;
         let lang = model.lang in
+        let deny_key =
+          if Model.is_artifact_dive_search_active model then "[Alt+N]"
+          else "[N]"
+        in
         let full_allow, full_deny, full_dive =
           match entry.payload with
           | Attention.Payload_ask _ ->
               ( Say.resolve lang (Say.make ~ko:"[Y] 질문 답변" ~en:"[Y] Answer Ask")
-              , Say.resolve lang (Say.make ~ko:"[N] 건너뛰기" ~en:"[N] Skip")
+              , Say.resolve lang
+                  (Say.make ~ko:(deny_key ^ " 건너뛰기") ~en:(deny_key ^ " Skip"))
               , Say.resolve lang (Say.make ~ko:"[J] 수신함" ~en:"[J] Inbox") )
           | Attention.Payload_goal_confirmation _ ->
               ( Say.resolve lang (Say.make ~ko:"[Y/Enter] 확인" ~en:"[Y/Enter] Confirm")
-              , Say.resolve lang (Say.make ~ko:"[N] 보류·중단" ~en:"[N] Hold/Drop")
+              , Say.resolve lang
+                  (Say.make ~ko:(deny_key ^ " 보류·중단")
+                     ~en:(deny_key ^ " Hold/Drop"))
               , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
           | Attention.Payload_tool_approval _ | Attention.Payload_gate _ ->
               ( Say.resolve lang (Say.make ~ko:"[Y] 승인" ~en:"[Y] Allow")
-              , Say.resolve lang (Say.make ~ko:"[N] 거절" ~en:"[N] Deny")
+              , Say.resolve lang
+                  (Say.make ~ko:(deny_key ^ " 거절") ~en:(deny_key ^ " Deny"))
               , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
         in
         let is_ask =
@@ -1019,8 +1027,8 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           if compact_actions then
             let a, d, j =
               if is_ask && Say.equal_lang lang Say.Lang_ko && rect.w >= 44 then
-                ("[Y]답", "[N]건", "[J]함")
-              else ("[Y]", "[N]", "[J]")
+                ("[Y]답", deny_key ^ "건", "[J]함")
+              else ("[Y]", deny_key, "[J]")
             in
             let sep = "/" in
             let w =

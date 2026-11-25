@@ -449,6 +449,13 @@ val is_memory_diff_pin_surface : t -> bool
     subview is the diff-flow view ([Mem_diff_flow] / [Kmem_diff_flow]), where
     uppercase [D] pins the diff range instead of arming keeper stop. *)
 
+val is_artifact_dive_search_active : t -> bool
+(** [true] iff no overlay/composer/filter/sidebar holds focus, the active dive
+    is [Artifact_dive], and [knowledge.artifact_search_query] is non-empty
+    after trimming. In this state bare [n]/[N] step search matches instead of
+    firing Approval Strip [Fast_deny_top] (which remains reachable via
+    [Alt+N]). *)
+
 val target_keeper_for_lifecycle : t -> string option
 (** Single-SSOT target keeper for lifecycle actions ([W]/[D], slash commands,
     and [Ctrl+K] palette): on [4 Keepers], yields [None] when a collapsed

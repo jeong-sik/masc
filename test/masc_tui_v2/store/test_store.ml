@@ -20298,6 +20298,42 @@ let test_layer1_input_esc_focus_traps () =
     (List.length (Cmd.flatten cmds_art_n));
   Alcotest.(check int) "#13a: [N] steps to previous search match (wraps to idx 1)"
     1 m_art_after_n.knowledge.artifact_search_match_idx;
+  let has_tool_deny_post cmds =
+    List.exists
+      (function
+        | Cmd.Http_post
+            {
+              req =
+                Cmd.Post_tool_approval
+                  {
+                    approval_id = "ap-strip-1";
+                    decision = Wire_work.Tool_deny;
+                    _;
+                  };
+              _;
+            } ->
+            true
+        | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  let _m_art_alt_n, cmds_art_alt_n =
+    Update.step ~now:t0 m_art_n (Msg.Key_event (char_key ~alt:true "n"))
+  in
+  Alcotest.(check bool)
+    "#13a: [Alt+N] in Artifact_dive with active search still routes to Fast_deny_top"
+    true (has_tool_deny_post cmds_art_alt_n);
+  let m_art_empty_search =
+    {
+      m_art_n with
+      knowledge = Knowledge_store.set_artifact_search "" m_art_n.knowledge;
+    }
+  in
+  let _m_art_empty_n, cmds_art_empty_n =
+    Update.step ~now:t0 m_art_empty_search (Msg.Key_event (char_key "N"))
+  in
+  Alcotest.(check bool)
+    "#13a: [N] in Artifact_dive with empty search falls through to Fast_deny_top"
+    true (has_tool_deny_post cmds_art_empty_n);
 
   (* #13b & #19b & #19c: Settings edit/dirty Global guards, narrow resize Pane_inspector, Micro Settings / *)
   let schema_str_bool : Wire_config.config_schema =

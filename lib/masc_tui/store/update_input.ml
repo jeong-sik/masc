@@ -3562,27 +3562,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                             Nav.Knowledge_artifacts) ->
                                 Some Keymap.Copy_public_url
                             | Some "N"
-                              when Option.is_none
-                                     (Model.fast_approval_strip_item m)
-                                   && (not
-                                      (String.equal
-                                         (String.trim
-                                            m.knowledge.artifact_search_query)
-                                         ""))
-                                   &&
-                                   (match Model.active_dive m with
-                                   | Some
-                                       (Nav.Dive_knowledge (Nav.Artifact_dive _))
-                                     ->
-                                       true
-                                   | Some
-                                       ( Nav.Dive_knowledge
-                                           (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                                       | Nav.Dive_work _
-                                       | Nav.Dive_runtime _
-                                       )
-                                   | None ->
-                                       false) ->
+                              when Model.is_artifact_dive_search_active m ->
                                 Some Keymap.Search_prev_match
                             | Some "p"
                               when (match Model.active_dive m with

@@ -155,6 +155,11 @@ export type KeeperToolResultResponse =
   | {
       readonly state: 'page'
       readonly executionId: string
+      readonly sourceId?: string
+      readonly bodySha256?: string
+      readonly offset: number
+      readonly nextOffset: number
+      readonly encoding: string
       readonly content: string
       readonly isError: boolean
       readonly recordedBytes: number
@@ -315,6 +320,7 @@ export interface KeeperToolCallEntry {
   readonly task_id?: string
   readonly model?: string
   readonly result_bytes?: number
+  readonly truncated_to?: number
   readonly input: unknown
   readonly output: unknown
 }

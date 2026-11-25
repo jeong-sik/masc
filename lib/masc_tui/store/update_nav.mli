@@ -110,6 +110,9 @@ val palette_entries_with_overflow :
 val palette_len : Model.t -> int
 
 val switch_workspace : Model.t -> Nav.workspace -> Model.t * Cmd.t list
+val jump_to_workspace :
+  ?pane_index:int -> ?zoomed:bool -> Model.t -> Nav.workspace -> Model.t * Cmd.t list
+val pop_workspace_return : Model.t -> (Model.t * Cmd.t list) option
 val navigate_menu_target :
   ?keep_sidebar_focus:bool -> Model.t -> Nav.menu_target -> Model.t * Cmd.t list
 val enter_sidebar_focus : Model.t -> Model.t

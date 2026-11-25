@@ -796,7 +796,8 @@ let enter_sidebar_focus (m : Model.t) =
     drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m;
     config = Config_store.cancel_edit_field m.config;
     inline_modal = None;
-    ask_modal = None;
+    ask_modal =
+      (if Model.has_preserved_ask_return m.nav then m.ask_modal else None);
   }
 let switch_workspace (m : Model.t) ws =
   let nav =
@@ -805,8 +806,10 @@ let switch_workspace (m : Model.t) ws =
       workspace = ws;
       dive_stack = [];
       dive_return_stack = [];
+      workspace_return_stack = [];
       overlay = None;
       pane_index = 0;
+      pre_zoom_pane_index = None;
       zoomed = false;
       filter_focused = false;
       sidebar_focused = false;
@@ -976,7 +979,9 @@ let open_overlay (m : Model.t) overlay =
     match overlay with
     | Nav.Ask_answer -> m.ask_modal
     | Nav.Help ->
-        if Option.equal Nav.equal_overlay return_overlay (Some Nav.Ask_answer)
+        if
+          Option.equal Nav.equal_overlay return_overlay (Some Nav.Ask_answer)
+          || Model.has_preserved_ask_return nav
         then m.ask_modal
         else None
     | Nav.Palette
@@ -985,7 +990,7 @@ let open_overlay (m : Model.t) overlay =
     | Nav.Queue_context _
     | Nav.Inline_action _
     | Nav.System_gate _ ->
-        None
+        if Model.has_preserved_ask_return nav then m.ask_modal else None
   in
   let inline_modal =
     match overlay with
@@ -1218,13 +1223,7 @@ let push_dive (m : Model.t) dive =
         m.runtime
   in
   let ask_modal =
-    if
-      List.exists
-        (fun (_, _, ov) ->
-          Option.equal Nav.equal_overlay ov (Some Nav.Ask_answer))
-        nav.dive_return_stack
-    then m.ask_modal
-    else None
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
   in
   let next =
     {
@@ -1391,7 +1390,10 @@ let open_inline_modal (m : Model.t) kind =
     else clear_btw_if_leaving m drafts
   in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let open_ask_modal ?preselect_choice_1based (m : Model.t)
     (ask : Wire_work.ask_row) =
@@ -1424,8 +1426,11 @@ let open_palette (m : Model.t) mode =
   in
   let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
   let next =
-    { m with nav; drafts; config; palette; inline_modal = None; ask_modal = None }
+    { m with nav; drafts; config; palette; inline_modal = None; ask_modal }
   in
   let extra_cmds =
     match mode with
@@ -1571,7 +1576,13 @@ let cycle_sub_tab (m : Model.t) dir =
                 else m.attention
               in
               let nav =
-                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                {
+                  m.nav with
+                  pane_index = 0;
+                  pre_zoom_pane_index = None;
+                  zoomed = false;
+                  filter_focused = false;
+                }
               in
               let next =
                 { m with nav; work; attention } |> Model.sync_sidebar_cursor
@@ -1580,7 +1591,13 @@ let cycle_sub_tab (m : Model.t) dir =
           | Nav.Knowledge ->
               let knowledge = Knowledge_store.cycle_tab dir m.knowledge in
               let nav =
-                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                {
+                  m.nav with
+                  pane_index = 0;
+                  pre_zoom_pane_index = None;
+                  zoomed = false;
+                  filter_focused = false;
+                }
               in
               let next =
                 { m with nav; knowledge } |> Model.sync_sidebar_cursor
@@ -1614,7 +1631,13 @@ let cycle_sub_tab (m : Model.t) dir =
               else
                 let fleet = Fleet_store.cycle_fleet_mode dir m.fleet in
                 let nav =
-                  { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                  {
+                  m.nav with
+                  pane_index = 0;
+                  pre_zoom_pane_index = None;
+                  zoomed = false;
+                  filter_focused = false;
+                }
                 in
                 ({ m with nav; fleet }, [])
           | Nav.Runtime ->
@@ -1625,7 +1648,13 @@ let cycle_sub_tab (m : Model.t) dir =
                 }
               in
               let nav =
-                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                {
+                  m.nav with
+                  pane_index = 0;
+                  pre_zoom_pane_index = None;
+                  zoomed = false;
+                  filter_focused = false;
+                }
               in
               let next =
                 { m with nav; runtime } |> Model.sync_sidebar_cursor
@@ -1637,7 +1666,13 @@ let cycle_sub_tab (m : Model.t) dir =
                 |> Infra_store.set_code_right_mode Infra_store.Code_file
               in
               let nav =
-                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                {
+                  m.nav with
+                  pane_index = 0;
+                  pre_zoom_pane_index = None;
+                  zoomed = false;
+                  filter_focused = false;
+                }
               in
               let next = { m with nav; infra } |> Model.sync_sidebar_cursor in
               (next, View_fetches.fetches_for_current_view next)))
@@ -3748,7 +3783,8 @@ let enter_plan (m : Model.t) : enter_plan =
                   | Some entry ->
                       Enter_push (Nav.Dive_runtime (Nav.Tool_dive entry.name))
                   | None -> Enter_noop)
-              | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1 -> (
+              | Runtime_store.Tools_keeper_skills
+                when Model.detail_pane_focused ~detail_index:1 m -> (
                   match Runtime_store.selected_skill_surface m.runtime with
                   | Some sf ->
                       Enter_push
@@ -3818,7 +3854,10 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop)
           | Nav.Infra_code ->
               let scope = m.infra.code.scope in
-              if m.nav.pane_index = 0 then
+              if
+                m.nav.pane_index = 0
+                && not (m.nav.zoomed && Model.can_zoom_current_view m)
+              then
                 match Infra_store.selected_code_tree_node m.infra with
                 | None -> Enter_noop
                 | Some node when node.has_children ->
@@ -7938,13 +7977,15 @@ let work_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
   let theme = Theme.of_preset m.theme_preset in
+  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
   match m.work.active_tab with
   | Nav.Work_pipeline -> (
       match Work_store.selected_goal m.work with
       | None -> 0
       | Some g ->
           let right_rect =
-            if br.w >= 96 then
+            if zoomed then br
+            else if br.w >= 96 then
               match
                 Masc_tui_ui.Layout.split_h_bp bp br
                   [ Masc_tui_ui.Layout.Ratio 0.46; Masc_tui_ui.Layout.Flex 1 ]
@@ -8013,7 +8054,7 @@ let work_detail_max_scroll (m : Model.t) =
               | None -> 0
             in
             if
-              (not (Model.work_pipeline_has_linked_card m))
+              (zoomed || not (Model.work_pipeline_has_linked_card m))
               && (unlinked_n > 0 || unattrib_n > 0)
               && !y < body_bot
             then incr y;
@@ -8104,9 +8145,48 @@ let work_detail_max_scroll (m : Model.t) =
             in
             max md_max diff_max)
   | Nav.Work_inbox -> (
-      match
-        Attention.current_filtered_item ~query:m.work.filter_query m.attention
-      with
+      match m.work.inbox_subview with
+      | Work_store.Inbox_history -> 0
+      | Work_store.Inbox_rules ->
+          let _, sub_br = Work_store.inbox_subview_rects br in
+          let right_rect =
+            if zoomed then sub_br
+            else if sub_br.w >= 96 then
+              match
+                Masc_tui_ui.Layout.split_h_bp bp sub_br
+                  [ Masc_tui_ui.Layout.Ratio 0.56; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; r ] -> r
+              | _ -> Rect.empty
+            else
+              match
+                Masc_tui_ui.Layout.split_v_bp bp sub_br
+                  [ Masc_tui_ui.Layout.Ratio 0.52; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; b ] -> b
+              | _ -> Rect.empty
+          in
+          let r_inner = ui_card_inner right_rect in
+          if Rect.is_empty r_inner then 0
+          else
+            let rule_rows =
+              if Option.is_some (Work_store.selected_gate_rule m.work) then 6
+              else 0
+            in
+            let mode_rows =
+              if Option.is_some (Work_store.hitl_status m.work) then 2 else 0
+            in
+            let ov_rows =
+              if Option.is_some (Observed.to_option m.work.tool_approval_modes)
+              then 1
+              else 0
+            in
+            let total_rows = rule_rows + 1 + mode_rows + ov_rows in
+            max 0 (total_rows - r_inner.h)
+      | Work_store.Inbox_queue -> (
+          match
+            Attention.current_filtered_item ~query:m.work.filter_query m.attention
+          with
       | None ->
           let audit_row_count =
             if m.work.recent_decisions_24h <> [] then
@@ -8145,7 +8225,8 @@ let work_detail_max_scroll (m : Model.t) =
       | Some entry -> (
           let _, br = Work_store.inbox_subview_rects br in
           let right_rect =
-            if br.w >= 96 then
+            if zoomed then br
+            else if br.w >= 96 then
               match
                 Masc_tui_ui.Layout.split_h_bp bp br
                   [ Masc_tui_ui.Layout.Ratio 0.42; Masc_tui_ui.Layout.Flex 1 ]
@@ -8246,11 +8327,13 @@ let work_detail_max_scroll (m : Model.t) =
                 else
                   markdown_max_scroll ~theme ~width:w ~height:md_h
                     (Chat_transcript.rewrite_masc_links_for_markdown
-                       (g.measure ^ "\n\n" ^ g.procedure))))
+                       (g.measure ^ "\n\n" ^ g.procedure)))))
   | Nav.Work_harness ->
       let _, right_rect =
-        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-          ~left_ratio:0.48 ~top_ratio:0.48 bp br
+        if zoomed then (Rect.empty, br)
+        else
+          Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+            ~left_ratio:0.48 ~top_ratio:0.48 bp br
       in
       let content = ui_card_inner right_rect |> ops_pad_content in
       if Rect.is_empty content then 0
@@ -8275,7 +8358,8 @@ let work_detail_max_scroll (m : Model.t) =
                 | _ -> br
               in
               let detail_rect =
-                if body_r.w >= 96 then
+                if zoomed then body_r
+                else if body_r.w >= 96 then
                   match
                     Masc_tui_ui.Layout.split_h_bp bp body_r
                       [ Masc_tui_ui.Layout.Ratio 0.54; Masc_tui_ui.Layout.Flex 1 ]
@@ -8313,7 +8397,8 @@ let work_detail_max_scroll (m : Model.t) =
           | Some s when String.equal (String.trim s) "" -> 0
           | Some summary_txt ->
               let detail_rect =
-                if br.w >= 96 then
+                if zoomed then br
+                else if br.w >= 96 then
                   match
                     Masc_tui_ui.Layout.split_h_bp bp br
                       [ Masc_tui_ui.Layout.Ratio 0.60; Masc_tui_ui.Layout.Flex 1 ]
@@ -8449,6 +8534,7 @@ let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
+  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
   let body_rect =
     match
       Masc_tui_ui.Layout.split_v br
@@ -8456,6 +8542,13 @@ let runtime_detail_max_scroll (m : Model.t) =
     with
     | [ _; b ] -> b
     | _ -> br
+  in
+  let detail_rect_for ~left_ratio ~top_ratio r =
+    if zoomed then r
+    else
+      snd
+        (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio
+           ~top_ratio bp r)
   in
   match m.runtime.active_tab with
   | Nav.Runtime_quotas_credits ->
@@ -8491,9 +8584,8 @@ let runtime_detail_max_scroll (m : Model.t) =
       match Runtime_store.selected_lane m.runtime with
       | None -> 0
       | Some lane ->
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.56 ~top_ratio:0.54 bp body_rect
+          let right_rect =
+            detail_rect_for ~left_ratio:0.56 ~top_ratio:0.54 body_rect
           in
           let insp_rect =
             match
@@ -8521,17 +8613,8 @@ let runtime_detail_max_scroll (m : Model.t) =
   | Nav.Runtime_tools_usage -> (
       match m.runtime.tools_subview with
       | Runtime_store.Tools_keeper_skills -> (
-          let body_rect =
-            match
-              Masc_tui_ui.Layout.split_v br
-                [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
-            with
-            | [ _; b ] -> b
-            | _ -> br
-          in
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+          let right_rect =
+            detail_rect_for ~left_ratio:0.52 ~top_ratio:0.50 body_rect
           in
           let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
           if Rect.is_empty rc then 0
@@ -8548,9 +8631,8 @@ let runtime_detail_max_scroll (m : Model.t) =
                 let vis = max 1 (rc.h - hdr_rows) in
                 max 0 (List.length sk.surfaces - vis))
       | Runtime_store.Tools_quality_gate ->
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+          let right_rect =
+            detail_rect_for ~left_ratio:0.52 ~top_ratio:0.50 body_rect
           in
           let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
           let rej_n =
@@ -8566,9 +8648,8 @@ let runtime_detail_max_scroll (m : Model.t) =
           let total_lines = rej_n + wait_n + 6 in
           if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
       | Runtime_store.Tools_prompts_presets ->
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.46 ~top_ratio:0.48 bp body_rect
+          let right_rect =
+            detail_rect_for ~left_ratio:0.46 ~top_ratio:0.48 body_rect
           in
           let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
           let total_lines =
@@ -8605,9 +8686,8 @@ let runtime_detail_max_scroll (m : Model.t) =
       match Runtime_store.selected_fusion_run m.runtime with
       | None -> 0
       | Some run ->
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.44 ~top_ratio:0.46 bp body_rect
+          let right_rect =
+            detail_rect_for ~left_ratio:0.44 ~top_ratio:0.46 body_rect
           in
           let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
           if Rect.is_empty rc then 0
@@ -8622,9 +8702,8 @@ let runtime_detail_max_scroll (m : Model.t) =
           match Runtime_store.addon_preview_for ~manifest_path m.runtime with
           | None -> 0
           | Some preview ->
-              let _, right_rect =
-                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-                  ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+              let right_rect =
+                detail_rect_for ~left_ratio:0.52 ~top_ratio:0.50 body_rect
               in
               let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
               if Rect.is_empty rc then 0
@@ -8644,48 +8723,51 @@ let runtime_detail_max_scroll (m : Model.t) =
 let infra_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
+  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
   match m.infra.active_tab with
   | Nav.Infra_sandboxes -> (
       match Infra_store.selected_sandbox_keeper m.infra with
       | None -> 0
       | Some kp -> (
-          let top_h = if br.w >= 100 then 6 else 4 in
-          let body_rect =
-            match
-              Masc_tui_ui.Layout.split_v_bp bp br
-                [ Masc_tui_ui.Layout.Fixed top_h; Masc_tui_ui.Layout.Flex 1 ]
-            with
-            | [ _; b ] -> b
-            | _ -> br
-          in
-          if body_rect.w < 100 then 0
-          else
-            let right_rect =
-              match
-                Masc_tui_ui.Layout.split_h_bp bp body_rect
-                  [ Masc_tui_ui.Layout.Ratio 0.60; Masc_tui_ui.Layout.Flex 1 ]
-              with
-              | [ _; r ] -> r
-              | _ -> Rect.empty
-            in
-            let inner = ui_card_inner right_rect in
-            if Rect.is_empty inner then 0
+          let right_rect =
+            if zoomed then br
             else
-              match
-                sandbox_entry_info_for_keeper ~use_keeper_detail:false
-                  ~keeper:kp m.infra
-              with
-              | None -> 0
-              | Some info ->
-                  let rem_rows =
-                    sandbox_inspector_rem_rows ~inner_h:inner.h info
-                  in
-                  if rem_rows <= 0 then 0
-                  else
-                    max 0
-                      (Infra_store.sandbox_inspector_event_count ~keeper:kp
-                         m.infra
-                      - rem_rows)))
+              let top_h = if br.w >= 100 then 6 else 4 in
+              let body_rect =
+                match
+                  Masc_tui_ui.Layout.split_v_bp bp br
+                    [ Masc_tui_ui.Layout.Fixed top_h; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ _; b ] -> b
+                | _ -> br
+              in
+              if body_rect.w < 100 then Rect.empty
+              else
+                match
+                  Masc_tui_ui.Layout.split_h_bp bp body_rect
+                    [ Masc_tui_ui.Layout.Ratio 0.60; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ _; r ] -> r
+                | _ -> Rect.empty
+          in
+          let inner = ui_card_inner right_rect in
+          if Rect.is_empty inner then 0
+          else
+            match
+              sandbox_entry_info_for_keeper ~use_keeper_detail:false
+                ~keeper:kp m.infra
+            with
+            | None -> 0
+            | Some info ->
+                let rem_rows =
+                  sandbox_inspector_rem_rows ~inner_h:inner.h info
+                in
+                if rem_rows <= 0 then 0
+                else
+                  max 0
+                    (Infra_store.sandbox_inspector_event_count ~keeper:kp
+                       m.infra
+                    - rem_rows)))
   | Nav.Infra_repos_changes -> (
       match Infra_store.selected_change m.infra with
       | Some fc -> (
@@ -8693,8 +8775,10 @@ let infra_detail_max_scroll (m : Model.t) =
           | [] -> 0
           | rows ->
               let _, right_rect =
-                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-                  ~left_ratio:0.42 ~top_ratio:0.46 bp br
+                if zoomed then (Rect.empty, br)
+                else
+                  Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                    ~left_ratio:0.42 ~top_ratio:0.46 bp br
               in
               let inner = ui_card_inner right_rect in
               if Rect.is_empty inner then 0
@@ -8766,8 +8850,10 @@ let infra_detail_max_scroll (m : Model.t) =
         | _ -> br
       in
       let _, right_rect =
-        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-          ~left_ratio:0.32 ~top_ratio:0.42 bp body_rect
+        if zoomed then (Rect.empty, body_rect)
+        else
+          Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+            ~left_ratio:0.32 ~top_ratio:0.42 bp body_rect
       in
       let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
       if Rect.is_empty rc then 0
@@ -8787,7 +8873,8 @@ let infra_detail_max_scroll (m : Model.t) =
             | _ -> br
           in
           let _, right_rect =
-            if m.infra.acting_rail_open && body_rect.w >= 104 then
+            if zoomed then (Rect.empty, body_rect)
+            else if m.infra.acting_rail_open && body_rect.w >= 104 then
               match
                 Masc_tui_ui.Layout.split_h_bp bp body_rect
                   [
@@ -9851,50 +9938,315 @@ let clamp_for_pane (m : Model.t) =
       match Model.active_dive m with
       | Some _ -> m
       | None -> (
+          let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
           match m.nav.workspace with
           | Nav.Work ->
+              let eff_pane =
+                if not zoomed then pane_index
+                else
+                  match m.work.active_tab with
+                  | Nav.Work_pipeline when Model.work_pipeline_has_linked_card m ->
+                      2
+                  | Nav.Work_pipeline
+                  | Nav.Work_tasks
+                  | Nav.Work_schedules
+                  | Nav.Work_inbox
+                  | Nav.Work_candle_scorecard
+                  | Nav.Work_harness ->
+                      1
+              in
               let max_detail_scroll = work_detail_max_scroll m in
               {
                 m with
                 work =
-                  Work_store.move_selection ~pane_index
+                  Work_store.move_selection ~pane_index:eff_pane
                     ~has_linked_card:(Model.work_pipeline_has_linked_card m)
                     ~viewport_rows ~max_detail_scroll ~delta:0 m.work;
               }
           | Nav.Runtime ->
               let rt = sync_runtime_companies_if_needed m in
+              let eff_pane = if zoomed then 1 else pane_index in
               let max_detail_scroll =
                 if
                   Nav.equal_runtime_tab rt.active_tab Nav.Runtime_tools_usage
                   && Runtime_store.equal_tools_subview rt.tools_subview
                        Runtime_store.Tools_keeper_skills
-                  && pane_index = 0
+                  && eff_pane = 0
                 then runtime_tools_keeper_pane0_max_scroll m
                 else runtime_detail_max_scroll m
               in
               {
                 m with
                 runtime =
-                  Runtime_store.move_selection ~pane_index ~viewport_rows
-                    ~max_detail_scroll ~delta:0 rt;
+                  Runtime_store.move_selection ~pane_index:eff_pane
+                    ~viewport_rows ~max_detail_scroll ~delta:0 rt;
               }
           | Nav.Knowledge ->
+              let eff_pane = if zoomed then 1 else pane_index in
               let max_detail_scroll = knowledge_detail_max_scroll m in
               {
                 m with
                 knowledge =
-                  Knowledge_store.move_selection ~pane_index ~viewport_rows
-                    ~max_detail_scroll ~delta:0 m.knowledge;
+                  Knowledge_store.move_selection ~pane_index:eff_pane
+                    ~viewport_rows ~max_detail_scroll ~delta:0 m.knowledge;
               }
           | Nav.Infra ->
+              let eff_pane =
+                if not zoomed then pane_index
+                else
+                  match m.infra.active_tab with
+                  | Nav.Infra_repos_changes
+                    when Infra_store.repo_changes m.infra <> [] ->
+                      2
+                  | Nav.Infra_sandboxes
+                  | Nav.Infra_repos_changes
+                  | Nav.Infra_activity_logs
+                  | Nav.Infra_code ->
+                      1
+              in
               let max_detail_scroll = infra_detail_max_scroll m in
               {
                 m with
                 infra =
-                  Infra_store.move_selection ~pane_index ~viewport_rows
+                  Infra_store.move_selection ~pane_index:eff_pane ~viewport_rows
                     ~max_detail_scroll ~delta:0 m.infra;
               }
           | Nav.Pulse | Nav.Keepers -> m))
+
+let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame =
+  let overlay =
+    match m.nav.overlay with
+    | Some ((Nav.Incidents | Nav.Queue_context _ | Nav.Ask_answer) as ov) ->
+        Some ov
+    | Some
+        ( Nav.Palette
+        | Nav.Settings _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate _ )
+    | None ->
+        None
+  in
+  {
+    Model.workspace = m.nav.workspace;
+    dive_stack = m.nav.dive_stack;
+    dive_return_stack = m.nav.dive_return_stack;
+    work_tab = m.work.active_tab;
+    knowledge_tab = m.knowledge.active_tab;
+    runtime_tab = m.runtime.active_tab;
+    infra_tab = m.infra.active_tab;
+    pane_index = m.nav.pane_index;
+    pre_zoom_pane_index = m.nav.pre_zoom_pane_index;
+    zoomed = m.nav.zoomed;
+    overlay;
+  }
+
+let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) (m : Model.t) ws =
+  let workspace_return_stack =
+    capture_workspace_return_frame m :: m.nav.workspace_return_stack
+  in
+  let nav0 =
+    {
+      m.nav with
+      workspace = ws;
+      dive_stack = [];
+      dive_return_stack = [];
+      workspace_return_stack;
+      overlay = None;
+      pane_index = 0;
+      pre_zoom_pane_index = None;
+      zoomed = false;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+      dive_scroll_offset = 0;
+      json_scroll_offset = 0;
+    }
+  in
+  let keep_ask = Model.has_preserved_ask_return nav0 in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
+  let config = Config_store.cancel_edit_field m.config in
+  let knowledge =
+    m.knowledge
+    |> Knowledge_store.close_memory_reading
+    |> Knowledge_store.close_memory_diagram
+    |> Knowledge_store.clear_pending_wiki_edit
+    |> Knowledge_store.clear_armed_vote
+    |> Knowledge_store.clear_pending_artifact_revision
+    |> close_board_recovery
+  in
+  let attention =
+    match ws with
+    | Nav.Work when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox ->
+        Attention.sync_selection ~query:m.work.filter_query m.attention
+    | Nav.Pulse -> Attention.sync_selection ~query:"" m.attention
+    | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra ->
+        m.attention
+  in
+  let next0 =
+    {
+      m with
+      nav = nav0;
+      drafts;
+      config;
+      knowledge;
+      attention;
+      infra = { m.infra with show_raw_json = false };
+      runtime = { m.runtime with pending_addon_decl_path = None };
+      inline_modal = None;
+      ask_modal = (if keep_ask then m.ask_modal else None);
+    }
+    |> sync_config_for_keeper_view
+    |> Model.sync_sidebar_cursor
+  in
+  let eff_zoomed = zoomed && Model.can_zoom_current_view next0 in
+  let max_pane = max 0 (Model.focusable_pane_count next0 - 1) in
+  let clamped = max 0 (min max_pane pane_index) in
+  let next1 =
+    if eff_zoomed then
+      {
+        next0 with
+        nav =
+          {
+            next0.nav with
+            zoomed = true;
+            pre_zoom_pane_index = Some clamped;
+            pane_index = 0;
+          };
+      }
+    else { next0 with nav = { next0.nav with pane_index = clamped } }
+  in
+  let next = clamp_for_pane next1 in
+  (next, View_fetches.fetches_for_current_view next)
+
+let pop_workspace_return (m : Model.t) =
+  match m.nav.workspace_return_stack with
+  | [] -> None
+  | frame :: rest ->
+      let keep_ask =
+        Option.equal Nav.equal_overlay frame.overlay (Some Nav.Ask_answer)
+        || Model.has_preserved_ask_return
+             {
+               m.nav with
+               dive_return_stack = frame.dive_return_stack;
+               workspace_return_stack = rest;
+             }
+      in
+      let restored_overlay, restored_ask_modal =
+        match frame.overlay with
+        | Some Nav.Ask_answer ->
+            if Option.is_some m.ask_modal then (Some Nav.Ask_answer, m.ask_modal)
+            else (None, None)
+        | Some
+            (( Nav.Incidents
+             | Nav.Queue_context _
+             | Nav.Palette
+             | Nav.Settings _
+             | Nav.Inline_action _
+             | Nav.Help
+             | Nav.System_gate _ ) as ov) ->
+            (Some ov, if keep_ask then m.ask_modal else None)
+        | None -> (None, if keep_ask then m.ask_modal else None)
+      in
+      let work =
+        if Nav.equal_work_tab m.work.active_tab frame.work_tab then m.work
+        else Work_store.set_tab frame.work_tab m.work
+      in
+      let knowledge0 =
+        if Nav.equal_knowledge_tab m.knowledge.active_tab frame.knowledge_tab then
+          m.knowledge
+        else Knowledge_store.set_tab frame.knowledge_tab m.knowledge
+      in
+      let knowledge =
+        knowledge0
+        |> Knowledge_store.close_memory_reading
+        |> Knowledge_store.clear_armed_vote
+        |> Knowledge_store.clear_pending_artifact_revision
+        |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.clear_pending_wiki_edit
+        |> close_board_recovery
+      in
+      let runtime0 =
+        if Nav.equal_runtime_tab m.runtime.active_tab frame.runtime_tab then
+          m.runtime
+        else Runtime_store.set_tab frame.runtime_tab m.runtime
+      in
+      let runtime = { runtime0 with pending_addon_decl_path = None } in
+      let infra0 =
+        if Nav.equal_infra_tab m.infra.active_tab frame.infra_tab then m.infra
+        else Infra_store.set_tab frame.infra_tab m.infra
+      in
+      let infra = { infra0 with show_raw_json = false } in
+      let drafts =
+        m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m
+      in
+      let config = Config_store.cancel_edit_field m.config in
+      let attention =
+        match frame.workspace with
+        | Nav.Work when Nav.equal_work_tab work.active_tab Nav.Work_inbox ->
+            Attention.sync_selection ~query:work.filter_query m.attention
+        | Nav.Pulse -> Attention.sync_selection ~query:"" m.attention
+        | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra ->
+            m.attention
+      in
+      let next0 =
+        {
+          m with
+          nav =
+            {
+              m.nav with
+              workspace = frame.workspace;
+              dive_stack = frame.dive_stack;
+              dive_return_stack = frame.dive_return_stack;
+              workspace_return_stack = rest;
+              overlay = None;
+              pane_index = 0;
+              pre_zoom_pane_index = None;
+              zoomed = false;
+              filter_focused = false;
+              sidebar_focused = false;
+              dive_scroll_offset = 0;
+              json_scroll_offset = 0;
+            };
+          drafts;
+          config;
+          attention;
+          work;
+          knowledge;
+          runtime;
+          infra;
+          inline_modal = None;
+          ask_modal = restored_ask_modal;
+        }
+      in
+      let restored_zoom =
+        frame.zoomed && Model.can_zoom_current_view next0
+      in
+      let next1 =
+        {
+          next0 with
+          nav =
+            {
+              next0.nav with
+              zoomed = restored_zoom;
+              pre_zoom_pane_index =
+                (if restored_zoom then frame.pre_zoom_pane_index else None);
+              pane_index = frame.pane_index;
+            };
+        }
+      in
+      let max_pane = max 0 (Model.focusable_pane_count next1 - 1) in
+      let clamped_pane = max 0 (min max_pane frame.pane_index) in
+      let next2 =
+        { next1 with nav = { next1.nav with pane_index = clamped_pane } }
+        |> clamp_for_pane
+      in
+      let next =
+        { next2 with nav = { next2.nav with overlay = restored_overlay } }
+        |> sync_config_for_keeper_view
+        |> Model.sync_sidebar_cursor
+      in
+      Some (next, View_fetches.fetches_for_current_view next)
 
 let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
   let bp = ui_bp m in
@@ -10265,7 +10617,10 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
         m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m
       in
       let config = Config_store.cancel_edit_field m.config in
-      ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+      let ask_modal =
+        if Model.has_preserved_ask_return nav then m.ask_modal else None
+      in
+      ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
   | None ->
       let msg =
         match m.work.harness_health with
@@ -10314,7 +10669,10 @@ let open_schedule_form_populated (m : Model.t) =
   in
   let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let check_verification_verdict_precondition (m : Model.t)
     (v : Wire_work.verification_request) : (unit, Say.t) result =
@@ -11843,9 +12201,12 @@ let apply_move (m : Model.t) dir =
                       in
                       (next, cmds)
                 | Nav.Work -> (
+                    let zoomed_work =
+                      m.nav.zoomed && Model.can_zoom_current_view m
+                    in
                     match m.work.active_tab with
                     | Nav.Work_inbox ->
-                        if pane_index = 1 then
+                        if pane_index = 1 || zoomed_work then
                           let sd = scroll_delta dir in
                           let max_detail_scroll = work_detail_max_scroll m in
                           ( {
@@ -11933,25 +12294,32 @@ let apply_move (m : Model.t) dir =
                             }
                           , [] )
                     | Nav.Work_tasks | Nav.Work_schedules ->
+                        let eff_pane = if zoomed_work then 1 else pane_index in
                         let eff_delta =
-                          if pane_index = 1 then scroll_delta dir else delta
+                          if eff_pane = 1 then scroll_delta dir else delta
                         in
                         let max_detail_scroll =
-                          if pane_index = 1 then Some (work_detail_max_scroll m)
+                          if eff_pane = 1 then Some (work_detail_max_scroll m)
                           else None
                         in
                         let work =
-                          Work_store.move_selection ~pane_index ~viewport_rows
-                            ?max_detail_scroll ~delta:eff_delta m.work
+                          Work_store.move_selection ~pane_index:eff_pane
+                            ~viewport_rows ?max_detail_scroll ~delta:eff_delta
+                            m.work
                         in
                         ({ m with work }, [])
                     | Nav.Work_pipeline ->
                         let has_linked_card =
                           Model.work_pipeline_has_linked_card m
                         in
+                        let eff_pane =
+                          if zoomed_work then
+                            if has_linked_card then 2 else 1
+                          else pane_index
+                        in
                         let is_detail =
-                          pane_index = 2
-                          || (pane_index = 1 && not has_linked_card)
+                          eff_pane = 2
+                          || (eff_pane = 1 && not has_linked_card)
                         in
                         let eff_delta =
                           if is_detail then scroll_delta dir else delta
@@ -11963,7 +12331,7 @@ let apply_move (m : Model.t) dir =
                         ( {
                             m with
                             work =
-                              Work_store.move_selection ~pane_index
+                              Work_store.move_selection ~pane_index:eff_pane
                                 ~has_linked_card ~viewport_rows
                                 ?max_detail_scroll ~delta:eff_delta m.work;
                           }
@@ -11985,7 +12353,8 @@ let apply_move (m : Model.t) dir =
                           }
                         , [] )
                     | Nav.Work_harness ->
-                        let is_detail = pane_index = 1 in
+                        let eff_pane = if zoomed_work then 1 else pane_index in
+                        let is_detail = eff_pane = 1 in
                         let eff_delta =
                           if is_detail then scroll_delta dir else delta
                         in
@@ -11996,7 +12365,7 @@ let apply_move (m : Model.t) dir =
                         ( {
                             m with
                             work =
-                              Work_store.move_selection ~pane_index
+                              Work_store.move_selection ~pane_index:eff_pane
                                 ~viewport_rows ?max_detail_scroll
                                 ~delta:eff_delta m.work;
                           }
@@ -12173,6 +12542,10 @@ let apply_move (m : Model.t) dir =
                     in
                     (next, nav_cmds)
                 | Nav.Runtime ->
+                    let pane_index =
+                      if m.nav.zoomed && Model.can_zoom_current_view m then 1
+                      else pane_index
+                    in
                     let rt = sync_runtime_companies_if_needed m in
                     let prev_browser_cid =
                       Option.map
@@ -12216,6 +12589,12 @@ let apply_move (m : Model.t) dir =
                       | Nav.Runtime_tools_usage, (0 | 1)
                         when Runtime_store.equal_tools_subview rt.tools_subview
                                Runtime_store.Tools_keeper_skills ->
+                          true
+                      | Nav.Runtime_tools_usage, 1
+                        when Runtime_store.equal_tools_subview rt.tools_subview
+                               Runtime_store.Tools_quality_gate
+                             || Runtime_store.equal_tools_subview rt.tools_subview
+                                  Runtime_store.Tools_prompts_presets ->
                           true
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
@@ -12722,6 +13101,19 @@ let apply_move (m : Model.t) dir =
                     in
                     ({ m with runtime = next_rt }, tab_cmds)
                 | Nav.Infra ->
+                    let pane_index =
+                      if m.nav.zoomed && Model.can_zoom_current_view m then
+                        match m.infra.active_tab with
+                        | Nav.Infra_repos_changes
+                          when Infra_store.repo_changes m.infra <> [] ->
+                            2
+                        | Nav.Infra_sandboxes
+                        | Nav.Infra_repos_changes
+                        | Nav.Infra_activity_logs
+                        | Nav.Infra_code ->
+                            1
+                      else pane_index
+                    in
                     if
                       Nav.equal_infra_tab m.infra.active_tab
                         Nav.Infra_activity_logs

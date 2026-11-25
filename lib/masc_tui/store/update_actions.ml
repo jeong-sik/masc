@@ -1040,7 +1040,10 @@ let open_runtime_lane_edit_modal ~now (m : Model.t)
     | None ->
         [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
   in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, rev_cmds))
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, rev_cmds))
 
 let open_named_lane_delete_modal (m : Model.t) lane_id =
   let opened_revision = runtime_config_revision_opt m in
@@ -1113,7 +1116,10 @@ let open_task_transition_modal ~now (m : Model.t) (tk : Wire_work.task) =
       in
       let drafts = Drafts.set_focus false m.drafts in
       let config = Config_store.cancel_edit_field m.config in
-      ( { m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }
+      let ask_modal =
+        if Model.has_preserved_ask_return nav then m.ask_modal else None
+      in
+      ( { m with nav; drafts; config; inline_modal = Some modal; ask_modal }
       , [] )
 
 let open_task_link_goal_modal ~now (m : Model.t) (tk : Wire_work.task) =
@@ -1173,7 +1179,10 @@ let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
   match Model.active_dive m with
@@ -1375,7 +1384,10 @@ let open_keeper_lifecycle_modal (m : Model.t) ~keeper ~default_action =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let open_addon_attach_modal ?manifest_path ?run_id (m : Model.t) =
   let kind = Nav.Addon_attach_form in
@@ -1411,7 +1423,10 @@ let open_addon_attach_modal ?manifest_path ?run_id (m : Model.t) =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  let ask_modal =
+    if Model.has_preserved_ask_return nav then m.ask_modal else None
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let open_addon_ask_modal ~now (m : Model.t) =
   let open_asks = Runtime_store.open_lane_addon_asks m.runtime in
@@ -2773,8 +2788,12 @@ let rec execute_slash ~now (m : Model.t) cmd =
             m_in.nav with
             workspace = Nav.Runtime;
             dive_stack = [];
+            dive_return_stack = [];
+            workspace_return_stack = [];
             overlay = None;
             pane_index = 0;
+            pre_zoom_pane_index = None;
+            zoomed = false;
           }
         in
         let runtime =
@@ -2783,7 +2802,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
           |> Runtime_store.set_tools_subview Runtime_store.Tools_prompts_presets
           |> Runtime_store.set_prompts_presets_section Runtime_store.Sec_presets
         in
-        let next = { m_in with nav; runtime } in
+        let next = { m_in with nav; runtime; ask_modal = None } in
         (next, View_fetches.fetches_for_current_view next)
       in
       match act with
@@ -2794,8 +2813,12 @@ let rec execute_slash ~now (m : Model.t) cmd =
               m.nav with
               workspace = Nav.Runtime;
               dive_stack = [];
+              dive_return_stack = [];
+              workspace_return_stack = [];
               overlay = None;
               pane_index = 0;
+              pre_zoom_pane_index = None;
+              zoomed = false;
             }
           in
           let runtime =
@@ -2805,7 +2828,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                  Runtime_store.Tools_prompts_presets
             |> Runtime_store.select_preset_by_name name
           in
-          let next = { m with nav; runtime } in
+          let next = { m with nav; runtime; ask_modal = None } in
           let vf = View_fetches.fetches_for_current_view next in
           let target_path = Wire_runtime.preset_show_path ~name in
           let already_fetching =
@@ -4283,7 +4306,9 @@ and execute_action ~now (m : Model.t) action =
                 m0 with
                 nav;
                 inline_modal = None;
-                ask_modal = None;
+                ask_modal =
+                  (if Model.has_preserved_ask_return nav then m0.ask_modal
+                   else None);
                 drafts =
                   m0.drafts
                   |> Update_nav.clear_btw_if_leaving m0
@@ -4757,7 +4782,9 @@ and execute_action ~now (m : Model.t) action =
                 {
                   m with
                   nav = { m.nav with overlay = None; filter_focused = false };
-                  ask_modal = None;
+                  ask_modal =
+                    (if Model.has_preserved_ask_return m.nav then m.ask_modal
+                     else None);
                 }
               in
               (closed, []))
@@ -4802,7 +4829,9 @@ and execute_action ~now (m : Model.t) action =
                 };
               config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
-              ask_modal = None;
+              ask_modal =
+                (if Model.has_preserved_ask_return m.nav then m.ask_modal
+                 else None);
             }
             |> Update_nav.sync_config_for_keeper_view
           in
@@ -4930,6 +4959,10 @@ and execute_action ~now (m : Model.t) action =
                           | hd :: tl -> (hd, tl)
                           | [] -> ((0, false, None), [])
                         in
+                        let keep_ask =
+                          Model.has_preserved_ask_return
+                            { m.nav with dive_return_stack = ret_rest }
+                        in
                         let restored_overlay, restored_ask_modal =
                           match ret_overlay with
                           | Some Nav.Ask_answer ->
@@ -4944,8 +4977,8 @@ and execute_action ~now (m : Model.t) action =
                                | Nav.Inline_action _
                                | Nav.Help
                                | Nav.System_gate _ ) as ov) ->
-                              (Some ov, None)
-                          | None -> (None, None)
+                              (Some ov, if keep_ask then m.ask_modal else None)
+                          | None -> (None, if keep_ask then m.ask_modal else None)
                         in
                         let next0 =
                           {
@@ -5009,6 +5042,20 @@ and execute_action ~now (m : Model.t) action =
                         in
                         (next, View_fetches.fetches_for_current_view next))
                   | [] ->
+                      let m =
+                        if m.nav.zoomed && not (Model.can_zoom_current_view m)
+                        then
+                          {
+                            m with
+                            nav =
+                              {
+                                m.nav with
+                                zoomed = false;
+                                pre_zoom_pane_index = None;
+                              };
+                          }
+                        else m
+                      in
                       if Option.is_some m.knowledge.pending_wiki_edit_slug then
                         ( {
                             m with
@@ -5017,7 +5064,7 @@ and execute_action ~now (m : Model.t) action =
                                 m.knowledge;
                           }
                         , [] )
-                      else if m.nav.zoomed then
+                      else if m.nav.zoomed && Model.can_zoom_current_view m then
                         let m0 =
                           {
                             m with
@@ -5046,43 +5093,6 @@ and execute_action ~now (m : Model.t) action =
                              Nav.Keeper_config
                       then
                         ({ m with nav = { m.nav with pane_index = 0 } }, [])
-                      else if
-                        not (String.equal (Update_nav.current_filter_query m) "")
-                      then Update_nav.set_active_filter_query "" m
-                      else if
-                        Nav.equal_workspace m.nav.workspace Nav.Work
-                        && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
-                        && not
-                             (Work_store.equal_task_status_filter
-                                m.work.task_status_filter Work_store.Status_all)
-                      then
-                        (* The status chip narrows the list like the filter
-                           does, so the last Esc returns it to All. *)
-                        ( {
-                            m with
-                            nav = { m.nav with pane_index = 0 };
-                            work =
-                              Work_store.set_task_status_filter
-                                Work_store.Status_all m.work;
-                          }
-                        , [] )
-                      else if
-                        Nav.equal_workspace m.nav.workspace Nav.Work
-                        && Nav.equal_work_tab m.work.active_tab
-                             Nav.Work_pipeline
-                        && not
-                             (Work_store.equal_goal_phase_filter
-                                m.work.goal_phase_filter
-                                Work_store.Goal_filter_all)
-                      then
-                        ( {
-                            m with
-                            nav = { m.nav with pane_index = 0 };
-                            work =
-                              Work_store.set_goal_phase_filter
-                                Work_store.Goal_filter_all m.work;
-                          }
-                        , [] )
                       else if
                         Nav.equal_workspace m.nav.workspace Nav.Infra
                         && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
@@ -5113,7 +5123,49 @@ and execute_action ~now (m : Model.t) action =
                           |> Update_nav.clamp_for_pane
                         in
                         (next, [])
-                      else (m, [])))
+                      else
+                        match Update_nav.pop_workspace_return m with
+                        | Some res -> res
+                        | None ->
+                            if
+                              not
+                                (String.equal (Update_nav.current_filter_query m) "")
+                            then Update_nav.set_active_filter_query "" m
+                            else if
+                              Nav.equal_workspace m.nav.workspace Nav.Work
+                              && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
+                              && not
+                                   (Work_store.equal_task_status_filter
+                                      m.work.task_status_filter Work_store.Status_all)
+                            then
+                              (* The status chip narrows the list like the filter
+                                 does, so the last Esc returns it to All. *)
+                              ( {
+                                  m with
+                                  nav = { m.nav with pane_index = 0 };
+                                  work =
+                                    Work_store.set_task_status_filter
+                                      Work_store.Status_all m.work;
+                                }
+                              , [] )
+                            else if
+                              Nav.equal_workspace m.nav.workspace Nav.Work
+                              && Nav.equal_work_tab m.work.active_tab
+                                   Nav.Work_pipeline
+                              && not
+                                   (Work_store.equal_goal_phase_filter
+                                      m.work.goal_phase_filter
+                                      Work_store.Goal_filter_all)
+                            then
+                              ( {
+                                  m with
+                                  nav = { m.nav with pane_index = 0 };
+                                  work =
+                                    Work_store.set_goal_phase_filter
+                                      Work_store.Goal_filter_all m.work;
+                                }
+                              , [] )
+                            else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
   | Keymap.Open_incidents ->
@@ -5497,7 +5549,10 @@ and execute_action ~now (m : Model.t) action =
                           infra = Infra_store.cycle_log_level_filter m.infra;
                         }
                       , [] )
-                  | Nav.Infra_code when m.nav.pane_index = 0 -> (
+                  | Nav.Infra_code
+                    when m.nav.pane_index = 0
+                         && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                    -> (
                       match Infra_store.selected_code_tree_node m.infra with
                       | Some node when node.has_children ->
                           let was_expanded =
@@ -6188,7 +6243,7 @@ and execute_action ~now (m : Model.t) action =
                           (fun (r : Wire_infra.repository) -> r.url)
                           (Infra_store.selected_repository m.infra)
                     | Nav.Infra_code ->
-                        if m.nav.pane_index = 1 then
+                        if Model.detail_pane_focused ~detail_index:1 m then
                           match Infra_store.open_file_for_current m.infra with
                           | Some f -> Some f.content
                           | None ->
@@ -7153,7 +7208,14 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Work
                       when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox ->
                         let work = Work_store.cycle_inbox_subview m.work in
-                        let nav = { m.nav with pane_index = 0 } in
+                        let nav =
+                          {
+                            m.nav with
+                            pane_index = 0;
+                            zoomed = false;
+                            pre_zoom_pane_index = None;
+                          }
+                        in
                         let next = { m with nav; work } in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Knowledge
@@ -7194,7 +7256,14 @@ and execute_action ~now (m : Model.t) action =
                         let runtime =
                           Runtime_store.cycle_tools_subview m.runtime
                         in
-                        let nav = { m.nav with pane_index = 0 } in
+                        let nav =
+                          {
+                            m.nav with
+                            pane_index = 0;
+                            zoomed = false;
+                            pre_zoom_pane_index = None;
+                          }
+                        in
                         let next = { m with nav; runtime } in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Infra
@@ -8157,7 +8226,8 @@ and execute_action ~now (m : Model.t) action =
               when Nav.equal_runtime_tab m.runtime.active_tab
                      Nav.Runtime_addons_browser
                    && (not m.runtime.addon_catalog_mode)
-                   && m.nav.pane_index = 0 -> (
+                   && m.nav.pane_index = 0
+                   && not (m.nav.zoomed && Model.can_zoom_current_view m) -> (
                 match Runtime_store.selected_addon_instance m.runtime with
                 | Some inst ->
                     execute_slash ~now m
@@ -8167,8 +8237,8 @@ and execute_action ~now (m : Model.t) action =
               when Nav.equal_runtime_tab m.runtime.active_tab
                      Nav.Runtime_tools_usage -> (
                 match m.runtime.tools_subview with
-                | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1
-                  -> (
+                | Runtime_store.Tools_keeper_skills
+                  when Model.detail_pane_focused ~detail_index:1 m -> (
                     match Runtime_store.selected_skill_surface m.runtime with
                     | Some sf ->
                         execute_slash ~now m
@@ -8435,7 +8505,9 @@ and execute_action ~now (m : Model.t) action =
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Runtime
                   && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
-                  && m.runtime.addon_catalog_mode && m.nav.pane_index = 0
+                  && m.runtime.addon_catalog_mode
+                  && m.nav.pane_index = 0
+                  && not (m.nav.zoomed && Model.can_zoom_current_view m)
                 then
                   Update_nav.open_inline_modal m
                     (Nav.Addon_decl_form
@@ -8446,8 +8518,8 @@ and execute_action ~now (m : Model.t) action =
                        Nav.Runtime_tools_usage
                 then (
                   match m.runtime.tools_subview with
-                  | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1
-                    -> (
+                  | Runtime_store.Tools_keeper_skills
+                    when Model.detail_pane_focused ~detail_index:1 m -> (
                       match Runtime_store.selected_skill_surface m.runtime with
                       | Some sf ->
                           execute_slash ~now m
@@ -8955,7 +9027,14 @@ and execute_action ~now (m : Model.t) action =
         && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
       then
         let runtime = Runtime_store.toggle_addon_catalog_mode m.runtime in
-        let nav = { m.nav with pane_index = 0 } in
+        let nav =
+          {
+            m.nav with
+            pane_index = 0;
+            zoomed = false;
+            pre_zoom_pane_index = None;
+          }
+        in
         let next =
           { m with nav; runtime }
           |> Model.with_toast ~now ~level:Model.Toast_info

@@ -684,6 +684,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.make ~ko:"[z/Esc] 확대 해제" ~en:"[z/Esc] Unzoom")
         in
         (txt, whisper_style)
+      else if model.nav.workspace_return_stack <> [] then
+        let txt =
+          if compact then "[Esc]"
+          else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
+        in
+        (txt, whisper_style)
       else if
         Option.is_none (Model.active_dive model)
         && Nav.equal_workspace model.nav.workspace Nav.Keepers
@@ -1599,6 +1605,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
           || model.nav.zoomed
+          || model.nav.workspace_return_stack <> []
           || not (String.equal (String.trim (active_filter_text model)) "")
           || Option.is_some (Memory_diagram.active_diagram model)
           || Model.has_active_memory_reading model

@@ -2660,8 +2660,11 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   ignore (H.draw_pills ~grid ~rect:header_rect ~theme header_pills);
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
-      ~top_ratio:0.54 bp body_rect
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, body_rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
+        ~top_ratio:0.54 bp body_rect
   in
   (* Left Card: Visual Flow_down Cascade Tree *)
   let cascade_inner =
@@ -2996,7 +2999,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let insp_inner =
     Card.draw ~cache grid ~rect:insp_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 1)
+      (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ?subtitle:(Option.map (fun (l : Wire_runtime.failover_lane) -> l.id) sel_lane)
          ~hotkey:setup_hint
          (Say.resolve lang
@@ -3466,8 +3469,11 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~en:"[Enter] Dive · [e] Evidence · [f] Launch · [Tab] Scroll"))
        pills);
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
-      ~top_ratio:0.46 bp body_rect
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, body_rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
+        ~top_ratio:0.46 bp body_rect
   in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
@@ -3585,7 +3591,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   end;
   let det_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 1)
+      (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 전체 보기 · [e] 증거" ~en:"[Enter] Dive · [e] Evidence"))
          (Say.resolve lang (Say.make ~ko:"Fusion 파이프라인 상세" ~en:"Fusion Pipeline Detail")))
   in
@@ -4244,8 +4250,11 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     Runtime_store.selected_tools_surface_keeper ~keeper_names rt
   in
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
-      ~top_ratio:0.50 bp rect
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+        ~top_ratio:0.50 bp rect
   in
   let k_sub =
     match sel_keeper with Some k -> "@" ^ k | None -> "—"
@@ -4373,7 +4382,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   end;
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 1)
+      (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:
            (Say.resolve lang
               (Say.make
@@ -4437,7 +4446,9 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (Int.max 0 (List.length filtered_sf - Int.max 1 (bot - !y)))
             (Int.max 0 rt.skill_scroll_offset)
         in
-        let pane1_focused = Model.pane_focused model 1 in
+        let pane1_focused =
+          Model.detail_pane_focused ~detail_index:1 model
+        in
         List.iteri
           (fun rel_i (sf : Wire_runtime.skill_surface_entry) ->
             let abs_i = skip + rel_i in
@@ -4577,8 +4588,11 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       render_tools_keeper_skills ~grid ~cache ~rect:body_rect ~theme ~bp ~model
   | Runtime_store.Tools_quality_gate ->
       let left_rect, right_rect =
-        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
-          ~top_ratio:0.50 bp body_rect
+        if model.nav.zoomed && Model.can_zoom_current_view model then
+          (Rect.empty, body_rect)
+        else
+          Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+            ~top_ratio:0.50 bp body_rect
       in
       let left_inner =
         Card.draw ~cache grid ~rect:left_rect ~theme
@@ -4673,7 +4687,8 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       let right_inner =
         Card.draw ~cache grid ~rect:right_rect ~theme
-          (H.card_spec ?subtitle:right_sub ~focused:(Model.pane_focused model 1)
+          (H.card_spec ?subtitle:right_sub
+             ~focused:(Model.detail_pane_focused ~detail_index:1 model)
              ~hotkey:
                (Say.resolve lang
                   (Say.make ~ko:"< / > 키퍼 · [j/k] 스크롤"
@@ -4835,8 +4850,11 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       end
   | Runtime_store.Tools_prompts_presets ->
       let left_rect, right_rect =
-        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.46
-          ~top_ratio:0.48 bp body_rect
+        if model.nav.zoomed && Model.can_zoom_current_view model then
+          (Rect.empty, body_rect)
+        else
+          Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.46
+            ~top_ratio:0.48 bp body_rect
       in
       let sec_title =
         match rt.pp_section with
@@ -5071,7 +5089,7 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       end;
       let right_inner =
         Card.draw ~cache grid ~rect:right_rect ~theme
-          (H.card_spec ~focused:(Model.pane_focused model 1)
+          (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
              (Say.resolve lang
                 (Say.make ~ko:"상세 인스펙터" ~en:"Detail Inspector")))
       in
@@ -5738,8 +5756,11 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~en:"[n] Attach · [c] Act/Interact · [O] Obs/Scene · [p] Catalog"))
        pills);
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
-      ~top_ratio:0.50 bp body_rect
+    if rt.addon_catalog_mode && model.nav.zoomed && Model.can_zoom_current_view model
+    then (Rect.empty, body_rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+        ~top_ratio:0.50 bp body_rect
   in
   if rt.addon_catalog_mode then begin
     let entries = Runtime_store.filtered_addon_catalog_entries rt in
@@ -5890,7 +5911,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
     end;
     let prev_inner =
       Card.draw ~cache grid ~rect:right_rect ~theme
-        (H.card_spec ~focused:(Model.pane_focused model 1)
+        (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
            ~hotkey:
              (Say.resolve lang
                 (Say.make ~ko:"[→/Tab] 스크롤 · [↑↓] 이동 · [p] 런타임"

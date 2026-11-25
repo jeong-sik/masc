@@ -18,10 +18,25 @@ type composer_mode =
   | Collapsed_bar
   | Expanded_multiline
 
+type workspace_return_frame = {
+  workspace : Nav.workspace;
+  dive_stack : Nav.dive list;
+  dive_return_stack : (int * bool * Nav.overlay option) list;
+  work_tab : Nav.work_tab;
+  knowledge_tab : Nav.knowledge_tab;
+  runtime_tab : Nav.runtime_tab;
+  infra_tab : Nav.infra_tab;
+  pane_index : int;
+  pre_zoom_pane_index : int option;
+  zoomed : bool;
+  overlay : Nav.overlay option;
+}
+
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
   dive_return_stack : (int * bool * Nav.overlay option) list;
+  workspace_return_stack : workspace_return_frame list;
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -380,6 +395,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         workspace = Nav.Pulse;
         dive_stack = [];
         dive_return_stack = [];
+        workspace_return_stack = [];
         overlay = None;
         pane_index = 0;
         pre_zoom_pane_index = None;
@@ -908,7 +924,115 @@ let can_zoom_current_view m =
             | Nav.Knowledge_artifacts
             | Nav.Knowledge_memory ->
                 true)
-        | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
+        | Nav.Work -> (
+            match m.work.active_tab with
+            | Nav.Work_pipeline
+            | Nav.Work_tasks
+            | Nav.Work_schedules
+            | Nav.Work_harness ->
+                true
+            | Nav.Work_inbox -> (
+                match m.work.inbox_subview with
+                | Work_store.Inbox_rules -> true
+                | Work_store.Inbox_history -> false
+                | Work_store.Inbox_queue ->
+                    Option.is_some
+                      (Attention.current_filtered_item ~query:m.work.filter_query
+                         m.attention))
+            | Nav.Work_candle_scorecard -> false)
+        | Nav.Runtime -> (
+            match m.runtime.active_tab with
+            | Nav.Runtime_failover_lanes | Nav.Runtime_fusion -> true
+            | Nav.Runtime_tools_usage -> (
+                match m.runtime.tools_subview with
+                | Runtime_store.Tools_keeper_skills
+                | Runtime_store.Tools_quality_gate
+                | Runtime_store.Tools_prompts_presets ->
+                    true
+                | Runtime_store.Tools_usage_calls
+                | Runtime_store.Tools_catalog_tree ->
+                    false)
+            | Nav.Runtime_addons_browser -> m.runtime.addon_catalog_mode
+            | Nav.Runtime_quotas_credits
+            | Nav.Runtime_efficiency_spend
+            | Nav.Runtime_connectors ->
+                false)
+        | Nav.Infra -> (
+            match m.infra.active_tab with
+            | Nav.Infra_sandboxes
+            | Nav.Infra_repos_changes
+            | Nav.Infra_activity_logs
+            | Nav.Infra_code ->
+                true)
+        | Nav.Pulse -> false)
+
+let has_preserved_ask_return (nav : nav_state) =
+  let has_ask_in_dive_returns stack =
+    List.exists
+      (fun (_, _, ov) -> Option.equal Nav.equal_overlay ov (Some Nav.Ask_answer))
+      stack
+  in
+  has_ask_in_dive_returns nav.dive_return_stack
+  || List.exists
+       (fun (f : workspace_return_frame) ->
+         Option.equal Nav.equal_overlay f.overlay (Some Nav.Ask_answer)
+         || has_ask_in_dive_returns f.dive_return_stack)
+       nav.workspace_return_stack
+
+let detail_visible m =
+  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
+    false
+  else if Option.is_some (active_dive m) then true
+  else if
+    m.nav.zoomed
+    && can_zoom_current_view { m with nav = { m.nav with overlay = None } }
+  then true
+  else
+    match m.nav.workspace with
+    | Nav.Pulse -> false
+    | Nav.Keepers -> uses_keeper_split ~width:(inner_body_width m) m
+    | Nav.Knowledge -> true
+    | Nav.Work -> (
+        match m.work.active_tab with
+        | Nav.Work_inbox -> (
+            match m.work.inbox_subview with
+            | Work_store.Inbox_rules -> true
+            | Work_store.Inbox_history -> false
+            | Work_store.Inbox_queue ->
+                Option.is_some
+                  (Attention.current_filtered_item ~query:m.work.filter_query
+                     m.attention))
+        | Nav.Work_pipeline
+        | Nav.Work_tasks
+        | Nav.Work_schedules
+        | Nav.Work_candle_scorecard
+        | Nav.Work_harness ->
+            true)
+    | Nav.Runtime -> (
+        match m.runtime.active_tab with
+        | Nav.Runtime_efficiency_spend -> false
+        | Nav.Runtime_tools_usage -> (
+            match m.runtime.tools_subview with
+            | Runtime_store.Tools_keeper_skills
+            | Runtime_store.Tools_quality_gate
+            | Runtime_store.Tools_prompts_presets ->
+                true
+            | Runtime_store.Tools_usage_calls
+            | Runtime_store.Tools_catalog_tree ->
+                false)
+        | Nav.Runtime_quotas_credits
+        | Nav.Runtime_failover_lanes
+        | Nav.Runtime_fusion
+        | Nav.Runtime_connectors
+        | Nav.Runtime_addons_browser ->
+            true)
+    | Nav.Infra -> (
+        match m.infra.active_tab with
+        | Nav.Infra_sandboxes -> inner_body_width m >= 100
+        | Nav.Infra_repos_changes
+        | Nav.Infra_activity_logs
+        | Nav.Infra_code ->
+            true)
 
 let task_dive_has_two_main_panes m task_id =
   match
@@ -1471,6 +1595,10 @@ let body_has_focus m =
 
 let pane_focused m idx = body_has_focus m && Int.equal m.nav.pane_index idx
 
+let detail_pane_focused ~detail_index m =
+  if m.nav.zoomed && can_zoom_current_view m then body_has_focus m
+  else pane_focused m detail_index
+
 let active_focus_label m =
   let pane_prefix ~ko ~en =
     let n = focusable_pane_count m in
@@ -1604,23 +1732,29 @@ let active_focus_label m =
                 | Pulse_goals -> pane_prefix ~ko:"목표" ~en:"Goals"
                 | Pulse_world -> pane_prefix ~ko:"월드 펄스" ~en:"World")
             | Nav.Work -> (
+                let zoomed = m.nav.zoomed && can_zoom_current_view m in
                 match m.work.active_tab with
                 | Nav.Work_pipeline -> (
+                    if zoomed then Say.make ~ko:"확대 · 목표 상세" ~en:"ZOOM · Goal Detail"
+                    else
                     match m.nav.pane_index with
                     | 0 -> pane_prefix ~ko:"목표" ~en:"Goals"
                     | 1 when work_pipeline_has_linked_card m ->
                         pane_prefix ~ko:"검증" ~en:"Verifs"
                     | _ -> pane_prefix ~ko:"목표 상세" ~en:"Detail")
                 | Nav.Work_tasks ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 작업 상세" ~en:"ZOOM · Task Detail"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"작업 상세" ~en:"Task Detail"
                     else pane_prefix ~ko:"작업 목록" ~en:"Tasks"
                 | Nav.Work_schedules ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 일정 상세" ~en:"ZOOM · Schedule"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"일정 상세" ~en:"Schedule Detail"
                     else pane_prefix ~ko:"예약 일정" ~en:"Schedules"
                 | Nav.Work_inbox ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 인스펙터" ~en:"ZOOM · Inspector"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"인스펙터" ~en:"Inspector"
                     else pane_prefix ~ko:"수신함" ~en:"Inbox"
                 | Nav.Work_candle_scorecard ->
@@ -1628,7 +1762,8 @@ let active_focus_label m =
                       pane_prefix ~ko:"원장 이벤트" ~en:"Ledger Events"
                     else pane_prefix ~ko:"키퍼 잔액" ~en:"Balances"
                 | Nav.Work_harness ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 하네스 상세" ~en:"ZOOM · Run Detail"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"하네스 상세" ~en:"Run Detail"
                     else pane_prefix ~ko:"하네스 실행" ~en:"Harness")
             | Nav.Knowledge -> (
@@ -1729,6 +1864,7 @@ let active_focus_label m =
                   else pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
             | Nav.Runtime -> (
+                let zoomed = m.nav.zoomed && can_zoom_current_view m in
                 match m.runtime.active_tab with
                 | Nav.Runtime_quotas_credits ->
                     if m.nav.pane_index = 1 then
@@ -1737,15 +1873,18 @@ let active_focus_label m =
                 | Nav.Runtime_efficiency_spend ->
                     Say.make ~ko:"효율 · 지출" ~en:"Efficiency"
                 | Nav.Runtime_failover_lanes ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 레인 상세" ~en:"ZOOM · Lane Health"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"레인 상세" ~en:"Lane Health"
                     else pane_prefix ~ko:"페일오버" ~en:"Lanes"
                 | Nav.Runtime_fusion ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 퓨전 상세" ~en:"ZOOM · Fusion Detail"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"퓨전 상세" ~en:"Fusion Detail"
                     else pane_prefix ~ko:"퓨전 실행" ~en:"Fusion"
                 | Nav.Runtime_tools_usage ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 도구 상세" ~en:"ZOOM · Tool Detail"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"도구 상세" ~en:"Tool Detail"
                     else pane_prefix ~ko:"도구·사용량" ~en:"Tools"
                 | Nav.Runtime_connectors ->
@@ -1754,31 +1893,46 @@ let active_focus_label m =
                     else pane_prefix ~ko:"커넥터" ~en:"Connectors"
                 | Nav.Runtime_addons_browser ->
                     if m.runtime.addon_catalog_mode then
-                      if m.nav.pane_index = 1 then
+                      if zoomed then
+                        Say.make ~ko:"확대 · 패키지 미리보기" ~en:"ZOOM · Pkg Preview"
+                      else if m.nav.pane_index = 1 then
                         pane_prefix ~ko:"패키지 미리보기" ~en:"Pkg Preview"
                       else pane_prefix ~ko:"애드온 카탈로그" ~en:"Addon Catalog"
                     else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"브라우저·탭" ~en:"Browser"
                     else pane_prefix ~ko:"애드온 레인" ~en:"Addons")
             | Nav.Infra -> (
+                let zoomed = m.nav.zoomed && can_zoom_current_view m in
                 match m.infra.active_tab with
                 | Nav.Infra_sandboxes ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 샌드박스 상세" ~en:"ZOOM · Inspector"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"샌드박스 상세" ~en:"Inspector"
                     else pane_prefix ~ko:"샌드박스" ~en:"Sandboxes"
                 | Nav.Infra_repos_changes -> (
+                    if zoomed then Say.make ~ko:"확대 · 변경 미리보기" ~en:"ZOOM · Diff"
+                    else
                     match m.nav.pane_index with
                     | 0 -> pane_prefix ~ko:"저장소" ~en:"Repos"
                     | 1 when Infra_store.repo_changes m.infra <> [] ->
                         pane_prefix ~ko:"파일 변경" ~en:"Changes"
                     | _ -> pane_prefix ~ko:"Diff" ~en:"Diff")
                 | Nav.Infra_activity_logs -> (
+                    if zoomed then Say.make ~ko:"확대 · 로그 상세" ~en:"ZOOM · Detail"
+                    else
                     match m.nav.pane_index with
                     | 1 -> pane_prefix ~ko:"로그 상세" ~en:"Detail"
                     | 2 -> pane_prefix ~ko:"실행 중" ~en:"Acting"
                     | _ -> pane_prefix ~ko:"활동·로그" ~en:"Logs")
                 | Nav.Infra_code ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then
+                      let mode_lbl =
+                        Infra_store.code_right_mode_label m.infra.code.right_mode
+                      in
+                      Say.make
+                        ~ko:("확대 · " ^ Say.resolve Say.Lang_ko mode_lbl)
+                        ~en:("ZOOM · " ^ Say.resolve Say.Lang_en mode_lbl)
+                    else if m.nav.pane_index = 1 then
                       let mode_lbl =
                         Infra_store.code_right_mode_label m.infra.code.right_mode
                       in

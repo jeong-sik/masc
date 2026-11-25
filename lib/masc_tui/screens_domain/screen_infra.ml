@@ -600,11 +600,14 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let inf = model.infra in
+  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
   let top_h = if H.is_wide_split rect then 6 else 4 in
   let top_rect, body_rect =
-    match Layout.split_v_bp bp rect [ Layout.Fixed top_h; Layout.Flex 1 ] with
-    | [ a; b ] -> (a, b)
-    | _ -> (Rect.empty, rect)
+    if zoomed then (Rect.empty, rect)
+    else
+      match Layout.split_v_bp bp rect [ Layout.Fixed top_h; Layout.Flex 1 ] with
+      | [ a; b ] -> (a, b)
+      | _ -> (Rect.empty, rect)
   in
   (* Top 3 Peer Summary Cards *)
   (match inf.sandboxes with
@@ -1021,7 +1024,8 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     List.nth_opt entries (H.clamp_index (List.length entries) inf.selected_index)
   in
   let tbl_rect, insp_rect =
-    if H.is_wide_split body_rect then
+    if zoomed then (Rect.empty, body_rect)
+    else if H.is_wide_split body_rect then
       match
         Layout.split_h_bp bp body_rect [ Layout.Ratio 0.60; Layout.Flex 1 ]
       with
@@ -1302,7 +1306,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
   if not (Rect.is_empty insp_rect) then
     draw_sandbox_inspector ~scroll:inf.detail_scroll_offset ~grid ~cache
       ~rect:insp_rect ~theme ~bp ~lang ~model sel_entry inf.sandboxes
-      ~focused:(Model.pane_focused model 1)
+      ~focused:(Model.detail_pane_focused ~detail_index:1 model)
 
 (* --- 2. Sub-Tab 2: Repos & Read-Only Syntax-Highlighted Diffs --- *)
 
@@ -1419,9 +1423,12 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let inf = model.infra in
+  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.42
-      ~top_ratio:0.46 bp rect
+    if zoomed then (Rect.empty, rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.42
+        ~top_ratio:0.46 bp rect
   in
   let repos_rect, changes_rect =
     match
@@ -1625,7 +1632,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let diff_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ?subtitle:diff_subtitle
-         ~focused:(Model.pane_focused model diff_pane_idx)
+         ~focused:(Model.detail_pane_focused ~detail_index:diff_pane_idx model)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] URL 열기" ~en:"[o] Open URL"))
          (Say.resolve lang (Say.make ~ko:"변경 미리보기" ~en:"Change Preview")))
   in
@@ -2092,7 +2099,9 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   ignore (H.draw_pills ~grid ~rect:bar_rect ~theme ?right_hint:bar_right_hint pills);
   let left_rect, right_rect, acting_rect_opt =
-    if inf.acting_rail_open && body_rect.w >= 104 then
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, body_rect, None)
+    else if inf.acting_rail_open && body_rect.w >= 104 then
       match
         Layout.split_h_bp bp body_rect
           [ Layout.Ratio 0.50; Layout.Ratio 0.32; Layout.Flex 1 ]
@@ -2300,7 +2309,8 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let det_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ?subtitle:det_subtitle ~focused:(Model.pane_focused model 1)
+      (H.card_spec ?subtitle:det_subtitle
+         ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[y] 복사" ~en:"[y] Copy"))
          (Say.resolve lang
             (Say.make ~ko:"구조화 K/V 상세" ~en:"Structured K/V Detail")))
@@ -2597,8 +2607,11 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~en:"[p] Find · [f] Search · [v] Git · [y] Copy"))
        pills);
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32
-      ~top_ratio:0.42 bp body_rect
+    if model.nav.zoomed && Model.can_zoom_current_view model then
+      (Rect.empty, body_rect)
+    else
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32
+        ~top_ratio:0.42 bp body_rect
   in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
@@ -2701,7 +2714,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ?subtitle:right_subtitle ~focused:(Model.pane_focused model 1)
+      (H.card_spec ?subtitle:right_subtitle
+         ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:
            (Say.resolve lang
               (Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
@@ -2821,7 +2835,9 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   let idx = start_i + local_i in
                   if !y < bot then begin
                     let is_sel = Int.equal idx sel in
-                    let res_focused = Model.pane_focused model 1 in
+                    let res_focused =
+                      Model.detail_pane_focused ~detail_index:1 model
+                    in
                     let row_rect =
                       Rect.make ~x:vis_rect.x ~y:!y ~w:vis_rect.w ~h:1
                     in

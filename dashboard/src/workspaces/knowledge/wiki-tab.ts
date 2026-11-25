@@ -21,6 +21,7 @@ import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { computeMarkdownLineDiff } from './wiki-diff'
 import {
@@ -276,7 +277,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     )
   }, [])
   const loadLog = useCallback((reason: 'mount' | 'manual') => {
-    void resourceCache.fetch(
+    return resourceCache.fetch(
       'kn:wiki:log',
       (signal) => apiGetV2<WikiLogData>('/api/v1/wiki/log?limit=100', { signal, decode: decodeWikiLogData }),
       { reason, topics: ['wiki', 'wiki_updated'] },
@@ -285,7 +286,7 @@ export function WikiTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     if (leftView === 'lint') loadLint('mount')
-    if (leftView === 'log') loadLog('mount')
+    if (leftView === 'log') void loadLog('mount')
   }, [leftView, loadLint, loadLog])
 
   // Live search via GET /api/v1/wiki/search?q=
@@ -519,7 +520,7 @@ export function WikiTab(props: WorkspaceViewProps) {
         </div>
         <div class="kn-actions">
           ${!adminLocked && html`<button type="button" class="btn-primary" data-opens-detail onClick=${startNewPage}>+ 새 페이지</button>`}
-          <button type="button" class="btn-ghost" onClick=${() => void loadIndex('manual')}>새로고침</button>
+          <${RefreshButton} onRefresh=${() => loadIndex('manual')} />
         </div>
       </div>
 
@@ -733,7 +734,7 @@ export function WikiTab(props: WorkspaceViewProps) {
         <div class="kn-detail-pad kn-scroll-pad">
           <div class="kn-section-head">
             <h3 class="kn-section-title">Wiki Revision Log</h3>
-            <button type="button" class="btn-ghost" onClick=${() => loadLog('manual')}>새로고침</button>
+            <${RefreshButton} onRefresh=${() => loadLog('manual')} />
           </div>
           ${(logObs.kind === 'failed' || logObs.kind === 'absent' || logObs.kind === 'unreported')
             ? html`<div class="kn-notice kn-notice--err" role="alert">Wiki 로그 조회 실패: ${logObs.kind === 'failed' ? logObs.error.message : logObs.reason ?? '응답을 확인할 수 없습니다.'}</div>`

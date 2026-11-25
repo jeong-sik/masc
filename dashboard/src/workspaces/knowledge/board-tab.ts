@@ -27,6 +27,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
@@ -1026,7 +1027,7 @@ export function BoardTab(props: WorkspaceViewProps) {
               ${showCreate ? '닫기' : '+ 새 글'}
             </button>
           `}
-          <button type="button" class="btn-ghost" onClick=${() => void loadBoard('manual')}>새로고침</button>
+          <${RefreshButton} onRefresh=${() => loadBoard('manual')} />
         </div>
       </div>
 

@@ -75,7 +75,7 @@
   (#54690).
 - Gemini tool declarations carry the tool input schema in `parametersJsonSchema` instead of `parameters`. Gemini rejected every Keeper turn whose tools used `additionalProperties` or `exclusiveMinimum` with 400 "Unknown name" (#54693).
 - Normalized `tui.*` Settings schema fields (`tui.theme`, `tui.language`,
-  `tui.board_sort`, `tui.candle`, `tui.opening`) to canonical `Field_enum` /
+  `tui.board_sort`, `tui.candle`) to canonical `Field_enum` /
   `Hot_reload` controls with immediate live apply for theme, language, and
   board sort, non-teleporting Inspector arrow navigation with preserved row
   focus, strict zero-POST `Space` toggling, unified `< / >` artifact revision

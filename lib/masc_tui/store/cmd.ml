@@ -49,7 +49,7 @@ type get_request =
   | Get_wiki_log of { limit : int option; page : string option }
   | Get_wiki_search of { query : string; limit : int option }
   | Get_wiki_lint
-  | Get_artifacts
+  | Get_artifacts of { generation : int }
   | Get_artifact_detail of { id : string; revision : int option }
   | Get_artifact_checks
   | Get_world_memory
@@ -694,7 +694,7 @@ let get_request_path = function
   | Get_wiki_search { query; limit } ->
       Wire_knowledge.wiki_search_path ~query ?limit ()
   | Get_wiki_lint -> Wire_knowledge.wiki_lint_path
-  | Get_artifacts -> Wire_knowledge.published_artifacts_path
+  | Get_artifacts _ -> Wire_knowledge.published_artifacts_path
   | Get_artifact_detail { id; revision } ->
       Wire_knowledge.published_artifact_detail_path ~id ?revision ()
   | Get_artifact_checks -> Wire_knowledge.published_artifact_checks_path

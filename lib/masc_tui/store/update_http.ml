@@ -2082,7 +2082,16 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
-  | Msg.Reply_artifacts (Ok items) ->
+  | Msg.Reply_artifacts { generation; result = Ok items }
+    when generation <> m.knowledge.artifact_list_generation -> (
+      match m.knowledge.artifacts with
+      | Observed.Value _ | Observed.Failed _ -> (m, [])
+      | Observed.Unreported | Observed.Absent | Observed.Loading _ ->
+          let knowledge =
+            Knowledge_store.apply_artifacts ~stale:true ~observed_at:now items m.knowledge
+          in
+          ({ m with knowledge }, []))
+  | Msg.Reply_artifacts { result = Ok items; _ } ->
       let knowledge =
         Knowledge_store.apply_artifacts ~observed_at:now items m.knowledge
       in
@@ -2131,11 +2140,13 @@ let apply_http_reply ~now (m : Model.t) reply =
         | None -> []
       in
       (next, detail_cmds)
-  | Msg.Reply_artifacts (Error err) ->
+  | Msg.Reply_artifacts { generation; result = Error err } ->
       err_reply
         ~fail:
           (on_knowledge (fun (x : Knowledge_store.t) ->
-               { x with artifacts = failed_slot err x.artifacts }))
+               if generation = x.artifact_list_generation then
+                 { x with artifacts = failed_slot err x.artifacts }
+               else x))
         ~source:Health.Source_client_http ~ko:"산출물 목록 조회"
         ~en:"Artifacts fetch" err
   | Msg.Reply_artifact_detail { id; result = Ok detail } ->

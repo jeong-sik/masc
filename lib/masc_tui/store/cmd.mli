@@ -55,7 +55,7 @@ type get_request =
   | Get_wiki_log of { limit : int option; page : string option }
   | Get_wiki_search of { query : string; limit : int option }
   | Get_wiki_lint
-  | Get_artifacts
+  | Get_artifacts of { generation : int }
   | Get_artifact_detail of { id : string; revision : int option }
   | Get_artifact_checks
   | Get_world_memory

@@ -164,7 +164,7 @@ let has_get_health cmds =
               | Cmd.Get_wiki_log _
               | Cmd.Get_wiki_search _
               | Cmd.Get_wiki_lint
-              | Cmd.Get_artifacts
+              | Cmd.Get_artifacts _
               | Cmd.Get_artifact_detail _
               | Cmd.Get_artifact_checks
               | Cmd.Get_world_memory
@@ -1769,7 +1769,7 @@ let test_verifier_regressions () =
 
   (* P1-5: Live server routes + Goal confirmation strip dives instead of fabricating *)
   Alcotest.(check string) "Get_artifacts path" "/api/v1/published-artifacts"
-    (Cmd.get_request_path Cmd.Get_artifacts);
+    (Cmd.get_request_path (Cmd.Get_artifacts { generation = 0 }));
   Alcotest.(check string) "Post_gate_resolution path"
     "/api/v1/dashboard/gate/resolve"
     (Cmd.post_request_path
@@ -10893,7 +10893,7 @@ let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
       (Msg.Http_reply
          {
            epoch = m_art_b.epoch;
-           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+           reply = Msg.Reply_artifacts { generation = 0; result = Ok [ art_a; art_b ] };
          })
   in
   Alcotest.(check bool)
@@ -10926,7 +10926,7 @@ let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
       (Msg.Http_reply
          {
            epoch = m_art_missing.epoch;
-           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+           reply = Msg.Reply_artifacts { generation = 0; result = Ok [ art_a; art_b ] };
          })
   in
   Alcotest.(check int)
@@ -10947,7 +10947,7 @@ let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
       (Msg.Http_reply
          {
            epoch = m_non_retry.epoch;
-           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+           reply = Msg.Reply_artifacts { generation = 0; result = Ok [ art_a; art_b ] };
          })
   in
   Alcotest.(check int)

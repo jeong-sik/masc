@@ -853,7 +853,8 @@ let fetches_for_workspace ~force (m : Model.t) =
                   ]
           in
           ([]
-          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+          |> add_if (needs_fetch ~force m.knowledge.artifacts)
+               (Cmd.Get_artifacts { generation = m.knowledge.artifact_list_generation })
           |> add_if
                (needs_fetch ~force m.knowledge.artifact_checks)
                Cmd.Get_artifact_checks)

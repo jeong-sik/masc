@@ -1097,6 +1097,90 @@ let with_loopback_executor ?stream_capacity ~respond run =
     ~on_quit:ignore ~on_restart:ignore () in
   Fun.protect ~finally:(fun () -> Cmd_executor.shutdown exec) (fun () -> run env#clock bus exec)
 
+let test_artifact_list_respects_invalidation_during_read () =
+  let module Wire = Masc_tui_protocol.Wire_knowledge in
+  let first, first_started = Eio.Promise.create () in
+  let release_first, finish_first = Eio.Promise.create () in
+  let second, second_started = Eio.Promise.create () in
+  let release_second, finish_second = Eio.Promise.create () in
+  let calls = ref 0 in
+  let respond ~meth ~path =
+    Alcotest.(check string) "artifact GET" "GET" meth;
+    Alcotest.(check string) "artifact list endpoint" Wire.published_artifacts_path path;
+    incr calls;
+    let revision = !calls in
+    (match revision with
+    | 1 -> Eio.Promise.resolve first_started (); Eio.Promise.await release_first
+    | 2 -> Eio.Promise.resolve second_started (); Eio.Promise.await release_second
+    | _ -> Alcotest.fail "unexpected additional artifact list read");
+    200, Yojson.Safe.from_string (Printf.sprintf
+      {|{"artifacts":[{"id":"report","revision":%d,"title":"Report","summary":"Draft",
+         "author":"test","created_at":1,"body":{"_blob":{"sha256":"abc","bytes":3,"mime":"text/plain"}}}]}|}
+      revision)
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let reads cmds =
+    List.filter (function
+      | Cmd.Http_get { req; _ } -> String.equal (Cmd.get_request_path req) Wire.published_artifacts_path
+      | _ -> false) (Cmd.flatten cmds)
+  in
+  let dispatch cmds =
+    match reads cmds with
+    | [ cmd ] -> Cmd_executor.execute exec cmd
+    | _ -> Alcotest.fail "expected one artifact list read"
+  in
+  let rec next_reply () =
+    match Ui_bus.drain bus with
+    | [] -> Eio.Time.sleep clock 0.001; next_reply ()
+    | [ Ui_bus.Snapshot (_, (Msg.Http_reply { reply = Msg.Reply_artifacts _; _ } as msg)) ] -> msg
+    | _ -> Alcotest.fail "expected one artifact list reply"
+  in
+  let now = Clock.Mono.zero in
+  let switch m ws = Update.execute_action ~now m (Masc_tui_keymap.Keymap.Switch_workspace ws) in
+  let changed (m : Model.t) =
+    let change = Masc_tui_protocol.Wire_observer.Observation_changed
+      { topic = `Published_artifacts; scope = `Workspace } in
+    let event = Msg.Sse_observer_delivery
+      { cursor = None; decoded = Masc_tui_protocol.Wire_observer.Event change } in
+    Update.step ~now m (Msg.Sse_event { epoch = m.epoch; event })
+  in
+  let list_state (m : Model.t) =
+    match m.knowledge.artifacts with
+    | Observed.Value { data = [ (row : Wire.artifact_entry) ]; stale; _ } ->
+        Some (row.revision, stale)
+    | _ -> None
+  in
+  let initial = Model.initial () in
+  let initial = { initial with
+    knowledge = Knowledge_store.set_tab Nav.Knowledge_artifacts initial.knowledge } in
+  let visible, cmd = switch initial Nav.Knowledge in
+  dispatch cmd;
+  Eio.Promise.await first;
+  let away, _ = switch visible Nav.Work in
+  let away, idle = changed away in
+  let visible, corrective = changed visible in
+  dispatch corrective;
+  Eio.Promise.resolve finish_first ();
+  let prior = next_reply () in
+  let visible, _ = Update.step ~now visible prior in
+  let away, _ = Update.step ~now away prior in
+  let reopened, reopen = switch away Nav.Knowledge in
+  Eio.Promise.await second;
+  Eio.Promise.resolve finish_second ();
+  let current = next_reply () in
+  let fresh, _ = Update.step ~now reopened current in
+  let late, _ = Update.step ~now fresh prior in
+  let next_workspace, _ = Update.step ~now initial (Msg.Server_start_result (Ok ())) in
+  let fenced, _ = Update.step ~now next_workspace current in
+  Alcotest.(check int) "off-view change does not fetch" 0 (List.length (reads idle));
+  Alcotest.(check int) "reopening requests the invalidated list" 1 (List.length (reads reopen));
+  let check = Alcotest.(check (option (pair int bool))) in
+  check "pre-change reply stays stale on screen" (Some (1, true)) (list_state visible);
+  check "pre-change reply stays stale off screen" (Some (1, true)) (list_state away);
+  check "post-change read settles fresh" (Some (2, false)) (list_state fresh);
+  check "late prior reply preserves the fresh list" (Some (2, false)) (list_state late);
+  check "a workspace change rejects the entire old read" None (list_state fenced)
+
 let test_tool_series_readers_each_receive_the_latest_reply () =
   let raw = Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 } in
   let summary = Cmd.Get_tool_series_filtered { bucket = `Hour; since_hours = 24; tool = None } in
@@ -3143,7 +3227,7 @@ let test_timeout_budgets_and_reattach_on_timeout_detail () =
             execution_ids = None;
             turn_ref = None;
           } );
-      ("Get_artifacts", Cmd.Get_artifacts);
+      ("Get_artifacts", Cmd.Get_artifacts { generation = 0 });
       ( "Get_artifact_detail"
       , Cmd.Get_artifact_detail { id = "art-1"; revision = None } );
       ( "Get_board_feed"
@@ -3573,6 +3657,8 @@ let () =
             `Quick test_keeper_sandbox_current_epoch_survives_late_reply;
           Alcotest.test_case "a current Fleet sandbox denial survives a late previous workspace reply"
             `Quick test_fleet_sandbox_current_denial_survives_late_reply;
+          Alcotest.test_case "Artifact list keeps invalidations during an admitted GET"
+            `Quick test_artifact_list_respects_invalidation_during_read;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"

@@ -521,12 +521,11 @@ let apply_observation_changed (m : Model.t)
   | `Tools | `Tool_metrics ->
       apply_dataset_invalidation m Wire_observer.Dataset_tool_metrics
   | `Published_artifacts | `Artifact_checks ->
-      let knowledge =
-        { m.knowledge with artifacts = Observed.mark_stale m.knowledge.artifacts }
-      in
+      let knowledge = Knowledge_store.invalidate_artifacts m.knowledge in
       let cmds =
         match m.nav.workspace with
-        | Nav.Knowledge -> [ get_cmd e Cmd.Get_artifacts ]
+        | Nav.Knowledge ->
+            [ get_cmd e (Cmd.Get_artifacts { generation = knowledge.artifact_list_generation }) ]
         | Nav.Pulse | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
       in
       ({ m with knowledge }, cmds)

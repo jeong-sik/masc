@@ -187,6 +187,7 @@ type t = {
   pending_wiki_edit_slug : string option;
   pending_wiki_jump_slug : string option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
+  artifact_list_generation : int;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
   pending_artifact_revision : (string * int option) option;
@@ -269,6 +270,7 @@ let empty =
     pending_wiki_edit_slug = None;
     pending_wiki_jump_slug = None;
     artifacts = Observed.unreported;
+    artifact_list_generation = 0;
     active_artifact_detail = Observed.absent;
     active_artifact_detail_target = None;
     pending_artifact_revision = None;
@@ -1956,8 +1958,13 @@ let apply_wiki_search ~observed_at search t =
 let apply_wiki_lint ~observed_at lint t =
   { t with wiki_lint = Observed.value ~observed_at lint }
 
-let apply_artifacts ~observed_at artifacts t =
-  { t with artifacts = Observed.value ~observed_at artifacts }
+let invalidate_artifacts t =
+  { t with
+    artifacts = Observed.mark_stale t.artifacts;
+    artifact_list_generation = t.artifact_list_generation + 1 }
+
+let apply_artifacts ?(stale = false) ~observed_at artifacts t =
+  { t with artifacts = Observed.value ~stale ~observed_at artifacts }
 
 let apply_world_memory ~observed_at mem t =
   { t with world_memory = Observed.value ~observed_at mem }
@@ -2922,6 +2929,7 @@ let set_filter filter_query t =
   }
 
 let mark_stale_all t =
+  let t = invalidate_artifacts t in
   {
     t with
     board = Observed.mark_stale t.board;
@@ -2931,7 +2939,6 @@ let mark_stale_all t =
     wiki_pages = String_map.map Observed.mark_stale t.wiki_pages;
     wiki_log = Observed.mark_stale t.wiki_log;
     wiki_lint = Observed.mark_stale t.wiki_lint;
-    artifacts = Observed.mark_stale t.artifacts;
     active_artifact_detail = Observed.mark_stale t.active_artifact_detail;
     pending_artifact_revision = None;
     artifact_checks = Observed.mark_stale t.artifact_checks;

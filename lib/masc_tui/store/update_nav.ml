@@ -1148,6 +1148,7 @@ let push_dive (m : Model.t) dive =
           |> Knowledge_store.set_memory_diff_keeper keeper
     | Nav.Dive_knowledge (Nav.Thread_dive post_id) ->
         base
+        |> Knowledge_store.reset_thread_view
         |> Knowledge_store.mark_thread_loading ~post_id
              ~since_ns:m.freshness.last_mono
         |> Knowledge_store.close_memory_reading
@@ -9078,57 +9079,29 @@ let dive_max_scroll (m : Model.t) active =
       in
       memory_right_pane_max_scroll ~bp ~rect:br k_scoped
   | Nav.Dive_knowledge (Nav.Thread_dive post_id) -> (
-      let post_opt, comments =
-        match Observed.to_option m.knowledge.active_thread with
-        | Some (tp, cs) when String.equal tp.id post_id -> (Some tp, cs)
-        | Some _ | None -> (
-            let all_posts =
-              match Observed.to_option m.knowledge.board with
-              | Some f -> f.posts
-              | None -> []
-            in
-            match
-              List.find_opt
-                (fun (p : Wire_knowledge.board_post) ->
-                  String.equal p.id post_id)
-                all_posts
-            with
-            | Some p -> (Some p, [])
-            | None -> (None, []))
+      let k = m.knowledge in
+      let content = Knowledge_store.thread_reading_rect ~bp k br in
+      let body =
+        match k.thread_view with
+        | Knowledge_store.Thread_comments ->
+            Option.map
+              (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.body)
+              (Knowledge_store.selected_thread_comment ~post_id k)
+        | Knowledge_store.Thread_post -> (
+            match Observed.to_option k.active_thread with
+            | Some (post, _) when String.equal post.id post_id -> Some post.body
+            | Some _ | None ->
+                Option.bind (Observed.to_option k.board) (fun feed ->
+                    List.find_map
+                      (fun (post : Wire_knowledge.board_post) ->
+                        if String.equal post.id post_id then Some post.body
+                        else None)
+                      feed.posts))
       in
-      match post_opt with
+      match body with
       | None -> 0
-      | Some p ->
-          let body_rect =
-            match
-              Masc_tui_ui.Layout.split_v br
-                [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
-            with
-            | [ _; b ] -> b
-            | _ -> br
-          in
-          let inner = ui_card_inner body_rect in
-          let band_h = if inner.h >= 7 then 2 else 1 in
-          let content =
-            Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-              ~h:(max 0 (inner.h - band_h))
-            |> ui_pad_content ~bp
-          in
-          let comments_h =
-            if comments = [] then 0
-            else min (max 3 (content.h / 3)) (2 + (List.length comments * 2))
-          in
-          let body_h = max 0 (content.h - comments_h) in
-          let body_max =
-            markdown_max_scroll ~theme ~width:content.w ~height:body_h p.body
-          in
-          let comments_body_h = max 0 (comments_h - 1) in
-          let comments_max =
-            if comments_body_h > 0 then
-              max 0 ((List.length comments * 2) - comments_body_h)
-            else 0
-          in
-          body_max + comments_max)
+      | Some markdown ->
+          markdown_max_scroll ~theme ~width:content.w ~height:content.h markdown)
   | Nav.Dive_knowledge (Nav.Wiki_dive slug) ->
       let main_rect, _ =
         Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
@@ -11525,6 +11498,18 @@ let apply_move (m : Model.t) dir =
                       (m.nav.dive_scroll_offset + sd)
                   in
                   ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+            | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id) as active)
+              when m.knowledge.thread_view = Knowledge_store.Thread_comments -> (
+                let knowledge = m.knowledge in
+                match Observed.to_option knowledge.active_thread with
+                | Some (post, _ :: _) when String.equal post.id post_id ->
+                    let max_scroll = dive_max_scroll m active in
+                    let thread_comment_scroll =
+                      Store_scroll.clamp_scroll ~max_scroll
+                        (knowledge.thread_comment_scroll + scroll_delta dir)
+                    in
+                    ({ m with knowledge = { knowledge with thread_comment_scroll } }, [])
+                | Some _ | None -> (m, []))
             | Some
                 (( Nav.Dive_keeper
                      {

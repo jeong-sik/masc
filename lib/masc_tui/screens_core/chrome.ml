@@ -1453,6 +1453,12 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 180)
             ~lang:model.lang
         in
+        let thread_reading =
+          Model.body_has_focus model
+          && (match Model.active_dive model with
+              | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
+              | _ -> false)
+        in
         let show_tab_hint =
           match model.nav.overlay with
           | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
@@ -1478,7 +1484,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                           false)
               | None -> false)
           | None ->
-              Model.focusable_pane_count model > 1
+              thread_reading || Model.focusable_pane_count model > 1
               || Model.sidebar_visible model
         in
         let show_overlay_confirm_hint =
@@ -1530,6 +1536,10 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some Nav.Ask_answer -> Some ("질문", "Q")
           | Some (Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
               None
+          | None when thread_reading -> (
+              match model.knowledge.thread_view with
+              | Knowledge_store.Thread_post -> Some ("댓글", "Comments")
+              | Knowledge_store.Thread_comments -> Some ("본문", "Post"))
           | None ->
               if
                 Model.focusable_pane_count model <= 1

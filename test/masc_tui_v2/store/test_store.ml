@@ -15673,7 +15673,7 @@ let test_ux_sweep_12_fixes () =
             };
         active_thread = Observed.value ~observed_at:t0 (long_post_a, many_comments);
         active_thread_target = Some "post-a";
-        thread_selected_comment = Some 0;
+        thread_selected_comment = Some "c-0";
       }
     in
     {
@@ -15682,6 +15682,69 @@ let test_ux_sweep_12_fixes () =
       knowledge;
     }
   in
+  let expanded_comment =
+    String.concat "\n\n" (List.init 50 (fun i -> Printf.sprintf "Paragraph %d" i))
+  in
+  let comments =
+    List.map
+      (fun (comment : Wire_knowledge.board_comment) ->
+        { comment with post_id = "post-a"; body = expanded_comment })
+      many_comments
+  in
+  let reader =
+    {
+      m_thread_a with
+      knowledge =
+        Knowledge_store.apply_thread ~observed_at:t0 (long_post_a, comments)
+          m_thread_a.knowledge;
+    }
+  in
+  let post, _ =
+    Update_nav.push_dive reader (Nav.Dive_knowledge (Nav.Thread_dive "post-a"))
+  in
+  let post, _ = step post (mk_key Keymap.Input.Page_down) in
+  let comment, switch_cmds = step post (mk_key Keymap.Input.Tab) in
+  let comment, _ = step comment (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool) "thread reader scrolls its full comment without sending"
+    true
+    (List.is_empty (Cmd.flatten switch_cmds)
+     && comment.knowledge.thread_comment_scroll > 0
+     && Int.equal post.nav.dive_scroll_offset comment.nav.dive_scroll_offset);
+  let post_again, _ = step comment (mk_key Keymap.Input.Tab) in
+  let comment_again, _ = step post_again (mk_key Keymap.Input.Tab) in
+  Alcotest.(check int) "Tab restores the selected comment scroll"
+    comment.knowledge.thread_comment_scroll
+    comment_again.knowledge.thread_comment_scroll;
+  let next_comment, _ = step comment_again (char_k ">") in
+  let reply, _ = step next_comment (char_k "c") in
+  Alcotest.(check bool) "reply targets the visible comment and starts it at the top"
+    true
+    (Int.equal next_comment.knowledge.thread_comment_scroll 0
+     && Option.equal Nav.equal_overlay reply.nav.overlay
+          (Some (Nav.Inline_action
+             (Nav.Board_comment { post_id = "post-a"; parent_id = Some "c-1" }))));
+  let reading, _ = step next_comment (mk_key Keymap.Input.Page_down) in
+  let apply_thread_reply m result =
+    Update.step ~now:t0 m
+      (Msg.Http_reply
+         { epoch = m.Model.epoch;
+           reply = Msg.Reply_board_thread { post_id = "post-a"; result } })
+    |> fst
+  in
+  let failed =
+    apply_thread_reply reading
+      (Error (Msg.Http_error { status = 503; body = "temporary"; api_error = None }))
+  in
+  let failed, _ = step failed (mk_key Keymap.Input.Page_down) in
+  let added : Wire_knowledge.board_comment =
+    { (List.hd comments) with id = "c-earlier"; created_at_unix = 1050.0 }
+  in
+  let recovered = apply_thread_reply failed (Ok (long_post_a, added :: comments)) in
+  Alcotest.(check bool) "the same comment and position survive a retryable refresh failure"
+    true
+    (Option.equal String.equal recovered.knowledge.thread_selected_comment (Some "c-1")
+     && Int.equal reading.knowledge.thread_comment_scroll
+          recovered.knowledge.thread_comment_scroll);
   (* Entering Thread_dive "post-b" (not in board feed) marks active_thread Loading for post-b *)
   let m_dive_b, cmds_dive_b =
     Update_nav.push_dive m_thread_a (Nav.Dive_knowledge (Nav.Thread_dive "post-b"))
@@ -15697,7 +15760,7 @@ let test_ux_sweep_12_fixes () =
             | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-b"; _ }; _ } -> true
             | _ -> false)
           cmds_dive_b);
-  (* Even if active_thread still holds stale Post A + selected comment 0 while in Thread_dive B:
+  (* Even if active_thread still holds stale Post A + selected comment c-0 while in Thread_dive B:
      - selected_thread_comment ~post_id:"post-b" is None
      - PgDn yields dive_scroll_offset = 0 (never uses Post A's long body/comments)
      - Board_vote NEVER constructs Post_board_comment_vote { post_id = "post-b"; comment_id = "c-0" }
@@ -15710,7 +15773,7 @@ let test_ux_sweep_12_fixes () =
           m_dive_b.knowledge with
           active_thread = Observed.value ~observed_at:t0 (long_post_a, many_comments);
           active_thread_target = Some "post-a";
-          thread_selected_comment = Some 0;
+          thread_selected_comment = Some "c-0";
         };
     }
   in
@@ -15719,7 +15782,7 @@ let test_ux_sweep_12_fixes () =
     true
     (Option.is_none
        (Knowledge_store.selected_thread_comment ~post_id:"post-b"
-          m_dive_b_stale.knowledge));
+          { m_dive_b_stale.knowledge with thread_view = Knowledge_store.Thread_comments }));
   let m_dive_b_pgdn, _ = step m_dive_b_stale (mk_key Keymap.Input.Page_down) in
   Alcotest.(check int)
     "CR P2 #1: Thread_dive B PgDn does not scroll stale Post A's body/comments"

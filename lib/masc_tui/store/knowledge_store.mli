@@ -136,6 +136,8 @@ type threaded_comment = {
   is_reply : bool;
 }
 
+type thread_view = Thread_post | Thread_comments
+
 type memory_subview =
   | Mem_diff_flow
   | Mem_health_ledger
@@ -159,7 +161,9 @@ type t = {
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
   active_thread_target : string option;
-  thread_selected_comment : int option;
+  thread_view : thread_view;
+  thread_selected_comment : string option;
+  thread_comment_scroll : int;
   armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
@@ -302,13 +306,22 @@ val order_comments_threaded :
 (** Thread comments by [parent_id] up to depth 4, chronologically per parent,
     promoting orphans and breaking cycles safely. *)
 
+val reset_thread_view : t -> t
+val toggle_thread_view : t -> t
+val restore_thread_comment : post_id:string -> previous:t -> t -> t
+(** Keep the same comment and scroll position when a thread refresh returns it. *)
+
+val thread_reading_rect : bp:Masc_tui_ui.Layout.breakpoint -> t -> Rect.t -> Rect.t
+(** Markdown area inside a thread with its tab bar, border, and metadata. *)
+
 val step_thread_comment : post_id:string -> delta:int -> t -> t
-(** Advance comment selection within [active_thread] only when it holds
-    [post_id]; clears comment selection otherwise. *)
+(** Open the comment reader and advance within the loaded [post_id] thread. *)
 
 val selected_thread_comment : post_id:string -> t -> threaded_comment option
-(** Selected comment only when [active_thread] holds [post_id]; [None] when
-    [active_thread] is missing or belongs to another post. *)
+(** The comment displayed in the comment reader for the matching post. *)
+
+val selected_thread_comment_at : post_id:string -> t -> (int * threaded_comment) option
+(** The selected comment and its zero-based position in thread order. *)
 
 val press_vote :
   target:vote_target ->

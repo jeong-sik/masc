@@ -234,6 +234,9 @@ val inner_body_width : t -> int
 val inner_body_height : t -> int
 (** Exact inset body height matching [Chrome.compute_layout]. *)
 
+val keeper_dive_focused : t -> bool
+(** The selected Keeper detail occupies the body without the navigation menu. *)
+
 val sidebar_width : int
 val sidebar_gap : int
 val sidebar_docked_min_cols : int
@@ -282,7 +285,7 @@ val work_pipeline_verifs_visible : t -> bool
 
 val can_zoom_current_view : t -> bool
 (** [true] iff [z] ([Toggle_zoom]) renders a zoomed view on the active screen
-    ([Keepers] with a selected keeper, or [Knowledge] Board/Wiki/Memory). *)
+    (Keeper detail, [Keepers] with a selected keeper, or [Knowledge]). *)
 
 val focusable_pane_count : t -> int
 (** Single source of truth for the exact number of interactive focusable panes

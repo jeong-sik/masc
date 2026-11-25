@@ -773,7 +773,7 @@ let short_turn_ref_tag (turn : Wire_fleet.active_turn) =
           Some (String.sub tr idx (String.length tr - idx))
       | Some _ | None -> None)
 
-let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
     (turn : Wire_fleet.active_turn) =
   let is_failed =
     match turn.preview with
@@ -793,41 +793,6 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~width
   let rail_rgb =
     if is_failed then theme.status_attention else theme.status_active
   in
-  let summary =
-    Printf.sprintf "%s · %s"
-      (Ops_common.say model ~ko:"현재 작업" ~en:"Active turn")
-      (Say.resolve model.lang (Chat_transcript.active_turn_detail_summary turn))
-  in
-  let hdr_text =
-    Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 24)) summary
-  in
-  let right_meta =
-    match model.fleet.chat_origin_mode with
-    | Fleet_store.Display_origin_bare ->
-        if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
-        else Ops_common.say model ~ko:"진행 중" ~en:"running"
-    | Fleet_store.Display_origin_inline | Fleet_store.Display_origin_row -> (
-        let parts =
-          List.filter_map Fun.id
-            [
-              short_turn_ref_tag turn;
-              format_active_turn_elapsed ~model turn;
-            ]
-        in
-        match parts with
-        | [] ->
-            if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
-            else Ops_common.say model ~ko:"진행 중" ~en:"running"
-        | _ :: _ -> String.concat " · " parts)
-  in
-  let hdr_row =
-    single_span_row ~rail_rgb
-      ~prefix:(Glyph.to_utf8 Glyph.Live_working ^ " ")
-      ~prefix_fg:rail_rgb ~prefix_attrs:Attr.bold ~text:hdr_text
-      ~text_fg:theme.text_bright ~attrs:Attr.bold ~right_meta
-      ~right_meta_fg:rail_rgb ~right_meta_attrs:Attr.italic
-      ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
-  in
   let tail_rows =
     match Chat_transcript.active_turn_preview_tail turn with
     | None -> []
@@ -842,7 +807,45 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~width
             ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ();
         ]
   in
-  hdr_row :: tail_rows
+  if not (Chat_transcript.show_active_turn_summary ~model ~keeper turn) then
+    tail_rows
+  else
+    let summary =
+      Printf.sprintf "%s · %s"
+        (Ops_common.say model ~ko:"현재 작업" ~en:"Active turn")
+        (Say.resolve model.lang (Chat_transcript.active_turn_detail_summary turn))
+    in
+    let hdr_text =
+      Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 24)) summary
+    in
+    let right_meta =
+      match model.fleet.chat_origin_mode with
+      | Fleet_store.Display_origin_bare ->
+          if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
+          else Ops_common.say model ~ko:"진행 중" ~en:"running"
+      | Fleet_store.Display_origin_inline | Fleet_store.Display_origin_row -> (
+          let parts =
+            List.filter_map Fun.id
+              [
+                short_turn_ref_tag turn;
+                format_active_turn_elapsed ~model turn;
+              ]
+          in
+          match parts with
+          | [] ->
+              if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
+              else Ops_common.say model ~ko:"진행 중" ~en:"running"
+          | _ :: _ -> String.concat " · " parts)
+    in
+    let hdr_row =
+      single_span_row ~rail_rgb
+        ~prefix:(Glyph.to_utf8 Glyph.Live_working ^ " ")
+        ~prefix_fg:rail_rgb ~prefix_attrs:Attr.bold ~text:hdr_text
+        ~text_fg:theme.text_bright ~attrs:Attr.bold ~right_meta
+        ~right_meta_fg:rail_rgb ~right_meta_attrs:Attr.italic
+        ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
+    in
+    hdr_row :: tail_rows
 
 let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~pad_x ~scroll rows =
@@ -1133,147 +1136,64 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
             starters
 
 let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~name ~activity (keeper_opt : Wire_fleet.keeper_summary option) =
-  if Rect.is_empty rect then ()
-  else
-    let bg = Color.of_rgb theme.surface_2 in
-    let base_st = Typography.structure ~bg theme in
-    Cell_grid.fill_rect ~clip:rect grid ~rect ~style:base_st ();
-    let has_attn = Ops_common.keeper_has_attention model.attention name in
-    let glyph, tone, act_str, rt_str, ctx_ratio_opt =
-      match keeper_opt with
-      | Some k ->
-          let g, t, _ =
-            Ops_common.keeper_live_status ~has_attention:has_attn k
-          in
-          let act =
-            Say.resolve model.lang (Ops_common.activation_label k.activation_mode)
-          in
-          let rt = Ops_common.human_runtime_label ~model k in
-          let ctx_opt =
-            match Observed.to_option k.context with
-            | Some (Wire_fleet.Context_measured { ratio = Some r; _ }) -> Some r
-            | Some
-                ( Wire_fleet.Context_measured { ratio = None; _ }
-                | Wire_fleet.Context_not_measured _ )
-            | None ->
-                None
-          in
-          (g, t, act, rt, ctx_opt)
-      | None ->
-          ( Glyph.Live_idle
-          , Theme.Status_historical
-          , Glyph.to_utf8 Glyph.Missing_absent
-          , Glyph.to_utf8 Glyph.Missing_absent
-          , None )
-    in
-    let infra_tag, _ = Ops_common.keeper_sandbox_tag ~model name in
-    let trail_n = Ops_common.keeper_incident_count model.incidents name in
-    let sep = Typography.sep_dot in
-    let trail_part =
-      if trail_n > 0 then
-        Printf.sprintf "%s%s%d [I]" sep (Glyph.to_utf8 Glyph.Recovered) trail_n
-      else ""
-    in
-    let voice_part =
-      match model.drafts.voice with
-      | Drafts.Voice_recording { elapsed_s; _ } ->
-          Printf.sprintf "%sREC %.1fs" sep elapsed_s
-      | Drafts.Voice_transcribing ->
-          sep ^ Ops_common.say model ~ko:"음성 변환 중" ~en:"Transcribing"
-      | Drafts.Voice_error e ->
-          sep ^ "Voice " ^ Glyph.to_utf8 Glyph.Live_failing ^ " " ^ e
-      | Drafts.Voice_off -> ""
-    in
-    let wave_w = 10 in
-    let voice_levels_opt =
-      match model.drafts.voice with
-      | Drafts.Voice_recording { levels; _ } when rect.w >= 48 && levels <> [] ->
-          Some levels
-      | Drafts.Voice_recording _
-      | Drafts.Voice_off
-      | Drafts.Voice_transcribing
-      | Drafts.Voice_error _ ->
-          None
-    in
+    ~(model : Model.t) ~activity =
+  if not (Rect.is_empty rect) then begin
+    let bg = Color.of_rgb theme.surface_1 in
     let activity =
-      Option.map (fun (glyph, tone, label) -> (glyph, tone, Say.resolve model.lang label))
+      Option.map
+        (fun (glyph, tone, label) ->
+          (Glyph.to_utf8 glyph ^ " ", tone, Say.resolve model.lang label))
         activity
     in
-    let activity_w =
-      Option.fold ~none:0 ~some:(fun (_, _, text) -> Grapheme.display_width text) activity
+    let voice_error =
+      match model.drafts.voice with
+      | Drafts.Voice_error error ->
+          let label = Ops_common.say model ~ko:"음성 오류" ~en:"Voice error" in
+          Some (label, label ^ Typography.sep_dot ^ error)
+      | Drafts.Voice_recording _ | Drafts.Voice_transcribing | Drafts.Voice_off ->
+          None
     in
-    let ctx_block_w = 18 in
-    let show_ctx_gauge =
-      Option.is_none voice_levels_opt && rect.w >= 48
-      && rect.w >= 4 + activity_w + ctx_block_w + 2
+    let available = Int.max 0 (rect.w - 4) in
+    let voice_w, voice_text =
+      match voice_error with
+      | None -> (0, "")
+      | Some (label, detail) ->
+          let label_w = Grapheme.display_width label in
+          let budget =
+            match activity with
+            | None -> available
+            | Some (mark, _, activity_text) ->
+                let activity_w =
+                  Grapheme.display_width mark + Grapheme.display_width activity_text
+                in
+                Int.min available (Int.max label_w (available - activity_w - 2))
+          in
+          if budget <= label_w then (budget, label)
+          else (Int.min budget (Grapheme.display_width detail), detail)
     in
-    let right_reserve =
-      match voice_levels_opt with
-      | Some _ -> wave_w + 2
-      | None -> if show_ctx_gauge then ctx_block_w + 2 else 1
-    in
-    let text_right_limit = Rect.right rect - right_reserve in
-    let cx = ref (rect.x + 2) in
-    let append ~style text =
-      let adv =
-        Ops_common.put_line ~clip:rect grid ~x:!cx ~y:rect.y
-          ~max_w:(Int.max 0 (text_right_limit - !cx)) ~style text
-      in
-      cx := !cx + adv
-    in
-    let glyph, tone = match activity with
-      | Some (mark, tone, _) -> (mark, tone)
-      | None -> (glyph, tone)
-    in
-    append ~style:(Typography.status ~bg ~bold:true theme tone)
-      (Glyph.to_utf8 glyph ^ " ");
     Option.iter
-      (fun (_, _, label) ->
-        append ~style:(Typography.primary ~bg theme) label;
-        append ~style:base_st sep)
-      activity;
-    append ~style:(Typography.anchor ~bg theme) name;
-    let rest_str =
-      Printf.sprintf "%s%s%s%s%s%s%s%s" sep act_str sep rt_str sep
-        infra_tag trail_part voice_part
-    in
-    append ~style:base_st rest_str;
-    (* Right cluster: Voice waveform when recording, else smooth inline Ctx % Ratio_gauge *)
-    match voice_levels_opt with
-    | Some levels ->
-        let wx = Rect.right rect - wave_w - 2 in
-        let samples = Ops_common.samples_of_floats levels in
+      (fun (mark, tone, label) ->
+        let x = rect.x + 2 in
+        let voice_reserve = if voice_w > 0 then voice_w + 2 else 0 in
+        let max_w = Int.max 0 (available - voice_reserve) in
+        let glyph_w =
+          Ops_common.put_line ~clip:rect grid ~x ~y:rect.y ~max_w
+            ~style:(Typography.status ~bg ~bold:true theme tone) mark
+        in
         ignore
-          (Chart.draw_sparkline_run ~clip:rect grid ~x:wx ~y:rect.y
-             ~width:wave_w ~theme ~bg ~unicode:true
-             ~gradient:Chart.Gradient.Cool_flow samples)
-    | None ->
-        if show_ctx_gauge then begin
-          let gx = Rect.right rect - ctx_block_w - 1 in
-          match ctx_ratio_opt with
-          | Some raw ->
-              let ratio = Float.max 0.0 (Float.min 1.0 raw) in
-              let lbl = Printf.sprintf "Ctx %2.0f%% " (ratio *. 100.0) in
-              let adv_l =
-                Ops_common.put_line ~clip:rect grid ~x:gx ~y:rect.y ~max_w:9
-                  ~style:(Typography.whisper ~bg ~italic:false theme)
-                  lbl
-              in
-              ignore
-                (Chart.draw_ratio_bar_run ~clip:rect grid ~x:(gx + adv_l)
-                   ~y:rect.y ~width:(Int.max 4 (ctx_block_w - adv_l)) ~theme ~bg
-                   ~unicode:true
-                   ~gradient:
-                     (if ratio >= 0.80 then Chart.Gradient.Thermal
-                      else Chart.Gradient.Cool_flow)
-                   ~ratio)
-          | None ->
-              ignore
-                (Ops_common.put_line ~clip:rect grid ~x:gx ~y:rect.y
-                   ~max_w:ctx_block_w ~style:(Typography.whisper ~bg theme)
-                   "Ctx —  [V] PTT")
-        end
+          (Ops_common.put_line ~clip:rect grid ~x:(x + glyph_w) ~y:rect.y
+             ~max_w:(Int.max 0 (max_w - glyph_w))
+             ~style:(Typography.primary ~bg theme) label))
+      activity;
+    if voice_w > 0 then
+      let x =
+        if Option.is_some activity then Rect.right rect - voice_w - 2
+        else rect.x + 2
+      in
+      ignore
+        (Ops_common.put_line ~clip:rect grid ~x ~y:rect.y ~max_w:voice_w
+           ~style:(Typography.status ~bg theme Theme.Status_attention) voice_text)
+  end
 
 let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~name keeper_opt =
@@ -1303,7 +1223,7 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                   build_history_rows ~theme ~model ~keeper_name:name
                     ~width:prose_w msgs
               | Chat_transcript.Section_active_turn turn ->
-                  build_active_turn_rows ~theme ~model ~width:prose_w turn
+                  build_active_turn_rows ~theme ~model ~keeper:name ~width:prose_w turn
               | Chat_transcript.Section_pending items ->
                   build_pending_tx_rows ~theme ~model ~width:prose_w items
               | Chat_transcript.Section_stream sp ->
@@ -1351,8 +1271,7 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     end;
     if status_h = 1 then
       let activity = Chat_transcript.live_chat_phase_badge ~model ~keeper:name in
-      draw_keeper_status_strip grid ~rect:status_rect ~theme ~model ~name
-        ~activity keeper_opt
+      draw_keeper_status_strip grid ~rect:status_rect ~theme ~model ~activity
 
 (* --- Tab 2: Memory (Rich Explorer + 24-bin Age Ladder + Braille Trend + Librarian) --- *)
 

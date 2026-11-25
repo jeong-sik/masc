@@ -439,9 +439,6 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
     | Collapsed_bar | Expanded_multiline ->
         let bg_rgb = if st.focused then theme.surface_2 else theme.surface_1 in
         let bg = Color.of_rgb bg_rgb in
-        let pill_bg =
-          Color.of_rgb (if st.focused then theme.surface_1 else theme.surface_2)
-        in
         let input_style =
           if st.focused then
             Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg ()
@@ -457,7 +454,6 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
           else Typography.primary ~bg ~bold:true theme
         in
         let placeholder_style = Typography.whisper ~bg theme in
-        let pill_style = Typography.structure ~bg:pill_bg theme in
         let header_y = rect.y in
         let header_r = Rect.make ~x:rect.x ~y:header_y ~w:rect.w ~h:1 in
         let caret_s = Glyph.to_utf8 Glyph.Prompt_caret ^ " " in
@@ -471,15 +467,8 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
             ~style:target_style target_s
         in
         let pref_end_x = left_x + c_adv + t_adv in
-        (* Right-side pills: pending transmission + other drafts + elevated send keycap pill *)
+        (* Send and editing shortcuts are shown in the footer. *)
         let right_parts = ref [] in
-        let send_hint =
-          Say.resolve lang
-            (if st.focused then
-               Say.make ~ko:" Enter 전송 · Alt+↵ Steer " ~en:" Send ↵ · Steer Alt+↵ "
-             else Say.make ~ko:" 전송 ↵ " ~en:" Send ↵ ")
-        in
-        right_parts := (send_hint, pill_style) :: !right_parts;
         if st.draft_count_other_keepers > 0 then begin
           let badge =
             Say.resolve lang
@@ -505,7 +494,7 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
             0 !right_parts
         in
         let rx = ref (Rect.right rect - right_margin - right_total_w + 2) in
-        let right_drawn = !rx > pref_end_x + 4 in
+        let right_drawn = right_total_w > 0 && !rx > pref_end_x + 4 in
         if right_drawn then
           List.iter
             (fun (text, style) ->
@@ -689,8 +678,7 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
               let rr = Rect.make ~x:rect.x ~y:body_top ~w:rect.w ~h:1 in
               let placeholder =
                 Say.resolve lang
-                  (Say.make ~ko:"메시지를 입력하세요… (Enter 전송 · Shift+Enter 줄바꿈)"
-                     ~en:"Type a message… (Enter send · Shift+Enter newline)")
+                  (Say.make ~ko:"메시지를 입력하세요…" ~en:"Type a message…")
               in
               ignore
                 (Cell_grid.put_text ~clip:rr grid ~x:content_x ~y:body_top

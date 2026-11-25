@@ -486,6 +486,16 @@ let composer_mode m =
         then Auto_folded_pill
         else Collapsed_bar
 
+let keeper_dive_focused m =
+  m.nav.zoomed
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_keeper _) -> true
+  | Some
+      (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _)
+  | None ->
+      false
+
 let sidebar_width = 24
 let sidebar_gap = 1
 let sidebar_docked_min_cols = 132
@@ -493,6 +503,7 @@ let sidebar_docked_min_cols = 132
 let sidebar_docked m =
   (not (is_too_small_viewport m.viewport))
   && (not (equal_breakpoint m.breakpoint Micro))
+  && not (keeper_dive_focused m)
   && m.viewport.cols >= sidebar_docked_min_cols
   &&
   match m.nav.sidebar_open with
@@ -502,6 +513,7 @@ let sidebar_docked m =
 let sidebar_drawer_open m =
   (not (is_too_small_viewport m.viewport))
   && (not (equal_breakpoint m.breakpoint Micro))
+  && not (keeper_dive_focused m)
   && (not (sidebar_docked m))
   &&
   match m.nav.sidebar_open with
@@ -770,19 +782,24 @@ let can_zoom_current_view m =
     is_too_small_viewport m.viewport
     || equal_breakpoint m.breakpoint Micro
     || Option.is_some m.nav.overlay
-    || Option.is_some (active_dive m)
   then false
   else
-    match m.nav.workspace with
-    | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
-    | Nav.Knowledge -> (
-        match m.knowledge.active_tab with
-        | Nav.Knowledge_board
-        | Nav.Knowledge_wiki
-        | Nav.Knowledge_artifacts
-        | Nav.Knowledge_memory ->
-            true)
-    | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false
+    match active_dive m with
+    | Some (Nav.Dive_keeper _) -> true
+    | Some
+        (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
+        false
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
+        | Nav.Knowledge -> (
+            match m.knowledge.active_tab with
+            | Nav.Knowledge_board
+            | Nav.Knowledge_wiki
+            | Nav.Knowledge_artifacts
+            | Nav.Knowledge_memory ->
+                true)
+        | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
 
 let task_dive_has_two_main_panes m task_id =
   match

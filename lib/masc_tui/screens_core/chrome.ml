@@ -885,6 +885,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion") ^ " " ^ run_id
            | Nav.Skill_dive ref_s ->
                Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
+           | Nav.Exact_run_dive run_id ->
+               Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
          in
          let crumb =
            Printf.sprintf "%s %s %s"

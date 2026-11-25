@@ -273,7 +273,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_22_commands () =
-  Alcotest.(check int) "exactly 28 slash commands" 28 (List.length Slash.all);
+  Alcotest.(check int) "exactly 31 slash commands" 31 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -339,6 +339,63 @@ let test_slash_22_commands () =
       );
       ("/preset restore baseline", Slash.Preset (Slash.Preset_restore "baseline"));
       ("/preset delete old", Slash.Preset (Slash.Preset_delete "old"));
+      ( "/lane create fast slot-a,slot-b",
+        Slash.Lane
+          (Slash.Lane_create { lane = "fast"; runtime_ids = [ "slot-a"; "slot-b" ] }) );
+      ("/lane remove fast", Slash.Lane (Slash.Lane_remove "fast"));
+      ( "/lane rename fast turbo",
+        Slash.Lane (Slash.Lane_rename { lane = "fast"; to_lane = "turbo" }) );
+      ( "/lane exact-move verifier slot-b first",
+        Slash.Lane
+          (Slash.Lane_exact_move
+             { lane_id = "verifier"; runtime_id = "slot-b"; direction = `First }) );
+      ("/lane run run-42", Slash.Lane (Slash.Lane_run_inspect "run-42"));
+      ("/lane raw-preview", Slash.Lane Slash.Lane_raw_preview);
+      ( "/lane quarantines alpha",
+        Slash.Lane (Slash.Lane_quarantines "alpha") );
+      ( "/lane recover alpha part-1 cand-1 q-1",
+        Slash.Lane
+          (Slash.Lane_quarantine_recover
+             {
+               keeper = "alpha";
+               partition_id = "part-1";
+               candidate_id = "cand-1";
+               quarantine_id = "q-1";
+             }) );
+      ( "/addon attach /tmp/manifest.toml run-1 {\"k\":1}",
+        Slash.Addon
+          (Slash.Addon_attach
+             {
+               manifest_path = "/tmp/manifest.toml";
+               run_id = "run-1";
+               binding_json = Some "{\"k\":1}";
+             }) );
+      ("/addon detach inst-1", Slash.Addon (Slash.Addon_detach "inst-1"));
+      ("/addon observe inst-1", Slash.Addon (Slash.Addon_observe "inst-1"));
+      ( "/addon act inst-1 {\"op\":\"ping\"}",
+        Slash.Addon
+          (Slash.Addon_act
+             { instance_id = "inst-1"; action_json = Some "{\"op\":\"ping\"}" }) );
+      ("/addon asks all", Slash.Addon (Slash.Addon_asks { include_resolved = true }));
+      ( "/browser scene 7 regions",
+        Slash.Browser
+          (Slash.Browser_scene
+             { client_id = None; tab_id = Some 7; view = `Regions }) );
+      ( "/browser screenshot 7",
+        Slash.Browser
+          (Slash.Browser_screenshot { client_id = None; tab_id = Some 7 }) );
+      ( "/browser interact click #go",
+        Slash.Browser
+          (Slash.Browser_interact
+             {
+               client_id = None;
+               tab_id = None;
+               action = Some "click";
+               selector = Some "#go";
+               text = None;
+             }) );
+      ( "/browser command {\"action\":\"reload\"}",
+        Slash.Browser (Slash.Browser_command "{\"action\":\"reload\"}") );
       ("/tools full", Slash.Tools (Some Slash.Tools_full));
       ("/clear", Slash.Clear);
       ("/theme arcade_hi", Slash.Theme (Some Theme.Arcade_hi));
@@ -364,6 +421,24 @@ let test_slash_22_commands () =
     (List.mem "/prompt param-set" (Slash.complete ~prefix:"/prompt p"));
   Alcotest.(check bool) "/preset completion lists restore" true
     (List.mem "/preset restore" (Slash.complete ~prefix:"/preset r"));
+  Alcotest.(check bool) "/lane completion lists exact-move" true
+    (List.mem "/lane exact-move" (Slash.complete ~prefix:"/lane exact-m"));
+  Alcotest.(check bool) "/addon completion lists attach" true
+    (List.mem "/addon attach" (Slash.complete ~prefix:"/addon at"));
+  Alcotest.(check bool) "/browser completion lists interact" true
+    (List.mem "/browser interact" (Slash.complete ~prefix:"/browser in"));
+  Alcotest.(check bool) "/lane bogus rejected" true
+    (match Slash.parse "/lane bogus" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "/addon bogus rejected" true
+    (match Slash.parse "/addon bogus" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "/browser bogus rejected" true
+    (match Slash.parse "/browser bogus" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
   Alcotest.(check bool) "/skill unknown subcommand rejected" true
     (match Slash.parse "/skill bogus" with
     | Error (Slash.Invalid_argument _) -> true
@@ -991,7 +1066,7 @@ let test_composer_modes_and_voice () =
   Alcotest.(check bool) "focused cursor visible" true cursor.visible;
   let hdr = grid_row_text grid ~y:0 in
   Alcotest.(check bool) "honest pending tx pill shown" true
-    (contains_sub ~needle:"처리 대기" ~haystack:hdr);
+    (contains_sub ~needle:"응답 대기" ~haystack:hdr);
   let braille_count = ref 0 in
   for x = 0 to 79 do
     match (Cell_grid.get grid ~x ~y:3).glyph with

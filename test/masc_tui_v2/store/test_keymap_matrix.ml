@@ -1490,7 +1490,24 @@ let test_axis_a_screen_dive_matrix () =
                   Nav.equal_infra_tab m.infra.active_tab
                     Nav.Infra_repos_changes
             in
-            if not is_valid_n then
+            let runtime_tab tab =
+              Option.is_none dive_before && Nav.equal_workspace m.nav.workspace Nav.Runtime
+              && Nav.equal_runtime_tab m.runtime.active_tab tab
+            in
+            let expected_form kind =
+              (match m'.inline_modal, m'.nav.overlay with
+              | Some modal, Some (Nav.Inline_action overlay) ->
+                  Nav.equal_inline_action_kind modal.kind kind && Nav.equal_inline_action_kind overlay kind
+              | _ -> false)
+              && not (has_cmd (function Cmd.Http_post _ -> true | _ -> false) cmds)
+            in
+            if runtime_tab Nav.Runtime_failover_lanes then
+              Alcotest.(check bool) (tag ^ " 'n' opens only lane creation") true
+                (expected_form Nav.Runtime_lane_create)
+            else if runtime_tab Nav.Runtime_addons_browser then
+              Alcotest.(check bool) (tag ^ " 'n' opens add-on attachment with no catalog selection") true
+                (expected_form Nav.Addon_attach_form)
+            else if not is_valid_n then
               Alcotest.(check bool) (tag ^ " 'n' never bleeds modal/overlay") true
                 (Option.is_none m'.inline_modal && Option.is_none m'.nav.overlay)
           end;
@@ -1978,7 +1995,7 @@ let test_dynamic_rendered_hint_contracts () =
         }
       in
       let pop_txt = grid_all_text (render_full ~model:pop_m) in
-      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/28" pop_txt;
+      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/31" pop_txt;
       assert_has ~label:(lang_s ^ "/Popup/TabHint") ~needle:"Tab" pop_txt;
       record_case ();
       let filt_m =

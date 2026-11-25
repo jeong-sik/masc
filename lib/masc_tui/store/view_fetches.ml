@@ -602,6 +602,19 @@ let fetches_for_dive ~force (m : Model.t) =
                && not m.runtime.skill_editor_tools_auth_denied)
            && needs_fetch ~force m.runtime.skill_editor_tools)
            Cmd.Get_skill_editor_tools
+  | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) ->
+      let detail_needed =
+        match m.runtime.exact_run_detail with
+        | Observed.Value { data = rid, _; stale = false; _ } ->
+            force || not (String.equal rid run_id)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.runtime.exact_run_detail
+      in
+      [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
@@ -976,6 +989,24 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.runtime.exact_lane_runs)
                (Cmd.Get_exact_lane_runs { lane = None; limit = Some 30 })
           |> add_if
+               ((force
+                || (not m.runtime.lanes_inventory_absent)
+                   && not m.runtime.lanes_inventory_auth_denied)
+               && needs_fetch ~force m.runtime.lanes_inventory)
+               Cmd.Get_lanes_inventory
+          |> add_if
+               ((force
+                || (not m.runtime.standalone_lanes_absent)
+                   && not m.runtime.standalone_lanes_auth_denied)
+               && needs_fetch ~force m.runtime.standalone_lanes)
+               Cmd.Get_standalone_lanes
+          |> add_if
+               (needs_fetch ~force m.runtime.verification_runs)
+               Cmd.Get_verification_runs
+          |> add_if
+               (needs_fetch ~force m.runtime.goal_verification_runs)
+               Cmd.Get_goal_verification_runs
+          |> add_if
                (needs_fetch ~force m.runtime.fusion_runs)
                Cmd.Get_fusion_runs
       | Nav.Runtime_fusion ->
@@ -1225,7 +1256,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                Cmd.Get_lane_addons
           |> add_if
                (needs_fetch ~force m.runtime.lane_addon_asks)
-               Cmd.Get_lane_addon_asks
+               (Cmd.Get_lane_addon_asks { include_resolved = false })
           |> add_if
                (needs_fetch ~force m.runtime.browser_lane)
                Cmd.Get_browser_lane)
@@ -1423,7 +1454,8 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
           ( Nav.Dive_keeper _
           | Nav.Dive_work _
           | Nav.Dive_knowledge _
-          | Nav.Dive_runtime (Nav.Fusion_dive _ | Nav.Skill_dive _)
+          | Nav.Dive_runtime
+              (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
           | Nav.Dive_infra _ ) ->
           false
       | None ->
@@ -1503,7 +1535,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
         ( Nav.Dive_keeper _
         | Nav.Dive_work _
         | Nav.Dive_knowledge _
-        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ )
     | None ->
         []

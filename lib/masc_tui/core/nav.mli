@@ -71,6 +71,7 @@ type runtime_dive_target =
   | Tool_dive of string
   | Fusion_dive of string
   | Skill_dive of string
+  | Exact_run_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
@@ -164,6 +165,22 @@ type inline_action_kind =
   | Prompt_override_form of { key : string }
   | Preset_create_form
   | Runtime_param_set_form of { param_key : string }
+  | Default_route_edit
+  | Lane_rename_form of { lane : string }
+  | Addon_decl_form of {
+      file_name : string;
+      mode : [ `Create | `Save ];
+      expected_source_revision : string option;
+    }
+  | Addon_act_form of {
+      instance_id : string;
+      expected_incarnation : string;
+    }
+  | Browser_interact_form of {
+      client_id : string;
+      tab_id : int;
+      expected_url : string option;
+    }
 
 type system_gate_kind =
   | Micro_viewport

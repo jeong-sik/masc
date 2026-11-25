@@ -1299,6 +1299,8 @@ let active_focus_label m =
             Say.make ~ko:("퓨전 · " ^ id) ~en:("FUSION · " ^ id)
         | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
             Say.make ~ko:("스킬 · " ^ ref_s) ~en:("SKILL · " ^ ref_s)
+        | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) ->
+            Say.make ~ko:("실행 · " ^ run_id) ~en:("RUN · " ^ run_id)
         | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
             Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
         | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
@@ -1943,8 +1945,8 @@ let inline_modal_for kind =
             key = "confirm_addon_detach";
             label =
               Say.make
-                ~ko:(Printf.sprintf "분리 확인 ('detach' 또는 '%s')" instance_id)
-                ~en:(Printf.sprintf "Confirm detach ('detach' or '%s')" instance_id);
+                ~ko:(Printf.sprintf "분리 확인: %s 입력" instance_id)
+                ~en:(Printf.sprintf "Confirm detach: type %s" instance_id);
             value = "";
             required = true;
             secret = false;
@@ -2175,6 +2177,116 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Default_route_edit ->
+        [
+          {
+            key = "runtime_ids";
+            label = Say.make ~ko:"기본 런타임 ID (하나)" ~en:"Default runtime ID (one)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Lane_rename_form { lane } ->
+        [
+          {
+            key = "to_lane";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "새 레인 이름 (현재: %s)" lane)
+                ~en:(Printf.sprintf "New lane name (current: %s)" lane);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Addon_decl_form { file_name; mode; _ } -> (
+        match mode with
+        | `Create ->
+            [
+              {
+                key = "file_name";
+                label =
+                  Say.make ~ko:"선언 파일명 (*.toml · create)"
+                    ~en:"Declaration filename (*.toml · create)";
+                value = file_name;
+                required = true;
+                secret = false;
+              };
+              {
+                key = "source_text";
+                label =
+                  Say.make ~ko:"TOML 선언 본문 (\\n 줄바꿈, \\\\ 백슬래시)"
+                    ~en:"TOML declaration source (\\n newline, \\\\ backslash)";
+                value = "";
+                required = true;
+                secret = false;
+              };
+            ]
+        | `Save ->
+            [
+              {
+                key = "source_text";
+                label =
+                  Say.make
+                    ~ko:
+                      (Printf.sprintf
+                         "%s TOML 본문 (\\n 줄바꿈, \\\\ 백슬래시)" file_name)
+                    ~en:
+                      (Printf.sprintf
+                         "%s TOML source (\\n newline, \\\\ backslash)" file_name);
+                value = "";
+                required = true;
+                secret = false;
+              };
+            ])
+    | Nav.Addon_act_form { instance_id; _ } ->
+        [
+          {
+            key = "action";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "애드온 액션 JSON 객체 (%s)" instance_id)
+                ~en:(Printf.sprintf "Addon action JSON object (%s)" instance_id);
+            value = "{}";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Browser_interact_form { tab_id; _ } ->
+        [
+          {
+            key = "action";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "동작 (click|fill|scroll|hover|double_click · #%d)" tab_id)
+                ~en:(Printf.sprintf "Action (click|fill|scroll|hover|double_click · #%d)" tab_id);
+            value = "click";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "selector";
+            label = Say.make ~ko:"CSS 선택자 (selector)" ~en:"CSS selector";
+            value = "";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "text";
+            label = Say.make ~ko:"입력 텍스트 (fill 용)" ~en:"Text (for fill)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "y";
+            label = Say.make ~ko:"스크롤 Y px (scroll 용)" ~en:"Scroll delta Y px (for scroll)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -2205,6 +2317,11 @@ let inline_modal_for kind =
     | Nav.Prompt_override_form _
     | Nav.Preset_create_form
     | Nav.Runtime_param_set_form _
+    | Nav.Default_route_edit
+    | Nav.Lane_rename_form _
+    | Nav.Addon_decl_form _
+    | Nav.Addon_act_form _
+    | Nav.Browser_interact_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -2348,8 +2465,8 @@ let modal_field_help ~key =
   | "confirm_addon_detach" ->
       Some
         (Say.make
-           ~ko:"'detach' 또는 인스턴스 ID 입력 후 Enter"
-           ~en:"Type 'detach' or instance ID + Enter to detach addon")
+           ~ko:"인스턴스 ID 입력 후 Enter"
+           ~en:"Type the instance ID, then press Enter to detach")
   | "setup_login_input" ->
       Some
         (Say.make
@@ -3703,6 +3820,17 @@ let active_view_ssot_mode m =
               [
                 observed_at_opt m.runtime.skill_editor_loaded;
                 observed_at_opt m.runtime.skills;
+              ];
+        }
+  | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.runtime.exact_run_detail;
+                observed_at_opt m.runtime.exact_lane_runs;
               ];
         }
   | Some (Nav.Dive_infra target) -> (

@@ -132,7 +132,17 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_prompts
   | Cmd.Get_presets
   | Cmd.Get_preset_show _
-  | Cmd.Get_runtime_params ->
+  | Cmd.Get_runtime_params
+  | Cmd.Get_lanes_inventory
+  | Cmd.Get_standalone_lanes
+  | Cmd.Get_exact_lane_run_detail _
+  | Cmd.Get_verification_runs
+  | Cmd.Get_goal_verification_runs
+  | Cmd.Get_keeper_board_attention_quarantines _
+  | Cmd.Get_lane_addon_declaration _
+  | Cmd.Get_lane_addon_action_status _
+  | Cmd.Get_lane_addon_slice _
+  | Cmd.Get_lane_addon_asks _ ->
       standard_timeout_sec
   (* Heavy tier: dashboard/analytics aggregates, disk/git/ripgrep scans,
      memory/keeper context & history reads, probes, and published artifacts *)
@@ -183,7 +193,6 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_skills
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
-  | Cmd.Get_lane_addon_asks
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
   | Cmd.Get_repositories
@@ -289,7 +298,16 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_preset_restore _
   | Cmd.Post_preset_delete _
   | Cmd.Post_runtime_param_set _
-  | Cmd.Post_runtime_param_clear _ ->
+  | Cmd.Post_runtime_param_clear _
+  | Cmd.Post_runtime_routing_action _
+  | Cmd.Post_runtime_config_raw_preview _
+  | Cmd.Post_board_attention_quarantine_recovery _
+  | Cmd.Post_lane_addon_declaration_save _
+  | Cmd.Post_lane_addon_observe _
+  | Cmd.Post_lane_addon_retain _
+  | Cmd.Post_lane_addon_evidence _
+  | Cmd.Post_lane_addon_act _
+  | Cmd.Post_lane_addon_operator _ ->
       standard_timeout_sec
   (* Heavy tier: probes, fusion launches, config patches, memory recovery,
      OAuth/GitHub/repo/browser CLI or external-service calls *)
@@ -307,7 +325,11 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_keeper_clear _
   | Cmd.Post_keeper_checkpoints _
   | Cmd.Post_mcp_tools_list _
-  | Cmd.Post_mcp_tools_call _ ->
+  | Cmd.Post_mcp_tools_call _
+  | Cmd.Post_browser_scene _
+  | Cmd.Post_browser_screenshot _
+  | Cmd.Post_browser_command _
+  | Cmd.Post_browser_interact _ ->
       heavy_timeout_sec
 
 let stream_spec_of_id = function
@@ -981,7 +1003,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_connectors
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
-  | Cmd.Get_lane_addon_asks
   | Cmd.Get_mcp_clients
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
@@ -1036,7 +1057,17 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_prompts
   | Cmd.Get_presets
   | Cmd.Get_preset_show _
-  | Cmd.Get_runtime_params ->
+  | Cmd.Get_runtime_params
+  | Cmd.Get_lanes_inventory
+  | Cmd.Get_standalone_lanes
+  | Cmd.Get_exact_lane_run_detail _
+  | Cmd.Get_verification_runs
+  | Cmd.Get_goal_verification_runs
+  | Cmd.Get_keeper_board_attention_quarantines _
+  | Cmd.Get_lane_addon_declaration _
+  | Cmd.Get_lane_addon_action_status _
+  | Cmd.Get_lane_addon_slice _
+  | Cmd.Get_lane_addon_asks _ ->
       Some base, Key_get path
 
 let rec execute_get t ~epoch req =
@@ -1694,13 +1725,6 @@ let rec execute_get t ~epoch req =
                    ~decode:Wire_runtime.decode_lane_addons)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_lane_addon_asks ->
-            let reply =
-              Msg.Reply_lane_addon_asks
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_runtime.decode_lane_addon_asks)
-            in
-            Msg.Http_reply { epoch; reply }
         | Cmd.Get_mcp_clients ->
             let reply =
               Msg.Reply_mcp_clients
@@ -2234,6 +2258,88 @@ let rec execute_get t ~epoch req =
               Msg.Reply_runtime_params
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_runtime_params)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lanes_inventory ->
+            let reply =
+              Msg.Reply_lanes_inventory
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_lane_inventory)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_standalone_lanes ->
+            let reply =
+              Msg.Reply_standalone_lanes
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_standalone_lanes)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_exact_lane_run_detail { run_id } ->
+            let reply =
+              Msg.Reply_exact_lane_run_detail
+                {
+                  run_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_exact_lane_run_detail;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_verification_runs ->
+            let reply =
+              Msg.Reply_verification_runs
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_verification_runs)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_goal_verification_runs ->
+            let reply =
+              Msg.Reply_goal_verification_runs
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_goal_verification_runs)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_board_attention_quarantines { keeper } ->
+            let reply =
+              Msg.Reply_keeper_board_attention_quarantines
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_board_attention_quarantines;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addon_declaration { source_path } ->
+            let reply =
+              Msg.Reply_lane_addon_declaration
+                {
+                  source_path;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_addon_declaration_document;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addon_action_status _ ->
+            let reply =
+              Msg.Reply_lane_addon_action_receipt
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_addon_action_receipt)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addon_slice _ ->
+            let reply =
+              Msg.Reply_lane_addon_slice
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_addon_slice)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addon_asks _ ->
+            let reply =
+              Msg.Reply_lane_addon_asks
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_lane_addon_asks)
             in
             Msg.Http_reply { epoch; reply }
       in
@@ -2938,7 +3044,7 @@ let execute_post t ~epoch req =
         | Cmd.Post_keeper_purge { keeper; _ } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_keeper_purge { keeper; result })
-        | Cmd.Post_lane_addon_attach _ ->
+        | Cmd.Post_lane_addon_attach { from_modal; _ } ->
             let result = post_ack t ~path ~body in
             Some
               (Msg.Reply_action_ack
@@ -2946,8 +3052,8 @@ let execute_post t ~epoch req =
                    label =
                      Say.make ~ko:"애드온 연결(Attach) 요청 완료"
                        ~en:"Lane addon attached";
-                   ack_scope = Msg.Ack_close_modal_and_refresh;
-                   for_modal = Some Nav.Addon_attach_form;
+                   ack_scope = (if from_modal then Msg.Ack_close_modal_and_refresh else Msg.Ack_refresh_view);
+                   for_modal = (if from_modal then Some Nav.Addon_attach_form else None);
                    result;
                  })
         | Cmd.Post_lane_addon_detach { instance_id } ->
@@ -3304,6 +3410,117 @@ let execute_post t ~epoch req =
             Some
               (Msg.Reply_runtime_param_mutation
                  { param_key; cleared = true; result })
+        | Cmd.Post_runtime_routing_action { label; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_runtime_routing_action { label; result })
+        | Cmd.Post_runtime_config_raw_preview _ ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_runtime_raw_preview
+            in
+            Some (Msg.Reply_runtime_config_raw_preview result)
+        | Cmd.Post_board_attention_quarantine_recovery
+            { keeper; partition_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_board_attention_quarantine_recovery
+                 { keeper; partition_id; result })
+        | Cmd.Post_lane_addon_declaration_save { file_name; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_addon_declaration_document
+            in
+            Some
+              (Msg.Reply_lane_addon_declaration_saved { file_name; result })
+        | Cmd.Post_lane_addon_observe { instance_id } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_lane_addon_mutation
+                 {
+                   label =
+                     Say.make ~ko:("애드온 관측 트리거: " ^ instance_id)
+                       ~en:("Addon observe triggered: " ^ instance_id);
+                   refresh_addons = true;
+                   result;
+                 })
+        | Cmd.Post_lane_addon_retain { instance_id } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_lane_addon_mutation
+                 {
+                   label =
+                     Say.make ~ko:("애드온 리소스 인수 완료: " ^ instance_id)
+                       ~en:("Addon resources retained: " ^ instance_id);
+                   refresh_addons = true;
+                   result;
+                 })
+        | Cmd.Post_lane_addon_evidence { instance_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_lane_addon_mutation
+                 {
+                   label =
+                     Say.make ~ko:("애드온 증거 보존/전달 완료: " ^ instance_id)
+                       ~en:("Addon evidence preserved/delivered: " ^ instance_id);
+                   refresh_addons = false;
+                   result;
+                 })
+        | Cmd.Post_lane_addon_act _ ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_addon_action_receipt
+            in
+            Some (Msg.Reply_lane_addon_action_receipt result)
+        | Cmd.Post_lane_addon_operator { instance_id; mode; _ } ->
+            let mode_label =
+              match mode with
+              | Wire_runtime.Operator_describe -> "describe"
+              | Wire_runtime.Operator_invoke _ -> "invoke"
+            in
+            let result =
+              post_and_decode t ~path ~body ~decode:(fun j -> Ok j)
+            in
+            Some
+              (Msg.Reply_lane_addon_operator
+                 { instance_id; mode_label; result })
+        | Cmd.Post_browser_scene { client_id; tab_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_browser_scene_response
+            in
+            Some (Msg.Reply_browser_scene { client_id; tab_id; result })
+        | Cmd.Post_browser_screenshot { client_id; tab_id } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_browser_screenshot_response
+            in
+            Some (Msg.Reply_browser_screenshot { client_id; tab_id; result })
+        | Cmd.Post_browser_command _ ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_browser_op_receipt
+            in
+            Some
+              (Msg.Reply_browser_op_receipt
+                 {
+                   label =
+                     Say.make ~ko:"브라우저 명령 완료" ~en:"Browser command completed";
+                   result;
+                 })
+        | Cmd.Post_browser_interact { action; tab_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_browser_op_receipt
+            in
+            Some
+              (Msg.Reply_browser_op_receipt
+                 {
+                   label =
+                     Say.make
+                       ~ko:(Printf.sprintf "브라우저 인터랙션 완료 (%s · #%d)" action tab_id)
+                       ~en:(Printf.sprintf "Browser interact ok (%s · #%d)" action tab_id);
+                   result;
+                 })
       in
       Option.iter
         (fun reply ->

@@ -1,6 +1,6 @@
 (** Persistent bottom composer widget supporting collapsed 1-line mode, active
     multi-line editing, Compact auto-fold footer pill, per-keeper draft badges,
-    honest pending transmission pills ([전송 대기]/[전송 중]/[처리 대기]/[확인 중]),
+    honest pending transmission pills ([전송 대기]/[전송 중]/[응답 대기]/[확인 중]),
     live Voice PTT Braille mic waveform, and [@] keeper / [/] slash popups.
 
     v2.5 visual polish: refined [surface_1]/[surface_2] elevation, calm
@@ -24,7 +24,7 @@ type pending_tx =
   | Tx_queued           (** 전송 대기 / Queued *)
   | Tx_queued_count of int (** 대기열 N / Queued N *)
   | Tx_sending          (** 전송 중 / Sending *)
-  | Tx_awaiting_turn    (** 처리 대기 / Awaiting turn *)
+  | Tx_awaiting_turn    (** 응답 대기 / Waiting for response *)
   | Tx_thinking         (** 추론 중… / Thinking… *)
   | Tx_tool_running of string
   | Tx_tool_waiting of string
@@ -74,7 +74,7 @@ val empty : target_keeper:string -> state
 
 val pending_tx_label : pending_tx -> Say.t option
 val pending_tx_badge : pending_tx -> (Glyph.t * Theme.status_token * Say.t) option
-(** Exact honest transmission state copy ([전송 대기] / [전송 중] / [처리 대기] /
+(** Exact honest transmission state copy ([전송 대기] / [전송 중] / [응답 대기] /
     [확인 중]) per [tui-chat-design/SKILL.md], or [None] when {!Tx_idle}. *)
 
 val resolve_mode : breakpoint:Layout.breakpoint -> state -> mode

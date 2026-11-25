@@ -98,6 +98,27 @@ type t = {
   setup_login_output_lines : string list;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
+  lanes_inventory : Wire_runtime.lane_inventory_snapshot Observed.t;
+  lanes_inventory_absent : bool;
+  lanes_inventory_auth_denied : bool;
+  standalone_lanes : Wire_runtime.standalone_lanes_snapshot Observed.t;
+  standalone_lanes_absent : bool;
+  standalone_lanes_auth_denied : bool;
+  exact_run_detail : (string * Wire_runtime.exact_lane_run_detail) Observed.t;
+  verification_runs : Wire_runtime.verifier_runs_snapshot Observed.t;
+  goal_verification_runs : Wire_runtime.verifier_runs_snapshot Observed.t;
+  board_attention_quarantines :
+    (string * Wire_runtime.board_attention_quarantines_snapshot) Observed.t;
+  runtime_raw_preview : Wire_runtime.runtime_raw_preview_result Observed.t;
+  addon_declaration_doc :
+    (string * Wire_runtime.addon_declaration_document) Observed.t;
+  pending_addon_decl_path : string option;
+  addon_last_action_receipt : Wire_runtime.addon_action_receipt Observed.t;
+  addon_slice : Wire_runtime.addon_slice_snapshot Observed.t;
+  addon_req_seq : int;
+  browser_scene : (int * Wire_runtime.browser_scene_snapshot) Observed.t;
+  browser_screenshot : (int * Wire_runtime.browser_screenshot_meta) Observed.t;
+  browser_last_receipt : Wire_runtime.browser_op_receipt Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
   fusion_replay : Wire_runtime.fusion_replay_status option;
   fusion_historical_evidence : Wire_runtime.fusion_historical_evidence list;
@@ -287,6 +308,25 @@ let empty =
     setup_login_output_lines = [];
     runtime_probe = Observed.unreported;
     exact_lane_runs = Observed.unreported;
+    lanes_inventory = Observed.unreported;
+    lanes_inventory_absent = false;
+    lanes_inventory_auth_denied = false;
+    standalone_lanes = Observed.unreported;
+    standalone_lanes_absent = false;
+    standalone_lanes_auth_denied = false;
+    exact_run_detail = Observed.absent;
+    verification_runs = Observed.unreported;
+    goal_verification_runs = Observed.unreported;
+    board_attention_quarantines = Observed.absent;
+    runtime_raw_preview = Observed.absent;
+    addon_declaration_doc = Observed.absent;
+    pending_addon_decl_path = None;
+    addon_last_action_receipt = Observed.absent;
+    addon_slice = Observed.absent;
+    addon_req_seq = 1;
+    browser_scene = Observed.absent;
+    browser_screenshot = Observed.absent;
+    browser_last_receipt = Observed.absent;
     fusion_runs = Observed.unreported;
     fusion_replay = None;
     fusion_historical_evidence = [];
@@ -472,6 +512,7 @@ let set_tab active_tab t =
   {
     t with
     active_tab;
+    pending_addon_decl_path = None;
     selected_index = 0;
     scroll_offset = 0;
     quota_scroll_offset = 0;
@@ -2549,6 +2590,26 @@ let mark_stale_all t =
     setup_inventory = Observed.mark_stale t.setup_inventory;
     runtime_probe = Observed.mark_stale t.runtime_probe;
     exact_lane_runs = Observed.mark_stale t.exact_lane_runs;
+    lanes_inventory = Observed.mark_stale t.lanes_inventory;
+    lanes_inventory_absent = false;
+    lanes_inventory_auth_denied = false;
+    standalone_lanes = Observed.mark_stale t.standalone_lanes;
+    standalone_lanes_absent = false;
+    standalone_lanes_auth_denied = false;
+    exact_run_detail = Observed.mark_stale t.exact_run_detail;
+    verification_runs = Observed.mark_stale t.verification_runs;
+    goal_verification_runs = Observed.mark_stale t.goal_verification_runs;
+    board_attention_quarantines =
+      Observed.mark_stale t.board_attention_quarantines;
+    runtime_raw_preview = Observed.mark_stale t.runtime_raw_preview;
+    addon_declaration_doc = Observed.mark_stale t.addon_declaration_doc;
+    pending_addon_decl_path = None;
+    addon_last_action_receipt =
+      Observed.mark_stale t.addon_last_action_receipt;
+    addon_slice = Observed.mark_stale t.addon_slice;
+    browser_scene = Observed.mark_stale t.browser_scene;
+    browser_screenshot = Observed.mark_stale t.browser_screenshot;
+    browser_last_receipt = Observed.mark_stale t.browser_last_receipt;
     fusion_runs = Observed.mark_stale t.fusion_runs;
     fusion_detail = Observed.mark_stale t.fusion_detail;
     fusion_board_evidence = Observed.mark_stale t.fusion_board_evidence;
@@ -2757,3 +2818,68 @@ let apply_mcp_call_result ~observed_at res t =
 let next_mcp_rpc_id t =
   let id = t.mcp_next_rpc_id in
   ({ t with mcp_next_rpc_id = id + 1 }, id)
+
+let apply_lanes_inventory ~observed_at inv t =
+  {
+    t with
+    lanes_inventory = Observed.value ~observed_at inv;
+    lanes_inventory_absent = false;
+    lanes_inventory_auth_denied = false;
+  }
+
+let apply_standalone_lanes ~observed_at snap t =
+  {
+    t with
+    standalone_lanes = Observed.value ~observed_at snap;
+    standalone_lanes_absent = false;
+    standalone_lanes_auth_denied = false;
+  }
+
+let apply_exact_run_detail ~observed_at ~run_id detail t =
+  { t with exact_run_detail = Observed.value ~observed_at (run_id, detail) }
+
+let exact_run_detail_for ~run_id t =
+  match Observed.to_option t.exact_run_detail with
+  | Some (id, d) when String.equal id run_id -> Some d
+  | Some _ | None -> None
+
+let apply_verification_runs ~observed_at snap t =
+  { t with verification_runs = Observed.value ~observed_at snap }
+
+let apply_goal_verification_runs ~observed_at snap t =
+  { t with goal_verification_runs = Observed.value ~observed_at snap }
+
+let apply_board_attention_quarantines ~observed_at ~keeper snap t =
+  {
+    t with
+    board_attention_quarantines = Observed.value ~observed_at (keeper, snap);
+  }
+
+let apply_runtime_raw_preview ~observed_at res t =
+  { t with runtime_raw_preview = Observed.value ~observed_at res }
+
+let apply_addon_declaration_doc ~observed_at ~source_path doc t =
+  {
+    t with
+    addon_declaration_doc = Observed.value ~observed_at (source_path, doc);
+    pending_addon_decl_path = None;
+  }
+
+let apply_addon_action_receipt ~observed_at recp t =
+  { t with addon_last_action_receipt = Observed.value ~observed_at recp }
+
+let apply_addon_slice ~observed_at sl t =
+  { t with addon_slice = Observed.value ~observed_at sl }
+
+let next_addon_request_id t =
+  let n = t.addon_req_seq in
+  ({ t with addon_req_seq = n + 1 }, Printf.sprintf "tui-addon-req-%d" n)
+
+let apply_browser_scene ~observed_at ~tab_id sc t =
+  { t with browser_scene = Observed.value ~observed_at (tab_id, sc) }
+
+let apply_browser_screenshot ~observed_at ~tab_id shot t =
+  { t with browser_screenshot = Observed.value ~observed_at (tab_id, shot) }
+
+let apply_browser_op_receipt ~observed_at recp t =
+  { t with browser_last_receipt = Observed.value ~observed_at recp }

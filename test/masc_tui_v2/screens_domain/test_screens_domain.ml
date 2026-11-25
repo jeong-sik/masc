@@ -3740,9 +3740,16 @@ let test_feature_wave1_domain_renders () =
       runtime = Runtime_store.set_tab Nav.Runtime_addons_browser m_base.runtime;
     }
   in
-  let g_ab =
+  let render_addons model =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_runtime.render ~model:m_ab ~cache ~rect gr)
+        Screen_runtime.render ~model ~cache ~rect gr)
+  in
+  let g_ab =
+    render_addons
+      { m_ab with
+        freshness =
+          { m_ab.freshness with
+            observer = Health.Live { last_event_ns = now_mono; revision = 1 } } }
   in
   assert_grid_invariants ~label:"Wave1/AddonsBrowser" g_ab;
   let txt_ab = grid_all_text g_ab in
@@ -3756,6 +3763,11 @@ let test_feature_wave1_domain_renders () =
   Alcotest.(check bool) "Mixed-mode badges SYNCED & SNAPSHOT present" true
     (contains_sub ~needle:"SYNCED" ~haystack:txt_ab
      && contains_sub ~needle:"SNAPSHOT" ~haystack:txt_ab);
+  let connecting = grid_all_text (render_addons m_ab) in
+  Alcotest.(check bool) "Connecting observer and browser snapshot are visible together"
+    true
+    (contains_sub ~needle:"SYNCING" ~haystack:connecting
+     && contains_sub ~needle:"SNAPSHOT" ~haystack:connecting);
 
   (* 3. Infra Activity & Logs renders SRC column (LOG/EVT) & right detail for Entry_event *)
   let m_logs =
@@ -4033,6 +4045,67 @@ let test_wave2_tools_artifacts_board_renders () =
           ~model:{ m_base with runtime = rt_sd } ~cache ~rect gr)
   in
   assert_grid_invariants ~label:"Wave4L3/SkillDive" g_sd;
+  let rt_l4 =
+    rt_sd
+    |> Runtime_store.apply_exact_run_detail ~observed_at:now_mono ~run_id:"run-42"
+         {
+           run_id = "run-42";
+           run_kind = "exact_output";
+           lane = "verifier";
+           subject_id = Some "task-1";
+           actor = Some "alpha";
+           status = "succeeded";
+           started_at = Some 1700000000.0;
+           elapsed_s = Some 1.25;
+           selected_slot = Some "s1";
+           skill_evidence_state = Some "verified";
+           input_json = Some (`Assoc [ ("prompt", `String "ok") ]);
+           output_json = Some (`Assoc [ ("verdict", `String "pass") ]);
+           raw_json = `Assoc [ ("run_id", `String "run-42") ];
+         }
+    |> Runtime_store.apply_lane_addon_asks ~observed_at:now_mono
+         [
+           {
+             declaration_id = "decl-1";
+             title = "Demo";
+             ask_id = "ask-1";
+             asked_at = 1700000000.0;
+             context = None;
+             questions =
+               [
+                 {
+                   question_id = "q-1";
+                   header = "Confirmation";
+                   prompt = "Confirm?";
+                   mode = Wire_work.Ask_single;
+                   allow_free_text = false;
+                   free_text_hint = None;
+                   choices = [];
+                 };
+               ];
+             resolution = Wire_work.Ask_open;
+           };
+         ]
+    |> Runtime_store.apply_browser_op_receipt ~observed_at:now_mono
+         { ok = true; summary = "click done"; data_json = None; error = None }
+  in
+  let g_erd =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render_dive ~target:(Nav.Exact_run_dive "run-42")
+          ~model:{ m_base with runtime = rt_l4 } ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave4L4/ExactRunDive" g_erd;
+  let g_ab =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render
+          ~model:
+            {
+              m_base with
+              runtime = Runtime_store.set_tab Nav.Runtime_addons_browser rt_l4;
+            }
+          ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave4L4/AddonsBrowserOperator" g_ab;
 
   (* 2. Rich HTML Artifact rendering: strips <script>, aligns <table>, toggles [v] Raw, shows Checked/Shared *)
   let sel_art = Option.get (Knowledge_store.selected_artifact m_base.knowledge) in

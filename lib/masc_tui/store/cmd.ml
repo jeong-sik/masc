@@ -111,7 +111,6 @@ type get_request =
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
-  | Get_lane_addon_asks
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -189,6 +188,22 @@ type get_request =
   | Get_presets
   | Get_preset_show of { name : string }
   | Get_runtime_params
+  | Get_lanes_inventory
+  | Get_standalone_lanes
+  | Get_exact_lane_run_detail of { run_id : string }
+  | Get_verification_runs
+  | Get_goal_verification_runs
+  | Get_keeper_board_attention_quarantines of { keeper : string }
+  | Get_lane_addon_declaration of { source_path : string }
+  | Get_lane_addon_action_status of {
+      instance_id : string;
+      request_id : string;
+    }
+  | Get_lane_addon_slice of {
+      run_id : string option;
+      lane_id : string option;
+    }
+  | Get_lane_addon_asks of { include_resolved : bool }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -390,6 +405,7 @@ type post_request =
       manifest_path : string;
       run_id : string;
       binding : Yojson.Safe.t;
+      from_modal : bool;
     }
   | Post_lane_addon_detach of { instance_id : string }
   | Post_lane_addon_action of {
@@ -488,6 +504,60 @@ type post_request =
   | Post_preset_delete of { name : string }
   | Post_runtime_param_set of { param_key : string; value : Yojson.Safe.t }
   | Post_runtime_param_clear of { param_key : string }
+  | Post_runtime_routing_action of {
+      action : Wire_runtime.runtime_routing_action;
+      label : Say.t;
+    }
+  | Post_runtime_config_raw_preview of { source_text : string }
+  | Post_board_attention_quarantine_recovery of {
+      keeper : string;
+      partition_id : string;
+      candidate_id : string;
+      expected_quarantine_id : string;
+    }
+  | Post_lane_addon_declaration_save of {
+      mode : [ `Create | `Save ];
+      file_name : string;
+      source_text : string;
+      expected_source_revision : string option;
+    }
+  | Post_lane_addon_observe of { instance_id : string }
+  | Post_lane_addon_retain of { instance_id : string }
+  | Post_lane_addon_evidence of {
+      instance_id : string;
+      row_ids : string list;
+      keeper_name : string option;
+      broadcast : bool;
+      request_id : string option;
+    }
+  | Post_lane_addon_act of {
+      instance_id : string;
+      expected_incarnation : string;
+      request_id : string;
+      action : Yojson.Safe.t;
+    }
+  | Post_lane_addon_operator of {
+      instance_id : string;
+      expected_incarnation : string;
+      mode : Wire_runtime.addon_operator_mode;
+    }
+  | Post_browser_scene of {
+      client_id : string;
+      tab_id : int;
+      view : [ `Content | `Regions ];
+    }
+  | Post_browser_screenshot of { client_id : string; tab_id : int }
+  | Post_browser_command of { arguments : Yojson.Safe.t }
+  | Post_browser_interact of {
+      client_id : string;
+      tab_id : int;
+      expected_url : string option;
+      action : string;
+      selector : string option;
+      text : string option;
+      x : int option;
+      y : int option;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -672,7 +742,6 @@ let get_request_path = function
   | Get_connectors -> Wire_runtime.connectors_path
   | Get_browser_lane -> Wire_runtime.browser_lane_path
   | Get_lane_addons -> Wire_runtime.lane_addons_path
-  | Get_lane_addon_asks -> Wire_runtime.lane_addon_asks_path ()
   | Get_mcp_clients -> Wire_runtime.mcp_clients_path
   | Get_sandboxes -> Wire_infra.infra_sandboxes_path
   | Get_keeper_sandbox { keeper } ->
@@ -756,6 +825,22 @@ let get_request_path = function
   | Get_presets -> Wire_runtime.presets_path
   | Get_preset_show { name } -> Wire_runtime.preset_show_path ~name
   | Get_runtime_params -> Wire_runtime.runtime_params_path
+  | Get_lanes_inventory -> Wire_runtime.lanes_inventory_path
+  | Get_standalone_lanes -> Wire_runtime.standalone_lanes_path
+  | Get_exact_lane_run_detail { run_id } ->
+      Wire_runtime.exact_lane_run_detail_path ~run_id
+  | Get_verification_runs -> Wire_runtime.verification_runs_path
+  | Get_goal_verification_runs -> Wire_runtime.goal_verification_runs_path
+  | Get_keeper_board_attention_quarantines { keeper } ->
+      Wire_runtime.keeper_board_attention_quarantines_path ~keeper
+  | Get_lane_addon_declaration { source_path } ->
+      Wire_runtime.lane_addon_declaration_read_path ~source_path
+  | Get_lane_addon_action_status { instance_id; request_id } ->
+      Wire_runtime.lane_addon_action_status_path ~instance_id ~request_id
+  | Get_lane_addon_slice { run_id; lane_id } ->
+      Wire_runtime.lane_addon_slice_path ?run_id ?lane_id ()
+  | Get_lane_addon_asks { include_resolved } ->
+      Wire_runtime.lane_addon_asks_path ~include_resolved ()
 
 let post_request_path = function
   | Post_ask_answer _ -> Wire_work.keeper_ask_answer_path
@@ -861,6 +946,23 @@ let post_request_path = function
   | Post_preset_delete _ -> Wire_runtime.preset_delete_path
   | Post_runtime_param_set _ -> Wire_runtime.runtime_param_set_path
   | Post_runtime_param_clear _ -> Wire_runtime.runtime_param_clear_path
+  | Post_runtime_routing_action _ -> Wire_runtime.runtime_routing_path
+  | Post_runtime_config_raw_preview _ ->
+      Wire_runtime.runtime_config_raw_preview_path
+  | Post_board_attention_quarantine_recovery { keeper; partition_id; _ } ->
+      Wire_runtime.keeper_board_attention_quarantine_recovery_path ~keeper
+        ~partition_id
+  | Post_lane_addon_declaration_save _ ->
+      Wire_runtime.lane_addon_declaration_save_path
+  | Post_lane_addon_observe _ -> Wire_runtime.lane_addon_observe_path
+  | Post_lane_addon_retain _ -> Wire_runtime.lane_addon_retain_path
+  | Post_lane_addon_evidence _ -> Wire_runtime.lane_addon_evidence_path
+  | Post_lane_addon_act _ -> Wire_runtime.lane_addon_actions_path
+  | Post_lane_addon_operator _ -> Wire_runtime.lane_addon_operator_path
+  | Post_browser_scene _ -> Wire_runtime.browser_lane_scene_path
+  | Post_browser_screenshot _ -> Wire_runtime.browser_lane_screenshot_path
+  | Post_browser_command _ -> Wire_runtime.browser_lane_command_path
+  | Post_browser_interact _ -> Wire_runtime.browser_lane_interact_path
 
 let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
@@ -941,6 +1043,19 @@ let mcp_tool_name_of_post_request = function
   | Post_keeper_checkpoints _
   | Post_keeper_operator_note _
   | Post_keeper_run_next _
+  | Post_runtime_routing_action _
+  | Post_runtime_config_raw_preview _
+  | Post_board_attention_quarantine_recovery _
+  | Post_lane_addon_declaration_save _
+  | Post_lane_addon_observe _
+  | Post_lane_addon_retain _
+  | Post_lane_addon_evidence _
+  | Post_lane_addon_act _
+  | Post_lane_addon_operator _
+  | Post_browser_scene _
+  | Post_browser_screenshot _
+  | Post_browser_command _
+  | Post_browser_interact _
   | Post_lane_addon_ask_answer _ ->
       None
 
@@ -1117,7 +1232,7 @@ let post_request_body = function
       Wire_fleet.encode_keeper_lifecycle_body ?expected_workspace op
   | Post_keeper_purge { keeper; expected_workspace } ->
       Wire_fleet.encode_keeper_purge ~agent_name:keeper ~expected_workspace
-  | Post_lane_addon_attach { manifest_path; run_id; binding } ->
+  | Post_lane_addon_attach { manifest_path; run_id; binding; _ } ->
       Wire_runtime.encode_lane_addon_attach ~manifest_path ~run_id ~binding
   | Post_lane_addon_detach { instance_id } ->
       Wire_runtime.encode_lane_addon_detach ~instance_id
@@ -1189,6 +1304,41 @@ let post_request_body = function
       Wire_runtime.encode_runtime_param_set ~param_key ~value
   | Post_runtime_param_clear { param_key } ->
       Wire_runtime.encode_runtime_param_clear ~param_key
+  | Post_runtime_routing_action { action; _ } ->
+      Wire_runtime.encode_runtime_routing_action action
+  | Post_runtime_config_raw_preview { source_text } ->
+      Wire_runtime.encode_runtime_raw_preview ~source_text
+  | Post_board_attention_quarantine_recovery
+      { candidate_id; expected_quarantine_id; _ } ->
+      Wire_runtime.encode_board_attention_quarantine_recovery ~candidate_id
+        ~expected_quarantine_id
+  | Post_lane_addon_declaration_save
+      { mode; file_name; source_text; expected_source_revision } ->
+      Wire_runtime.encode_addon_declaration_save ~mode ~file_name ~source_text
+        ~expected_source_revision
+  | Post_lane_addon_observe { instance_id }
+  | Post_lane_addon_retain { instance_id } ->
+      Wire_runtime.encode_lane_addon_detach ~instance_id
+  | Post_lane_addon_evidence
+      { instance_id; row_ids; keeper_name; broadcast; request_id } ->
+      Wire_runtime.encode_addon_evidence ~instance_id ~row_ids ?keeper_name
+        ~broadcast ?request_id ()
+  | Post_lane_addon_act
+      { instance_id; expected_incarnation; request_id; action } ->
+      Wire_runtime.encode_lane_addon_action ~instance_id ~expected_incarnation
+        ~request_id ~action
+  | Post_lane_addon_operator { instance_id; expected_incarnation; mode } ->
+      Wire_runtime.encode_addon_operator ~instance_id ~expected_incarnation
+        ~mode
+  | Post_browser_scene { client_id; tab_id; view } ->
+      Wire_runtime.encode_browser_scene_request ~client_id ~tab_id ~view
+  | Post_browser_screenshot { client_id; tab_id } ->
+      Wire_runtime.encode_browser_screenshot_request ~client_id ~tab_id
+  | Post_browser_command { arguments } -> arguments
+  | Post_browser_interact
+      { client_id; tab_id; expected_url; action; selector; text; x; y } ->
+      Wire_runtime.encode_browser_interact_request ~client_id ~tab_id
+        ?expected_url ~action ?selector ?text ?x ?y ()
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

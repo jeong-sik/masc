@@ -109,6 +109,27 @@ type t = {
   setup_login_output_lines : string list;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
+  lanes_inventory : Wire_runtime.lane_inventory_snapshot Observed.t;
+  lanes_inventory_absent : bool;
+  lanes_inventory_auth_denied : bool;
+  standalone_lanes : Wire_runtime.standalone_lanes_snapshot Observed.t;
+  standalone_lanes_absent : bool;
+  standalone_lanes_auth_denied : bool;
+  exact_run_detail : (string * Wire_runtime.exact_lane_run_detail) Observed.t;
+  verification_runs : Wire_runtime.verifier_runs_snapshot Observed.t;
+  goal_verification_runs : Wire_runtime.verifier_runs_snapshot Observed.t;
+  board_attention_quarantines :
+    (string * Wire_runtime.board_attention_quarantines_snapshot) Observed.t;
+  runtime_raw_preview : Wire_runtime.runtime_raw_preview_result Observed.t;
+  addon_declaration_doc :
+    (string * Wire_runtime.addon_declaration_document) Observed.t;
+  pending_addon_decl_path : string option;
+  addon_last_action_receipt : Wire_runtime.addon_action_receipt Observed.t;
+  addon_slice : Wire_runtime.addon_slice_snapshot Observed.t;
+  addon_req_seq : int;
+  browser_scene : (int * Wire_runtime.browser_scene_snapshot) Observed.t;
+  browser_screenshot : (int * Wire_runtime.browser_screenshot_meta) Observed.t;
+  browser_last_receipt : Wire_runtime.browser_op_receipt Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
   fusion_replay : Wire_runtime.fusion_replay_status option;
   fusion_historical_evidence : Wire_runtime.fusion_historical_evidence list;
@@ -582,3 +603,53 @@ val filtered_runtime_params : t -> Wire_runtime.runtime_param_item list
 val selected_runtime_param : t -> Wire_runtime.runtime_param_item option
 val filtered_async_requests : t -> Wire_runtime.async_request_row list
 val selected_async_request : t -> Wire_runtime.async_request_row option
+
+val apply_lanes_inventory :
+  observed_at:Clock.Mono.t -> Wire_runtime.lane_inventory_snapshot -> t -> t
+val apply_standalone_lanes :
+  observed_at:Clock.Mono.t -> Wire_runtime.standalone_lanes_snapshot -> t -> t
+val apply_exact_run_detail :
+  observed_at:Clock.Mono.t ->
+  run_id:string ->
+  Wire_runtime.exact_lane_run_detail ->
+  t ->
+  t
+val exact_run_detail_for :
+  run_id:string -> t -> Wire_runtime.exact_lane_run_detail option
+val apply_verification_runs :
+  observed_at:Clock.Mono.t -> Wire_runtime.verifier_runs_snapshot -> t -> t
+val apply_goal_verification_runs :
+  observed_at:Clock.Mono.t -> Wire_runtime.verifier_runs_snapshot -> t -> t
+val apply_board_attention_quarantines :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_runtime.board_attention_quarantines_snapshot ->
+  t ->
+  t
+val apply_runtime_raw_preview :
+  observed_at:Clock.Mono.t -> Wire_runtime.runtime_raw_preview_result -> t -> t
+val apply_addon_declaration_doc :
+  observed_at:Clock.Mono.t ->
+  source_path:string ->
+  Wire_runtime.addon_declaration_document ->
+  t ->
+  t
+val apply_addon_action_receipt :
+  observed_at:Clock.Mono.t -> Wire_runtime.addon_action_receipt -> t -> t
+val apply_addon_slice :
+  observed_at:Clock.Mono.t -> Wire_runtime.addon_slice_snapshot -> t -> t
+val next_addon_request_id : t -> t * string
+val apply_browser_scene :
+  observed_at:Clock.Mono.t ->
+  tab_id:int ->
+  Wire_runtime.browser_scene_snapshot ->
+  t ->
+  t
+val apply_browser_screenshot :
+  observed_at:Clock.Mono.t ->
+  tab_id:int ->
+  Wire_runtime.browser_screenshot_meta ->
+  t ->
+  t
+val apply_browser_op_receipt :
+  observed_at:Clock.Mono.t -> Wire_runtime.browser_op_receipt -> t -> t

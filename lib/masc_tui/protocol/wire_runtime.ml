@@ -131,16 +131,69 @@ let connector_bind_path ~connector =
   "/api/v1/gate/connector/bind?name=" ^ percent_encode (String.trim connector)
 let browser_lane_path = "/api/v1/dashboard/browser-lane/clients"
 let browser_lane_read_path = "/api/v1/dashboard/browser-lane/read"
+let browser_lane_scene_path = "/api/v1/dashboard/browser-lane/scene"
+let browser_lane_screenshot_path = "/api/v1/dashboard/browser-lane/screenshot"
+let browser_lane_command_path = "/api/v1/dashboard/browser-lane/command"
+let browser_lane_interact_path = "/api/v1/dashboard/browser-lane/interact"
 let lane_addons_path = "/api/v1/lane-addons"
+let runtime_config_raw_preview_path = "/api/v1/runtime/config/raw/preview"
+let lanes_inventory_path = "/api/v1/lanes"
+let standalone_lanes_path = "/api/v1/dashboard/standalone-lanes"
+
+let exact_lane_run_detail_path ~run_id =
+  "/api/v1/dashboard/exact-lane-runs/" ^ percent_encode (String.trim run_id)
+
+let verification_runs_path = "/api/v1/dashboard/verification-runs"
+let goal_verification_runs_path = "/api/v1/dashboard/goal-verification-runs"
+
+let keeper_board_attention_quarantines_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/board-attention/quarantines"
+    (percent_encode (String.trim keeper))
+
+let keeper_board_attention_quarantine_recovery_path ~keeper ~partition_id =
+  Printf.sprintf "/api/v1/keepers/%s/board-attention/quarantines/%s/recovery"
+    (percent_encode (String.trim keeper))
+    (percent_encode (String.trim partition_id))
+
+let lane_addon_declaration_read_path ~source_path =
+  "/api/v1/lane-addons/declaration?source_path="
+  ^ percent_encode (String.trim source_path)
+
+let lane_addon_declaration_save_path = "/api/v1/lane-addons/declaration"
 let lane_addon_attach_path = "/api/v1/lane-addons/attach"
 let lane_addon_detach_path = "/api/v1/lane-addons/detach"
+let lane_addon_observe_path = "/api/v1/lane-addons/observe"
+let lane_addon_retain_path = "/api/v1/lane-addons/retain"
+let lane_addon_evidence_path = "/api/v1/lane-addons/evidence"
 let lane_addon_actions_path = "/api/v1/lane-addons/actions"
+
+let lane_addon_action_status_path ~instance_id ~request_id =
+  Printf.sprintf "/api/v1/lane-addons/actions?instance_id=%s&request_id=%s"
+    (percent_encode (String.trim instance_id))
+    (percent_encode (String.trim request_id))
+
+let lane_addon_slice_path ?run_id ?lane_id () =
+  let params =
+    (match run_id with
+    | Some s when not (String.equal (String.trim s) "") ->
+        [ "run_id=" ^ percent_encode (String.trim s) ]
+    | Some _ | None -> [])
+    @
+    match lane_id with
+    | Some s when not (String.equal (String.trim s) "") ->
+        [ "lane_id=" ^ percent_encode (String.trim s) ]
+    | Some _ | None -> []
+  in
+  match params with
+  | [] -> "/api/v1/lane-addons/slice"
+  | xs -> "/api/v1/lane-addons/slice?" ^ String.concat "&" xs
 
 let lane_addon_asks_path ?(include_resolved = false) () =
   if include_resolved then "/api/v1/lane-addons/asks?include_resolved=true"
   else "/api/v1/lane-addons/asks?include_resolved=false"
 
 let lane_addon_ask_answer_path = "/api/v1/lane-addons/ask-answer"
+let lane_addon_operator_path = "/api/v1/lane-addons/operator"
 let mcp_clients_path = "/api/v1/dashboard/clients"
 
 type usage_window_kind =
@@ -3539,6 +3592,7 @@ let decode_mcp_clients json =
 
 type runtime_config_raw_meta = {
   source_revision : string;
+  source_text : string option;
   assignments : (string * string) list;
 }
 
@@ -3603,10 +3657,15 @@ let parse_runtime_assignments_from_toml source_text =
 let decode_runtime_config_raw_meta json =
   let* _, body = unwrap_v2_or_raw json in
   let* source_revision = required_nonblank_string body "source_revision" in
-  let from_toml =
+  let source_text =
     match optional_string_field body "source_text" with
-    | Ok (Some text) -> parse_runtime_assignments_from_toml text
-    | Ok None | Error _ -> []
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let from_toml =
+    match source_text with
+    | Some text -> parse_runtime_assignments_from_toml text
+    | None -> []
   in
   let assignments =
     if from_toml <> [] then from_toml
@@ -3629,7 +3688,7 @@ let decode_runtime_config_raw_meta json =
           | Error _ -> [])
       | Ok None | Error _ -> []
   in
-  Ok { source_revision; assignments }
+  Ok { source_revision; source_text; assignments }
 
 let encode_runtime_assignment ~keeper_name ~runtime_id ~source_revision
     ~previous_runtime_id () =
@@ -5950,3 +6009,1172 @@ let decode_runtime_params json =
   let* raw = required_list_field body "parameters" in
   let* parameters = decode_list "parameters" decode_runtime_param_item raw in
   Ok { parameters }
+
+(* ── Wave 4 Layer 4: Runtime Lane CRUD, Exact Run Detail, Verifier,
+   Quarantines, Lane Add-ons Operator & Browser Operator ── *)
+
+type runtime_routing_action =
+  | Route_create of { lane : string; runtime_ids : string list }
+  | Route_rename of { lane : string; to_lane : string }
+  | Route_set_default of { runtime_id : string }
+  | Route_set_named of {
+      lane : string;
+      runtime_ids : string list;
+      expected_source_revision : string option;
+    }
+  | Route_set_media_failover of { runtime_ids : string list }
+  | Route_exact_append of { lane_id : string; runtime_id : string }
+  | Route_exact_drop of { lane_id : string; runtime_id : string }
+  | Route_exact_move of {
+      lane_id : string;
+      runtime_id : string;
+      direction : [ `Up | `Down | `First ];
+    }
+  | Route_exact_replace of {
+      lane_id : string;
+      runtime_id : string;
+      replacement_runtime_id : string;
+    }
+
+let routing_lane_kind lane =
+  match String.trim lane with
+  | "default" -> `Default
+  | "media_failover" -> `Media_failover
+  | name when String.starts_with ~prefix:"exact/" name -> `Exact
+  | _ -> `Named
+
+let is_named_routing_lane lane =
+  match routing_lane_kind lane with
+  | `Named -> not (String.equal (String.trim lane) "")
+  | `Default | `Media_failover | `Exact -> false
+
+let set_routing_action ~lane ~runtime_ids ~expected_source_revision =
+  match routing_lane_kind lane, runtime_ids with
+  | `Default, [ runtime_id ] when not (String.equal (String.trim runtime_id) "") ->
+      Ok (Route_set_default { runtime_id = String.trim runtime_id })
+  | `Default, _ -> Error "The default route requires exactly one runtime ID"
+  | (`Media_failover | `Exact | `Named), [] -> Error "At least one runtime ID is required"
+  | `Media_failover, _ -> Ok (Route_set_media_failover { runtime_ids })
+  | (`Named | `Exact), _ -> Ok (Route_set_named { lane; runtime_ids; expected_source_revision })
+
+let encode_runtime_routing_action = function
+  | Route_create { lane; runtime_ids } ->
+      `Assoc
+        [
+          ("lane", `String (String.trim lane));
+          ("action", `String "create");
+          ("runtime_ids", `List (List.map (fun s -> `String (String.trim s)) runtime_ids));
+        ]
+  | Route_rename { lane; to_lane } ->
+      `Assoc
+        [
+          ("lane", `String (String.trim lane));
+          ("action", `String "rename");
+          ("to", `String (String.trim to_lane));
+        ]
+  | Route_set_default { runtime_id } -> encode_runtime_default_route ~runtime_id
+  | Route_set_named { lane; runtime_ids; expected_source_revision } ->
+      let rev_field =
+        match expected_source_revision with
+        | Some rev when is_lowercase_sha256_hex rev ->
+            [ ("expected_source_revision", `String rev) ]
+        | Some _ | None -> []
+      in
+      `Assoc
+        ([
+           ("lane", `String (String.trim lane));
+           ("action", `String "set");
+           ( "runtime_ids"
+           , `List (List.map (fun s -> `String (String.trim s)) runtime_ids) );
+         ]
+        @ rev_field)
+  | Route_set_media_failover { runtime_ids } ->
+      `Assoc
+        [
+          ("lane", `String "media_failover");
+          ("action", `String "set");
+          ( "runtime_ids"
+          , `List (List.map (fun s -> `String (String.trim s)) runtime_ids) );
+        ]
+  | Route_exact_append { lane_id; runtime_id } ->
+      `Assoc
+        [
+          ("lane", `String ("exact/" ^ String.trim lane_id));
+          ("action", `String "append");
+          ("runtime_id", `String (String.trim runtime_id));
+        ]
+  | Route_exact_drop { lane_id; runtime_id } ->
+      `Assoc
+        [
+          ("lane", `String ("exact/" ^ String.trim lane_id));
+          ("action", `String "drop");
+          ("runtime_id", `String (String.trim runtime_id));
+        ]
+  | Route_exact_move { lane_id; runtime_id; direction } ->
+      let dir_s =
+        match direction with `Up -> "up" | `Down -> "down" | `First -> "first"
+      in
+      `Assoc
+        [
+          ("lane", `String ("exact/" ^ String.trim lane_id));
+          ("action", `String "move");
+          ("runtime_id", `String (String.trim runtime_id));
+          ("direction", `String dir_s);
+        ]
+  | Route_exact_replace { lane_id; runtime_id; replacement_runtime_id } ->
+      `Assoc
+        [
+          ("lane", `String ("exact/" ^ String.trim lane_id));
+          ("action", `String "replace");
+          ("runtime_id", `String (String.trim runtime_id));
+          ("replacement_runtime_id", `String (String.trim replacement_runtime_id));
+        ]
+
+type runtime_raw_preview_result = {
+  ok : bool;
+  can_save : bool;
+  runtime_validation : string option;
+  validation_json : Yojson.Safe.t option;
+}
+
+let encode_runtime_raw_preview ~source_text =
+  `Assoc [ ("source_text", `String source_text) ]
+
+let decode_runtime_raw_preview json =
+  let* _, body = unwrap_v2_or_raw json in
+  let ok =
+    match optional_bool_field body "ok" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> true
+  in
+  let* can_save = required_bool_field body "can_save" in
+  let runtime_validation =
+    match optional_nonblank_string body "runtime_validation" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let validation_json =
+    if has_field body "validation" then Some (member "validation" body) else None
+  in
+  Ok { ok; can_save; runtime_validation; validation_json }
+
+type lane_inventory_row = {
+  id : string;
+  label : string;
+  purpose : string;
+  selection_kind : string;
+  state_kind : string;
+  ui_category : string option;
+  summary : string option;
+}
+
+type lane_inventory_snapshot = {
+  observed_at : float;
+  directory : string;
+  complete : bool;
+  owner_present : bool;
+  rows : lane_inventory_row list;
+  issues : (string * string) list;
+}
+
+let decode_lane_inventory_row row =
+  let* id = required_nonblank_string row "id" in
+  let label =
+    match optional_nonblank_string row "label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> id
+  in
+  let purpose =
+    match optional_string_field row "purpose" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let selection_kind =
+    match optional_object_field row "selection" with
+    | Ok (Some sel) -> (
+        match optional_nonblank_string sel "kind" with
+        | Ok (Some k) -> k
+        | Ok None | Error _ -> "unknown")
+    | Ok None | Error _ -> "unknown"
+  in
+  let state_kind, summary =
+    match optional_object_field row "state" with
+    | Ok (Some st) ->
+        let kind =
+          match optional_nonblank_string st "kind" with
+          | Ok (Some k) -> k
+          | Ok None | Error _ -> "unknown"
+        in
+        let sum =
+          match kind with
+          | "exact" -> (
+              match optional_object_field st "configuration" with
+              | Ok (Some cfg) -> (
+                  match optional_nonblank_string cfg "kind" with
+                  | Ok (Some ck) -> Some ck
+                  | Ok None | Error _ -> None)
+              | Ok None | Error _ -> None)
+          | "browser_clients" -> (
+              match optional_object_field st "addon" with
+              | Ok (Some a) -> (
+                  match optional_int_field a "connected_clients" with
+                  | Ok (Some n) -> Some (Printf.sprintf "%d clients" n)
+                  | Ok None | Error _ -> (
+                      match optional_nonblank_string a "kind" with
+                      | Ok v -> v
+                      | Error _ -> None))
+              | Ok None | Error _ -> None)
+          | "machine" -> (
+              match optional_nonblank_string st "publication" with
+              | Ok v -> v
+              | Error _ -> None)
+          | "package" -> (
+              match optional_list_field st "instances" with
+              | Ok xs -> Some (Printf.sprintf "%d instance(s)" (List.length xs))
+              | Error _ -> None)
+          | _ -> None
+        in
+        (kind, sum)
+    | Ok None | Error _ -> ("unknown", None)
+  in
+  let ui_category =
+    match optional_nonblank_string row "ui_category" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  Ok { id; label; purpose; selection_kind; state_kind; ui_category; summary }
+
+let decode_lane_inventory json =
+  let* _, body = unwrap_v2_or_raw json in
+  let observed_at =
+    match optional_float_field body "observed_at" with
+    | Ok (Some f) -> f
+    | Ok None | Error _ -> 0.0
+  in
+  let* raw_rows = required_list_field body "rows" in
+  let* rows = decode_list "rows" decode_lane_inventory_row raw_rows in
+  let directory, complete, owner_present, issues =
+    match optional_object_field body "package_read" with
+    | Ok (Some pr) ->
+        let dir =
+          match optional_string_field pr "directory" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> ""
+        in
+        let comp =
+          match optional_bool_field pr "complete" with
+          | Ok (Some b) -> b
+          | Ok None | Error _ -> true
+        in
+        let own =
+          match optional_bool_field pr "owner_present" with
+          | Ok (Some b) -> b
+          | Ok None | Error _ -> false
+        in
+        let iss =
+          match optional_list_field pr "issues" with
+          | Ok xs ->
+              List.filter_map
+                (fun j ->
+                  match
+                    ( optional_string_field j "source_path"
+                    , optional_string_field j "message" )
+                  with
+                  | Ok (Some p), Ok (Some m) -> Some (p, m)
+                  | Ok (Some _), (Ok None | Error _)
+                  | (Ok None | Error _), (Ok _ | Error _) ->
+                      None)
+                xs
+          | Error _ -> []
+        in
+        (dir, comp, own, iss)
+    | Ok None | Error _ -> ("", true, false, [])
+  in
+  Ok { observed_at; directory; complete; owner_present; rows; issues }
+
+type standalone_lane_row = {
+  lane_id : string;
+  label : string;
+  purpose : string;
+  required : bool;
+  configuration_state : string;
+  status : string;
+  admitted_slots : string list;
+  cli_slots : string list;
+  dropped_slots : string list;
+  declared_slots : string list;
+  admission_error : string option;
+  retained_run_count : int;
+  running_count : int;
+  succeeded_count : int;
+  failed_count : int;
+  cancelled_count : int;
+  last_outcome : string option;
+  p50_elapsed_s : float option;
+}
+
+type standalone_lanes_snapshot = {
+  generated_at : string;
+  observed_at_unix : float;
+  lanes : standalone_lane_row list;
+}
+
+let decode_standalone_lane_row row =
+  let* lane_id = required_nonblank_string row "lane_id" in
+  let label =
+    match optional_nonblank_string row "label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> lane_id
+  in
+  let purpose =
+    match optional_string_field row "purpose" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let required =
+    match optional_bool_field row "required" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let configuration_state =
+    match optional_nonblank_string row "configuration_state" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let status =
+    match optional_nonblank_string row "status" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let str_list k =
+    match optional_string_list row k with Ok xs -> xs | Error _ -> []
+  in
+  let int_or0 k =
+    match optional_int_field row k with Ok (Some n) -> n | Ok None | Error _ -> 0
+  in
+  let admission_error =
+    match optional_nonblank_string row "admission_error" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let last_outcome =
+    match optional_nonblank_string row "last_outcome" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let p50_elapsed_s =
+    match optional_float_field row "p50_elapsed_s" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  Ok
+    {
+      lane_id;
+      label;
+      purpose;
+      required;
+      configuration_state;
+      status;
+      admitted_slots = str_list "admitted_slots";
+      cli_slots = str_list "cli_slots";
+      dropped_slots = str_list "dropped_slots";
+      declared_slots = str_list "declared_slots";
+      admission_error;
+      retained_run_count = int_or0 "retained_run_count";
+      running_count = int_or0 "running_count";
+      succeeded_count = int_or0 "succeeded_count";
+      failed_count = int_or0 "failed_count";
+      cancelled_count = int_or0 "cancelled_count";
+      last_outcome;
+      p50_elapsed_s;
+    }
+
+let decode_standalone_lanes json =
+  let* _, body = unwrap_v2_or_raw json in
+  let generated_at =
+    match optional_string_field body "generated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let observed_at_unix =
+    match optional_float_field body "observed_at_unix" with
+    | Ok (Some f) -> f
+    | Ok None | Error _ -> 0.0
+  in
+  let* raw = required_list_field body "lanes" in
+  let* lanes = decode_list "lanes" decode_standalone_lane_row raw in
+  Ok { generated_at; observed_at_unix; lanes }
+
+type exact_lane_run_detail = {
+  run_id : string;
+  run_kind : string;
+  lane : string;
+  subject_id : string option;
+  actor : string option;
+  status : string;
+  started_at : float option;
+  elapsed_s : float option;
+  selected_slot : string option;
+  skill_evidence_state : string option;
+  input_json : Yojson.Safe.t option;
+  output_json : Yojson.Safe.t option;
+  raw_json : Yojson.Safe.t;
+}
+
+let decode_exact_lane_run_detail json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* run_id = required_nonblank_string body "run_id" in
+  let run_kind =
+    match optional_nonblank_string body "run_kind" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "exact_output"
+  in
+  let lane =
+    match optional_nonblank_string body "lane" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let subject_id =
+    match optional_nonblank_string body "subject_id" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let actor =
+    match optional_nonblank_string body "actor" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let status =
+    match optional_nonblank_string body "status" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let started_at =
+    match optional_float_field body "started_at" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let elapsed_s =
+    match optional_float_field body "elapsed_s" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let selected_slot =
+    match optional_nonblank_string body "selected_slot" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let skill_evidence_state =
+    match optional_object_field body "skill_evidence" with
+    | Ok (Some se) -> (
+        match optional_nonblank_string se "state" with
+        | Ok v -> v
+        | Error _ -> None)
+    | Ok None | Error _ -> None
+  in
+  let opt_field k =
+    if has_field body k then
+      match member k body with `Null -> None | v -> Some v
+    else None
+  in
+  Ok
+    {
+      run_id;
+      run_kind;
+      lane;
+      subject_id;
+      actor;
+      status;
+      started_at;
+      elapsed_s;
+      selected_slot;
+      skill_evidence_state;
+      input_json = opt_field "input";
+      output_json = opt_field "output";
+      raw_json = body;
+    }
+
+type verifier_run_row = {
+  run_id : string;
+  kind : [ `Task | `Goal ];
+  subject_id : string;
+  actor : string option;
+  status : string;
+  started_at : float option;
+  elapsed_s : float option;
+  evaluator_runtime : string option;
+  detail : string option;
+}
+
+type verifier_runs_snapshot = {
+  generated_at : string;
+  count : int;
+  runs : verifier_run_row list;
+}
+
+let decode_verifier_run_row ~kind row =
+  let id_key, subj_key =
+    match kind with
+    | `Task -> ("verification_id", "task_id")
+    | `Goal -> ("run_id", "goal_id")
+  in
+  let run_id =
+    match optional_nonblank_string row id_key with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string row "run_id" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> (
+            match optional_nonblank_string row "id" with
+            | Ok (Some s) -> s
+            | Ok None | Error _ -> "run"))
+  in
+  let subject_id =
+    match optional_nonblank_string row subj_key with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string row "subject_id" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "—")
+  in
+  let actor =
+    match optional_nonblank_string row "authority_actor" with
+    | Ok (Some s) -> Some s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string row "actor" with
+        | Ok v -> v
+        | Error _ -> None)
+  in
+  let status =
+    match optional_nonblank_string row "status" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string row "kind" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "unknown")
+  in
+  let started_at =
+    match optional_float_field row "started_at" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let elapsed_s =
+    match optional_float_field row "elapsed_s" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let evaluator_runtime =
+    match optional_nonblank_string row "evaluator_runtime" with
+    | Ok (Some s) -> Some s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string row "selected_slot" with
+        | Ok v -> v
+        | Error _ -> None)
+  in
+  let detail =
+    match optional_nonblank_string row "detail" with
+    | Ok (Some s) -> Some s
+    | Ok None | Error _ -> (
+        let eval_reason =
+          match optional_object_field row "evaluated_verdict" with
+          | Ok (Some ev) -> (
+              match optional_nonblank_string ev "reason" with
+              | Ok v -> v
+              | Error _ -> None)
+          | Ok None | Error _ -> None
+        in
+        match eval_reason with
+        | Some _ as v -> v
+        | None -> (
+            match optional_nonblank_string row "reason" with
+            | Ok (Some s) -> Some s
+            | Ok None | Error _ -> (
+                match optional_nonblank_string row "verdict" with
+                | Ok v -> v
+                | Error _ -> None)))
+  in
+  Ok
+    {
+      run_id;
+      kind;
+      subject_id;
+      actor;
+      status;
+      started_at;
+      elapsed_s;
+      evaluator_runtime;
+      detail;
+    }
+
+let decode_verifier_runs_common ~kind json =
+  let* _, body = unwrap_v2_or_raw json in
+  let generated_at =
+    match optional_string_field body "generated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* raw = required_list_field body "runs" in
+  let* runs = decode_list "runs" (decode_verifier_run_row ~kind) raw in
+  let count =
+    match optional_int_field body "count" with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> List.length runs
+  in
+  Ok { generated_at; count; runs }
+
+let decode_verification_runs json = decode_verifier_runs_common ~kind:`Task json
+
+let decode_goal_verification_runs json =
+  decode_verifier_runs_common ~kind:`Goal json
+
+type board_attention_quarantine_item = {
+  keeper_name : string;
+  partition_id : string;
+  candidate_id : string;
+  quarantine_id : string;
+  phase : string;
+  failure_category : string;
+  quarantined_at : float;
+  requested_by : string option;
+}
+
+type board_attention_quarantines_snapshot = {
+  count : int;
+  items : board_attention_quarantine_item list;
+  errors : (string * string) list;
+}
+
+let decode_board_attention_quarantine_item row =
+  let* keeper_name = required_nonblank_string row "keeper_name" in
+  let* partition_id = required_nonblank_string row "partition_id" in
+  let* candidate_id = required_nonblank_string row "candidate_id" in
+  let* quarantine_id = required_nonblank_string row "quarantine_id" in
+  let* phase = required_nonblank_string row "phase" in
+  let* failure_category = required_nonblank_string row "failure_category" in
+  let quarantined_at =
+    match optional_float_field row "quarantined_at" with
+    | Ok (Some f) -> f
+    | Ok None | Error _ -> 0.0
+  in
+  let requested_by =
+    match optional_nonblank_string row "requested_by" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  Ok
+    {
+      keeper_name;
+      partition_id;
+      candidate_id;
+      quarantine_id;
+      phase;
+      failure_category;
+      quarantined_at;
+      requested_by;
+    }
+
+let decode_board_attention_quarantines json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw_items = required_list_field body "items" in
+  let* items =
+    decode_list "items" decode_board_attention_quarantine_item raw_items
+  in
+  let count =
+    match optional_int_field body "count" with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> List.length items
+  in
+  let errors =
+    match optional_list_field body "errors" with
+    | Ok xs ->
+        List.filter_map
+          (fun j ->
+            match
+              ( optional_string_field j "keeper_name"
+              , optional_string_field j "kind" )
+            with
+            | Ok (Some k), Ok (Some kind) -> Some (k, kind)
+            | Ok (Some _), (Ok None | Error _)
+            | (Ok None | Error _), (Ok _ | Error _) ->
+                None)
+          xs
+    | Error _ -> []
+  in
+  Ok { count; items; errors }
+
+let encode_board_attention_quarantine_recovery ~candidate_id
+    ~expected_quarantine_id =
+  `Assoc
+    [
+      ("schema", `String "keeper.board_attention.quarantine.recovery.request.v1");
+      ("candidate_id", `String (String.trim candidate_id));
+      ("expected_quarantine_id", `String (String.trim expected_quarantine_id));
+      ("decision", `String "acknowledge_and_requeue");
+    ]
+
+type addon_declaration_document = {
+  file_name : string;
+  source_path : string;
+  source_text : string;
+  source_revision : string;
+  desired_revision : string option;
+  valid : bool;
+  messages : string list;
+}
+
+let encode_addon_declaration_save ~mode ~file_name ~source_text
+    ~expected_source_revision =
+  let base =
+    [
+      ( "mode"
+      , `String (match mode with `Create -> "create" | `Save -> "save") );
+      ("file_name", `String (String.trim file_name));
+      ("source_text", `String source_text);
+    ]
+  in
+  let rev_field =
+    match (mode, expected_source_revision) with
+    | `Save, Some rev -> [ ("expected_source_revision", `String (String.trim rev)) ]
+    | `Create, _ | `Save, None -> []
+  in
+  `Assoc (base @ rev_field)
+
+let decode_addon_declaration_document json =
+  let* _, body = unwrap_v2_or_raw json in
+  let doc =
+    match optional_object_field body "document" with
+    | Ok (Some d) -> d
+    | Ok None | Error _ -> body
+  in
+  let* file_name = required_nonblank_string doc "file_name" in
+  let* source_path = required_nonblank_string doc "source_path" in
+  let* source_text = required_string_field doc "source_text" in
+  let* source_revision = required_nonblank_string doc "source_revision" in
+  let desired_revision =
+    match optional_nonblank_string doc "desired_revision" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let valid, messages =
+    match optional_object_field doc "validation" with
+    | Ok (Some v) ->
+        let ok =
+          match optional_bool_field v "valid" with
+          | Ok (Some b) -> b
+          | Ok None | Error _ -> true
+        in
+        let msgs =
+          match optional_string_list v "messages" with
+          | Ok xs -> xs
+          | Error _ -> []
+        in
+        (ok, msgs)
+    | Ok None | Error _ -> (true, [])
+  in
+  Ok
+    {
+      file_name;
+      source_path;
+      source_text;
+      source_revision;
+      desired_revision;
+      valid;
+      messages;
+    }
+
+let encode_addon_evidence ~instance_id ~row_ids ?keeper_name ?broadcast
+    ?request_id () =
+  let base =
+    [
+      ("instance_id", `String (String.trim instance_id));
+      ("row_ids", `List (List.map (fun s -> `String s) row_ids));
+    ]
+  in
+  let opt =
+    (match keeper_name with
+    | Some k when not (String.equal (String.trim k) "") ->
+        [ ("keeper_name", `String (String.trim k)) ]
+    | Some _ | None -> [])
+    @ (match broadcast with Some b -> [ ("broadcast", `Bool b) ] | None -> [])
+    @
+    match request_id with
+    | Some rid when not (String.equal (String.trim rid) "") ->
+        [ ("request_id", `String (String.trim rid)) ]
+    | Some _ | None -> []
+  in
+  `Assoc (base @ opt)
+
+type addon_action_receipt = {
+  instance_id : string;
+  request_id : string;
+  state : string;
+  detail : string option;
+  result_json : Yojson.Safe.t option;
+}
+
+let decode_addon_action_receipt json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* instance_id = required_nonblank_string body "instance_id" in
+  let* request_id = required_nonblank_string body "request_id" in
+  let state =
+    match optional_nonblank_string body "state" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let detail =
+    match optional_nonblank_string body "detail" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let result_json =
+    if has_field body "result" then
+      match member "result" body with `Null -> None | v -> Some v
+    else None
+  in
+  Ok { instance_id; request_id; state; detail; result_json }
+
+type addon_slice_snapshot = {
+  raw_json : Yojson.Safe.t;
+  row_count : int;
+  summary_lines : string list;
+}
+
+let decode_addon_slice json =
+  let* _, body = unwrap_v2_or_raw json in
+  let rows =
+    match optional_list_field body "rows" with
+    | Ok xs -> xs
+    | Error _ -> (
+        match optional_list_field body "slices" with
+        | Ok xs -> xs
+        | Error _ -> [])
+  in
+  let summary_lines =
+    match rows with
+    | [] ->
+        String.split_on_char '\n' (Yojson.Safe.pretty_to_string body)
+    | xs ->
+        List.mapi
+          (fun idx r ->
+            let id_s =
+              match optional_nonblank_string r "row_id" with
+              | Ok (Some s) -> s
+              | Ok None | Error _ -> (
+                  match optional_nonblank_string r "id" with
+                  | Ok (Some s) -> s
+                  | Ok None | Error _ -> Printf.sprintf "#%d" (idx + 1))
+            in
+            let kind_s =
+              match optional_nonblank_string r "lane_id" with
+              | Ok (Some s) -> s
+              | Ok None | Error _ -> (
+                  match optional_nonblank_string r "kind" with
+                  | Ok (Some s) -> s
+                  | Ok None | Error _ -> "row")
+            in
+            Printf.sprintf "[%s] %s: %s" kind_s id_s (Yojson.Safe.to_string r))
+          xs
+  in
+  Ok { raw_json = body; row_count = List.length rows; summary_lines }
+
+type addon_operator_mode =
+  | Operator_describe
+  | Operator_invoke of Yojson.Safe.t
+
+let encode_addon_operator ~instance_id ~expected_incarnation ~mode =
+  let base =
+    [
+      ("instance_id", `String (String.trim instance_id));
+      ("expected_incarnation", `String (String.trim expected_incarnation));
+    ]
+  in
+  match mode with
+  | Operator_describe -> `Assoc (base @ [ ("mode", `String "describe") ])
+  | Operator_invoke arguments ->
+      `Assoc (base @ [ ("mode", `String "invoke"); ("arguments", arguments) ])
+
+type browser_scene_node_summary = {
+  node_id : string;
+  kind : string;
+  tag : string;
+  text : string;
+  clickable : bool;
+  editable : bool;
+}
+
+type browser_scene_snapshot = {
+  document_id : string;
+  tab_id : int option;
+  url : string;
+  title : string;
+  width : float;
+  height : float;
+  scroll_x : float;
+  scroll_y : float;
+  view : string;
+  truncated : bool;
+  elapsed_ms : float option;
+  nodes : browser_scene_node_summary list;
+}
+
+let encode_browser_scene_request ~client_id ~tab_id ~view =
+  let view_s = match view with `Content -> "content" | `Regions -> "regions" in
+  `Assoc
+    [
+      ("lane", `String "live");
+      ("clientId", `String (String.trim client_id));
+      ("tabId", `Int tab_id);
+      ("view", `String view_s);
+    ]
+
+let decode_browser_scene_node row =
+  let* node_id = required_nonblank_string row "nodeId" in
+  let kind =
+    match optional_nonblank_string row "kind" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "text"
+  in
+  let tag =
+    match optional_nonblank_string row "tag" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let text =
+    match optional_string_field row "text" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let clickable =
+    match optional_bool_field row "clickable" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let editable =
+    match optional_bool_field row "editable" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  Ok { node_id; kind; tag; text; clickable; editable }
+
+let decode_browser_scene_response json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* () =
+    match optional_bool_field body "ok" with
+    | Ok (Some false) ->
+        let msg =
+          match optional_nonblank_string body "error" with
+          | Ok (Some e) -> e
+          | Ok None | Error _ -> "browser scene failed"
+        in
+        Error msg
+    | Ok (Some true | None) | Error _ -> Ok ()
+  in
+  let data =
+    match optional_object_field body "data" with
+    | Ok (Some d) -> d
+    | Ok None | Error _ -> body
+  in
+  let* document_id = required_nonblank_string data "documentId" in
+  let tab_id =
+    match optional_int_field data "tabId" with Ok v -> v | Error _ -> None
+  in
+  let url =
+    match optional_string_field data "url" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let title =
+    match optional_string_field data "title" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let width, height, scroll_x, scroll_y =
+    match optional_object_field data "viewport" with
+    | Ok (Some vp) ->
+        let fl k =
+          match optional_float_field vp k with
+          | Ok (Some f) -> f
+          | Ok None | Error _ -> 0.0
+        in
+        (fl "width", fl "height", fl "scrollX", fl "scrollY")
+    | Ok None | Error _ -> (0.0, 0.0, 0.0, 0.0)
+  in
+  let view =
+    match optional_nonblank_string data "view" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "content"
+  in
+  let truncated =
+    match optional_bool_field data "truncated" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let elapsed_ms =
+    match optional_float_field data "elapsed_ms" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let* raw_nodes = optional_list_field data "nodes" in
+  let* nodes = decode_list "nodes" decode_browser_scene_node raw_nodes in
+  Ok
+    {
+      document_id;
+      tab_id;
+      url;
+      title;
+      width;
+      height;
+      scroll_x;
+      scroll_y;
+      view;
+      truncated;
+      elapsed_ms;
+      nodes;
+    }
+
+type browser_screenshot_meta = {
+  tab_id : int;
+  url : string;
+  title : string;
+  mime_type : string;
+  base64_bytes : int;
+  elapsed_ms : float option;
+}
+
+let encode_browser_screenshot_request ~client_id ~tab_id =
+  `Assoc
+    [
+      ("lane", `String "live");
+      ("clientId", `String (String.trim client_id));
+      ("tabId", `Int tab_id);
+    ]
+
+let decode_browser_screenshot_response json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* () =
+    match optional_bool_field body "ok" with
+    | Ok (Some false) ->
+        let msg =
+          match optional_nonblank_string body "error" with
+          | Ok (Some e) -> e
+          | Ok None | Error _ -> "browser screenshot failed"
+        in
+        Error msg
+    | Ok (Some true | None) | Error _ -> Ok ()
+  in
+  let data =
+    match optional_object_field body "data" with
+    | Ok (Some d) -> d
+    | Ok None | Error _ -> body
+  in
+  let* tab_id = required_int_field data "tabId" in
+  let url =
+    match optional_string_field data "url" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let title =
+    match optional_string_field data "title" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let mime_type =
+    match optional_nonblank_string data "mimeType" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "image/png"
+  in
+  let base64_bytes =
+    match optional_string_field data "data" with
+    | Ok (Some s) -> String.length s
+    | Ok None | Error _ -> 0
+  in
+  let elapsed_ms =
+    match optional_float_field data "elapsed_ms" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  Ok { tab_id; url; title; mime_type; base64_bytes; elapsed_ms }
+
+let encode_browser_interact_request ~client_id ~tab_id ?expected_url ~action
+    ?selector ?text ?x ?y () =
+  let base =
+    [
+      ("lane", `String "live");
+      ("clientId", `String (String.trim client_id));
+      ("tabId", `Int tab_id);
+      ("action", `String (String.trim action));
+    ]
+  in
+  let opt =
+    (match expected_url with
+    | Some u when not (String.equal (String.trim u) "") ->
+        [ ("expectedUrl", `String (String.trim u)) ]
+    | Some _ | None -> [])
+    @ (match selector with
+      | Some s when not (String.equal (String.trim s) "") ->
+          [ ("selector", `String (String.trim s)) ]
+      | Some _ | None -> [])
+    @ (match text with Some t -> [ ("text", `String t) ] | None -> [])
+    @ (match x with Some v -> [ ("x", `Int v) ] | None -> [])
+    @ match y with Some v -> [ ("y", `Int v) ] | None -> []
+  in
+  `Assoc (base @ opt)
+
+type browser_op_receipt = {
+  ok : bool;
+  summary : string;
+  data_json : Yojson.Safe.t option;
+  error : string option;
+}
+
+let decode_browser_op_receipt json =
+  let* _, body = unwrap_v2_or_raw json in
+  let outer_ok =
+    match optional_bool_field body "ok" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> true
+  in
+  let outer_error =
+    match optional_nonblank_string body "error" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let data_json =
+    if has_field body "data" then
+      match member "data" body with `Null -> None | v -> Some v
+    else Some body
+  in
+  let inner_is_error, inner_error_text =
+    match data_json with
+    | Some (`Assoc _ as d) -> (
+        match optional_bool_field d "isError" with
+        | Ok (Some true) ->
+            let txt =
+              match optional_list_field d "content" with
+              | Ok (first :: _) -> (
+                  match optional_nonblank_string first "text" with
+                  | Ok (Some s) -> Some s
+                  | Ok None | Error _ -> Some "tool error")
+              | Ok [] | Error _ -> Some "tool error"
+            in
+            (true, txt)
+        | Ok (Some false) | Ok None | Error _ -> (false, None))
+    | Some _ | None -> (false, None)
+  in
+  let ok = outer_ok && not inner_is_error in
+  let error =
+    match outer_error with
+    | Some _ as e -> e
+    | None -> inner_error_text
+  in
+  let summary =
+    match error with
+    | Some e -> "error: " ^ e
+    | None -> (
+        match data_json with
+        | Some d ->
+            let s = Yojson.Safe.to_string d in
+            if String.length s > 180 then String.sub s 0 180 ^ "…" else s
+        | None -> if ok then "ok" else "failed")
+  in
+  Ok { ok; summary; data_json; error }

@@ -3496,6 +3496,11 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Prompt_override_form _
     | Nav.Preset_create_form
     | Nav.Runtime_param_set_form _
+    | Nav.Default_route_edit
+    | Nav.Lane_rename_form _
+    | Nav.Addon_decl_form _
+    | Nav.Addon_act_form _
+    | Nav.Browser_interact_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3689,6 +3694,28 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("런타임 파라미터 설정 · " ^ param_key)
            ~en:("Set Runtime Param · " ^ param_key))
+  | Form_standard Nav.Default_route_edit ->
+      Say.resolve lang (Say.make ~ko:"기본 런타임 변경" ~en:"Edit Default Runtime")
+  | Form_standard (Nav.Lane_rename_form { lane }) ->
+      Say.resolve lang
+        (Say.make ~ko:("레인 이름 변경 · " ^ lane) ~en:("Rename Lane · " ^ lane))
+  | Form_standard (Nav.Addon_decl_form { file_name; mode; _ }) ->
+      let m_ko, m_en =
+        match mode with `Create -> ("생성", "Create") | `Save -> ("편집", "Edit")
+      in
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "애드온 선언 %s · %s" m_ko file_name)
+           ~en:(Printf.sprintf "%s Addon Declaration · %s" m_en file_name))
+  | Form_standard (Nav.Addon_act_form { instance_id; _ }) ->
+      Say.resolve lang
+        (Say.make ~ko:("애드온 액션 실행 · " ^ instance_id)
+           ~en:("Run Addon Action · " ^ instance_id))
+  | Form_standard (Nav.Browser_interact_form { tab_id; _ }) ->
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "브라우저 인터랙션 · #%d" tab_id)
+           ~en:(Printf.sprintf "Browser Interact · #%d" tab_id))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3755,6 +3782,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Prompt_override_form _
     | Nav.Preset_create_form
     | Nav.Runtime_param_set_form _
+    | Nav.Default_route_edit
+    | Nav.Lane_rename_form _
+    | Nav.Addon_decl_form _
+    | Nav.Addon_act_form _
+    | Nav.Browser_interact_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3822,6 +3854,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Prompt_override_form _
       | Nav.Preset_create_form
       | Nav.Runtime_param_set_form _
+      | Nav.Default_route_edit
+      | Nav.Lane_rename_form _
+      | Nav.Addon_decl_form _
+      | Nav.Addon_act_form _
+      | Nav.Browser_interact_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3991,6 +4028,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Prompt_override_form _
       | Nav.Preset_create_form
       | Nav.Runtime_param_set_form _
+      | Nav.Default_route_edit
+      | Nav.Lane_rename_form _
+      | Nav.Addon_decl_form _
+      | Nav.Addon_act_form _
+      | Nav.Browser_interact_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -4051,6 +4093,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Prompt_override_form _
                 | Nav.Preset_create_form
                 | Nav.Runtime_param_set_form _
+                | Nav.Default_route_edit
+                | Nav.Lane_rename_form _
+                | Nav.Addon_decl_form _
+                | Nav.Addon_act_form _
+                | Nav.Browser_interact_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
@@ -4232,6 +4279,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Prompt_override_form _
                 | Nav.Preset_create_form
                 | Nav.Runtime_param_set_form _
+                | Nav.Default_route_edit
+                | Nav.Lane_rename_form _
+                | Nav.Addon_decl_form _
+                | Nav.Addon_act_form _
+                | Nav.Browser_interact_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _

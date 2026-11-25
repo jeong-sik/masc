@@ -23017,7 +23017,7 @@ let test_open_work_of_preview_names_what_is_open () =
           None)
    with
   | Some { kind; since_unix; _ } ->
-      Alcotest.(check (pair string (option float)))
+      Alcotest.(check (pair string (option (float 0.0001))))
         "a tool outranks the response that asked for it, from when it began to run"
         ("tool running", Some 12.0) (kind_name kind, since_unix)
   | None -> Alcotest.fail "the server reported open work");

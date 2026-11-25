@@ -13,12 +13,14 @@
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { randomUuid } from '../../lib/uuid'
 import {
   cancelQueuedChatOperation,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperControlToken,
+  fetchKeeperToolResultApi,
   fetchQueuedChatOperations,
   moveQueuedChatOperationToEndApi,
   observeRosterContextPct,
@@ -31,24 +33,27 @@ import {
   shouldDefaultOpenCompanion,
 } from './keeper-debug-companion'
 import {
+  dedupeHistoryToolRows,
   internalModeLabel,
   loadChatBlockPrefs,
   nextInternalMode,
   nextThinkingMode,
   nextToolsMode,
   parseChatMessageBlocks,
+  prettyFormatPayload,
   saveChatBlockPrefs,
   shouldRenderChatEntry,
   summarizeCompact,
   thinkingModeLabel,
   toolsModeLabel,
+  toolStatusMeta,
+  upsertStreamToolCall,
   type ChatBlockPrefs,
 } from './chat-blocks'
 import type {
   BtwQueryState,
   ChatAttachmentDraft,
   ChatDeliveryState,
-  ChatToolBlock,
   ChatTranscriptEntry,
   KeeperRosterItem,
   QueuedChatOperation,
@@ -95,6 +100,37 @@ function deliveryBadgeTone(state: ChatDeliveryState | undefined): 'ok' | 'warn' 
   }
 }
 
+interface ToolResultCacheEntry {
+  readonly status: 'loading' | 'loaded' | 'pending' | 'unavailable' | 'error'
+  readonly content?: string
+  readonly isError?: boolean
+  readonly detail?: string
+  readonly truncated?: boolean
+}
+
+const MAX_TOOL_RESULT_CACHE = 50
+
+function joinThinkingMap(map: Map<string, string>): string | undefined {
+  const ordered = Array.from(map.values()).filter((v) => v.length > 0)
+  return ordered.length > 0 ? ordered.join('\n\n') : undefined
+}
+
+function setBoundedToolResultCache(
+  prev: Record<string, ToolResultCacheEntry>,
+  key: string,
+  entry: ToolResultCacheEntry,
+): Record<string, ToolResultCacheEntry> {
+  const next: Record<string, ToolResultCacheEntry> = { ...prev }
+  delete next[key]
+  next[key] = entry
+  const keys = Object.keys(next)
+  while (keys.length > MAX_TOOL_RESULT_CACHE) {
+    const oldest = keys.shift()
+    if (oldest) delete next[oldest]
+  }
+  return next
+}
+
 export function KeeperChatTab(props: KeeperChatTabProps) {
   const { keeper } = props
   const [messages, setMessages] = useState<readonly ChatTranscriptEntry[]>([])
@@ -131,6 +167,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [renderWindow, setRenderWindow] = useState(INITIAL_RENDER_WINDOW)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [unseenBelowCount, setUnseenBelowCount] = useState(0)
+  const [toolResultCache, setToolResultCache] = useState<Record<string, ToolResultCacheEntry>>({})
 
   const chatListRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -143,6 +180,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const forceScrollBottomRef = useRef(true)
   const pendingPrependAnchorRef = useRef<{ readonly prevScrollHeight: number; readonly prevScrollTop: number } | null>(null)
   const prevTailSigRef = useRef('')
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeper.name)
+  const requestedExecIdsRef = useRef<Set<string>>(new Set())
+  const toolFetchControllersRef = useRef<Set<AbortController>>(new Set())
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = chatListRef.current
@@ -167,26 +208,122 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     if (near) setUnseenBelowCount(0)
   }, [])
 
+  const abortAllToolFetches = useCallback(() => {
+    for (const ctrl of toolFetchControllersRef.current) {
+      ctrl.abort()
+    }
+    toolFetchControllersRef.current.clear()
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortAllToolFetches()
+    }
+  }, [abortAllToolFetches])
+
+  useEffect(() => {
+    activeKeeperRef.current = keeper.name
+    stickToBottomRef.current = true
+    forceScrollBottomRef.current = true
+    pendingPrependAnchorRef.current = null
+    setRenderWindow(INITIAL_RENDER_WINDOW)
+    setIsNearBottom(true)
+    setUnseenBelowCount(0)
+    abortAllToolFetches()
+    requestedExecIdsRef.current.clear()
+    setToolResultCache({})
+  }, [keeper.name, abortAllToolFetches])
+
+  useEffect(() => {
+    let lastEpoch = currentSessionEpoch()
+    return sessionEpoch.subscribe((ep) => {
+      if (ep !== lastEpoch) {
+        lastEpoch = ep
+        streamAbortRef.current?.abort('session_epoch_changed')
+        btwAbortRef.current?.abort('session_epoch_changed')
+        abortAllToolFetches()
+        requestedExecIdsRef.current.clear()
+        setToolResultCache({})
+      }
+    })
+  }, [abortAllToolFetches])
+
+  const requestToolResult = useCallback(async (executionId: string, force = false) => {
+    const trimmed = executionId.trim()
+    if (!trimmed) return
+    if (!force && requestedExecIdsRef.current.has(trimmed)) return
+    requestedExecIdsRef.current.add(trimmed)
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
+    const ctrl = new AbortController()
+    toolFetchControllersRef.current.add(ctrl)
+    setToolResultCache((prev) => setBoundedToolResultCache(prev, trimmed, { status: 'loading' }))
+    try {
+      const res = await fetchKeeperToolResultApi(targetKeeper, trimmed, 16_384, ctrl.signal)
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+        requestedExecIdsRef.current.delete(trimmed)
+        return
+      }
+      if (!res.ok) {
+        requestedExecIdsRef.current.delete(trimmed)
+        if (res.error.kind === 'epoch_stale' || res.error.kind === 'aborted') return
+        setToolResultCache((prev) =>
+          setBoundedToolResultCache(prev, trimmed, { status: 'error', detail: res.error.message }),
+        )
+        return
+      }
+      const payload = res.value
+      if (payload.state === 'pending') {
+        requestedExecIdsRef.current.delete(trimmed)
+        setToolResultCache((prev) => setBoundedToolResultCache(prev, trimmed, { status: 'pending' }))
+        return
+      }
+      if (payload.state === 'unavailable') {
+        setToolResultCache((prev) =>
+          setBoundedToolResultCache(prev, trimmed, { status: 'unavailable', detail: payload.reason }),
+        )
+        return
+      }
+      setToolResultCache((prev) =>
+        setBoundedToolResultCache(prev, trimmed, {
+          status: 'loaded',
+          content: prettyFormatPayload(payload.content),
+          isError: payload.isError,
+          truncated: !payload.eof,
+        }),
+      )
+    } finally {
+      toolFetchControllersRef.current.delete(ctrl)
+    }
+  }, [keeper.name])
+
   useEffect(() => {
     setControlToken(keeper.chat_control_token)
   }, [keeper.chat_control_token])
 
   const loadInitialHistory = useCallback(async () => {
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     setLoadingHistory(true)
     setHistoryError(null)
     const [pageRes, opsRes] = await Promise.all([
-      fetchKeeperChatHistoryPageApi(keeper.name, undefined, 40),
-      fetchQueuedChatOperations(keeper.name),
+      fetchKeeperChatHistoryPageApi(targetKeeper, undefined, 40),
+      fetchQueuedChatOperations(targetKeeper),
     ])
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     setLoadingHistory(false)
     if (!pageRes.ok) {
-      setHistoryError(pageRes.error.message)
+      if (pageRes.error.kind !== 'epoch_stale' && pageRes.error.kind !== 'aborted') {
+        setHistoryError(pageRes.error.message)
+      }
     } else {
       forceScrollBottomRef.current = true
       setMessages((prev) => {
         const loadedIds = new Set(pageRes.value.messages.map((m) => m.id))
         const optimistic = prev.filter((m) => !loadedIds.has(m.id))
-        return [...pageRes.value.messages, ...optimistic]
+        return [...dedupeHistoryToolRows([...pageRes.value.messages, ...optimistic])]
       })
       setHasMore(pageRes.value.hasMore)
       setNextCursor(pageRes.value.nextCursor)
@@ -224,11 +361,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
   const handleLoadEarlier = async () => {
     if (!nextCursor || loadingHistory) return
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     setLoadingHistory(true)
-    const res = await fetchKeeperChatHistoryPageApi(keeper.name, nextCursor, 40)
+    const res = await fetchKeeperChatHistoryPageApi(targetKeeper, nextCursor, 40)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     setLoadingHistory(false)
     if (!res.ok) {
-      setHistoryError(res.error.message)
+      if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {
+        setHistoryError(res.error.message)
+      }
       return
     }
     const el = chatListRef.current
@@ -239,7 +381,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       }
     }
     setRenderWindow((cur) => Math.min(MAX_RENDER_WINDOW, cur + res.value.messages.length))
-    setMessages((prev) => [...res.value.messages, ...prev])
+    setMessages((prev) => {
+      const existingIds = new Set(prev.map((m) => m.id))
+      const fresh = res.value.messages.filter((m) => !existingIds.has(m.id))
+      return [...dedupeHistoryToolRows([...fresh, ...prev])]
+    })
     setHasMore(res.value.hasMore)
     setNextCursor(res.value.nextCursor)
   }
@@ -254,12 +400,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const updateAssistantEntry = updateEntryById
 
   const handleRecoverCut = async (assistantId: string, operationId: string) => {
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     updateAssistantEntry(assistantId, (m) => ({
       ...m,
       deliveryState: 'Confirming_delivery',
     }))
-    const recovered = await recoverCutReplyFromJournal(keeper.name, operationId)
+    const recovered = await recoverCutReplyFromJournal(targetKeeper, operationId)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!recovered.ok) {
+      if (recovered.error.kind === 'epoch_stale' || recovered.error.kind === 'aborted') return
       updateAssistantEntry(assistantId, (m) => ({
         ...m,
         deliveryState: 'Failed',
@@ -332,10 +482,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       return
     }
 
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     const operationId = `op-${randomUuid()}`
     const nowSec = Date.now() / 1000
+    const userId = `user-${operationId}`
     const userEntry: ChatTranscriptEntry = {
-      id: `user-${operationId}`,
+      id: userId,
       role: 'user',
       speakerLabel: 'Operator',
       content: trimmed,
@@ -354,7 +507,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
 
     const currentAttachments = [...attachments]
-    const userId = userEntry.id
     let acceptedByServer = false
     sendingRef.current = true
     forceScrollBottomRef.current = true
@@ -374,19 +526,36 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         kind: 'queue',
       }
       if (intent === 'steer') {
-        const token = controlToken ?? (await fetchKeeperControlToken(keeper.name))
+        const token = controlToken ?? (await fetchKeeperControlToken(targetKeeper))
+        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+          return
+        }
         if (token) {
           setControlToken(token)
           submitMode = { kind: 'steer', controlToken: token }
         }
       }
 
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+        return
+      }
+
       streamAbortRef.current?.abort()
       abortController = new AbortController()
       streamAbortRef.current = abortController
 
+      const thinkingByBlock = new Map<string, string>()
+      const promoteStreaming = (cur: ChatDeliveryState | undefined): ChatDeliveryState =>
+        cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
+      const markUserDelivered = () => {
+        acceptedByServer = true
+        updateEntryById(userId, (m) =>
+          m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' },
+        )
+      }
+
       outcome = await streamKeeperChat({
-        keeper: keeper.name,
+        keeper: targetKeeper,
         message: trimmed,
         operationId,
         mode: submitMode,
@@ -409,63 +578,274 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: nextState }))
           },
           onRunStarted: () => {
-            acceptedByServer = true
-            updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Delivered' }))
+            markUserDelivered()
             updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: 'Pending_processing' }))
           },
           onAttemptStarted: () => {
-            acceptedByServer = true
-            updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Delivered' }))
+            markUserDelivered()
+            thinkingByBlock.clear()
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: '',
+              thinking: undefined,
+              toolCalls: undefined,
               deliveryState: 'Streaming',
             }))
           },
+          onModelActivity: () => {
+            markUserDelivered()
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+            }))
+          },
           onTextDelta: (delta) => {
-            acceptedByServer = true
-            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
+            markUserDelivered()
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: m.content + delta,
               deliveryState: 'Streaming',
             }))
           },
-          onThinkingDelta: (delta) => {
+          onThinkingDelta: (delta, blockKey = '0:0:0') => {
+            markUserDelivered()
+            thinkingByBlock.set(blockKey, (thinkingByBlock.get(blockKey) ?? '') + delta)
+            const combined = joinThinkingMap(thinkingByBlock)
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              thinking: (m.thinking ?? '') + delta,
+              thinking: combined,
+              deliveryState: promoteStreaming(m.deliveryState),
             }))
           },
-          onToolStart: (toolName, toolCallId) => {
-            updateAssistantEntry(assistantId, (m) => {
-              const nextTool: ChatToolBlock = { id: toolCallId, name: toolName, status: 'running' }
-              return { ...m, toolCalls: [...(m.toolCalls ?? []), nextTool] }
-            })
+          onThinkingSnapshot: (snapshot, blockKey = '0:0:0') => {
+            markUserDelivered()
+            thinkingByBlock.set(blockKey, snapshot)
+            const combined = joinThinkingMap(thinkingByBlock)
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              thinking: combined,
+              deliveryState: promoteStreaming(m.deliveryState),
+            }))
           },
-          onToolArgsDelta: (toolCallId, delta) => {
-            updateAssistantEntry(assistantId, (m) => {
-              const list = [...(m.toolCalls ?? [])]
-              const idx = toolCallId
-                ? list.findIndex((t) => t.id === toolCallId)
-                : list.length - 1
-              if (idx < 0) return m
-              const cur = list[idx]!
-              list[idx] = { ...cur, args: (cur.args ?? '') + delta }
-              return { ...m, toolCalls: list }
-            })
+          onToolStart: (toolName, toolCallId, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  id: toolCallId ?? cur.id,
+                  streamKey: streamKey ?? cur.streamKey,
+                  name: toolName || cur.name,
+                  status: 'running',
+                }),
+                () => ({
+                  id: toolCallId,
+                  streamKey,
+                  name: toolName,
+                  status: 'running',
+                }),
+              ),
+            }))
           },
-          onToolResult: (toolCallId, content) => {
+          onToolAdmitted: (toolName, toolCallId, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  id: toolCallId ?? cur.id,
+                  streamKey: streamKey ?? cur.streamKey,
+                  name: toolName,
+                }),
+              ),
+            }))
+          },
+          onToolArgsDelta: (toolCallId, delta, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({ ...cur, args: (cur.args ?? '') + delta }),
+              ),
+            }))
+          },
+          onToolArgsSnapshot: (toolCallId, snapshot, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({ ...cur, args: snapshot }),
+              ),
+            }))
+          },
+          onToolEnd: (toolCallId, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  status: cur.status === 'running' ? 'awaiting_result' : cur.status,
+                }),
+              ),
+            }))
+          },
+          onToolResultReady: ({ executionId, toolCallId, streamKey }) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  executionId,
+                  status: cur.status === 'error' ? 'error' : 'completed',
+                }),
+                () => ({
+                  id: toolCallId,
+                  streamKey,
+                  executionId,
+                  name: 'tool',
+                  status: 'completed',
+                }),
+              ),
+            }))
+          },
+          onToolResult: (toolCallId, content, streamKey) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({ ...cur, result: content, status: 'completed' }),
+                () => ({
+                  id: toolCallId || undefined,
+                  streamKey,
+                  name: 'tool',
+                  result: content,
+                  status: 'completed',
+                }),
+              ),
+            }))
+          },
+          onNativeToolProgress: ({ toolName, toolCallId, streamKey, progressLabel }) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  name: toolName ?? cur.name,
+                  progressLabel,
+                }),
+                () => ({
+                  id: toolCallId,
+                  streamKey,
+                  name: toolName ?? 'native_tool',
+                  status: 'running',
+                  progressLabel,
+                }),
+              ),
+            }))
+          },
+          onNativeToolEnd: ({ toolName, toolCallId, streamKey, status, summary }) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                { toolCallId, streamKey },
+                (cur) => ({
+                  ...cur,
+                  name: toolName ?? cur.name,
+                  status,
+                  progressLabel: summary ?? cur.progressLabel,
+                }),
+                () => ({
+                  id: toolCallId,
+                  streamKey,
+                  name: toolName ?? 'native_tool',
+                  status,
+                  progressLabel: summary,
+                }),
+              ),
+            }))
+          },
+          onToolApprovalRequested: ({ toolCallId, toolName, args, question, because }) => {
+            const label = question ?? because ?? '운영자 승인 대기 중'
+            const trimmedId = toolCallId.trim()
+            const matchRef = trimmedId
+              ? { toolCallId: trimmedId }
+              : { streamKey: `approval:${randomUuid()}` }
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: promoteStreaming(m.deliveryState),
+              toolCalls: upsertStreamToolCall(
+                m.toolCalls,
+                matchRef,
+                (cur) => ({
+                  ...cur,
+                  name: toolName || cur.name,
+                  args: args ?? cur.args,
+                  status: 'awaiting_approval',
+                  progressLabel: label,
+                }),
+                () => ({
+                  id: trimmedId || undefined,
+                  streamKey: matchRef.streamKey,
+                  name: toolName,
+                  args,
+                  status: 'awaiting_approval',
+                  progressLabel: label,
+                }),
+              ),
+            }))
+          },
+          onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
+            const approved = /^approv/i.test(approvalOutcome.trim())
+            const trimmedId = toolCallId.trim()
             updateAssistantEntry(assistantId, (m) => {
+              if (trimmedId) {
+                return {
+                  ...m,
+                  toolCalls: upsertStreamToolCall(
+                    m.toolCalls,
+                    { toolCallId: trimmedId },
+                    (cur) => ({
+                      ...cur,
+                      status: approved ? 'running' : 'error',
+                      progressLabel: approvalOutcome,
+                    }),
+                  ),
+                }
+              }
               const list = [...(m.toolCalls ?? [])]
-              const idx = toolCallId
-                ? list.findIndex((t) => t.id === toolCallId)
-                : list.length - 1
-              if (idx < 0) {
-                list.push({ id: toolCallId || undefined, name: 'tool', result: content, status: 'completed' })
-              } else {
-                const cur = list[idx]!
-                list[idx] = { ...cur, result: content, status: 'completed' }
+              let targetIdx = -1
+              for (let i = list.length - 1; i >= 0; i -= 1) {
+                const cur = list[i]!
+                if (cur.status !== 'awaiting_approval') continue
+                if (!toolName || cur.name === toolName) {
+                  targetIdx = i
+                  break
+                }
+                if (targetIdx < 0) targetIdx = i
+              }
+              if (targetIdx < 0) return m
+              list[targetIdx] = {
+                ...list[targetIdx]!,
+                status: approved ? 'running' : 'error',
+                progressLabel: approvalOutcome,
               }
               return { ...m, toolCalls: list }
             })
@@ -491,17 +871,32 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onFinished: () => {
-            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
+            markUserDelivered()
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
+              toolCalls: m.toolCalls?.map((tc) =>
+                tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
+                  ? { ...tc, status: 'completed' }
+                  : tc,
+              ),
             }))
           },
         },
       })
     } finally {
       sendingRef.current = false
-      setSending(false)
+      if (mountedRef.current) setSending(false)
+    }
+
+    if (
+      !mountedRef.current
+      || activeKeeperRef.current !== targetKeeper
+      || !isEpochCurrent(startEpoch)
+      || outcome.error === 'session_epoch_changed'
+      || outcome.error === 'aborted'
+    ) {
+      return
     }
 
     // Mid-stream cut without RUN_FINISHED -> Confirming_delivery & journal recovery
@@ -515,7 +910,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       await handleRecoverCut(assistantId, operationId)
     }
 
-    const opsRes = await fetchQueuedChatOperations(keeper.name)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+      return
+    }
+
+    const opsRes = await fetchQueuedChatOperations(targetKeeper)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+      return
+    }
     if (opsRes.ok) setQueuedOps(opsRes.value)
     props.onMutated()
   }
@@ -756,31 +1158,120 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
                     ${blocks.toolBlocks.length > 0 && blockPrefs.tools !== 'hidden' && html`
                       <div class="kp-block-stack">
-                        ${blocks.toolBlocks.map((tb, idx) => html`
-                          <details
-                            key=${`${tb.id ?? tb.name}-${idx}:${blockPrefs.tools}`}
-                            class="kp-block-card kp-block-card--tool"
-                            data-testid="chat-tool-card"
-                            open=${blockPrefs.tools === 'full' ? true : undefined}
-                          >
-                            <summary class="kp-block-summary">
-                              <span class="kp-pill" data-tone=${tb.status === 'error' ? 'bad' : 'info'}>도구 · ${tb.name}</span>
-                              <span class="kp-block-preview">
-                                ${summarizeCompact(tb.args ?? tb.result ?? tb.status ?? '실행됨', 90)}
-                              </span>
-                            </summary>
-                            <div class="kp-block-content">
-                              ${tb.args && html`
-                                <div class="kp-block-sublabel">입력 (Args)</div>
-                                <pre class="kp-block-pre">${tb.args}</pre>
-                              `}
-                              ${tb.result && html`
-                                <div class="kp-block-sublabel">결과 (Result)</div>
-                                <pre class="kp-block-pre">${tb.result}</pre>
-                              `}
-                            </div>
-                          </details>
-                        `)}
+                        ${blocks.toolBlocks.map((tb, idx) => {
+                          const cachedRes = tb.executionId ? toolResultCache[tb.executionId] : undefined
+                          const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
+                          const displayResult = tb.result
+                            ? prettyFormatPayload(tb.result)
+                            : cachedRes?.status === 'loaded'
+                              ? cachedRes.content
+                              : undefined
+                          const effectiveStatus =
+                            cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
+                          const statusMeta = toolStatusMeta(effectiveStatus)
+                          const previewText = summarizeCompact(
+                            displayArgs ?? displayResult ?? tb.progressLabel ?? statusMeta.label,
+                            90,
+                          )
+                          return html`
+                            <details
+                              key=${`${tb.streamKey ?? tb.id ?? tb.executionId ?? tb.name}-${idx}:${blockPrefs.tools}`}
+                              class="kp-block-card kp-block-card--tool"
+                              data-testid="chat-tool-card"
+                              open=${blockPrefs.tools === 'full' ? true : undefined}
+                              onToggle=${(e: Event) => {
+                                const el = e.currentTarget as HTMLDetailsElement
+                                if (
+                                  el.open
+                                  && tb.executionId
+                                  && !displayResult
+                                  && (!cachedRes || cachedRes.status === 'pending' || cachedRes.status === 'error')
+                                ) {
+                                  void requestToolResult(tb.executionId, cachedRes?.status === 'pending' || cachedRes?.status === 'error')
+                                }
+                              }}
+                            >
+                              <summary class="kp-block-summary">
+                                <span class="kp-pill" data-tone=${statusMeta.tone}>도구 · ${tb.name}</span>
+                                <span class="kp-pill" data-tone=${statusMeta.tone}>
+                                  ${tb.progressLabel ?? statusMeta.label}${tb.duration ? ` · ${tb.duration}` : ''}
+                                </span>
+                                <span class="kp-block-preview">${previewText}</span>
+                              </summary>
+                              <div class="kp-block-content">
+                                ${displayArgs && html`
+                                  <div class="kp-block-sublabel">입력 (Args)</div>
+                                  <pre class="kp-block-pre">${displayArgs}</pre>
+                                `}
+                                ${displayResult && html`
+                                  <div class="kp-block-sublabel">
+                                    결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
+                                  </div>
+                                  <pre class="kp-block-pre">${displayResult}</pre>
+                                `}
+                                ${!displayResult && cachedRes?.status === 'loading' && html`
+                                  <div class="kp-block-status">결과 불러오는 중…</div>
+                                `}
+                                ${!displayResult && cachedRes?.status === 'pending' && html`
+                                  <div class="kp-block-status">
+                                    도구 실행 중 — 결과 준비 대기 중…
+                                    ${tb.executionId && html`
+                                      ${' '}
+                                      <button
+                                        type="button"
+                                        class="btn-ghost kp-toggle-btn"
+                                        onClick=${() => void requestToolResult(tb.executionId!, true)}
+                                      >
+                                        다시 확인
+                                      </button>
+                                    `}
+                                  </div>
+                                `}
+                                ${!displayResult && cachedRes?.status === 'unavailable' && html`
+                                  <div class="kp-block-status">저장된 결과 없음 (${cachedRes.detail ?? 'unavailable'})</div>
+                                `}
+                                ${!displayResult && cachedRes?.status === 'error' && html`
+                                  <div class="kp-block-status">
+                                    결과 조회 실패 (${cachedRes.detail ?? 'error'})
+                                    ${tb.executionId && html`
+                                      ${' '}
+                                      <button
+                                        type="button"
+                                        class="btn-ghost kp-toggle-btn"
+                                        onClick=${() => void requestToolResult(tb.executionId!, true)}
+                                      >
+                                        다시 시도
+                                      </button>
+                                    `}
+                                  </div>
+                                `}
+                                ${!displayResult && !cachedRes && tb.executionId && html`
+                                  <div class="kp-block-status">
+                                    <button
+                                      type="button"
+                                      class="btn-ghost kp-toggle-btn"
+                                      onClick=${() => void requestToolResult(tb.executionId!)}
+                                    >
+                                      실행 결과 불러오기
+                                    </button>
+                                  </div>
+                                `}
+                                ${!displayArgs && !displayResult && !cachedRes && !tb.executionId && html`
+                                  <div class="kp-block-status">
+                                    ${tb.progressLabel
+                                      ?? (effectiveStatus === 'running'
+                                        ? '도구 실행 중…'
+                                        : effectiveStatus === 'awaiting_result'
+                                          ? '도구 호출 완료 — 결과 대기 중…'
+                                          : effectiveStatus === 'awaiting_approval'
+                                            ? '운영자 승인 대기 중…'
+                                            : '기록된 입력·결과가 없습니다.')}
+                                  </div>
+                                `}
+                              </div>
+                            </details>
+                          `
+                        })}
                       </div>
                     `}
 

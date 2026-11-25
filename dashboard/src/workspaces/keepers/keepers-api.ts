@@ -36,6 +36,11 @@ import {
 } from '../../core/resource-cache'
 import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { randomUuid } from '../../lib/uuid'
+import {
+  dedupeHistoryToolRows,
+  formatNativeCompletionSummary,
+  formatNativeProgressLabel,
+} from './chat-blocks'
 import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
@@ -53,6 +58,7 @@ import type {
   KeeperCandleLedgerData,
   KeeperCatalogItem,
   KeeperItemsData,
+  KeeperToolResultResponse,
   KeeperLastPromptData,
   KeeperLinkedTask,
   KeeperMemoryFactsData,
@@ -370,6 +376,74 @@ export function resetKeeperAction(name: string) {
 
 // ── Chat History, Queued Ops, Cut-Reply Journal & Origin_bare AG-UI SSE ──
 
+function stringifyPayloadField(val: unknown): string | undefined {
+  if (val === undefined || val === null) return undefined
+  if (typeof val === 'string') return val
+  return JSON.stringify(val, null, 2)
+}
+
+function mapTraceToolStatus(raw: string | null): string | undefined {
+  if (!raw) return undefined
+  if (raw === 'ok') return 'completed'
+  if (raw === 'err') return 'error'
+  if (raw === 'pending') return 'running'
+  return raw
+}
+
+function decodeHistoryBlocks(rawBlocks: unknown): {
+  readonly thinking: readonly string[]
+  readonly redactedThinking: boolean
+  readonly toolCalls: readonly ChatToolBlock[]
+} {
+  if (!Array.isArray(rawBlocks)) {
+    return { thinking: [], redactedThinking: false, toolCalls: [] }
+  }
+  const thinking: string[] = []
+  let redactedThinking = false
+  const toolCalls: ChatToolBlock[] = []
+
+  for (const block of rawBlocks) {
+    if (!isRecord(block)) continue
+    const t = asStr(block.t)
+    if (t === 'thinking') {
+      if (block.redacted === true) {
+        redactedThinking = true
+      } else if (typeof block.content === 'string' && block.content.trim()) {
+        thinking.push(block.content.trim())
+      }
+    } else if (t === 'trace' && Array.isArray(block.trace)) {
+      for (const step of block.trace) {
+        if (!isRecord(step)) continue
+        const kind = asStr(step.kind)
+        if (kind === 'think') {
+          if (step.content_withheld === true) {
+            redactedThinking = true
+          } else if (typeof step.text === 'string' && step.text.trim()) {
+            thinking.push(step.text.trim())
+          }
+        } else if (kind === 'reason') {
+          const text = typeof step.text === 'string' ? step.text.trim() : ''
+          const detail = typeof step.detail === 'string' ? step.detail.trim() : ''
+          const combined = [text, detail].filter(Boolean).join('\n')
+          if (combined) thinking.push(combined)
+        } else if (kind === 'tool') {
+          const name = asStr(step.name) ?? 'tool'
+          toolCalls.push({
+            id: asStr(step.tool_call_id) ?? undefined,
+            executionId: asStr(step.execution_id) ?? undefined,
+            name,
+            args: stringifyPayloadField(step.args),
+            result: stringifyPayloadField(step.result),
+            status: mapTraceToolStatus(asStr(step.status)),
+            duration: asStr(step.dur) ?? undefined,
+          })
+        }
+      }
+    }
+  }
+  return { thinking, redactedThinking, toolCalls }
+}
+
 function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[] | undefined {
   const out: ChatToolBlock[] = []
   if (Array.isArray(raw.tool_calls)) {
@@ -379,11 +453,13 @@ function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[
       const argsVal = tc.args ?? tc.input ?? tc.arguments
       const resVal = tc.result ?? tc.output
       out.push({
-        id: asStr(tc.id) ?? undefined,
+        id: asStr(tc.id) ?? asStr(tc.tool_call_id) ?? undefined,
+        executionId: asStr(tc.execution_id) ?? undefined,
         name,
-        args: argsVal !== undefined ? (typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal, null, 2)) : undefined,
-        result: resVal !== undefined ? (typeof resVal === 'string' ? resVal : JSON.stringify(resVal, null, 2)) : undefined,
-        status: asStr(tc.status) ?? asStr(tc.outcome) ?? undefined,
+        args: stringifyPayloadField(argsVal),
+        result: stringifyPayloadField(resVal),
+        status: mapTraceToolStatus(asStr(tc.status) ?? asStr(tc.outcome)),
+        duration: asStr(tc.dur) ?? undefined,
       })
     }
   } else {
@@ -393,17 +469,18 @@ function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[
       const resVal = raw.tool_output ?? raw.tool_result ?? raw.output
       out.push({
         id: asStr(raw.tool_call_id) ?? undefined,
+        executionId: asStr(raw.execution_id) ?? undefined,
         name: toolName,
-        args: argsVal !== undefined ? (typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal, null, 2)) : undefined,
-        result: resVal !== undefined ? (typeof resVal === 'string' ? resVal : JSON.stringify(resVal, null, 2)) : undefined,
-        status: asStr(raw.status) ?? undefined,
+        args: stringifyPayloadField(argsVal),
+        result: stringifyPayloadField(resVal),
+        status: mapTraceToolStatus(asStr(raw.status)),
       })
     }
   }
   return out.length > 0 ? out : undefined
 }
 
-function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
+export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
   if (!isRecord(raw)) return null
   const id = asStr(raw.id)
   if (!id) return null
@@ -417,10 +494,32 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     : undefined
   const content = typeof raw.content === 'string' ? raw.content : ''
   const ts = asNum(raw.ts) ?? Date.now() / 1000
-  const thinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
-  const toolCalls = decodeToolBlocks(raw)
+  const decodedBlocks = decodeHistoryBlocks(raw.blocks)
+  const rawThinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
+  const thinkingParts: string[] = []
+  if (rawThinking) thinkingParts.push(rawThinking)
+  for (const part of decodedBlocks.thinking) {
+    if (!thinkingParts.includes(part)) thinkingParts.push(part)
+  }
+  const thinking = thinkingParts.length > 0
+    ? thinkingParts.join('\n\n')
+    : decodedBlocks.redactedThinking
+      ? '[추론 내용 비공개 (redacted)]'
+      : undefined
+  const directToolCalls = decodeToolBlocks(raw) ?? []
+  const mergedToolCalls: ChatToolBlock[] = [...directToolCalls]
+  for (const bt of decodedBlocks.toolCalls) {
+    const dup = mergedToolCalls.some(
+      (existing) =>
+        (bt.executionId && existing.executionId === bt.executionId)
+        || (bt.id && existing.id === bt.id && existing.name === bt.name),
+    )
+    if (!dup) mergedToolCalls.push(bt)
+  }
+  const toolCalls = mergedToolCalls.length > 0 ? mergedToolCalls : undefined
   const autonomousTurn =
     raw.autonomous === true
+    || isRecord(raw.autonomous_turn)
     || asStr(raw.source) === 'autonomous'
     || asStr(raw.turn_kind) === 'autonomous'
     || (isRecord(raw.metadata) && (raw.metadata.autonomous === true || asStr(raw.metadata.turn_kind) === 'autonomous'))
@@ -457,6 +556,7 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     thinking,
     ts,
     turnRef: asStr(raw.turn_ref) ?? undefined,
+    executionId: asStr(raw.execution_id) ?? undefined,
     toolName: asStr(raw.tool_call_name) ?? asStr(raw.tool_name) ?? undefined,
     kind,
     toolCalls,
@@ -464,6 +564,66 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     autonomousTurn: autonomousTurn || undefined,
     deliveryState: 'Delivered',
   }
+}
+
+export function fetchKeeperToolResultApi(
+  keeper: string,
+  executionId: string,
+  maxBytes = 16_384,
+  signal?: AbortSignal,
+): Promise<Result<KeeperToolResultResponse, ApiError>> {
+  const params = new URLSearchParams({
+    execution_id: executionId,
+    max_bytes: String(maxBytes),
+  })
+  return apiGet<KeeperToolResultResponse>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-result?${params.toString()}`,
+    {
+      signal,
+      decode: (raw) => {
+        const body = isRecord(raw) && isRecord(raw.data) ? raw.data : raw
+        if (!isRecord(body)) throw new Error('Invalid tool-result payload')
+        const state = asStr(body.state)
+        const execId = asStr(body.execution_id) ?? executionId
+        if (state === 'pending') {
+          return { state: 'pending', executionId: execId }
+        }
+        if (state === 'unavailable') {
+          return {
+            state: 'unavailable',
+            executionId: execId,
+            reason: asStr(body.reason) ?? 'unavailable',
+          }
+        }
+        if (state === 'page' && isRecord(body.page)) {
+          if (body.page.ok === false) {
+            return {
+              state: 'unavailable',
+              executionId: execId,
+              reason: asStr(body.page.error) ?? 'page_read_failed',
+            }
+          }
+          const rawContent = typeof body.page.content === 'string' ? body.page.content : ''
+          const encoding = asStr(body.page.encoding) ?? 'utf-8'
+          const recordedBytes = asNum(body.recorded_bytes) ?? rawContent.length
+          const content =
+            encoding === 'base64'
+              ? `[binary/base64 · ${recordedBytes.toLocaleString('en-US')}B]`
+              : rawContent
+          return {
+            state: 'page',
+            executionId: execId,
+            content,
+            isError: body.is_error === true,
+            recordedBytes,
+            totalBytes: asNum(body.page.total_bytes) ?? rawContent.length,
+            eof: body.page.eof !== false,
+          }
+        }
+        throw new Error(`Unknown tool-result state: ${String(state)}`)
+      },
+    },
+  )
 }
 
 export function fetchKeeperChatHistoryPageApi(
@@ -480,9 +640,10 @@ export function fetchKeeperChatHistoryPageApi(
         if (!isRecord(raw) || !Array.isArray(raw.messages)) {
           throw new Error('Invalid chat history page')
         }
-        const messages = raw.messages
+        const decoded = raw.messages
           .map(decodeHistoryRow)
           .filter((m): m is ChatTranscriptEntry => m !== null)
+        const messages = dedupeHistoryToolRows(decoded)
         return {
           messages,
           hasMore: raw.has_more === true,
@@ -789,14 +950,66 @@ export interface StreamKeeperChatCallbacks {
   }) => void
   readonly onRunStarted?: () => void
   readonly onAttemptStarted?: () => void
+  readonly onModelActivity?: (channel: 'thinking' | 'text') => void
   readonly onTextDelta?: (delta: string) => void
-  readonly onThinkingDelta?: (delta: string) => void
-  readonly onToolStart?: (toolName: string, toolCallId?: string) => void
-  readonly onToolArgsDelta?: (toolCallId: string, delta: string) => void
-  readonly onToolResult?: (toolCallId: string, content: string) => void
+  readonly onThinkingDelta?: (delta: string, blockKey?: string) => void
+  readonly onThinkingSnapshot?: (snapshot: string, blockKey?: string) => void
+  readonly onToolStart?: (toolName: string, toolCallId?: string, streamKey?: string) => void
+  readonly onToolAdmitted?: (toolName: string, toolCallId?: string, streamKey?: string) => void
+  readonly onToolArgsDelta?: (toolCallId: string, delta: string, streamKey?: string) => void
+  readonly onToolArgsSnapshot?: (toolCallId: string, snapshot: string, streamKey?: string) => void
+  readonly onToolEnd?: (toolCallId?: string, streamKey?: string) => void
+  readonly onToolResultReady?: (info: {
+    readonly executionId: string
+    readonly toolCallId?: string
+    readonly streamKey?: string
+  }) => void
+  readonly onToolResult?: (toolCallId: string, content: string, streamKey?: string) => void
+  readonly onNativeToolProgress?: (info: {
+    readonly toolName?: string
+    readonly toolCallId?: string
+    readonly streamKey?: string
+    readonly progressLabel: string
+  }) => void
+  readonly onNativeToolEnd?: (info: {
+    readonly toolName?: string
+    readonly toolCallId?: string
+    readonly streamKey?: string
+    readonly status: 'completed' | 'error'
+    readonly summary?: string
+  }) => void
+  readonly onToolApprovalRequested?: (info: {
+    readonly toolCallId: string
+    readonly toolName: string
+    readonly args?: string
+    readonly question?: string
+    readonly because?: string
+  }) => void
+  readonly onToolApprovalSettled?: (info: {
+    readonly toolCallId: string
+    readonly toolName?: string
+    readonly outcome: string
+  }) => void
   readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
   readonly onFinished?: () => void
   readonly onError?: (message: string) => void
+}
+
+function extractToolOccurrenceKey(rec: Record<string, unknown>): string | undefined {
+  const scope = asNum(rec.toolStreamScope)
+  const blockIndex = asNum(rec.toolCallBlockIndex)
+  if (scope !== null && blockIndex !== null && Number.isInteger(scope) && Number.isInteger(blockIndex)) {
+    return `occ:${scope}:${blockIndex}`
+  }
+  return undefined
+}
+
+function extractThinkingBlockKey(val: Record<string, unknown>): string {
+  const idx = asNum(val.index) ?? 0
+  const resp = isRecord(val.response) ? val.response : null
+  const cg = resp ? (asNum(resp.content_generation) ?? 0) : 0
+  const ss = resp ? (asNum(resp.stream_scope) ?? 0) : 0
+  return `${cg}:${ss}:${idx}`
 }
 
 /**
@@ -902,16 +1115,32 @@ export async function streamKeeperChat(params: {
             params.callbacks.onToolStart?.(
               asStr(parsed.toolCallName) ?? 'tool',
               asStr(parsed.toolCallId) ?? undefined,
+              extractToolOccurrenceKey(parsed),
             )
-          } else if (type === 'TOOL_CALL_ARGS' && typeof parsed.delta === 'string') {
-            params.callbacks.onToolArgsDelta?.(asStr(parsed.toolCallId) ?? '', parsed.delta)
+          } else if (type === 'TOOL_CALL_ARGS') {
+            const tcId = asStr(parsed.toolCallId) ?? ''
+            const occKey = extractToolOccurrenceKey(parsed)
+            if (typeof parsed.snapshot === 'string') {
+              params.callbacks.onToolArgsSnapshot?.(tcId, parsed.snapshot, occKey)
+            } else if (typeof parsed.delta === 'string') {
+              params.callbacks.onToolArgsDelta?.(tcId, parsed.delta, occKey)
+            }
+          } else if (type === 'TOOL_CALL_END') {
+            params.callbacks.onToolEnd?.(
+              asStr(parsed.toolCallId) ?? undefined,
+              extractToolOccurrenceKey(parsed),
+            )
           } else if (type === 'TOOL_CALL_RESULT') {
             const rawContent = typeof parsed.content === 'string'
               ? parsed.content
               : parsed.result !== undefined
                 ? JSON.stringify(parsed.result, null, 2)
                 : ''
-            params.callbacks.onToolResult?.(asStr(parsed.toolCallId) ?? '', rawContent)
+            params.callbacks.onToolResult?.(
+              asStr(parsed.toolCallId) ?? '',
+              rawContent,
+              extractToolOccurrenceKey(parsed),
+            )
           } else if (type === 'RUN_FINISHED') {
             terminal = true
             params.callbacks.onFinished?.()
@@ -923,8 +1152,77 @@ export async function streamKeeperChat(params: {
             const val = isRecord(parsed.value) ? parsed.value : null
             if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
               params.callbacks.onAttemptStarted?.()
+            } else if (name === 'KEEPER_MODEL_CONTENT_ACTIVITY' && val) {
+              const ch = asStr(val.channel)
+              if (ch === 'thinking' || ch === 'text') {
+                params.callbacks.onModelActivity?.(ch)
+              }
             } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
-              params.callbacks.onThinkingDelta?.(val.delta)
+              params.callbacks.onThinkingDelta?.(val.delta, extractThinkingBlockKey(val))
+            } else if (name === 'KEEPER_THINKING_SNAPSHOT' && val && typeof val.snapshot === 'string') {
+              params.callbacks.onThinkingSnapshot?.(val.snapshot, extractThinkingBlockKey(val))
+            } else if (name === 'KEEPER_TOOL_CALL_ADMITTED' && val) {
+              const admittedName = asStr(val.toolCallName)
+              if (admittedName) {
+                params.callbacks.onToolAdmitted?.(
+                  admittedName,
+                  asStr(val.toolCallId) ?? undefined,
+                  extractToolOccurrenceKey(val),
+                )
+              }
+            } else if (name === 'KEEPER_TOOL_RESULT_READY' && val) {
+              const executionId = asStr(val.executionId) ?? asStr(val.execution_id)
+              if (executionId) {
+                params.callbacks.onToolResultReady?.({
+                  executionId,
+                  toolCallId: asStr(val.toolCallId) ?? undefined,
+                  streamKey: extractToolOccurrenceKey(val),
+                })
+              }
+            } else if (name === 'KEEPER_NATIVE_TOOL_START' && val) {
+              params.callbacks.onToolStart?.(
+                asStr(val.toolCallName) ?? 'native_tool',
+                asStr(val.toolCallId) ?? undefined,
+                extractToolOccurrenceKey(val),
+              )
+            } else if (name === 'KEEPER_NATIVE_TOOL_PROGRESS' && val && isRecord(val.progress)) {
+              const progressLabel = formatNativeProgressLabel(val.progress)
+              if (progressLabel) {
+                params.callbacks.onNativeToolProgress?.({
+                  toolName: asStr(val.toolCallName) ?? undefined,
+                  toolCallId: asStr(val.toolCallId) ?? undefined,
+                  streamKey: extractToolOccurrenceKey(val),
+                  progressLabel,
+                })
+              }
+            } else if (name === 'KEEPER_NATIVE_TOOL_END' && val) {
+              const completion = isRecord(val.completion) ? formatNativeCompletionSummary(val.completion) : { status: 'completed' as const }
+              params.callbacks.onNativeToolEnd?.({
+                toolName: asStr(val.toolCallName) ?? undefined,
+                toolCallId: asStr(val.toolCallId) ?? undefined,
+                streamKey: extractToolOccurrenceKey(val),
+                status: completion.status,
+                summary: completion.summary,
+              })
+            } else if (name === 'KEEPER_TOOL_APPROVAL_REQUESTED' && val) {
+              const tcId = asStr(val.tool_call_id) ?? ''
+              params.callbacks.onToolApprovalRequested?.({
+                toolCallId: tcId,
+                toolName: asStr(val.tool_call_name) ?? 'tool',
+                args: typeof val.args === 'string' && val.args.trim() ? val.args : undefined,
+                question: asStr(val.question) ?? undefined,
+                because: asStr(val.because) ?? undefined,
+              })
+            } else if (name === 'KEEPER_TOOL_APPROVAL_SETTLED' && val) {
+              const tcId = asStr(val.tool_call_id) ?? ''
+              const outcome = asStr(val.outcome) ?? ''
+              if (outcome) {
+                params.callbacks.onToolApprovalSettled?.({
+                  toolCallId: tcId,
+                  toolName: asStr(val.tool_call_name) ?? undefined,
+                  outcome,
+                })
+              }
             } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
               const state = asStr(val.state) ?? 'Queued'
               const inter = isRecord(val.interactive) ? val.interactive : null

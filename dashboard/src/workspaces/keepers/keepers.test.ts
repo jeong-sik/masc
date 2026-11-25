@@ -32,7 +32,6 @@ import {
   buildContextFillSeries,
   computePromptCacheSegments,
   KeeperDebugCompanion,
-  shouldDefaultOpenCompanion,
 } from './keeper-debug-companion'
 import { releaseAllViewStreams, getActiveViewStreamKey } from '../../core/view-stream-slot'
 import { KeeperChatTab } from './keeper-chat-tab'
@@ -240,11 +239,7 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
     expect(decoded.source_bound.state).toBe('present')
   })
 
-  it('computes Debug Companion defaults, 4-segment cache bar, and 60-turn compaction detection', () => {
-    expect(shouldDefaultOpenCompanion(1024)).toBe(false)
-    expect(shouldDefaultOpenCompanion(1279)).toBe(false)
-    expect(shouldDefaultOpenCompanion(1280)).toBe(true)
-
+  it('computes a 4-segment cache bar and detects compaction across 60 turns', () => {
     const sampleRecord: TurnRecordItem = {
       trace_id: 'tr1',
       absolute_turn: 10,
@@ -838,7 +833,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await recoveredObserver
   })
 
-  it('dispatches Queue (Enter) vs Steer (⌘↵) with own operation_id and toggles Debug Companion with ⌘.', async () => {
+  it('dispatches Queue (Enter) vs Steer (⌘↵) with separate operation IDs', async () => {
     const streamBodies: Record<string, unknown>[] = []
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -904,14 +899,41 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       control_token: 'ctrl-tok-1',
       operation_id: steerBody.request_id,
     })
+  })
 
-    // Toggle Debug Companion with ⌘.
-    const initialOpen = container.querySelector('[data-companion-open]')?.getAttribute('data-companion-open')
-    fireEvent.keyDown(window, { key: '.', metaKey: true })
-    await waitFor(() => {
-      const nextOpen = container.querySelector('[data-companion-open]')?.getAttribute('data-companion-open')
-      expect(nextOpen).not.toBe(initialOpen)
+  it('loads Debug Companion traces only when opened, even in a wide chat', async ({ onTestFinished }) => {
+    const originalWidth = window.innerWidth
+    vi.stubGlobal('innerWidth', 1365)
+    onTestFinished(() => { vi.stubGlobal('innerWidth', originalWidth) })
+    const traceReads: string[] = []
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), window.location.href).pathname
+      const endpoint = path.split('/').at(-1)
+      if (endpoint === 'turn-records' || endpoint === 'tool-calls' || endpoint === 'raw-traces') {
+        traceReads.push(endpoint)
+      }
+      const body = path.endsWith('/chat/history/page')
+        ? { messages: [], has_more: false, next_cursor: null }
+        : {}
+      return Response.json(body)
     })
+    vi.stubGlobal('fetch', mockFetch)
+    const view = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/chat/history/page'))).toBe(true)
+    })
+    expect(view.getByRole('button', { name: /Debug 열기/ })).toBeTruthy()
+    expect(traceReads).toEqual([])
+
+    fireEvent.keyDown(window, { key: '.', metaKey: true })
+    expect(await view.findByRole('tab', { name: 'Trace' })).toBeTruthy()
+    await waitFor(() => expect([...traceReads].sort()).toEqual(['raw-traces', 'tool-calls', 'turn-records']))
+
+    fireEvent.click(view.getByRole('button', { name: '닫기' }))
+    expect(view.queryByRole('tab', { name: 'Trace' })).toBeNull()
   })
 
   it('renders 3-way discriminated Memory tab states and Config CAS 409 conflict_cas alert', async () => {
@@ -1017,7 +1039,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await waitFor(() => expect(cfg.getByLabelText('keeper.activation_mode')).toBeTruthy())
 
     const select = cfg.getByLabelText('keeper.activation_mode') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'autonomous' } })
+    // The Preact test helper maps change to input in compat mode, even for selects.
+    select.value = 'autonomous'
+    fireEvent(select, new Event('change', { bubbles: true }))
 
     fireEvent.click(cfg.getByRole('button', { name: 'Dry-Run Unified Diff 미리보기' }))
     await waitFor(() => {
@@ -1240,7 +1264,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const cfg = render(html`<${KeeperConfigTab} keeperName="code-reviewer-sister" onMutated=${vi.fn()} />`)
     await waitFor(() => expect(cfg.getByLabelText('keeper.activation_mode')).toBeTruthy())
     const select = cfg.getByLabelText('keeper.activation_mode') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'autonomous' } })
+    select.value = 'autonomous'
+    fireEvent(select, new Event('change', { bubbles: true }))
     expect(cfg.container.textContent).toContain('변경 1건')
 
     fireEvent.click(cfg.getByRole('button', { name: '끄기' }))

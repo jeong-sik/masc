@@ -7,13 +7,15 @@
  *   (`Queued | Sending | Pending_processing | Confirming_delivery | Streaming | Delivered | Cut_recovered | Failed`).
  * - Hermes-style Composer Footer: Model/Lane pill, circular SVG Context Ring %,
  *   attachments + voice STT trigger, `Enter` Queue vs `⌘↵` Steer (own `operation_id`), `/btw` side-query.
- * - Opt-In Right Debug Companion Pane (`⌘.`, `380px`, default closed `<1280px`).
+ * - Opens the Debug Companion on demand (`⌘.`).
  */
 
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
+import { ErrorBoundary } from '../../components/common/error-boundary'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { WorkspaceChatImage } from '../../components/chat/workspace-image'
+import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
@@ -35,10 +37,6 @@ import {
   transcribeVoiceAudio,
   type KeeperLiveToolPulse,
 } from './keepers-api'
-import {
-  KeeperDebugCompanion,
-  shouldDefaultOpenCompanion,
-} from './keeper-debug-companion'
 import {
   dedupeHistoryToolRows,
   extractDelegateCardInfo,
@@ -90,6 +88,10 @@ import type {
   KeeperWaitingInventoryData,
   QueuedChatOperation,
 } from './types'
+
+const LazyKeeperDebugCompanion = lazy(async () => ({
+  default: (await import('./keeper-debug-companion')).KeeperDebugCompanion,
+}))
 
 export interface KeeperChatTabProps {
   readonly keeper: KeeperRosterItem
@@ -206,7 +208,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [sending, setSending] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [controlToken, setControlToken] = useState<string | null>(keeper.chat_control_token)
-  const [companionOpen, setCompanionOpen] = useState<boolean>(() => shouldDefaultOpenCompanion())
+  const [companionOpen, setCompanionOpen] = useState(false)
   const [blockPrefs, setBlockPrefs] = useState<ChatBlockPrefs>(() => loadChatBlockPrefs())
 
   const updateBlockPrefs = useCallback((updater: (cur: ChatBlockPrefs) => ChatBlockPrefs) => {
@@ -2587,12 +2589,27 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       </div>
 
       ${companionOpen && html`
-        <${KeeperDebugCompanion}
-          keeperName=${keeper.name}
-          onClose=${() => setCompanionOpen(false)}
-          onInspect=${props.onInspect}
-          onMutated=${props.onMutated}
-        />
+        <${ErrorBoundary} label="Keeper Debug" fallback=${() => html`
+          <aside class="kp-companion" aria-label="Debug Companion (⌘.)">
+            <div class="kp-companion-head">
+              <span role="alert">Debug 패널을 불러오지 못했습니다.</span>
+              <button type="button" class="btn-ghost" onClick=${() => setCompanionOpen(false)}>닫기</button>
+            </div>
+          </aside>
+        `}>
+          <${Suspense} fallback=${html`
+            <aside class="kp-companion" role="status">
+              <div class="kp-companion-head">Debug 불러오는 중…</div>
+            </aside>
+          `}>
+            <${LazyKeeperDebugCompanion}
+              keeperName=${keeper.name}
+              onClose=${() => setCompanionOpen(false)}
+              onInspect=${props.onInspect}
+              onMutated=${props.onMutated}
+            />
+          </${Suspense}>
+        </${ErrorBoundary}>
       `}
     </div>
   `

@@ -949,11 +949,11 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
     (fun () -> ignore (Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages))
 ;;
 
-(* A stranded carrier (the target Text gone, the carrier last) is a refusal
-   of this request before anything is sent. It reaches the caller as a value,
-   [AcceptRejected], not as an exception the runtime reports as unhandled.
-   Shape from a Gemini Keeper's history, 2026-11-25. *)
-let test_stranded_carrier_is_a_typed_request_refusal () =
+(* A stranded carrier (the target Text gone, the carrier last) can no longer
+   be replayed on any part, so the serializer drops just the carrier and the
+   request dispatches without it, instead of refusing the request or raising
+   it to the runtime. Shape from a Gemini Keeper's history, 2026-11-25. *)
+let test_stranded_carrier_dispatches_without_signature () =
   let carrier =
     Backend_gemini.gemini_part_thought_signature_payload
       ~target:Backend_gemini.Gemini_text_part
@@ -975,16 +975,59 @@ let test_stranded_carrier_is_a_typed_request_refusal () =
      reasoning projection replays the carrier instead of dropping it. *)
   let messages = stamp_reasoning_history config messages in
   (match Backend_gemini.build_request_artifact_result ~config ~messages () with
-   | Error reason ->
-     check string "the builder names the stranded carrier"
-       "Gemini thoughtSignature carrier targets text but its adjacent content block is \
-        unsupported"
-       reason
-   | Ok _ -> fail "a stranded carrier must refuse the request");
-  match Complete_common.serialize_http_request ~stream:false ~config ~messages ~tools:[] with
-  | Error (Http_client.AcceptRejected { reason = _ }) -> ()
-  | Error _ -> fail "the serializer must report a local refusal"
-  | Ok _ -> fail "the serializer must refuse a stranded carrier"
+   | Ok _ -> ()
+   | Error reason -> fail ("a stranded carrier must drop, not refuse: " ^ reason));
+  (match Complete_common.serialize_http_request ~stream:false ~config ~messages ~tools:[] with
+   | Ok _ -> ()
+   | Error _ -> fail "the serializer must dispatch a stranded carrier");
+  let body = Backend_gemini.build_request ~config ~messages () in
+  let contents = parse_body body |> member "contents" |> to_list in
+  (match List.nth contents 1 |> member "parts" |> to_list with
+   | [ part ] ->
+     check string "surviving text carries no signature"
+       "reply"
+       (part |> member "text" |> to_string);
+     check bool "no thoughtSignature on the unsigned part"
+       true ((part |> member "thoughtSignature") = `Null)
+   | _ -> fail "expected one unsigned Gemini part")
+;;
+
+(* A part carrier whose adjacent block is not a signable part at all (here a
+   tool call, whose own carrier kind is keyed separately) is dropped the same
+   way; the adjacent block itself is emitted normally. *)
+let test_part_carrier_before_tool_use_dispatches () =
+  let carrier =
+    Backend_gemini.gemini_part_thought_signature_payload
+      ~target:Backend_gemini.Gemini_text_part
+      ~thought_signature:"sig-text-before-tool"
+  in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
+      ; content =
+          [ Types.RedactedThinking carrier
+          ; Types.ToolUse { id = "call-1"; name = "lookup"; input = `Assoc [] }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let contents, _ =
+    Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages
+  in
+  match contents with
+  | [ content ] ->
+    (match content |> member "parts" |> to_list with
+     | [ part ] ->
+       let call = part |> member "functionCall" in
+       check string "tool call survives the dropped carrier"
+         "lookup"
+         (call |> member "name" |> to_string);
+       check bool "no part signature on the tool call"
+         true ((part |> member "thoughtSignature") = `Null)
+     | _ -> fail "expected one Gemini function-call part")
+  | _ -> fail "expected one Gemini content"
 ;;
 
 let message_with_blocks role content : Types.message =
@@ -2514,8 +2557,14 @@ let () =
     "backend_gemini"
     [ ( "build_request"
       , [ test_case "basic" `Quick test_basic_request
-        ; test_case "stranded carrier is a typed request refusal" `Quick
-            test_stranded_carrier_is_a_typed_request_refusal
+        ; test_case
+            "stranded carrier dispatches without signature"
+            `Quick
+            test_stranded_carrier_dispatches_without_signature
+        ; test_case
+            "part carrier before tool use dispatches"
+            `Quick
+            test_part_carrier_before_tool_use_dispatches
         ; test_case "explicit supported seed" `Quick test_explicit_supported_seed
         ; test_case "omitted seed stays omitted" `Quick test_omitted_seed_stays_omitted
         ; test_case

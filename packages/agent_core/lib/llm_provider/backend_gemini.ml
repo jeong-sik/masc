@@ -545,8 +545,12 @@ let parts_of_content_blocks ~role ~supports_function_response_parts tool_signatu
   (* Gemini requires an opaque [thoughtSignature] to be replayed on the exact
      model part that carried it. AGENT_CORE represents that otherwise-unmodeled field
      as a [RedactedThinking] block immediately before its target. Adjacency is
-     the structural identity: if a reducer breaks it, fail the request rather
-     than attaching the signature to a different part or silently dropping it. *)
+     the structural identity. A carrier whose target block is gone entirely,
+     or whose next block is not a signable part at all, cannot be replayed on
+     any part: drop just that carrier with a warning so a reducer-stranded
+     history stays dispatchable. A carrier whose next block is a different
+     signable part is a reordered history: keep failing the request rather
+     than attaching the signature to a different part. *)
   let malformed_carrier expected actual =
     let actual =
       match actual with
@@ -584,11 +588,23 @@ let parts_of_content_blocks ~role ~supports_function_response_parts tool_signatu
              | Some part ->
                loop (attach_thought_signature thought_signature part :: acc) rest
              | None -> malformed_carrier expected_target (Some actual_target))
-          | Some _ | None -> malformed_carrier expected_target actual_target))
+          | Some _ -> malformed_carrier expected_target actual_target
+          | None ->
+            Diag.warn
+              "backend_gemini"
+              "dropping stranded Gemini thoughtSignature carrier targeting %s: its \
+               adjacent content block is not a signable part"
+              (gemini_part_signature_target_to_string expected_target);
+            loop acc (target :: rest)))
     | [ (RedactedThinking data, _) ] ->
       (match decode_gemini_part_thought_signature data with
        | Decoded_gemini_part_signature (expected_target, _) ->
-         malformed_carrier expected_target None
+         Diag.warn
+           "backend_gemini"
+           "dropping stranded Gemini thoughtSignature carrier targeting %s: its \
+            target block is gone"
+           (gemini_part_signature_target_to_string expected_target);
+         List.rev acc
        | Malformed_gemini_part_signature ->
          raise
            (Gemini_api_error
@@ -942,6 +958,7 @@ let extract_cacheable_prefix_result
       Ok { system_instruction; tools_json; tool_config_json }
   with
   | Invalid_argument reason -> Error reason
+  | Gemini_api_error reason -> Error reason
 ;;
 
 let extract_cacheable_prefix ~config ~messages ?tools () =
@@ -1103,8 +1120,10 @@ let build_request ?stream ?cached_content ~config ~messages ?tools () =
 
 (* The serializer refuses a request in two ways: [invalid_arg] for a config
    it cannot express, and [Gemini_api_error] for a history it cannot lower
-   (a stranded thoughtSignature carrier, a malformed inlineData). Both are
-   local refusals of this request, decided before anything is sent. *)
+   (a reordered thoughtSignature carrier, a malformed inlineData). Both are
+   local refusals of this request, decided before anything is sent. A
+   stranded carrier with no adjacent signable part is dropped with a warning
+   instead of refused, so a reducer-stranded history stays dispatchable. *)
 let build_request_artifact_result ?stream ?cached_content ~config ~messages ?tools () =
   match build_request_artifact ?stream ?cached_content ~config ~messages ?tools () with
   | artifact -> Ok artifact

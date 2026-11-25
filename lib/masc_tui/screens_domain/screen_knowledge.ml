@@ -2817,6 +2817,55 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     | Nav.Knowledge_memory ->
         render_memory ~model ~cache ~rect:body ~theme ~bp grid
 
+let thread_reading_tabs ~lang (view : Knowledge_store.thread_view) =
+  let reading_comments =
+    match view with
+    | Knowledge_store.Thread_post -> false
+    | Knowledge_store.Thread_comments -> true
+  in
+  [
+    {
+      H.label =
+        Say.resolve lang
+          (if reading_comments then Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Post"
+           else Say.make ~ko:"본문" ~en:"Post");
+      active = not reading_comments;
+      tone = Some Theme.Status_active;
+      glyph = None;
+    };
+    {
+      H.label =
+        Say.resolve lang
+          (if reading_comments then Say.make ~ko:"댓글 전문" ~en:"Comments"
+           else Say.make ~ko:"[Tab] 댓글 전문" ~en:"[Tab] Comments");
+      active = reading_comments;
+      tone = Some Theme.Status_active;
+      glyph = None;
+    };
+  ]
+
+let draw_thread_vote ~grid ~theme ~lang ~(inner : Rect.t) ~(content : Rect.t) = function
+  | Some (target, direction) when content.w > 0 && content.y <= Rect.bottom inner ->
+      let y = content.y - 1 in
+      let key = match direction with `Up -> "[+]" | `Down -> "[-]" in
+      let text =
+        match target with
+        | Knowledge_store.Vote_post _ ->
+            Say.make ~ko:"한 번 더 눌러 게시글 투표 확정"
+              ~en:"Press again to confirm the post vote"
+        | Knowledge_store.Vote_comment _ ->
+            Say.make ~ko:"한 번 더 눌러 댓글 투표 확정"
+              ~en:"Press again to confirm the comment vote"
+      in
+      Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:content.x
+        ~y ~h:1 ~theme;
+      ignore
+        (H.put_clipped ~grid ~clip:inner ~x:(content.x + 2) ~y
+           ~max_w:(Int.max 0 (content.w - 2))
+           ~style:(H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention)
+           (key ^ " " ^ Say.resolve lang text))
+  | Some _ | None -> ()
+
 let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
@@ -2869,7 +2918,8 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           | None -> "Standalone")
       | None -> H.short_hash ~len:10 post_id
     in
-    [
+    thread_reading_tabs ~lang k.thread_view
+    @ [
       {
         H.label = depth_info;
         active = true;
@@ -2892,12 +2942,6 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             (if Option.is_some k.armed_vote then Theme.Status_attention
              else Theme.Status_ok);
         glyph = Some Glyph.Delta_up;
-      };
-      {
-        H.label = Say.resolve lang (Say.make ~ko:"[< >] 댓글 선택" ~en:"[< >] Comment");
-        active = Option.is_some (Knowledge_store.selected_thread_comment ~post_id k);
-        tone = Some Theme.Status_ai;
-        glyph = None;
       };
     ]
   in
@@ -2923,8 +2967,8 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[↑↓/PgDn] 댓글 스크롤 · [c] 댓글 · [+][-] 투표(2회 확정) · [Esc] 뒤로"
-                 ~en:"[↑↓/PgDn] Scroll Comments · [c] Reply · [+][-] Vote (2x) · [Esc] Back"))
+                 ~ko:"[Tab] 댓글 전문 · [↑↓] 스크롤 · [Esc] 뒤로"
+                 ~en:"[Tab] Comments · [↑↓] Scroll · [Esc] Back"))
          title)
   in
   if Rect.is_empty inner then ()
@@ -2965,161 +3009,80 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           ~theme ~left_title:p.title ~right_meta:age
           ?subtitle:(if band_h >= 2 then Some meta else None)
           ();
-        let content =
-          Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-            ~h:(Int.max 0 (inner.h - band_h))
-          |> H.pad_content ~bp
+        let content = Knowledge_store.thread_reading_rect ~bp k rect in
+        draw_thread_vote ~grid ~theme ~lang ~inner ~content k.armed_vote;
+        ignore
+          (Markdown.draw grid ~rect:content ~theme ~osc8:true
+             ~scroll:model.nav.dive_scroll_offset p.body)
+
+let render_dive_thread_comment ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let knowledge = model.knowledge in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ bar; body ] -> bar, body
+    | _ -> Rect.empty, rect
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       (thread_reading_tabs ~lang knowledge.thread_view));
+  let selected = Knowledge_store.selected_thread_comment_at ~post_id knowledge in
+  let thread =
+    match knowledge.active_thread with
+    | Observed.Value { data = post, _; _ } as slot
+      when String.equal post.id post_id -> slot
+    | (Observed.Loading _ | Observed.Failed _) as slot
+      when Option.equal String.equal knowledge.active_thread_target (Some post_id) ->
+        slot
+    | Observed.Value _ | Observed.Loading _ | Observed.Failed _
+    | Observed.Absent | Observed.Unreported ->
+        Observed.loading ~since_ns:model.freshness.last_mono
+  in
+  let title =
+    match Observed.to_option thread with
+    | Some (post, _) -> post.title
+    | None -> Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments")
+  in
+  let hotkey =
+    match selected with
+    | Some _ ->
+        Say.make ~ko:"[Tab] 본문 · [< >] 댓글 이동 · [c] 답글"
+          ~en:"[Tab] Post · [< >] Next/prev comment · [c] Reply"
+    | None -> Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Post"
+  in
+  let inner =
+    Card.draw ~cache grid ~rect:body_rect ~theme
+      (H.card_spec ~focused:(Model.body_has_focus model)
+         ~hotkey:(Say.resolve lang hotkey) title)
+  in
+  if not (Rect.is_empty inner) then
+    match selected, Observed.to_option thread with
+    | Some (index, tc), Some (_, comments) ->
+        let c = tc.comment in
+        let age = H.format_age ~now_unix:model.freshness.last_wall_unix c.created_at_unix in
+        let author =
+          Printf.sprintf "%d/%d · %s@%s" (index + 1) (List.length comments)
+            (if Option.is_some c.parent_id then "↳ " else "") c.author
         in
-        if not (Rect.is_empty content) then begin
-          let y = ref content.y and bottom = Rect.bottom content in
-          (match k.armed_vote with
-           | Some (target, dir) when !y < bottom ->
-               let key_s = match dir with `Up -> "[+]" | `Down -> "[-]" in
-               let target_s =
-                 match target with
-                 | Knowledge_store.Vote_post _ ->
-                     Say.resolve lang (Say.make ~ko:"게시글" ~en:"post")
-                 | Knowledge_store.Vote_comment _ ->
-                     Say.resolve lang (Say.make ~ko:"선택 댓글" ~en:"selected comment")
-               in
-               Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:content.x
-                 ~y:!y ~h:1 ~theme;
-               ignore
-                 (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                    ~max_w:(Int.max 0 (content.w - 2))
-                    ~style:
-                      (H.status_style ~theme ~attrs:Attr.bold
-                         Theme.Status_attention)
-                    (Printf.sprintf "%s %s (%s)" key_s
-                       (Say.resolve lang
-                          (Say.make ~ko:"한 번 더 눌러 투표 확정"
-                             ~en:"Press again to confirm vote"))
-                       target_s));
-               incr y
-           | Some _ | None -> ());
-          let threaded = Knowledge_store.order_comments_threaded comments in
-          let comments_h =
-            if threaded = [] then 0
-            else
-              Int.min
-                (Int.max 4 ((bottom - !y) / 2))
-                (2 + (List.length threaded * 2))
-          in
-          let body_h = Int.max 0 (bottom - !y - comments_h) in
-          let body_max =
-            if body_h > 0 && content.w > 0 then
-              let lines =
-                Markdown.render_lines ~width:content.w ~theme p.body
-              in
-              Int.max 0 (List.length lines - body_h)
-            else 0
-          in
-          let raw_scroll = Int.max 0 model.nav.dive_scroll_offset in
-          if body_h > 0 then begin
-            let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:body_h in
-            ignore
-              (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                 ~scroll:(Int.min body_max raw_scroll) p.body);
-            y := !y + body_h
-          end;
-          if comments_h > 0 && !y < bottom then begin
-            let c_lines =
-              List.concat
-                (List.mapi
-                   (fun idx (tc : Knowledge_store.threaded_comment) ->
-                     let c = tc.comment in
-                     let is_sel =
-                       Option.equal Int.equal k.thread_selected_comment (Some idx)
-                     in
-                     let indent =
-                       if tc.depth <= 0 then ""
-                       else
-                         let prefix =
-                           String.concat "" (List.init (tc.depth - 1) (fun _ -> "│ "))
-                         in
-                         prefix ^ "└─ "
-                     in
-                     let c_age = H.format_age ~now_unix c.created_at_unix in
-                     let hdr =
-                       Printf.sprintf "%s@%s · %s%d" indent c.author
-                         (Glyph.to_utf8 Glyph.Delta_up) c.score
-                     in
-                     let body_indent = String.make (tc.depth * 2) ' ' in
-                     [
-                       `Hdr (hdr, c_age, is_sel);
-                       `Body (body_indent ^ H.sanitize_single_line c.body, is_sel);
-                     ])
-                   threaded)
-            in
-            let c_vis_h = Int.max 1 (bottom - !y - 1) in
-            let total_cl = List.length c_lines in
-            let c_max = Int.max 0 (total_cl - c_vis_h) in
-            let c_skip = Int.min c_max (Int.max 0 (raw_scroll - body_max)) in
-            let scroll_suffix =
-              if c_max > 0 then
-                let ve = Int.min total_cl (c_skip + c_vis_h) in
-                let rem = Int.max 0 (total_cl - ve) in
-                if rem > 0 then
-                  Printf.sprintf " · L%d-%d/%d · ↓ +%d" (c_skip + 1) ve total_cl rem
-                else Printf.sprintf " · L%d-%d/%d" (c_skip + 1) ve total_cl
-              else ""
-            in
-            H.draw_divider ~grid ~rect:content ~y:!y ~theme
-              ~label:
-                (Printf.sprintf "%s (%d)%s · [c] %s"
-                   (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
-                   (List.length threaded) scroll_suffix
-                   (Say.resolve lang (Say.make ~ko:"답글" ~en:"Reply")))
-              ();
-            incr y;
-            let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-            List.iter
-              (function
-                | `Hdr (hdr, c_age, is_sel) ->
-                    if !y < bottom then begin
-                      let row_bg =
-                        if is_sel then theme.selection_bg else theme.surface_1
-                      in
-                      if is_sel then
-                        H.paint_selected_row_bg ~grid ~clip:content
-                          ~row_rect:(Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
-                          ~theme ()
-                      else
-                        Card.draw_left_rail ~color:theme.border_inactive grid
-                          ~x:content.x ~y:!y ~h:1 ~theme;
-                      let aw = Grapheme.display_width c_age in
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                           ~max_w:(Int.max 6 (tw - aw - 2))
-                           ~style:
-                             (H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ())
-                           hdr);
-                      ignore
-                        (H.put_right ~grid ~clip:content
-                           ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                           ~style:(H.whisper_style ~theme ~bg:row_bg ()) c_age);
-                      incr y
-                    end
-                | `Body (body_s, is_sel) ->
-                    if !y < bottom then begin
-                      let row_bg =
-                        if is_sel then theme.selection_bg else theme.surface_1
-                      in
-                      if is_sel then
-                        H.paint_selected_row_bg ~grid ~clip:content
-                          ~row_rect:(Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
-                          ~theme ()
-                      else
-                        Card.draw_left_rail ~color:theme.border_inactive grid
-                          ~x:content.x ~y:!y ~h:1 ~theme;
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                           ~style:(H.text_style ~theme ~bg:row_bg ()) body_s);
-                      incr y
-                    end)
-              (Store_scroll.drop c_skip c_lines)
-          end
-        end
+        let meta = Printf.sprintf "%s%d · %s" (Glyph.to_utf8 Glyph.Delta_up) c.score age in
+        let header = Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1 in
+        Card.draw_section_band ~pad_x:(Layout.card_pad_x bp) grid ~rect:header
+          ~theme ~left_title:author ~right_meta:meta ();
+        let content = Knowledge_store.thread_reading_rect ~bp knowledge rect in
+        draw_thread_vote ~grid ~theme ~lang ~inner ~content knowledge.armed_vote;
+        ignore
+          (Markdown.draw grid ~rect:content ~theme ~osc8:true
+             ~scroll:knowledge.thread_comment_scroll c.body)
+    | None, Some _ ->
+        let content = H.pad_content ~bp inner in
+        ignore
+          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
+             ~max_w:content.w ~style:(H.secondary_style ~theme ())
+             (Say.resolve lang (Say.make ~ko:"댓글 없음" ~en:"No comments")))
+    | (Some _ | None), None ->
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
+          ~theme ~lang thread
 
 let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -3279,8 +3242,13 @@ let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
     match target with
-    | Nav.Thread_dive post_id ->
-        render_dive_thread ~post_id ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Thread_dive post_id -> (
+        match model.knowledge.thread_view with
+        | Knowledge_store.Thread_post ->
+            render_dive_thread ~post_id ~model ~cache ~rect:body ~theme ~bp grid
+        | Knowledge_store.Thread_comments ->
+            render_dive_thread_comment ~post_id ~model ~cache ~rect:body ~theme
+              ~bp grid)
     | Nav.Wiki_dive slug ->
         render_dive_wiki ~slug ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Artifact_dive id ->

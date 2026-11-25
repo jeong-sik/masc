@@ -147,6 +147,8 @@ type threaded_comment = {
   is_reply : bool;
 }
 
+type thread_view = Thread_post | Thread_comments
+
 type memory_subview =
   | Mem_diff_flow
   | Mem_health_ledger
@@ -170,7 +172,9 @@ type t = {
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
   active_thread_target : string option;
-  thread_selected_comment : int option;
+  thread_view : thread_view;
+  thread_selected_comment : string option;
+  thread_comment_scroll : int;
   armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
@@ -246,7 +250,9 @@ let empty =
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
     active_thread_target = None;
+    thread_view = Thread_post;
     thread_selected_comment = None;
+    thread_comment_scroll = 0;
     armed_vote = None;
     wiki_index = Observed.unreported;
     wiki_pages = String_map.empty;
@@ -824,29 +830,104 @@ let order_comments_threaded (comments : Wire_knowledge.board_comment list) :
     (List.sort cmp_comment comments);
   List.rev !out
 
+let thread_comments ~post_id t =
+  match Observed.to_option t.active_thread with
+  | Some (post, comments) when String.equal post.id post_id ->
+      order_comments_threaded comments
+  | Some _ | None -> []
+
+let comment_index selected comments =
+  match selected with
+  | None -> Some 0
+  | Some id ->
+      List.find_index (fun tc -> String.equal tc.comment.id id) comments
+
+let selected_thread_comment_at ~post_id t =
+  match t.thread_view with
+  | Thread_post -> None
+  | Thread_comments ->
+      let comments = thread_comments ~post_id t in
+      Option.bind (comment_index t.thread_selected_comment comments) (fun i ->
+          Option.map (fun comment -> (i, comment)) (List.nth_opt comments i))
+
 let selected_thread_comment ~post_id t =
-  match t.thread_selected_comment, Observed.to_option t.active_thread with
-  | Some idx, Some (tp, comments) when String.equal tp.id post_id ->
-      let ordered = order_comments_threaded comments in
-      List.nth_opt ordered idx
-  | Some _, Some _ | None, _ | Some _, None -> None
+  Option.map snd (selected_thread_comment_at ~post_id t)
+
+let thread_comment_id ~post_id t =
+  match t.thread_selected_comment with
+  | Some _ as id -> id
+  | None ->
+      Option.map (fun tc -> tc.comment.id)
+        (List.nth_opt (thread_comments ~post_id t) 0)
+
+let reset_thread_view t =
+  {
+    t with
+    thread_view = Thread_post;
+    thread_selected_comment = None;
+    thread_comment_scroll = 0;
+  }
+
+let toggle_thread_view t =
+  let thread_view =
+    match t.thread_view with
+    | Thread_post -> Thread_comments
+    | Thread_comments -> Thread_post
+  in
+  { t with thread_view; armed_vote = None }
+
+let thread_reading_rect ~bp t rect =
+  let card = Rect.inset ~left:1 ~right:1 ~top:2 ~bottom:1 rect in
+  let header =
+    match t.thread_view with
+    | Thread_post when card.h >= 7 -> 2
+    | Thread_post | Thread_comments -> 1
+  in
+  let vote_row = if Option.is_some t.armed_vote then 1 else 0 in
+  Rect.inset ~top:(header + vote_row) card
+  |> Masc_tui_ui.Card.pad_inner ~pad_x:(Masc_tui_ui.Layout.card_pad_x bp)
 
 let step_thread_comment ~post_id ~delta t =
-  match Observed.to_option t.active_thread with
-  | Some (tp, comments) when String.equal tp.id post_id ->
-      let n = List.length (order_comments_threaded comments) in
-      if n <= 0 then { t with thread_selected_comment = None; armed_vote = None }
-      else
-        let cur = match t.thread_selected_comment with None -> -1 | Some i -> i in
-        let next = cur + delta in
-        let thread_selected_comment =
-          if next < 0 then None
-          else if next >= n then None
-          else Some next
-        in
-        { t with thread_selected_comment; armed_vote = None }
-  | Some _ | None ->
-      { t with thread_selected_comment = None; armed_vote = None }
+  let comments = thread_comments ~post_id t in
+  let next = { t with thread_view = Thread_comments; armed_vote = None } in
+  if List.is_empty comments then next
+  else
+    let last = List.length comments - 1 in
+    let index =
+      match t.thread_view, t.thread_selected_comment with
+      | Thread_post, None -> if delta < 0 then last else 0
+      | (Thread_post | Thread_comments), (Some _ | None) ->
+          Option.value (comment_index t.thread_selected_comment comments) ~default:0
+          + delta
+    in
+    let thread_selected_comment =
+      Option.map (fun tc -> tc.comment.id)
+        (List.nth_opt comments (Int.max 0 (Int.min last index)))
+    in
+    let thread_comment_scroll =
+      if Option.equal String.equal thread_selected_comment (thread_comment_id ~post_id t)
+      then t.thread_comment_scroll
+      else 0
+    in
+    { next with thread_selected_comment; thread_comment_scroll }
+
+let restore_thread_comment ~post_id ~previous current =
+  let thread_selected_comment =
+    if not (Option.equal String.equal previous.active_thread_target (Some post_id))
+    then None
+    else
+      match thread_comment_id ~post_id previous with
+      | Some id
+        when List.exists (fun tc -> String.equal tc.comment.id id)
+               (thread_comments ~post_id current) ->
+          Some id
+      | Some _ | None -> None
+  in
+  let thread_comment_scroll =
+    if Option.is_some thread_selected_comment then previous.thread_comment_scroll
+    else 0
+  in
+  { current with thread_selected_comment; thread_comment_scroll }
 
 let equal_vote_dir a b =
   match a, b with
@@ -1681,20 +1762,33 @@ let mark_thread_loading ?(force = false) ~post_id ~since_ns t =
   in
   if keep_existing then t
   else
+    let same_thread =
+      Option.equal String.equal t.active_thread_target (Some post_id)
+    in
     {
       t with
       active_thread = Observed.loading ~since_ns;
       active_thread_target = Some post_id;
-      thread_selected_comment = None;
+      thread_selected_comment =
+        (if same_thread then thread_comment_id ~post_id t else None);
+      thread_comment_scroll = (if same_thread then t.thread_comment_scroll else 0);
       armed_vote = None;
     }
 
 let mark_thread_failed ?target ~at ~reason ~retryable t =
+  let thread_selected_comment =
+    match target with
+    | Some post_id when retryable && Option.equal String.equal t.active_thread_target target ->
+        thread_comment_id ~post_id t
+    | Some _ | None -> None
+  in
   {
     t with
     active_thread = Observed.failed ~reason ~retryable ~at;
     active_thread_target = target;
-    thread_selected_comment = None;
+    thread_selected_comment;
+    thread_comment_scroll =
+      (if Option.is_some thread_selected_comment then t.thread_comment_scroll else 0);
     armed_vote = None;
   }
 

@@ -1237,7 +1237,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         ( {
             m with
             knowledge =
-              Knowledge_store.apply_thread ~observed_at:now thread m.knowledge;
+              Knowledge_store.apply_thread ~observed_at:now thread m.knowledge
+              |> Knowledge_store.restore_thread_comment ~post_id:tp.id
+                   ~previous:m.knowledge;
           }
         , [] )
   | Msg.Reply_board_thread { post_id; result = Error err } ->

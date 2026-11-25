@@ -1155,12 +1155,16 @@ let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post optio
 let open_board_comment_for_selected (m : Model.t) =
   match Model.active_dive m with
   | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
-      let parent_id =
-        Option.map
-          (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.id)
-          (Knowledge_store.selected_thread_comment ~post_id m.knowledge)
-      in
-      Update_nav.open_inline_modal m (Nav.Board_comment { post_id; parent_id })
+      (match m.knowledge.thread_view with
+      | Knowledge_store.Thread_post ->
+          Update_nav.open_inline_modal m
+            (Nav.Board_comment { post_id; parent_id = None })
+      | Knowledge_store.Thread_comments -> (
+          match Knowledge_store.selected_thread_comment ~post_id m.knowledge with
+          | Some tc ->
+              Update_nav.open_inline_modal m
+                (Nav.Board_comment { post_id; parent_id = Some tc.comment.id })
+          | None -> (m, [])))
   | Some
       ( Nav.Dive_knowledge
           ( Nav.Wiki_dive _
@@ -1178,20 +1182,33 @@ let open_board_comment_for_selected (m : Model.t) =
             (Nav.Board_comment { post_id = p.id; parent_id = None })
       | None -> (m, []))
 
+let thread_vote_target ~post_id (knowledge : Knowledge_store.t) =
+  match knowledge.thread_view with
+  | Knowledge_store.Thread_post -> Some (Knowledge_store.Vote_post post_id)
+  | Knowledge_store.Thread_comments ->
+      Option.map
+        (fun (tc : Knowledge_store.threaded_comment) ->
+          Knowledge_store.Vote_comment { post_id; comment_id = tc.comment.id })
+        (Knowledge_store.selected_thread_comment ~post_id knowledge)
+
 let upvote_board_target ~now (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
+  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
       let req =
-        match Knowledge_store.selected_thread_comment ~post_id m.knowledge with
-        | Some tc ->
-            Cmd.Post_board_comment_vote
-              { post_id; comment_id = tc.comment.id; direction = `Up }
-        | None -> Cmd.Post_board_vote { post_id; direction = `Up }
+        match thread_vote_target ~post_id m.knowledge with
+        | Some (Knowledge_store.Vote_comment { post_id; comment_id }) ->
+            Some (Cmd.Post_board_comment_vote { post_id; comment_id; direction = `Up })
+        | Some (Knowledge_store.Vote_post post_id) ->
+            Some (Cmd.Post_board_vote { post_id; direction = `Up })
+        | None -> None
       in
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make ~ko:"추천 전송 중..." ~en:"Submitting upvote...")
-          m
-      , [ Cmd.Http_post { epoch = m.epoch; req } ] )
+      match req with
+      | None -> (m, [])
+      | Some req ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"추천 전송 중..." ~en:"Submitting upvote...")
+              m
+          , [ Cmd.Http_post { epoch = m.epoch; req } ] ))
   | Some
       ( Nav.Dive_knowledge
           ( Nav.Wiki_dive _
@@ -4136,6 +4153,19 @@ and execute_action ~now (m : Model.t) action =
               in
               ({ m with ask_modal = Some next_modal }, []))
       | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
+      | None
+        when not (Model.sidebar_has_focus m)
+             && (match Model.active_dive m with
+                 | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
+                 | Some
+                     ( Nav.Dive_knowledge
+                         (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+                     | Nav.Dive_keeper _
+                     | Nav.Dive_work _
+                     | Nav.Dive_runtime _
+                     | Nav.Dive_infra _ )
+                 | None -> false) ->
+          ({ m with knowledge = Knowledge_store.toggle_thread_view m.knowledge }, [])
       | None ->
           let n = Model.focusable_pane_count m in
           let sync_pane (base : Model.t) next_pane =
@@ -6025,15 +6055,15 @@ and execute_action ~now (m : Model.t) action =
                     | None -> Some id))
             | Some (Nav.Dive_knowledge kd) -> (
                 match kd with
-                | Nav.Thread_dive id -> (
-                    match
-                      List.find_opt
-                        (fun (p : Wire_knowledge.board_post) ->
-                          String.equal p.id id)
-                        (Knowledge_store.filtered_posts m.knowledge)
-                    with
-                    | Some p -> Some p.body
-                    | None -> Some id)
+                | Nav.Thread_dive post_id -> (
+                    match m.knowledge.thread_view with
+                    | Knowledge_store.Thread_post ->
+                        Option.map (fun (p : Wire_knowledge.board_post) -> p.body)
+                          (selected_board_post_for_crud m)
+                    | Knowledge_store.Thread_comments ->
+                        Option.map
+                          (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.body)
+                          (Knowledge_store.selected_thread_comment ~post_id m.knowledge))
                 | Nav.Wiki_dive slug -> (
                     match
                       Observed.to_option
@@ -7192,15 +7222,8 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
-                let parent_id =
-                  Option.map
-                    (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.id)
-                    (Knowledge_store.selected_thread_comment ~post_id
-                       m.knowledge)
-                in
-                Update_nav.open_inline_modal m
-                  (Nav.Board_comment { post_id; parent_id })
+            | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
+                open_board_comment_for_selected m
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
                 let drafts =
                   m.drafts |> Drafts.set_active_keeper name
@@ -8753,15 +8776,8 @@ and execute_action ~now (m : Model.t) action =
         if Option.is_some m.nav.overlay then None
         else
           match Model.active_dive m with
-          | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
-              match
-                Knowledge_store.selected_thread_comment ~post_id m.knowledge
-              with
-              | Some tc ->
-                  Some
-                    (Knowledge_store.Vote_comment
-                       { post_id; comment_id = tc.comment.id })
-              | None -> Some (Knowledge_store.Vote_post post_id))
+          | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
+              thread_vote_target ~post_id m.knowledge
           | Some
               ( Nav.Dive_knowledge
                   ( Nav.Wiki_dive _

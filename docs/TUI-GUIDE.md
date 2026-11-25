@@ -180,7 +180,7 @@ insert a line break. Pasting multiple lines preserves their line breaks.
 - Press **`y`** (while unfocused) to copy the selected entity via **OSC 52**
   clipboard escape sequence:
   - **Keeper Chat**: latest assistant reply
-  - **Board**: selected post body
+  - **Board**: post body or the visible comment in the thread reader
   - **Wiki**: open page Markdown (or selected page slug)
   - **Artifacts / Artifact Dive / Media Viewer**: `y` copies full raw HTML/Markdown body via OSC 52 (fetching `GET /api/v1/published-artifacts/<id>` on demand if not yet cached); `H` copies SHA-256; `e` saves locally as `.html`/`.md` to `$HOME/Downloads/masc-artifacts/` (or `<base-path>/.masc/exports/` if `Downloads` is absent); `o` exports and opens the file in your default browser
   - **World Memory / Memory Diagram**: briefing text or top claim; when a Memory Diagram is open, copies its Mermaid source or Formation Tree text
@@ -338,10 +338,11 @@ Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 1. **Board**: workspace posts with Signal-only vs All filtering (`s`), Sort
    cycle (`S`: `recent` / `active` / `top`), live Hearth picker (`h` via
    `GET /api/v1/board/hearths`), and Succession Chain folding (`Space` strictly
-   expands/collapses chains). Press `Enter` for **Thread Dive** (threaded
-   comments with `<`/`>` comment cursor + depth rails, `c` comment/reply
-   composer, two-press armed `+`/`-` voting on posts and comments), `n` to
-   create a post, and `y` to copy post body.
+   expands/collapses chains). Press `Enter` to open the thread. Use `Tab` to go
+   between the post and the full comment reader. In the reader, `<`/`>` selects
+   a comment and the arrow or page keys scroll through its Markdown.
+   Use `c` to reply, `y` to copy what you are reading, and two presses of
+   `+`/`-` to vote. Use `n` on the Board to create a post.
 2. **Wiki**: shared `.masc/wiki/` index, lint status, and Markdown preview
    (`Enter` opens Wiki Dive with outgoing links, backlinks, and revision log;
    `e` opens inline Markdown edit modal; `Ctrl+E` opens in `$EDITOR`; `y`

@@ -1078,42 +1078,29 @@ let apply_sse_event ~now (m : Model.t) = function
       ({ m with infra }, [])
 
 let apply_sse_freshness ~now ~stream ~freshness (m : Model.t) =
-  match stream with
-  | Subscriptions.Stream_model_metrics
-  | Subscriptions.Stream_tool_metrics_series
-  | Subscriptions.Stream_logs _
-    when not
-           (Option.equal Subscriptions.equal_stream_kind
-              (Subscriptions.view_scoped_stream m)
-              (Some stream)) ->
-      (m, [])
-  | Subscriptions.Stream_observer
-  | Subscriptions.Stream_fleet
-  | Subscriptions.Stream_model_metrics
-  | Subscriptions.Stream_tool_metrics_series
-  | Subscriptions.Stream_logs _ -> (
-      let updated_freshness =
-        match stream with
-        | Subscriptions.Stream_observer ->
-            { m.freshness with observer = freshness }
-        | Subscriptions.Stream_fleet -> { m.freshness with fleet = freshness }
-        | Subscriptions.Stream_model_metrics
-        | Subscriptions.Stream_tool_metrics_series
-        | Subscriptions.Stream_logs _ ->
-            { m.freshness with view_stream = Some freshness }
-      in
-      let next = { m with freshness = updated_freshness } in
-      match freshness with
-      | Health.Workspace_mismatch { expected_instance; observed_instance } ->
-          Update_http.handle_workspace_mismatch ~now
-            ~expected:(Some expected_instance) ~observed:(Some observed_instance)
-            ~message:"SSE stream reported 409 workspace_mismatch" next
-      | Health.Connecting
-      | Health.Live _
-      | Health.Reconnecting _
-      | Health.Stale _
-      | Health.Disconnected _ ->
-          (next, []))
+  let local =
+    match stream with
+    | Subscriptions.Stream_observer ->
+        { m with freshness = { m.freshness with observer = freshness } }
+    | Subscriptions.Stream_fleet ->
+        { m with freshness = { m.freshness with fleet = freshness } }
+    | Subscriptions.Stream_model_metrics
+    | Subscriptions.Stream_tool_metrics_series
+    | Subscriptions.Stream_logs _ ->
+        if Option.equal Subscriptions.equal_stream_kind
+             (Subscriptions.view_scoped_stream m) (Some stream)
+        then { m with freshness = { m.freshness with view_stream = Some freshness } }
+        else m
+  in
+  match freshness with
+  | Health.Workspace_mismatch { expected_instance; observed_instance } ->
+      (* The current epoch's rejection applies to the workspace even when the
+         operator has already left the tab that detected it. *)
+      Update_http.handle_workspace_mismatch ~now
+        ~expected:(Some expected_instance) ~observed:(Some observed_instance)
+        ~message:"SSE stream reported 409 workspace_mismatch" local
+  | Health.Connecting | Health.Live _ | Health.Reconnecting _
+  | Health.Stale _ | Health.Disconnected _ -> (local, [])
 
 let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
   match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with

@@ -5,16 +5,17 @@ open Masc_tui_store
 open Masc_tui_term
 
 type bus_key =
-  | Key_get of string
-  | Key_read of string * Clock.Mono.t
-  | Key_freshness of Subscriptions.stream_id
+  | Key_get of Epoch.t * string
+  | Key_read of Epoch.t * string * Clock.Mono.t
+  | Key_freshness of Epoch.t * Subscriptions.stream_id
 
 let equal_bus_key a b =
   match a, b with
-  | Key_get x, Key_get y -> String.equal x y
-  | Key_freshness x, Key_freshness y -> Subscriptions.equal_stream_kind x y
-  | Key_read (x, tx), Key_read (y, ty) ->
-      String.equal x y && Clock.Mono.equal tx ty
+  | Key_get (ex, x), Key_get (ey, y) -> Epoch.equal ex ey && String.equal x y
+  | Key_freshness (ex, x), Key_freshness (ey, y) ->
+      Epoch.equal ex ey && Subscriptions.equal_stream_kind x y
+  | Key_read (ex, x, tx), Key_read (ey, y, ty) ->
+      Epoch.equal ex ey && String.equal x y && Clock.Mono.equal tx ty
   | Key_get _, (Key_freshness _ | Key_read _)
   | Key_freshness _, (Key_get _ | Key_read _)
   | Key_read _, (Key_get _ | Key_freshness _) -> false
@@ -27,9 +28,11 @@ let stream_kind_tag = function
   | Subscriptions.Stream_logs _ -> 4
 
 let hash_bus_key = function
-  | Key_get path -> Hashtbl.hash (0, path)
-  | Key_read (path, stamp) -> Hashtbl.hash (2, path, Clock.Mono.to_ns stamp)
-  | Key_freshness stream -> Hashtbl.hash (1, stream_kind_tag stream)
+  | Key_get (epoch, path) -> Hashtbl.hash (0, Epoch.to_int epoch, path)
+  | Key_read (epoch, path, stamp) ->
+      Hashtbl.hash (2, Epoch.to_int epoch, path, Clock.Mono.to_ns stamp)
+  | Key_freshness (epoch, stream) ->
+      Hashtbl.hash (1, Epoch.to_int epoch, stream_kind_tag stream)
 
 type bus = (bus_key, Msg.t, Msg.t) Ui_bus.t
 
@@ -556,12 +559,14 @@ let msg_of_voice_event = function
         }
   | Voice_runner.Voice_error reason -> Msg.Voice_failed reason
 
+type hub_delivery = Hub_snapshot of bus_key | Hub_event | Hub_receipt
+
 (* A view-stream frame that cannot be applied is reported like an
    undecodable observer frame, so the failure is on the incident list instead
    of vanishing. *)
 let skipped_stream_frame ~epoch detail =
   [
-    ( None
+    ( Hub_event
     , Msg.Sse_event
         {
           epoch;
@@ -575,13 +580,20 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
   match ev with
   | Sse_hub.Freshness { stream; freshness } ->
       let sid = stream_id_of_kind stream in
-      [ (Some (Key_freshness sid), Msg.Sse_freshness { epoch; stream = sid; freshness }) ]
+      let delivery =
+        match freshness with
+        | Health.Workspace_mismatch _ -> Hub_receipt
+        | Health.Connecting | Health.Live _ | Health.Reconnecting _
+        | Health.Stale _ | Health.Disconnected _ ->
+            Hub_snapshot (Key_freshness (epoch, sid))
+      in
+      [ (delivery, Msg.Sse_freshness { epoch; stream = sid; freshness }) ]
   | Sse_hub.Observer_handshake hs ->
-      [ (None, Msg.Sse_event { epoch; event = Msg.Sse_observer_handshake hs }) ]
+      [ (Hub_event, Msg.Sse_event { epoch; event = Msg.Sse_observer_handshake hs }) ]
   | Sse_hub.Observer_delivery delivery ->
-      [ (None, Msg.Sse_event { epoch; event = Msg.Sse_observer_delivery delivery }) ]
+      [ (Hub_event, Msg.Sse_event { epoch; event = Msg.Sse_observer_delivery delivery }) ]
   | Sse_hub.Fleet_event fleet_ev ->
-      [ (None, Msg.Sse_event { epoch; event = Msg.Sse_fleet fleet_ev }) ]
+      [ (Hub_event, Msg.Sse_event { epoch; event = Msg.Sse_fleet fleet_ev }) ]
   | Sse_hub.Raw_frame { stream; frame } -> (
       match stream with
       | Sse_hub.Stream_spec.Logs _ -> (
@@ -591,7 +603,7 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
           | json -> (
               match Wire_infra.decode_system_log_frame json with
               | Ok log_frame ->
-                  [ (None, Msg.Sse_event { epoch; event = Msg.Sse_log_frame log_frame }) ]
+                  [ (Hub_event, Msg.Sse_event { epoch; event = Msg.Sse_log_frame log_frame }) ]
               | Error reason -> skipped_stream_frame ~epoch ("log stream: " ^ reason)))
       | Sse_hub.Stream_spec.Model_metrics -> (
           (* The stream is opened with the chart's window and bucket
@@ -610,7 +622,7 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                        && snap.bucket_minutes
                           = Wire_runtime.models_chart_bucket_minutes ->
                     [
-                      ( None
+                      ( Hub_event
                       , Msg.Sse_event
                           {
                             epoch;
@@ -642,7 +654,7 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
               match Wire_runtime.decode_tool_series json with
               | Ok series ->
                   [
-                    ( None
+                    ( Hub_event
                     , Msg.Sse_event { epoch; event = Msg.Sse_tool_series series } );
                   ]
               | Error reason ->
@@ -656,8 +668,13 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
 
 let worker_decode_threshold_bytes = 4096
 
-let publish_hub_event ~worker ~bus ~stream_epoch ev =
-  let epoch = Atomic.get stream_epoch in
+let publish_hub_messages bus =
+  List.iter (function
+    | Hub_snapshot key, msg -> Ui_bus.publish_snapshot bus ~key msg
+    | Hub_event, msg -> Ui_bus.publish_stream bus msg
+    | Hub_receipt, msg -> Ui_bus.publish_stream_receipt bus msg)
+
+let publish_hub_event ~worker ~bus ~epoch ev =
   let observed_at = Clock.Mono.now () in
   let msgs =
     match ev with
@@ -672,11 +689,7 @@ let publish_hub_event ~worker ~bus ~stream_epoch ev =
     | Sse_hub.Raw_frame _ ->
         decode_hub_event_msgs ~epoch ~observed_at ev
   in
-  List.iter
-    (function
-      | Some key, msg -> Ui_bus.publish_snapshot bus ~key msg
-      | None, msg -> Ui_bus.publish_stream bus msg)
-    msgs
+  publish_hub_messages bus msgs
 
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
@@ -699,10 +712,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let in_flight_gets = Hashtbl.create 32 in
   let mcp_tools_list_in_flight = Atomic.make false in
   let skill_read_in_flight = Atomic.make None in
-  let sse_hub =
-    Sse_hub.create ~io ~clock ~endpoint:initial_ep
-      ~on_event:(publish_hub_event ~worker ~bus ~stream_epoch)
-  in
+  let sse_hub = Sse_hub.create ~io ~clock ~endpoint:initial_ep in
   let backend =
     match voice_backend with
     | Some b -> b
@@ -939,8 +949,8 @@ let fork_safe t fn =
   end
 
 let board_snapshot_key ~epoch ~path ids =
-  let scope = string_of_int (Epoch.to_int epoch) :: ids in
-  Key_get (path ^ "#" ^ String.concat "/" (List.map Wire_common.percent_encode scope))
+  let scope = String.concat "/" (List.map Wire_common.percent_encode ids) in
+  Key_get (epoch, path ^ "#" ^ scope)
 
 let read_chat_queue ~timeout_sec t ~keeper ~partial =
   let endpoint = Atomic.get t.endpoint in
@@ -986,14 +996,14 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   (* One URL can feed distinct reducers. Preserve that identity both while
      the HTTP request is running and while its reply awaits the UI drain. *)
   let scoped suffix =
-    let key = base ^ suffix in
-    Some key, Key_get key
+    Some (base ^ suffix), Key_get (epoch, path ^ suffix)
   in
   match req with
-  (* Timestamped queue/status reads use [Key_read (path, requested_at)] so a
+  (* Timestamped queue/status reads use their own request stamp so a
      newer overlapping refresh can overtake a stalled older read; never merge
      them under single-flight dedup. *)
-  | Cmd.Get_chat_queue _ | Cmd.Get_chat_status _ -> None, Key_read (path, requested_at)
+  | Cmd.Get_chat_queue _ | Cmd.Get_chat_status _ ->
+      None, Key_read (epoch, path, requested_at)
   | Cmd.Get_board_quarantines { generation; _ } ->
       Some (Printf.sprintf "%s#quarantines=%d" base generation),
       board_snapshot_key ~epoch ~path [string_of_int generation]
@@ -1126,7 +1136,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_lane_addon_action_status _
   | Cmd.Get_lane_addon_slice _
   | Cmd.Get_lane_addon_asks _ ->
-      Some base, Key_get path
+      scoped ""
 
 let rec execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
@@ -1223,7 +1233,7 @@ let rec execute_get t ~epoch req =
                   Option.iter
                     (fun ex ->
                       Ui_bus.publish_snapshot t.bus
-                        ~key:(Key_get (path ^ "#extras"))
+                        ~key:(Key_get (epoch, path ^ "#extras"))
                         (Msg.Http_reply
                            { epoch; reply = Msg.Reply_keepers_roster_extras ex }))
                     extras_opt;
@@ -1297,7 +1307,7 @@ let rec execute_get t ~epoch req =
                           (match Wire_work.decode_planning_backlog_counts json with
                           | Ok (Some counts) ->
                               Ui_bus.publish_snapshot t.bus
-                                ~key:(Key_get (Printf.sprintf "%d:%s#backlog" (Epoch.to_int epoch) path))
+                                ~key:(Key_get (epoch, path ^ "#backlog"))
                                 (Msg.Http_reply
                                    {
                                      epoch;
@@ -1323,7 +1333,7 @@ let rec execute_get t ~epoch req =
                           Ui_bus.publish_snapshot t.bus
                             ~key:
                               (Key_get
-                                 (Wire_work.execution_tasks_path ^ "#enrich"))
+                                 (epoch, Wire_work.execution_tasks_path ^ "#enrich"))
                             (Msg.Http_reply
                                {
                                  epoch;
@@ -1335,7 +1345,7 @@ let rec execute_get t ~epoch req =
                           Ui_bus.publish_snapshot t.bus
                             ~key:
                               (Key_get
-                                 (Wire_work.execution_tasks_path ^ "#enrich"))
+                                 (epoch, Wire_work.execution_tasks_path ^ "#enrich"))
                             (Msg.Http_reply
                                {
                                  epoch;
@@ -1408,7 +1418,7 @@ let rec execute_get t ~epoch req =
                   (match meta_opt with
                    | Some meta ->
                        Ui_bus.publish_snapshot t.bus
-                         ~key:(Key_get (path ^ "#meta"))
+                         ~key:(Key_get (epoch, path ^ "#meta"))
                          (Msg.Http_reply
                             { epoch; reply = Msg.Reply_board_feed_meta meta })
                    | None -> ());
@@ -1442,7 +1452,7 @@ let rec execute_get t ~epoch req =
                   (match meta_opt with
                    | Some meta ->
                        Ui_bus.publish_snapshot t.bus
-                         ~key:(Key_get (path ^ "#meta"))
+                         ~key:(Key_get (epoch, path ^ "#meta"))
                          (Msg.Http_reply
                             { epoch; reply = Msg.Reply_board_thread_meta meta })
                    | None -> ());
@@ -1741,7 +1751,7 @@ let rec execute_get t ~epoch req =
               match resolved_res with
               | Ok (snap, standings_res) ->
                   Ui_bus.publish_snapshot t.bus
-                    ~key:(Key_get (path ^ "#standings"))
+                    ~key:(Key_get (epoch, path ^ "#standings"))
                     (Msg.Http_reply
                        { epoch; reply = Msg.Reply_runtime_standings standings_res });
                   Msg.Reply_runtime_resolved (Ok snap)
@@ -1933,7 +1943,7 @@ let rec execute_get t ~epoch req =
               | Ok (schema, meta) ->
                   if meta <> [] then
                     Ui_bus.publish_snapshot t.bus
-                      ~key:(Key_get (path ^ "#meta"))
+                      ~key:(Key_get (epoch, path ^ "#meta"))
                       (Msg.Http_reply
                          {
                            epoch;
@@ -4851,19 +4861,18 @@ let rec execute t = function
   | Cmd.Http_delete { epoch; req } -> execute_delete t ~epoch req
   | Cmd.Http_post_stream { epoch; req } -> execute_post_stream t ~epoch req
   | Cmd.Sync_streams { epoch; streams } ->
-      (* On epoch transitions, fence & stop previous streams while stream_epoch
-         still names the old epoch so old-epoch cancellation callbacks cannot
-         tag events with the new epoch, and discard any in-flight/queued
-         async wiki $EDITOR handoff belonging to the old epoch. *)
+      let on_event = publish_hub_event ~worker:t.worker ~bus:t.bus ~epoch in
+      (* Start a new subscription owner even for identical stream specs when
+         the epoch changes, and discard the previous epoch's editor handoff. *)
       if not (Epoch.equal (Atomic.get t.stream_epoch) epoch) then begin
         ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
         ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
         ignore
-          (Sse_hub.sync_streams t.sse_hub [] : (Sse_hub.sync_diff, string) result)
+          (Sse_hub.sync_streams t.sse_hub ~on_event [] : (Sse_hub.sync_diff, string) result)
       end;
       Atomic.set t.stream_epoch epoch;
       let specs = List.map stream_spec_of_id streams in
-      (match Sse_hub.sync_streams t.sse_hub specs with
+      (match Sse_hub.sync_streams t.sse_hub ~on_event specs with
       | Ok _ -> ()
       | Error msg ->
           Ui_bus.publish_stream_receipt t.bus
@@ -4918,7 +4927,7 @@ let rec execute t = function
               ~decode:Wire_knowledge.decode_published_artifact_detail
           with
           | Ok detail ->
-              Ui_bus.publish_snapshot t.bus ~key:(Key_get path)
+              Ui_bus.publish_snapshot t.bus ~key:(Key_get (epoch, path))
                 (Msg.Http_reply
                    {
                      epoch;
@@ -4963,7 +4972,7 @@ let rec execute t = function
                     ~decode:Wire_knowledge.decode_published_artifact_detail
                 with
                 | Ok detail ->
-                    Ui_bus.publish_snapshot t.bus ~key:(Key_get path)
+                    Ui_bus.publish_snapshot t.bus ~key:(Key_get (epoch, path))
                       (Msg.Http_reply
                          {
                            epoch;

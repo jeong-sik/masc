@@ -1325,6 +1325,97 @@ let test_board_replies_survive_epoch_change_and_stream_overflow () =
         Epoch.equal epoch current && Q.same_candidate actual item | _ -> false) messages);
   Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events
 
+let test_roster_replies_survive_an_older_epoch_finishing_last () =
+  let older_read, accept_older = Eio.Promise.create () in
+  let finish_older, release_older = Eio.Promise.create () in
+  let calls = ref 0 in
+  let req = Cmd.Get_keepers_roster in
+  let respond ~meth ~path =
+    Alcotest.(check string) "method" "GET" meth;
+    Alcotest.(check string) "roster path" (Cmd.get_request_path req) path;
+    incr calls;
+    let total = !calls in
+    if total = 1 then begin
+      Eio.Promise.resolve accept_older ();
+      Eio.Promise.await finish_older
+    end;
+    200, `Assoc [ "keepers", `List []; "total", `Int total ]
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let older = Epoch.initial in
+  let current = Epoch.next older in
+  let read epoch = Cmd_executor.execute exec (Cmd.Http_get { epoch; req }) in
+  let rec wait_for_publications n =
+    let stats = Ui_bus.stats bus in
+    if stats.queued_snapshots + stats.total_coalesced_snapshots < n then begin
+      Eio.Time.sleep clock 0.001;
+      wait_for_publications n
+    end
+  in
+  read older;
+  Eio.Promise.await older_read;
+  read current;
+  wait_for_publications 2;
+  Eio.Promise.resolve release_older ();
+  wait_for_publications 4;
+  let messages = Ui_bus.drain bus in
+  let partial, terminal =
+    List.fold_left
+      (fun (partial, terminal) -> function
+        | Ui_bus.Snapshot (_, Msg.Http_reply
+            { epoch; reply = Msg.Reply_keepers_roster_extras { roster_total; _ } }) ->
+            (Epoch.to_int epoch, roster_total) :: partial, terminal
+        | Ui_bus.Snapshot (_, Msg.Http_reply
+            { epoch; reply = Msg.Reply_keepers_roster (Ok _); _ }) ->
+            partial, Epoch.to_int epoch :: terminal
+        | _ -> partial, terminal)
+      ([], []) messages
+  in
+  Alcotest.(check (list (pair int (option int)))) "partial replies keep their epoch"
+    [ Epoch.to_int older, Some 1; Epoch.to_int current, Some 2 ]
+    (List.sort Stdlib.compare partial);
+  Alcotest.(check (list int)) "terminal replies keep their epoch"
+    [ Epoch.to_int older; Epoch.to_int current ] (List.sort Int.compare terminal)
+
+let test_sse_disconnect_uses_the_subscription_owner () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let listener =
+    Eio.Net.listen ~sw ~backlog:2 env#net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port = match Eio.Net.listening_addr listener with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> Alcotest.fail "expected TCP listener"
+  in
+  let cli = match Cli_args.parse ~env:empty_env ~cwd:"/tmp" ["--port"; string_of_int port] with
+    | Cli_args.Run cli -> cli
+    | _ -> Alcotest.fail "expected fixture endpoint"
+  in
+  let io = Io_domain.start ~sw ~env in
+  let hub = Sse_hub.create ~io ~clock:env#clock ~endpoint:(Cmd_executor.endpoint_of_cli cli) in
+  let older = Epoch.initial in
+  let current = Epoch.next older in
+  let disconnected = ref [] in
+  let deliver epoch = function
+    | Sse_hub.Freshness { freshness = Health.Disconnected _; _ } ->
+        disconnected := Epoch.to_int epoch :: !disconnected
+    | _ -> ()
+  in
+  let sync epoch specs =
+    match Sse_hub.sync_streams hub ~on_event:(deliver epoch) specs with
+    | Ok _ -> ()
+    | Error message -> Alcotest.fail message
+  in
+  Fun.protect ~finally:(fun () -> Sse_hub.shutdown hub) (fun () ->
+    let desired = [ Sse_hub.Stream_spec.logs () ] in
+    sync older desired;
+    sync current [];
+    sync current desired;
+    Sse_hub.shutdown hub;
+    Alcotest.(check (list int)) "unsubscribe and shutdown report to their original owners"
+      [ Epoch.to_int older; Epoch.to_int current ]
+      (List.rev !disconnected))
+
 let test_queue_drawer_walks_all_http_pages () =
   let alpha = "alpha" and beta = "beta" and stalled = "stalled" in
   let start keeper = "/api/v1/keepers/" ^ keeper ^ "/chat/operations?state=queued" in
@@ -1436,10 +1527,14 @@ let test_queue_drawer_walks_all_http_pages () =
     (List.rev !seen)
 
 let test_bus_key_hash_and_stream_frames () =
-  (* P1-1: equal Stream_logs keys with differing since_seq MUST hash identically
-     and coalesce in Ui_bus. *)
-  let k1 = Cmd_executor.Key_freshness (Subscriptions.Stream_logs { since_seq = None }) in
-  let k2 = Cmd_executor.Key_freshness (Subscriptions.Stream_logs { since_seq = Some 42 }) in
+  (* Logs cursors coalesce within their subscription generation. *)
+  let older = Epoch.initial in
+  let current = Epoch.next older in
+  let freshness_key epoch since_seq =
+    Cmd_executor.Key_freshness (epoch, Subscriptions.Stream_logs { since_seq })
+  in
+  let k1 = freshness_key current None in
+  let k2 = freshness_key current (Some 42) in
   Alcotest.(check bool) "Stream_logs keys equal" true
     (Cmd_executor.equal_bus_key k1 k2);
   Alcotest.(check int) "Stream_logs hashes equal"
@@ -1449,18 +1544,73 @@ let test_bus_key_hash_and_stream_frames () =
   Ui_bus.publish_snapshot bus ~key:k1
     (Msg.Sse_freshness
        {
-         epoch = Epoch.initial;
+         epoch = current;
          stream = Subscriptions.Stream_logs { since_seq = None };
          freshness = Health.Connecting;
        });
   Ui_bus.publish_snapshot bus ~key:k2
     (Msg.Sse_freshness
        {
-         epoch = Epoch.initial;
+         epoch = current;
          stream = Subscriptions.Stream_logs { since_seq = Some 42 };
          freshness = Health.Live { last_event_ns = Clock.Mono.zero; revision = 5 };
        });
-  Alcotest.(check int) "coalesced to 1 snapshot" 1 (List.length (Ui_bus.drain bus));
+  Ui_bus.publish_snapshot bus ~key:(freshness_key older None)
+    (Msg.Sse_freshness
+       {
+         epoch = older;
+         stream = Subscriptions.Stream_logs { since_seq = None };
+         freshness = Health.Connecting;
+       });
+  let revisions =
+    Ui_bus.drain bus
+    |> List.filter_map (function
+      | Ui_bus.Snapshot (_, Msg.Sse_freshness
+          { epoch; freshness = Health.Live { revision; _ }; _ })
+        when Epoch.equal epoch current -> Some revision
+      | _ -> None)
+  in
+  Alcotest.(check int) "only the current generation's keys coalesced" 1
+    (Ui_bus.stats bus).total_coalesced_snapshots;
+  Alcotest.(check (list int)) "later old connection state cannot replace Live"
+    [ 5 ] revisions;
+
+  let bus = Cmd_executor.create_bus ~stream_capacity:1 () in
+  let publish_freshness ~epoch freshness =
+    Cmd_executor.decode_hub_event_msgs ~epoch
+      ~observed_at:Clock.Mono.zero
+      (Sse_hub.Freshness { stream = Sse_hub.Stream_spec.Logs { since_seq = None }; freshness })
+    |> Cmd_executor.publish_hub_messages bus
+  in
+  let mismatch =
+    Health.Workspace_mismatch { expected_instance = "expected"; observed_instance = "other" }
+  in
+  publish_freshness ~epoch:current mismatch;
+  publish_freshness ~epoch:current Health.Connecting;
+  Ui_bus.publish_stream bus (Msg.Stream_gap 1);
+  let receipt =
+    List.find_map (function
+      | Ui_bus.Stream_event (Msg.Sse_freshness
+          { epoch; freshness = Health.Workspace_mismatch _; _ } as msg)
+        when Epoch.equal epoch current -> Some msg
+      | _ -> None) (Ui_bus.drain bus)
+  in
+  let model = { (Model.initial ()) with epoch = current } in
+  let receive = Update.step ~now:Clock.Mono.zero model in
+  (match receipt with
+  | None -> Alcotest.fail "a new status and a stream burst erased the workspace mismatch"
+  | Some msg ->
+      let next, commands = receive msg in
+      Alcotest.(check bool) "a current rejection from an inactive view starts a handshake"
+        true (List.mem (Cmd.Http_get { epoch = next.epoch; req = Cmd.Get_health })
+                (Cmd.flatten commands)));
+  let _, old_commands =
+    receive (Msg.Sse_freshness
+      { epoch = older; stream = Subscriptions.Stream_logs { since_seq = None };
+        freshness = mismatch })
+  in
+  Alcotest.(check int) "the older workspace rejection starts no handshake" 0
+    (List.length old_commands);
 
   (* /api/v1/dashboard/logs/stream sends newest-first batch frames
      {"reset": true, "entries": [seq=2, seq=1]}; the frame reaches the store
@@ -1479,20 +1629,20 @@ let test_bus_key_hash_and_stream_frames () =
   in
   let seqs =
     List.filter_map
-      (fun (key_opt, msg) ->
-        match key_opt, msg with
-        | ( None
+      (fun (delivery, msg) ->
+        match delivery, msg with
+        | ( Cmd_executor.Hub_event
           , Msg.Sse_event
               { event = Msg.Sse_log_frame { reset = true; entries }; _ } ) ->
             Some
               (List.map
                  (fun (e : Masc_tui_protocol.Wire_infra.system_log_entry) -> e.seq)
                  entries)
-        | None, Msg.Sse_event { event = Msg.Sse_log_frame { reset = false; _ }; _ }
+        | Cmd_executor.Hub_event, Msg.Sse_event { event = Msg.Sse_log_frame { reset = false; _ }; _ }
           ->
             None
-        | Some _, _ -> None
-        | ( None
+        | (Cmd_executor.Hub_snapshot _ | Cmd_executor.Hub_receipt), _ -> None
+        | ( Cmd_executor.Hub_event
           , ( Msg.Sse_event
                 {
                   event =
@@ -1546,7 +1696,7 @@ let test_bus_key_hash_and_stream_frames () =
   in
   Alcotest.(check bool) "other-window model metrics frame is reported, not applied" true
     (match agg_msgs with
-    | [ ( None
+    | [ ( Cmd_executor.Hub_event
         , Msg.Sse_event
             {
               event =
@@ -1571,7 +1721,7 @@ let test_bus_key_hash_and_stream_frames () =
   in
   Alcotest.(check bool) "tool series error frame names the server's detail" true
     (match tool_error_msgs with
-    | [ ( None
+    | [ ( Cmd_executor.Hub_event
         , Msg.Sse_event
             {
               event =
@@ -3427,6 +3577,10 @@ let () =
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"
             `Quick test_queue_drawer_walks_all_http_pages;
+          Alcotest.test_case "roster replies survive an older generation finishing last"
+            `Quick test_roster_replies_survive_an_older_epoch_finishing_last;
+          Alcotest.test_case "SSE subscriptions disconnect through their own callbacks"
+            `Quick test_sse_disconnect_uses_the_subscription_owner;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "setup login EOF closes only the matching input form"

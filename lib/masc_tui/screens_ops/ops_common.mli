@@ -138,6 +138,9 @@ val rewrite_masc_links_for_markdown : string -> string
 val keeper_has_attention : Attention.t -> string -> bool
 val keeper_incident_count : Incidents.t -> string -> int
 
+val keeper_attention_badge : Glyph.t * Theme.status_token * Say.t
+val keeper_idle_badge : Glyph.t * Theme.status_token * Say.t
+
 val keeper_live_status :
   has_attention:bool ->
   Wire_fleet.keeper_summary ->

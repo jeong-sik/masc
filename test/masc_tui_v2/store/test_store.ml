@@ -23118,6 +23118,43 @@ let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last
     preview = Some (preview_reporting ~activity activities last_tool) }
 ;;
 
+let test_compact_chat_phase_preserves_wait_and_turn_freshness () =
+  let keeper = "alpha" and request_id = "draining" in
+  let base = Model.initial () in
+  let snapshot state =
+    let row : Wire_fleet.keeper_turn_row = { keeper_name = keeper; chat_control_token = None; state } in
+    Fleet_store.apply_turns ~observed_at:t0 [row] base.fleet
+  in
+  let badge_matches m glyph tone =
+    match snd (Chat_transcript.live_chat_phase_badges ~model:m ~keeper) with
+    | Some (observed_glyph, observed_tone, _) -> observed_glyph = glyph && observed_tone = tone
+    | None -> false
+  in
+  let draining =
+    snapshot Wire_fleet.Turn_idle
+    |> Fleet_store.start_chat_stream ~keeper ~request_id
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id (Wire_fleet.Chunk_run_started { operation_id = None })
+  in
+  let m = { base with fleet = draining } in
+  Alcotest.(check bool) "a draining chat is awaiting its response" true
+    (Chat_transcript.equal_live_chat_phase (Chat_transcript.live_chat_phase ~model:m ~keeper)
+       Chat_transcript.Phase_awaiting_turn);
+  Alcotest.(check bool) "confirmed idle does not signal active work from the draining stream" true
+    (badge_matches m Glyph.Live_idle Theme.Status_active);
+  let turn = running_turn_with None None in
+  let preview = preview_reporting None None in
+  let rejected : Wire_fleet.turn_preparation =
+    { phase = Wire_fleet.Prep_tools; state = Wire_fleet.Prep_rejected; started_at_unix = 90.0 }
+  in
+  List.iter (fun preview ->
+      let fleet = snapshot (Wire_fleet.Turn_active { turn with preview = Some preview }) in
+      Alcotest.(check bool) "the current owner reports a fresh attempt requiring attention" true
+        (badge_matches { base with fleet } Glyph.Action_required Theme.Status_attention);
+      let stale = { base with fleet = Fleet_store.mark_stale_all fleet } in
+      Alcotest.(check bool) "a retained attempt has historical provenance" true
+        (badge_matches stale Glyph.Live_idle Theme.Status_historical))
+    [{ preview with activity = Wire_fleet.Preview_failed }; { preview with preparation = Some rejected }]
+
 let ko phrase = Say.resolve Say.Lang_ko phrase
 let en phrase = Say.resolve Say.Lang_en phrase
 
@@ -23927,6 +23964,8 @@ let () =
             `Quick test_turn_preview_updates_keep_owner_and_skip_fleet_reads;
           Alcotest.test_case "the open work of a preview names what the turn is doing"
             `Quick test_open_work_of_preview_names_what_is_open;
+          Alcotest.test_case "compact chat phase preserves waiting and observation freshness"
+            `Quick test_compact_chat_phase_preserves_wait_and_turn_freshness;
           Alcotest.test_case "chat status uses the same words for every turn and names a waiting message"
             `Quick test_chat_status_uses_the_same_words_for_every_turn;
           Alcotest.test_case "the turns wire reads the open work, and misses it from an older server"

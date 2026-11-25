@@ -402,11 +402,16 @@ let keeper_incident_count (inc : Incidents.t) name =
           acc)
     0 inc.entries
 
+let keeper_attention_badge =
+  ( Glyph.Action_required
+  , Theme.Status_attention
+  , Say.make ~ko:"승인/질문 필요" ~en:"Needs Action" )
+
+let keeper_idle_badge =
+  (Glyph.Live_idle, Theme.Status_historical, Say.make ~ko:"유휴" ~en:"Idle")
+
 let keeper_live_status ~has_attention (k : Wire_fleet.keeper_summary) =
-  if has_attention then
-    ( Glyph.Action_required
-    , Theme.Status_attention
-    , Say.make ~ko:"승인/질문 필요" ~en:"Needs Action" )
+  if has_attention then keeper_attention_badge
   else
     match k.health with
     | Wire_fleet.Keeper_failing ->
@@ -453,10 +458,7 @@ let keeper_live_status ~has_attention (k : Wire_fleet.keeper_summary) =
             ( Glyph.Live_working
             , Theme.Status_active
             , Say.make ~ko:"작업 중" ~en:"Working" )
-        | None ->
-            ( Glyph.Live_idle
-            , Theme.Status_historical
-            , Say.make ~ko:"유휴" ~en:"Idle" ))
+        | None -> keeper_idle_badge)
 
 let activation_label = function
   | Wire_fleet.Activation_autonomous -> Say.make ~ko:"자율" ~en:"AUTO"

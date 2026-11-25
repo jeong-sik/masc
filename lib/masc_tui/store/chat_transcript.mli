@@ -109,13 +109,22 @@ val active_turn_preview_tail : Wire_fleet.active_turn -> string option
     or [None] when blank or absent. *)
 
 val live_chat_phase : model:Model.t -> keeper:string -> live_chat_phase
-(** Single-source-of-truth live chat turn phase driving the Keeper header badge,
-    header hotkey, composer pill, and viewport geometry from the same state. *)
+(** Resolve the current chat phase from the Keeper's turn, stream and drafts. *)
+
+val fresh_turn_state : model:Model.t -> keeper:string -> Wire_fleet.keeper_turn_state option
+(** Latest current turn observation for this Keeper. [None] means the turn
+    dataset is stale, unavailable, or lacks a row for this Keeper. *)
 
 val live_chat_phase_badge :
   model:Model.t -> keeper:string -> (Glyph.t * Theme.status_token * Say.t) option
 (** Width-1 geometric glyph, status tone, and bilingual label for an active or
     failed {!live_chat_phase}, or the latest confirmed completion when idle. *)
+
+val live_chat_phase_badges :
+  model:Model.t -> keeper:string ->
+  (Glyph.t * Theme.status_token * Say.t) option * (Glyph.t * Theme.status_token * Say.t) option
+(** The detailed strip and compact header from the same phase and observation.
+    Prior successes remain in the detail strip. *)
 
 val show_active_turn_summary :
   model:Model.t -> keeper:string -> Wire_fleet.active_turn -> bool

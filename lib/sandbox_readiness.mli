@@ -1,7 +1,7 @@
 (** Read-only prerequisites for setup and configuration UIs. Service readiness
     is not proof that a guest booted or that its tools work. *)
 type architecture = Arm64 | X64
-type host = Macos of { architecture : architecture; major : int } | Linux of architecture | Unsupported
+type host = Macos of { major : int } | Linux of architecture | Unsupported
 type backend = Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh
 type state = Service_ready | Missing_prerequisite of string | Unsupported_host of string
   | Unsupported_capability of string | Probe_failed of string | Needs_configuration of string
@@ -22,6 +22,8 @@ val backend_of_id : string -> backend option
 val profile : backend -> Keeper_sandbox_config.sandbox_profile
 val microvm_backend : backend -> Keeper_microvm_backend.t option
 val detect_host : run:runner -> host
+(** macOS hosts are Apple Silicon on macOS 15 or later. A translated shell
+    counts as Apple Silicon only when macOS reports Rosetta translation. *)
 type builder_rosetta = Rosetta_not_used | Rosetta_installed | Rosetta_missing
 (** Whether Apple Container's image builder can start on this Mac. The builder
     VM uses Rosetta unless [build] rosetta = false, and does not start when

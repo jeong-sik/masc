@@ -26,9 +26,8 @@ terminal that has not picked up the installer's PATH change still finds them.
 `masc runtime-client-path --client claude-code` prints what setup and the
 runtime will use. A failed connection
 check can offer sign-in without losing the selection. Setup offers installation
-and startup actions for missing sandbox prerequisites. On macOS these open the
-official download or instructions; MASC does not verify the vendor installer's
-signature or checksum. Linux actions run the offered distribution package commands.
+and startup actions for missing sandbox prerequisites, including verified
+package installation for Apple Container and Docker Desktop on macOS.
 
 If you accepted the shell PATH prompt, a new terminal can find `masc`. If you
 skipped it or installed noninteractively, add the installation directory yourself.
@@ -53,18 +52,29 @@ and asset availability on
 [GitHub Releases](https://github.com/jeong-sik/masc/releases). Multi-selection
 requires 0.35.2 or later.
 
+## First-install sequence
+
+On an Apple Silicon Mac, follow the release from download to the first Keeper turn.
+
+| Tick | What happens | What can stop progress |
+|---|---|---|
+| N | Download the installer with `curl` and run it with Bash. A terminal install suggests `~/MASC` for a new workspace. Executables go in `~/.local/bin` by default, and workspace state goes in the selected directory's `.masc`. A Rosetta shell still selects the Apple Silicon asset. | Network access, write permissions, or a Mac outside the Apple Silicon and macOS 15 minimum. |
+| N+1 | Resolve the release tag, read `SHA256SUMS`, and verify the bundled runtime archive. Run the bundled Python for the rest of the install. | Missing or mismatched checksums, archive extraction, or Python startup. This path needs no Homebrew, Xcode command-line tools, system Python, opam, OCaml, or Node.js. |
+| N+2 | Verify and stage the server, TUI, companion executables, and dashboard. Check the workspace, seed configuration and the manual-start Keeper `imp`, then check `masc --version` and commit the installation. | Missing release assets, unreadable existing state, or a failed configuration write or executable check. |
+| N+3 | In `masc setup`, select a model connection and check its response and tool call. Use a supported CLI login, API access, or a reachable local model server. | Authentication, usage limits, or a connection or tool-call failure. Choosing to finish later keeps the installed files. |
+| N+4 | Check the sandbox service and prepare its image. Start or connect to the workspace server, establish local operator access, apply the model settings, start `imp`, and open the TUI. | A stopped Docker engine, Apple Container requirements, a failed image build, or an occupied port. |
+| N+5 | In Keeper chat, confirm a reply, the output of `pwd` and `ls`, and a Board post and Task that you can find in the workspace. | A rejected tool call or a pending approval can hold up the first request. Check completion verification, model fallback, and continuity after a restart through their own workflows. |
+
 ## Platforms and prerequisites
 
 | OS / CPU | Release asset suffix | Verified on |
 |---|---|---|
 | Linux x86-64 | `linux-x64` | Ubuntu 24.04 runner + fresh Ubuntu 24.04 container |
 | Linux ARM64 | `linux-arm64` | Ubuntu 24.04 ARM runner + fresh Ubuntu 24.04 container |
-| macOS Apple Silicon | `macos-arm64` | macOS 14 ARM runner |
-| macOS Intel | `macos-x64` | macOS 15 Intel runner |
+| macOS 15 or later, Apple Silicon | `macos-arm64` | macOS 15 ARM runner |
 
-This table is what CI targets. An install counts as verified only after you
-have checked the successful `Release` run for that release and the actual
-assets.
+Intel Macs are unsupported. Check the successful release candidate run and
+the published assets for the version you plan to install.
 
 The Linux binaries are built inside an Ubuntu 22.04 container, so they need
 **glibc 2.35 or newer** — Ubuntu 22.04, Debian 12, RHEL 10 and anything later.
@@ -72,10 +82,8 @@ The release fails rather than publishing a binary that asks for more, so this
 floor is checked and not merely intended (`scripts/check-glibc-floor.sh`). The
 glibc floor is separate from the shared libraries listed below, which each
 distribution still has to provide. RHEL 9 ships glibc 2.34 and is below the
-floor. Alpine and other musl distributions are not covered, and neither is
-macOS older than the versions above. An Intel Mac offers no Apple
-Container based microVM, so choose Docker or remote SSH there. Runner names
-follow the [official GitHub list](https://github.com/actions/runner-images).
+floor. Alpine and other musl distributions require a different build.
+Runner names follow the [official GitHub list](https://github.com/actions/runner-images).
 
 The install script uses Bash, curl, tar, and `sha256sum` or `shasum`.
 macOS includes its Python and shared-library runtime; Homebrew and a preinstalled
@@ -99,9 +107,11 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
-macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.
-
-The setup screen inspects sandbox services, explains what is missing, and offers to install it. On macOS these actions open official downloads or instructions; MASC does not verify the vendor installer's signature or checksum. Linux actions run the offered package commands. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
+Apple Container requires Apple Silicon and macOS 26 or later. Setup checks
+the selected sandbox service and offers actions for missing prerequisites.
+On macOS it can verify and install official Apple Container and Docker Desktop
+packages when you choose that action. Start the service and recheck it before
+continuing.
 
 If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
@@ -533,7 +543,7 @@ first build needs network access to fetch the Debian base image and packages.
 | Execution environment | Preparation | Verification scope |
 |---|---|---|
 | Linux + Docker | Install and start the Docker daemon, from setup's actions or on your own, then run `masc sandbox-image` | Server install and image creation/tool execution are checked separately |
-| Apple Silicon + Apple Container | macOS 26 and `container` installed, then a build naming the runtime below | Passing the macOS 14 server CI alone does not prove this backend |
+| Apple Silicon + Apple Container | macOS 26 and `container` installed, then a build naming the runtime below | Check image preparation and guest startup on this backend |
 | Linux + nerdctl/Kata | containerd/nerdctl/Kata with virtualization support, an explicit backend, and an image created in that store | Work volume created idempotently and confirmed with inspect; real Kata verification needed, policy networking not supported |
 | remote SSH | A remote endpoint with authentication, shim, and tools prepared | A remote environment independent of the local Docker/microVM images |
 
@@ -749,7 +759,7 @@ processes and for recovery.
 
 ## Release verification
 
-The `Release` workflow builds all four native targets as required jobs and
+The release candidate workflow builds and checks each supported target and
 runs a checksum-verified `file://` install → config seed → installed server
 health → dashboard verification. On Linux it runs the same install in a fresh
 Ubuntu container without an OCaml development environment as well. It also
@@ -763,11 +773,8 @@ continuity are not proven by this fixture. The `keeper-create` CLI's
 successful exit and its exit on refused authentication are checked separately
 as well.
 
-`workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing a `vX.Y.Z` tag to a verified commit publishes the GitHub
-Release and `SHA256SUMS` after the four builds and asset verification. The
-tag, CI success, the actual release assets, and the result of running after
-install each have to be checked on their own.
+The `Release` workflow publishes the verified candidate assets and
+`SHA256SUMS` on an existing version tag when publication is requested.
 
 ## Uninstall
 

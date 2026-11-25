@@ -1,7 +1,7 @@
 open Alcotest
 module P = Masc.Sandbox_prerequisites
 module S = Masc.Sandbox_readiness
-let mac architecture major = S.Macos {architecture;major}
+let mac major = S.Macos {major}
 let actions host distribution backend = P.catalog ~host ~distribution (P.Sandbox backend)
 let find id actions = match List.find_opt (fun (action : P.action) -> action.id=id) actions with
   | Some action -> action | None -> fail ("missing action " ^ id)
@@ -12,19 +12,17 @@ let test_distribution_boundary () =
     (P.distribution_of_os_release contents=P.Other))
     ["ID_LIKE=ubuntu\n"; "ID=$(touch /tmp/should-not-exist)\n"; "ID=ubuntu\nID=debian\n"; "ID=derivative\nID_LIKE=debian\n"]
 let test_platform_choices () =
-  check int "Apple not offered on Intel" 0 (List.length (actions (mac S.X64 26) P.Other S.Apple_container));
-  check int "Apple not offered on older macOS" 0 (List.length (actions (mac S.Arm64 25) P.Other S.Apple_container));
+  check int "Apple not offered on older macOS" 0 (List.length (actions (mac 25) P.Other S.Apple_container));
   check int "Apple not offered on Linux" 0 (List.length (actions (S.Linux S.Arm64) P.Ubuntu S.Apple_container));
   List.iter (fun host ->
     check int "unimplemented msb gets no fake install completion path" 0
-      (List.length (actions host P.Other S.Microsandbox))) [mac S.Arm64 26; S.Linux S.X64];
-  List.iter (fun (architecture,suffix) ->
-    let action = find "docker_desktop_official_install" (actions (mac architecture 26) P.Other S.Docker) in
-    match action.action_effect with
-    | P.Open_official_installer {url;argv} ->
-      check string "official architecture URL" ("https://desktop.docker.com/mac/main/" ^ suffix ^ "/Docker.dmg") url;
-      check (list string) "URL passed as one argv item" ["open";url] argv
-    | _ -> fail "desktop download must open vendor installer") [S.Arm64,"arm64"; S.X64,"amd64"]
+      (List.length (actions host P.Other S.Microsandbox))) [mac 26; S.Linux S.X64];
+  let action = find "docker_desktop_official_install" (actions (mac 26) P.Other S.Docker) in
+  match action.action_effect with
+  | P.Open_official_installer {url;argv} ->
+    check string "official Apple Silicon URL" "https://desktop.docker.com/mac/main/arm64/Docker.dmg" url;
+    check (list string) "URL passed as one argv item" ["open";url] argv
+  | _ -> fail "desktop download must open vendor installer"
 let test_linux_install_is_explicit () =
   let action = find "docker_distribution_install" (actions (S.Linux S.X64) P.Debian S.Docker) in
   check bool "privilege disclosed" true action.requires_admin;
@@ -46,10 +44,10 @@ let test_linux_install_is_explicit () =
   check bool "the reason is the catalog's sentence" true
     (String_util.contains_substring serialized "did not finish")
 let test_completion_never_means_ready () =
-  let action = find "apple_container_official_install" (actions (mac S.Arm64 26) P.Other S.Apple_container) in
+  let action = find "apple_container_official_install" (actions (mac 26) P.Other S.Apple_container) in
   check bool "opening page remains pending" true
     (P.execute ~run:(fun _ -> Ok ()) action = P.External_step_pending);
-  let start = find "apple_container_start" (actions (mac S.Arm64 26) P.Other S.Apple_container) in
+  let start = find "apple_container_start" (actions (mac 26) P.Other S.Apple_container) in
   let outcome = P.execute ~run:(fun _ -> Ok ()) start in
   check bool "command success needs recheck" true (outcome=P.Commands_completed_recheck_required);
   check bool "no guest proof claimed" true
@@ -69,7 +67,7 @@ let test_official_clients_are_explicit_and_not_ready () =
       let json = Yojson.Safe.to_string (P.outcome_to_json outcome) in
       check bool "failed action stays failed" true (match outcome with P.Failed _ -> true | _ -> false);
       check bool "no invented reason text" false (String_util.contains_substring json "PRIVATE_FAILURE"))
-      [mac S.Arm64 26; S.Linux S.X64])
+      [mac 26; S.Linux S.X64])
     [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"; P.Vibe_cli,"vibe-acp_native_install"; P.Kimi_cli,"kimi_native_install"]
 
 let test_pdf_tools_reuse_selected_package_managers () =
@@ -78,7 +76,7 @@ let test_pdf_tools_reuse_selected_package_managers () =
     match action.action_effect with
     | P.Run_commands steps -> check (list (list string)) "explicit PDF package manager" expected steps
     | _ -> fail "PDF tools must use the selected host package manager")
-    [mac S.Arm64 26, P.Other, [["brew";"install";"poppler"]];
+    [mac 26, P.Other, [["brew";"install";"poppler"]];
      S.Linux S.X64, P.Debian, [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"poppler-utils"]]];
   check int "unknown Linux distribution gets no guessed apt command" 0
     (List.length (P.catalog ~host:(S.Linux S.X64) ~distribution:P.Other P.Pdf_tools))
@@ -86,7 +84,7 @@ let test_pdf_tools_reuse_selected_package_managers () =
 let test_presentation_install_is_workspace_owned () =
   let base_path = "/tmp/presentation workspace" in
   let dependency = P.Presentation_tools {base_path} in
-  let catalog = P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other dependency in
+  let catalog = P.catalog ~host:(mac 26) ~distribution:P.Other dependency in
   let parser = find "presentation_parser_install" catalog in
   (match parser.action_effect with
    | P.Run_commands steps ->
@@ -115,7 +113,7 @@ let test_presentation_install_is_workspace_owned () =
 (* ego lite installs as a macOS app whose onboarding puts ego-browser on PATH,
    so a mac gets its download page and nothing to run; it has no Linux build. *)
 let test_ego_lite_is_a_download_page_on_a_mac_only () =
-  (match P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other P.Ego_browser with
+  (match P.catalog ~host:(mac 26) ~distribution:P.Other P.Ego_browser with
    | [action] ->
      check string "the download page" "ego_lite_download" action.id;
      check bool "opening a page needs no administrator" false action.requires_admin;
@@ -135,7 +133,7 @@ let test_browser_tool_actions_write_no_file () =
       List.iter (fun (action : P.action) ->
         check (option string) "no file is left behind" None action.writes)
         (P.catalog ~host ~distribution:P.Ubuntu dependency))
-      [mac S.Arm64 26; S.Linux S.X64])
+      [mac 26; S.Linux S.X64])
     [P.Ego_browser]
 
 module B = Masc.Browser_runtime_dependencies
@@ -371,7 +369,7 @@ let whisper host distribution = P.catalog ~host ~distribution P.Whisper_cli
    steps. Measured before this: the receipt said the step "did not finish" and
    to check its terminal output, when brew had never run and there was none. *)
 let test_a_missing_homebrew_is_named_with_where_it_comes_from () =
-  let actions = whisper (mac S.Arm64 26) P.Other in
+  let actions = whisper (mac 26) P.Other in
   let reason_of id failure =
     match P.execute ~run:(fun _ -> Error failure) (find id actions) with
     | P.Failed {step = 1; reason} -> reason
@@ -387,7 +385,7 @@ let test_a_missing_homebrew_is_named_with_where_it_comes_from () =
 
 let test_a_missing_program_that_is_not_homebrew_is_named_as_itself () =
   let actions =
-    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
+    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac 26)
       ~distribution:P.Other P.Whisper_cli
   in
   (match P.execute ~run:(fun _ -> Error P.Program_not_found) (find "whisper_model_download" actions) with
@@ -404,7 +402,7 @@ let test_a_missing_program_that_is_not_homebrew_is_named_as_itself () =
 
 let test_whisper_offers_a_package_and_a_model () =
   let actions =
-    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
+    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac 26)
       ~distribution:P.Other P.Whisper_cli
   in
   check int "a transcriber, a model, and a recorder" 3 (List.length actions);
@@ -453,7 +451,7 @@ let test_whisper_offers_a_package_and_a_model () =
 (* Offering a download with nowhere to write would produce a command that
    fails on a path nobody chose. The page is opened instead. *)
 let test_without_a_directory_the_model_is_a_page_not_a_command () =
-  let actions = whisper (mac S.Arm64 26) P.Other in
+  let actions = whisper (mac 26) P.Other in
   match (find "whisper_model_page" actions).action_effect with
   | P.Open_official_installer _ -> ()
   | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
@@ -504,7 +502,7 @@ let test_the_recorder_is_named_where_the_package_manager_is_known () =
    error and the tones are swallowed at debug level, so nothing on the way in
    says a package is missing. *)
 let test_hearing_names_the_recorder_not_only_the_transcriber () =
-  match (find "sox_brew_install" (whisper (mac S.Arm64 26) P.Other)).action_effect with
+  match (find "sox_brew_install" (whisper (mac 26) P.Other)).action_effect with
   | P.Run_commands steps ->
     check (list (list string)) "the formula that carries rec and play"
       [ [ "brew"; "install"; "sox" ] ] steps
@@ -540,7 +538,7 @@ let test_linux_with_a_cache_gets_the_same_download () =
     fail "linux with a cache directory must get the download too"
 
 let apple_catalog apple_builder =
-  P.catalog ~apple_builder ~host:(mac S.Arm64 26) ~distribution:P.Other (P.Sandbox S.Apple_container)
+  P.catalog ~apple_builder ~host:(mac 26) ~distribution:P.Other (P.Sandbox S.Apple_container)
 let needs_rosetta user_config = P.Needs_missing_rosetta {user_config}
 
 (* A running Apple Container whose image builder needs a Rosetta this Mac does
@@ -709,7 +707,7 @@ let test_searxng_plan_follows_the_container () =
       [ "a running container", P.Searxng_running; "a paused container", P.Searxng_paused
       ; "a restarting container", P.Searxng_restarting
       ; "a dead container", P.Searxng_unusable "dead" ])
-    [mac S.Arm64 26; mac S.X64 14; S.Linux S.X64];
+    [mac 26; S.Linux S.X64];
   check int "an unsupported host is offered nothing" 0
     (List.length (searxng_actions S.Unsupported "/work/.masc/searxng"))
 
@@ -728,7 +726,7 @@ let test_searxng_writes_the_settings_once_and_keeps_an_edit () =
   let dir = Filename.temp_dir "masc-searxng-" "" in
   Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
   let config_dir = Filename.concat (Filename.concat dir ".masc") "searxng" in
-  let action = List.hd (searxng_actions (mac S.Arm64 26) config_dir) in
+  let action = List.hd (searxng_actions (mac 26) config_dir) in
   let calls = ref [] in
   let recording argv = calls := argv :: !calls; Ok () in
   check bool "commands finished needs a recheck" true
@@ -750,7 +748,7 @@ let test_searxng_writes_the_settings_once_and_keeps_an_edit () =
   check string "the file is kept as the operator left it" (first ^ "# turned an engine off by hand\n") (read path);
   (* Another install does not share the key. *)
   let other_dir = Filename.concat dir "other" in
-  ignore (P.execute ~run:recording (List.hd (searxng_actions (mac S.Arm64 26) other_dir)));
+  ignore (P.execute ~run:recording (List.hd (searxng_actions (mac 26) other_dir)));
   check bool "keys differ between installs" false
     (String.equal (read (Filename.concat other_dir "settings.yml")) first)
 
@@ -844,7 +842,7 @@ let test_searxng_starts_a_stopped_container_and_writes_nothing () =
   let dir = Filename.temp_dir "masc-searxng-" "" in
   Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
   let config_dir = Filename.concat dir "searxng" in
-  let action = List.hd (searxng_actions ~container:P.Searxng_stopped (mac S.Arm64 26) config_dir) in
+  let action = List.hd (searxng_actions ~container:P.Searxng_stopped (mac 26) config_dir) in
   let calls = ref [] in
   check bool "commands finished needs a recheck" true
     (P.execute ~run:(fun argv -> calls := argv :: !calls; Ok ()) action = P.Commands_completed_recheck_required);

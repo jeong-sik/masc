@@ -227,9 +227,9 @@ else:
             body = ('\nDRY_RUN=0\nRUN_SETUP_JOURNEY=1\nexport JOURNEY_HELPER\n'
                     + ''.join(key + '=' + shlex.quote(value) + '\n' for key, value in variables.items()))
             for ends, said, unsaid, copied_argv in (
-                    ('accounts', 'asks for accounts', 'Setup finished',
+                    ('accounts', 'asks for accounts', 'Open this workspace or continue setup',
                      ['restart', '--base-path', base, '--port', '9876']),
-                    ('prepared', 'Setup finished', 'asks for accounts',
+                    ('prepared', 'Open this workspace or continue setup', 'asks for accounts',
                      ['--base-path', base, '--port', '9876'])):
                 with self.subTest(ends=ends):
                     result, _ = run_shell(body + 'export JOURNEY_ENDS=' + ends

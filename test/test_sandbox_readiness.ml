@@ -2,7 +2,7 @@ open Alcotest
 module S = Masc.Sandbox_readiness
 module N = Keeper_types_profile_sandbox
 let linux = S.Linux S.X64
-let mac = S.Macos {architecture=S.Arm64; major=26}
+let mac = S.Macos {major=26}
 let run_fixture responses argv = match List.assoc_opt argv responses with
   | Some reply -> reply | None -> Error S.Missing_command
 let docker security = [ ["docker";"info";"--format";"{{json .}}"],
@@ -68,8 +68,8 @@ let test_recommendation () =
     let rows = List.map (probe host (docker [])) S.all in
     check bool "named platform recommends Docker" true
       (S.recommend ~host ~configured:None rows = Some S.Docker))
-    [S.Linux S.Arm64; S.Linux S.X64; S.Macos {architecture=S.X64;major=26};
-     S.Macos {architecture=S.Arm64;major=25}];
+    [S.Linux S.Arm64; S.Linux S.X64;
+     S.Macos {major=25}];
   check bool "no healthy candidate means no recommendation" true
     (S.recommend ~host:mac ~configured:None [probe mac [] S.Docker] = None);
   let msb = probe linux [] S.Microsandbox in
@@ -330,15 +330,22 @@ let test_an_apple_builder_without_a_default_kernel_is_not_ready () =
        [probe mac [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
                    no_kernel ~rosetta:false] S.Apple_container;
         probe mac (docker []) S.Docker] = Some S.Docker)
-(* The wildcard-expansion codemod dropped the Macos {architecture = X64} arm,
-   so Intel hosts reached the live inventory probe instead of this refusal. *)
-let test_intel_mac_refused_before_probe () =
-  let entry = probe (S.Macos {architecture=S.X64; major=26}) [] S.Apple_container in
-  check bool "an Intel mac is refused before any service probe" true
-    (match entry.state with
-     | S.Unsupported_host reason ->
-       reason = "Apple Container requires Apple Silicon and macOS 26 or newer"
-     | _ -> false)
+let test_macos_host_detection () =
+  let detect arch version extra =
+    S.detect_host ~run:(run_fixture
+      ((["uname"; "-s"], Ok "Darwin\n") ::
+       (["uname"; "-m"], Ok arch) ::
+       (["sw_vers"; "-productVersion"], Ok version) :: extra))
+  in
+  check bool "Apple Silicon is a supported host" true
+    (detect "arm64\n" "15.0\n" [] = S.Macos {major=15});
+  check bool "Rosetta is a supported host" true
+    (detect "x86_64\n" "26.0\n"
+       [["sysctl"; "-n"; "sysctl.proc_translated"], Ok "1\n"] = S.Macos {major=26});
+  check bool "an Intel Mac is unsupported" true
+    (detect "x86_64\n" "26.0\n" [] = S.Unsupported);
+  check bool "macOS 14 is unsupported" true
+    (detect "arm64\n" "14.7\n" [] = S.Unsupported)
 (* A command that builds nothing, such as the volume GC's listing, asks only
    whether the host can run Apple Container and whether the service answers.
    On a host that cannot, no command runs: #48138 ran [container] on Linux and
@@ -355,8 +362,8 @@ let test_apple_service_without_builder_questions () =
     check bool "a host without Apple Container is refused" true
       (match service host [apple_inventory] with S.Unsupported_host _ -> true | _ -> false);
     check (list (list string)) "no command runs on that host" [] !asked)
-    [S.Linux S.Arm64; S.Linux S.X64; S.Macos {architecture=S.X64; major=26};
-     S.Macos {architecture=S.Arm64; major=25}; S.Unsupported];
+    [S.Linux S.Arm64; S.Linux S.X64;
+     S.Macos {major=25}; S.Unsupported];
   check bool "an absent container command is a missing prerequisite" true
     (match service mac [] with S.Missing_prerequisite _ -> true | _ -> false);
   check bool "a service that does not answer is a failed probe" true
@@ -369,8 +376,7 @@ let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
   test_case "Apple service answers without builder questions" `Quick
     test_apple_service_without_builder_questions;
-  test_case "an Intel mac is refused before any service probe" `Quick
-    test_intel_mac_refused_before_probe;
+  test_case "detect supported macOS hosts" `Quick test_macos_host_detection;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
   test_case "hardening requirements" `Quick test_hardening;
   test_case "OS recommendation and configured preference" `Quick test_recommendation;

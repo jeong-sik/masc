@@ -21,7 +21,7 @@ status: runbook
 - raw evidence: 실행 결과와 headers/body/json 정규화본·`server.log`, checksums와 배포 묶음
 
 이 후보의 RC는 `config/release-behavior.json`에 고정된 `release-essential-v2`를 실행합니다.
-같은 SHA의 full compile/type·4-platform install·선언된 필수 동작을 모두 통과해야
+같은 SHA의 full compile/type·지원 플랫폼 설치 검사·선언된 필수 동작을 모두 통과해야
 산출물 게시 준비로 판정합니다. receipt의 profile·정확한 suite 목록·manifest hash가
 태그의 manifest와 다르면 게시를 거부합니다. 선택을 실패 후 축소해 통과시킬 수 없습니다.
 repository 전체 `@runtest` 회귀는 별도 manual lane이며 필수 profile 통과가 전체 회귀
@@ -77,7 +77,7 @@ release 브랜치로 치환합니다. 현재 workflow는 `release/v*` 브랜치 
 gh workflow run release-candidate.yml --ref release/vX.Y.Z
 ```
 
-이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 명시된 출시 필수 동작 검사, 4개 플랫폼 `release-build.yml` 설치
+이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 명시된 출시 필수 동작 검사, 지원 플랫폼 `release-build.yml` 설치
 검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
 입력은 없습니다. 별도의 수동 전체 회귀 Test 워크플로는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
 판정합니다. 실패를 허용하는 목록이나 별도 재컴파일 경로는 없습니다.

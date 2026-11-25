@@ -69,7 +69,7 @@ Do not exclude a suite by filename alone.
 
 Before freeze, the owner records the core scenarios and changed-surface scope,
 their actual verification targets and environment limits in the release PR.
-Full compilation/type checks, four-platform installation and the complete
+Full compilation/type checks, installation on the supported platforms and the complete
 declared essential behavior profile run against the same candidate SHA. A
 reviewed versioned profile must record its exact suites and identity in the
 candidate receipt; it cannot be reduced after a failure to manufacture a pass.

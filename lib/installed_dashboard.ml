@@ -111,7 +111,7 @@ let parse body =
   let* source_commit = string "source_commit" f in
   let* binary_sha256 = string "binary_sha256" f in
   let* binary_asset = string "binary_asset" f in
-  let* () = if List.mem binary_asset ["masc-macos-arm64"; "masc-macos-x64"; "masc-linux-x64"; "masc-linux-arm64"]
+  let* () = if List.mem binary_asset ["masc-macos-arm64"; "masc-linux-x64"; "masc-linux-arm64"]
     then Ok () else Error Invalid_receipt in
   let* companions = match List.assoc_opt "companions" f with
     | Some json -> parse_companions json | None -> Error Invalid_receipt in

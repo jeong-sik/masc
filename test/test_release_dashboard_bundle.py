@@ -42,7 +42,7 @@ class Distribution(unittest.TestCase):
         (self.assets / ".build-stamp").write_text("2026-09-07T00:00:00Z\n")
         os.utime(self.assets / ".build-stamp", (1788739200, 1788739200))
         system = os.uname()
-        self.arch = {("Darwin", "arm64"): "macos-arm64", ("Darwin", "x86_64"): "macos-x64", ("Linux", "x86_64"): "linux-x64", ("Linux", "aarch64"): "linux-arm64"}[(system.sysname, system.machine)]
+        self.arch = {("Darwin", "arm64"): "macos-arm64", ("Linux", "x86_64"): "linux-x64", ("Linux", "aarch64"): "linux-arm64"}[(system.sysname, system.machine)]
         self.asset = "masc-" + self.arch
         self.archive = self.root / "bundle.tar.gz"
         self.package(self.binary, self.assets, COMMIT, self.asset, self.archive)
@@ -268,10 +268,9 @@ class Distribution(unittest.TestCase):
         self.package(self.binary, self.assets, COMMIT, self.asset, self.archive, (), runtime, stage)
         with tarfile.open(self.archive) as source:
             original = json.loads(source.extractfile(bundle.RECEIPT).read())
-        for arch in ("macos-arm64", "macos-x64"):
-            receipt = dict(original, binary_asset="masc-" + arch, runtime=None)
-            with self.assertRaisesRegex(ValueError, "macOS receipt requires"):
-                bundle.validate_receipt(receipt, receipt["binary_asset"])
+        receipt = dict(original, binary_asset="masc-macos-arm64", runtime=None)
+        with self.assertRaisesRegex(ValueError, "macOS receipt requires"):
+            bundle.validate_receipt(receipt, receipt["binary_asset"])
         for entry in original["runtime"]["files"]:
             if entry["path"] == "python/bin/python3":
                 entry["mode"] = 0o644

@@ -48,10 +48,11 @@ capabilities from guarantees still to be demonstrated.
 
 ### Install
 
-Binary releases target macOS (Apple Silicon and Intel) and Linux (x86_64 and
-ARM64). You do not need an OCaml or Node.js toolchain for a binary install.
-Check the [platform requirements](docs/INSTALL.md#platforms-and-prerequisites)
-and [release assets](https://github.com/jeong-sik/masc/releases/latest).
+Binary releases support Apple Silicon Macs with macOS 15 or later and Linux
+(x86_64 and ARM64). Intel Macs are unsupported. No OCaml or Node.js toolchain is
+required for a binary install.
+See the [first-install sequence](docs/INSTALL.md#first-install-sequence),
+[platform requirements](docs/INSTALL.md#platforms-and-prerequisites), and [release assets](https://github.com/jeong-sik/masc/releases/latest).
 Model access is separate: bring a supported CLI login, an API credential, or a
 reachable local model server. The setup screen helps you choose and prepare a
 sandbox; Docker is one option, alongside supported microVM and remote SSH backends.
@@ -108,7 +109,7 @@ sandbox choices and uninstalling, use the [installation guide](docs/INSTALL.md).
 
 ### From source
 
-Install Git, opam, a native C toolchain, Python 3, Node.js 22, Corepack and the native
+Install Git, opam, a native C toolchain, Python 3, Node.js 22.13 or later in the 22.x series, Corepack and the native
 libraries first:
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
@@ -118,9 +119,20 @@ libraries first:
   [upstream protoc](https://github.com/protocolbuffers/protobuf/releases) first
   on `PATH` (the release build uses 25.1; see
   [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh)).
-- macOS (Homebrew): `flock gmp libpq openssl@3 zstd protobuf`, then export
-  `PKG_CONFIG_PATH`, `CPATH` and `LIBRARY_PATH` for `openssl@3` and `libpq` as the
-  macOS step of the [Release workflow](.github/workflows/release.yml) does.
+- macOS (Homebrew): install the Xcode Command Line Tools with `xcode-select --install`
+  if needed. In the build shell, run:
+
+  ```bash
+  brew install pkg-config gmp libpq openssl@3 zstd protobuf
+  libpq_prefix="$(brew --prefix libpq)"
+  openssl_prefix="$(brew --prefix openssl@3)"
+  export PATH="$libpq_prefix/bin:$openssl_prefix/bin:$PATH"
+  export PKG_CONFIG_PATH="$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export CPATH="$openssl_prefix/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="$openssl_prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export CPPFLAGS="-I$openssl_prefix/include${CPPFLAGS:+ $CPPFLAGS}"
+  export LDFLAGS="-L$openssl_prefix/lib${LDFLAGS:+ $LDFLAGS}"
+  ```
 
 The dashboard build below is required for browser access from a checkout.
 Coding agents follow [the repository execution protocol](docs/constitution.xml).
@@ -141,8 +153,8 @@ scripts/build-dashboard-if-needed.sh --force
 
 `--no-install` keeps the switch from resolving MASC's dependencies before the
 pin script has registered the ones that are not in opam-repository. The
-compiler version is pinned in `dune-project`, and `--locked` installs the exact
-Dune and library versions CI builds with from `masc.opam.locked`. The first build
+compiler version is pinned in `dune-project`. With `--locked`, opam uses the
+Dune and library versions recorded in `masc.opam.locked`. The first build
 takes several minutes. Dune leaves the two programs at
 `_build/default/bin/main_eio.exe` (server and CLI) and
 `_build/default/bin/masc_tui.exe` (TUI). `masc` finds the TUI by the name
@@ -157,8 +169,16 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
 `masc-tui` and the deployment preflight tools into `~/.local/bin` in one step;
-run it in a shell where `eval "$(opam env)"` has been applied.
-Local installation leaves a microVM guest shim alone without querying releases.
+run it in the shell where you applied `eval "$(opam env)"`. For a new workspace:
+
+```bash
+scripts/install-local-build.sh --base-path "$HOME/MASC"
+"$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
+```
+
+For a new source installation, choose Docker in setup. To use Apple Container,
+first [build and install the Linux ARM64 guest shim from the same checkout](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기),
+using the same workspace path. The source installer keeps existing release shims by default.
 Use `--refresh-guest-shim` when deploying a server/shim change to microVM Keepers
 or addressing `remote_shim_outdated`; it refreshes an existing release shim
 (`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another

@@ -563,6 +563,76 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('Multi-Account Goal')
   })
 
+  it('Tasks and Schedules publish each read independently and report unobserved counts', async () => {
+    let finishPlanning!: (response: Response) => void
+    const pendingPlanning = new Promise<Response>((resolve) => {
+      finishPlanning = resolve
+    })
+    let planning = pendingPlanning
+    let execution = jsonResponse({
+      tasks: [{ id: 'task-observed', title: 'Observed execution task', status: 'todo' }],
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) return (await planning).clone()
+      if (url.startsWith('/api/v1/dashboard/execution')) return execution.clone()
+      if (url.startsWith('/api/v1/dashboard/scheduled-automation')) {
+        return jsonResponse({
+          schedule_store_known: true,
+          requests: [{ schedule_id: 'sched-ready', payload_summary: 'Observed schedule' }],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    render(
+      html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    const chip = (name: string) => [...container.querySelectorAll<HTMLButtonElement>('.wk-chip')]
+      .find((el) => el.textContent?.trim().startsWith(name))!
+    await flushUi()
+
+    expect(container.querySelector('[role="status"] [data-inline-spinner]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).toContain('Observed execution task')
+    expect(chip('All').textContent).toContain('—')
+
+    chip('Schedules').click()
+    await flushUi()
+    expect(container.querySelector('[aria-label="예약 자동화 목록"]')?.textContent).toContain('Observed schedule')
+    chip('All').click()
+    finishPlanning(jsonResponse({ error: { message: 'Planning offline' } }, 503))
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('계획 목록 조회 불가')
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).toContain('Observed execution task')
+
+    planning = Promise.resolve(jsonResponse({ goals: [] }))
+    execution = jsonResponse({ tasks: [] })
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((el) => el.textContent?.trim() === '새로고침')!
+    refresh.click()
+    await flushUi()
+    expect(chip('All').textContent).toContain('0')
+    expect(container.textContent).toContain('조건에 맞는 태스크가 없습니다.')
+    expect(container.textContent).not.toContain('계획 목록 조회 불가')
+
+    execution = jsonResponse({
+      tasks: [],
+      task_counts: { shown: 0, total: 7 },
+      projection_diagnostics: { cache_state: 'stale' },
+    })
+    refresh.click()
+    await flushUi()
+    expect(container.textContent).toContain('실행 태스크 · 마지막 조회 결과')
+    expect(chip('All').textContent).toContain('—')
+    expect(container.textContent).not.toContain('조건에 맞는 태스크가 없습니다.')
+
+    execution = jsonResponse({ tasks: [], task_counts: { shown: 0, total: 7 } })
+    refresh.click()
+    await flushUi()
+    expect(container.textContent).toContain('종료된 실행 태스크 7건이 현재 목록의 표시 범위 밖에 있습니다.')
+    expect(container.textContent).toContain('표시 범위에 해당하는 태스크가 없습니다.')
+  })
+
   it('Tasks tab fetches cursor-paginated history with task_id + positive limit, handles 409 source changed, and aborts stale history fetch on rapid task switch', async () => {
     const requestedUrls: string[] = []
     let resolveSlowT1!: (resp: Response) => void

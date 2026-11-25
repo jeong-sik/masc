@@ -512,9 +512,18 @@ let test_slash_36_commands () =
   Alcotest.(check bool) "fuzzy filter matches" true
     (List.exists (fun (s : Slash.spec) -> String.equal s.name "/knowledge")
        (Slash.filter ~query:"knw" ~lang:Say.Lang_en));
-  Alcotest.(check (list string)) "theme arg completion"
-    [ "/theme midnight"; "/theme mono"; "/theme muted" ]
-    (Slash.complete ~prefix:"/theme m");
+  Alcotest.(check (list string)) "theme arg completion lists the muted family"
+    [
+      "/theme muted";
+      "/theme muted_warm";
+      "/theme muted_green";
+      "/theme muted_dusk";
+      "/theme muted_graphite";
+    ]
+    (Slash.complete ~prefix:"/theme mu");
+  Alcotest.(check (list string)) "theme arg completion narrows by prefix"
+    [ "/theme muted_warm" ]
+    (Slash.complete ~prefix:"/theme muted_w");
   (* Every name the picker lists is a name /theme accepts. *)
   List.iter
     (fun preset ->

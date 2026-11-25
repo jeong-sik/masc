@@ -360,7 +360,7 @@ let test_theme_contrast () =
   Alcotest.(check int) "Midnight text_bright (#F3F6FA)" 0xF3F6FA mid.text_bright;
   Alcotest.(check int) "Midnight status_ai Violet (#C084FC)" 0xC084FC mid.status_ai;
   (* Floors became per-preset data; the original four keep the values they had,
-     and Muted still holds WCAG 2.1 AAA (7:1) for body text. *)
+     and the down-tone presets still hold WCAG 2.1 AAA (7:1) for body text. *)
   List.iter
     (fun preset ->
       let f = Theme.text_floors preset in
@@ -370,8 +370,24 @@ let test_theme_contrast () =
         [ f.Theme.bright; f.Theme.primary; f.Theme.secondary; f.Theme.muted;
           f.Theme.selection ])
     Theme.[ Midnight; Arcade_hi; Paper_light; Mono ];
-  Alcotest.(check bool) "Muted body text floor is WCAG AAA" true
-    ((Theme.text_floors Theme.Muted).Theme.primary >= 7.0);
+  List.iter
+    (fun preset ->
+      Alcotest.(check bool)
+        (Theme.preset_name preset ^ " body text floor is WCAG AAA") true
+        ((Theme.text_floors preset).Theme.primary >= 7.0))
+    Theme.[ Muted; Muted_warm; Muted_green; Muted_dusk; Muted_graphite ];
+  (* preset_index is numbered by hand, and equal_preset compares it. *)
+  List.iter
+    (fun a ->
+      List.iter
+        (fun b ->
+          Alcotest.(check bool)
+            (Printf.sprintf "equal_preset %s %s follows the name"
+               (Theme.preset_name a) (Theme.preset_name b))
+            (String.equal (Theme.preset_name a) (Theme.preset_name b))
+            (Theme.equal_preset a b))
+        Theme.all_presets)
+    Theme.all_presets;
   List.iter
     (fun preset ->
       let th = Theme.of_preset preset in

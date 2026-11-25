@@ -42,8 +42,18 @@ type exact_completion_artifact =
   ; measurement_request : exact_completion_measurement_request
   }
 
-let supports_completion_request_measurement =
-  Count_tokens_sync.supports_completion_request_measurement
+(* The exact-output path freezes an Anthropic Messages artifact and counts
+   that frozen body, so it measures only the providers that speak that
+   envelope. Agent admission measurement ({!Count_tokens_sync}) also counts
+   Gemini through its own endpoint; that does not make a Gemini request an
+   Anthropic artifact. *)
+let supports_completion_request_measurement (config : Provider_config.t) =
+  match config.kind with
+  | Provider_config.Anthropic | Provider_config.Kimi -> true
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> false
 ;;
 
 let transport_error_stage = function

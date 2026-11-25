@@ -1051,6 +1051,76 @@ let test_transport_success () =
     body
 ;;
 
+(* Gemini counts through models/{model}:countTokens with the whole
+   generateContent body wrapped as generateContentRequest, so the count is of
+   the request the dispatch sends (system instruction and tools included). *)
+let gemini_config base_url =
+  Provider_config.make
+    ~kind:Provider_config.Gemini
+    ~model_id:"input-count-fixture"
+    ~base_url
+    ~api_key:"test-key"
+    ~max_context:512
+    ~system_prompt:"Count the exact projected input."
+    ()
+;;
+
+let test_gemini_transport_success () =
+  let result, (path, headers, body) =
+    with_mock ~status:`OK ~response:{|{"totalTokens":91}|}
+    @@ fun ~sw ~net ~base_url ->
+    Count_tokens_sync.measure_completion_request
+      ~sw
+      ~net
+      (completion_request (gemini_config base_url))
+  in
+  (match result with
+   | Ok measurement ->
+     check int "Gemini input tokens" 91 measurement.input_count.input_tokens;
+     check
+       bool
+       "Gemini protocol"
+       true
+       (Count.equal_protocol measurement.input_count.protocol Count.Gemini_count_tokens)
+   | Error _ -> fail "expected native Gemini count success");
+  check string "Gemini count path" "/models/input-count-fixture:countTokens" path;
+  check
+    (option string)
+    "Gemini api key header"
+    (Some "test-key")
+    (Cohttp.Header.get headers "x-goog-api-key");
+  let expected =
+    match
+      Backend_gemini.build_request
+        ~config:(gemini_config "unused")
+        ~messages
+        ~tools:[ tool ]
+        ()
+      |> Yojson.Safe.from_string
+    with
+    | `Assoc fields ->
+      `Assoc
+        [ ( "generateContentRequest"
+          , `Assoc (("model", `String "models/input-count-fixture") :: fields) )
+        ]
+    | _ -> fail "Gemini request body is not an object"
+  in
+  check
+    string
+    "Gemini count body wraps the generateContent body"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (Yojson.Safe.from_string body))
+;;
+
+let test_gemini_admission_selects_exact_fit () =
+  check
+    bool
+    "Gemini is measured before dispatch"
+    true
+    (Count_tokens_sync.supports_completion_request_measurement
+       (gemini_config "https://generativelanguage.googleapis.com/v1beta"))
+;;
+
 let test_kimi_transport_success () =
   let result, (path, headers, body) =
     with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
@@ -2955,6 +3025,11 @@ let () =
             `Quick
             test_unsupported_provider_blocks_stream_dispatch
         ; test_case "typed HTTP error" `Quick test_transport_error
+        ; test_case "Gemini countTokens transport" `Quick test_gemini_transport_success
+        ; test_case
+            "Gemini admission measures before dispatch"
+            `Quick
+            test_gemini_admission_selects_exact_fit
         ; test_case "non-Anthropic unsupported" `Quick test_unsupported
         ; test_case
             "missing output ceiling precedes I/O"

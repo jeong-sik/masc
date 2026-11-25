@@ -289,6 +289,42 @@ let apply_http_reply ~now (m : Model.t) reply =
     record_http_incident ~now ~source ~context:(Say.make ~ko ~en) err m
   in
   match reply with
+  | Msg.Reply_discord_reply { request; workspace; result } ->
+      if Update_nav.expected_workspace_of m <> Some workspace then (m, [])
+      else
+        let result =
+          match result, request with
+          | Error (Msg.Http_error { status = 404; _ }), Wire_discord_reply.Status _ ->
+              Error `Absent
+          | Error (Msg.Http_error { status = (400 | 401 | 403 | 404 | 409 | 413); _ } as error),
+            Wire_discord_reply.Send _ ->
+              Error (`Rejected (Msg.http_error_summary error))
+          | Error error, _ -> Error (`Unobserved (Msg.http_error_summary error))
+          | Ok state, _ -> Ok state
+        in
+        (match Discord_reply_store.observe ~epoch:m.epoch ~workspace request result m.discord_replies with
+         | None -> (m, [])
+         | Some discord_replies ->
+             let target, _ = Wire_discord_reply.identity request in
+             let attempt =
+               Discord_reply_store.find ~epoch:m.epoch ~workspace target discord_replies
+             in
+             let inline_modal, nav =
+               match m.inline_modal with
+               | Some modal when
+                   Option.exists
+                     (fun (shown, owner) ->
+                       owner = workspace && Wire_discord_reply.equal_target target shown)
+                     (Discord_reply_store.target_of_form modal.kind) ->
+                   let fields =
+                     Update_nav.discord_reply_fields attempt (Model.inline_modal_for modal.kind)
+                   in
+                   let modal = { modal with fields; submitting = false } in
+                   let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
+                   Some modal, { m.nav with modal_edit_cursor }
+               | other -> other, m.nav
+             in
+             ({ m with discord_replies; inline_modal; nav }, []))
   | Msg.Reply_dashboard_shell (Ok shell) ->
       let freshness, fleet0 =
         match shell.generated_at_unix with
@@ -1345,6 +1381,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Tool_execute_form _
         | Nav.Skill_create_form
         | Nav.Skill_edit_form _
@@ -1460,6 +1497,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -1588,6 +1626,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Code_search_form
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
@@ -1712,6 +1751,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -2717,6 +2757,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Code_search_form
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Tool_execute_form _
         | Nav.Skill_create_form
         | Nav.Skill_edit_form _
@@ -2812,6 +2853,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -2903,6 +2945,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Code_search_form
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -3007,6 +3050,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -3055,6 +3099,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 in
                 { modal with fields }
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Btw_query
             | Nav.Gate_reject _
             | Nav.Verification_reject _
@@ -3178,6 +3223,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -3222,6 +3268,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   error = Some (Msg.http_error_detail err);
                 }
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Btw_query
             | Nav.Gate_reject _
             | Nav.Verification_reject _
@@ -3362,6 +3409,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -3483,6 +3531,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -3956,6 +4005,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Code_search_form
         | Nav.Task_create_form
         | Nav.Task_transition_form _
@@ -4088,6 +4138,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Code_search_form
         | Nav.Task_create_form
         | Nav.Task_transition_form _
@@ -4666,6 +4717,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Discord_reply_form _
         | Nav.Code_search_form
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
@@ -4786,6 +4838,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -5109,6 +5162,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -5176,6 +5230,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -5231,6 +5286,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -5271,6 +5327,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_control_confirm _
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
+             | Nav.Discord_reply_form _
              | Nav.Tool_execute_form _
              | Nav.Skill_create_form
              | Nav.Skill_edit_form _
@@ -5391,6 +5448,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -5458,6 +5516,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -5513,6 +5572,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -5553,6 +5613,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_control_confirm _
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
+             | Nav.Discord_reply_form _
              | Nav.Tool_execute_form _
              | Nav.Skill_create_form
              | Nav.Skill_edit_form _
@@ -7258,6 +7319,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -7390,6 +7452,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -7551,6 +7614,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -7635,6 +7699,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -7862,6 +7927,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -7939,6 +8005,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -8031,6 +8098,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -8115,6 +8183,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -8491,6 +8560,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -8590,6 +8660,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -8749,6 +8820,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -8834,6 +8906,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -8904,6 +8977,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -8985,6 +9059,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -9211,6 +9286,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -9279,6 +9355,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.Keeper_control_confirm _
               | Nav.Keeper_clear_form _
               | Nav.Keeper_operator_note_form _
+              | Nav.Discord_reply_form _
               | Nav.Tool_execute_form _
               | Nav.Skill_create_form
               | Nav.Skill_edit_form _
@@ -9358,6 +9435,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _

@@ -1874,6 +1874,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_control_confirm _
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
+                        | Nav.Discord_reply_form _
                         | Nav.Tool_execute_form _
                         | Nav.Skill_create_form
                         | Nav.Skill_edit_form _
@@ -2121,6 +2122,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_control_confirm _
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
+                        | Nav.Discord_reply_form _
                         | Nav.Tool_execute_form _
                         | Nav.Skill_create_form
                         | Nav.Skill_edit_form _
@@ -3168,6 +3170,7 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Keeper_control_confirm _
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
+                  | Nav.Discord_reply_form _
                   | Nav.Tool_execute_form _
                   | Nav.Skill_create_form
                   | Nav.Skill_edit_form _

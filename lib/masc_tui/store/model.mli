@@ -130,10 +130,21 @@ type server_identity = {
   autostart_attempted : bool;
 }
 
+type discord_source = {
+  target : Wire_discord_reply.target;
+  speaker : string;
+  excerpt : string;
+}
+
 type palette_mode =
   | Palette_commands
   | Palette_keepers
   | Palette_models
+  | Palette_discord_replies of {
+      epoch : Epoch.t;
+      workspace : Wire_work.expected_workspace;
+      sources : discord_source list;
+    }
 
 type palette_state = {
   mode : palette_mode;
@@ -244,6 +255,7 @@ type t = {
   config : Config_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  discord_replies : Discord_reply_store.t;
   ask_modal : ask_modal option;
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;

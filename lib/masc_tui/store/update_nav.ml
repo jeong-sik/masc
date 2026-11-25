@@ -224,6 +224,7 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_lang
   | Slash.Cmd_help
   | Slash.Cmd_restart
+  | Slash.Cmd_discord_reply
   | Slash.Cmd_quit ->
       false
 
@@ -301,6 +302,7 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
         | Slash.Cmd_lang
         | Slash.Cmd_help
         | Slash.Cmd_restart
+        | Slash.Cmd_discord_reply
         | Slash.Cmd_quit ->
             None
       in
@@ -405,6 +407,7 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
   | Slash.Cmd_clear
   | Slash.Cmd_help
   | Slash.Cmd_restart
+  | Slash.Cmd_discord_reply
   | Slash.Cmd_quit ->
       []
 
@@ -1456,8 +1459,28 @@ let activate_sidebar_cursor (m : Model.t) =
   | None -> (exit_sidebar_focus m, [])
   | Some it -> navigate_menu_target ~keep_sidebar_focus:false m it.target
 
+let discord_reply_attempt (m : Model.t) kind =
+  match expected_workspace_of m, Discord_reply_store.target_of_form kind with
+  | Some current_workspace, Some (target, workspace) when current_workspace = workspace ->
+      Discord_reply_store.find ~epoch:m.epoch ~workspace target m.discord_replies
+  | _ -> None
+
+let discord_reply_fields attempt (modal : Model.inline_modal_state) =
+  if not (Discord_reply_store.can_compose attempt) then []
+  else
+    match Discord_reply_store.rejected_content attempt with
+    | None -> modal.fields
+    | Some value ->
+        List.map (fun (f : Model.modal_form_field) -> { f with value }) modal.fields
+
 let open_inline_modal (m : Model.t) kind =
   let modal = Model.inline_modal_for kind in
+  let modal =
+    match kind with
+    | Nav.Discord_reply_form _ ->
+        { modal with fields = discord_reply_fields (discord_reply_attempt m kind) modal }
+    | _ -> modal
+  in
   let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
   let nav =
     {
@@ -1546,7 +1569,7 @@ let open_palette (m : Model.t) mode =
               [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
         in
         resolved_cmd @ raw_cmd
-    | Model.Palette_commands | Model.Palette_keepers -> []
+    | Model.Palette_commands | Model.Palette_keepers | Model.Palette_discord_replies _ -> []
   in
   (next, extra_cmds)
 
@@ -2252,11 +2275,50 @@ let palette_entries_with_overflow (m : Model.t) :
 let palette_entries (m : Model.t) : palette_entry list =
   fst (palette_entries_with_overflow m)
 
+let discord_sources_in_history ~keeper (m : Model.t) =
+  let single_line text =
+    text |> Chat_transcript.scrub_secrets_in_text
+    |> String.map (function '\r' | '\n' | '\t' -> ' ' | c -> c)
+    |> Masc_tui_term.Grapheme.truncate_to_width ~max_width:100
+  in
+  let source (row : Wire_fleet.chat_message) =
+    match row.role with
+    | Wire_fleet.Role_peer
+        { peer = Wire_fleet.Peer_external name;
+          surface = Some (Wire_fleet.Surface_discord (Some origin)) } ->
+        if String.equal row.id "" then None
+        else
+          Some ({ target = { keeper; chat_id = row.id; origin };
+                  speaker = single_line name; excerpt = single_line row.content }
+                : Model.discord_source)
+    | _ -> None
+  in
+  match Option.bind (Fleet_store.String_map.find_opt keeper m.fleet.chat_histories)
+          Observed.to_option with
+  | Some page -> List.rev page.messages |> List.filter_map source
+  | None -> []
+
+let palette_discord_sources (m : Model.t) =
+  match m.palette.mode with
+  | Model.Palette_discord_replies { epoch; workspace; sources }
+    when Epoch.is_current ~current:m.epoch ~reply:epoch
+         && expected_workspace_of m = Some workspace ->
+      List.filter
+        (fun ({ target; speaker; excerpt } : Model.discord_source) ->
+          let origin = target.origin in
+          Option.is_some
+            (fuzzy_score ~query:m.palette.query
+               (String.concat " " [ speaker; excerpt; origin.channel_id;
+                                    origin.original_message_id ])))
+        sources
+  | _ -> []
+
 let palette_len (m : Model.t) =
   match m.palette.mode with
   | Model.Palette_commands -> List.length (palette_entries m)
   | Model.Palette_keepers -> List.length (palette_filtered_keepers m)
   | Model.Palette_models -> List.length (palette_filtered_models m)
+  | Model.Palette_discord_replies _ -> List.length (palette_discord_sources m)
 
 let resolve_target_keeper (m : Model.t) =
   match m.drafts.active_keeper with
@@ -5625,6 +5687,33 @@ let submit_inline_modal ~now (m : Model.t) =
                 | _ ->
                     set_modal_error
                       "preserve_system_prompt must be 'true' or 'false'")
+          | Nav.Discord_reply_form _ ->
+              (match expected_workspace_of m, Discord_reply_store.target_of_form modal.kind with
+               | Some current_workspace, Some (target, workspace)
+                 when current_workspace = workspace ->
+                   let content = Model.modal_field_raw_value ~key:"discord_content" modal in
+                   let attempt = discord_reply_attempt m modal.kind in
+                   (match Discord_reply_store.next_request ~target ~content attempt with
+                    | None when Discord_reply_store.can_compose attempt ->
+                        set_modal_error
+                          (Say.resolve m.lang
+                             (Say.make ~ko:"답장 내용을 입력하세요" ~en:"Enter a reply"))
+                    | None -> (m, [])
+                    | Some request ->
+                        let discord_replies =
+                          Discord_reply_store.submit ~epoch:m.epoch ~workspace request m.discord_replies
+                        in
+                        let inline_modal =
+                          Some { modal with fields = []; submitting = true; error = None }
+                        in
+                        let nav = { m.nav with modal_edit_cursor = 0 } in
+                        ({ m with discord_replies; inline_modal; nav },
+                         [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_discord_reply { request; workspace } } ]))
+               | _ ->
+                   set_modal_error
+                     (Say.resolve m.lang
+                        (Say.make ~ko:"워크스페이스 확인 후 다시 시도하세요"
+                           ~en:"Retry after the workspace is identified")))
           | Nav.Keeper_operator_note_form keeper ->
               let text = String.trim (Model.modal_field_value ~key:"text" modal) in
               if String.length text > 4096 then
@@ -11044,6 +11133,7 @@ let apply_move (m : Model.t) dir =
                   | Nav.Keeper_control_confirm _
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
+                  | Nav.Discord_reply_form _
                   | Nav.Tool_execute_form _
                   | Nav.Skill_create_form
                   | Nav.Skill_edit_form _
@@ -11107,6 +11197,7 @@ let apply_move (m : Model.t) dir =
               | Nav.Keeper_control_confirm _
               | Nav.Keeper_clear_form _
               | Nav.Keeper_operator_note_form _
+              | Nav.Discord_reply_form _
               | Nav.Tool_execute_form _
               | Nav.Skill_create_form
               | Nav.Skill_edit_form _

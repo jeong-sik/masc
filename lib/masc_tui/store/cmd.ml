@@ -442,6 +442,7 @@ type post_request =
       keeper : string;
       action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
     }
+  | Post_discord_reply of { request : Wire_discord_reply.request; workspace : Wire_work.expected_workspace }
   | Post_keeper_operator_note of { keeper : string; text : string }
   | Post_keeper_run_next of {
       keeper : string;
@@ -935,6 +936,7 @@ let post_request_path = function
       Wire_keeper_context.keeper_directive_path ~keeper
   | Post_keeper_checkpoints { keeper; _ } ->
       Wire_keeper_context.keeper_checkpoints_path ~keeper
+  | Post_discord_reply { request; _ } -> Wire_discord_reply.path request
   | Post_keeper_operator_note { keeper; _ } ->
       Wire_keeper_context.keeper_operator_note_path ~keeper
   | Post_keeper_run_next _ -> Wire_keeper_context.keeper_run_next_path
@@ -1057,6 +1059,7 @@ let mcp_tool_name_of_post_request = function
   | Post_keeper_clear _
   | Post_keeper_directive _
   | Post_keeper_checkpoints _
+  | Post_discord_reply _
   | Post_keeper_operator_note _
   | Post_keeper_run_next _
   | Post_runtime_routing_action _
@@ -1280,6 +1283,7 @@ let post_request_body = function
       Wire_keeper_context.encode_checkpoint_purge_body ~apply:true
   | Post_keeper_checkpoints { action = `Delete_history snapshot_ids; _ } ->
       Wire_keeper_context.encode_checkpoint_delete_history_body ~snapshot_ids
+  | Post_discord_reply { request; workspace } -> Wire_discord_reply.encode ~workspace request
   | Post_keeper_operator_note { text; _ } ->
       Wire_keeper_context.encode_operator_note_body ~text
   | Post_keeper_run_next { keeper; request_id; interrupt_token } ->

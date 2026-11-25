@@ -147,6 +147,15 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
+  | Discord_reply_form of {
+      keeper : string;
+      chat_id : string;
+      guild_id : string option;
+      channel_id : string;
+      message_id : string;
+      workspace_base_path : string;
+      workspace_masc_root : string;
+    }
   | Tool_execute_form of { tool_name : string option; args_json : string }
   | Skill_create_form
   | Skill_edit_form of { reference : string }
@@ -629,6 +638,7 @@ let inline_action_tag = function
   | Runtime_assign_form -> 50
   | Setup_account_key_form -> 51
   | Setup_login_start_form -> 52
+  | Discord_reply_form _ -> 53
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
   else
@@ -664,6 +674,12 @@ let equal_inline_action_kind a b =
     | Keeper_clear_form x, Keeper_clear_form y
     | Keeper_operator_note_form x, Keeper_operator_note_form y ->
         String.equal x y
+    | Discord_reply_form a, Discord_reply_form b ->
+        String.equal a.keeper b.keeper && String.equal a.chat_id b.chat_id
+        && Option.equal String.equal a.guild_id b.guild_id
+        && String.equal a.channel_id b.channel_id && String.equal a.message_id b.message_id
+        && String.equal a.workspace_base_path b.workspace_base_path
+        && String.equal a.workspace_masc_root b.workspace_masc_root
     | Keeper_control_confirm x, Keeper_control_confirm y ->
         String.equal x.keeper y.keeper
         && equal_keeper_destructive_action x.action y.action
@@ -748,6 +764,7 @@ let equal_inline_action_kind a b =
       | Keeper_control_confirm _
       | Keeper_clear_form _
       | Keeper_operator_note_form _
+      | Discord_reply_form _
       | Tool_execute_form _
       | Skill_create_form
       | Skill_edit_form _

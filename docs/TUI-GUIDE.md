@@ -26,10 +26,10 @@ table from a checkout with `bin/masc_tui_keys_doc_cli.exe`.
 
 Press `Ctrl+K` to open the **Universal Command & Entity Palette** — filter across
 all 9 sections (Commands, Workspaces, Keepers, Companies, Goals/Tasks, Board/Wiki,
-Sandboxes, Settings Keys, and all 36 Slash Commands including `/wake`, `/up`,
+Sandboxes, Settings Keys, and slash commands including `/wake`, `/up`,
 `/resume`, `/pause`, `/down`, `/ctl`, `/gate`, `/exec`, `/skill`, `/prompt`,
 `/preset`, `/lane`, `/addon`, `/browser`, `/theme`, `/lang`, `/btw`, `/clear`,
-`/context`, `/restart`) and press `Enter` to execute or jump directly. Use
+`/context`, `/discord-reply`, `/restart`) and press `Enter` to execute or jump directly. Use
 `Ctrl+G` to jump straight to any Keeper's chat, and `Ctrl+L` to inspect or
 switch model runtimes.
 
@@ -209,6 +209,7 @@ Type a `/` command in the focused composer and press `Enter`
 | `/incidents` | Open Historical Incidents drawer |
 | `/jump` | Jump to highest-priority blocked item |
 | `/voice` | Toggle Voice Push-to-Talk |
+| `/discord-reply` | Reply to a recorded Discord message in the current Keeper chat |
 | `/btw <question>` | Ask an ephemeral side-query to the target Keeper without polluting chat history |
 | `/wake [name]` | Smart wake / bring online / resume the target Keeper (same logic as `W`) |
 | `/up [name]` (alias `/boot [name]`) | Bring the target Keeper online (auto-resumes if paused, otherwise boots) |
@@ -240,6 +241,14 @@ When your keyboard layout is set to Korean 2-set Hangul while **unfocused**
 (`Keymap.allows_ime_replay`) lets bare navigation keys continue to work without
 switching input methods. Inside focused text inputs (composer, filter, modals),
 Korean input is preserved verbatim.
+
+From Keeper Chat, open `/discord-reply` in the command palette and select a
+Discord message from loaded history. The reply form shows the original message
+ID. Enter sends the reply to Discord. While delivery is pending, Enter checks
+the same operation. A completed receipt shows the Discord message ID for your
+reply. A same-connection retry uses the original operation ID and text. After a
+reconnect, the TUI can still check that operation within the current session.
+
 
 ## Surfaces: 6 Workspaces & Sub-Tabs
 

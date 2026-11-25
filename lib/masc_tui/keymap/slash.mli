@@ -22,6 +22,7 @@ type command_id =
   | Cmd_jump
   | Cmd_voice
   | Cmd_btw
+  | Cmd_discord_reply
   | Cmd_wake
   | Cmd_up
   | Cmd_resume
@@ -194,6 +195,7 @@ type parsed =
   | Jump
   | Voice
   | Btw of string
+  | Discord_reply
   | Wake of string option
   | Up of string option
   | Resume of string option

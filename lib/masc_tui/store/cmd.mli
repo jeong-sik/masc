@@ -454,6 +454,7 @@ type post_request =
       keeper : string;
       action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
     }
+  | Post_discord_reply of { request : Wire_discord_reply.request; workspace : Wire_work.expected_workspace }
   | Post_keeper_operator_note of { keeper : string; text : string }
   | Post_keeper_run_next of {
       keeper : string;

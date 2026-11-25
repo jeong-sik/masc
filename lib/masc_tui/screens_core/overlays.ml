@@ -164,6 +164,9 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Model.Palette_keepers ->
           Say.resolve lang
             (Say.make ~ko:"Ctrl+G · 키퍼 빠른 전환" ~en:"Ctrl+G · Keeper Switcher")
+      | Model.Palette_discord_replies _ ->
+          Say.resolve lang
+            (Say.make ~ko:"답장할 Discord 원본 선택" ~en:"Select a Discord message to reply to")
       | Model.Palette_models ->
           Say.resolve lang
             (Say.make ~ko:"Ctrl+L · 런타임 · 모델 선택" ~en:"Ctrl+L · Runtime / Model Picker")
@@ -211,8 +214,12 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         if placeholder_x < Rect.right q_row then
           let placeholder =
             Say.resolve lang
-              (Say.make ~ko:"검색어 입력 (워크스페이스, 키퍼, 목표, 설정, /명령)..."
-                 ~en:"Fuzzy search workspaces, keepers, goals, settings, /commands...")
+              (match model.palette.mode with
+               | Model.Palette_discord_replies _ ->
+                   Say.make ~ko:"작성자, 본문, 원본 ID 검색" ~en:"Search author, message, or source ID"
+               | Model.Palette_commands | Model.Palette_keepers | Model.Palette_models ->
+                   Say.make ~ko:"검색어 입력 (워크스페이스, 키퍼, 목표, 설정, /명령)..."
+                     ~en:"Fuzzy search workspaces, keepers, goals, settings, /commands...")
           in
           ignore
             (Cell_grid.put_text ~clip:q_row grid ~x:placeholder_x ~y:inner.y
@@ -234,7 +241,12 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           Cell_grid.put_ascii ~clip:q_row grid ~x:cur_x ~y:inner.y
             ~style:cursor_style ' '
       end;
-      let show_mode_bar = inner.h >= 4 in
+      let show_mode_bar =
+        inner.h >= 4
+        && (match model.palette.mode with
+            | Model.Palette_discord_replies _ -> false
+            | Model.Palette_commands | Model.Palette_keepers | Model.Palette_models -> true)
+      in
       if show_mode_bar then begin
         let mode_y = inner.y + 1 in
         let mode_r = Rect.make ~x:q_left ~y:mode_y ~w:q_w ~h:1 in
@@ -281,6 +293,20 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let rows =
           match model.palette.mode with
           | Model.Palette_commands -> build_universal_palette_rows model
+          | Model.Palette_discord_replies _ ->
+              Update_nav.palette_discord_sources model
+              |> List.mapi (fun idx ({ target; speaker; excerpt } : Model.discord_source) ->
+                     let id = target.origin.original_message_id in
+                     let badge =
+                       if String.length id <= 12 then id
+                       else "…" ^ String.sub id (String.length id - 10) 10
+                     in
+                     Palette_item
+                       { selectable_idx = Some idx;
+                         badge;
+                         title = speaker ^ " · " ^ excerpt;
+                         meta = target.origin.channel_id;
+                         tone = None })
           | Model.Palette_keepers ->
               Update_nav.palette_filtered_keepers model
               |> List.mapi (fun idx (k : Wire_fleet.keeper_summary) ->
@@ -4015,6 +4041,10 @@ let inline_action_title ~lang (kind : Nav.inline_action_kind) =
       Say.resolve lang
         (Say.make ~ko:("키퍼 대화 이력 초기화 · " ^ keeper)
            ~en:("Clear Keeper History · " ^ keeper))
+  | Nav.Discord_reply_form { message_id; _ } ->
+      Say.resolve lang
+        (Say.make ~ko:("Discord 원본 답장 · " ^ message_id)
+           ~en:("Reply to Discord message · " ^ message_id))
   | Nav.Keeper_operator_note_form keeper ->
       Say.resolve lang
         (Say.make ~ko:("다음 턴 운영자 노트 · " ^ keeper)
@@ -4097,6 +4127,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Some m -> m
     | None -> Model.inline_modal_for kind
   in
+  let discord_status =
+    Update_nav.discord_reply_attempt model kind
+    |> Option.map (fun a -> Discord_reply_store.status (Discord_reply_store.phase a))
+  in
   let focused_field = List.nth_opt modal.fields modal.active_field in
   let has_focused_help =
     match focused_field with
@@ -4156,6 +4190,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Discord_reply_form _
     | Nav.Tool_execute_form _
     | Nav.Skill_create_form
     | Nav.Skill_edit_form _
@@ -4212,6 +4247,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           | Drafts.Btw_failed _ ->
               Say.resolve lang
                 (Say.make ~ko:"[Enter/Esc] 닫기" ~en:"[Enter/Esc] Close"))
+      | Nav.Discord_reply_form _ ->
+          if modal.submitting then Say.resolve lang (Say.make ~ko:"[Esc] 닫기" ~en:"[Esc] Close")
+          else if modal.fields = [] then
+            Say.resolve lang (Say.make ~ko:"[Enter] 결과 확인 · [Esc] 닫기" ~en:"[Enter] Delivery status · [Esc] Close")
+          else
+            Say.resolve lang (Say.make ~ko:"[Enter] Discord에 전송 · [Esc] 닫기" ~en:"[Enter] Send to Discord · [Esc] Close")
       | Nav.Gate_reject _
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
@@ -4420,6 +4461,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_control_confirm _
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
+      | Nav.Discord_reply_form _
       | Nav.Tool_execute_form _
       | Nav.Skill_create_form
       | Nav.Skill_edit_form _
@@ -4447,7 +4489,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Addon_invoke_action _
       | Nav.Setup_login_input_form _ ->
           let status_rows =
-            if modal.submitting || Option.is_some modal.error then 1 else 0
+            if modal.submitting || Option.is_some modal.error || Option.is_some discord_status then 1 else 0
           in
           let extra_rows =
             match modal.kind with
@@ -4483,6 +4525,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -4668,6 +4711,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _
@@ -4704,6 +4748,17 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      ~style:crit_st
                      (Grapheme.truncate_to_width ~max_width:padded.w
                         (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ clean_err)))
+            | None when Option.is_some discord_status ->
+                Option.iter
+                  (fun (state, label) ->
+                    let style =
+                      match state with
+                      | `Delivered -> ok_st | `Pending -> attn_st | `Failed -> crit_st
+                    in
+                    ignore
+                      (Cell_grid.put_text ~clip:sr grid ~x:padded.x ~y:sy ~style
+                         (Grapheme.truncate_to_width ~max_width:padded.w (Say.resolve lang label))))
+                  discord_status
             | None ->
                 if modal.submitting then
                   ignore

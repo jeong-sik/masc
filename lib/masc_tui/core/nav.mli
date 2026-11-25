@@ -69,16 +69,12 @@ type knowledge_dive_target =
 
 type runtime_dive_target =
   | Tool_dive of string
-  | Fusion_dive of string
   | Skill_dive of string
   | Exact_run_dive of string
 
 type infra_dive_target =
-  | Sandbox_dive of string
-  | Lane_dive of string
   | Incident_dive of int
   | Runtime_trace_dive of string
-  | Log_detail_dive of int
 
 type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }

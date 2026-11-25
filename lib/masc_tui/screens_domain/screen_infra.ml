@@ -496,7 +496,7 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
                  ~y:(empty_box.y + 1) ~max_w:(Int.max 0 (empty_box.w - 2))
                  ~style:(H.whisper_style ~theme ())
                  (Say.resolve lang
-                    (Say.make ~ko:"[Enter] 전체 상세" ~en:"[Enter] Full dive")))
+                    (Say.make ~ko:"[Enter/z] 확대 보기" ~en:"[Enter/z] Zoom")))
         end
         else begin
           let log_bg_rgb = theme.surface_0 in
@@ -572,29 +572,226 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
         end
       end
 
+let json_of_metrics (m : Wire_infra.tool_metrics_24h) : Yojson.Safe.t =
+  let opt_float obs =
+    match Observed.to_option obs with Some f -> `Float f | None -> `Null
+  in
+  let fc = m.failure_classes in
+  `Assoc
+    [
+      ("calls", `Int m.calls);
+      ("failures", `Int m.failures);
+      ("failure_unclassified", `Int m.failure_unclassified);
+      ("p50_ms", opt_float m.p50_ms);
+      ("p95_ms", opt_float m.p95_ms);
+      ("max_ms", opt_float m.max_ms);
+      ( "failure_classes"
+      , `Assoc
+          [
+            ("dependency_unavailable", `Int fc.dependency_unavailable);
+            ("runtime_failure", `Int fc.runtime_failure);
+            ("policy_rejection", `Int fc.policy_rejection);
+            ("workflow_rejection", `Int fc.workflow_rejection);
+            ("operator_cancelled", `Int fc.operator_cancelled);
+          ] );
+    ]
+
+let json_of_sandbox_entry = function
+  | Entry_microvm g ->
+      let _, _, sock_s = socket_status_display g.agent_socket in
+      let _, _, shim_s = shim_parity_display g.shim_parity in
+      let vol_s =
+        match g.volume with
+        | Wire_infra.Volume_declared v -> v
+        | Wire_infra.Volume_invalid err -> "invalid: " ^ err
+      in
+      `Assoc
+        [
+          ("keeper", `String g.keeper);
+          ("backend", `String g.backend);
+          ("guest_name", `String g.guest_name);
+          ("presence", `String g.presence);
+          ("socket", `String sock_s);
+          ("shim_parity", `String shim_s);
+          ("network_mode", `String (network_mode_label g.network_mode));
+          ("volume", `String vol_s);
+          ("metrics_24h", json_of_metrics g.metrics_24h);
+        ]
+  | Entry_ssh_bound (p, ks) ->
+      `Assoc
+        [
+          ("keeper", `String ks.keeper);
+          ("pool", `String p.pool_name);
+          ("host", `String p.host);
+          ("port", `Int p.port);
+          ("unix_user", `String p.unix_user);
+          ("remote_root", `String p.remote_root);
+          ("last_dispatch", ks.last_dispatch);
+          ("metrics_24h", json_of_metrics ks.metrics_24h);
+        ]
+  | Entry_ssh_unbound u ->
+      `Assoc
+        [
+          ("keeper", `String u.keeper);
+          ("backend", `String u.backend);
+          ("binding_state", `String u.binding_state);
+          ( "remote_endpoint"
+          , match u.remote_endpoint with Some ep -> `String ep | None -> `Null );
+          ("metrics_24h", json_of_metrics u.metrics_24h);
+        ]
+  | Entry_docker d ->
+      `Assoc
+        [
+          ("keeper", `String d.keeper);
+          ("backend", `String d.backend);
+          ("network_mode", `String (network_mode_label d.network_mode));
+          ("metrics_24h", json_of_metrics d.metrics_24h);
+        ]
+
+let entry_of_keeper_detail ~(sandboxes : Wire_infra.sandboxes_snapshot option)
+    (detail : Wire_infra.keeper_sandbox_detail) : fleet_sandbox_entry =
+  match detail with
+  | Wire_infra.Sandbox_microvm g -> Entry_microvm g
+  | Wire_infra.Sandbox_ssh_unbound u -> Entry_ssh_unbound u
+  | Wire_infra.Sandbox_docker d -> Entry_docker d
+  | Wire_infra.Sandbox_ssh_keeper { session = ks; pool = embedded_pool } -> (
+      let pool_opt =
+        match embedded_pool with
+        | Some _ as p -> p
+        | None -> (
+            match sandboxes with
+            | Some s ->
+                List.find_opt
+                  (fun (p : Wire_infra.ssh_pool) ->
+                    List.exists
+                      (fun (s_ks : Wire_infra.ssh_keeper_session) ->
+                        String.equal s_ks.keeper ks.keeper)
+                      p.keeper_sessions)
+                  s.ssh_pools
+            | None -> None)
+      in
+      match pool_opt with
+      | Some p -> Entry_ssh_bound (p, ks)
+      | None ->
+          let fallback_pool : Wire_infra.ssh_pool =
+            {
+              pool_name = "remote_ssh";
+              host = "remote";
+              port = 22;
+              unix_user = ks.keeper;
+              remote_root = "/";
+              private_home = false;
+              max_sessions = 1;
+              active_sessions = Observed.unreported;
+              reachability = Wire_infra.Ssh_probe_pending;
+              accounts = [];
+              keeper_sessions = [ ks ];
+              metrics_24h = ks.metrics_24h;
+            }
+          in
+          Entry_ssh_bound (fallback_pool, ks))
+
 let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp ~lang ~(model : Model.t)
     (entry_opt : fleet_sandbox_entry option)
     (obs : Wire_infra.sandboxes_snapshot Observed.t) ~focused =
-  let subtitle = Option.map entry_keeper_name entry_opt in
+  let inf = model.infra in
+  let resolved_entry_opt =
+    match entry_opt with
+    | None -> None
+    | Some fallback -> (
+        let keeper = entry_keeper_name fallback in
+        match Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf) with
+        | Some resp ->
+            Some
+              (entry_of_keeper_detail
+                 ~sandboxes:(Observed.to_option inf.sandboxes)
+                 resp.sandbox)
+        | None -> Some fallback)
+  in
+  let subtitle = Option.map entry_keeper_name resolved_entry_opt in
+  let badge =
+    if focused || inf.show_raw_json then
+      Some
+        (H.make_badge
+           ~tone:
+             (if inf.show_raw_json then Theme.Status_active
+              else Theme.Status_historical)
+           (if inf.show_raw_json then "[Space] Json_tree ON"
+            else "[Space] Json_tree"))
+    else None
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ?subtitle ~focused
+      (H.card_spec ?subtitle ?badge ~focused
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Enter] 상세 · [p] 프로브"
-                 ~en:"[Enter] Dive · [p] Probe"))
+              (Say.make ~ko:"[Enter/z] 확대 · [p] 프로브"
+                 ~en:"[Enter/z] Zoom · [p] Probe"))
          (Say.resolve lang (Say.make ~ko:"샌드박스 인스펙터" ~en:"Sandbox Inspector")))
   in
   if Rect.is_empty inner then ()
   else
-    match entry_opt with
+    match resolved_entry_opt with
     | None ->
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
           ~lang obs
     | Some entry ->
-        draw_sandbox_inspector_body ~scroll ~grid ~inner ~theme ~bp ~lang ~model
-          entry
+        if inf.show_raw_json then
+          let lines =
+            Json_tree.flatten ~max_depth:5 ~redact_secrets:true
+              (json_of_sandbox_entry entry)
+          in
+          ignore
+            (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme ~scroll
+               lines)
+        else if
+          model.nav.zoomed && Model.can_zoom_current_view model && inner.h >= 10
+        then begin
+          let top_rect, body_rect =
+            match Layout.split_v inner [ Layout.Fixed 3; Layout.Flex 1 ] with
+            | [ a; b ] -> (a, b)
+            | _ -> (inner, Rect.empty)
+          in
+          let metrics = entry_metrics entry in
+          let fc = metrics.failure_classes in
+          let err_spec : Chart.Spec.t =
+            {
+              title =
+                Say.make ~ko:"24h 도구 오류 분류" ~en:"24h Tool Failure Classes";
+              hotkey_hint = None;
+              kind =
+                Chart.Spec.Stacked_bar
+                  {
+                    segments =
+                      [
+                        ( Say.literal "dep"
+                        , float_of_int fc.dependency_unavailable
+                        , Theme.Status_historical );
+                        ( Say.literal "runtime"
+                        , float_of_int fc.runtime_failure
+                        , Theme.Status_critical );
+                        ( Say.literal "policy"
+                        , float_of_int fc.policy_rejection
+                        , Theme.Status_attention );
+                        ( Say.literal "workflow"
+                        , float_of_int fc.workflow_rejection
+                        , Theme.Status_active );
+                      ];
+                    total_label = Say.make ~ko:"24h 실패" ~en:"24h Failures";
+                    unit = Format_val.Count;
+                  };
+            }
+          in
+          ignore
+            (Chart.draw grid ~rect:(H.pad_content ~bp top_rect) ~theme
+               ~caps:H.default_caps ~lang ~show_title:false err_spec);
+          draw_sandbox_inspector_body ~scroll ~grid ~inner:body_rect ~theme ~bp
+            ~lang ~model entry
+        end
+        else
+          draw_sandbox_inspector_body ~scroll ~grid ~inner ~theme ~bp ~lang ~model
+            entry
 
 let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -1036,7 +1233,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let tbl_inner =
     Card.draw ~cache grid ~rect:tbl_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter/z] 확대" ~en:"[Enter/z] Zoom"))
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 샌드박스 플릿 (%d)" (List.length entries))
@@ -2389,7 +2586,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             in
             let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 1)) in
             let lines =
-              Json_tree.flatten ~max_depth:4 ~redact_secrets:true e.details
+              Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
             in
             ignore
               (Json_tree.draw grid ~rect:tree_rect ~theme
@@ -3078,82 +3275,6 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     | Nav.Infra_activity_logs ->
         render_activity_logs ~model ~cache ~rect:body ~theme ~bp grid
 
-let json_of_metrics (m : Wire_infra.tool_metrics_24h) : Yojson.Safe.t =
-  let opt_float obs =
-    match Observed.to_option obs with Some f -> `Float f | None -> `Null
-  in
-  let fc = m.failure_classes in
-  `Assoc
-    [
-      ("calls", `Int m.calls);
-      ("failures", `Int m.failures);
-      ("failure_unclassified", `Int m.failure_unclassified);
-      ("p50_ms", opt_float m.p50_ms);
-      ("p95_ms", opt_float m.p95_ms);
-      ("max_ms", opt_float m.max_ms);
-      ( "failure_classes"
-      , `Assoc
-          [
-            ("dependency_unavailable", `Int fc.dependency_unavailable);
-            ("runtime_failure", `Int fc.runtime_failure);
-            ("policy_rejection", `Int fc.policy_rejection);
-            ("workflow_rejection", `Int fc.workflow_rejection);
-            ("operator_cancelled", `Int fc.operator_cancelled);
-          ] );
-    ]
-
-let json_of_sandbox_entry = function
-  | Entry_microvm g ->
-      let _, _, sock_s = socket_status_display g.agent_socket in
-      let _, _, shim_s = shim_parity_display g.shim_parity in
-      let vol_s =
-        match g.volume with
-        | Wire_infra.Volume_declared v -> v
-        | Wire_infra.Volume_invalid err -> "invalid: " ^ err
-      in
-      `Assoc
-        [
-          ("keeper", `String g.keeper);
-          ("backend", `String g.backend);
-          ("guest_name", `String g.guest_name);
-          ("presence", `String g.presence);
-          ("socket", `String sock_s);
-          ("shim_parity", `String shim_s);
-          ("network_mode", `String (network_mode_label g.network_mode));
-          ("volume", `String vol_s);
-          ("metrics_24h", json_of_metrics g.metrics_24h);
-        ]
-  | Entry_ssh_bound (p, ks) ->
-      `Assoc
-        [
-          ("keeper", `String ks.keeper);
-          ("pool", `String p.pool_name);
-          ("host", `String p.host);
-          ("port", `Int p.port);
-          ("unix_user", `String p.unix_user);
-          ("remote_root", `String p.remote_root);
-          ("last_dispatch", ks.last_dispatch);
-          ("metrics_24h", json_of_metrics ks.metrics_24h);
-        ]
-  | Entry_ssh_unbound u ->
-      `Assoc
-        [
-          ("keeper", `String u.keeper);
-          ("backend", `String u.backend);
-          ("binding_state", `String u.binding_state);
-          ( "remote_endpoint"
-          , match u.remote_endpoint with Some ep -> `String ep | None -> `Null );
-          ("metrics_24h", json_of_metrics u.metrics_24h);
-        ]
-  | Entry_docker d ->
-      `Assoc
-        [
-          ("keeper", `String d.keeper);
-          ("backend", `String d.backend);
-          ("network_mode", `String (network_mode_label d.network_mode));
-          ("metrics_24h", json_of_metrics d.metrics_24h);
-        ]
-
 let draw_tail_logs ?(scroll = 0) ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
     ~tz_offset_sec ~filter_opt (logs : Wire_infra.system_log_entry list) =
   if Rect.is_empty rect then ()
@@ -3206,302 +3327,6 @@ let draw_tail_logs ?(scroll = 0) ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
             incr y
           end)
         (Store_scroll.drop skip matching |> H.safe_take rect.h)
-
-let entry_of_keeper_detail ~(sandboxes : Wire_infra.sandboxes_snapshot option)
-    (detail : Wire_infra.keeper_sandbox_detail) : fleet_sandbox_entry =
-  match detail with
-  | Wire_infra.Sandbox_microvm g -> Entry_microvm g
-  | Wire_infra.Sandbox_ssh_unbound u -> Entry_ssh_unbound u
-  | Wire_infra.Sandbox_docker d -> Entry_docker d
-  | Wire_infra.Sandbox_ssh_keeper { session = ks; pool = embedded_pool } -> (
-      let pool_opt =
-        match embedded_pool with
-        | Some _ as p -> p
-        | None -> (
-            match sandboxes with
-            | Some s ->
-                List.find_opt
-                  (fun (p : Wire_infra.ssh_pool) ->
-                    List.exists
-                      (fun (s_ks : Wire_infra.ssh_keeper_session) ->
-                        String.equal s_ks.keeper ks.keeper)
-                      p.keeper_sessions)
-                  s.ssh_pools
-            | None -> None)
-      in
-      match pool_opt with
-      | Some p -> Entry_ssh_bound (p, ks)
-      | None ->
-          let fallback_pool : Wire_infra.ssh_pool =
-            {
-              pool_name = "remote_ssh";
-              host = "remote";
-              port = 22;
-              unix_user = ks.keeper;
-              remote_root = "/";
-              private_home = false;
-              max_sessions = 1;
-              active_sessions = Observed.unreported;
-              reachability = Wire_infra.Ssh_probe_pending;
-              accounts = [];
-              keeper_sessions = [ ks ];
-              metrics_24h = ks.metrics_24h;
-            }
-          in
-          Entry_ssh_bound (fallback_pool, ks))
-
-let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let inf = model.infra in
-  let entry_opt =
-    match Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf) with
-    | Some resp ->
-        Some
-          (entry_of_keeper_detail
-             ~sandboxes:(Observed.to_option inf.sandboxes)
-             resp.sandbox)
-    | None -> (
-        match Observed.to_option inf.sandboxes with
-        | Some s ->
-            List.find_opt
-              (fun e -> String.equal (entry_keeper_name e) keeper)
-              (fleet_entries_of_snapshot s)
-        | None -> None)
-  in
-  let inner =
-    Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:keeper
-         ~badge:
-           (H.make_badge
-              ~tone:
-                (if inf.show_raw_json then Theme.Status_active
-                 else Theme.Status_historical)
-              (if inf.show_raw_json then "[Space] Json_tree ON"
-               else "[Space] Json_tree"))
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make ~ko:"[p] 프로브 · [Esc] 뒤로"
-                 ~en:"[p] Probe · [Esc] Back"))
-         (Say.resolve lang
-            (Say.make ~ko:"인프라 > 샌드박스 상세" ~en:"Infra > Sandbox Dive")))
-  in
-  if Rect.is_empty inner then ()
-  else
-    match entry_opt with
-    | None ->
-        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
-          ~lang inf.sandboxes
-    | Some entry ->
-        if inf.show_raw_json then
-          let lines =
-            Json_tree.flatten ~max_depth:5 ~redact_secrets:true
-              (json_of_sandbox_entry entry)
-          in
-          ignore
-            (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme
-               ~scroll:model.nav.dive_scroll_offset lines)
-        else
-          let top_rect, body_rect =
-            match Layout.split_v inner [ Layout.Fixed 3; Layout.Flex 1 ] with
-            | [ a; b ] -> (a, b)
-            | _ -> (inner, Rect.empty)
-          in
-          let metrics = entry_metrics entry in
-          let fc = metrics.failure_classes in
-          let err_spec : Chart.Spec.t =
-            {
-              title =
-                Say.make ~ko:"24h 도구 오류 분류" ~en:"24h Tool Failure Classes";
-              hotkey_hint = None;
-              kind =
-                Chart.Spec.Stacked_bar
-                  {
-                    segments =
-                      [
-                        ( Say.literal "dep"
-                        , float_of_int fc.dependency_unavailable
-                        , Theme.Status_historical );
-                        ( Say.literal "runtime"
-                        , float_of_int fc.runtime_failure
-                        , Theme.Status_critical );
-                        ( Say.literal "policy"
-                        , float_of_int fc.policy_rejection
-                        , Theme.Status_attention );
-                        ( Say.literal "workflow"
-                        , float_of_int fc.workflow_rejection
-                        , Theme.Status_active );
-                      ];
-                    total_label = Say.make ~ko:"24h 실패" ~en:"24h Failures";
-                    unit = Format_val.Count;
-                  };
-            }
-          in
-          ignore
-            (Chart.draw grid ~rect:(H.pad_content ~bp top_rect) ~theme
-               ~caps:H.default_caps ~lang ~show_title:false err_spec);
-          (* ZERO nested Card.draw: paints rich 4-section inspector body directly *)
-          draw_sandbox_inspector_body ~scroll:model.nav.dive_scroll_offset ~grid
-            ~inner:body_rect ~theme ~bp ~lang ~model entry
-
-let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let rt = model.runtime in
-  let inf = model.infra in
-  let lane_opt, runtimes =
-    match Observed.to_option rt.runtime_resolved with
-    | Some snap ->
-        ( List.find_opt
-            (fun (l : Wire_runtime.failover_lane) -> String.equal l.id lane_id)
-            snap.lanes
-        , snap.runtimes )
-    | None -> (None, [])
-  in
-  let active_probes, _ = Runtime_store.active_and_outside_probes rt in
-  let inner =
-    Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:lane_id
-         ~badge:
-           (H.make_badge
-              ~tone:
-                (if inf.show_raw_json then Theme.Status_active
-                 else Theme.Status_historical)
-              (if inf.show_raw_json then "[Space] Json_tree ON"
-               else "[Space] Json_tree"))
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make ~ko:"[n] 생성 · [e] 편집 · [d] 삭제 · [a] 배정 · [Esc] 뒤로"
-                 ~en:"[n] New · [e] Edit · [d] Del · [a] Assign · [Esc] Back"))
-         (Say.resolve lang
-            (Say.make ~ko:"런타임 > 페일오버 레인 상세"
-               ~en:"Runtime > Failover Lane Dive")))
-  in
-  let content = H.pad_content ~bp inner in
-  if Rect.is_empty content then ()
-  else
-    match lane_opt with
-    | None ->
-        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
-          rt.runtime_resolved
-    | Some lane ->
-        if inf.show_raw_json then
-          let json =
-            `Assoc
-              [
-                ("id", `String lane.id);
-                ("declared", `Bool lane.declared);
-                ( "runtime_ids"
-                , `List (List.map (fun s -> `String s) lane.runtime_ids) );
-              ]
-          in
-          let lines = Json_tree.flatten ~max_depth:4 ~redact_secrets:true json in
-          ignore
-            (Json_tree.draw grid ~rect:content ~theme
-               ~scroll:model.nav.dive_scroll_offset lines)
-        else
-          let probe_of rid =
-            List.find_opt
-              (fun (p : Wire_runtime.provider_probe_row) ->
-                String.equal p.runtime_id rid)
-              active_probes
-          in
-          let total_slots = List.length lane.runtime_ids in
-          let reachable_slots =
-            List.fold_left
-              (fun acc rid ->
-                match probe_of rid with
-                | Some { reachable = Some true; _ } -> acc + 1
-                | Some _ | None -> acc)
-              0 lane.runtime_ids
-          in
-          let gauge_rect, body_rect, tail_rect =
-            match
-              Layout.split_v content
-                [ Layout.Fixed 2; Layout.Ratio 0.54; Layout.Flex 1 ]
-            with
-            | [ a; b; c ] -> (a, b, c)
-            | _ -> (content, Rect.empty, Rect.empty)
-          in
-          let g_spec : Chart.Spec.t =
-            {
-              title =
-                Say.make ~ko:"활성 슬롯 가용률" ~en:"Active Slot Availability";
-              hotkey_hint = None;
-              kind =
-                Chart.Spec.Ratio_gauge
-                  {
-                    used =
-                      Observed.value ~observed_at:Clock.Mono.zero
-                        (float_of_int reachable_slots);
-                    limit =
-                      Observed.value ~observed_at:Clock.Mono.zero
-                        (float_of_int (Int.max 1 total_slots));
-                    unit = Format_val.Count;
-                    gradient = Chart.Gradient.Efficiency;
-                    reset_hint = None;
-                  };
-            }
-          in
-          ignore
-            (Chart.draw grid ~rect:gauge_rect ~theme ~caps:H.default_caps ~lang
-               ~show_title:false g_spec);
-          let y = ref body_rect.y and bot = Rect.bottom body_rect in
-          List.iteri
-            (fun idx rid ->
-              if !y < bot then begin
-                let hlbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
-                let st_g, st_tone, st_desc =
-                  match probe_of rid with
-                  | Some pr -> (
-                      match pr.reachable with
-                      | Some true ->
-                          let lat =
-                            match pr.latency_ms with
-                            | Some ms ->
-                                Format_val.format_value Format_val.Milliseconds
-                                  ms
-                            | None -> "ok"
-                          in
-                          (Glyph.Live_healthy, Theme.Status_ok, "Active · " ^ lat)
-                      | Some false ->
-                          let err =
-                            match pr.error with Some e -> e | None -> pr.status
-                          in
-                          (Glyph.Live_failing, Theme.Status_critical, err)
-                      | None ->
-                          (Glyph.Live_idle, Theme.Status_active, pr.status))
-                  | None -> (Glyph.Live_idle, Theme.Status_active, "Ready")
-                in
-                let conn =
-                  if idx = 0 then " " else Glyph.to_utf8 Glyph.Flow_down
-                in
-                let dw = Grapheme.display_width st_desc in
-                ignore
-                  (H.put_clipped ~grid ~clip:body_rect ~x:body_rect.x ~y:!y
-                     ~max_w:(Int.max 8 (body_rect.w - dw - 2))
-                     ~style:(H.text_style ~theme ())
-                     (Printf.sprintf "%s #%d %s %s" conn (idx + 1)
-                        (Glyph.to_utf8 st_g) hlbl));
-                ignore
-                  (H.put_right ~grid ~clip:body_rect
-                     ~right_x:(Rect.right body_rect) ~y:!y ~max_w:dw
-                     ~style:(H.status_style ~theme st_tone) st_desc);
-                incr y
-              end)
-            lane.runtime_ids;
-          if not (Rect.is_empty tail_rect) then begin
-            H.draw_divider ~grid ~rect:tail_rect ~y:tail_rect.y ~theme
-              ~label:(Say.resolve lang (Say.make ~ko:"최근 로그" ~en:"Tail Logs"))
-              ();
-            let log_area =
-              Rect.make ~x:tail_rect.x ~y:(tail_rect.y + 1) ~w:tail_rect.w
-                ~h:(Int.max 0 (tail_rect.h - 1))
-            in
-            draw_tail_logs ~scroll:model.nav.dive_scroll_offset ~grid
-              ~rect:log_area ~theme ~lang ~tz_offset_sec:model.tz_offset_sec
-              ~filter_opt:None inf.logs
-          end
 
 let incident_source_display = function
   | Health.Source_keeper k -> ("keeper", Some k)
@@ -3751,88 +3576,6 @@ let render_dive_runtime_trace ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
                ~scroll:model.nav.dive_scroll_offset lines)
         end
 
-let render_dive_log_detail ~seq ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let inf = model.infra in
-  let inner =
-    Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:("#" ^ Int.to_string seq)
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make ~ko:"[↑↓] 스크롤 · [y] 복사 · [Esc] 뒤로"
-                 ~en:"[↑↓] Scroll · [y] Copy · [Esc] Back"))
-         (Say.resolve lang
-            (Say.make ~ko:"인프라 > 로그 상세" ~en:"Infra > Log Detail")))
-  in
-  let content = H.pad_content ~bp inner in
-  if Rect.is_empty content then ()
-  else
-    match Infra_store.find_log_by_seq seq inf with
-    | None ->
-        H.draw_empty_notice ~grid ~rect:content ~theme
-          (Say.resolve lang
-             (Say.make
-                ~ko:(Printf.sprintf "버퍼에서 로그 #%d를 찾을 수 없습니다" seq)
-                ~en:(Printf.sprintf "Log entry #%d not found in ring buffer" seq)))
-    | Some e ->
-        let y = ref content.y and bot = Rect.bottom content in
-        let lvl_s, lvl_tone = log_level_badge e.level in
-        let kp_s = match e.keeper with Some k -> " · @" ^ k | None -> "" in
-        let local_ts =
-          H.format_local_datetime ~tz_offset_sec:model.tz_offset_sec e.ts
-        in
-        if !y < bot then begin
-          ignore
-            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-               ~max_w:content.w
-               ~style:(H.status_style ~theme ~attrs:Attr.bold lvl_tone)
-               (Printf.sprintf "[%s] %s · %s/%s%s" lvl_s local_ts e.source
-                  e.module_name kp_s));
-          incr y
-        end;
-        let msg_lines =
-          H.wrap_lines ~max_width:(Int.max 1 (content.w - 2)) e.message
-        in
-        let msg_n = List.length msg_lines in
-        let eff_scroll = Int.max 0 model.nav.dive_scroll_offset in
-        let msg_skip = Int.min msg_n eff_scroll in
-        let vis_msg = Store_scroll.drop msg_skip msg_lines in
-        let vis_msg_n = Int.min (List.length vis_msg) (Int.max 0 (bot - !y)) in
-        if vis_msg_n > 0 then begin
-          Card.draw_left_rail ~tone:lvl_tone grid ~x:content.x ~y:!y
-            ~h:vis_msg_n ~theme;
-          List.iter
-            (fun ln ->
-              if !y < bot then begin
-                ignore
-                  (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                     ~max_w:(Int.max 0 (content.w - 2))
-                     ~style:(H.text_style ~theme ()) ln);
-                incr y
-              end)
-            vis_msg
-        end;
-        if eff_scroll <= msg_n && !y < bot then begin
-          H.draw_divider ~grid ~rect:content ~y:!y ~theme
-            ~label:(Say.resolve lang (Say.make ~ko:"구조화 속성" ~en:"Structured Details"))
-            ();
-          incr y
-        end;
-        let tree_h = Int.max 0 (bot - !y) in
-        if tree_h > 0 then begin
-          let tree_rect =
-            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
-          in
-          let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 1)) in
-          let lines =
-            Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
-          in
-          ignore
-            (Json_tree.draw grid ~rect:tree_rect ~theme
-               ~scroll:tree_scroll lines)
-        end
-
 let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -3841,13 +3584,7 @@ let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
     match target with
-    | Nav.Sandbox_dive keeper ->
-        render_dive_sandbox ~keeper ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Lane_dive lane_id ->
-        render_dive_lane ~lane_id ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Incident_dive incident_id ->
         render_dive_incident ~incident_id ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Runtime_trace_dive keeper ->
         render_dive_runtime_trace ~keeper ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Log_detail_dive seq ->
-        render_dive_log_detail ~seq ~model ~cache ~rect:body ~theme ~bp grid

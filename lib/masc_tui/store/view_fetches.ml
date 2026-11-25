@@ -608,21 +608,6 @@ let fetches_for_dive ~force (m : Model.t) =
       |> add_if series_needed
            (Cmd.Get_tool_series_filtered
               { bucket; since_hours; tool = Some tool_name })
-  | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) ->
-      let detail_needed =
-        match m.runtime.fusion_detail with
-        | Observed.Value { data = rid, _; stale = false; _ } ->
-            force || not (String.equal rid run_id)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.runtime.fusion_detail
-      in
-      []
-      |> add_if (needs_fetch ~force m.runtime.fusion_runs) Cmd.Get_fusion_runs
-      |> add_if detail_needed (Cmd.Get_fusion_run_detail { run_id })
   | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
       []
       |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
@@ -653,19 +638,7 @@ let fetches_for_dive ~force (m : Model.t) =
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
   | Some (Nav.Dive_infra target) -> (
       match target with
-      | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
-      | Nav.Lane_dive _ ->
-          []
-          |> add_if
-               (needs_fetch ~force m.runtime.runtime_resolved)
-               Cmd.Get_runtime_resolved
-          |> add_if
-               (needs_fetch ~force m.runtime.runtime_config_raw)
-               Cmd.Get_runtime_config_raw
-          |> add_if
-               (needs_fetch ~force m.runtime.runtime_probe)
-               (Cmd.Get_runtime_probe { force = false })
-      | Nav.Incident_dive _ | Nav.Log_detail_dive _ -> []
+      | Nav.Incident_dive _ -> []
       | Nav.Runtime_trace_dive keeper ->
           let trace_needed =
             match m.infra.runtime_trace with
@@ -1306,7 +1279,17 @@ let fetches_for_workspace ~force (m : Model.t) =
   | Nav.Infra -> (
       match m.infra.active_tab with
       | Nav.Infra_sandboxes ->
-          [] |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
+          let keeper_req =
+            match Infra_store.selected_sandbox_keeper m.infra with
+            | Some keeper
+              when needs_fetch ~force
+                     (Infra_store.keeper_sandbox_for ~keeper m.infra) ->
+                [ Cmd.Get_keeper_sandbox { keeper } ]
+            | Some _ | None -> []
+          in
+          ([]
+          |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes)
+          @ keeper_req
       | Nav.Infra_repos_changes -> (
           let base_reqs =
             []
@@ -1505,8 +1488,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
           ( Nav.Dive_keeper _
           | Nav.Dive_work _
           | Nav.Dive_knowledge _
-          | Nav.Dive_runtime
-              (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
+          | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
           | Nav.Dive_infra _ ) ->
           false
       | None ->
@@ -1586,7 +1568,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
         ( Nav.Dive_keeper _
         | Nav.Dive_work _
         | Nav.Dive_knowledge _
-        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ )
     | None ->
         []

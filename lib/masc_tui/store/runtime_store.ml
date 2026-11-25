@@ -192,6 +192,7 @@ type t = {
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
   show_unreported_accounts : bool;
+  pending_lane_id : string option;
   selected_index : int;
   scroll_offset : int;
   quota_scroll_offset : int;
@@ -400,6 +401,7 @@ let empty =
     keeper_companies = String_map.empty;
     show_outside_lane_probes = false;
     show_unreported_accounts = false;
+    pending_lane_id = None;
     selected_index = 0;
     scroll_offset = 0;
     quota_scroll_offset = 0;
@@ -619,11 +621,32 @@ let apply_runtime_resolved ~observed_at (snap : Wire_runtime.runtime_resolved_sn
     | Some uw -> Observed.value ~observed_at uw
     | None -> t.usage_windows
   in
-  {
-    t with
-    runtime_resolved = Observed.value ~observed_at snap;
-    usage_windows;
-  }
+  let base =
+    {
+      t with
+      runtime_resolved = Observed.value ~observed_at snap;
+      usage_windows;
+    }
+  in
+  match base.pending_lane_id with
+  | None -> base
+  | Some lane_id ->
+      let rec find i = function
+        | [] -> None
+        | (l : Wire_runtime.failover_lane) :: rest ->
+            if String.equal l.id lane_id then Some i else find (i + 1) rest
+      in
+      (match find 0 snap.lanes with
+      | Some idx ->
+          {
+            base with
+            pending_lane_id = None;
+            filter_query = "";
+            selected_index = idx;
+            scroll_offset = Store_scroll.adjust_scroll ~scroll:base.scroll_offset idx;
+            detail_scroll_offset = 0;
+          }
+      | None -> { base with pending_lane_id = None })
 
 let apply_runtime_config_raw ~observed_at meta t =
   { t with runtime_config_raw = Observed.value ~observed_at meta }
@@ -2070,6 +2093,33 @@ let apply_browser_tabs ~observed_at ~client_id resp t =
 let selected_lane t =
   let lanes = filtered_lanes t in
   List.nth_opt lanes (clamp_index (List.length lanes) t.selected_index)
+
+let select_lane_by_id lane_id t =
+  let find_idx lanes =
+    let rec loop i = function
+      | [] -> None
+      | (l : Wire_runtime.failover_lane) :: rest ->
+          if String.equal l.id lane_id then Some i else loop (i + 1) rest
+    in
+    loop 0 lanes
+  in
+  let t0, idx_opt =
+    match find_idx (filtered_lanes t) with
+    | Some i -> (t, Some i)
+    | None ->
+        let cleared = { t with filter_query = "" } in
+        (cleared, find_idx (filtered_lanes cleared))
+  in
+  match idx_opt with
+  | Some idx ->
+      {
+        t0 with
+        pending_lane_id = None;
+        selected_index = idx;
+        scroll_offset = Store_scroll.adjust_scroll ~scroll:t0.scroll_offset idx;
+        detail_scroll_offset = 0;
+      }
+  | None -> { t0 with pending_lane_id = Some lane_id }
 
 let selected_connector t =
   let cs = filtered_connectors t in

@@ -1270,10 +1270,9 @@ let test_axis_a_screen_dive_matrix () =
       , with_dive
           (Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"))
           (with_ws Nav.Knowledge base) );
-      ( "Dive/Infra/Sandbox"
-      , with_dive
-          (Nav.Dive_infra (Nav.Sandbox_dive "alpha"))
-          (with_ws Nav.Infra base) );
+      ( "Infra/Sandboxes/Zoomed"
+      , let mi = with_ws Nav.Infra base in
+        { mi with nav = { mi.nav with zoomed = true; pane_index = 0 } } );
     ]
   in
   let keys : (string * Keymap.Input.key_event) list =
@@ -5522,8 +5521,6 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
       , "Artifact Report 59"
       , dive_off );
-      ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01", dive_off);
-      ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00", dive_off);
       ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00", dive_off);
     ]
   in
@@ -5784,8 +5781,9 @@ let test_enter_hint_follows_enter_plan () =
   Alcotest.(check string) "Infra/Logs (populated): footer offers Enter" "dive"
     (enter_hint_name (Update_nav.enter_hint infra_logs_populated));
   let infra_logs_dived, _ = Update_nav.dive_selected infra_logs_populated in
-  Alcotest.(check int) "Infra/Logs (populated): Enter pushes dive" 1
-    (List.length infra_logs_dived.nav.dive_stack);
+  Alcotest.(check bool) "Infra/Logs (populated): Enter zooms log detail in place"
+    true
+    (infra_logs_dived.nav.zoomed && infra_logs_dived.nav.dive_stack = []);
   let keepers =
     { m_base with nav = { m_base.nav with workspace = Nav.Keepers } }
   in
@@ -6537,7 +6535,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   let valid_hash =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   in
-  (* 1. Surface 1: Fusion detail stale run_id guard + Fusion_dive scroll bounds *)
+  (* 1. Surface 1: Fusion detail stale run_id guard + zoomed Runtime_fusion scroll bounds *)
   let mk_fusion_run id : Wire_runtime.fusion_run =
     {
       run_id = id;
@@ -6599,7 +6597,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
     (Option.is_some (Runtime_store.fusion_detail_for ~run_id:"run-A" rt_fus));
   Alcotest.(check bool) "Stale run_id guard rejects run-A detail for run-B" true
     (Option.is_none (Runtime_store.fusion_detail_for ~run_id:"run-B" rt_fus));
-  let m_fdive =
+  let m_fzoom =
     {
       base with
       runtime = rt_fus;
@@ -6607,16 +6605,18 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
         {
           base.nav with
           workspace = Nav.Runtime;
-          dive_stack = [ Nav.Dive_runtime (Nav.Fusion_dive "run-A") ];
+          zoomed = true;
+          pane_index = 0;
         };
     }
   in
-  let m_fdive_end, _ = step m_fdive (mk_key Keymap.Input.End) in
-  let m_fdive_extra, _ = step m_fdive_end (mk_key Keymap.Input.Down) in
-  Alcotest.(check bool) "Fusion_dive End scrolls > 0" true
-    (m_fdive_end.nav.dive_scroll_offset > 0);
-  Alcotest.(check int) "Fusion_dive Down past End stays clamped"
-    m_fdive_end.nav.dive_scroll_offset m_fdive_extra.nav.dive_scroll_offset;
+  let m_fzoom_end, _ = step m_fzoom (mk_key Keymap.Input.End) in
+  let m_fzoom_extra, _ = step m_fzoom_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "zoomed Runtime_fusion End scrolls > 0" true
+    (m_fzoom_end.runtime.detail_scroll_offset > 0);
+  Alcotest.(check int) "zoomed Runtime_fusion Down past End stays clamped"
+    m_fzoom_end.runtime.detail_scroll_offset
+    m_fzoom_extra.runtime.detail_scroll_offset;
 
   (* 2. Surface 2: Work_harness valid vs invalid notes_hash pre-seeding & Verification_dive 4 tabs *)
   let hh_snap : Wire_work.harness_health =
@@ -7225,16 +7225,16 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
          | Cmd.Http_get { req = Cmd.Get_verification_evidence _; _ } -> true
          | _ -> false)
        (View_fetches.fetches_for_current_view ~force:false m_vdive_nr));
-  let m_fdive_nr =
-    { m_fdive with runtime = { m_fdive.runtime with fusion_detail = non_retry_fail } }
+  let m_fzoom_nr =
+    { m_fzoom with runtime = { m_fzoom.runtime with fusion_detail = non_retry_fail } }
   in
-  Alcotest.(check bool) "Fusion_dive non-retryable fail skips force=false refetch"
+  Alcotest.(check bool) "zoomed Runtime_fusion non-retryable fail skips force=false refetch"
     false
     (has_cmd
        (function
          | Cmd.Http_get { req = Cmd.Get_fusion_run_detail _; _ } -> true
          | _ -> false)
-       (View_fetches.fetches_for_current_view ~force:false m_fdive_nr));
+       (View_fetches.fetches_for_current_view ~force:false m_fzoom_nr));
   let m_rfus_nr =
     {
       base with

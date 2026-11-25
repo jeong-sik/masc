@@ -114,6 +114,7 @@ type t = {
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
   show_raw_json : bool;
+  pending_sandbox_keeper : string option;
   selected_index : int;
   scroll_offset : int;
   diff_scroll_offset : int;
@@ -214,6 +215,7 @@ val toggle_raw_json : t -> t
 val filtered_sandbox_keepers : t -> string list
 val filtered_repositories : t -> Wire_infra.repository list
 val selected_sandbox_keeper : t -> string option
+val select_sandbox_by_keeper : string -> t -> t
 val selected_repository : t -> Wire_infra.repository option
 
 val selected_repo_activity :

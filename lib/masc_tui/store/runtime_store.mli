@@ -203,6 +203,7 @@ type t = {
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
   show_unreported_accounts : bool;
+  pending_lane_id : string option;
   selected_index : int;
   scroll_offset : int;
   quota_scroll_offset : int;
@@ -614,6 +615,7 @@ val selected_prompt_item : t -> Wire_runtime.prompt_item option
 val filtered_presets : t -> Wire_runtime.preset_manifest list
 val selected_preset_manifest : t -> Wire_runtime.preset_manifest option
 val select_preset_by_name : string -> t -> t
+val select_lane_by_id : string -> t -> t
 val filtered_runtime_params : t -> Wire_runtime.runtime_param_item list
 val selected_runtime_param : t -> Wire_runtime.runtime_param_item option
 val filtered_async_requests : t -> Wire_runtime.async_request_row list

@@ -449,4 +449,81 @@ describe('PulseWorkspace DOM Integration', () => {
     expect(requestedUrls.some((u) => u.includes('keeper-costs?window=43200'))).toBe(false)
     expect(requestedUrls).toContain('/api/v1/dashboard/provider-usage-history?days=14')
   })
+
+  it('surfaces unbridged approvals/asks honestly in multi_account_signed_in instead of green 0건 empty state', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-1',
+      email: 'operator@example.com',
+      displayName: 'Operator',
+      role: 'admin',
+      csrfToken: 'csrf-tok-1',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const requestedUrls: string[] = []
+    let keeperHealth: 'healthy' | 'failing' = 'healthy'
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) {
+        return json({ counts: { keepers: 1, configured_keepers: 1, tasks_done_24h: 0 }, groups: [] })
+      }
+      if (url.includes('/api/v1/gate/keepers')) {
+        return json({
+          keepers: [
+            {
+              name: 'code-reviewer-sister',
+              status: 'running',
+              phase: 'idle',
+              health: keeperHealth,
+              paused: false,
+              keepalive_running: true,
+              runtime_id: 'claude-code',
+              runtime_blocker_summary: keeperHealth === 'failing' ? 'provider 429' : null,
+            },
+          ],
+        })
+      }
+      return json({ keepers: [], points: [], tree: [], posts: [], data: {} })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    // 1. All keepers healthy, approvals & asks unbridged -> MUST NOT claim green 0건 or empty queue
+    const first = render(
+      html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      const attn = first.container.querySelector('section[aria-label="주의 필요 대기열"]')
+      expect(attn?.textContent).toContain('일부 미확인')
+      expect(attn?.textContent).toContain('도구 승인 (멀티 계정 미지원)')
+      expect(attn?.textContent).toContain('Keeper 질문 (멀티 계정 미지원)')
+      expect(attn?.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+    })
+    const attn1 = first.container.querySelector('section[aria-label="주의 필요 대기열"]')!
+    const pill1 = attn1.querySelector('.pulse-header-meta .pulse-pill')!
+    expect(pill1.getAttribute('data-tone')).toBe('warn')
+    expect(pill1.textContent?.trim()).toBe('일부 미확인')
+    expect(attn1.textContent).not.toContain('대기 중인 승인·질문·오류 없음')
+    expect(attn1.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    first.unmount()
+
+    // 2. One keeper failing while approvals & asks remain unbridged -> count + partial unchecked notice
+    resourceCache.clearAll()
+    keeperHealth = 'failing'
+    const second = render(
+      html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      const attn = second.container.querySelector('section[aria-label="주의 필요 대기열"]')
+      expect(attn?.textContent).toContain('1건 · 일부 미확인')
+      expect(attn?.textContent).toContain('provider 429')
+      expect(attn?.querySelector('[data-attention-unchecked="true"]')).not.toBeNull()
+    })
+  })
 })

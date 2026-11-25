@@ -147,8 +147,6 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
       }),
     [bundle.approvals, bundle.asks, keepersList, nowSec],
   )
-  const attentionSources = [bundle.approvals, bundle.asks, bundle.keepers]
-  const attentionPending = attentionSources.some((source) => source.kind === 'loading')
 
   const fleetGroups = useMemo(
     () =>
@@ -191,12 +189,46 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   if (bundle.approvals.kind === 'failed') attentionErrors.push(`도구 승인 조회 실패: ${bundle.approvals.error.message}`)
   if (bundle.asks.kind === 'failed') attentionErrors.push(`Keeper 질문 조회 실패: ${bundle.asks.error.message}`)
   if (bundle.keepers.kind === 'failed') attentionErrors.push(`Keeper 상태 조회 실패: ${bundle.keepers.error.message}`)
+  const attentionUnchecked: string[] = []
+  if (bundle.approvals.kind === 'absent' || bundle.approvals.kind === 'unreported') {
+    attentionUnchecked.push(
+      bundle.approvals.kind === 'absent' && bundle.approvals.reason === 'multi_account_unbridged'
+        ? '도구 승인 (멀티 계정 미지원)'
+        : '도구 승인 (미확인)',
+    )
+  }
+  if (bundle.asks.kind === 'absent' || bundle.asks.kind === 'unreported') {
+    attentionUnchecked.push(
+      bundle.asks.kind === 'absent' && bundle.asks.reason === 'multi_account_unbridged'
+        ? 'Keeper 질문 (멀티 계정 미지원)'
+        : 'Keeper 질문 (미확인)',
+    )
+  }
+  if (bundle.keepers.kind === 'absent' || bundle.keepers.kind === 'unreported') {
+    attentionUnchecked.push('Keeper 상태 (미확인)')
+  }
   const attentionLoading =
-    bundle.approvals.kind === 'loading' && bundle.asks.kind === 'loading' && bundle.keepers.kind === 'loading'
+    bundle.approvals.kind === 'loading' || bundle.asks.kind === 'loading' || bundle.keepers.kind === 'loading'
   const attentionStale =
     (bundle.approvals.kind === 'value' && bundle.approvals.stale)
     || (bundle.asks.kind === 'value' && bundle.asks.stale)
     || (bundle.keepers.kind === 'value' && bundle.keepers.stale)
+  const attentionPillTone: 'bad' | 'warn' | 'info' | 'ok' =
+    attentionErrors.length > 0
+      ? 'bad'
+      : attentionItems.length > 0 || attentionUnchecked.length > 0
+        ? 'warn'
+        : attentionLoading
+          ? 'info'
+          : 'ok'
+  const attentionPillText =
+    attentionErrors.length > 0
+      ? '조회 오류'
+      : attentionUnchecked.length > 0
+        ? (attentionItems.length > 0 ? `${attentionItems.length}건 · 일부 미확인` : '일부 미확인')
+        : attentionLoading && attentionItems.length === 0
+          ? '확인 중'
+          : `${attentionItems.length}건`
 
   const worldMemory = bundle.worldMemory.kind === 'value' ? bundle.worldMemory.data : null
 
@@ -443,8 +475,8 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                 ${attentionStale && html`<span class="pulse-pill" data-tone="warn">지연됨</span>`}
               </div>
               <div class="pulse-header-meta">
-                <span class="pulse-pill" data-tone=${attentionErrors.length > 0 ? 'bad' : attentionItems.length > 0 ? 'warn' : attentionPending ? 'default' : 'ok'}>
-                  ${attentionErrors.length > 0 ? '조회 오류' : attentionPending && attentionItems.length === 0 ? '조회 중…' : `${attentionItems.length}건`}
+                <span class="pulse-pill" data-tone=${attentionPillTone}>
+                  ${attentionPillText}
                 </span>
                 <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/inbox')}>
                   Inbox →
@@ -454,12 +486,19 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             ${attentionErrors.length > 0 && html`
               <div class="ap-error" role="alert">${attentionErrors.join(' · ')}</div>
             `}
-            ${(attentionLoading || (attentionPending && attentionItems.length === 0 && attentionErrors.length === 0))
+            ${attentionUnchecked.length > 0 && html`
+              <div class="pulse-empty" role="note" data-attention-unchecked="true">
+                미확인 소스: ${attentionUnchecked.join(' · ')}
+              </div>
+            `}
+            ${attentionLoading && attentionItems.length === 0
               ? html`<div class="pulse-empty">대기열 불러오는 중…</div>`
               : attentionItems.length === 0
                 ? (attentionErrors.length > 0
                     ? html`<div class="pulse-empty">일부 소스 조회 실패로 대기열을 확정할 수 없습니다</div>`
-                    : html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`)
+                    : attentionUnchecked.length > 0
+                      ? html`<div class="pulse-empty">확인된 Keeper 오류는 없으나 미확인 대기열이 있어 비어 있음으로 확정할 수 없습니다</div>`
+                      : html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`)
                 : html`
                   <div class="pulse-attn-list">
                     ${attentionItems.slice(0, 10).map((item) => html`

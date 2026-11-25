@@ -260,9 +260,12 @@ let external_person_observation_keeps_its_scope () =
   let question, _ =
     ask [] [ { (unit item) with
                 kind = Reset { cause = Turn_log.Cleared; items = [ row 0 older; row 1 item; row 2 other ] }
-              } ]
+              }
+           ; { (unit older) with line = 240 } ]
   in
-  let consent_claim = "prefers Korean summaries here" in
+  let consent_claim =
+    "prefers Korean summaries here " ^ "sk" ^ "-ant-api03-" ^ "SECRETTOKEN1234567890ABCDEFGH"
+  in
   let select item_index : Answer.op =
     Remember_personal { unit_name = "u1"; item_index; claim = consent_claim; category = Preference }
   in
@@ -272,7 +275,9 @@ let external_person_observation_keeps_its_scope () =
     ; ops =
         List.map select [ 0; 1; 2; 3 ]
         @ [ Add { claim = consent_claim; category = Preference;
-                  basis = Observed Transcript; from_units = [ "u1" ] } ]
+                  basis = Observed Transcript; from_units = [ "u1" ] }
+          ; Add { claim = consent_claim; category = Preference;
+                  basis = Observed Transcript; from_units = [ "u2" ] } ]
     }
   in
   let parsed =
@@ -289,7 +294,10 @@ let external_person_observation_keeps_its_scope () =
     (List.map (fun (op, why, _) -> op, why) plan.effects.not_applied =
        [ 0, Masc.Librarian_effects.Source_outside_question
        ; 3, Masc.Librarian_effects.Source_outside_question
-       ; 4, Masc.Librarian_effects.Source_reserved_for_personal_memory ]);
+       ; 4, Masc.Librarian_effects.Source_reserved_for_personal_memory
+       ; 5, Masc.Librarian_effects.Source_reserved_for_personal_memory ]);
+  check bool "private storage also redacts the claimed secret" true
+    (List.for_all (fun (fact : Types.fact) -> fact.claim <> consent_claim) plan.facts);
   check bool "refusal bodies and working state do not copy the personal claim" true
     (plan.working_state = Kept
      && List.for_all (fun (_, _, fact) -> Option.is_none fact) plan.effects.not_applied);

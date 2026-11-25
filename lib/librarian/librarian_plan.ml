@@ -137,12 +137,16 @@ type t =
 
 type stating =
   | New_claim of string * Answer.new_fact * int list
-  | New_personal of fact * int
+  | New_personal of
+      { fact : fact
+      ; offset : int
+      ; unredacted_claim_id : string
+      }
   | Seen_again of string * int list
 
 let kept_and_units = function
   | New_claim (id, (_ : Answer.new_fact), offsets) | Seen_again (id, offsets) -> id, offsets
-  | New_personal (fact, offset) -> memory_id fact, [ offset ]
+  | New_personal { fact; offset; unredacted_claim_id = _ } -> memory_id fact, [ offset ]
 ;;
 
 type screened =
@@ -271,6 +275,7 @@ let screen
       in
       (match List.filter matches personal_sources with
        | [ { observation; _ } ] ->
+         let unredacted_claim_id = memory_id_of_claim claim in
          let claim = Keeper_secret_redaction.redact_text redact claim in
          (match Librarian_direct.remember_personal ~claim ~category observation with
           | Some (Remember { claim; category; basis }) when String.trim claim <> "" ->
@@ -279,7 +284,7 @@ let screen
             let id = memory_id fact in
             (match By_id.find_opt id removed_since with
              | Some seq -> Error (Effects.Removed_during_flight { seq })
-             | None -> Ok (Some (New_personal (fact, offset)), None))
+             | None -> Ok (Some (New_personal { fact; offset; unredacted_claim_id }), None))
           | Some (Remember _ | Supersede _ | Retract _) | None -> Error Effects.Source_outside_question)
        | [] | _ :: _ :: _ -> Error Effects.Source_outside_question)
     | Merge { into = fact; _ } | Revise { into = fact; _ } ->
@@ -424,8 +429,9 @@ let reserve_personal_sources screened =
   let offsets, claims =
     List.fold_left (fun (offsets, claims) op ->
       match op.states with
-      | Some (New_personal (fact, offset)) ->
-        Offsets.add offset offsets, Ids.add (memory_id_of_claim fact.claim) claims
+      | Some (New_personal { fact; offset; unredacted_claim_id }) ->
+        ( Offsets.add offset offsets
+        , claims |> Ids.add unredacted_claim_id |> Ids.add (memory_id_of_claim fact.claim) )
       | Some (New_claim _ | Seen_again _) | None -> offsets, claims)
       (Offsets.empty, Ids.empty) screened
   in
@@ -525,7 +531,7 @@ let of_answer
         (fun (touched, added, added_ids) op ->
            match op.states with
            | None -> touched, added, added_ids
-           | Some (New_personal (fact, _)) -> touched, fact :: added, added_ids
+           | Some (New_personal { fact; _ }) -> touched, fact :: added, added_ids
            | Some ((New_claim _ | Seen_again _) as stating) ->
              let id = fst (kept_and_units stating) in
              if Ids.mem id kept_ids

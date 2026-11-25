@@ -512,7 +512,8 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
            ; "inputSchema", `Assoc [ "type", `String "object" ] ] in
   let started pinned_tool_specs =
     let bridge =
-      Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs in
+      Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs
+        ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs in
     bridge, Runtime_acp_client.mcp_http_server_of_bridge bridge in
   let bridge, server =
     started [ spec "masc_status"; `Assoc [ "description", `String "no name" ]; spec "keeper_skill" ] in
@@ -520,8 +521,8 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
     Runtime_official_client_mcp_http.endpoint bridge in
   check string "name" (Runtime_official_client_mcp_http.server_name bridge)
     server.Runtime_acp_client.name;
-  check string "the Keeper names its bridge masc, the name the glob and the tool policy use"
-    "masc" server.Runtime_acp_client.name;
+  check string "the Keeper names a muse_code bridge masc_keeper, so the operator's masc entry cannot conflict"
+    "masc_keeper" server.Runtime_acp_client.name;
   check string "url" url server.Runtime_acp_client.url;
   check (list (pair string string)) "headers" headers server.Runtime_acp_client.headers;
   check (list string) "tool names, in order, without the spec that has no name"
@@ -537,23 +538,100 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
       ~native_posture:Runtime_native_tools.Native_none ~mcp_server cfg ~temp_gemini_dir:None
     |> List.filter (String.starts_with ~prefix:"run.toolset=") in
   check (list string) "a bridge that lists tools reaches the Muse argv as the glob"
-    [ {|run.toolset=["mcp__masc__*"]|} ] (toolset server);
+    [ {|run.toolset=["mcp__masc_keeper__*"]|} ] (toolset server);
   check (list string) "a bridge that lists no tool reaches the Muse argv as an empty list"
     [ "run.toolset=[]" ] (toolset empty)
 ;;
 
+(* The name is a fact of each host. Muse refuses a session server that has the
+   name of one in the operator's settings, a plugin or a [.mcp.json] it loads,
+   and an entry for MASC's own server can be named [masc]; the other drivers
+   keep the name their live verification used. A host replaces every
+   character of a tool name outside [A-Za-z0-9_], and the Keeper reads the
+   server back from [mcp__<server>__<tool>] up to the first [__], so a
+   trailing [_] would make it read the server one character short. *)
+let test_bridge_server_names () =
+  let name = Runtime_acp_client.bridge_server_name in
+  check string "muse_code does not share the operator's masc entry" "masc_keeper"
+    (name Runtime_acp_client.Muse_code);
+  List.iter
+    (fun driver ->
+       check string
+         (Runtime_acp_client.driver_to_string driver ^ " keeps the name it was verified with")
+         "masc" (name driver))
+    [ Runtime_acp_client.Antigravity; Runtime_acp_client.Kimi_code; Runtime_acp_client.Mistral_vibe ];
+  List.iter
+    (fun driver ->
+       let label = Runtime_acp_client.driver_to_string driver in
+       let n = name driver in
+       let host_safe c =
+         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
+       in
+       check bool (label ^ " name is non-empty and host-safe") true
+         (n <> "" && String.for_all host_safe n);
+       let rec has_double i =
+         i + 1 < String.length n && ((n.[i] = '_' && n.[i + 1] = '_') || has_double (i + 1))
+       in
+       check bool (label ^ " name has no double underscore") false (has_double 0);
+       check bool (label ^ " name does not end in an underscore") false
+         (String.ends_with ~suffix:"_" n))
+    Runtime_acp_client.all_drivers
+;;
+
+(* The Keeper reads the bridge's server name from the driver when it decides
+   whether a call fences a same-turn retry. For a Muse session that name is
+   [masc_keeper]: a call to the bridge's tool passes, and a tool of the same
+   name from the operator's [masc] entry belongs to another server and
+   fences. *)
+let test_muse_stream_projection_uses_bridge_server_name () =
+  let fenced = ref 0 in
+  let on_acp_event, _, _, _, _ =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_effect_attempted:(fun () -> incr fenced)
+      ~driver:Runtime_acp_client.Muse_code
+      ~model:"muse-ember-1.0"
+      ~session_id:"sess-muse-bridge-name"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_none
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  let call ~tool_call_id ~server =
+    on_acp_event
+      (Runtime_acp_client.Tool_call_started
+         { tool_call_id
+         ; title = "mcp__" ^ server ^ "__masc_probe_ping"
+         ; kind = Some Runtime_acp_client.Tool_other
+         ; status = Runtime_acp_client.Tool_pending
+         ; raw_input = None
+         ; identity =
+             Runtime_acp_client.Mcp_tool
+               { server = Runtime_acp_client.Explicit_server server
+               ; tool_name = "masc_probe_ping"
+               }
+         })
+  in
+  call
+    ~tool_call_id:"tc-bridge"
+    ~server:(Runtime_acp_client.bridge_server_name Runtime_acp_client.Muse_code);
+  check int "a call to the bridge's tool does not fence" 0 !fenced;
+  call ~tool_call_id:"tc-operator" ~server:"masc";
+  check int "the same tool name from the operator's masc entry fences" 1 !fenced
+;;
+
 let test_muse_permission_grammar () =
   let allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ] in
+  let mcp_server_name = Runtime_acp_client.bridge_server_name Runtime_acp_client.Muse_code in
   let mcp_only =
-    Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name = "masc"; allowed_tool_names }
+    Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name; allowed_tool_names }
   in
   let read_and_mcp =
-    Runtime_acp_client.Allow_read_and_masc_mcp { mcp_server_name = "masc"; allowed_tool_names }
+    Runtime_acp_client.Allow_read_and_masc_mcp { mcp_server_name; allowed_tool_names }
   in
   let classify =
     Runtime_acp_client.For_testing.classify_tool_call_json
       ~driver:Runtime_acp_client.Muse_code
-      ~mcp_server_name:"masc"
+      ~mcp_server_name
   in
   (* Shape recorded from muse acp 1.4.25: an MCP call is title = name =
      mcp__<server>__<tool> with kind other; a native read is read_file with
@@ -568,9 +646,17 @@ let test_muse_permission_grammar () =
       ]
   in
   let allowed policy wire = Runtime_acp_client.should_allow_tool_call ~policy (classify wire) in
-  check bool "masc tool allowed under mcp-only" true
+  let bridge_tool tool = "mcp__" ^ mcp_server_name ^ "__" ^ tool in
+  check bool "bridge tool allowed under mcp-only" true
+    (allowed mcp_only (frame ~title:(bridge_tool "masc_probe_ping") ~kind:"other"));
+  check bool "bridge tool allowed under read-and-mcp" true
+    (allowed read_and_mcp (frame ~title:(bridge_tool "keeper_skill") ~kind:"other"));
+  (* An entry for MASC's own server named masc has the same tool names but is
+     not the Keeper's bridge; under one shared name the policy could not tell
+     them apart. *)
+  check bool "the operator's masc server is denied under mcp-only" false
     (allowed mcp_only (frame ~title:"mcp__masc__masc_probe_ping" ~kind:"other"));
-  check bool "masc tool allowed under read-and-mcp" true
+  check bool "the operator's masc server is denied under read-and-mcp" false
     (allowed read_and_mcp (frame ~title:"mcp__masc__keeper_skill" ~kind:"other"));
   check bool "foreign MCP server denied" false
     (allowed read_and_mcp (frame ~title:"mcp__foreign-srv__masc_probe_ping" ~kind:"other"));
@@ -590,10 +676,10 @@ let test_muse_permission_grammar () =
             ~policy:mcp_only
             ~title
             ~kind:(Some Runtime_acp_client.Tool_other)))
-    [ "mcp(masc/keeper_skill)"
-    ; "mcp_masc.masc_probe_ping"
-    ; "mcp_masc_masc_probe_ping"
-    ; "masc_masc_probe_ping"
+    [ "mcp(" ^ mcp_server_name ^ "/keeper_skill)"
+    ; "mcp_" ^ mcp_server_name ^ ".masc_probe_ping"
+    ; "mcp_" ^ mcp_server_name ^ "_masc_probe_ping"
+    ; mcp_server_name ^ "_masc_probe_ping"
     ]
 ;;
 
@@ -1274,7 +1360,8 @@ let test_mcp_bridge_advertises_pinned_tools_before_turn_slot () =
         ]
       in
       let bridge =
-        Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs
+        Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs
+          ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs
       in
       let names = listed_tools ~sw ~env bridge in
       check (list string) "pinned MASC tools advertised before turn_slot is bound"
@@ -1335,7 +1422,9 @@ let test_hook_selected_surface_pins_the_session_and_bridge () =
               `Assoc ["name", `String t.schema.name; "description", `String t.schema.description;
                       "inputSchema", Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json t)])
               prepared.tools in
-          let fresh = Acp.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs in
+          let fresh =
+            Acp.start_mcp_bridge_for_specs
+              ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs in
           Acp.Pool.install_for_keeper pool ~key ~fresh ~is_alive:(fun _ -> true) ~close:ignore in
     check (list string) "HTTP tools/list from the selected child" names (listed_tools ~sw ~env bridge);
     Some (digest, plan.turn_count)
@@ -5341,6 +5430,9 @@ let () =
             test_muse_start_spawns_the_host_with_the_posture_toolset
         ; test_case "server record reads every field from the bridge" `Quick
             test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
+        ; test_case "bridge server name per driver" `Quick test_bridge_server_names
+        ; test_case "muse stream projection fences by the bridge's server name" `Quick
+            test_muse_stream_projection_uses_bridge_server_name
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick

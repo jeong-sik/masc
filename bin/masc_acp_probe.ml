@@ -19,7 +19,6 @@
 
     Zero secrets, API keys, or ephemeral Bearer headers are ever printed. *)
 
-let mcp_server_name = "masc"
 let default_turn_timeout_s = 120.0
 let target_skill_name = "ocaml-coding"
 let max_skill_read_chars = 2400
@@ -184,6 +183,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
   : driver_report
   =
   let driver_name = Runtime_acp_client.driver_to_string driver in
+  let mcp_server_name = Runtime_acp_client.bridge_server_name driver in
   let nonce = Printf.sprintf "masc-acp-%s-ok" driver_name in
   let expected_pong = "MASC_PONG:" ^ nonce in
   let skills_root = Filename.concat cwd ".agents/skills" in
@@ -388,7 +388,8 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
           in
           let turn1_prompt =
             Printf.sprintf
-              "Call the MCP tool `masc_probe_ping` (from the `masc` MCP server) with argument {\"nonce\": %S}. After receiving the tool result, reply with ONLY that exact tool result string and nothing else."
+              "Call the MCP tool `masc_probe_ping` (from the `%s` MCP server) with argument {\"nonce\": %S}. After receiving the tool result, reply with ONLY that exact tool result string and nothing else."
+              mcp_server_name
               nonce
           in
           let t1_start = now_ms () in
@@ -437,7 +438,8 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
              (* Turn 2 on the SAME persistent process and SAME session_id *)
              let turn2_prompt =
                Printf.sprintf
-                 "In this same session, call the MCP tool `keeper_skill` (from the `masc` MCP server) with {\"action\": \"read\", \"skill_name\": %S}. Then reply in one short line containing the skill name %S and the exact OCaml version mentioned in that skill."
+                 "In this same session, call the MCP tool `keeper_skill` (from the `%s` MCP server) with {\"action\": \"read\", \"skill_name\": %S}. Then reply in one short line containing the skill name %S and the exact OCaml version mentioned in that skill."
+                 mcp_server_name
                  target_skill_name
                  target_skill_name
              in

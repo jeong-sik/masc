@@ -120,6 +120,7 @@ type driver_profile =
   ; env_set : (string * string) list
   ; default_strip_env : string list
   ; mcp_wiring : mcp_wiring
+  ; bridge_server_name : string
   ; mcp_identifier_syntaxes : mcp_identifier_syntax list
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
@@ -132,6 +133,11 @@ type driver_profile =
   ; effort_config_id : string option
   }
 
+(* The bridge name for the drivers whose host takes it as is. The Muse host
+   refuses it when the operator's settings define a server of that name, so
+   its profile names its own. *)
+let shared_bridge_server_name = "masc"
+
 let profile_of_driver = function
   | Antigravity ->
     { driver = Antigravity
@@ -140,6 +146,7 @@ let profile_of_driver = function
     ; env_set = [ "AGY_CLI_DISABLE_AUTO_UPDATE", "true" ]
     ; default_strip_env = []
     ; mcp_wiring = Gemini_dir_mcp_config
+    ; bridge_server_name = shared_bridge_server_name
     (* Live-verified against agy acp 1.5.14: call_mcp_tool (rawInput ServerName/
        ToolName), mcp(masc/<tool>) permission syntax, mcp_<server>_<tool>, and
        vendor kind="mcp". *)
@@ -168,6 +175,7 @@ let profile_of_driver = function
     ; env_set = []
     ; default_strip_env = []
     ; mcp_wiring = Session_new_http_mcp
+    ; bridge_server_name = shared_bridge_server_name
     (* Live-verified against kimi acp 2.7.2: session/update tool_call emits
        title = "mcp__<server>__<tool>" with kind = "other" (no _meta/name) and
        session/request_permission emits title = "mcp__<server>__<tool>" with
@@ -192,6 +200,7 @@ let profile_of_driver = function
        Pro subscription rather than a budget-capped API key. *)
     ; default_strip_env = [ "MISTRAL_API_KEY" ]
     ; mcp_wiring = Session_new_http_mcp
+    ; bridge_server_name = shared_bridge_server_name
     (* Live-verified against vibe-acp 3.1.0: _meta.tool_name emits
        mcp_<server>.<tool> and <server>_<tool> (plus mcp_<server>_<tool>).
        Implicit_vendor_mcp_kind is deliberately omitted because Vibe shares
@@ -225,6 +234,23 @@ let profile_of_driver = function
     ; env_set = [ "MUSE_NO_AUTO_UPDATE", "1" ]
     ; default_strip_env = []
     ; mcp_wiring = Session_new_http_mcp
+    (* The host refuses a session MCP server whose name it already has from
+       the operator's muse settings or from a [.mcp.json] it loads for the
+       workspace: session/new fails with -32030 "session MCP server name
+       conflicts with a host or plugin server". The text also names plugin
+       servers; none was tried. A [-c mcpServers...] override of the whole
+       map or of an entry the settings define is refused ("the server name
+       is reserved"), so the operator's entry cannot be switched off from the
+       command line; an override of a name the settings do not define is
+       accepted (muse acp 1.4.25, echo provider, 2026-11-25). The operator
+       this was found with names its entry for MASC's own server [masc] in
+       both the settings and a [.mcp.json]. The Keeper's bridge, a
+       per-session URL and token with its own tool list, is another thing
+       and takes another name. Only [A-Za-z0-9_], no [__] and no trailing
+       [_]: the host registers a tool as [mcp__<server>__<tool>] with every
+       other character replaced by [_], and the Keeper reads the server back
+       from that name up to the first [__]. *)
+    ; bridge_server_name = "masc_keeper"
     (* Live-verified against muse acp 1.4.25 (2026-11-24): session/update
        tool_call emits title = name = "mcp__<server>__<tool>" with kind =
        "other"; native tools use plain names ("read_file", kind "read"). The
@@ -261,6 +287,8 @@ let profile_of_driver = function
     ; effort_config_id = None
     }
 ;;
+
+let bridge_server_name driver = (profile_of_driver driver).bridge_server_name
 
 let validate_session_effort ~driver effort =
   match effort, (profile_of_driver driver).effort_config_id with
@@ -2920,13 +2948,14 @@ let muse_observer_capability_ids =
    and [full] run in the Keeper's repository, [none] in a fresh empty
    temporary directory (the host also walks up to an ancestor that has a VCS
    marker, so a temporary directory under a repository would load that
-   ancestor's [.mcp.json]). A server named [masc] in such a [.mcp.json] or in
-   the operator's muse settings ([mcpServers]) makes session/new fail with
-   -32030 ("session MCP server name conflicts with a host or plugin
-   server"), because the session carries MASC's bridge under that name; MASC
-   gives the host no settings of its own. A repeated [-c] key makes the host
-   refuse to run ("one setting, one occurrence"), so an operator [args] must
-   not repeat the observer keys below. *)
+   ancestor's [.mcp.json]). MASC gives the host no settings of its own, so
+   the operator's muse settings ([mcpServers]) and those [.mcp.json] files
+   stay loaded. A server named [masc] there does not conflict with the
+   bridge (see [bridge_server_name] in the Muse profile); under [none] and
+   [read] the toolset below leaves its tools out, under [full] the host
+   offers them. A repeated [-c] key makes the host refuse to run ("one
+   setting, one occurrence"), so an operator [args] must not repeat the
+   observer keys below. *)
 let muse_required_args =
   "--trust-workspace"
   :: List.concat_map
@@ -2954,17 +2983,25 @@ let muse_required_args =
    The MCP server's tools are named by the glob [mcp__<server>__*], which
    matched every tool of a stub server whose tool names contain underscores.
    The glob also matches the tools of any server whose name starts with
-   [masc__], which a trusted workspace or the operator's muse settings can
-   define. Exact names would not. The host registers a tool under its name
-   with every character outside [A-Za-z0-9_] replaced by [_] (a tool [a-b]
-   is [mcp__masc__a_b], and [mcp__masc__a-b] is unknown), and a listed name
+   [masc_keeper__], which a trusted workspace or the operator's muse
+   settings could define. A server named [masc] is not matched (echo
+   provider, 2026-11-25: its 7 tools from a workspace [.mcp.json] or its
+   4 from the muse settings were registered and none was offered; with the
+   [read] list 5 were, 2 native and the bridge's 3). Exact names would
+   not over-match. The host registers a tool under its name with
+   every character outside [A-Za-z0-9_] replaced by [_] (measured with a
+   server named [masc]: a tool [a-b] is [mcp__masc__a_b], and
+   [mcp__masc__a-b] is unknown), and a listed name
    that matches no registered tool fails every turn. The names in
    config/tools use only [A-Za-z0-9_] and are at most 48 characters
    (2026-11-24), so the glob matches all of them; dynamic tools from other
-   sources were not checked. The host registers nothing for an empty name or
-   for one whose whole [mcp__<server>__<name>] is longer than 256 characters
-   (names of 245 characters work, 246 fail), so a bridge that lists only
-   such names fails every turn too. The glob stays.
+   sources were not checked. The host skips a tool with an empty name. It
+   rejects a tool whose whole [mcp__<server>__<name>] is longer than 256
+   characters: one such tool fails the whole turn with -32603 "final
+   registered tool surface is invalid", even beside valid tools. The longest
+   tool name is therefore 256 minus the length of [mcp__<server>__]: 245
+   characters for a server named [masc], 238 for [masc_keeper] (echo
+   provider, 2026-11-25). The glob stays.
    The host refuses an unknown plain name when the session starts. A name
    that matches no tool fails the first turn with "invalid run
    configuration: unknown tool"; the message gives the name, not the cause.

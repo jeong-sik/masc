@@ -228,7 +228,8 @@ module For_testing : sig
     -> (Keeper_official_client_session_store.claim_plan * string, Agent_core.Error.t) result
 
   val start_mcp_bridge_for_specs
-    :  sw:Eio.Switch.t
+    :  driver:Runtime_acp_client.driver
+    -> sw:Eio.Switch.t
     -> env:Eio_unix.Stdenv.base
     -> pinned_tool_specs:Yojson.Safe.t list
     -> Runtime_official_client_mcp_http.t

@@ -862,9 +862,6 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   walk raw_lines;
   List.rev !out
 
-let measure ~(theme : Theme.t) ~width ?(osc8 = true) raw =
-  if width <= 0 then 0 else List.length (render_lines ~theme ~width ~osc8 raw)
-
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
     raw =
   if Rect.is_empty rect then 0

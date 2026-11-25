@@ -3268,83 +3268,50 @@ let parse_json_or_wrap ~key raw =
     | exception Yojson.Json_error _ ->
         `Assoc [ (key, `String (Ops_common.scrub_secrets_in_text raw)) ]
 
-let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) grid =
-  let bp = Ops_common.layout_bp model in
-  let banner_rect, split_rect =
-    match Layout.split_v_bp bp rect [ Layout.Fixed 1; Layout.Flex 1 ] with
-    | [ t; b ] -> (t, b)
-    | _ -> Rect.split_v rect ~top_h:1
+let inbox_queue_status (model : Model.t) =
+  let say = Ops_common.say model in
+  let label = function
+    | Work_store.Inbox_approvals -> say ~ko:"도구 승인" ~en:"Tool Approvals"
+    | Work_store.Inbox_asks -> say ~ko:"Keeper 질문" ~en:"Keeper Asks"
+    | Work_store.Inbox_gate -> "Channel Gate"
+    | Work_store.Inbox_goals -> say ~ko:"Goal 확인" ~en:"Goal Confirm"
   in
+  let status = function
+    | Observed.Failed _ ->
+        Some (0, Theme.Status_critical, Glyph.Live_failing, say ~ko:"조회 불가" ~en:"unavailable")
+    | Observed.Value { stale = true; _ } ->
+        Some (1, Theme.Status_attention, Glyph.Transport_stale, say ~ko:"마지막 조회" ~en:"last read")
+    | Observed.Loading _ ->
+        Some (2, Theme.Status_active, Glyph.Live_working, say ~ko:"불러오는 중" ~en:"loading")
+    | Observed.Unreported ->
+        Some (3, Theme.Status_historical, Glyph.Missing_unreported, say ~ko:"미관측" ~en:"unobserved")
+    | Observed.Value _ | Observed.Absent -> None
+  in
+  let notices =
+    Work_store.inbox_queue_reads model.work
+    |> List.filter_map (fun (source, observed) ->
+           Option.map
+             (fun (priority, tone, glyph, state) ->
+               priority, tone, glyph, label source ^ " " ^ state)
+             (status observed))
+    |> List.stable_sort (fun (left, _, _, _) (right, _, _, _) -> Int.compare left right)
+  in
+  match notices with
+  | [] -> None
+  | (_, tone, glyph, _) :: _ ->
+      let text = notices |> List.map (fun (_, _, _, text) -> text) |> String.concat " · " in
+      Some (tone, glyph, text)
+
+let draw_inbox_queue_status ~(model : Model.t) ~banner_rect
+    ~(theme : Theme.t) ~show_verifications grid (banner_tone, banner_glyph, banner_txt) =
   let bg = Color.of_rgb theme.surface_2 in
-  let any_failed =
-    Observed.is_failed model.work.asks
-    || Observed.is_failed model.work.tool_approvals
-    || Observed.is_failed model.work.gate_pending
-    || Observed.is_failed model.work.planning
-  in
-  let any_loading =
-    Observed.is_loading model.work.asks
-    || Observed.is_loading model.work.tool_approvals
-    || Observed.is_loading model.work.gate_pending
-    || Observed.is_loading model.work.planning
-  in
-  let any_stale =
-    Observed.is_stale model.work.asks
-    || Observed.is_stale model.work.tool_approvals
-    || Observed.is_stale model.work.gate_pending
-    || Observed.is_stale model.work.planning
-  in
-  let is_settled obs =
-    match obs with
-    | Observed.Value _ | Observed.Absent -> true
-    | Observed.Loading _ | Observed.Unreported | Observed.Failed _ -> false
-  in
-  let all_observed =
-    is_settled model.work.asks
-    && is_settled model.work.tool_approvals
-    && is_settled model.work.gate_pending
-    && is_settled model.work.planning
-  in
-  let banner_tone, banner_glyph, banner_txt =
-    if any_failed then
-      ( Theme.Status_critical
-      , Glyph.Live_failing
-      , Ops_common.say model
-          ~ko:"수신함 조회 실패 · 일부 대기 항목을 확인하지 못했습니다"
-          ~en:"Inbox fetch failed — pending operator items could not be verified" )
-    else if any_loading && not all_observed then
-      ( Theme.Status_active
-      , Glyph.Transport_reconnecting
-      , Ops_common.say model
-          ~ko:"수신함 불러오는 중..."
-          ~en:"Loading operator inbox..." )
-    else if not all_observed then
-      ( Theme.Status_historical
-      , Glyph.Missing_unreported
-      , Ops_common.say model
-          ~ko:"수신함 미관측 · 서버 응답 대기 중"
-          ~en:"Inbox not yet observed — awaiting server snapshot" )
-    else if any_stale then
-      ( Theme.Status_attention
-      , Glyph.Transport_stale
-      , Ops_common.say model
-          ~ko:"수신함 갱신 지연 · 최신 승인/질문 상태를 재확인 중입니다"
-          ~en:"Inbox data stale — refreshing pending operator items" )
-    else
-      ( Theme.Status_ok
-      , Glyph.Live_healthy
-      , Ops_common.say model
-          ~ko:"수신함 모두 처리됨 · 대기 중인 승인/질문 0건"
-          ~en:"Inbox Clear — 0 items awaiting operator decision" )
-  in
   let banner_st = Typography.status ~bg ~bold:true theme banner_tone in
   Cell_grid.fill_rect ~clip:banner_rect grid ~rect:banner_rect ~style:banner_st ();
   Card.draw_left_rail ~bg ~tone:banner_tone grid ~x:banner_rect.x
     ~y:banner_rect.y ~h:1 ~theme;
   let vp, vr, vw = Work_store.verification_pass_summary model.work in
   let verify_summary =
-    if vp + vr + vw > 0 && banner_rect.w >= 72 then
+    if show_verifications && vp + vr + vw > 0 && banner_rect.w >= 72 then
       let vs =
         Printf.sprintf "%s %d  ·  %s %d"
           (Ops_common.say model ~ko:"검증 통과" ~en:"Verify pass") vp
@@ -3372,7 +3339,26 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
             ~y:banner_rect.y ~max_w:sw
             ~style:(Typography.whisper ~bg theme)
             vs)
-   | None -> ());
+   | None -> ())
+
+let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~queue_status grid =
+  let bp = Ops_common.layout_bp model in
+  let banner_rect, split_rect =
+    match Layout.split_v_bp bp rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ t; b ] -> (t, b)
+    | _ -> Rect.split_v rect ~top_h:1
+  in
+  let status =
+    Option.value queue_status
+      ~default:
+        ( Theme.Status_ok
+        , Glyph.Live_healthy
+        , Ops_common.say model ~ko:"수신함 모두 처리됨 · 대기 중인 승인/질문 0건"
+            ~en:"Inbox Clear — 0 items awaiting operator decision" )
+  in
+  draw_inbox_queue_status ~model ~banner_rect ~theme ~show_verifications:true
+    grid status;
   if Rect.is_empty split_rect then ()
   else
     let left_rect, right_rect =
@@ -3390,13 +3376,13 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
         | _ -> (split_rect, Rect.empty)
     in
     (* Left/Top: Session Decisions + Server Gate Resolved Audit (honest provenance) *)
-    let server_resolved, server_resolved_err, gate_loading =
+    let server_resolved, server_resolved_err, gate_loading, history_partial =
       match model.work.gate_snapshot with
       | Observed.Value { data = gs; _ } ->
-          (gs.recent_resolved, gs.recent_resolved_error, false)
-      | Observed.Failed { reason; _ } -> ([], Some reason, false)
-      | Observed.Loading _ -> ([], None, true)
-      | Observed.Absent | Observed.Unreported -> ([], None, false)
+          (gs.recent_resolved, gs.recent_resolved_error, false, gs.recent_resolved_partial)
+      | Observed.Failed { reason; _ } -> ([], Some reason, false, false)
+      | Observed.Loading _ -> ([], None, true, false)
+      | Observed.Absent | Observed.Unreported -> ([], None, false, false)
     in
     let session_n = List.length model.work.recent_decisions_24h in
     let server_n = List.length server_resolved in
@@ -3416,7 +3402,13 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
           ~en:"Session Decisions (0)"
     in
     let audit_subtitle =
-      if session_n > 0 then
+      if server_n > 0
+         && (Option.is_some server_resolved_err || Observed.is_stale model.work.gate_snapshot)
+      then
+        Some (Ops_common.say model ~ko:"서버 이력 · 마지막 조회" ~en:"Server history · last read")
+      else if history_partial then
+        Some (Ops_common.say model ~ko:"서버 이력 일부" ~en:"Partial server history")
+      else if session_n > 0 then
         match server_resolved_err with
         | Some _ ->
             Some (Ops_common.say model ~ko:"서버 게이트 오류" ~en:"gate err")
@@ -3444,6 +3436,7 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
         let content = Card.pad_inner ~pad_x ~pad_y:1 a_inner in
         (match server_resolved_err with
          | Some err ->
+             let err = Ops_common.scrub_secrets_in_text err in
              ignore
                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
                   ~max_w:content.w
@@ -3469,8 +3462,8 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
                     ~style:(Typography.primary ~bg:card_bg theme)
                     (Glyph.to_utf8 Glyph.Live_idle ^ " "
                      ^ Ops_common.say model
-                         ~ko:"이번 TUI 세션에서 기록된 운영자 결정이 없습니다."
-                         ~en:"No operator decisions recorded in this TUI session.")));
+                       ~ko:"이번 TUI 세션에서 기록된 운영자 결정이 없습니다."
+                       ~en:"No operator decisions recorded in this TUI session.")));
         if content.h >= 2 then
           ignore
             (Ops_common.put_line ~clip:content grid ~x:content.x
@@ -3695,7 +3688,7 @@ let attention_tag = function
   | Health.Goal_confirmation _ -> ("GOAL", Theme.Status_active)
 
 let render_inbox_gate_bar ~(model : Model.t) ~(rect : Rect.t) ~(theme : Theme.t)
-    grid =
+    ~queue_current grid =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_0 in
@@ -3705,9 +3698,9 @@ let render_inbox_gate_bar ~(model : Model.t) ~(rect : Rect.t) ~(theme : Theme.t)
     let queue_n = List.length model.attention.items in
     let pills =
       [
-        ( Printf.sprintf "%s (%d)"
+        ( Printf.sprintf "%s (%s)"
             (Ops_common.say model ~ko:"대기열" ~en:"Queue")
-            queue_n
+            (if queue_current then Int.to_string queue_n else "—")
         , Work_store.equal_inbox_subview model.work.inbox_subview
             Work_store.Inbox_queue
         , Some Theme.Status_attention );
@@ -3992,10 +3985,23 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
   let bp = Ops_common.layout_bp model in
   let rows_data = Work_store.filtered_gate_resolved model.work in
   let late_rows = Work_store.late_approval_attempts_list model.work in
-  let hist_err =
+  let hist_err, history_partial =
     match Observed.to_option model.work.gate_snapshot with
-    | Some s -> s.recent_resolved_error
-    | None -> None
+    | Some s -> s.recent_resolved_error, s.recent_resolved_partial
+    | None -> None, false
+  in
+  let history_is_last_read =
+    Observed.is_stale model.work.gate_snapshot
+    || (Option.is_some hist_err && Work_store.gate_resolved_list model.work <> [])
+  in
+  let history_status =
+    match history_is_last_read, history_partial with
+    | true, true ->
+        Some (Ops_common.say model ~ko:"마지막 조회 · 일부 범위" ~en:"Last read · partial range")
+    | true, false -> Some (Ops_common.say model ~ko:"마지막 조회" ~en:"Last read")
+    | false, true ->
+        Some (Ops_common.say model ~ko:"서버 이력 일부" ~en:"Partial server history")
+    | false, false -> None
   in
   let top_rect, bot_rect =
     if late_rows <> [] || Observed.is_failed model.work.late_approval_attempts
@@ -4015,12 +4021,13 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
               (List.length rows_data)))
       with
       focused = Model.pane_focused model 0;
+      subtitle = history_status;
     }
   in
   let t_inner = Card.draw ~cache grid ~rect:top_rect ~theme t_spec in
   if not (Rect.is_empty t_inner) then begin
     match hist_err with
-    | Some raw_err ->
+    | Some raw_err when rows_data = [] ->
         let err = Ops_common.scrub_secrets_in_text raw_err in
         Ops_common.draw_observed_empty grid ~rect:t_inner ~theme ~lang:model.lang
           (Observed.failed ~reason:err ~retryable:true ~at:Clock.Mono.zero)
@@ -4029,9 +4036,13 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
         Ops_common.draw_observed_empty grid ~rect:t_inner ~theme ~lang:model.lang
           model.work.gate_snapshot
           ~empty_msg:
-            (Say.make ~ko:"최근 처리된 Gate 결정이 없습니다"
-               ~en:"No recent resolved Gate decisions")
-    | None ->
+            (if history_partial then
+               Say.make ~ko:"확인된 범위에 Gate 결정이 없습니다"
+                 ~en:"No Gate decisions in the observed range"
+             else
+               Say.make ~ko:"최근 처리된 Gate 결정이 없습니다"
+                 ~en:"No recent resolved Gate decisions")
+    | Some _ | None ->
         let cols : Table.column list =
           [
             {
@@ -4175,7 +4186,9 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let bar_rect, body_rect = Work_store.inbox_subview_rects rect in
-    render_inbox_gate_bar ~model ~rect:bar_rect ~theme grid;
+    let queue_status = inbox_queue_status model in
+    let queue_current = Option.is_none queue_status in
+    render_inbox_gate_bar ~model ~rect:bar_rect ~theme ~queue_current grid;
     match model.work.inbox_subview with
     | Work_store.Inbox_rules ->
         render_inbox_rules ~model ~cache ~rect:body_rect ~theme grid
@@ -4183,9 +4196,12 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_inbox_history ~model ~cache ~rect:body_rect ~theme grid
     | Work_store.Inbox_queue ->
     if Attention.is_empty model.attention then
-      render_inbox_empty ~model ~cache ~rect:body_rect ~theme grid
+      render_inbox_empty ~model ~cache ~rect:body_rect ~theme ~queue_status grid
     else
-      let rect = body_rect in
+      let banner_rect, rect = Work_store.inbox_queue_rects body_rect model.work in
+      if not (Rect.is_empty banner_rect) then
+        Option.iter (draw_inbox_queue_status ~model ~banner_rect ~theme
+                       ~show_verifications:false grid) queue_status;
       let filtered_attn =
         Attention.filtered_items ~query:model.work.filter_query model.attention
       in
@@ -4215,18 +4231,17 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         {
           (Card.default_spec
              ~title:
-               (Printf.sprintf "%s (%d)"
-                  (Ops_common.say model ~ko:"긴급도순 대기열"
-                     ~en:"Urgency Queue")
-                  (List.length filtered_attn)))
+               (Ops_common.say model ~ko:"긴급도순 대기열" ~en:"Urgency Queue"))
           with
           badge =
-            Some
-              {
-                Card.glyph = Some Glyph.Action_required;
-                text = Int.to_string (List.length filtered_attn);
-                tone = Some Theme.Status_attention;
-              };
+            (if queue_current then
+               Some
+                 {
+                   Card.glyph = Some Glyph.Action_required;
+                   text = Int.to_string (List.length filtered_attn);
+                   tone = Some Theme.Status_attention;
+                 }
+             else None);
           focused = Model.pane_focused model 0;
         }
       in

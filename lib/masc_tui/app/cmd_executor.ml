@@ -1002,18 +1002,16 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_keeper_tool_calls { turn_ref = None; _ } -> scoped "#tool-calls"
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
+  | Cmd.Get_planning | Cmd.Get_asks _ | Cmd.Get_tool_approvals | Cmd.Get_gate_pending ->
+      scoped ""
   | Cmd.Get_health
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
   | Cmd.Get_keeper_turns
   | Cmd.Get_chat_history _
   | Cmd.Get_chat_operation_events _
-  | Cmd.Get_planning
   | Cmd.Get_verifications _
   | Cmd.Get_schedules _
-  | Cmd.Get_asks _
-  | Cmd.Get_tool_approvals
-  | Cmd.Get_gate_pending
   | Cmd.Get_candle_ledger _
   | Cmd.Get_board_feed _
   | Cmd.Get_board_hearths
@@ -1286,7 +1284,7 @@ let rec execute_get t ~epoch req =
             let planning_res =
               fetch_planning_with_tasks ~observed_at
                 ~fetch_planning:(fun () ->
-                  fetch_and_decode_get t ~path ~decode:(fun json ->
+                  let result = fetch_and_decode_get t ~path ~decode:(fun json ->
                       match
                         Wire_work.decode_planning_snapshot ~observed_at json
                       with
@@ -1295,14 +1293,20 @@ let rec execute_get t ~epoch req =
                           (match Wire_work.decode_planning_backlog_counts json with
                           | Ok (Some counts) ->
                               Ui_bus.publish_snapshot t.bus
-                                ~key:(Key_get (path ^ "#backlog"))
+                                ~key:(Key_get (Printf.sprintf "%d:%s#backlog" (Epoch.to_int epoch) path))
                                 (Msg.Http_reply
                                    {
                                      epoch;
                                      reply = Msg.Reply_planning_backlog counts;
                                    })
                           | Ok None | Error _ -> ());
-                          Ok snap))
+                          Ok snap)
+                  in
+                  let goals = Result.map (fun (snap : Wire_work.planning_snapshot) -> snap.goals) result in
+                  Ui_bus.publish_snapshot t.bus
+                    ~key:(Key_get (Printf.sprintf "%d:%s#confirmations" (Epoch.to_int epoch) path))
+                    (Msg.Http_reply { epoch; reply = Msg.Reply_goal_confirmations goals });
+                  result)
                 ~fetch_tasks:(fun () ->
                   fetch_and_decode_get t ~path:Wire_work.execution_tasks_path
                     ~decode:(fun json ->

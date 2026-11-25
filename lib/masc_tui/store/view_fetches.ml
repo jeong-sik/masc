@@ -705,8 +705,10 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.work.tool_approvals)
                Cmd.Get_tool_approvals
           |> add_if
-               (needs_fetch ~force m.work.gate_snapshot)
+               (needs_fetch ~force m.work.gate_snapshot
+               || needs_fetch ~force m.work.gate_pending)
                Cmd.Get_gate_pending
+          |> add_if (needs_fetch ~force m.work.goal_confirmations) Cmd.Get_planning
           |> add_if
                ((force || not m.work.tool_approval_modes_absent)
                && needs_fetch ~force m.work.tool_approval_modes)

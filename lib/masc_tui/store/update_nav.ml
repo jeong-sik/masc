@@ -8917,6 +8917,7 @@ let work_detail_max_scroll (m : Model.t) =
           else 0
       | Some entry -> (
           let _, br = Work_store.inbox_subview_rects br in
+          let _, br = Work_store.inbox_queue_rects br m.work in
           let right_rect =
             if zoomed then br
             else if br.w >= 96 then
@@ -8971,7 +8972,11 @@ let work_detail_max_scroll (m : Model.t) =
                 in
                 max q_max jt_max
             | Attention.Payload_gate g ->
-                let jt_h = max 0 (avail_h - 2) in
+                let meta_rows =
+                  if Option.is_some (Work_store.retry_meta_for_id ~id:g.id m.work)
+                  then 1 else 0
+                in
+                let jt_h = max 0 (avail_h - 2 - meta_rows) in
                 if jt_h <= 0 then 0
                 else
                   let raw_in = Option.value g.input_preview ~default:"{}" in

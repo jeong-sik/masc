@@ -3932,6 +3932,7 @@ let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
     {
       generated_at = Some "2026-11-25T03:00:00Z";
       pending = [];
+      pending_error = None;
       retry_meta = [];
       rules = [];
       rules_error = None;
@@ -3952,6 +3953,7 @@ let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
           };
         ];
       recent_resolved_error = None;
+      recent_resolved_partial = false;
       hitl = None;
     }
   in

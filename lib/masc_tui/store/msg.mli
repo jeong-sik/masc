@@ -87,6 +87,7 @@ type http_reply =
     }
   (* Work *)
   | Reply_planning of (Wire_work.planning_snapshot, http_error) result
+  | Reply_goal_confirmations of (Wire_work.goal list, http_error) result
   | Reply_planning_backlog of Wire_work.task_backlog_counts
   | Reply_verifications of
       (Wire_work.verification_request list, http_error) result

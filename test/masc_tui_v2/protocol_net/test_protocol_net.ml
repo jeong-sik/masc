@@ -6303,6 +6303,28 @@ let test_wave4_layer2_wire_codecs () =
   Alcotest.(check int) "gate retry_meta count" 1 (List.length snap.retry_meta);
   Alcotest.(check int) "gate rules count" 1 (List.length snap.rules);
   Alcotest.(check int) "gate recent_resolved count" 1 (List.length snap.recent_resolved);
+  let partial =
+    expect_ok "gate snapshot retains audit when the queue is unavailable"
+      (Wire_work.decode_gate_snapshot
+         (parse_json
+            {|{
+              "approval_queue_state": {
+                "state": "unavailable", "title": "Queue unavailable", "operator_detail": "read failed"
+              },
+              "approval_queue": null,
+              "recent_resolved_state": { "state": "ready" },
+              "recent_resolved_page": { "truncated": false, "scan_exhausted": true },
+              "recent_resolved": [{
+                "id": "appr-0", "event": "resolved", "keeper_name": "alpha",
+                "tool_name": "Bash", "decision": "approve", "resolved_at": 1795249000.0
+              }]
+            }|}))
+  in
+  Alcotest.(check (option string)) "queue error retained"
+    (Some "Queue unavailable: read failed") partial.pending_error;
+  Alcotest.(check int) "audit still received" 1 (List.length partial.recent_resolved);
+  Alcotest.(check bool) "audit scan did not cover the window" true
+    partial.recent_resolved_partial;
   let rm = List.hd snap.retry_meta in
   Alcotest.(check (option string)) "summary_judgment" (Some "require_human") rm.summary_judgment;
   let ws : Wire_work.expected_workspace =

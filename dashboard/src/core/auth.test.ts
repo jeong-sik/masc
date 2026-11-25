@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
 import { startNavTelemetry } from '../lib/nav-telemetry'
+import {
+  captureDashboardCredentialOwner,
+  clearStoredToken,
+  dashboardCredentialOwnerIsCurrent,
+  getStoredToken,
+  getStoredTokenMeta,
+  setStoredToken,
+  subscribeStoredTokenChanges,
+} from '../api/core'
+import { apiGet } from './transport'
+import { currentCanonicalDashboardActor, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { RouteState } from '../types'
 import {
   activeWorkspaceId,
@@ -13,6 +24,7 @@ import {
   installAuthLifecycleGuards,
   isAuthenticated,
   isEpochCurrent,
+  normalizeBearerToken,
   refreshMultiAccountCsrf,
   registerWorkspaceTargets,
   resetAuthStateForTests,
@@ -20,6 +32,7 @@ import {
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
+  verifyAndApplySingleUserToken,
   wipeTransientSecrets,
   workspaceTargets,
 } from './auth'
@@ -417,6 +430,287 @@ describe('core/auth', () => {
     } finally {
       dispose()
       fetchSpy.mockRestore()
+    }
+  })
+
+  it('retires the old credential owner on URL login, manual replacement, and clear', async () => {
+    setStoredToken('previous-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    setCanonicalDashboardActor('previous-actor')
+    const oldOwner = captureDashboardCredentialOwner()
+    const onChange = vi.fn()
+    const unsubscribe = subscribeStoredTokenChanges(onChange)
+
+    try {
+      window.history.replaceState(null, '', '/dashboard/?token=new-url-token')
+      const fetchMock = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+
+      await bootstrapAuthSession({ fetchImpl: fetchMock, probeShell: false })
+      expect(getStoredTokenMeta()).toEqual({ source: 'url' })
+      expect(currentCanonicalDashboardActor()).toBeNull()
+      expect(dashboardCredentialOwnerIsCurrent(oldOwner)).toBe(false)
+      expect(captureDashboardCredentialOwner().managed).toBe(false)
+
+      setCanonicalDashboardActor('url-actor')
+      setSingleUserToken('manual-token')
+      expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+      expect(currentCanonicalDashboardActor()).toBeNull()
+
+      setCanonicalDashboardActor('manual-actor')
+      setSingleUserToken(null)
+      expect(getStoredTokenMeta()).toBeNull()
+      expect(currentCanonicalDashboardActor()).toBeNull()
+      expect(onChange.mock.calls).toEqual([
+        [{ token: 'new-url-token', meta: { source: 'url' } }],
+        [{ token: 'manual-token', meta: { source: 'manual' } }],
+        [{ token: null, meta: null }],
+      ])
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it.each([401, 403])('keeps a newer login when an earlier shell probe returns %i', async status => {
+    setSingleUserToken('old-token')
+    let finishOldProbe!: (response: Response) => void
+    const oldProbe = new Promise<Response>(resolve => { finishOldProbe = resolve })
+    const oldFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      return oldProbe
+    })
+    const oldBootstrap = bootstrapAuthSession({ fetchImpl: oldFetch })
+    await vi.waitFor(() => expect(oldFetch).toHaveBeenCalledTimes(2))
+
+    setSingleUserToken('new-token')
+    const newFetch = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+    const signedIn = await bootstrapAuthSession({ fetchImpl: newFetch })
+    const currentOwner = captureDashboardCredentialOwner()
+    const epoch = currentSessionEpoch()
+    setCanonicalDashboardActor('new-actor')
+
+    finishOldProbe(jsonResponse({ error: 'denied' }, status))
+    await expect(oldBootstrap).resolves.toEqual(signedIn)
+    expect(getSingleUserToken()).toBe('new-token')
+    expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+    expect(captureDashboardCredentialOwner().tokenRevision).toBe(currentOwner.tokenRevision)
+    expect(currentCanonicalDashboardActor()).toBe('new-actor')
+    expect(currentSessionEpoch()).toBe(epoch)
+  })
+
+  it('keeps a manual login when an earlier dev-token probe succeeds', async () => {
+    let finishDevProbe!: (response: Response) => void
+    const devProbe = new Promise<Response>(resolve => { finishDevProbe = resolve })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ auth_methods: { dev_token: true } })
+      return devProbe
+    })
+    const oldBootstrap = bootstrapAuthSession({ fetchImpl: fetchMock, probeShell: false })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    setSingleUserToken('manual-token')
+    const newFetch = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+    const signedIn = await bootstrapAuthSession({ fetchImpl: newFetch, probeShell: false })
+
+    finishDevProbe(jsonResponse({ token: 'late-dev-token' }))
+    await expect(oldBootstrap).resolves.toEqual(signedIn)
+    expect(getSingleUserToken()).toBe('manual-token')
+    expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+    expect(captureDashboardCredentialOwner().managed).toBe(false)
+  })
+
+  it('consumes ?token= from masc login URL, strips URL history, persists in sessionStorage across reload, and clears on 401 or multi_account', async () => {
+    window.history.replaceState(null, '', '/dashboard/?agent=local-admin&token=url-bearer-123#/keepers')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') {
+        const hdrs = init?.headers as Record<string, string>
+        if (hdrs.Authorization === 'Bearer url-bearer-123') return jsonResponse({ ok: true })
+        return jsonResponse({ error: 'unauthorized' }, 401)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    const session = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(session.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('url-bearer-123')
+    expect(window.location.search).toBe('?agent=local-admin')
+    expect(window.location.hash).toBe('#/keepers')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBe('url-bearer-123')
+    expect(localStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // Simulate reload: in-memory secrets wiped on pagehide, sessionStorage hydrates cleanly
+    wipeTransientSecrets()
+    expect(getSingleUserToken()).toBeNull()
+    const reloaded = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(reloaded.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('url-bearer-123')
+
+    // Revoked token (401) clears stale sessionStorage bearer
+    const revokedFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ error: 'revoked' }, 401)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const revoked = await bootstrapAuthSession({ fetchImpl: revokedFetch as unknown as typeof fetch })
+    expect(revoked.kind).toBe('single_user_auth_required')
+    expect(getSingleUserToken()).toBeNull()
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // Multi-account mode strips stray ?token= and clears sessionStorage
+    window.history.replaceState(null, '', '/dashboard/?token=stray-token#/pulse')
+    sessionStorage.setItem('masc_bearer_token', 'old-single-token')
+    const multiFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') return jsonResponse({ error: 'signed_out' }, 401)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const multi = await bootstrapAuthSession({ fetchImpl: multiFetch as unknown as typeof fetch })
+    expect(multi.kind).toBe('multi_account_signed_out')
+    expect(window.location.search).toBe('')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+  })
+
+  it('rejects non-ASCII Bearer tokens before fetch(), self-heals poisoned sessionStorage, and times out cleanly without poisoning authSession', async () => {
+    expect(normalizeBearerToken('Bearer "abc-123_XYZ"')).toEqual({ ok: true, token: 'abc-123_XYZ' })
+    expect(normalizeBearerToken('한글토큰')).toMatchObject({ ok: false })
+    expect(normalizeBearerToken('tok with space')).toMatchObject({ ok: false })
+
+    // Poisoned sessionStorage value is automatically purged without throwing in fetch()
+    sessionStorage.setItem('masc_bearer_token', '잘못된한글토큰')
+    const cleanFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') {
+        const hdrs = init?.headers as Record<string, string>
+        expect(hdrs.Authorization).toBeUndefined()
+        return jsonResponse({ error: 'missing_token' }, 401)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const healed = await bootstrapAuthSession({ fetchImpl: cleanFetch as unknown as typeof fetch })
+    expect(healed.kind).toBe('single_user_auth_required')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // verifyAndApplySingleUserToken rejects non-ASCII before calling fetch() and keeps session intact
+    const neverFetch = vi.fn()
+    const badRes = await verifyAndApplySingleUserToken('한글복사본', {
+      fetchImpl: neverFetch as unknown as typeof fetch,
+    })
+    expect(badRes.ok).toBe(false)
+    expect(neverFetch).not.toHaveBeenCalled()
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+
+    // Timeout returns clean error without overwriting authSession to unavailable or flipping to Bearer Active
+    const hangingFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      }),
+    )
+    const timedOut = await verifyAndApplySingleUserToken('valid-ascii-token-123', {
+      fetchImpl: hangingFetch as unknown as typeof fetch,
+      timeoutMs: 25,
+    })
+    expect(timedOut.ok).toBe(false)
+    if (!timedOut.ok) expect(timedOut.error).toContain('시간 초과')
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+    expect(getSingleUserToken()).toBeNull()
+  })
+
+  it('synchronizes shell bearer cache, authSession, and core/transport immediately when API clears or replaces the shared token', async () => {
+    window.history.replaceState(null, '', '/dashboard/?token=initial-shell-token')
+    const bootstrapFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ status: 'ok' })
+      if (String(input) === '/api/v1/dashboard/shell') return jsonResponse({ ok: true })
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const initialSession = await bootstrapAuthSession({ fetchImpl: bootstrapFetch as unknown as typeof fetch })
+    expect(initialSession.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('initial-shell-token')
+
+    const seenAuthHeaders: (string | undefined)[] = []
+    const transportFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const hdrs = (init?.headers ?? {}) as Record<string, string>
+      seenAuthHeaders.push(hdrs.Authorization)
+      return jsonResponse({ ok: true })
+    })
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual(['Bearer initial-shell-token'])
+
+    // API rejection path clears the shared store via clearStoredToken()
+    const epochBeforeClear = currentSessionEpoch()
+    clearStoredToken()
+    expect(getSingleUserToken()).toBeNull()
+    expect(currentSessionEpoch()).toBe(epochBeforeClear + 1)
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual(['Bearer initial-shell-token', undefined])
+
+    // Subsequent bootstrapAuthSession must not reuse the retired bearer
+    const postClearShellAuth: (string | undefined)[] = []
+    const postClearBootstrapFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/health') return jsonResponse({ status: 'ok' })
+      if (String(input) === '/api/v1/dashboard/shell') {
+        const hdrs = (init?.headers ?? {}) as Record<string, string>
+        postClearShellAuth.push(hdrs.Authorization)
+        return jsonResponse({ error: 'unauthorized' }, 401)
+      }
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const postClear = await bootstrapAuthSession({ fetchImpl: postClearBootstrapFetch as unknown as typeof fetch })
+    expect(postClear.kind).toBe('single_user_auth_required')
+    expect(postClearShellAuth).toEqual([undefined])
+
+    // API replacement path updates the shared store via setStoredToken()
+    const epochBeforeReplace = currentSessionEpoch()
+    setStoredToken('api-rotated-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(getSingleUserToken()).toBe('api-rotated-token')
+    expect(currentSessionEpoch()).toBe(epochBeforeReplace + 1)
+    expect(authSession.value.kind).toBe('single_user_local')
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual([
+      'Bearer initial-shell-token',
+      undefined,
+      'Bearer api-rotated-token',
+    ])
+  })
+
+  it('purges corrupted sessionStorage tokens in O(1) without mutual getStoredToken/clearStoredToken recursion', () => {
+    sessionStorage.setItem('masc_bearer_token', '잘못된한글토큰')
+    sessionStorage.setItem('masc_bearer_token_meta', JSON.stringify({ source: 'manual' }))
+    const onChange = vi.fn()
+    const unsub = subscribeStoredTokenChanges(onChange)
+    const getItemSpy = vi.spyOn(sessionStorage, 'getItem')
+    const removeItemSpy = vi.spyOn(sessionStorage, 'removeItem')
+
+    try {
+      expect(getStoredToken()).toBeNull()
+      // Strict bounds prove real reads ran AND zero mutual recursion / stack exhaustion occurred
+      expect(getItemSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(getItemSpy.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(removeItemSpy).toHaveBeenCalledWith('masc_bearer_token')
+      expect(removeItemSpy).toHaveBeenCalledWith('masc_bearer_token_meta')
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onChange).toHaveBeenCalledWith({ token: null, meta: null })
+      expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+      expect(sessionStorage.getItem('masc_bearer_token_meta')).toBeNull()
+
+      // Overwriting a corrupted value with setStoredToken also completes in O(1) without recursion
+      sessionStorage.setItem('masc_bearer_token', '또다른비ASCII')
+      getItemSpy.mockClear()
+      setStoredToken('clean-ascii-token', { source: 'manual' })
+      expect(getItemSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(getItemSpy.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(getStoredToken()).toBe('clean-ascii-token')
+      expect(onChange).toHaveBeenLastCalledWith({ token: 'clean-ascii-token', meta: { source: 'manual' } })
+    } finally {
+      unsub()
+      getItemSpy.mockRestore()
+      removeItemSpy.mockRestore()
     }
   })
 })

@@ -12,7 +12,21 @@
  * - `pagehide` wipes transient in-memory secrets cleanly.
  */
 
-import { signal, computed } from '@preact/signals'
+import { batch, signal, computed } from '@preact/signals'
+import {
+  clearStoredToken,
+  consumeUrlBearerToken,
+  currentStoredTokenRevision,
+  getStoredToken,
+  getStoredTokenMeta,
+  normalizeBearerToken,
+  setStoredToken,
+  subscribeStoredTokenChanges,
+  type BearerTokenValidation,
+  type StoredTokenMeta,
+} from '../lib/dashboard-bearer'
+
+export { normalizeBearerToken, type BearerTokenValidation }
 
 export type AccountMode = 'single_user' | 'multi_account'
 export type UserRole = 'admin' | 'worker' | 'viewer'
@@ -74,15 +88,55 @@ export type AuthSession =
     }
 
 const ACCOUNT_MARKER_STORAGE_KEY = 'masc.core.account_marker'
+const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 12_000
 const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
   google: false,
   github: false,
   dev_token: false,
 })
 
-// Volatile in-memory secrets — wiped on pagehide / sign-out / epoch change
+// Volatile in-memory secrets — wiped on pagehide / sign-out / epoch change.
+// Single-user operator bearers are mirrored into tab-scoped sessionStorage
+// (never localStorage) so `masc login` ?token= URLs and page reloads survive
+// without leaking across tabs or surviving tab close.
 let singleUserBearerToken: string | null = null
 let activeCsrfToken: string | null = null
+let internalBearerWriteDepth = 0
+
+function withInternalBearerWrite<T>(fn: () => T): T {
+  internalBearerWriteDepth += 1
+  try {
+    return fn()
+  } finally {
+    internalBearerWriteDepth -= 1
+  }
+}
+
+function isSessionStorageReadable(): boolean {
+  try {
+    if (typeof sessionStorage === 'undefined') return false
+    sessionStorage.getItem('masc_bearer_token')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function readSessionBearerToken(): string | null {
+  return getStoredToken()?.trim() ?? null
+}
+
+function writeSessionBearerToken(
+  token: string | null,
+  meta: StoredTokenMeta = { source: 'manual' },
+): void {
+  withInternalBearerWrite(() => {
+    try {
+      if (token === null) clearStoredToken()
+      else setStoredToken(token, meta)
+    } catch { /* storage unavailable */ }
+  })
+}
 
 export const authSession = signal<AuthSession>({ kind: 'probing' })
 export const sessionEpoch = signal<number>(1)
@@ -90,6 +144,38 @@ export const workspaceTargets = signal<readonly WorkspaceTarget[]>([
   { id: 'default', label: 'Default Workspace' },
 ])
 export const activeWorkspaceId = signal<string>('default')
+
+// Keep the shell's in-memory bearer cache, epoch fence, and single-user session
+// synchronized whenever API modules (e.g. api/dev-token.ts) clear or replace
+// the shared tab-scoped bearer store.
+subscribeStoredTokenChanges(({ token }) => {
+  if (internalBearerWriteDepth > 0) return
+  const prevToken = singleUserBearerToken
+  singleUserBearerToken = token
+  if (prevToken === token) return
+  batch(() => {
+    bumpSessionEpoch()
+    const cur = authSession.peek()
+    if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
+      if (token !== null) {
+        authSession.value = {
+          kind: 'single_user_local',
+          mode: 'single_user',
+          tokenPresent: true,
+          authMethods: cur.authMethods,
+          workspaceId: activeWorkspaceId.peek(),
+        }
+      } else {
+        authSession.value = {
+          kind: 'single_user_auth_required',
+          mode: 'single_user',
+          authMethods: cur.authMethods,
+          reason: 'Token cleared',
+        }
+      }
+    }
+  })
+})
 
 export const isAuthenticated = computed<boolean>(() => {
   const s = authSession.value
@@ -129,29 +215,37 @@ export function getActiveCsrfToken(): string | null {
 }
 
 export function setSingleUserToken(token: string | null): void {
-  const normalized = token && token.trim().length > 0 ? token.trim() : null
-  if (singleUserBearerToken === normalized) return
-  singleUserBearerToken = normalized
-  bumpSessionEpoch()
-  const cur = authSession.peek()
-  if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
-    if (normalized !== null) {
-      authSession.value = {
-        kind: 'single_user_local',
-        mode: 'single_user',
-        tokenPresent: true,
-        authMethods: cur.authMethods,
-        workspaceId: activeWorkspaceId.peek(),
-      }
-    } else {
-      authSession.value = {
-        kind: 'single_user_auth_required',
-        mode: 'single_user',
-        authMethods: cur.authMethods,
-        reason: 'Token cleared',
+  const parsed = normalizeBearerToken(token)
+  if (!parsed.ok) return
+  const normalized = parsed.token
+  const storedSource = getStoredTokenMeta()?.source ?? null
+  const nextSource = normalized === null ? null : 'manual'
+  if (singleUserBearerToken === normalized && readSessionBearerToken() === normalized
+      && storedSource === nextSource) return
+  batch(() => {
+    singleUserBearerToken = normalized
+    bumpSessionEpoch()
+    const cur = authSession.peek()
+    if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
+      if (normalized !== null) {
+        authSession.value = {
+          kind: 'single_user_local',
+          mode: 'single_user',
+          tokenPresent: true,
+          authMethods: cur.authMethods,
+          workspaceId: activeWorkspaceId.peek(),
+        }
+      } else {
+        authSession.value = {
+          kind: 'single_user_auth_required',
+          mode: 'single_user',
+          authMethods: cur.authMethods,
+          reason: 'Token cleared',
+        }
       }
     }
-  }
+    writeSessionBearerToken(normalized)
+  })
 }
 
 export function wipeTransientSecrets(): void {
@@ -386,33 +480,168 @@ async function readMultiAccountSession(
 export interface BootstrapAuthOptions {
   readonly fetchImpl?: typeof fetch
   readonly probeShell?: boolean
+  readonly timeoutMs?: number
+}
+
+async function fetchWithBootstrapTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  if (typeof AbortController === 'undefined' || timeoutMs <= 0) {
+    return fetchImpl(url, init)
+  }
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) {
+      const secs = Math.max(1, Math.round(timeoutMs / 1000))
+      throw new Error(`서버 응답 시간 초과 (${secs}초) — 서버가 일시적으로 바쁘거나 read_pool이 포화 상태일 수 있습니다.`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export type VerifySingleUserTokenResult =
+  | { readonly ok: true; readonly session: Extract<AuthSession, { readonly kind: 'single_user_local' }> }
+  | { readonly ok: false; readonly error: string }
+
+/**
+ * Verifies a candidate single-user operator Bearer token against `/health` and
+ * `/api/v1/dashboard/shell` with an explicit timeout BEFORE committing it to
+ * `authSession` or `sessionStorage`, preventing premature green badges,
+ * non-ASCII `fetch()` header crashes, or infinite `Verifying…` locks.
+ */
+export async function verifyAndApplySingleUserToken(
+  rawToken: string,
+  opts: BootstrapAuthOptions = {},
+): Promise<VerifySingleUserTokenResult> {
+  const parsed = normalizeBearerToken(rawToken)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  if (parsed.token === null) {
+    return { ok: false, error: '토큰을 입력한 뒤 적용해 주세요.' }
+  }
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
+  const candidate = parsed.token
+  const epoch = currentSessionEpoch()
+  const bearerRevision = currentStoredTokenRevision()
+
+  try {
+    const healthRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/health',
+      { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } },
+      timeoutMs,
+    )
+    if (!healthRes.ok) {
+      return { ok: false, error: `GET /health 실패 (HTTP ${healthRes.status})` }
+    }
+    const health = (await healthRes.json()) as Record<string, unknown>
+    const mode = parseAccountMode(health.account_mode)
+    if (mode !== 'single_user') {
+      return { ok: false, error: '현재 서버는 싱글유저 Bearer 토큰 모드가 아닙니다.' }
+    }
+    const authMethods = parseAuthMethods(health.auth_methods)
+    const shellRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/api/v1/dashboard/shell',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${candidate}`,
+        },
+      },
+      timeoutMs,
+    )
+    if (!isEpochCurrent(epoch) || currentStoredTokenRevision() !== bearerRevision) {
+      return { ok: false, error: '검증 중 다른 인증 변경이 발생했습니다. 다시 시도하세요.' }
+    }
+    if (shellRes.status === 401 || shellRes.status === 403) {
+      return {
+        ok: false,
+        error: `토큰 인증 실패 (HTTP ${shellRes.status}) — 유효한 오퍼레이터 토큰인지 확인하세요.`,
+      }
+    }
+    if (!shellRes.ok) {
+      return { ok: false, error: `서버 상태 오류 (HTTP ${shellRes.status})` }
+    }
+
+    const next: Extract<AuthSession, { readonly kind: 'single_user_local' }> = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods,
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    batch(() => {
+      singleUserBearerToken = candidate
+      bumpSessionEpoch()
+      authSession.value = next
+      writeSessionBearerToken(candidate, { source: 'manual' })
+    })
+    return { ok: true, session: next }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 /**
  * Capability-gated auth bootstrap:
  * 1. Reads `GET /health` to determine `account_mode` and `auth_methods`.
  * 2. In `single_user`: ONLY calls `/api/v1/dashboard/dev-token` if `auth_methods.dev_token === true`.
- * 3. In `multi_account`: reads `/api/v1/auth/session` with `credentials: 'same-origin'`.
+ * 3. In `multi_account`: reads `/auth/session` + `/api/v1/auth/whoami` with `credentials: 'same-origin'`.
  */
 export async function bootstrapAuthSession(
   opts: BootstrapAuthOptions = {},
 ): Promise<AuthSession> {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
   const prev = authSession.peek()
   const prevAccountId = prev.kind === 'multi_account_signed_in' ? prev.accountId : null
+  const epoch = currentSessionEpoch()
+  let bearerRevision = currentStoredTokenRevision()
+  const ownsCredential = () =>
+    isEpochCurrent(epoch) && currentStoredTokenRevision() === bearerRevision
+  const persistBearer = (token: string | null, meta?: StoredTokenMeta): void => {
+    singleUserBearerToken = token
+    writeSessionBearerToken(token, meta)
+    bearerRevision = currentStoredTokenRevision()
+  }
+  const urlToken = consumeUrlBearerToken()
 
   try {
-    const healthRes = await fetchImpl('/health', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    })
+    const healthRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/health',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      },
+      timeoutMs,
+    )
+    const health = (healthRes.ok ? await healthRes.json() : {}) as Record<string, unknown>
+    if (!ownsCredential()) return authSession.peek()
     if (!healthRes.ok) {
       const next: AuthSession = { kind: 'unavailable', reason: `GET /health failed (${healthRes.status})` }
       authSession.value = next
       return next
     }
-    const health = (await healthRes.json()) as Record<string, unknown>
     const mode = parseAccountMode(health.account_mode)
     if (mode === 'invalid') {
       const next: AuthSession = {
@@ -425,40 +654,76 @@ export async function bootstrapAuthSession(
     const authMethods = parseAuthMethods(health.auth_methods)
 
     if (mode === 'multi_account') {
-      singleUserBearerToken = null
+      persistBearer(null)
       const next = await readMultiAccountSession(fetchImpl, authMethods, prevAccountId)
       if (next.kind === 'account_changed') bumpSessionEpoch()
       authSession.value = next
       return next
     }
 
-    // Single-user mode: ONLY probe /api/v1/dashboard/dev-token if explicitly advertised
+    // Single-user mode: hydrate from `?token=` (`masc login` URL) or tab-scoped
+    // sessionStorage, and ONLY probe /api/v1/dashboard/dev-token if explicitly advertised.
     activeCsrfToken = null
-    if (authMethods.dev_token && singleUserBearerToken === null) {
-      try {
-        const devRes = await fetchImpl('/api/v1/dashboard/dev-token', {
-          method: 'GET',
-          credentials: 'same-origin',
-          headers: { Accept: 'application/json' },
-        })
-        if (devRes.ok) {
-          const payload = (await devRes.json()) as { token?: unknown }
-          if (typeof payload.token === 'string' && payload.token.trim().length > 0) {
-            singleUserBearerToken = payload.token.trim()
+    if (urlToken !== null) {
+      persistBearer(urlToken, { source: 'url' })
+    } else {
+      const stored = withInternalBearerWrite(() => readSessionBearerToken())
+      bearerRevision = currentStoredTokenRevision()
+      if (stored !== null) {
+        singleUserBearerToken = stored
+      } else if (singleUserBearerToken !== null) {
+        if (isSessionStorageReadable()) {
+          singleUserBearerToken = null
+        } else {
+          const rechecked = normalizeBearerToken(singleUserBearerToken)
+          if (!rechecked.ok) {
+            persistBearer(null)
           }
         }
+      }
+    }
+    if (authMethods.dev_token && singleUserBearerToken === null) {
+      let devToken: string | null = null
+      try {
+        const devRes = await fetchWithBootstrapTimeout(
+          fetchImpl,
+          '/api/v1/dashboard/dev-token',
+          {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+          },
+          timeoutMs,
+        )
+        if (devRes.ok) {
+          const payload = (await devRes.json()) as { token?: unknown } | null
+          const parsedDev = typeof payload?.token === 'string' ? normalizeBearerToken(payload.token) : null
+          devToken = parsedDev?.ok ? parsedDev.token : null
+        }
       } catch { /* dev token optional */ }
+      if (!ownsCredential()) return authSession.peek()
+      if (devToken !== null) {
+        persistBearer(devToken, { source: 'dev', actor: 'dashboard', role: 'admin' })
+      }
     }
 
+    if (!ownsCredential()) return authSession.peek()
     if (opts.probeShell !== false) {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (singleUserBearerToken) headers.Authorization = `Bearer ${singleUserBearerToken}`
-      const shellRes = await fetchImpl('/api/v1/dashboard/shell', {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers,
-      })
+      const shellRes = await fetchWithBootstrapTimeout(
+        fetchImpl,
+        '/api/v1/dashboard/shell',
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers,
+        },
+        timeoutMs,
+      )
+      if (!ownsCredential()) return authSession.peek()
       if (shellRes.status === 401 || shellRes.status === 403) {
+        persistBearer(null)
         const next: AuthSession = {
           kind: 'single_user_auth_required',
           mode: 'single_user',
@@ -488,6 +753,7 @@ export async function bootstrapAuthSession(
     authSession.value = next
     return next
   } catch (error) {
+    if (!ownsCredential()) return authSession.peek()
     const next: AuthSession = {
       kind: 'unavailable',
       reason: error instanceof Error ? error.message : String(error),
@@ -578,6 +844,7 @@ export function installAuthLifecycleGuards(
 
 export function resetAuthStateForTests(): void {
   wipeTransientSecrets()
+  writeSessionBearerToken(null)
   authSession.value = { kind: 'probing' }
   sessionEpoch.value = 1
   activeWorkspaceId.value = 'default'

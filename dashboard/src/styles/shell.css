@@ -1204,6 +1204,11 @@
   min-width: 0;
 }
 
+.ap-workspace.ap-account-workspace {
+  display: flex;
+  flex-direction: column;
+}
+
 .ap-workspace-head,
 .ap-placeholder-head {
   display: flex;

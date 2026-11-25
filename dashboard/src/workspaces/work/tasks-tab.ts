@@ -33,6 +33,7 @@ import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
 import {
@@ -829,11 +830,7 @@ export function TasksTab(props: WorkspaceViewProps) {
           ${isSingleUser && (chip === 'schedules'
             ? html`<button type="button" class="btn-primary" onClick=${() => setShowCreateSchedule((v) => !v)}>${showCreateSchedule ? '닫기' : '+ 새 예약'}</button>`
             : html`<button type="button" class="btn-primary" onClick=${() => setShowCreateTask((v) => !v)}>${showCreateTask ? '닫기' : '+ 새 태스크'}</button>`)}
-          <button
-            type="button"
-            class="btn-ghost"
-            onClick=${() => void (isSchedulesView ? loadSchedules('manual') : loadTaskSources('manual'))}
-          >새로고침</button>
+          <${RefreshButton} onRefresh=${() => (isSchedulesView ? loadSchedules('manual') : loadTaskSources('manual'))} />
         </div>
       </div>
 

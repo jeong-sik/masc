@@ -49,6 +49,7 @@ import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { MasterDetail } from '../../components/primitives/master-detail'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import {
@@ -906,7 +907,7 @@ export function InboxTab(props: WorkspaceViewProps) {
       </div>
       <div class="wk-toolbar-end">
         ${decisionPill}
-        <button type="button" class="btn-ghost" onClick=${() => void refreshVisibleSources()}>새로고침</button>
+        <${RefreshButton} onRefresh=${refreshVisibleSources} />
       </div>
     </div>
   `

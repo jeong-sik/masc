@@ -949,6 +949,44 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
     (fun () -> ignore (Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages))
 ;;
 
+(* A stranded carrier (the target Text gone, the carrier last) is a refusal
+   of this request before anything is sent. It reaches the caller as a value,
+   [AcceptRejected], not as an exception the runtime reports as unhandled.
+   Shape from a Gemini Keeper's history, 2026-11-25. *)
+let test_stranded_carrier_is_a_typed_request_refusal () =
+  let carrier =
+    Backend_gemini.gemini_part_thought_signature_payload
+      ~target:Backend_gemini.Gemini_text_part
+      ~thought_signature:"sig-text-stranded"
+  in
+  let messages =
+    [ Types.user_msg "question"
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
+      ; content = [ Types.Text "reply"; Types.RedactedThinking carrier ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; Types.user_msg "next"
+    ]
+  in
+  let config = gemini_config () in
+  (* Stamped as this model's own reasoning, as a stored response is, so the
+     reasoning projection replays the carrier instead of dropping it. *)
+  let messages = stamp_reasoning_history config messages in
+  (match Backend_gemini.build_request_artifact_result ~config ~messages () with
+   | Error reason ->
+     check string "the builder names the stranded carrier"
+       "Gemini thoughtSignature carrier targets text but its adjacent content block is \
+        unsupported"
+       reason
+   | Ok _ -> fail "a stranded carrier must refuse the request");
+  match Complete_common.serialize_http_request ~stream:false ~config ~messages ~tools:[] with
+  | Error (Http_client.AcceptRejected { reason = _ }) -> ()
+  | Error _ -> fail "the serializer must report a local refusal"
+  | Ok _ -> fail "the serializer must refuse a stranded carrier"
+;;
+
 let message_with_blocks role content : Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
@@ -2476,6 +2514,8 @@ let () =
     "backend_gemini"
     [ ( "build_request"
       , [ test_case "basic" `Quick test_basic_request
+        ; test_case "stranded carrier is a typed request refusal" `Quick
+            test_stranded_carrier_is_a_typed_request_refusal
         ; test_case "explicit supported seed" `Quick test_explicit_supported_seed
         ; test_case "omitted seed stays omitted" `Quick test_omitted_seed_stays_omitted
         ; test_case

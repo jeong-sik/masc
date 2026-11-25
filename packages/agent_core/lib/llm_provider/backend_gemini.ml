@@ -1101,6 +1101,17 @@ let build_request ?stream ?cached_content ~config ~messages ?tools () =
   |> request_payload
 ;;
 
+(* The serializer refuses a request in two ways: [invalid_arg] for a config
+   it cannot express, and [Gemini_api_error] for a history it cannot lower
+   (a stranded thoughtSignature carrier, a malformed inlineData). Both are
+   local refusals of this request, decided before anything is sent. *)
+let build_request_artifact_result ?stream ?cached_content ~config ~messages ?tools () =
+  match build_request_artifact ?stream ?cached_content ~config ~messages ?tools () with
+  | artifact -> Ok artifact
+  | exception Invalid_argument reason -> Error reason
+  | exception Gemini_api_error reason -> Error reason
+;;
+
 (* ── Parse response ─────────────────────────────────── *)
 
 let stop_reason_of_finish_reason ~has_tool_use finish_reason =

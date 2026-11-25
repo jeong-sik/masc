@@ -131,7 +131,7 @@ let count_anthropic_staged
 
 (* Gemini [models/{model}:countTokens] counts a whole request: system
    instruction, tools and generation config included. The body comes from
-   {!Backend_gemini.build_request} for the same messages and tools, so the
+   {!Backend_gemini.build_request_artifact_result} for the same messages and tools, so the
    count is of the request the dispatch sends. Both routes use the same
    canonical model ({!Complete_sampling.gemini_target}).
 
@@ -150,8 +150,13 @@ let build_gemini_count_tokens_body
       ~messages
       ~tools
   =
-  match Backend_gemini.build_request ~config ~messages ~tools () |> Yojson.Safe.from_string with
-  | `Assoc fields ->
+  match
+    Result.map
+      (fun artifact -> Yojson.Safe.from_string (Backend_gemini.request_payload artifact))
+      (Backend_gemini.build_request_artifact_result ~config ~messages ~tools ())
+  with
+  | Error reason -> Error (Http_client.AcceptRejected { reason })
+  | Ok (`Assoc fields) ->
     (match Vertex_endpoint.parse_base_url target.base_url with
      | Ok (_ : string * Vertex_endpoint.location) ->
        Ok
@@ -167,9 +172,8 @@ let build_gemini_count_tokens_body
                 [ ( "generateContentRequest"
                   , `Assoc (("model", `String target.model_resource) :: fields) )
                 ])))
-  | _ ->
+  | Ok (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
     Error (Http_client.AcceptRejected { reason = "Gemini request body is not a JSON object" })
-  | exception Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
   | exception Yojson.Json_error reason -> Error (Http_client.AcceptRejected { reason })
 ;;
 

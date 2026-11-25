@@ -152,6 +152,11 @@ export function ToolsTab(_props: WorkspaceViewProps) {
 
   const selectedOAuthTarget = useRef<OAuthTarget | null>(null)
   const oauthRead = useRef<AbortController | null>(null)
+  const skillReadRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => {
+    skillReadRef.current?.abort()
+  }, [])
 
   const isCurrentOAuthTarget = (target: OAuthTarget | null) =>
     target !== null && target === selectedOAuthTarget.current && target.epoch === sessionEpoch.peek()
@@ -433,15 +438,24 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   ], [])
 
   // Skills editor handlers
+  const skillKey = (s: SkillSummaryItem | null): string =>
+    s ? `${s.identity.source_id}:${s.identity.package_id}:${s.identity.name}` : ''
+
   const handleOpenSkill = async (skill: SkillSummaryItem) => {
+    skillReadRef.current?.abort()
+    const ctrl = new AbortController()
+    skillReadRef.current = ctrl
     setSelectedSkill(skill)
+    setSkillSource('')
     setSkillPreviewNote(null)
     setSkillBusy(true)
     const res = await apiMutate<{ readonly source_text?: string; readonly access?: 'read_only' | 'read_write' }>(
       'POST',
       '/api/v1/skills/editor/read',
       { reference: { identity: skill.identity, content_revision: skill.content_revision } },
+      { signal: ctrl.signal },
     )
+    if (ctrl.signal.aborted) return
     setSkillBusy(false)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `SKILL.md 읽기 실패: ${res.error.message}` })
@@ -494,11 +508,18 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       return
     }
     setBanner({ kind: 'ok', text: `SKILL.md 저장 완료 (${res.value.status ?? 'saved'}).` })
-    void resourceCache.fetch<SkillsApiPayload>(
+    const savedKey = skillKey(selectedSkill)
+    const refreshed = await resourceCache.fetch<SkillsApiPayload>(
       'runtime:skills',
       (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
       { reason: 'manual' },
     )
+    if (refreshed.kind === 'value') {
+      const updated = refreshed.data.snapshot?.skills.find((item) => skillKey(item) === savedKey)
+      if (updated) {
+        setSelectedSkill((cur) => (skillKey(cur) === savedKey ? updated : cur))
+      }
+    }
   }
 
   // Gate connector bind / unbind
@@ -743,7 +764,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                     style=${{
                       justifyContent: 'space-between',
                       textAlign: 'left',
-                      background: selectedSkill?.identity.name === s.identity.name ? 'var(--bg-4)' : undefined,
+                      background: skillKey(selectedSkill) === skillKey(s) ? 'var(--bg-4)' : undefined,
                     }}
                     onClick=${() => void handleOpenSkill(s)}
                   >

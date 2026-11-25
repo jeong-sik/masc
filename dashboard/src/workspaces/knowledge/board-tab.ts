@@ -69,13 +69,37 @@ function ReactionBar(props: {
   readonly disabled?: boolean
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const { active, collapsedZero } = useMemo(
     () => partitionReactions(props.reactions, props.supportedEmojis),
     [props.reactions, props.supportedEmojis],
   )
 
+  useEffect(() => {
+    if (!pickerOpen) return
+    const onOutside = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setPickerOpen(false)
+      }
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onOutside)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onOutside)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pickerOpen])
+
   return html`
-    <div class="kn-reactions">
+    <div ref=${wrapRef} class="kn-reactions">
       ${active.map((r) => html`
         <button
           key=${r.emoji}
@@ -151,6 +175,8 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const commentsEndRef = useRef<HTMLDivElement>(null)
 
   const loadBoard = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
@@ -281,6 +307,8 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     detailAbortRef.current?.abort()
+    setReplyText('')
+    setReplyParentId(null)
     if (!selectedPostId) {
       setDetail(null)
       setDetailLoading(false)
@@ -373,6 +401,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     setReplyParentId(null)
     setFeedback({ kind: 'ok', message: '댓글이 등록되었습니다.' })
     await refreshActiveDetail(activePost.id)
+    queueMicrotask(() => commentsEndRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }))
   }
 
   const handleVotePost = async (postId: string, direction: 'up' | 'down') => {
@@ -599,9 +628,16 @@ export function BoardTab(props: WorkspaceViewProps) {
           <textarea
             class="kn-textarea"
             required
-            placeholder="Markdown 본문…"
+            placeholder="Markdown 본문… (⌘↵ 게시)"
             value=${newBody}
             onInput=${(e: Event) => setNewBody((e.target as HTMLTextAreaElement).value)}
+            onKeyDown=${(e: KeyboardEvent) => {
+              if (e.isComposing || e.keyCode === 229) return
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
+                e.preventDefault()
+                void handleCreatePost(e)
+              }
+            }}
           />
           <div class="kn-actions">
             <button type="submit" class="btn-primary" disabled=${busy}>게시</button>
@@ -782,7 +818,17 @@ export function BoardTab(props: WorkspaceViewProps) {
                       <button type="button" class="btn-ghost kn-btn-compact" disabled=${busy} onClick=${() => void handleVoteComment(c.id, 'down')} aria-label="댓글 비추천">
                         ▼
                       </button>
-                      <button type="button" class="btn-ghost kn-btn-compact" onClick=${() => setReplyParentId(c.id)}>
+                      <button
+                        type="button"
+                        class="btn-ghost kn-btn-compact"
+                        onClick=${() => {
+                          setReplyParentId(c.id)
+                          queueMicrotask(() => {
+                            replyTextareaRef.current?.focus()
+                            replyTextareaRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                          })
+                        }}
+                      >
                         답글
                       </button>
                     </div>
@@ -800,6 +846,8 @@ export function BoardTab(props: WorkspaceViewProps) {
                 </div>
               `)}
 
+              <div ref=${commentsEndRef} />
+
               <form class="kn-reply-form" onSubmit=${handleReply}>
                 ${replyParentId && html`
                   <div class="kn-notice kn-notice--info">
@@ -810,10 +858,18 @@ export function BoardTab(props: WorkspaceViewProps) {
                   </div>
                 `}
                 <textarea
+                  ref=${replyTextareaRef}
                   class="kn-textarea kn-textarea--reply"
-                  placeholder="댓글을 작성하세요 (Markdown 지원)…"
+                  placeholder="댓글을 작성하세요 (Markdown 지원 · ⌘↵ 등록)…"
                   value=${replyText}
                   onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
+                  onKeyDown=${(e: KeyboardEvent) => {
+                    if (e.isComposing || e.keyCode === 229) return
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && replyText.trim()) {
+                      e.preventDefault()
+                      void handleReply(e)
+                    }
+                  }}
                 />
                 <div class="kn-actions">
                   <button type="submit" class="btn-primary" disabled=${busy || !replyText.trim()}>
@@ -832,6 +888,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${activePost !== null}
+      selectionKey=${selectedPostId}
       masterLabel="게시글 목록"
       detailLabel="게시글 상세"
       emptyDetail=${html`

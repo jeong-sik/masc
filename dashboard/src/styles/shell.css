@@ -2,8 +2,8 @@
  * Pure OKLCH tokens only (0 raw hex), 4px spacing scale (--sp-1..6), min-width: 0 everywhere. */
 
 .ap-shell {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100dvh;
   width: 100%;
   max-width: 100vw;
@@ -52,6 +52,7 @@
 
 /* ── Slim Top Bar (50px) ── */
 .ap-topbar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -570,6 +571,7 @@
 
 /* ── Main Stage (Collapsible Rail + Workspace Host + Optional Push QuickPeekDrawer) ── */
 .ap-stage {
+  flex: 1 1 0%;
   display: flex;
   min-width: 0;
   min-height: 0;

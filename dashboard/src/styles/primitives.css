@@ -231,9 +231,16 @@
 }
 
 /* ── MasterDetail (Selective 42% / 58% @container split) ── */
-.md-split {
+.md-container {
   container-type: inline-size;
   container-name: master-detail;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.md-split {
   display: grid;
   grid-template-columns: minmax(0, 42%) minmax(0, 58%);
   gap: var(--sp-4);

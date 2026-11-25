@@ -308,5 +308,18 @@ describe('workspaces/infra', () => {
     await flushUi(15)
     expect(container.querySelector('[data-testid="logs-kv-inspector"]')).not.toBeNull()
     expect(onInspect).toHaveBeenCalledTimes(1)
+
+    // Pause toggle pauses live updates and buffers incoming events until resumed
+    const pauseBtn = container.querySelector('[data-testid="logs-pause-toggle"]') as HTMLButtonElement
+    expect(pauseBtn).not.toBeNull()
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
+    pauseBtn.click()
+    await flushUi(10)
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('[data-testid="logs-stream-status"]')?.textContent).toContain('PAUSED')
+
+    pauseBtn.click()
+    await flushUi(10)
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
   })
 })

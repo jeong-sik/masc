@@ -15,7 +15,9 @@ import { activeWorkspaceId, sessionEpoch } from '../core/auth'
 import { TargetLockedAction, type TargetLockState } from '../components/primitives/target-locked-action'
 import { navigate } from '../routes/router'
 import {
+  commandPaletteOpen,
   isMobileViewport,
+  mobileMoreOpen,
   pendingApprovals,
   pendingAsks,
   refreshPendingHitl,
@@ -49,7 +51,9 @@ export function FastApprovalStrip(): VNode | null {
   useEffect(() => {
     if (!headApproval && !headAsk) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.shiftKey || commandPaletteOpen.peek() || mobileMoreOpen.peek()) return
+      if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (event.metaKey || event.ctrlKey) return
       const key = event.key.toLowerCase()
       const typing = isEditableTarget(event.target)

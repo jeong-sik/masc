@@ -266,6 +266,11 @@ export function TasksTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
+    setCancelReason('')
+    setLinkGoalId('')
+  }, [selectedTaskId, selectedScheduleId, chip])
+
+  useEffect(() => {
     if (chip !== 'schedules' && selectedTask) {
       const controller = new AbortController()
       setHistoryEvents([])
@@ -513,7 +518,19 @@ export function TasksTab(props: WorkspaceViewProps) {
           </div>
           <div class="wk-field">
             <label for="new-task-desc">설명</label>
-            <textarea id="new-task-desc" class="wk-textarea" value=${newTaskDesc} onInput=${(e: Event) => setNewTaskDesc((e.target as HTMLTextAreaElement).value)} />
+            <textarea
+              id="new-task-desc"
+              class="wk-textarea"
+              value=${newTaskDesc}
+              onInput=${(e: Event) => setNewTaskDesc((e.target as HTMLTextAreaElement).value)}
+              onKeyDown=${(e: KeyboardEvent) => {
+                if (e.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && busyAction === null) {
+                  e.preventDefault()
+                  void handleCreateTask(e)
+                }
+              }}
+            />
           </div>
           <div class="wk-form-grid">
             <div class="wk-field">
@@ -565,7 +582,20 @@ export function TasksTab(props: WorkspaceViewProps) {
           </div>
           <div class="wk-field">
             <label for="sched-msg">메시지</label>
-            <textarea id="sched-msg" class="wk-textarea" required value=${schedMessage} onInput=${(e: Event) => setSchedMessage((e.target as HTMLTextAreaElement).value)} />
+            <textarea
+              id="sched-msg"
+              class="wk-textarea"
+              required
+              value=${schedMessage}
+              onInput=${(e: Event) => setSchedMessage((e.target as HTMLTextAreaElement).value)}
+              onKeyDown=${(e: KeyboardEvent) => {
+                if (e.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && busyAction === null) {
+                  e.preventDefault()
+                  void handleCreateSchedule(e)
+                }
+              }}
+            />
           </div>
           <div class="wk-actions">
             <button type="submit" class="btn-primary" disabled=${busyAction !== null}>예약 등록</button>
@@ -892,6 +922,7 @@ export function TasksTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${chip === 'schedules' ? selectedSchedule !== null : selectedTask !== null}
+      selectionKey=${chip === 'schedules' ? `sched:${selectedScheduleId ?? ''}` : `task:${selectedTaskId ?? ''}`}
       masterLabel=${chip === 'schedules' ? '예약 목록' : '태스크 목록'}
       detailLabel=${chip === 'schedules' ? '예약 상세' : '태스크 상세'}
       emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">항목을 선택하세요.</span></div>`}

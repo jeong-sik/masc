@@ -246,6 +246,19 @@ describe('components/primitives', () => {
     expect(container.querySelector('.md-split')).not.toBeNull()
     expect(container.querySelector('.md-master')!.textContent).toContain('Item 1')
     expect(container.querySelector('.md-detail')!.textContent).toContain('선택된 항목 없음')
+
+    // Switching selectionKey resets detail pane scrollTop to 0
+    render(
+      html`<${MasterDetail} selectionKey="item-1" master=${html`<div>M</div>`} detail=${html`<div>D1</div>`} />`,
+      container,
+    )
+    const detailEl = container.querySelector('.md-detail') as HTMLElement
+    detailEl.scrollTop = 320
+    render(
+      html`<${MasterDetail} selectionKey="item-2" master=${html`<div>M</div>`} detail=${html`<div>D2</div>`} />`,
+      container,
+    )
+    expect(detailEl.scrollTop).toBe(0)
   })
 
   it('VirtualList virtualizes large lists without rendering every DOM node', () => {

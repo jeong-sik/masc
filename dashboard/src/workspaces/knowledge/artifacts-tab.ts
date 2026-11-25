@@ -139,8 +139,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     docAbortRef.current?.abort()
+    setCopyNotice(null)
+    setDoc(null)
     if (!selectedId) {
-      setDoc(null)
       setDocLoading(false)
       return
     }
@@ -359,6 +360,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${doc !== null || docLoading || docError !== null}
+      selectionKey=${selectedId}
       masterLabel="아티팩트 목록"
       detailLabel="아티팩트 미리보기"
       emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">HTML 또는 Markdown 아티팩트를 선택해 미리보세요.</span></div>`}

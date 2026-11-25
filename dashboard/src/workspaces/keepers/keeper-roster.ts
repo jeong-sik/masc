@@ -3,7 +3,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { formatObserved, type Observed } from '../../core/resource-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
@@ -195,6 +195,23 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
   const [draftValues, setDraftValues] = useState<Record<string, string>>({})
   const [preview, setPreview] = useState<ConfigPatchResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const onCloseRef = useRef(props.onClose)
+  onCloseRef.current = props.onClose
+
+  useEffect(() => {
+    queueMicrotask(() => nameInputRef.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onCloseRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -266,7 +283,15 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
   }
 
   return html`
-    <div class="kp-modal-backdrop" role="dialog" aria-modal="true" aria-label="새 Keeper 생성">
+    <div
+      class="kp-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="새 Keeper 생성"
+      onClick=${(e: MouseEvent) => {
+        if (e.target === e.currentTarget) props.onClose()
+      }}
+    >
       <div class="kp-modal">
         <div class="kp-card-head">
           <h3>+ Create Keeper (target=keeper_create)</h3>
@@ -278,6 +303,7 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
         <label class="kp-kv-box">
           <span class="kp-kv-k">Keeper Name (필수)</span>
           <input
+            ref=${nameInputRef}
             type="text"
             class="kp-input"
             placeholder="e.g. code-reviewer-alpha"

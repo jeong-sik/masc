@@ -278,6 +278,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
+    setTransitionNote('')
+  }, [selectedGoalId])
+
+  useEffect(() => {
     if (selectedGoal && selectedGoal.phase === 'Awaiting_confirmation') {
       const controller = new AbortController()
       void loadConfirmation(selectedGoal, controller.signal)
@@ -577,6 +581,13 @@ export function GoalsTab(props: WorkspaceViewProps) {
               class="wk-textarea"
               value=${procedure}
               onInput=${(e: Event) => setProcedure((e.target as HTMLTextAreaElement).value)}
+              onKeyDown=${(e: KeyboardEvent) => {
+                if (e.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !creating) {
+                  e.preventDefault()
+                  void handleCreateGoal(e)
+                }
+              }}
               placeholder="Verifier가 실재성·도달 가능성을 검증할 수 있는 구체적 측정 절차"
             />
           </div>
@@ -883,6 +894,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${selectedGoal !== null}
+      selectionKey=${selectedGoalId}
       masterLabel="목표 목록"
       detailLabel="목표 상세"
       emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">목표를 선택하면 단계 전환, 기준 심사, 검증 판정 및 연결 태스크를 확인할 수 있습니다.</span></div>`}

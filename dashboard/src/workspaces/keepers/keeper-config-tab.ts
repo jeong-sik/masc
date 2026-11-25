@@ -95,7 +95,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     oauthFlowRef.current?.cancel()
   }, [])
 
-  const loadSchema = useCallback(async () => {
+  const loadSchema = useCallback(async (preservePatchResult = false) => {
     setConfigError(null)
     setCasConflict(false)
     const schemaRes = await fetchConfigSchemaApi(`keeper:${keeperName}`)
@@ -105,7 +105,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     }
     setSchema(schemaRes.value)
     setDrafts({})
-    setPatchResult(null)
+    if (!preservePatchResult) {
+      setPatchResult(null)
+    }
     const firstCat = schemaRes.value.categories[0]?.id ?? ''
     setActiveCategoryId((cur) => cur || firstCat)
   }, [keeperName])
@@ -173,7 +175,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     }
     setPatchResult(res.value)
     if (!dryRun && res.value.applied) {
-      await loadSchema()
+      await loadSchema(true)
       props.onMutated()
     }
   }

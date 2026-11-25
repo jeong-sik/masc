@@ -781,4 +781,96 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       expect(savedNoteBody).toEqual({ text: 'Prioritize tests next turn' })
     })
   })
+
+  it('auto-scrolls Chat on load/send, shows jump-to-bottom pill when scrolled up, preserves anchor on prepend, updates user badge to Delivered, and guards /btw IME Enter', async () => {
+    const streamCalls: Record<string, unknown>[] = []
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/chat/history/page')) {
+        if (url.includes('cursor=cur-older')) {
+          return json({
+            messages: [
+              { id: 'old-1', role: 'user', content: 'Earlier question', ts: 1_700_000_001 },
+              { id: 'old-2', role: 'assistant', content: 'Earlier answer', ts: 1_700_000_002 },
+            ],
+            has_more: false,
+            next_cursor: null,
+          })
+        }
+        return json({
+          messages: [
+            { id: 'm-1', role: 'user', content: 'First msg', ts: 1_700_000_010 },
+            { id: 'm-2', role: 'assistant', content: 'Latest msg', ts: 1_700_000_020 },
+          ],
+          has_more: true,
+          next_cursor: 'cur-older',
+        })
+      }
+      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        streamCalls.push(parsed)
+        const sse = `data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Fresh reply' })}\n\ndata: ${JSON.stringify({ type: 'RUN_FINISHED' })}\n\n`
+        return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return json({ entries: [], turns: [] })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    const logEl = chat.getByLabelText('Keeper 대화 기록') as HTMLDivElement
+    Object.defineProperty(logEl, 'scrollHeight', {
+      configurable: true,
+      get: () => logEl.querySelectorAll('article.kp-msg').length * 400,
+    })
+    Object.defineProperty(logEl, 'clientHeight', { configurable: true, get: () => 400 })
+
+    // 1. Initial history load (2 msgs -> 800px) scrolls to bottom
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Latest msg')
+      expect(logEl.scrollTop).toBe(800)
+    })
+
+    // 2. User scrolls up -> jump-to-bottom button appears
+    logEl.scrollTop = 100
+    fireEvent.scroll(logEl)
+    await waitFor(() => {
+      expect(chat.container.querySelector('[data-testid="chat-scroll-bottom"]')).not.toBeNull()
+    })
+
+    // 3. Loading earlier messages (2 -> 4 msgs, +800px growth) preserves viewport anchor (100 -> 900)
+    fireEvent.click(chat.getByRole('button', { name: '이전 대화 불러오기' }))
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Earlier question')
+      expect(logEl.scrollTop).toBe(900)
+    })
+
+    // 4. Sending a new message (4 -> 6 msgs -> 2400px) forces scroll to bottom & transitions user bubble to Delivered
+    const composer = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(composer, { target: { value: 'New question' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Fresh reply')
+      expect(logEl.scrollTop).toBe(2400)
+    })
+    const userBubbles = chat.container.querySelectorAll('article.kp-msg[data-role="user"]')
+    const sentBubble = userBubbles[userBubbles.length - 1]
+    expect(sentBubble?.textContent).toContain('Delivered')
+    expect(sentBubble?.textContent).not.toContain('Sending')
+
+    // 5. /btw input ignores Korean IME composing Enter and submits on committed Enter
+    fireEvent.click(chat.getByRole('button', { name: '/btw 사이드 질의' }))
+    const btwInput = chat.getByPlaceholderText('임시 사이드 질문을 입력하세요…') as HTMLInputElement
+    fireEvent.input(btwInput, { target: { value: '한글 질문' } })
+    fireEvent.keyDown(btwInput, { key: 'Enter', isComposing: true })
+    expect(streamCalls).toHaveLength(1)
+
+    fireEvent.keyDown(btwInput, { key: 'Enter', isComposing: false })
+    await waitFor(() => expect(streamCalls).toHaveLength(2))
+    expect(streamCalls[1]!.turn_instructions).toContain('/btw')
+  })
 })

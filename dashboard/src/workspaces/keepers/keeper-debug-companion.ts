@@ -9,7 +9,7 @@
 
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import { activeWorkspaceId } from '../../core/auth'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
@@ -155,6 +155,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const [cfgFieldValue, setCfgFieldValue] = useState('')
   const [cfgDiff, setCfgDiff] = useState<ConfigPatchResult | null>(null)
   const [cfgError, setCfgError] = useState<string | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
+  }, [tab, keeperName])
 
   const loadTrace = useCallback(async () => {
     setTraceError(null)
@@ -207,11 +212,14 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     }
     setCfgSchema(res.value)
     const firstWritable = res.value.categories.flatMap((c) => c.fields).find((f) => f.writable && !f.secret)
-    if (firstWritable && !cfgFieldKey) {
-      setCfgFieldKey(firstWritable.full_key)
-      setCfgFieldValue(String(firstWritable.current_value ?? ''))
+    if (firstWritable) {
+      setCfgFieldKey((cur) => {
+        if (cur) return cur
+        setCfgFieldValue(String(firstWritable.current_value ?? ''))
+        return firstWritable.full_key
+      })
     }
-  }, [keeperName, cfgFieldKey])
+  }, [keeperName])
 
   useEffect(() => {
     if (tab === 'trace') void loadTrace()
@@ -356,7 +364,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
         `)}
       </div>
 
-      <div class="kp-companion-body">
+      <div ref=${bodyRef} class="kp-companion-body">
         ${tab === 'trace' && html`
           ${traceError && html`<div class="ap-error">${traceError}</div>`}
 
@@ -675,6 +683,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                 onChange=${(e: Event) => {
                   const nextKey = (e.currentTarget as HTMLSelectElement).value
                   setCfgFieldKey(nextKey)
+                  setCfgDiff(null)
                   const f = cfgSchema.categories.flatMap((c) => c.fields).find((x) => x.full_key === nextKey)
                   setCfgFieldValue(f ? String(f.current_value ?? '') : '')
                 }}

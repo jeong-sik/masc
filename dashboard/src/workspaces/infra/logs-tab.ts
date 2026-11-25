@@ -10,7 +10,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
   acquireViewStream,
@@ -110,14 +110,48 @@ export function LogsTab(props: WorkspaceViewProps) {
   const [selectedEntry, setSelectedEntry] = useState<TimelineEntry | null>(null)
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
   const [snapshot, setSnapshot] = useState<SnapshotState>({ kind: 'loading' })
+  const [pausedByUser, setPausedByUser] = useState(false)
+  const [bufferedCount, setBufferedCount] = useState(0)
+  const pausedByUserRef = useRef(false)
+  pausedByUserRef.current = pausedByUser
+  const pendingLiveRef = useRef<TimelineEntry[]>([])
   const liveSupported = authSession.value.kind === 'single_user_local'
   const sseInstanceId = liveSupported ? observerSseInstanceId.value : null
   const pausedByVisibility = sseInstanceId !== null && viewStreamPaused.value
   const epoch = sessionEpoch.value
 
+  const enqueueLiveEntries = useCallback((incoming: readonly TimelineEntry[], resetLogs: boolean) => {
+    if (pausedByUserRef.current) {
+      pendingLiveRef.current = mergeTimeline(pendingLiveRef.current, incoming, resetLogs)
+      setBufferedCount(pendingLiveRef.current.length)
+      return
+    }
+    setEntries((prev) => mergeTimeline(prev, incoming, resetLogs))
+  }, [])
+
+  const toggleUserPause = useCallback(() => {
+    if (pausedByUserRef.current) {
+      const flushed = pendingLiveRef.current
+      pendingLiveRef.current = []
+      setBufferedCount(0)
+      pausedByUserRef.current = false
+      setPausedByUser(false)
+      if (flushed.length > 0) {
+        setEntries((prev) => mergeTimeline(prev, flushed, false))
+      }
+    } else {
+      pausedByUserRef.current = true
+      setPausedByUser(true)
+    }
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
     const { signal } = controller
+    pendingLiveRef.current = []
+    setBufferedCount(0)
+    pausedByUserRef.current = false
+    setPausedByUser(false)
     setEntries([])
     setSnapshot({ kind: 'loading' })
     setSelectedEntry(null)
@@ -165,14 +199,14 @@ export function LogsTab(props: WorkspaceViewProps) {
             : frame.event,
         details: dataObj,
       }
-      setEntries((prev) => mergeTimeline(prev, [evtEntry], false))
+      enqueueLiveEntries([evtEntry], false)
     })
 
     return () => {
       controller.abort()
       unsubObserver()
     }
-  }, [epoch])
+  }, [epoch, enqueueLiveEntries])
 
   // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
   // Waits for observer x-masc-sse-instance-id so zero premature HTTP 400s fire.
@@ -220,7 +254,7 @@ export function LogsTab(props: WorkspaceViewProps) {
                 if (!frame) continue
                 const parsed = parseLogEntriesFromPayload(frame.data)
                 if (parsed.entries.length > 0 || parsed.reset) {
-                  setEntries((prev) => mergeTimeline(prev, parsed.entries, parsed.reset))
+                  enqueueLiveEntries(parsed.entries, parsed.reset)
                 }
               }
             }
@@ -237,12 +271,13 @@ export function LogsTab(props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [sseInstanceId, epoch])
+  }, [sseInstanceId, epoch, enqueueLiveEntries])
 
   const live = sseInstanceId !== null && streamStatus === 'live'
   const connecting = sseInstanceId !== null && streamStatus === 'connecting'
   const snapshotError = !live && snapshot.kind === 'failed' ? snapshot.message : null
-  const sourceLabel = pausedByVisibility ? '⏸ PAUSED (hidden)'
+  const sourceLabel = pausedByUser ? `⏸ PAUSED${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}`
+    : pausedByVisibility ? '⏸ PAUSED (hidden)'
     : live ? '● LIVE SSE'
     : connecting ? '◐ CONNECTING'
     : snapshot.kind === 'ready' ? '○ SNAPSHOT'
@@ -304,9 +339,9 @@ export function LogsTab(props: WorkspaceViewProps) {
               padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
               fontSize: 'var(--fs-11)',
-              border: `1px solid ${pausedByVisibility ? 'var(--warn-border)' : live ? 'var(--ok-border)' : 'var(--line-2)'}`,
-              background: pausedByVisibility ? 'var(--warn-soft)' : live ? 'var(--ok-soft)' : 'var(--bg-2)',
-              color: pausedByVisibility ? 'var(--warn-fg)' : live ? 'var(--ok-fg)' : 'var(--fg-2)',
+              border: `1px solid ${(pausedByUser || pausedByVisibility) ? 'var(--warn-border)' : live ? 'var(--ok-border)' : 'var(--line-2)'}`,
+              background: (pausedByUser || pausedByVisibility) ? 'var(--warn-soft)' : live ? 'var(--ok-soft)' : 'var(--bg-2)',
+              color: (pausedByUser || pausedByVisibility) ? 'var(--warn-fg)' : live ? 'var(--ok-fg)' : 'var(--fg-2)',
             }}
           >
             ${sourceLabel}
@@ -356,7 +391,27 @@ export function LogsTab(props: WorkspaceViewProps) {
             style=${{ flex: '1 1 180px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
 
-          <button type="button" class="btn-ghost" onClick=${() => setEntries([])}>버퍼 비우기</button>
+          <button
+            type="button"
+            class="btn-ghost"
+            data-testid="logs-pause-toggle"
+            aria-pressed=${pausedByUser ? 'true' : 'false'}
+            onClick=${toggleUserPause}
+          >
+            ${pausedByUser ? `▶ 재개${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}` : '⏸ 일시정지'}
+          </button>
+
+          <button
+            type="button"
+            class="btn-ghost"
+            onClick=${() => {
+              pendingLiveRef.current = []
+              setBufferedCount(0)
+              setEntries([])
+            }}
+          >
+            버퍼 비우기
+          </button>
         </div>
 
         <div style=${{ overflowX: 'auto', minWidth: 0 }}>
@@ -387,6 +442,7 @@ export function LogsTab(props: WorkspaceViewProps) {
                   tabIndex=${0}
                   onClick=${() => openInspector(item)}
                   onKeyDown=${(e: KeyboardEvent) => {
+                    if (e.isComposing || e.keyCode === 229) return
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
                       openInspector(item)

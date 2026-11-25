@@ -314,25 +314,52 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
            (Cmd.Get_chat_history
               { keeper = name; limit = Some 80; cursor = None }))
       @ cut_reply_reqs ~force ~keeper:name m
-  | Nav.Keeper_context -> fetches_for_keeper_context ~force ~name m
-  | Nav.Keeper_tool_calls ->
+  | Nav.Keeper_trace -> (
       let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      []
-      |> add_if
-           ((force || not ks.tool_stats_absent)
-            && needs_fetch ~force ks.tool_stats)
-           (Cmd.Get_keeper_tool_stats { keeper = name; window_hours = Some 24 })
-      |> add_if
-           ((force || not ks.tool_calls_auth_denied)
-            && (force || not ks.tool_calls_absent)
-            && needs_fetch ~force ks.tool_calls)
-           (Cmd.Get_keeper_tool_calls
-              {
-                keeper = name;
-                limit = Some 50;
-                execution_ids = None;
-                turn_ref = None;
-              })
+      match ks.trace_section with
+      | Keeper_context_store.Trace_context ->
+          fetches_for_keeper_context ~force ~name m
+      | Keeper_context_store.Trace_tool_calls ->
+          []
+          |> add_if
+               ((force || not ks.tool_stats_absent)
+                && needs_fetch ~force ks.tool_stats)
+               (Cmd.Get_keeper_tool_stats
+                  { keeper = name; window_hours = Some 24 })
+          |> add_if
+               ((force || not ks.tool_calls_auth_denied)
+                && (force || not ks.tool_calls_absent)
+                && needs_fetch ~force ks.tool_calls)
+               (Cmd.Get_keeper_tool_calls
+                  {
+                    keeper = name;
+                    limit = Some 50;
+                    execution_ids = None;
+                    turn_ref = None;
+                  })
+      | Keeper_context_store.Trace_metrics_logs ->
+          []
+          |> add_if
+               (needs_fetch ~force ks.metrics)
+               (Cmd.Get_keeper_metrics { keeper = name })
+          |> add_if
+               (needs_fetch ~force ks.sandbox_logs)
+               (Cmd.Get_keeper_sandbox_logs { keeper = name; tail = Some 200 })
+      | Keeper_context_store.Trace_runtime ->
+          let trace_needed =
+            match m.infra.runtime_trace with
+            | Observed.Value { data = k, _; stale = false; _ } ->
+                force || not (String.equal k name)
+            | Observed.Loading _
+            | Observed.Value { stale = true; _ }
+            | Observed.Absent
+            | Observed.Unreported
+            | Observed.Failed _ ->
+                needs_fetch ~force m.infra.runtime_trace
+          in
+          []
+          |> add_if trace_needed
+               (Cmd.Get_keeper_runtime_trace { keeper = name; limit = Some 50 }))
   | Nav.Keeper_memory ->
       let diff_needed =
         needs_fetch ~force
@@ -409,24 +436,23 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
             && Knowledge_store.equal_keeper_memory_subview
                  m.knowledge.keeper_memory_subview Knowledge_store.Kmem_journal)
            (Cmd.Get_keeper_memory_journal { keeper = name; limit = Some 50 })
-  | Nav.Keeper_work_candle when Board_recovery.shown ~keeper:name m.knowledge.board_recovery ->
+  | Nav.Keeper_work_sandbox
+    when Board_recovery.shown ~keeper:name m.knowledge.board_recovery ->
       let e = Board_recovery.entry ~keeper:name m.knowledge.board_recovery in
       if needs_fetch ~force e.inventory && not (Observed.is_loading e.inventory) then
         [Cmd.Get_board_quarantines { keeper = name; generation = e.generation + 1 }]
       else []
-  | Nav.Keeper_work_candle ->
+  | Nav.Keeper_work_sandbox ->
+      let sandbox_needed =
+        needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
+      in
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.schedules)
            (Cmd.Get_schedules { cursor = None })
-      |> candle_ledger_reqs ~force m
-  | Nav.Keeper_sandbox ->
-      let sandbox_needed =
-        needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
-      in
-      []
       |> add_if sandbox_needed (Cmd.Get_keeper_sandbox { keeper = name })
+      |> candle_ledger_reqs ~force m
   | Nav.Keeper_config ->
       let target = Wire_config.Target_keeper name in
       let schema_needed =
@@ -435,15 +461,6 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
         || needs_fetch ~force m.config.schema
       in
       [] |> add_if schema_needed (Cmd.Get_config_schema target)
-  | Nav.Keeper_logs ->
-      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      []
-      |> add_if
-           (needs_fetch ~force ks.metrics)
-           (Cmd.Get_keeper_metrics { keeper = name })
-      |> add_if
-           (needs_fetch ~force ks.sandbox_logs)
-           (Cmd.Get_keeper_sandbox_logs { keeper = name; tail = Some 200 })
   | Nav.Keeper_identity ->
       let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
       []
@@ -626,21 +643,6 @@ let fetches_for_dive ~force (m : Model.t) =
             needs_fetch ~force m.runtime.exact_run_detail
       in
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
-  | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
-      let trace_needed =
-        match m.infra.runtime_trace with
-        | Observed.Value { data = k, _; stale = false; _ } ->
-            force || not (String.equal k keeper)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.infra.runtime_trace
-      in
-      []
-      |> add_if trace_needed
-           (Cmd.Get_keeper_runtime_trace { keeper; limit = Some 50 })
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
    the slot already holds it fresh. A dive covers the tab, and a Wiki dive
@@ -1475,7 +1477,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
           ( Nav.Dive_work _
           | Nav.Dive_knowledge _
           | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
-          | Nav.Dive_infra _ ) ->
+          ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -1554,7 +1556,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
         ( Nav.Dive_work _
         | Nav.Dive_knowledge _
         | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-        | Nav.Dive_infra _ )
+        )
     | None ->
         []
   in
@@ -1573,7 +1575,7 @@ let chat_tab_shown ~keeper (m : Model.t) =
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      ) ->
       false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -1589,12 +1591,7 @@ let cut_reply_fetches ~keeper (m : Model.t) =
 
 let active_chat_keeper (m : Model.t) =
   match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
-      None
+  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Keepers

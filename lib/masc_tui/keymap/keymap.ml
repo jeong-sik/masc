@@ -805,8 +805,8 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'z');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Cycle_memory_view ~key_display:"t"
-        ~hint_label:(Say.make ~ko:"기억 보기" ~en:"Mem View")
-        ~help_desc:(Say.make ~ko:"기억 보기 모드 순환 (변천/전체/Diff)" ~en:"Cycle Memory view mode (Evolution/Facts/Diff)")
+        ~hint_label:(Say.make ~ko:"섹션/기억" ~en:"Sec/Mem")
+        ~help_desc:(Say.make ~ko:"트레이스 섹션 순환 (컨텍스트/도구/로그/런타임) · 기억 보기 모드 순환 (변천/전체/Diff)" ~en:"Cycle Trace section (Context/Tools/Logs/Runtime) or Memory view (Evolution/Facts/Diff)")
         ~footer_priority:0 (bare_char 't');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_memory_sort ~key_display:"s"
@@ -849,17 +849,17 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'P');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_revision Prev) ~key_display:"{"
-        ~hint_label:(Say.make ~ko:"이전 리비전" ~en:"Prev Rev")
+        ~hint_label:(Say.make ~ko:"이전 섹션/리비전" ~en:"Prev Sec/Rev")
         ~help_desc:
-          (Say.make ~ko:"산출물 이전 리비전으로 이동 (< 별칭)"
-             ~en:"Step to older artifact revision (alias of <)")
+          (Say.make ~ko:"트레이스 이전 섹션 / 산출물 이전 리비전으로 이동 (< 별칭)"
+             ~en:"Previous Trace section / older artifact revision (alias of <)")
         ~footer_priority:0 (bare_char '{');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_revision Next) ~key_display:"}"
-        ~hint_label:(Say.make ~ko:"다음 리비전" ~en:"Next Rev")
+        ~hint_label:(Say.make ~ko:"다음 섹션/리비전" ~en:"Next Sec/Rev")
         ~help_desc:
-          (Say.make ~ko:"산출물 다음 리비전으로 이동 (> 별칭)"
-             ~en:"Step to newer artifact revision (alias of >)")
+          (Say.make ~ko:"트레이스 다음 섹션 / 산출물 다음 리비전으로 이동 (> 별칭)"
+             ~en:"Next Trace section / newer artifact revision (alias of >)")
         ~footer_priority:0 (bare_char '}');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Prev) ~key_display:"<"

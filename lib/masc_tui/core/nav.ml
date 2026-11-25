@@ -42,13 +42,10 @@ type infra_tab =
 
 type keeper_tab =
   | Keeper_chat
-  | Keeper_context
-  | Keeper_tool_calls
+  | Keeper_trace
   | Keeper_memory
-  | Keeper_work_candle
-  | Keeper_sandbox
+  | Keeper_work_sandbox
   | Keeper_config
-  | Keeper_logs
   | Keeper_identity
 
 type work_dive_target =
@@ -66,14 +63,10 @@ type runtime_dive_target =
   | Skill_dive of string
   | Exact_run_dive of string
 
-type infra_dive_target =
-  | Runtime_trace_dive of string
-
 type dive =
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target
-  | Dive_infra of infra_dive_target
 
 type settings_tab =
   | Settings_general_ui
@@ -357,48 +350,36 @@ let prev_infra_tab = function
 let all_keeper_tabs =
   [
     Keeper_chat;
-    Keeper_context;
-    Keeper_tool_calls;
+    Keeper_trace;
     Keeper_memory;
-    Keeper_work_candle;
-    Keeper_sandbox;
+    Keeper_work_sandbox;
     Keeper_config;
-    Keeper_logs;
     Keeper_identity;
   ]
 
 let keeper_tab_label = function
   | Keeper_chat -> Say.make ~ko:"대화 · 스트림" ~en:"Chat"
-  | Keeper_context -> Say.make ~ko:"컨텍스트 · 턴" ~en:"Context & Turns"
-  | Keeper_tool_calls -> Say.make ~ko:"도구 호출" ~en:"Tool Calls"
+  | Keeper_trace -> Say.make ~ko:"트레이스" ~en:"Trace"
   | Keeper_memory -> Say.make ~ko:"기억" ~en:"Memory"
-  | Keeper_work_candle -> Say.make ~ko:"작업 · 캔들" ~en:"Work & Candle"
-  | Keeper_sandbox -> Say.make ~ko:"샌드박스" ~en:"Sandbox"
+  | Keeper_work_sandbox -> Say.make ~ko:"작업 · 샌드박스" ~en:"Work & Sandbox"
   | Keeper_config -> Say.make ~ko:"설정" ~en:"Config"
-  | Keeper_logs -> Say.make ~ko:"로그 · 지표" ~en:"Logs & Metrics"
   | Keeper_identity -> Say.make ~ko:"아이덴티티" ~en:"Identity"
 
 let next_keeper_tab = function
-  | Keeper_chat -> Keeper_context
-  | Keeper_context -> Keeper_tool_calls
-  | Keeper_tool_calls -> Keeper_memory
-  | Keeper_memory -> Keeper_work_candle
-  | Keeper_work_candle -> Keeper_sandbox
-  | Keeper_sandbox -> Keeper_config
-  | Keeper_config -> Keeper_logs
-  | Keeper_logs -> Keeper_identity
+  | Keeper_chat -> Keeper_trace
+  | Keeper_trace -> Keeper_memory
+  | Keeper_memory -> Keeper_work_sandbox
+  | Keeper_work_sandbox -> Keeper_config
+  | Keeper_config -> Keeper_identity
   | Keeper_identity -> Keeper_chat
 
 let prev_keeper_tab = function
   | Keeper_chat -> Keeper_identity
-  | Keeper_context -> Keeper_chat
-  | Keeper_tool_calls -> Keeper_context
-  | Keeper_memory -> Keeper_tool_calls
-  | Keeper_work_candle -> Keeper_memory
-  | Keeper_sandbox -> Keeper_work_candle
-  | Keeper_config -> Keeper_sandbox
-  | Keeper_logs -> Keeper_config
-  | Keeper_identity -> Keeper_logs
+  | Keeper_trace -> Keeper_chat
+  | Keeper_memory -> Keeper_trace
+  | Keeper_work_sandbox -> Keeper_memory
+  | Keeper_config -> Keeper_work_sandbox
+  | Keeper_identity -> Keeper_config
 
 let all_settings_tabs =
   [
@@ -507,14 +488,11 @@ let equal_infra_tab a b = Int.equal (infra_tab_index a) (infra_tab_index b)
 
 let keeper_tab_index = function
   | Keeper_chat -> 0
-  | Keeper_context -> 1
-  | Keeper_tool_calls -> 2
-  | Keeper_memory -> 3
-  | Keeper_work_candle -> 4
-  | Keeper_sandbox -> 5
-  | Keeper_config -> 6
-  | Keeper_logs -> 7
-  | Keeper_identity -> 8
+  | Keeper_trace -> 1
+  | Keeper_memory -> 2
+  | Keeper_work_sandbox -> 3
+  | Keeper_config -> 4
+  | Keeper_identity -> 5
 
 let equal_keeper_tab a b = Int.equal (keeper_tab_index a) (keeper_tab_index b)
 
@@ -551,20 +529,14 @@ let equal_runtime_dive_target a b =
   | Exact_run_dive _, (Tool_dive _ | Skill_dive _) ->
       false
 
-let equal_infra_dive_target a b =
-  match a, b with
-  | Runtime_trace_dive x, Runtime_trace_dive y -> String.equal x y
-
 let equal_dive a b =
   match a, b with
   | Dive_work x, Dive_work y -> equal_work_dive_target x y
   | Dive_knowledge x, Dive_knowledge y -> equal_knowledge_dive_target x y
   | Dive_runtime x, Dive_runtime y -> equal_runtime_dive_target x y
-  | Dive_infra x, Dive_infra y -> equal_infra_dive_target x y
-  | Dive_work _, (Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
-  | Dive_knowledge _, (Dive_work _ | Dive_runtime _ | Dive_infra _)
-  | Dive_runtime _, (Dive_work _ | Dive_knowledge _ | Dive_infra _)
-  | Dive_infra _, (Dive_work _ | Dive_knowledge _ | Dive_runtime _) ->
+  | Dive_work _, (Dive_knowledge _ | Dive_runtime _)
+  | Dive_knowledge _, (Dive_work _ | Dive_runtime _)
+  | Dive_runtime _, (Dive_work _ | Dive_knowledge _) ->
       false
 
 let settings_tab_index = function
@@ -984,14 +956,8 @@ let all_menu_items =
     };
     {
       section = Sec_fleet;
-      target = Menu_keeper_tab Keeper_context;
-      label = keeper_tab_label Keeper_context;
-      shortcut = None;
-    };
-    {
-      section = Sec_fleet;
-      target = Menu_keeper_tab Keeper_tool_calls;
-      label = keeper_tab_label Keeper_tool_calls;
+      target = Menu_keeper_tab Keeper_trace;
+      label = keeper_tab_label Keeper_trace;
       shortcut = None;
     };
     {
@@ -1002,26 +968,14 @@ let all_menu_items =
     };
     {
       section = Sec_fleet;
-      target = Menu_keeper_tab Keeper_work_candle;
-      label = keeper_tab_label Keeper_work_candle;
-      shortcut = None;
-    };
-    {
-      section = Sec_fleet;
-      target = Menu_keeper_tab Keeper_sandbox;
-      label = keeper_tab_label Keeper_sandbox;
+      target = Menu_keeper_tab Keeper_work_sandbox;
+      label = keeper_tab_label Keeper_work_sandbox;
       shortcut = None;
     };
     {
       section = Sec_fleet;
       target = Menu_keeper_tab Keeper_config;
       label = keeper_tab_label Keeper_config;
-      shortcut = None;
-    };
-    {
-      section = Sec_fleet;
-      target = Menu_keeper_tab Keeper_logs;
-      label = keeper_tab_label Keeper_logs;
       shortcut = None;
     };
     {
@@ -1136,29 +1090,26 @@ let menu_item_index = function
   | Menu_knowledge Knowledge_memory -> 10
   | Menu_keepers -> 11
   | Menu_keeper_tab Keeper_chat -> 12
-  | Menu_keeper_tab Keeper_context -> 13
-  | Menu_keeper_tab Keeper_tool_calls -> 14
-  | Menu_keeper_tab Keeper_memory -> 15
-  | Menu_keeper_tab Keeper_work_candle -> 16
-  | Menu_keeper_tab Keeper_sandbox -> 17
-  | Menu_keeper_tab Keeper_config -> 18
-  | Menu_keeper_tab Keeper_logs -> 19
-  | Menu_keeper_tab Keeper_identity -> 20
-  | Menu_runtime Runtime_quotas_credits -> 21
-  | Menu_runtime Runtime_efficiency_spend -> 22
-  | Menu_runtime Runtime_failover_lanes -> 23
-  | Menu_runtime Runtime_fusion -> 24
-  | Menu_runtime Runtime_tools_usage -> 25
-  | Menu_runtime Runtime_connectors -> 26
-  | Menu_runtime Runtime_addons_browser -> 27
-  | Menu_infra Infra_sandboxes -> 28
-  | Menu_infra Infra_repos_changes -> 29
-  | Menu_infra Infra_code -> 30
-  | Menu_infra Infra_activity_logs -> 31
-  | Menu_settings -> 32
-  | Menu_incidents -> 33
-  | Menu_queue_context -> 34
-  | Menu_help -> 35
+  | Menu_keeper_tab Keeper_trace -> 13
+  | Menu_keeper_tab Keeper_memory -> 14
+  | Menu_keeper_tab Keeper_work_sandbox -> 15
+  | Menu_keeper_tab Keeper_config -> 16
+  | Menu_keeper_tab Keeper_identity -> 17
+  | Menu_runtime Runtime_quotas_credits -> 18
+  | Menu_runtime Runtime_efficiency_spend -> 19
+  | Menu_runtime Runtime_failover_lanes -> 20
+  | Menu_runtime Runtime_fusion -> 21
+  | Menu_runtime Runtime_tools_usage -> 22
+  | Menu_runtime Runtime_connectors -> 23
+  | Menu_runtime Runtime_addons_browser -> 24
+  | Menu_infra Infra_sandboxes -> 25
+  | Menu_infra Infra_repos_changes -> 26
+  | Menu_infra Infra_code -> 27
+  | Menu_infra Infra_activity_logs -> 28
+  | Menu_settings -> 29
+  | Menu_incidents -> 30
+  | Menu_queue_context -> 31
+  | Menu_help -> 32
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 

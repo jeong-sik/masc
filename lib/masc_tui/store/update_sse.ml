@@ -30,14 +30,17 @@ let is_viewing_keeper_context ~keeper (m : Model.t) =
       | Some
           ( Nav.Dive_work _
           | Nav.Dive_knowledge _
-          | Nav.Dive_runtime _
-          | Nav.Dive_infra _ ) ->
+          | Nav.Dive_runtime _ ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Keepers
-          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_context
+          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
           && Option.equal String.equal (Model.selected_keeper_name m)
-               (Some keeper))
+               (Some keeper)
+          &&
+          let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+          Keeper_context_store.equal_trace_section ks.trace_section
+            Keeper_context_store.Trace_context)
 
 let is_viewing_keeper_tool_calls ~keeper (m : Model.t) =
   if Option.is_some m.nav.overlay then false
@@ -46,13 +49,16 @@ let is_viewing_keeper_tool_calls ~keeper (m : Model.t) =
     | Some
         ( Nav.Dive_work _
         | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        | Nav.Dive_infra _ ) ->
+        | Nav.Dive_runtime _ ) ->
         false
     | None ->
         Nav.equal_workspace m.nav.workspace Nav.Keepers
-        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_tool_calls
+        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
         && Option.equal String.equal (Model.selected_keeper_name m) (Some keeper)
+        &&
+        let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+        Keeper_context_store.equal_trace_section ks.trace_section
+          Keeper_context_store.Trace_tool_calls
 
 let is_viewing_keeper_chat ~keeper (m : Model.t) =
   match Model.active_dive m with
@@ -63,8 +69,7 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      | Nav.Dive_runtime _ ) ->
       false
 
 let active_memory_keeper (m : Model.t) =
@@ -72,8 +77,7 @@ let active_memory_keeper (m : Model.t) =
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      | Nav.Dive_runtime _ ) ->
       None
   | None -> (
       match m.nav.workspace with
@@ -98,8 +102,7 @@ let is_viewing_memory (m : Model.t) =
       ( Nav.Dive_work _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      | Nav.Dive_runtime _ ) ->
       false
   | None -> (
       match m.nav.workspace with
@@ -116,8 +119,7 @@ let reads_schedules (m : Model.t) =
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      | Nav.Dive_runtime _ ) ->
       false
   | None -> (
       match m.nav.workspace with
@@ -515,7 +517,7 @@ let apply_observation_changed (m : Model.t)
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match m.nav.workspace with
@@ -688,7 +690,7 @@ let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
     | None -> false)
     ||
     match Model.active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
+    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) ->
         false
     | None -> (
         match m.nav.workspace with
@@ -830,7 +832,7 @@ let apply_observer_event (m : Model.t) = function
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match next.nav.workspace with

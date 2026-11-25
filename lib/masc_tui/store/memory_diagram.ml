@@ -341,8 +341,7 @@ let active_memory_content_rect (m : Model.t) =
         | Some
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            | Nav.Dive_runtime _ ) ->
             None
         | None -> (
             match m.nav.workspace with

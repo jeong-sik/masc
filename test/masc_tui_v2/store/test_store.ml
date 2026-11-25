@@ -2006,15 +2006,12 @@ let test_verifier_regressions () =
   let m_kchat, _ =
     Update.execute_slash ~now:t0 m_with_rt (Slash.Keeper (Some "alpha"))
   in
-  (* Cycle prev tab 3x from Keeper_chat wraps Keeper_identity -> Keeper_logs -> Keeper_config *)
+  (* Cycle prev tab 2x from Keeper_chat wraps Keeper_identity -> Keeper_config *)
   let m_kid, _ =
     Update.execute_action ~now:t0 m_kchat (Keymap.Sub_tab Keymap.Prev)
   in
-  let m_klogs, _ =
-    Update.execute_action ~now:t0 m_kid (Keymap.Sub_tab Keymap.Prev)
-  in
   let m_kcfg, cmds_kcfg =
-    Update.execute_action ~now:t0 m_klogs (Keymap.Sub_tab Keymap.Prev)
+    Update.execute_action ~now:t0 m_kid (Keymap.Sub_tab Keymap.Prev)
   in
   Alcotest.(check bool) "Keeper_config switched target to Target_keeper alpha"
     true
@@ -2430,11 +2427,11 @@ let test_round2_store_regressions () =
     "Keeper_memory back to alpha does not ask alpha's fresh diff again" false
     (has_get (is_mem_diff_for "alpha") cmds_kmem_back);
 
-  (* 2. Keeper_sandbox: loaded fresh for alpha, pressing j -> beta fetches beta's sandbox *)
+  (* 2. Keeper_work_sandbox: loaded fresh for alpha, pressing j -> beta fetches beta's sandbox *)
   let m_ksb_alpha =
     {
       m_k with
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox m_k.fleet;
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox m_k.fleet;
       infra =
         Infra_store.set_keeper_sandbox ~keeper:"alpha"
           (Observed.value ~observed_at:t1 alpha_sandbox)
@@ -2445,7 +2442,7 @@ let test_round2_store_regressions () =
     Update.step ~now:t2 m_ksb_alpha (Msg.Key_event (char_key "j"))
   in
   Alcotest.(check bool)
-    "Keeper_sandbox move alpha->beta fetches Get_keeper_sandbox(beta)" true
+    "Keeper_work_sandbox move alpha->beta fetches Get_keeper_sandbox(beta)" true
     (has_get (is_sandbox_for "beta") cmds_ksb_beta);
 
   (* 3. Keeper_config: switching to Keepers + moving alpha->beta syncs config.target
@@ -5926,11 +5923,11 @@ let test_nav_left_right_subtab_cycling_and_guards () =
   Alcotest.(check bool) "Keepers Focus Mode Right does NOT cycle tab" true
     (Nav.equal_keeper_tab m_d_r.fleet.keeper_dive_tab Nav.Keeper_chat);
   let m_d1, _ = step m_dive (char_key "]") in
-  Alcotest.(check bool) "Keepers Focus Mode ']' -> Keeper_context" true
-    (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_context);
+  Alcotest.(check bool) "Keepers Focus Mode ']' -> Keeper_trace" true
+    (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_trace);
   let m_d2, _ = step m_d1 (char_key "]") in
-  Alcotest.(check bool) "Keepers Focus Mode second ']' -> Keeper_tool_calls" true
-    (Nav.equal_keeper_tab m_d2.fleet.keeper_dive_tab Nav.Keeper_tool_calls);
+  Alcotest.(check bool) "Keepers Focus Mode second ']' -> Keeper_memory" true
+    (Nav.equal_keeper_tab m_d2.fleet.keeper_dive_tab Nav.Keeper_memory);
   let m_d0, _ = step m_d1 (char_key "[") in
   Alcotest.(check bool) "Keepers Focus Mode '[' -> Keeper_chat" true
     (Nav.equal_keeper_tab m_d0.fleet.keeper_dive_tab Nav.Keeper_chat);
@@ -6938,7 +6935,7 @@ let test_keepers_views_request_active_schedules () =
       fleet =
         knowledge.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           knowledge.nav with
@@ -8463,7 +8460,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     {
       m_dive_read with
       fleet =
-        Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox m_dive_read.fleet;
+        Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox m_dive_read.fleet;
     }
   in
   let m_esc_other, _ =
@@ -8836,7 +8833,7 @@ let test_failure_is_asked_again_for_a_new_question () =
       fleet =
         failed.fleet
         |> Fleet_store.select_keeper "beta"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           failed.nav with
@@ -8896,7 +8893,7 @@ let test_answers_land_on_their_own_target () =
       fleet =
         m1.fleet
         |> Fleet_store.select_keeper "beta"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           m1.nav with
@@ -12215,17 +12212,19 @@ let test_single_slot_dive_error_target_guards () =
   Alcotest.(check bool)
     "Verification_dive B matching 500 leaves auth_denied false" false
     m_v_500.work.verification_evidence_auth_denied;
-  (* (c) Runtime_trace_dive B ignores delayed Error for A, accepts B. *)
+  (* (c) Keepers > Trace (Trace_runtime) B ignores delayed Error for A, accepts B. *)
   let m_trace_b =
     let base = Model.initial () in
     {
       base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Infra;
-          dive_stack = [ Nav.Dive_infra (Nav.Runtime_trace_dive "beta") ];
-        };
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "beta"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
+      keeper_context =
+        Keeper_context_store.set_trace_section ~keeper:"beta"
+          Keeper_context_store.Trace_runtime base.keeper_context;
+      nav = { base.nav with workspace = Nav.Keepers; zoomed = true };
     }
   in
   let m_t_stale, _ =
@@ -12239,7 +12238,7 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Runtime_trace_dive beta ignores stale alpha Error" false
+    "Trace_runtime beta ignores stale alpha Error" false
     (is_failed m_t_stale.infra.runtime_trace);
   let m_t_match, _ =
     Update.step ~now:t1 m_trace_b
@@ -12252,7 +12251,7 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Runtime_trace_dive beta records matching beta Error" true
+    "Trace_runtime beta records matching beta Error" true
     (is_failed m_t_match.infra.runtime_trace)
 
 let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
@@ -12483,7 +12482,10 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
       fleet =
         m0.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
+      keeper_context =
+        Keeper_context_store.set_trace_section ~keeper:"alpha"
+          Keeper_context_store.Trace_tool_calls m0.keeper_context;
       nav =
         {
           m0.nav with
@@ -12522,13 +12524,13 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
     {
       m_keepers_p1 with
       nav = { m_keepers_p1.nav with pane_index = 0 };
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_context m_keepers_p1.fleet;
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_trace m_keepers_p1.fleet;
     }
   in
   Alcotest.(check bool)
-    "UX-08 active_menu_target keeps Keeper_context even on pane 0" true
+    "UX-08 active_menu_target keeps Keeper_trace even on pane 0" true
     (match Model.active_menu_target m_k_ctx_p0 with
-     | Nav.Menu_keeper_tab Nav.Keeper_context -> true
+     | Nav.Menu_keeper_tab Nav.Keeper_trace -> true
      | _ -> false);
 
   (* UX-09: CLI --lang / --theme override survives boot Reply_tui_preferences *)
@@ -13944,7 +13946,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
     }
   in
   let m_pushed, _ =
-    Update_nav.push_dive m_raw (Nav.Dive_infra (Nav.Runtime_trace_dive "alpha"))
+    Update_nav.push_dive m_raw (Nav.Dive_work (Nav.Goal_dive "g-1"))
   in
   Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
     m_pushed.infra.show_raw_json;
@@ -14813,7 +14815,7 @@ let test_keeper_board_quarantine_recovery () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper keeper
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           base.nav with
@@ -17816,7 +17818,7 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper keeper
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_context;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
       nav =
         {
           base.nav with
@@ -20159,7 +20161,7 @@ let test_layer1_input_esc_focus_traps () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           base.nav with
@@ -20692,11 +20694,13 @@ let test_layer2_pane_scroll_nav_wayfinding () =
       base.fleet
       |> Fleet_store.apply_roster ~observed_at:t0
            (roster_of [ sample_keeper "alpha" ])
-      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls
+      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace
     in
     let keeper_context =
       Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper:"alpha"
         tc_page base.keeper_context
+      |> Keeper_context_store.set_trace_section ~keeper:"alpha"
+           Keeper_context_store.Trace_tool_calls
     in
     {
       base with
@@ -21011,8 +21015,8 @@ let test_layer2_pane_scroll_nav_wayfinding () =
          m_mem_d.knowledge.memory_diff_window
          (Knowledge_store.Window_revs { from_rev = 1; to_rev = 4 }));
 
-  (* #17: All 9 keeper tabs map 1:1 in Nav.all_menu_items & Model.active_menu_target *)
-  Alcotest.(check int) "#17: Nav.all_menu_items has 36 items" 36
+  (* #17: All 6 keeper tabs map 1:1 in Nav.all_menu_items & Model.active_menu_target *)
+  Alcotest.(check int) "#17: Nav.all_menu_items has 33 items" 33
     (List.length Nav.all_menu_items);
   List.iter
     (fun kt ->
@@ -23511,7 +23515,7 @@ let () =
                   fleet =
                     m0.fleet
                     |> Fleet_store.select_keeper "alpha"
-                    |> Fleet_store.set_keeper_dive_tab Nav.Keeper_context;
+                    |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
                   nav =
                     {
                       m0.nav with
@@ -26575,12 +26579,13 @@ let () =
                       entries = [ call_entry ];
                     }
                     Keeper_context_store.empty
+                  |> Keeper_context_store.set_trace_section ~keeper
+                       Keeper_context_store.Trace_tool_calls
                 in
                 {
                   m0 with
                   fleet =
-                    Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls
-                      m0.fleet;
+                    Fleet_store.set_keeper_dive_tab Nav.Keeper_trace m0.fleet;
                   keeper_context = kc;
                 }
               in
@@ -27606,5 +27611,210 @@ let () =
                 true
                 (Nav.equal_workspace m_n_ask_c.nav.workspace Nav.Keepers
                 && m_n_ask_c.nav.zoomed));
+          Alcotest.test_case
+            "Wave 2 Layer 2: 6 Keeper tabs, Trace section switcher, Work & Sandbox, and Dive_infra removal"
+            `Quick
+            (fun () ->
+              let step_k m k = Update.step ~now:t0 m (Msg.Key_event k) in
+              Alcotest.(check int) "6 consolidated Keeper tabs" 6
+                (List.length Nav.all_keeper_tabs);
+              Alcotest.(check int) "Keymap has zero collisions after Trace bindings" 0
+                (List.length (Keymap.collisions ()));
+              let base =
+                let m0 = Model.initial ~cols:140 ~rows:36 () in
+                {
+                  m0 with
+                  fleet =
+                    Fleet_store.apply_keepers ~observed_at:t0
+                      [ sample_keeper "alpha"; sample_keeper "beta" ]
+                      m0.fleet
+                    |> Fleet_store.select_keeper "alpha";
+                }
+              in
+              (* 1. [t] and { / } switch Trace sections cleanly without overloading [v] *)
+              let m_tr0 =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Keepers; pane_index = 1 };
+                  fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_trace base.fleet;
+                }
+              in
+              let m_tr_v1, _ = step_k m_tr0 (char_key "v") in
+              let ks_v1 =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_v1.keeper_context
+              in
+              Alcotest.(check bool)
+                "[v] on Trace_context cycles context subtab without changing trace_section"
+                true
+                (Keeper_context_store.equal_trace_section ks_v1.trace_section
+                   Keeper_context_store.Trace_context
+                && Keeper_context_store.equal_context_subtab ks_v1.subtab
+                     Keeper_context_store.Ctx_flow);
+              let m_tr_tools, cmds_tools = step_k m_tr0 (char_key "t") in
+              let ks_tools =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_tools.keeper_context
+              in
+              Alcotest.(check bool)
+                "[t] advances Trace_context -> Trace_tool_calls and fetches tool calls"
+                true
+                (Keeper_context_store.equal_trace_section ks_tools.trace_section
+                   Keeper_context_store.Trace_tool_calls
+                && List.exists
+                     (function
+                       | Cmd.Http_get
+                           { req = Cmd.Get_keeper_tool_calls { keeper = "alpha"; _ }; _ }
+                         ->
+                           true
+                       | _ -> false)
+                     (Cmd.flatten cmds_tools));
+              let m_tr_logs, cmds_logs = step_k m_tr_tools (char_key "}") in
+              let ks_logs =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_logs.keeper_context
+              in
+              Alcotest.(check bool)
+                "[}] advances Trace_tool_calls -> Trace_metrics_logs and fetches metrics"
+                true
+                (Keeper_context_store.equal_trace_section ks_logs.trace_section
+                   Keeper_context_store.Trace_metrics_logs
+                && List.exists
+                     (function
+                       | Cmd.Http_get
+                           { req = Cmd.Get_keeper_metrics { keeper = "alpha" }; _ } ->
+                           true
+                       | _ -> false)
+                     (Cmd.flatten cmds_logs));
+              let m_tr_logs_v, _ = step_k m_tr_logs (char_key "v") in
+              let ks_logs_v =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_logs_v.keeper_context
+              in
+              Alcotest.(check bool)
+                "[v] on Trace_metrics_logs toggles Logs_metrics -> Logs_sandbox without leaving section"
+                true
+                (Keeper_context_store.equal_trace_section ks_logs_v.trace_section
+                   Keeper_context_store.Trace_metrics_logs
+                && Keeper_context_store.equal_logs_subview ks_logs_v.logs_subview
+                     Keeper_context_store.Logs_sandbox);
+              let m_tr_rt, cmds_rt = step_k m_tr_logs (char_key "t") in
+              let ks_rt =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_rt.keeper_context
+              in
+              Alcotest.(check bool)
+                "[t] advances Trace_metrics_logs -> Trace_runtime and fetches runtime trace"
+                true
+                (Keeper_context_store.equal_trace_section ks_rt.trace_section
+                   Keeper_context_store.Trace_runtime
+                && List.exists
+                     (function
+                       | Cmd.Http_get
+                           {
+                             req = Cmd.Get_keeper_runtime_trace { keeper = "alpha"; _ };
+                             _;
+                           } ->
+                           true
+                       | _ -> false)
+                     (Cmd.flatten cmds_rt));
+              let m_tr_back, _ = step_k m_tr_rt (char_key "{") in
+              let ks_back =
+                Keeper_context_store.get_keeper ~keeper:"alpha"
+                  m_tr_back.keeper_context
+              in
+              Alcotest.(check bool)
+                "[{] steps backward Trace_runtime -> Trace_metrics_logs" true
+                (Keeper_context_store.equal_trace_section ks_back.trace_section
+                   Keeper_context_store.Trace_metrics_logs);
+              (* 2. Infra > Activity_logs [Enter] jumps to Keepers > Trace (Trace_runtime) without Dive_infra, and Esc returns *)
+              let m_infra_act =
+                let inf =
+                  base.infra
+                  |> Infra_store.set_tab Nav.Infra_activity_logs
+                  |> Infra_store.set_source_filter Infra_store.Source_events
+                  |> Infra_store.push_activity
+                       {
+                         at_unix = 1795252000.0;
+                         kind = Infra_store.Activity_turn_complete;
+                         keeper = Some "beta";
+                         summary = "turn done";
+                         detail = None;
+                       }
+                in
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Infra; pane_index = 0 };
+                  infra = inf;
+                }
+              in
+              let m_rt_jump, cmds_rt_jump =
+                step_k m_infra_act (key Keymap.Input.Enter)
+              in
+              let ks_beta =
+                Keeper_context_store.get_keeper ~keeper:"beta"
+                  m_rt_jump.keeper_context
+              in
+              Alcotest.(check bool)
+                "Infra > Activity_logs [Enter] jumps to Keepers > Trace (Trace_runtime) for beta with zero dive"
+                true
+                (Option.is_none (Model.active_dive m_rt_jump)
+                && Nav.equal_workspace m_rt_jump.nav.workspace Nav.Keepers
+                && Nav.equal_keeper_tab m_rt_jump.fleet.keeper_dive_tab
+                     Nav.Keeper_trace
+                && Option.equal String.equal (Model.selected_keeper_name m_rt_jump)
+                     (Some "beta")
+                && Keeper_context_store.equal_trace_section ks_beta.trace_section
+                     Keeper_context_store.Trace_runtime
+                && List.exists
+                     (function
+                       | Cmd.Http_get
+                           {
+                             req = Cmd.Get_keeper_runtime_trace { keeper = "beta"; _ };
+                             _;
+                           } ->
+                           true
+                       | _ -> false)
+                     (Cmd.flatten cmds_rt_jump));
+              let m_rt_ret, _ = step_k m_rt_jump (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc after Infra -> Trace_runtime jump returns to Infra > Activity_logs"
+                true
+                (Nav.equal_workspace m_rt_ret.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m_rt_ret.infra.active_tab
+                     Nav.Infra_activity_logs);
+              (* 3. Keepers > Work & Sandbox: [p] probes sandbox, [o] jumps to Infra > Sandboxes, Esc returns *)
+              let m_wsb =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Keepers; pane_index = 1 };
+                  fleet =
+                    Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox
+                      base.fleet;
+                }
+              in
+              let _, cmds_probe = step_k m_wsb (char_key "p") in
+              Alcotest.(check bool)
+                "[p] on Keepers > Work & Sandbox emits Post_sandbox_probe for alpha"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_sandbox_probe (`Keeper "alpha"); _ } ->
+                         true
+                     | _ -> false)
+                   (Cmd.flatten cmds_probe));
+              let m_sbox_jump, _ = step_k m_wsb (char_key "o") in
+              Alcotest.(check bool)
+                "[o] on Keepers > Work & Sandbox jumps to Infra > Sandboxes" true
+                (Nav.equal_workspace m_sbox_jump.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m_sbox_jump.infra.active_tab
+                     Nav.Infra_sandboxes);
+              let m_sbox_ret, _ = step_k m_sbox_jump (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc after [o] returns to Keepers > Work & Sandbox" true
+                (Nav.equal_workspace m_sbox_ret.nav.workspace Nav.Keepers
+                && Nav.equal_keeper_tab m_sbox_ret.fleet.keeper_dive_tab
+                     Nav.Keeper_work_sandbox));
         ] );
     ]

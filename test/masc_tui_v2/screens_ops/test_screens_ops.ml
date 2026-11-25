@@ -1116,12 +1116,9 @@ let test_keeper_dive_all_5_tabs () =
                           Knowledge_store.View_diff m.knowledge;
                     }
                 | Nav.Keeper_chat
-                | Nav.Keeper_context
-                | Nav.Keeper_tool_calls
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
+                | Nav.Keeper_trace
+                | Nav.Keeper_work_sandbox
                 | Nav.Keeper_config
-                | Nav.Keeper_logs
                 | Nav.Keeper_identity ->
                     m
               in
@@ -1145,51 +1142,39 @@ let test_keeper_dive_all_5_tabs () =
                   in
                   Alcotest.(check bool) "shows honest pending tx state" true
                     (contains_sub ~needle:expected_tx text)
-              | Nav.Keeper_context ->
-                  Alcotest.(check bool) "renders Context & Turns inspector" true
+              | Nav.Keeper_trace ->
+                  Alcotest.(check bool) "renders Trace Context section" true
                     (contains_sub ~needle:"Composition" text
                      || contains_sub ~needle:"구성" text
                      || contains_sub ~needle:"Context" text
                      || contains_sub ~needle:"컨텍스트" text)
-              | Nav.Keeper_tool_calls ->
-                  Alcotest.(check bool) "renders Tool Calls inspector" true
-                    (contains_sub ~needle:"Tool" text
-                     || contains_sub ~needle:"도구" text)
               | Nav.Keeper_memory ->
                   Alcotest.(check bool) "shows HOT heat" true
                     (contains_sub ~needle:"HOT" text);
                   Alcotest.(check bool) "shows before->after updated lesson" true
                     (contains_sub ~needle:"constitution" text)
-              | Nav.Keeper_work_candle ->
+              | Nav.Keeper_work_sandbox ->
                   Alcotest.(check bool) "shows assigned task" true
                     (contains_sub ~needle:"task-3898" text);
                   Alcotest.(check bool) "shows portrait ornament" true
-                    (contains_sub ~needle:"golden-crown" text)
-              | Nav.Keeper_sandbox ->
-                  Alcotest.(check bool) "shows microVM guest" true
-                    (contains_sub ~needle:"apple_container" text);
-                  Alcotest.(check bool) "shows sandbox log" true
-                    (contains_sub ~needle:"agent.sock" text)
+                    (contains_sub ~needle:"golden-crown" text);
+                  Alcotest.(check bool) "shows microVM guest in sandbox summary" true
+                    (contains_sub ~needle:"apple_container" text)
               | Nav.Keeper_config ->
                   Alcotest.(check bool) "never leaks raw secret" false
                     (contains_sub ~needle:"sk-live" text);
                   Alcotest.(check bool) "shows TOML diff preview" true
                     (contains_sub ~needle:"MASC Platform" text)
-              | Nav.Keeper_logs ->
-                  Alcotest.(check bool) "renders Keeper Logs tab" true
-                    (contains_sub ~needle:"Metrics" text
-                     || contains_sub ~needle:"Sandbox" text
-                     || contains_sub ~needle:"Logs" text)
               | Nav.Keeper_identity ->
                   Alcotest.(check bool) "renders Keeper Identity tab" true
                     (contains_sub ~needle:"Identity" text
                      || contains_sub ~needle:"GitHub" text))
             Nav.all_keeper_tabs;
-          (* Also verify remote_ssh keeper sandbox dive *)
+          (* Also verify remote_ssh keeper sandbox summary in Work & Sandbox *)
           let ssh_grid =
             render_to_grid ~cols ~rows
               (Screen_keepers.render_dive ~name:"wkbl-growth"
-                 ~tab:Nav.Keeper_sandbox ~model:m)
+                 ~tab:Nav.Keeper_work_sandbox ~model:m)
           in
           let ssh_txt = grid_all_text ssh_grid in
           Alcotest.(check bool) "shows remote_ssh pool" true
@@ -1744,7 +1729,7 @@ let test_p2_zero_candle_decay_company_counts_and_filter_isolation () =
   let kd_grid =
     render_to_grid ~cols:140 ~rows:40
       (Screen_keepers.render_dive ~name:"e-masc-the-leader"
-         ~tab:Nav.Keeper_work_candle ~model:m_zero)
+         ~tab:Nav.Keeper_work_sandbox ~model:m_zero)
   in
   let kd_txt = grid_all_text kd_grid in
   Alcotest.(check bool) "sub-1.0 C decay retention shows 80.0%" true
@@ -2264,11 +2249,11 @@ let test_v25_keeper_dive_chat_claude_code_archetypes_and_empty_state () =
      && has_any_italic_cell g_empty);
   Alcotest.(check int) "zero nested boxes in Empty Chat" 0
     (count_nested_box_corners g_empty);
-  (* 3. Zero nested boxes on Tab 3 (Keeper_work_candle) *)
+  (* 3. Zero nested boxes on Tab 4 (Keeper_work_sandbox) *)
   let g_wc =
     render_to_grid ~cols:140 ~rows:40
       (Screen_keepers.render_dive ~name:"e-masc-the-leader"
-         ~tab:Nav.Keeper_work_candle ~model:m0)
+         ~tab:Nav.Keeper_work_sandbox ~model:m0)
   in
   Alcotest.(check int) "zero nested boxes in Keeper Dive Work & Candle" 0
     (count_nested_box_corners g_wc)
@@ -3737,10 +3722,10 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
       let g =
         render_to_grid ~cols:140 ~rows:40
           (Screen_keepers.render_dive ~name:"e-masc-the-leader"
-             ~tab:Nav.Keeper_context ~model:m_st)
+             ~tab:Nav.Keeper_trace ~model:m_st)
       in
       let txt = grid_all_text g in
-      Alcotest.(check bool) "Keeper_context subtab populated" true
+      Alcotest.(check bool) "Keeper_trace Context subtab populated" true
         (non_empty_row_count g >= 8);
       match subtab with
       | Keeper_context_store.Ctx_composition ->
@@ -3777,22 +3762,30 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
   let g_den =
     render_to_grid ~cols:140 ~rows:40
       (Screen_keepers.render_dive ~name:"e-masc-the-leader"
-         ~tab:Nav.Keeper_context ~model:m_denied)
+         ~tab:Nav.Keeper_trace ~model:m_denied)
   in
   Alcotest.(check bool) "Exact_input 403 notice renders gracefully" true
     (contains_sub ~needle:"CanAdmin" (grid_all_text g_den)
      || contains_sub ~needle:"403" (grid_all_text g_den)
      || contains_sub ~needle:"Admin" (grid_all_text g_den));
-  (* Keeper_tool_calls renders tool call row + unfolded JSON detail *)
+  (* Keeper_trace (Trace_tool_calls) renders tool call row + unfolded JSON detail *)
+  let m_tc =
+    {
+      m_ctx with
+      keeper_context =
+        Keeper_context_store.set_trace_section ~keeper:"e-masc-the-leader"
+          Keeper_context_store.Trace_tool_calls m_ctx.keeper_context;
+    }
+  in
   let g_tc =
     render_to_grid ~cols:140 ~rows:40
       (Screen_keepers.render_dive ~name:"e-masc-the-leader"
-         ~tab:Nav.Keeper_tool_calls ~model:m_ctx)
+         ~tab:Nav.Keeper_trace ~model:m_tc)
   in
   let txt_tc = grid_all_text g_tc in
-  Alcotest.(check bool) "Keeper_tool_calls shows masc_board_post" true
+  Alcotest.(check bool) "Trace_tool_calls shows masc_board_post" true
     (contains_sub ~needle:"masc_board_post" txt_tc);
-  Alcotest.(check bool) "Keeper_tool_calls unfolds nested JSON string" true
+  Alcotest.(check bool) "Trace_tool_calls unfolds nested JSON string" true
     (contains_sub ~needle:"Wave2" txt_tc);
   (* Dedicated Work_schedules tab renders both populated AND empty state cleanly *)
   let m_empty_sched =
@@ -4492,6 +4485,8 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
            coverage_gaps_count = 0;
            entries = [ call_row ];
          }
+    |> Keeper_context_store.set_trace_section ~keeper
+         Keeper_context_store.Trace_tool_calls
   in
   let kc_p0 =
     kc_calls_only
@@ -4516,7 +4511,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_p0 =
     grid_all_text
       (render_to_grid ~cols:140 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_p0 }))
   in
   Alcotest.(check bool) "Keeper_tool_calls header keeps [Enter/Space] hint after tool_stats loads"
@@ -4547,7 +4542,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_p1 =
     grid_all_text
       (render_to_grid ~cols:140 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_p1 }))
   in
   Alcotest.(check bool) "Keeper_tool_calls shows Loaded all after eof=true" true
@@ -4562,7 +4557,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_absent =
     grid_all_text
       (render_to_grid ~cols:140 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_absent }))
   in
   Alcotest.(check bool) "Keeper_tool_calls surfaces 404 Absent honestly" true
@@ -4575,7 +4570,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_cont_absent =
     grid_all_text
       (render_to_grid ~cols:160 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_cont_absent }))
   in
   Alcotest.(check bool)
@@ -4592,7 +4587,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_initial_failed =
     grid_all_text
       (render_to_grid ~cols:140 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_initial_failed }))
   in
   Alcotest.(check bool) "Keeper_tool_calls surfaces initial Failed + Retry honestly" true
@@ -4608,7 +4603,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_cont_failed =
     grid_all_text
       (render_to_grid ~cols:160 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_cont_failed }))
   in
   Alcotest.(check bool)
@@ -4626,7 +4621,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_conflict =
     grid_all_text
       (render_to_grid ~cols:160 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_conflict }))
   in
   Alcotest.(check bool)
@@ -4658,7 +4653,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_bin_partial =
     grid_all_text
       (render_to_grid ~cols:160 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_bin_partial }))
   in
   Alcotest.(check bool)
@@ -4689,7 +4684,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let txt_tc_bin_full =
     grid_all_text
       (render_to_grid ~cols:160 ~rows:36
-         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_trace
             ~model:{ m0 with keeper_context = kc_bin_full }))
   in
   Alcotest.(check bool)

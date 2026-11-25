@@ -178,7 +178,7 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
         ( Nav.Dive_work _
         | Nav.Dive_knowledge _
         | Nav.Dive_runtime _
-        | Nav.Dive_infra _ ) ->
+        ) ->
         (None, true)
     | None ->
         let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
@@ -1560,8 +1560,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | _ -> (m, []))
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-      | Nav.Dive_infra (Nav.Runtime_trace_dive _) ) ->
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
       (m, [])
   | None -> (
       (* 2. Workspace-level contextual hotkeys *)
@@ -1772,7 +1771,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             else None
           in
           match split_keeper_opt, m.fleet.keeper_dive_tab, printable_char with
-          | Some name, Nav.Keeper_sandbox, Some "p" ->
+          | Some name, Nav.Keeper_work_sandbox, Some "p"
+            when not
+                   (Board_recovery.shown ~keeper:name m.knowledge.board_recovery)
+            ->
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
                      ~ko:("샌드박스 프로브 실행: " ^ name)
@@ -1920,13 +1922,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | None -> (m, []))
           | ( (Some _ | None)
             , ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
+              | Nav.Keeper_trace
               | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
+              | Nav.Keeper_work_sandbox
               | Nav.Keeper_config
-              | Nav.Keeper_logs
               | Nav.Keeper_identity )
             , (Some _ | None) ) ->
               (m, []))
@@ -2139,7 +2138,7 @@ let keeper_config_target_name (m : Model.t) =
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
-      | Nav.Dive_infra _ ) ->
+      ) ->
       None
   | None ->
       if Model.is_keeper_config_active m then Model.selected_keeper_name m
@@ -3370,8 +3369,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | ( ( Some
                                 ( Nav.Dive_work _
                                 | Nav.Dive_knowledge _
-                                | Nav.Dive_runtime _
-                                | Nav.Dive_infra _ )
+                                | Nav.Dive_runtime _ )
                             | None )
                           , ( Keymap.Input.Char _
                             | Keymap.Input.Enter
@@ -3459,8 +3457,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                       ( Nav.Thread_dive _
                                       | Nav.Wiki_dive _
                                       | Nav.Artifact_dive _ )
-                                  | Nav.Dive_runtime _
-                                  | Nav.Dive_infra _ )
+                                  | Nav.Dive_runtime _ )
                               | None )
                             , ( Keymap.Input.Char _
                               | Keymap.Input.Enter
@@ -3539,7 +3536,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                            (Nav.Thread_dive _ | Nav.Wiki_dive _)
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
-                                       | Nav.Dive_infra _ ) ->
+                                       ) ->
                                        false
                                    | None ->
                                        Nav.equal_workspace m.nav.workspace
@@ -3567,7 +3564,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                            (Nav.Thread_dive _ | Nav.Wiki_dive _)
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
-                                       | Nav.Dive_infra _ )
+                                       )
                                    | None ->
                                        false) ->
                                 Some Keymap.Search_prev_match
@@ -3577,8 +3574,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
                                        true
                                    | Some
-                                       ( Nav.Dive_infra _
-                                       | Nav.Dive_knowledge
+                                       ( Nav.Dive_knowledge
                                            (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _ ) ->
@@ -3608,7 +3604,14 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                              || m.nav.zoomed)
                                           && Nav.equal_keeper_tab
                                                m.fleet.keeper_dive_tab
-                                               Nav.Keeper_sandbox)) ->
+                                               Nav.Keeper_work_sandbox
+                                           && not
+                                                (Option.fold ~none:false
+                                                   ~some:(fun name ->
+                                                     Board_recovery.shown
+                                                       ~keeper:name
+                                                       m.knowledge.board_recovery)
+                                                   (Model.selected_keeper_name m)))) ->
                                 Some Keymap.Probe_sandbox
                             | Some "g"
                               when (match Model.active_dive m with
@@ -3620,7 +3623,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                            | Nav.Verification_dive _ )
                                        | Nav.Dive_knowledge _
                                        | Nav.Dive_runtime _
-                                       | Nav.Dive_infra _ ) ->
+                                       ) ->
                                        false
                                    | None ->
                                        Nav.equal_workspace m.nav.workspace
@@ -3639,7 +3642,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                            (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
-                                       | Nav.Dive_infra _ ) ->
+                                       ) ->
                                        false
                                    | None ->
                                        Nav.equal_workspace m.nav.workspace

@@ -2140,7 +2140,259 @@ let render_board_recovery grid ~(rect : Rect.t) ~theme ~(model : Model.t) ~name 
         line (if selected then Typography.anchor theme else value)
           ((if selected then "› " else "  ") ^ Q.inventory_phase_to_string item.phase ^ " · " ^ item.candidate_id))
 
-let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
+let find_ssh_pool_for_keeper (model : Model.t) ~name =
+  match Observed.to_option model.infra.sandboxes with
+  | None -> None
+  | Some snap ->
+      List.find_opt
+        (fun (p : Wire_infra.ssh_pool) ->
+          List.exists
+            (fun (s : Wire_infra.ssh_keeper_session) ->
+              String.equal s.keeper name)
+            p.keeper_sessions)
+        snap.ssh_pools
+
+let resolve_keeper_sandbox (model : Model.t) ~name =
+  match
+    Observed.to_option (Infra_store.keeper_sandbox_for ~keeper:name model.infra)
+  with
+  | Some resp ->
+      let pool_opt =
+        match resp.sandbox with
+        | Wire_infra.Sandbox_ssh_keeper { pool = Some p; _ } -> Some p
+        | Wire_infra.Sandbox_ssh_keeper { pool = None; _ } ->
+            find_ssh_pool_for_keeper model ~name
+        | Wire_infra.Sandbox_microvm _
+        | Wire_infra.Sandbox_ssh_unbound _
+        | Wire_infra.Sandbox_docker _ ->
+            None
+      in
+      Some (resp.sandbox, pool_opt)
+  | None -> (
+      match Observed.to_option model.infra.sandboxes with
+      | None -> None
+      | Some snap -> (
+          match
+            List.find_opt
+              (fun (g : Wire_infra.microvm_guest) -> String.equal g.keeper name)
+              snap.microvm_guests
+          with
+          | Some g -> Some (Wire_infra.Sandbox_microvm g, None)
+          | None -> (
+              let ssh_hit =
+                List.find_map
+                  (fun (p : Wire_infra.ssh_pool) ->
+                    match
+                      List.find_opt
+                        (fun (s : Wire_infra.ssh_keeper_session) ->
+                          String.equal s.keeper name)
+                        p.keeper_sessions
+                    with
+                    | Some sess -> Some (sess, p)
+                    | None -> None)
+                  snap.ssh_pools
+              in
+              match ssh_hit with
+              | Some (sess, pool) ->
+                  Some
+                    ( Wire_infra.Sandbox_ssh_keeper
+                        { session = sess; pool = Some pool }
+                    , Some pool )
+              | None -> (
+                  match
+                    List.find_opt
+                      (fun (u : Wire_infra.ssh_unbound_keeper) ->
+                        String.equal u.keeper name)
+                      snap.ssh_unbound_keepers
+                  with
+                  | Some u -> Some (Wire_infra.Sandbox_ssh_unbound u, None)
+                  | None -> (
+                      match
+                        List.find_opt
+                          (fun (d : Wire_infra.docker_keeper) ->
+                            String.equal d.keeper name)
+                          snap.docker_keepers
+                      with
+                      | Some d -> Some (Wire_infra.Sandbox_docker d, None)
+                      | None -> None)))))
+
+let network_mode_text ~lang = function
+  | Wire_infra.Net_inherit -> Say.resolve lang (Say.make ~ko:"상속 (inherit)" ~en:"inherit")
+  | Wire_infra.Net_none -> Say.resolve lang (Say.make ~ko:"차단 (none)" ~en:"none (isolated)")
+  | Wire_infra.Net_policy -> Say.resolve lang (Say.make ~ko:"정책 (policy)" ~en:"policy")
+
+let render_sandbox_summary grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~name =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let y = ref rect.y and bot = Rect.bottom rect in
+    Card.draw_hairline ~pad_x:0 ~bg
+      ~label:
+        (Ops_common.say model
+           ~ko:"샌드박스 · [p] 프로브 · [o] Infra"
+           ~en:"Sandbox · [p] Probe · [o] Infra")
+      grid ~rect ~y:!y ~theme;
+    incr y;
+    if !y < bot then
+      match resolve_keeper_sandbox model ~name with
+      | None -> (
+          let sandbox_obs =
+            Infra_store.keeper_sandbox_for ~keeper:name model.infra
+          in
+          match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
+          | Some _ ->
+              let lbl, tone = Ops_common.keeper_sandbox_label ~model name in
+              Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+                ~key:(Ops_common.say model ~ko:"프로필" ~en:"Profile")
+                ~value:lbl ~val_fg:(Theme.status_color theme tone)
+                ~val_attrs:Attr.bold ();
+              incr y;
+              if !y < bot then
+                let st, msg =
+                  match sandbox_obs with
+                  | Observed.Failed { reason; _ } ->
+                      ( Typography.status ~bg theme Theme.Status_critical
+                      , Ops_common.say model ~ko:("조회 실패: " ^ reason)
+                          ~en:("Fetch failed: " ^ reason) )
+                  | Observed.Loading _ | Observed.Unreported | Observed.Absent
+                  | Observed.Value _ ->
+                      ( Typography.whisper ~bg theme
+                      , Ops_common.say model
+                          ~ko:"상세 프로브 대기 중 ([p] 프로브 · [o] Infra > Sandboxes)"
+                          ~en:"Telemetry pending ([p] Probe · [o] Infra > Sandboxes)" )
+                in
+                ignore
+                  (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y
+                     ~max_w:rect.w ~style:st msg)
+          | None ->
+              Ops_common.draw_observed_empty grid
+                ~rect:(Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(bot - !y))
+                ~theme ~lang:model.lang sandbox_obs
+                ~empty_msg:
+                  (Say.make ~ko:"샌드박스 정보 없음"
+                     ~en:"No sandbox telemetry"))
+      | Some (Wire_infra.Sandbox_microvm g, _) ->
+          Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+            ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
+            ~value:(Printf.sprintf "%s · %s (%s)" g.backend g.guest_name g.presence)
+            ~val_fg:theme.accent ~val_attrs:Attr.bold ();
+          incr y;
+          if !y < bot then begin
+            let sock_str, sock_fg =
+              match g.agent_socket with
+              | Wire_infra.Socket_present { path_basename } ->
+                  ( Glyph.to_utf8 Glyph.Live_healthy ^ " present"
+                    ^ (match path_basename with Some b -> " (" ^ b ^ ")" | None -> "")
+                  , theme.status_ok )
+              | Wire_infra.Socket_absent { path_basename } ->
+                  ( Glyph.to_utf8 Glyph.Live_failing ^ " absent"
+                    ^ (match path_basename with Some b -> " (" ^ b ^ ")" | None -> "")
+                  , theme.status_critical )
+              | Wire_infra.Socket_non_socket { file_kind } ->
+                  ( Glyph.to_utf8 Glyph.Warning_triangle ^ " non-socket"
+                    ^ (match file_kind with Some k -> " (" ^ k ^ ")" | None -> "")
+                  , theme.status_attention )
+              | Wire_infra.Socket_unreadable { detail } ->
+                  ( Glyph.to_utf8 Glyph.Live_failing ^ " unreadable"
+                    ^ (match detail with Some d -> ": " ^ d | None -> "")
+                  , theme.status_critical )
+            in
+            Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+              ~key:(Ops_common.say model ~ko:"소켓" ~en:"Socket")
+              ~value:
+                (sock_str ^ " · " ^ network_mode_text ~lang:model.lang g.network_mode)
+              ~val_fg:sock_fg ();
+            incr y
+          end;
+          if !y < bot then
+            let m24 = g.metrics_24h in
+            let summary =
+              Printf.sprintf "24h: %d calls · %d fail" m24.calls
+                m24.failures
+            in
+            let st =
+              if m24.failures > 0 then
+                Typography.status ~bg theme Theme.Status_attention
+              else Typography.whisper ~bg theme
+            in
+            ignore
+              (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
+                 ~style:st summary)
+      | Some
+          ( Wire_infra.Sandbox_ssh_keeper { session = sess; pool = embedded_pool }
+          , pool_opt ) ->
+          let pool_opt =
+            match pool_opt with Some _ as p -> p | None -> embedded_pool
+          in
+          let pool_desc, reach_str, reach_fg =
+            match pool_opt with
+            | Some p ->
+                let r_s, r_fg =
+                  match p.reachability with
+                  | Wire_infra.Ssh_reachable { rtt_ms; _ } ->
+                      ( Printf.sprintf "%s %.1fms"
+                          (Glyph.to_utf8 Glyph.Live_healthy)
+                          rtt_ms
+                      , theme.status_ok )
+                  | Wire_infra.Ssh_probe_pending ->
+                      ( Glyph.to_utf8 Glyph.Transport_reconnecting ^ " probing…"
+                      , theme.status_active )
+                  | Wire_infra.Ssh_unreachable { detail; _ } ->
+                      ( Glyph.to_utf8 Glyph.Live_failing ^ " " ^ detail
+                      , theme.status_critical )
+                in
+                ( Printf.sprintf "%s (%s@%s:%d)" p.pool_name p.unix_user p.host
+                    p.port
+                , r_s
+                , r_fg )
+            | None -> ("remote_ssh", "pool pending", theme.text_muted)
+          in
+          Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+            ~key:(Ops_common.say model ~ko:"SSH 풀" ~en:"SSH Pool")
+            ~value:pool_desc ~val_fg:theme.accent ~val_attrs:Attr.bold ();
+          incr y;
+          if !y < bot then begin
+            Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+              ~key:(Ops_common.say model ~ko:"연결" ~en:"Liveness")
+              ~value:reach_str ~val_fg:reach_fg ();
+            incr y
+          end;
+          if !y < bot then
+            ignore
+              (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
+                 ~style:(Typography.whisper ~bg theme)
+                 (Printf.sprintf "24h: %d calls · %d fail"
+                    sess.metrics_24h.calls sess.metrics_24h.failures))
+      | Some (Wire_infra.Sandbox_ssh_unbound u, _) ->
+          Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+            ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
+            ~value:(Printf.sprintf "%s · %s" u.backend u.binding_state)
+            ~val_fg:theme.status_attention ~val_attrs:Attr.bold ();
+          incr y;
+          if !y < bot then
+            Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+              ~key:(Ops_common.say model ~ko:"엔드포인트" ~en:"Endpoint")
+              ~value:
+                (Option.value
+                   ~default:(Glyph.to_utf8 Glyph.Missing_absent)
+                   u.remote_endpoint)
+              ()
+      | Some (Wire_infra.Sandbox_docker d, _) ->
+          Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
+            ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
+            ~value:
+              (d.backend ^ " · " ^ network_mode_text ~lang:model.lang d.network_mode)
+            ~val_fg:theme.status_active ~val_attrs:Attr.bold ();
+          incr y;
+          if !y < bot then
+            ignore
+              (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
+                 ~style:(Typography.whisper ~bg theme)
+                 (Printf.sprintf "24h: %d calls · %d fail"
+                    d.metrics_24h.calls d.metrics_24h.failures))
+
+let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name =
   if Rect.is_empty rect then ()
   else
@@ -2183,8 +2435,29 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let push_line ~fg ~attrs line =
       rows_acc := `Line (fg, attrs, line) :: !rows_acc
     in
-    push_line ~fg:theme.text_secondary ~attrs:Attr.none
-      (Ops_common.say model ~ko:"[v] Board 격리 복구" ~en:"[v] Board quarantine recovery");
+    let quarantine_count =
+      let e = Board_recovery.entry ~keeper:name model.knowledge.board_recovery in
+      match Observed.to_option e.inventory with
+      | Some inv -> List.length inv.items
+      | None -> 0
+    in
+    if quarantine_count > 0 then
+      push_line
+        ~fg:(Theme.status_color theme Theme.Status_attention)
+        ~attrs:Attr.bold
+        (Ops_common.say model
+           ~ko:
+             (Printf.sprintf "%s [v] Board 격리 복구 (%d건 대기)"
+                (Glyph.to_utf8 Glyph.Warning_triangle)
+                quarantine_count)
+           ~en:
+             (Printf.sprintf "%s [v] Board quarantine recovery (%d pending)"
+                (Glyph.to_utf8 Glyph.Warning_triangle)
+                quarantine_count))
+    else
+      push_line ~fg:theme.text_secondary ~attrs:Attr.none
+        (Ops_common.say model ~ko:"[v] Board 격리 복구"
+           ~en:"[v] Board quarantine recovery");
     let now_unix = model.freshness.last_wall_unix in
     let say = Ops_common.say model in
     push_hairline (say ~ko:"주기" ~en:"Cadence");
@@ -2362,7 +2635,7 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                  ~en:"Candle & Ornaments")
           grid ~rect:r_content ~y:!cy ~theme;
         incr cy;
-        match model.work.candle_ledger with
+        (match model.work.candle_ledger with
         | Observed.Value { data = ledger; _ } ->
             let bal_opt =
               List.find_opt
@@ -2436,7 +2709,13 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                    ~show_title:false ratio_spec);
               cy := !cy + gauge_rect.h
             end;
-            if !cy < cbot then begin
+            let reserve_sbox =
+              if r_content.h >= 12 then 5
+              else if r_content.h >= 8 then 4
+              else 3
+            in
+            let candle_bot = Int.max !cy (cbot - reserve_sbox) in
+            if !cy < candle_bot then begin
               ignore
                 (Ops_common.put_line ~clip:r_content grid ~x:r_content.x ~y:!cy
                    ~max_w:r_content.w ~style:(Typography.whisper ~bg theme)
@@ -2445,7 +2724,7 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                       ~en:"Contract: portrait accessories only (no tools/models)"));
               incr cy
             end;
-            if !cy < cbot then begin
+            if !cy < candle_bot then begin
               Card.draw_hairline ~pad_x:0 ~bg
                 ~label:
                   (Printf.sprintf "%s (%d)"
@@ -2481,18 +2760,20 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 ledger.recent_events
             in
             if owned_items = [] && equipped = [] then begin
-              if !cy < cbot then
+              if !cy < candle_bot then begin
                 ignore
                   (Ops_common.put_line ~clip:r_content grid ~x:r_content.x
                      ~y:!cy ~max_w:r_content.w
                      ~style:(Typography.whisper ~bg theme)
                      (Ops_common.say model ~ko:"보유 장신구 없음"
-                        ~en:"No ornaments owned"))
+                        ~en:"No ornaments owned"));
+                incr cy
+              end
             end
             else begin
               List.iter
                 (fun eq ->
-                  if !cy < cbot then begin
+                  if !cy < candle_bot then begin
                     ignore
                       (Ops_common.put_line ~clip:r_content grid ~x:r_content.x
                          ~y:!cy ~max_w:r_content.w
@@ -2500,10 +2781,10 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                          (Glyph.to_utf8 Glyph.Check_mark ^ " " ^ eq));
                     incr cy
                   end)
-                (List.take 3 equipped);
+                (List.take 2 equipped);
               List.iter
                 (fun item ->
-                  if !cy < cbot then begin
+                  if !cy < candle_bot then begin
                     ignore
                       (Ops_common.put_line ~clip:r_content grid ~x:r_content.x
                          ~y:!cy ~max_w:r_content.w
@@ -2511,571 +2792,30 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                          (Glyph.to_utf8 Glyph.Separator_dot ^ " " ^ item));
                     incr cy
                   end)
-                (List.take 5 owned_items)
+                (List.take 3 owned_items)
             end
         | ( Observed.Loading _
           | Observed.Absent
           | Observed.Unreported
           | Observed.Failed _ ) as obs ->
-            Ops_common.draw_observed_empty grid
-              ~rect:
-                (Rect.make ~x:r_content.x ~y:!cy ~w:r_content.w
-                   ~h:(Int.max 0 (cbot - !cy)))
-              ~theme ~lang:model.lang obs
-              ~empty_msg:
-                (Say.make ~ko:"캔들 원장 데이터 없음" ~en:"No candle ledger data")
+            let candle_h = Int.min 2 (Int.max 0 (cbot - !cy)) in
+            if candle_h > 0 then begin
+              Ops_common.draw_observed_empty grid
+                ~rect:
+                  (Rect.make ~x:r_content.x ~y:!cy ~w:r_content.w ~h:candle_h)
+                ~theme ~lang:model.lang obs
+                ~empty_msg:
+                  (Say.make ~ko:"캔들 원장 데이터 없음" ~en:"No candle ledger data");
+              cy := !cy + candle_h
+            end);
+        let sbox_h = Int.max 0 (cbot - !cy) in
+        if sbox_h >= 2 then
+          let sbox_rect =
+            Rect.make ~x:r_content.x ~y:!cy ~w:r_content.w ~h:sbox_h
+          in
+          render_sandbox_summary grid ~rect:sbox_rect ~theme ~model ~name
       end
     end
-
-(* --- Tab 4: Sandbox (microVM / remote_ssh + 24h failure classes + logs) --- *)
-
-let find_ssh_pool_for_keeper (model : Model.t) ~name =
-  match Observed.to_option model.infra.sandboxes with
-  | None -> None
-  | Some snap ->
-      List.find_opt
-        (fun (p : Wire_infra.ssh_pool) ->
-          List.exists
-            (fun (s : Wire_infra.ssh_keeper_session) ->
-              String.equal s.keeper name)
-            p.keeper_sessions)
-        snap.ssh_pools
-
-let resolve_keeper_sandbox (model : Model.t) ~name =
-  match
-    Observed.to_option (Infra_store.keeper_sandbox_for ~keeper:name model.infra)
-  with
-  | Some resp ->
-      let pool_opt =
-        match resp.sandbox with
-        | Wire_infra.Sandbox_ssh_keeper { pool = Some p; _ } -> Some p
-        | Wire_infra.Sandbox_ssh_keeper { pool = None; _ } ->
-            find_ssh_pool_for_keeper model ~name
-        | Wire_infra.Sandbox_microvm _
-        | Wire_infra.Sandbox_ssh_unbound _
-        | Wire_infra.Sandbox_docker _ ->
-            None
-      in
-      Some (resp.sandbox, pool_opt)
-  | None -> (
-      match Observed.to_option model.infra.sandboxes with
-      | None -> None
-      | Some snap -> (
-          match
-            List.find_opt
-              (fun (g : Wire_infra.microvm_guest) -> String.equal g.keeper name)
-              snap.microvm_guests
-          with
-          | Some g -> Some (Wire_infra.Sandbox_microvm g, None)
-          | None -> (
-              let ssh_hit =
-                List.find_map
-                  (fun (p : Wire_infra.ssh_pool) ->
-                    match
-                      List.find_opt
-                        (fun (s : Wire_infra.ssh_keeper_session) ->
-                          String.equal s.keeper name)
-                        p.keeper_sessions
-                    with
-                    | Some sess -> Some (sess, p)
-                    | None -> None)
-                  snap.ssh_pools
-              in
-              match ssh_hit with
-              | Some (sess, pool) ->
-                  Some
-                    ( Wire_infra.Sandbox_ssh_keeper
-                        { session = sess; pool = Some pool }
-                    , Some pool )
-              | None -> (
-                  match
-                    List.find_opt
-                      (fun (u : Wire_infra.ssh_unbound_keeper) ->
-                        String.equal u.keeper name)
-                      snap.ssh_unbound_keepers
-                  with
-                  | Some u -> Some (Wire_infra.Sandbox_ssh_unbound u, None)
-                  | None -> (
-                      match
-                        List.find_opt
-                          (fun (d : Wire_infra.docker_keeper) ->
-                            String.equal d.keeper name)
-                          snap.docker_keepers
-                      with
-                      | Some d -> Some (Wire_infra.Sandbox_docker d, None)
-                      | None -> None)))))
-
-let network_mode_text ~lang = function
-  | Wire_infra.Net_inherit -> Say.resolve lang (Say.make ~ko:"상속 (inherit)" ~en:"inherit")
-  | Wire_infra.Net_none -> Say.resolve lang (Say.make ~ko:"차단 (none)" ~en:"none (isolated)")
-  | Wire_infra.Net_policy -> Say.resolve lang (Say.make ~ko:"정책 (policy)" ~en:"policy")
-
-let render_failure_classes grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) (m24 : Wire_infra.tool_metrics_24h) =
-  if Rect.is_empty rect then ()
-  else
-    let bg = Color.of_rgb theme.surface_1 in
-    let fc = m24.failure_classes in
-    let p95 =
-      Format_val.format_observed Format_val.Milliseconds m24.p95_ms
-        ~lang:model.lang
-    in
-    let p50 =
-      Format_val.format_observed Format_val.Milliseconds m24.p50_ms
-        ~lang:model.lang
-    in
-    let y = ref rect.y in
-    let bot = Rect.bottom rect in
-    Card.draw_hairline ~pad_x:0 ~bg
-      ~label:
-        (Ops_common.say model ~ko:"24h 도구 실행 · 오류 분류"
-           ~en:"24h Tool Telemetry & Failures")
-      grid ~rect ~y:!y ~theme;
-    incr y;
-    if !y < bot then begin
-      let hdr =
-        Printf.sprintf "%d calls · %d fail · p50 %s · p95 %s" m24.calls
-          m24.failures p50 p95
-      in
-      ignore
-        (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
-           ~style:(Typography.primary ~bg ~bold:true theme)
-           hdr);
-      incr y
-    end;
-    if !y < bot then begin
-      let classes_line =
-        Printf.sprintf "dep:%d  runtime:%d  policy:%d  workflow:%d  cancel:%d"
-          fc.dependency_unavailable fc.runtime_failure fc.policy_rejection
-          fc.workflow_rejection fc.operator_cancelled
-      in
-      let st =
-        if fc.dependency_unavailable + fc.runtime_failure > 0 then
-          Typography.status ~bg theme Theme.Status_attention
-        else Typography.whisper ~bg theme
-      in
-      ignore
-        (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
-           ~style:st classes_line);
-      incr y
-    end;
-    if !y < bot && m24.failures > 0 then begin
-      let bar_rect =
-        Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(Int.min 2 (bot - !y))
-      in
-      let segments =
-        [
-          (Say.literal "dep", Float.of_int fc.dependency_unavailable, Theme.Status_critical);
-          (Say.literal "run", Float.of_int fc.runtime_failure, Theme.Status_attention);
-          (Say.literal "pol", Float.of_int fc.policy_rejection, Theme.Status_active);
-          (Say.literal "wf", Float.of_int fc.workflow_rejection, Theme.Status_historical);
-        ]
-        |> List.filter (fun (_, v, _) -> v > 0.0)
-      in
-      if segments <> [] then
-        ignore
-          (Chart.draw grid ~rect:bar_rect ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~show_title:false
-             {
-               Chart.Spec.title = Say.make ~ko:"실패 분류" ~en:"Failures";
-               kind =
-                 Chart.Spec.Stacked_bar
-                   {
-                     segments;
-                     total_label = Say.literal (Int.to_string m24.failures);
-                     unit = Format_val.Count;
-                   };
-               hotkey_hint = None;
-             })
-    end
-
-let render_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~name =
-  if Rect.is_empty rect then ()
-  else
-    let bg = Color.of_rgb theme.surface_1 in
-    let pad_x = Ops_common.pad_x_for ~model rect in
-    let content = Card.pad_inner ~pad_x rect in
-    if Rect.is_empty content then ()
-    else
-      let top_h = Int.min 10 (Int.max 4 (content.h / 2)) in
-      let top_rect, rest_rect = Rect.split_v content ~top_h in
-      let metrics_h = if rest_rect.h >= 8 then 5 else if rest_rect.h >= 5 then 3 else 0 in
-      let metrics_rect, logs_rect = Rect.split_v rest_rect ~top_h:metrics_h in
-      let m24_opt =
-        match resolve_keeper_sandbox model ~name with
-        | None ->
-            let sandbox_obs =
-              Infra_store.keeper_sandbox_for ~keeper:name model.infra
-            in
-            (match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
-            | Some _ ->
-                let lbl, tone = Ops_common.keeper_sandbox_label ~model name in
-                Ops_common.draw_kv_row grid ~rect:top_rect ~y:top_rect.y ~theme
-                  ~bg ~label_w:14
-                  ~key:(Ops_common.say model ~ko:"프로필" ~en:"Profile")
-                  ~value:lbl ~val_fg:(Theme.status_color theme tone)
-                  ~val_attrs:Attr.bold ();
-                if top_rect.h >= 2 then begin
-                  let style, line =
-                    match sandbox_obs with
-                    | Observed.Failed { reason; _ } ->
-                        ( Typography.status ~bg theme Theme.Status_critical
-                        , Ops_common.say model ~ko:("조회 실패: " ^ reason)
-                            ~en:("Fetch failed: " ^ reason) )
-                    | Observed.Loading _ | Observed.Unreported
-                    | Observed.Absent | Observed.Value _ ->
-                        ( Typography.whisper ~bg theme
-                        , Ops_common.say model
-                            ~ko:"상세 샌드박스 프로브 데이터 대기 중"
-                            ~en:"Detailed sandbox telemetry pending" )
-                  in
-                  ignore
-                    (Ops_common.put_line ~clip:top_rect grid ~x:top_rect.x
-                       ~y:(top_rect.y + 1) ~max_w:top_rect.w ~style line)
-                end
-            | None ->
-                Ops_common.draw_observed_empty grid ~rect:top_rect ~theme
-                  ~lang:model.lang sandbox_obs
-                  ~empty_msg:
-                    (Say.make ~ko:"이 키퍼의 샌드박스 정보 없음"
-                       ~en:"No sandbox telemetry for this keeper"));
-            None
-        | Some (Wire_infra.Sandbox_microvm g, _) ->
-            let y = ref top_rect.y in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
-              ~value:(Printf.sprintf "%s · %s (%s)" g.backend g.guest_name g.presence)
-              ~val_fg:theme.accent ~val_attrs:Attr.bold ();
-            incr y;
-            let sock_str, sock_fg =
-              match g.agent_socket with
-              | Wire_infra.Socket_present { path_basename } ->
-                  ( Glyph.to_utf8 Glyph.Live_healthy ^ " present"
-                    ^ (match path_basename with Some b -> " (" ^ b ^ ")" | None -> "")
-                  , theme.status_ok )
-              | Wire_infra.Socket_absent { path_basename } ->
-                  ( Glyph.to_utf8 Glyph.Live_failing ^ " absent"
-                    ^ (match path_basename with Some b -> " (" ^ b ^ ")" | None -> "")
-                  , theme.status_critical )
-              | Wire_infra.Socket_non_socket { file_kind } ->
-                  ( Glyph.to_utf8 Glyph.Warning_triangle ^ " non-socket"
-                    ^ (match file_kind with Some k -> " (" ^ k ^ ")" | None -> "")
-                  , theme.status_attention )
-              | Wire_infra.Socket_unreadable { detail } ->
-                  ( Glyph.to_utf8 Glyph.Live_failing ^ " unreadable"
-                    ^ (match detail with Some d -> ": " ^ d | None -> "")
-                  , theme.status_critical )
-            in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"소켓" ~en:"Agent Socket")
-              ~value:sock_str ~val_fg:sock_fg ();
-            incr y;
-            let shim_str, shim_fg =
-              match g.shim_parity with
-              | Wire_infra.Shim_matched id ->
-                  (Glyph.to_utf8 Glyph.Check_mark ^ " matched (" ^ id ^ ")", theme.status_ok)
-              | Wire_infra.Shim_mismatch { shim_identity; server_identity } ->
-                  ( Printf.sprintf "%s mismatch (shim=%s vs srv=%s)"
-                      (Glyph.to_utf8 Glyph.Warning_triangle)
-                      shim_identity
-                      (match server_identity with Some s -> s | None -> "?")
-                  , theme.status_attention )
-              | Wire_infra.Shim_undeclared -> ("undeclared", theme.text_muted)
-              | Wire_infra.Shim_unavailable r ->
-                  ("unavailable: " ^ r, theme.status_critical)
-            in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"심 버전" ~en:"Shim Parity")
-              ~value:shim_str ~val_fg:shim_fg ();
-            incr y;
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"네트워크" ~en:"Network")
-              ~value:(network_mode_text ~lang:model.lang g.network_mode) ();
-            incr y;
-            let vol_str, vol_fg =
-              match g.volume with
-              | Wire_infra.Volume_declared v ->
-                  (Glyph.to_utf8 Glyph.Live_healthy ^ " " ^ v, theme.status_ok)
-              | Wire_infra.Volume_invalid err ->
-                  (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ err, theme.status_critical)
-            in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"볼륨 상태" ~en:"Volume")
-              ~value:vol_str ~val_fg:vol_fg ();
-            incr y;
-            let res_str =
-              let cpu_s =
-                match g.cpus with
-                | Observed.Value { data; _ } -> Printf.sprintf "%d vCPU" data
-                | Observed.Loading _ | Observed.Absent | Observed.Unreported
-                | Observed.Failed _ ->
-                    "?"
-              in
-              let mem_s =
-                match g.memory_mib with
-                | Observed.Value { data; _ } -> Printf.sprintf "%d MiB" data
-                | Observed.Loading _ | Observed.Absent | Observed.Unreported
-                | Observed.Failed _ ->
-                    "?"
-              in
-              cpu_s ^ " · " ^ mem_s
-            in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"자원" ~en:"Resources")
-              ~value:res_str ();
-            Some g.metrics_24h
-        | Some
-            ( Wire_infra.Sandbox_ssh_keeper
-                { session = sess; pool = embedded_pool }
-            , pool_opt ) ->
-            let pool_opt =
-              match pool_opt with Some _ as p -> p | None -> embedded_pool
-            in
-            let y = ref top_rect.y in
-            let pool_desc, reach_str, reach_fg, sess_str, sess_ratio_opt =
-              match pool_opt with
-              | Some p ->
-                  let r_s, r_fg =
-                    match p.reachability with
-                    | Wire_infra.Ssh_reachable { rtt_ms; _ } ->
-                        ( Printf.sprintf "%s reachable · RTT %.1fms"
-                            (Glyph.to_utf8 Glyph.Live_healthy)
-                            rtt_ms
-                        , theme.status_ok )
-                    | Wire_infra.Ssh_probe_pending ->
-                        ( Glyph.to_utf8 Glyph.Transport_reconnecting ^ " probing…"
-                        , theme.status_active )
-                    | Wire_infra.Ssh_unreachable { detail; _ } ->
-                        ( Glyph.to_utf8 Glyph.Live_failing ^ " " ^ detail
-                        , theme.status_critical )
-                  in
-                  let active_s, ratio_opt =
-                    match p.active_sessions with
-                    | Observed.Value { data; _ } ->
-                        let r =
-                          if p.max_sessions > 0 then
-                            Some
-                              (Float.min 1.0
-                                 (Float.of_int data /. Float.of_int p.max_sessions))
-                          else None
-                        in
-                        (Int.to_string data, r)
-                    | Observed.Loading _ | Observed.Absent | Observed.Unreported
-                    | Observed.Failed _ ->
-                        ("?", None)
-                  in
-                  ( Printf.sprintf "%s (%s@%s:%d)" p.pool_name p.unix_user
-                      p.host p.port
-                  , r_s
-                  , r_fg
-                  , Printf.sprintf "%s / %d sessions · root %s" active_s
-                      p.max_sessions p.remote_root
-                  , ratio_opt )
-              | None ->
-                  ( "remote_ssh"
-                  , Glyph.to_utf8 Glyph.Missing_unreported
-                    ^ " pool metadata pending"
-                  , theme.text_muted
-                  , Glyph.to_utf8 Glyph.Missing_absent
-                  , None )
-            in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"SSH 풀" ~en:"SSH Pool")
-              ~value:pool_desc ~val_fg:theme.accent ~val_attrs:Attr.bold ();
-            incr y;
-            let rtt_samples =
-              let opt_v = function
-                | Observed.Value { data; _ } when Float.is_finite data -> [ data ]
-                | Observed.Value _ | Observed.Loading _ | Observed.Absent
-                | Observed.Unreported | Observed.Failed _ ->
-                    []
-              in
-              let base_rtt =
-                match pool_opt with
-                | Some { reachability = Wire_infra.Ssh_reachable { rtt_ms; _ }; _ } ->
-                    [ rtt_ms ]
-                | Some
-                    {
-                      reachability =
-                        Wire_infra.Ssh_probe_pending
-                        | Wire_infra.Ssh_unreachable _;
-                      _;
-                    }
-                | None ->
-                    []
-              in
-              Ops_common.samples_of_floats
-                (base_rtt
-                 @ opt_v sess.metrics_24h.p50_ms
-                 @ opt_v sess.metrics_24h.p95_ms
-                 @ opt_v sess.metrics_24h.max_ms)
-            in
-            let sw = 8 in
-            let show_rtt_spark = Array.length rtt_samples > 0 && top_rect.w >= 54 in
-            let kv_rtt_rect =
-              if show_rtt_spark then
-                { top_rect with w = Int.max 0 (top_rect.w - sw - 2) }
-              else top_rect
-            in
-            Ops_common.draw_kv_row grid ~rect:kv_rtt_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"연결 · RTT" ~en:"Liveness · RTT")
-              ~value:reach_str ~val_fg:reach_fg ();
-            if show_rtt_spark then begin
-              let sx = Rect.right top_rect - sw - 1 in
-              ignore
-                (Chart.draw_sparkline_run ~clip:top_rect grid ~x:sx ~y:!y
-                   ~width:sw ~theme ~bg ~unicode:true
-                   ~gradient:Chart.Gradient.Cool_flow rtt_samples)
-            end;
-            incr y;
-            let sess_kv_r =
-              match sess_ratio_opt with
-              | Some _ when top_rect.w >= 56 ->
-                  { top_rect with w = Int.max 0 (top_rect.w - 12) }
-              | _ -> top_rect
-            in
-            Ops_common.draw_kv_row grid ~rect:sess_kv_r ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"세션" ~en:"Sessions")
-              ~value:sess_str ();
-            (match sess_ratio_opt with
-            | Some ratio when top_rect.w >= 56 ->
-                let bx = Rect.right top_rect - 10 in
-                ignore
-                  (Chart.draw_ratio_bar_run ~clip:top_rect grid ~x:bx ~y:!y
-                     ~width:10 ~theme ~bg ~unicode:true
-                     ~gradient:Chart.Gradient.Thermal ~ratio)
-            | Some _ | None -> ());
-            incr y;
-            (match sess.last_dispatch with
-            | `Null -> ()
-            | ( `Assoc _ | `List _ | `Bool _ | `Int _ | `Intlit _ | `Float _
-              | `String _ ) as dispatch_json ->
-                let jt_rect =
-                  Rect.make ~x:top_rect.x ~y:!y ~w:top_rect.w
-                    ~h:(Int.max 0 (Rect.bottom top_rect - !y))
-                in
-                if not (Rect.is_empty jt_rect) then begin
-                  let lines =
-                    Json_tree.flatten ~max_depth:2 ~redact_secrets:true
-                      (Ops_common.scrub_json_secrets dispatch_json)
-                  in
-                  ignore (Json_tree.draw grid ~rect:jt_rect ~theme lines)
-                end);
-            Some sess.metrics_24h
-        | Some (Wire_infra.Sandbox_ssh_unbound u, _) ->
-            let y = ref top_rect.y in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
-              ~value:u.backend ~val_fg:theme.status_attention ~val_attrs:Attr.bold
-              ();
-            incr y;
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"바인딩" ~en:"Binding")
-              ~value:(Glyph.to_utf8 Glyph.Warning_triangle ^ " " ^ u.binding_state)
-              ~val_fg:theme.status_attention ();
-            incr y;
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"원격 엔드포인트" ~en:"Endpoint")
-              ~value:
-                (match u.remote_endpoint with
-                | Some e -> e
-                | None -> Glyph.to_utf8 Glyph.Missing_absent)
-              ();
-            Some u.metrics_24h
-        | Some (Wire_infra.Sandbox_docker d, _) ->
-            let y = ref top_rect.y in
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")
-              ~value:d.backend ~val_fg:theme.status_active ~val_attrs:Attr.bold
-              ();
-            incr y;
-            Ops_common.draw_kv_row grid ~rect:top_rect ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"네트워크" ~en:"Network")
-              ~value:(network_mode_text ~lang:model.lang d.network_mode) ();
-            Some d.metrics_24h
-      in
-      (match m24_opt with
-      | Some m24 when metrics_h > 0 ->
-          render_failure_classes grid ~rect:metrics_rect ~theme ~model m24
-      | Some _ | None -> ());
-      (* Bottom: Live Sandbox Tail Logs *)
-      if not (Rect.is_empty logs_rect) then begin
-        Card.draw_hairline ~pad_x:0 ~bg
-          ~label:
-            (Ops_common.say model ~ko:"샌드박스 실시간 로그"
-               ~en:"Live Sandbox Tail Logs")
-          grid ~rect:logs_rect ~y:logs_rect.y ~theme;
-        let keeper_logs =
-          List.filter
-            (fun (l : Wire_infra.system_log_entry) ->
-              Option.equal String.equal l.keeper (Some name))
-            model.infra.logs
-        in
-        let body_logs =
-          Rect.make ~x:logs_rect.x ~y:(logs_rect.y + 1) ~w:logs_rect.w
-            ~h:(Int.max 0 (logs_rect.h - 1))
-        in
-        if keeper_logs = [] && not (Rect.is_empty body_logs) then
-          ignore
-            (Ops_common.put_line ~clip:body_logs grid ~x:body_logs.x
-               ~y:body_logs.y ~max_w:body_logs.w
-               ~style:(Typography.whisper ~bg theme)
-               (Ops_common.say model ~ko:"수신된 샌드박스 로그가 없습니다"
-                  ~en:"No sandbox logs captured for this keeper"))
-        else
-          let max_skip =
-            Int.max 0 (List.length keeper_logs - Int.max 1 body_logs.h)
-          in
-          let skip =
-            Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
-          in
-          List.iteri
-            (fun idx (l : Wire_infra.system_log_entry) ->
-              let py = body_logs.y + idx in
-              if py < Rect.bottom body_logs then begin
-                let lvl_str, tok =
-                  match l.level with
-                  | Wire_infra.Log_error -> ("ERR", Theme.Status_critical)
-                  | Wire_infra.Log_warn -> ("WRN", Theme.Status_attention)
-                  | Wire_infra.Log_info -> ("INF", Theme.Status_active)
-                  | Wire_infra.Log_debug -> ("DBG", Theme.Status_historical)
-                in
-                let adv_t =
-                  Ops_common.put_line ~clip:body_logs grid ~x:body_logs.x ~y:py
-                    ~max_w:10 ~style:(Typography.whisper ~bg theme)
-                    (l.ts ^ " ")
-                in
-                let adv_l =
-                  Ops_common.put_line ~clip:body_logs grid
-                    ~x:(body_logs.x + adv_t) ~y:py ~max_w:6
-                    ~style:(Typography.status ~bg ~bold:true theme tok)
-                    (lvl_str ^ " ")
-                in
-                let msg = Printf.sprintf "%s: %s" l.module_name l.message in
-                ignore
-                  (Ops_common.put_line ~clip:body_logs grid
-                     ~x:(body_logs.x + adv_t + adv_l) ~y:py
-                     ~max_w:(Int.max 0 (body_logs.w - adv_t - adv_l))
-                     ~style:(Typography.primary ~bg theme)
-                     msg)
-              end)
-            (List.take body_logs.h (Store_scroll.drop skip keeper_logs))
-      end
 
 (* --- Tab 5: Config (Scoped In-TUI Settings via v2.5 Form.draw, ZERO $EDITOR) --- *)
 
@@ -3878,7 +3618,122 @@ let render_identity_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         (Store_scroll.drop skip lines)
     end
 
-(* --- Unified 9-Tab Keeper Dive Entrypoint --- *)
+let render_runtime_trace_section grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~name =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let pad_x = Ops_common.pad_x_for ~model rect in
+    let content = Card.pad_inner ~pad_x rect in
+    if Rect.is_empty content then ()
+    else
+      let ks = Keeper_context_store.get_keeper ~keeper:name model.keeper_context in
+      match Infra_store.runtime_trace_for ~keeper:name model.infra with
+      | None ->
+          Ops_common.draw_observed_empty grid ~rect:content ~theme
+            ~lang:model.lang model.infra.runtime_trace
+            ~empty_msg:
+              (Say.make ~ko:"런타임 트레이스 데이터 없음"
+                 ~en:"No runtime trace recorded")
+      | Some tr ->
+          let y = ref content.y and bot = Rect.bottom content in
+          if !y < bot then begin
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:(Typography.accent ~bg ~bold:true theme)
+                 (Printf.sprintf "Keeper: @%s · Trace: %s · Health: %s" tr.keeper
+                    tr.trace_id tr.health));
+            incr y
+          end;
+          if !y < bot then begin
+            let turn_s =
+              match tr.turn_id with Some t -> Printf.sprintf "#%d" t | None -> "-"
+            in
+            let stale_s =
+              match tr.stale_reason with Some sr -> " · stale: " ^ sr | None -> ""
+            in
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:(Typography.structure ~bg theme)
+                 (Printf.sprintf "Turn: %s · Manifest: %d/%d · Receipts: %d%s"
+                    turn_s tr.manifest_returned_rows tr.manifest_total_rows
+                    tr.receipt_returned_rows stale_s));
+            incr y
+          end;
+          if !y < bot then begin
+            Card.draw_hairline ~pad_x:0 ~bg
+              ~label:
+                (Ops_common.say model ~ko:"트레이스 원문 (Json_tree)"
+                   ~en:"Runtime Trace Payload")
+              grid ~rect:content ~y:!y ~theme;
+            incr y
+          end;
+          let tree_h = Int.max 0 (bot - !y) in
+          if tree_h > 0 then begin
+            let tree_rect =
+              Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
+            in
+            let lines =
+              Json_tree.flatten ~max_depth:4 ~redact_secrets:true tr.raw
+            in
+            ignore
+              (Json_tree.draw grid ~rect:tree_rect ~theme
+                 ~scroll:ks.runtime_trace_scroll_offset lines)
+          end
+
+let render_trace_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
+    ~name =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let pad_x = Ops_common.pad_x_for ~model rect in
+    let ks = Keeper_context_store.get_keeper ~keeper:name model.keeper_context in
+    let y = ref rect.y and bot = Rect.bottom rect in
+    if rect.h >= 2 && !y < bot then begin
+      let hint =
+        Ops_common.say model ~ko:"[t / { }] 섹션" ~en:"[t / { }] Section"
+      in
+      let hw = Grapheme.display_width hint in
+      let pill_w =
+        if rect.w > hw + 18 then Int.max 8 (rect.w - hw - pad_x - 2)
+        else rect.w
+      in
+      let pill_r = Rect.make ~x:rect.x ~y:!y ~w:pill_w ~h:1 in
+      let pills =
+        List.map
+          (fun sec ->
+            ( Say.resolve model.lang (Keeper_context_store.trace_section_label sec)
+            , Keeper_context_store.equal_trace_section sec ks.trace_section
+            , None ))
+          Keeper_context_store.all_trace_sections
+      in
+      ignore (Ops_common.draw_pills grid ~rect:pill_r ~theme ~bg pills);
+      if rect.w > hw + 18 then
+        ignore
+          (Ops_common.put_line ~clip:rect grid
+             ~x:(Rect.right rect - pad_x - hw)
+             ~y:!y ~max_w:hw ~style:(Typography.whisper ~bg theme) hint);
+      incr y
+    end;
+    if rect.h >= 6 && !y < bot then begin
+      Card.draw_hairline ~pad_x ~bg grid ~rect ~y:!y ~theme;
+      incr y
+    end;
+    let body_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(Int.max 0 (bot - !y)) in
+    if not (Rect.is_empty body_r) then
+      match ks.trace_section with
+      | Keeper_context_store.Trace_context ->
+          Keeper_context_view.draw_context_tab grid ~rect:body_r ~theme ~model
+            ~name
+      | Keeper_context_store.Trace_tool_calls ->
+          Keeper_context_view.draw_tool_calls_tab grid ~rect:body_r ~theme
+            ~model ~name
+      | Keeper_context_store.Trace_metrics_logs ->
+          render_logs_tab grid ~rect:body_r ~theme ~model ~name
+      | Keeper_context_store.Trace_runtime ->
+          render_runtime_trace_section grid ~rect:body_r ~theme ~model ~name
+
+(* --- Unified 6-Tab Keeper Detail Entrypoint --- *)
 
 let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
@@ -3941,10 +3796,14 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
       | None -> false
     in
     let board_recovery_open =
-      Nav.equal_keeper_tab tab Nav.Keeper_work_candle
+      Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox
       && ((not embedded) || Model.pane_focused model 1
           || (model.nav.zoomed && Model.can_zoom_current_view model))
       && Board_recovery.shown ~keeper:name model.knowledge.board_recovery
+    in
+    let trace_sec =
+      (Keeper_context_store.get_keeper ~keeper:name model.keeper_context)
+        .trace_section
     in
     let hotkey =
       if Nav.equal_keeper_tab tab Nav.Keeper_memory then None
@@ -3965,11 +3824,30 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
               (Ops_common.say model
                  ~ko:"[Tab] 설정 편집 · [Enter/z] 확대"
                  ~en:"[Tab] Edit Config · [Enter/z] Zoom")
-        else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
+        else if Nav.equal_keeper_tab tab Nav.Keeper_trace then
+          Some
+            (match trace_sec with
+            | Keeper_context_store.Trace_metrics_logs ->
+                Ops_common.say model
+                  ~ko:"[t/{}] 섹션 · [v] 메트릭/샌드박스 · [r] 새로고침 · [z] 확대"
+                  ~en:"[t/{}] Section · [v] Metrics/Sandbox · [r] Refresh · [z] Zoom"
+            | Keeper_context_store.Trace_context ->
+                Ops_common.say model
+                  ~ko:"[t/{}] 섹션 · < / > 턴 · [v] 하위탭 · [z] 확대"
+                  ~en:"[t/{}] Section · < / > Turn · [v] View · [z] Zoom"
+            | Keeper_context_store.Trace_tool_calls ->
+                Ops_common.say model
+                  ~ko:"[t/{}] 섹션 · [Enter] 전체 결과 · [z] 확대"
+                  ~en:"[t/{}] Section · [Enter] Full Result · [z] Zoom"
+            | Keeper_context_store.Trace_runtime ->
+                Ops_common.say model
+                  ~ko:"[t/{}] 섹션 · [↑↓] 스크롤 · [r] 새로고침 · [z] 확대"
+                  ~en:"[t/{}] Section · [↑↓] Scroll · [r] Reload · [z] Zoom")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
           Some
             (Ops_common.say model
-               ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [z] 확대"
-               ~en:"[v] Metrics/Sandbox · [r] Refresh · [z] Zoom")
+               ~ko:"[v] 격리 복구 · [p] 프로브 · [o] Infra 샌드박스 · [z] 확대"
+               ~en:"[v] Quarantine · [p] Probe · [o] Infra Sandboxes · [z] Zoom")
         else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
           Some
             (Ops_common.say model
@@ -3989,11 +3867,30 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
           (Ops_common.say model
              ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [ / ] 탭 · [Esc] 목록"
              ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [ / ] Tabs · [Esc] Fleet")
-      else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
+      else if Nav.equal_keeper_tab tab Nav.Keeper_trace then
+        Some
+          (match trace_sec with
+          | Keeper_context_store.Trace_metrics_logs ->
+              Ops_common.say model
+                ~ko:"[t/{}] 섹션 · [v] 메트릭/샌드박스 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
+                ~en:"[t/{}] Section · [v] Metrics/Sandbox · [r] Refresh · [ / ] Tabs · [Esc] Fleet"
+          | Keeper_context_store.Trace_context ->
+              Ops_common.say model
+                ~ko:"[t/{}] 섹션 · < / > 턴 · [v] 하위탭 · [ / ] 탭 · [Esc] 목록"
+                ~en:"[t/{}] Section · < / > Turn · [v] View · [ / ] Tabs · [Esc] Fleet"
+          | Keeper_context_store.Trace_tool_calls ->
+              Ops_common.say model
+                ~ko:"[t/{}] 섹션 · [Enter] 전체 결과 · [ / ] 탭 · [Esc] 목록"
+                ~en:"[t/{}] Section · [Enter] Full Result · [ / ] Tabs · [Esc] Fleet"
+          | Keeper_context_store.Trace_runtime ->
+              Ops_common.say model
+                ~ko:"[t/{}] 섹션 · [↑↓] 스크롤 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
+                ~en:"[t/{}] Section · [↑↓] Scroll · [r] Reload · [ / ] Tabs · [Esc] Fleet")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
         Some
           (Ops_common.say model
-             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
-             ~en:"[v] Metrics/Sandbox · [r] Refresh · [ / ] Tabs · [Esc] Fleet")
+             ~ko:"[v] 격리 복구 · [p] 프로브 · [o] Infra 샌드박스 · [ / ] 탭 · [Esc] 목록"
+             ~en:"[v] Quarantine · [p] Probe · [o] Infra Sandboxes · [ / ] Tabs · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model
@@ -4187,25 +4084,18 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         | Nav.Keeper_chat ->
             render_chat_tab ?history_rows grid ~rect:content_rect ~theme ~model
               ~name keeper_opt
-        | Nav.Keeper_context ->
-            Keeper_context_view.draw_context_tab grid ~rect:content_rect ~theme
-              ~model ~name
-        | Nav.Keeper_tool_calls ->
-            Keeper_context_view.draw_tool_calls_tab grid ~rect:content_rect
-              ~theme ~model ~name
+        | Nav.Keeper_trace ->
+            render_trace_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_memory ->
             render_memory_tab grid ~rect:content_rect ~theme ~model ~name
               ~focused:card_spec.focused
-        | Nav.Keeper_work_candle when Board_recovery.shown ~keeper:name model.knowledge.board_recovery ->
+        | Nav.Keeper_work_sandbox
+          when Board_recovery.shown ~keeper:name model.knowledge.board_recovery ->
             render_board_recovery grid ~rect:content_rect ~theme ~model ~name
-        | Nav.Keeper_work_candle ->
-            render_work_candle_tab grid ~rect:content_rect ~theme ~model ~name
-        | Nav.Keeper_sandbox ->
-            render_sandbox_tab grid ~rect:content_rect ~theme ~model ~name
+        | Nav.Keeper_work_sandbox ->
+            render_work_sandbox_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_config ->
             render_config_tab grid ~rect:content_rect ~theme ~model ~name
               keeper_opt
-        | Nav.Keeper_logs ->
-            render_logs_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_identity ->
             render_identity_tab grid ~rect:content_rect ~theme ~model ~name

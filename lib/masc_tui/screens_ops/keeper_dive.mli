@@ -2,20 +2,24 @@
     ([model.nav.zoomed = true]) and the side-by-side right detail pane of
     [Screen_keepers].
 
-    Tabs:
+    Tabs (6 consolidated tabs):
     1. [Keeper_chat]: [Origin_bare]/[Origin_inline]/[Origin_row] transcript via
        [Markdown] + [Code_lexer], 1-line folded Thinking, 1-line collapsible
        Tool Cards, honest pending transmission rows, and a single 1-line Keeper
        Status Strip.
-    2. [Keeper_memory]: Scoped Temporal Memory Diff Scrubber ([24h]/[7d]/[30d]/rev),
+    2. [Keeper_trace]: Consolidated 4-section trace inspector ([Trace_context]
+       5-subtab per-turn context inspector, [Trace_tool_calls] tool execution
+       history, [Trace_metrics_logs] live metrics & sandbox logs, and
+       [Trace_runtime] runtime trace JSON tree) switched via [t] or [{]/[}].
+    3. [Keeper_memory]: Scoped Temporal Memory Diff Scrubber ([24h]/[7d]/[30d]/rev),
        retrieval heat ([HOT]/[WARM]/[COLD]), and Librarian writer recovery acts.
-    3. [Keeper_work_candle]: Assigned Tasks, Schedules (with last wake
-       disposition), recent Board posts, Candle balance + decay gauge, and
-       Portrait Ornaments inventory.
-    4. [Keeper_sandbox]: Live [apple_container] microVM or [remote_ssh] pool
-       telemetry, 24h tool failure breakdown, and live sandbox tail logs.
+    4. [Keeper_work_sandbox]: Assigned Tasks, Schedules (with last wake
+       disposition), recent Board posts + quarantine recovery, Candle balance +
+       decay gauge, Portrait Ornaments, and Sandbox summary ([p] Probe, [o]
+       Infra > Sandboxes).
     5. [Keeper_config]: Scoped In-TUI Keeper Settings rendered via
-       [Masc_tui_ui.Form] with masked secrets and TOML diff preview. *)
+       [Masc_tui_ui.Form] with masked secrets and TOML diff preview.
+    6. [Keeper_identity]: OAuth attached tools and GitHub device/PAT identity. *)
 
 type history_layout
 (** Everything the chat history rows of one keeper depend on besides the

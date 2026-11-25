@@ -30,6 +30,12 @@ val tool_result_page_size : int
 val is_binary_encoding : string -> bool
 (** True when a [/tool-result] page encoding is [base64] (case-insensitive). *)
 
+type trace_section =
+  | Trace_context
+  | Trace_tool_calls
+  | Trace_metrics_logs
+  | Trace_runtime
+
 type context_subtab =
   | Ctx_composition
   | Ctx_flow
@@ -50,6 +56,8 @@ type github_login_session = {
 }
 
 type keeper_state = {
+  trace_section : trace_section;
+  runtime_trace_scroll_offset : int;
   turn_records : Wire_keeper_context.turn_records_page Observed.t;
   selected_turn_idx : int;
   subtab : context_subtab;
@@ -117,6 +125,16 @@ type t = {
 val empty : t
 val empty_keeper_state : keeper_state
 val get_keeper : keeper:string -> t -> keeper_state
+
+val equal_trace_section : trace_section -> trace_section -> bool
+val all_trace_sections : trace_section list
+val trace_section_label : trace_section -> Say.t
+val next_trace_section : trace_section -> trace_section
+val prev_trace_section : trace_section -> trace_section
+val set_trace_section : keeper:string -> trace_section -> t -> t
+val cycle_trace_section : keeper:string -> delta:int -> t -> t
+val move_runtime_trace_scroll :
+  keeper:string -> ?max_scroll:int -> delta:int -> t -> t
 
 val equal_context_subtab : context_subtab -> context_subtab -> bool
 val all_context_subtabs : context_subtab list

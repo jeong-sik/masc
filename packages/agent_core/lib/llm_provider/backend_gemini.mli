@@ -89,6 +89,21 @@ val build_request
   -> unit
   -> string
 
+(** {!build_request_artifact} with its refusals as a value. [Error] carries
+    the reason when the config cannot be expressed or the history cannot be
+    lowered to Gemini parts (for example a [thoughtSignature] carrier whose
+    target block is gone). Nothing is sent in either case, so callers report
+    it as a local request refusal, not as a provider response.
+    @since 0.234.0 *)
+val build_request_artifact_result
+  :  ?stream:bool
+  -> ?cached_content:string
+  -> config:Provider_config.t
+  -> messages:Types.message list
+  -> ?tools:Yojson.Safe.t list
+  -> unit
+  -> (request_artifact, string) result
+
 (** Parse a Gemini [generateContent] response JSON into {!Types.api_response}. *)
 val parse_response : Yojson.Safe.t -> Types.api_response
 

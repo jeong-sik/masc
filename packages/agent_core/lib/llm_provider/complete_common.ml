@@ -780,10 +780,11 @@ let serialize_http_request_parts
         Ok (Backend_openai.request_payload artifact,
             Backend_openai.request_output_token_receipt artifact)
       | Provider_http_codec.Gemini_generate_content ->
-        let artifact = Backend_gemini.build_request_artifact
-            ~stream ~config ~messages ~tools () in
-        Ok (Backend_gemini.request_payload artifact,
-            Backend_gemini.request_output_token_receipt artifact)
+        (match Backend_gemini.build_request_artifact_result ~stream ~config ~messages ~tools () with
+         | Ok artifact ->
+           Ok (Backend_gemini.request_payload artifact,
+               Backend_gemini.request_output_token_receipt artifact)
+         | Error reason -> Error (Http_client.AcceptRejected { reason }))
       | Provider_http_codec.Glm_chat ->
         let artifact = Backend_glm.build_request_artifact
             ~stream ~config ~messages ~tools () in
@@ -830,23 +831,22 @@ let serialize_gemini_cached_http_request
       ~messages
       ~tools
   =
-  try
-    let artifact =
-      Backend_gemini.build_request_artifact
-        ~stream
-        ~cached_content
-        ~config
-        ~messages
-        ~tools
-        ()
-    in
+  match
+    Backend_gemini.build_request_artifact_result
+      ~stream
+      ~cached_content
+      ~config
+      ~messages
+      ~tools
+      ()
+  with
+  | Ok artifact ->
     Ok
       (seal_serialized
          ~http_codec:(Provider_http_codec.of_config config)
          ~body:(Backend_gemini.request_payload artifact)
          ~output_token_receipt:(Backend_gemini.request_output_token_receipt artifact))
-  with
-  | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
+  | Error reason -> Error (Http_client.AcceptRejected { reason })
 ;;
 
 let serialize_http_request ~stream ~(config : Provider_config.t) ~messages ~tools =

@@ -850,6 +850,7 @@ let test_compact_composer_and_drafts () =
                              execution_id = None;
                              provenance = None;
                              failure_kind = None;
+                             thinking = None;
                            };
                          ];
                        has_more = false;
@@ -1522,6 +1523,7 @@ let test_verifier_regressions () =
       execution_id = None;
       provenance = None;
       failure_kind = None;
+      thinking = None;
     }
   in
   let m_hist, _ =
@@ -4496,6 +4498,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             execution_id = None;
             provenance = None;
             failure_kind = None;
+            thinking = None;
           };
         ];
       has_more = false;
@@ -5241,6 +5244,7 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           execution_id = None;
           provenance = None;
           failure_kind = None;
+          thinking = None;
         })
   in
   let m0 = Model.initial ~cols:120 ~rows:30 () in
@@ -5959,6 +5963,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       execution_id = None;
       provenance;
       failure_kind = None;
+      thinking = None;
     }
   in
   let json_1line =
@@ -6043,6 +6048,150 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
   Alcotest.(check int)
     "Tools_full expands all 11 Json_tree lines (+11)" (rows_compact + 11)
     rows_full;
+
+  (* (a2) Delegate summary (incl. status_many + secret scrubbing) + persisted thinking row counts *)
+  let del_json =
+    {|{"target":{"kind":"keeper","name":"@worker-alpha"},"prompt":"Verify diff","artifacts":["a","b"]}|}
+  in
+  (match
+     Chat_transcript.extract_delegate_summary ~tool_name:"masc_keeper_delegate"
+       ~raw_json:del_json
+   with
+  | Some d ->
+      Alcotest.(check (option string))
+        "delegate target strips leading @" (Some "worker-alpha") d.target_keeper;
+      Alcotest.(check (list string))
+        "delegate targets" [ "worker-alpha" ] d.target_keepers;
+      Alcotest.(check (option string))
+        "delegate prompt" (Some "Verify diff") d.prompt_preview;
+      Alcotest.(check int) "delegate artifacts" 2 d.artifact_count
+  | None -> Alcotest.fail "expected delegate summary");
+  let status_many_json =
+    {|{"operations":[{"target":{"kind":"keeper","name":"worker-a"},"operation_id":"op-1"},{"target":{"kind":"keeper","name":"worker-b"},"operation_id":"op-2"}]}|}
+  in
+  (match
+     Chat_transcript.extract_delegate_summary
+       ~tool_name:"masc_keeper_delegate_status_many" ~raw_json:status_many_json
+   with
+  | Some d ->
+      Alcotest.(check (list string))
+        "status_many targets" [ "worker-a"; "worker-b" ] d.target_keepers;
+      Alcotest.(check int) "status_many operation_count" 2 d.operation_count;
+      Alcotest.(check (option string))
+        "status_many first op_id" (Some "op-1") d.operation_id
+  | None -> Alcotest.fail "expected status_many delegate summary");
+  let secret_del_json =
+    {|{"target":"Bearer\tsecret_tok_999","operation_id":"sk-ant-api03-secret_op_111","prompt":"Bearer\njwt_leak_222 and api_key:\nplain_api_secret_333"}|}
+  in
+  (match
+     Chat_transcript.extract_delegate_summary ~tool_name:"masc_keeper_delegate"
+       ~raw_json:secret_del_json
+   with
+  | Some d ->
+      let has_sub haystack needle =
+        let hlen = String.length haystack and nlen = String.length needle in
+        let rec scan i =
+          if i + nlen > hlen then false
+          else if String.equal (String.sub haystack i nlen) needle then true
+          else scan (i + 1)
+        in
+        nlen = 0 || scan 0
+      in
+      let check_clean field_name = function
+        | None -> ()
+        | Some s ->
+            Alcotest.(check bool)
+              (field_name ^ " scrubs secrets")
+              false
+              (has_sub s "secret_tok_999"
+               || has_sub s "secret_op_111"
+               || has_sub s "jwt_leak_222"
+               || has_sub s "plain_api_secret_333")
+      in
+      check_clean "target_keeper" d.target_keeper;
+      check_clean "operation_id" d.operation_id;
+      check_clean "prompt_preview" d.prompt_preview
+  | None -> Alcotest.fail "expected secret delegate summary");
+  Alcotest.(check string) "tool histogram ko"
+    "Read ×2 · 위임(@worker-alpha)"
+    (Chat_transcript.summarize_tool_histogram ~lang:Say.Lang_ko
+       [
+         ("Read", {|{"path":"a.ml"}|});
+         ("Read", {|{"path":"b.ml"}|});
+         ("masc_keeper_delegate", del_json);
+       ]);
+  let grouped_msgs =
+    [
+      mk_msg ~id:"g-1" ~role:Wire_fleet.Role_user ~content:"Audit"
+        1_700_000_001.0;
+      {
+        (mk_msg ~id:"g-2" ~role:Wire_fleet.Role_tool ~tool_call_name:"Read"
+           ~content:{|{"path":"a.ml"}|} 1_700_000_002.0)
+        with
+        turn_ref = Some "tr-grp-1";
+      };
+      {
+        (mk_msg ~id:"g-3" ~role:Wire_fleet.Role_tool ~tool_call_name:"Read"
+           ~content:{|{"path":"b.ml"}|} 1_700_000_003.0)
+        with
+        turn_ref = Some "tr-grp-1";
+      };
+      {
+        (mk_msg ~id:"g-4" ~role:Wire_fleet.Role_assistant ~content:"Done."
+           1_700_000_004.0)
+        with
+        thinking = Some (Wire_fleet.Thinking_visible "Checked both files.");
+      };
+      {
+        (mk_msg ~id:"g-5" ~role:Wire_fleet.Role_assistant ~content:"Redacted."
+           1_700_000_005.0)
+        with
+        thinking = Some Wire_fleet.Thinking_redacted;
+      };
+    ]
+  in
+  let grouped_items =
+    Chat_transcript.history_tool_groups ~tools_mode:Slash.Tools_compact
+      grouped_msgs
+  in
+  Alcotest.(check int)
+    "2 same-turn Role_tool collapse into 1 Grouped item (4 items total)"
+    4 (List.length grouped_items);
+  let fleet_grouped =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-1"
+         { messages = grouped_msgs; has_more = false; next_cursor = None }
+  in
+  let m_grp_compact = make_chat_model fleet_grouped m0.drafts in
+  let m_grp_hidden_think =
+    make_chat_model
+      { fleet_grouped with chat_thinking_mode = Fleet_store.Thinking_hidden }
+      m0.drafts
+  in
+  let m_grp_full_think =
+    make_chat_model
+      { fleet_grouped with chat_thinking_mode = Fleet_store.Thinking_full }
+      m0.drafts
+  in
+  let rows_grp_folded =
+    Chat_transcript.count_transcript_rows ~model:m_grp_compact ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  let rows_grp_hidden =
+    Chat_transcript.count_transcript_rows ~model:m_grp_hidden_think
+      ~keeper:"alpha-1" ~width:g_compact.prose_w
+  in
+  let rows_grp_full =
+    Chat_transcript.count_transcript_rows ~model:m_grp_full_think
+      ~keeper:"alpha-1" ~width:g_compact.prose_w
+  in
+  Alcotest.(check int)
+    "folded persisted visible + redacted thinking adds exactly 2 rows over hidden"
+    (rows_grp_hidden + 2) rows_grp_folded;
+  Alcotest.(check int)
+    "full persisted thinking expands visible (+1 body line) without adding body to redacted"
+    (rows_grp_folded + 1) rows_grp_full;
 
   (* (b) Persisted finished stream is deduped (adds 0 rows) so Home+Down has 0 dead presses *)
   let fleet_persisted =
@@ -6987,6 +7136,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       execution_id = None;
       provenance;
       failure_kind;
+      thinking = None;
     }
   in
   let m0 = Model.initial ~cols:120 ~rows:36 () in
@@ -10703,6 +10853,7 @@ let chat_row ~id ~role ?provenance content : Wire_fleet.chat_message =
     execution_id = None;
     provenance;
     failure_kind = None;
+    thinking = None;
   }
 
 let failure_row ~id ~operation_id =
@@ -14718,6 +14869,7 @@ let test_ux_sweep_12_fixes () =
           execution_id = None;
           provenance = None;
           failure_kind = None;
+          thinking = None;
         })
   in
   let keeper_alpha : Wire_fleet.keeper_summary =
@@ -16299,6 +16451,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             execution_id = None;
             provenance = None;
             failure_kind = None;
+            thinking = None;
           };
         ];
       has_more = false;

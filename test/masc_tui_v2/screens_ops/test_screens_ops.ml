@@ -742,6 +742,7 @@ let make_populated_model ~cols ~rows ~lang =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "msg-2";
@@ -755,6 +756,7 @@ let make_populated_model ~cols ~rows ~lang =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "msg-3";
@@ -768,6 +770,7 @@ let make_populated_model ~cols ~rows ~lang =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "msg-4";
@@ -782,6 +785,7 @@ let make_populated_model ~cols ~rows ~lang =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
              ];
            has_more = false;
@@ -1413,6 +1417,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "msg-asst";
@@ -1426,6 +1431,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  execution_id = None;
                  provenance = operation_provenance "op-2" Terminal_result;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "msg-code";
@@ -1439,6 +1445,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
              ];
            has_more = false;
@@ -2289,6 +2296,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "sec-2";
@@ -2302,6 +2310,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
                };
                {
                  id = "sec-3";
@@ -2315,6 +2324,24 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  execution_id = None;
                  provenance = None;
                  failure_kind = None;
+                 thinking = None;
+               };
+               {
+                 id = "sec-4";
+                 role = Wire_fleet.Role_tool;
+                 content =
+                   Printf.sprintf
+                     {|{"target":"Bearer\t%s","operation_id":"%s","prompt":"Bearer\n%s api_key:\n%s"}|}
+                     bearer_tok sk_tok bearer_tok kv_secret;
+                 ts_unix = now_unix -. 5.0;
+                 turn_ref = Some "t-sec-4";
+                 model_used = None;
+                 tool_call_id = Some "tc-sec-4";
+                 tool_call_name = Some "masc_keeper_delegate";
+                 execution_id = None;
+                 provenance = None;
+                 failure_kind = None;
+                 thinking = None;
                };
              ];
            has_more = false;
@@ -2384,6 +2411,7 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
                    execution_id = None;
                    provenance = None;
                    failure_kind = None;
+                   thinking = None;
                  };
                ];
              has_more = false;
@@ -2855,6 +2883,7 @@ let test_p1_chat_transcript_render_parity () =
       execution_id = None;
       provenance;
       failure_kind = None;
+      thinking = None;
     }
   in
   let json_1line =
@@ -2865,11 +2894,33 @@ let test_p1_chat_transcript_render_parity () =
       mk_msg ~id:"c-1" ~role:Wire_fleet.Role_user
         ~content:"TOP_ROW_MARKER_001 Verify narrow Markdown wrap and https://example.invalid/long/path/check"
         (now_unix -. 600.0);
-      mk_msg ~id:"c-2" ~role:Wire_fleet.Role_assistant
-        ~content:"# Audit Summary\n\n- Bullet one with generous wording so it wraps across multiple narrow rows\n- Bullet two referencing board:p-1234567890"
-        (now_unix -. 540.0);
-      mk_msg ~id:"c-3" ~role:Wire_fleet.Role_tool ~tool_call_name:"json_tool"
-        ~content:json_1line (now_unix -. 500.0);
+      {
+        (mk_msg ~id:"c-2" ~role:Wire_fleet.Role_assistant
+           ~content:"# Audit Summary\n\n- Bullet one with generous wording so it wraps across multiple narrow rows\n- Bullet two referencing board:p-1234567890"
+           (now_unix -. 540.0))
+        with
+        thinking = Some (Wire_fleet.Thinking_visible "Inspecting narrow Markdown layout and delegate cards.");
+      };
+      {
+        (mk_msg ~id:"c-3" ~role:Wire_fleet.Role_tool ~tool_call_name:"json_tool"
+           ~content:json_1line (now_unix -. 500.0))
+        with
+        turn_ref = Some "t-grp-parity";
+      };
+      {
+        (mk_msg ~id:"c-3b" ~role:Wire_fleet.Role_tool
+           ~tool_call_name:"masc_keeper_delegate"
+           ~content:{|{"target":{"kind":"keeper","name":"worker-alpha"},"prompt":"Verify diff","operation_id":"op-del-1"}|}
+           (now_unix -. 495.0))
+        with
+        turn_ref = Some "t-grp-parity";
+      };
+      {
+        (mk_msg ~id:"c-3c" ~role:Wire_fleet.Role_assistant
+           ~content:"Redacted reasoning turn." (now_unix -. 480.0))
+        with
+        thinking = Some Wire_fleet.Thinking_redacted;
+      };
     ]
     @ List.init 10 (fun i ->
           mk_msg
@@ -2960,7 +3011,44 @@ let test_p1_chat_transcript_render_parity () =
   Alcotest.(check bool)
     "Single Down right after Home immediately changes rendered transcript (0 dead presses)"
     true
-    (not (String.equal txt_top txt_dn1))
+    (not (String.equal txt_top txt_dn1));
+  (* Verify 1:1 Home/Down parity also holds under Tools_compact + Thinking_full *)
+  let m_compact_full =
+    {
+      m_chat with
+      fleet =
+        {
+          m_chat.fleet with
+          chat_tools_mode = Slash.Tools_compact;
+          chat_thinking_mode = Fleet_store.Thinking_full;
+        };
+    }
+  in
+  let m_cf_home, _ =
+    Update.step ~now:now_mono m_compact_full
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Home;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  let txt_cf_top = render_dive_body m_cf_home in
+  Alcotest.(check bool)
+    "Tools_compact + Thinking_full Home reaches TOP_ROW_MARKER_001"
+    true
+    (contains_sub ~needle:"TOP_ROW_MARKER_001" txt_cf_top);
+  let m_cf_dn1, _ =
+    Update.step ~now:now_mono m_cf_home
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Down;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  Alcotest.(check bool)
+    "Tools_compact + Thinking_full single Down advances immediately"
+    true
+    (not (String.equal txt_cf_top (render_dive_body m_cf_dn1)))
 
 (* A [user] row another Keeper wrote is headed with that Keeper, not
    "Operator", and its header row is counted for scrolling. *)
@@ -2997,6 +3085,7 @@ let test_chat_peer_rows_name_their_author () =
       execution_id = None;
       provenance = None;
       failure_kind = None;
+      thinking = None;
     }
   in
   let broadcast =
@@ -3153,6 +3242,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       execution_id = None;
       provenance = operation_provenance "op-old" Accepted_user;
       failure_kind = None;
+      thinking = None;
     }
   in
   let m1 =
@@ -3295,6 +3385,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              execution_id = None;
                              provenance = operation_provenance req_a Accepted_user;
                              failure_kind = None;
+                             thinking = None;
                            };
                            {
                              id = "hist-3";
@@ -3308,6 +3399,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              execution_id = None;
                              provenance = operation_provenance req_a Settled_failure;
                              failure_kind = Some "turn_exception";
+                             thinking = None;
                            };
                          ];
                        has_more = false;

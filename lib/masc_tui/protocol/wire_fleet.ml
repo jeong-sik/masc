@@ -1708,6 +1708,11 @@ type chat_submit_request = {
   attachments : chat_attachment list;
 }
 
+type history_thinking =
+  | Thinking_visible of string
+  | Thinking_redacted
+  | Thinking_partial of string
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -1720,6 +1725,7 @@ type chat_message = {
   execution_id : string option;
   provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
+  thinking : history_thinking option;
 }
 
 type chat_history_page = {
@@ -1999,6 +2005,84 @@ let decode_chat_role json =
   | "request_failure" -> Ok Role_request_failure
   | other -> Error (Printf.sprintf "unknown role value %S" other)
 
+let extract_history_thinking (json : Yojson.Safe.t) : history_thinking option =
+  let nonblank_opt = function
+    | Some (`String s) ->
+        let trimmed = String.trim s in
+        if String.equal trimmed "" then None else Some trimmed
+    | Some _ | None -> None
+  in
+  let push_unique rev_acc s =
+    if List.exists (String.equal s) rev_acc then rev_acc else s :: rev_acc
+  in
+  match json with
+  | `Assoc fields ->
+      let rev_parts = ref [] in
+      let redacted = ref false in
+      let push s = rev_parts := push_unique !rev_parts s in
+      (match nonblank_opt (List.assoc_opt "thinking" fields) with
+      | Some s -> push s
+      | None -> (
+          match nonblank_opt (List.assoc_opt "reasoning" fields) with
+          | Some s -> push s
+          | None -> (
+              match nonblank_opt (List.assoc_opt "reasoning_content" fields) with
+              | Some s -> push s
+              | None -> ())));
+      (match List.assoc_opt "blocks" fields with
+      | Some (`List blocks) ->
+          List.iter
+            (function
+              | `Assoc bfields -> (
+                  match List.assoc_opt "t" bfields with
+                  | Some (`String "thinking") -> (
+                      match List.assoc_opt "redacted" bfields with
+                      | Some (`Bool true) -> redacted := true
+                      | Some (`Bool false) | None -> (
+                          match nonblank_opt (List.assoc_opt "content" bfields) with
+                          | Some s -> push s
+                          | None -> ())
+                      | Some _ -> ())
+                  | Some (`String "trace") -> (
+                      match List.assoc_opt "trace" bfields with
+                      | Some (`List steps) ->
+                          List.iter
+                            (function
+                              | `Assoc sfields -> (
+                                  match List.assoc_opt "kind" sfields with
+                                  | Some (`String "think") -> (
+                                      match List.assoc_opt "content_withheld" sfields with
+                                      | Some (`Bool true) -> redacted := true
+                                      | Some (`Bool false) | None -> (
+                                          match nonblank_opt (List.assoc_opt "text" sfields) with
+                                          | Some s -> push s
+                                          | None -> ())
+                                      | Some _ -> ())
+                                  | Some (`String "reason") -> (
+                                      match
+                                        nonblank_opt (List.assoc_opt "text" sfields),
+                                        nonblank_opt (List.assoc_opt "detail" sfields)
+                                      with
+                                      | Some t, Some d -> push (t ^ "\n" ^ d)
+                                      | Some t, None -> push t
+                                      | None, Some d -> push d
+                                      | None, None -> ())
+                                  | Some _ | None -> ())
+                              | _ -> ())
+                            steps
+                      | Some _ | None -> ())
+                  | Some _ | None -> ())
+              | _ -> ())
+            blocks
+      | Some _ | None -> ());
+      (match List.rev !rev_parts with
+      | [] -> if !redacted then Some Thinking_redacted else None
+      | xs ->
+          let joined = String.concat "\n\n" xs in
+          if !redacted then Some (Thinking_partial joined)
+          else Some (Thinking_visible joined))
+  | _ -> None
+
 let decode_chat_message json =
   let* id = required_nonblank_string json "id" in
   let* role = decode_chat_role json in
@@ -2015,6 +2099,7 @@ let decode_chat_message json =
     | value -> field_type_error "chat message" "an object" value
   in
   let* failure_kind = optional_nonblank_string json "failure_kind" in
+  let thinking = extract_history_thinking json in
   Ok
     {
       id;
@@ -2028,6 +2113,7 @@ let decode_chat_message json =
       execution_id;
       provenance;
       failure_kind;
+      thinking;
     }
 
 let decode_chat_history = function

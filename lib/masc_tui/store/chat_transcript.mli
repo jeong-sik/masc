@@ -122,6 +122,43 @@ type pending_tx_projection = {
   notice_only : bool;
 }
 
+type delegate_kind =
+  | Delegate_invoke
+  | Delegate_status
+  | Delegate_cancel
+
+type delegate_summary = {
+  kind : delegate_kind;
+  target_keeper : string option;
+  target_keepers : string list;
+  operation_count : int;
+  prompt_preview : string option;
+  operation_id : string option;
+  artifact_count : int;
+}
+
+val extract_delegate_summary :
+  tool_name:string -> raw_json:string -> delegate_summary option
+(** Secret-scrubbed Keeper Delegate extractor covering [masc_keeper_delegate],
+    [masc_keeper_delegate_status], [masc_keeper_delegate_status_many], and
+    [masc_keeper_delegate_cancel]. *)
+
+val format_short_tool_label :
+  lang:Say.lang -> tool_name:string -> raw_json:string -> string
+(** Short delegate-aware tool label for compact group histograms. *)
+
+val summarize_tool_histogram :
+  lang:Say.lang -> ?max_unique:int -> (string * string) list -> string
+(** Compact tool frequency histogram (e.g. ["Read ×2 · 위임(@worker-alpha)"]). *)
+
+val count_history_thinking_rows :
+  mode:Fleet_store.thinking_display ->
+  width:int ->
+  Wire_fleet.history_thinking option ->
+  int
+(** Exact row count for persisted history thinking blocks, shared between
+    {!count_transcript_rows} and [Keeper_dive.build_history_rows]. *)
+
 type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
 
 val tools_mode : Model.t -> Slash.tools_mode

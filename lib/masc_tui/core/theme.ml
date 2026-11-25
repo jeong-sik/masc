@@ -11,6 +11,7 @@ type preset =
   | Arcade_hi
   | Paper_light
   | Mono
+  | Muted
 
 type status_token =
   | Status_ok
@@ -235,17 +236,48 @@ let build_gradient ~backgrounds ~floor c0 c1 c2 =
       in
       lift_across_surfaces ~surfaces:backgrounds ~floor raw)
 
+type text_floors = {
+  bright : float;
+  primary : float;
+  secondary : float;
+  muted : float;
+  selection : float;
+}
+
+(* The contrast each text tier keeps on every surface of its preset, the
+   selection background included. [build_theme] lifts a color up to its floor.
+   The four original presets share one set. Muted keeps WCAG 2.1 AAA (7:1) for
+   body text and lowers the other tiers, so its text is dimmer than theirs. *)
+let text_floors = function
+  | Midnight | Arcade_hi | Paper_light | Mono ->
+      {
+        bright = 12.0;
+        primary = 9.0;
+        secondary = 6.5;
+        muted = min_text_contrast;
+        selection = 12.0;
+      }
+  | Muted ->
+      {
+        bright = 8.5;
+        primary = 7.0;
+        secondary = 5.5;
+        muted = min_text_contrast;
+        selection = 8.5;
+      }
+
 let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
     ~border_subtle ~border_inactive ~border_focused
     ~text_bright ~text_primary ~text_secondary ~text_muted
     ~status_ok ~status_active ~status_attention ~status_critical ~status_ai ~status_historical
     ~accent ~selection_bg ~selection_fg
     ~cool_stops ~warm_stops ~ai_stops =
+  let floors = text_floors preset in
   let surfaces = [ surface_0; surface_1; surface_2; selection_bg ] in
-  let text_bright = lift_across_surfaces ~surfaces ~floor:12.0 text_bright in
-  let text_primary = lift_across_surfaces ~surfaces ~floor:9.0 text_primary in
-  let text_secondary = lift_across_surfaces ~surfaces ~floor:6.5 text_secondary in
-  let text_muted = lift_across_surfaces ~surfaces ~floor:min_text_contrast text_muted in
+  let text_bright = lift_across_surfaces ~surfaces ~floor:floors.bright text_bright in
+  let text_primary = lift_across_surfaces ~surfaces ~floor:floors.primary text_primary in
+  let text_secondary = lift_across_surfaces ~surfaces ~floor:floors.secondary text_secondary in
+  let text_muted = lift_across_surfaces ~surfaces ~floor:floors.muted text_muted in
   let status_ok = lift_across_surfaces ~surfaces ~floor:min_text_contrast status_ok in
   let status_active = lift_across_surfaces ~surfaces ~floor:min_text_contrast status_active in
   let status_attention = lift_across_surfaces ~surfaces ~floor:min_text_contrast status_attention in
@@ -253,7 +285,7 @@ let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
   let status_ai = lift_across_surfaces ~surfaces ~floor:min_text_contrast status_ai in
   let status_historical = lift_across_surfaces ~surfaces ~floor:min_text_contrast status_historical in
   let accent = lift_across_surfaces ~surfaces ~floor:min_text_contrast accent in
-  let selection_fg = lift_across_surfaces ~surfaces ~floor:12.0 selection_fg in
+  let selection_fg = lift_across_surfaces ~surfaces ~floor:floors.selection selection_fg in
   let grad_bgs = [ surface_1; selection_bg ] in
   let c_cool0, c_cool1, c_cool2 = cool_stops in
   let c_warm0, c_warm1, c_warm2 = warm_stops in
@@ -414,7 +446,35 @@ let mono_theme =
     ~warm_stops:(0xB4B4BC, 0xE4E4E7, 0xFFFFFF)
     ~ai_stops:(0x9A9AA5, 0xC8C8D2, 0xF4F4F5)
 
-let all_presets = [ Midnight; Arcade_hi; Paper_light; Mono ]
+(* Preset 5: Muted — Down-tone Slate. Same blue-slate family as Midnight with
+   lower chroma and dimmer text; its contrast floors are in [text_floors]. *)
+let muted_theme =
+  build_theme
+    ~preset:Muted
+    ~surface_0:0x13181D
+    ~surface_1:0x181D23
+    ~surface_2:0x1F252C
+    ~border_subtle:0x272F37
+    ~border_inactive:0x3B4550
+    ~border_focused:0x70A4D0
+    ~text_bright:0xCDD3D8
+    ~text_primary:0xBAC0C8
+    ~text_secondary:0xA2ACB7
+    ~text_muted:0x8F9CAB
+    ~status_ok:0x70B08B
+    ~status_active:0x74A7D4
+    ~status_attention:0xC19D5A
+    ~status_critical:0xE08B8D
+    ~status_ai:0xB297D2
+    ~status_historical:0x94A4B4
+    ~accent:0x74A7D4
+    ~selection_bg:0x23313E
+    ~selection_fg:0xCDD3D8
+    ~cool_stops:(0x69AABA, 0x7DB1DD, 0xAFD4EA)
+    ~warm_stops:(0xA693C9, 0xD494B8, 0xEFBBC2)
+    ~ai_stops:(0x9F92C8, 0xB89DD9, 0xDBC8EA)
+
+let all_presets = [ Midnight; Arcade_hi; Paper_light; Mono; Muted ]
 
 let all_status_tokens =
   [
@@ -433,12 +493,14 @@ let preset_name = function
   | Arcade_hi -> "arcade_hi"
   | Paper_light -> "paper_light"
   | Mono -> "mono"
+  | Muted -> "muted"
 
 let preset_label = function
   | Midnight -> Say.make ~ko:"미드나잇" ~en:"Midnight"
   | Arcade_hi -> Say.make ~ko:"아케이드 하이" ~en:"Arcade Hi"
   | Paper_light -> Say.make ~ko:"페이퍼 라이트" ~en:"Paper Light"
   | Mono -> Say.make ~ko:"모노크롬" ~en:"Mono"
+  | Muted -> Say.make ~ko:"다운톤" ~en:"Muted"
 
 let preset_of_name name =
   match String.lowercase_ascii (String.trim name) with
@@ -446,6 +508,7 @@ let preset_of_name name =
   | "arcade_hi" | "arcade-hi" -> Some Arcade_hi
   | "paper_light" | "paper-light" -> Some Paper_light
   | "mono" -> Some Mono
+  | "muted" -> Some Muted
   | _ -> None
 
 let preset_index = function
@@ -453,6 +516,7 @@ let preset_index = function
   | Arcade_hi -> 1
   | Paper_light -> 2
   | Mono -> 3
+  | Muted -> 4
 
 let equal_preset a b = Int.equal (preset_index a) (preset_index b)
 
@@ -461,6 +525,7 @@ let of_preset = function
   | Arcade_hi -> arcade_hi_theme
   | Paper_light -> paper_light_theme
   | Mono -> mono_theme
+  | Muted -> muted_theme
 
 let default = midnight_theme
 

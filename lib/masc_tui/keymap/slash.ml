@@ -731,6 +731,11 @@ let equal_parse_error a b =
 let mk id name ?arg_hint ~ko ~en category =
   { id; name; arg_hint; description = Say.make ~ko ~en; category }
 
+(* The preset names [/theme] accepts, joined by [sep]. They come from
+   [Theme.all_presets], so a new preset needs no edit here. *)
+let theme_names ~sep =
+  String.concat sep (List.map Theme.preset_name Theme.all_presets)
+
 let all : spec list =
   [
     mk Cmd_pulse "/pulse" ~ko:"펄스 대시보드 열기" ~en:"Jump to Pulse cockpit"
@@ -865,7 +870,9 @@ let all : spec list =
     mk Cmd_clear "/clear" ~ko:"현재 컴포저 초안 또는 화면 필터 초기화"
       ~en:"Clear active composer draft or filter" Slash_display;
     mk Cmd_theme "/theme"
-      ~arg_hint:(Say.make ~ko:"[midnight|arcade_hi|paper_light|mono]" ~en:"[midnight|arcade_hi|paper_light|mono]")
+      ~arg_hint:
+        (let names = "[" ^ theme_names ~sep:"|" ^ "]" in
+         Say.make ~ko:names ~en:names)
       ~ko:"테마 프리셋 변경"
       ~en:"Switch color theme preset" Slash_display;
     mk Cmd_lang "/lang"
@@ -1974,9 +1981,8 @@ let parse raw =
                      {
                        command = cmd;
                        expected =
-                         Say.make
-                           ~ko:"midnight | arcade_hi | paper_light | mono"
-                           ~en:"midnight | arcade_hi | paper_light | mono";
+                         (let names = theme_names ~sep:" | " in
+                          Say.make ~ko:names ~en:names);
                        got = raw_theme;
                      })))
     | "/lang" -> (

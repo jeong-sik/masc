@@ -47,8 +47,8 @@ val help_text : string
 
 val parse_theme : string -> Theme.preset option
 (** Strict parser accepting [midnight], [arcade] / [arcade_hi] / [arcade-hi],
-    [paper] / [paper_light] / [paper-light], and [mono]. Returns [None] for any
-    other string. *)
+    [paper] / [paper_light] / [paper-light], [mono], and [muted]. Returns
+    [None] for any other string. *)
 
 val parse_lang : string -> Say.lang option
 (** Strict parser accepting [ko] and [en]. Returns [None] for any other string. *)

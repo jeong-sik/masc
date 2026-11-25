@@ -34,6 +34,9 @@ let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
   | _ -> false
 
+let is_horiz_ws = function ' ' | '\t' -> true | _ -> false
+let is_ascii_ws = function ' ' | '\t' | '\n' | '\r' -> true | _ -> false
+
 let is_unquoted_val_char = function
   | ',' | '}' | ']' | '"' | '\'' | '\\' | ' ' | '\t' | '\n' | '\r' -> false
   | _ -> true
@@ -73,6 +76,23 @@ let scan_while s pred from =
   let len = String.length s in
   let rec loop i = if i < len && pred s.[i] then loop (i + 1) else i in
   loop from
+
+(* Horizontal whitespace plus at most one single line break (\r\n | \n | \r)
+   and following horizontal whitespace. Stops before a second line break so a
+   blank-line paragraph break (\n\n, \r\n\r\n, \n \n) never pulls prose on the
+   next paragraph into a preceding secret key or Bearer token. *)
+let scan_sep_ws s from =
+  let len = String.length s in
+  let j = scan_while s is_horiz_ws from in
+  if j >= len then j
+  else if Char.equal s.[j] '\r' then
+    let after_nl =
+      if j + 1 < len && Char.equal s.[j + 1] '\n' then j + 2 else j + 1
+    in
+    scan_while s is_horiz_ws after_nl
+  else if Char.equal s.[j] '\n' then
+    scan_while s is_horiz_ws (j + 1)
+  else j
 
 let find_pem_private_key_end s i =
   let len = String.length s in
@@ -180,12 +200,13 @@ let scrub_secrets_in_text raw =
                   end
               | None ->
                   let prev_ok = i = 0 || not (is_ident_char raw.[i - 1]) in
-                  if prev_ok && starts_at_ci raw i "bearer " then begin
-                    let val_start =
-                      scan_while raw
-                        (fun c -> Char.equal c ' ' || Char.equal c '\t')
-                        (i + 7)
-                    in
+                  if
+                    prev_ok
+                    && starts_at_ci raw i "bearer"
+                    && i + 6 < len
+                    && is_ascii_ws raw.[i + 6]
+                  then begin
+                    let val_start = scan_sep_ws raw (i + 6) in
                     let val_end =
                       scan_while raw is_secret_token_char val_start
                     in
@@ -211,20 +232,14 @@ let scrub_secrets_in_text raw =
                         else key_end
                       in
                       let sep_pos =
-                        scan_while raw
-                          (fun c -> Char.equal c ' ' || Char.equal c '\t')
-                          after_q
+                        scan_while raw is_horiz_ws after_q
                       in
                       if
                         sep_pos < len
                         && (Char.equal raw.[sep_pos] ':'
                             || Char.equal raw.[sep_pos] '=')
                       then begin
-                        let val_start =
-                          scan_while raw
-                            (fun c -> Char.equal c ' ' || Char.equal c '\t')
-                            (sep_pos + 1)
-                        in
+                        let val_start = scan_sep_ws raw (sep_pos + 1) in
                         Buffer.add_substring buf raw i (val_start - i);
                         if val_start >= len then ()
                         else if
@@ -235,48 +250,46 @@ let scrub_secrets_in_text raw =
                           let val_end =
                             scan_while raw is_unquoted_val_char val_start
                           in
-                          let first_tok =
-                            String.sub raw val_start (val_end - val_start)
-                          in
-                          if is_http_auth_scheme first_tok then begin
-                            let ws_end =
-                              scan_while raw
-                                (fun c -> Char.equal c ' ' || Char.equal c '\t')
-                                val_end
+                          if val_end = val_start then loop val_start
+                          else
+                            let first_tok =
+                              String.sub raw val_start (val_end - val_start)
                             in
-                            if ws_end > val_end && ws_end < len then begin
-                              if
-                                Char.equal raw.[ws_end] '"'
-                                || Char.equal raw.[ws_end] '\''
-                              then begin
-                                Buffer.add_string buf first_tok;
-                                Buffer.add_char buf ' ';
-                                loop (scan_quoted ws_end)
-                              end
-                              else
-                                let cred_end =
-                                  scan_while raw is_unquoted_val_char ws_end
-                                in
-                                if cred_end > ws_end then begin
+                            if is_http_auth_scheme first_tok then begin
+                              let ws_end = scan_sep_ws raw val_end in
+                              if ws_end > val_end && ws_end < len then begin
+                                if
+                                  Char.equal raw.[ws_end] '"'
+                                  || Char.equal raw.[ws_end] '\''
+                                then begin
                                   Buffer.add_string buf first_tok;
                                   Buffer.add_char buf ' ';
-                                  Buffer.add_string buf "[redacted]";
-                                  loop cred_end
+                                  loop (scan_quoted ws_end)
                                 end
-                                else begin
-                                  Buffer.add_string buf "[redacted]";
-                                  loop val_end
-                                end
+                                else
+                                  let cred_end =
+                                    scan_while raw is_unquoted_val_char ws_end
+                                  in
+                                  if cred_end > ws_end then begin
+                                    Buffer.add_string buf first_tok;
+                                    Buffer.add_char buf ' ';
+                                    Buffer.add_string buf "[redacted]";
+                                    loop cred_end
+                                  end
+                                  else begin
+                                    Buffer.add_string buf "[redacted]";
+                                    loop val_end
+                                  end
+                              end
+                              else begin
+                                Buffer.add_string buf "[redacted]";
+                                loop val_end
+                              end
                             end
                             else begin
                               Buffer.add_string buf "[redacted]";
                               loop val_end
                             end
-                          end
-                          else begin
-                            Buffer.add_string buf "[redacted]";
-                            loop val_end
-                          end
                         end
                       end
                       else begin

@@ -135,8 +135,10 @@ val apply_schema :
   t ->
   t
 (** Store the decoded schema, normalizing known [tui.*] fields into their
-    canonical {!Wire_config.Field_enum} / {!Wire_config.Hot_reload} SSOT forms
-    and syncing live preference values. *)
+    canonical {!Wire_config.Field_enum} and honest reload-scope SSOT forms
+    ({!Wire_config.Hot_reload} for live-applied preferences;
+    {!Wire_config.Restart_required} for startup-only [tui.opening]) and
+    syncing live preference values. *)
 val apply_schema_meta :
   target:Wire_config.config_target ->
   (string * Wire_config.field_entity_meta) list ->

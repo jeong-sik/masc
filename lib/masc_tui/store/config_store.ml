@@ -330,11 +330,12 @@ let normalize_tui_schema_field ~(prefs : Wire_config.tui_preferences option)
       {
         f with
         kind = Wire_config.Field_enum valid_opening_values;
-        reload_scope = Wire_config.Hot_reload;
+        reload_scope = Wire_config.Restart_required;
         description =
           tui_friendly_description ~full_key:f.full_key
             ~default:
-              "Initial screen opened on launch (overview, last, or keeper)"
+              "Initial screen opened on launch (overview, last, or keeper; \
+               takes effect on next TUI start)"
             f.description;
         value;
       }

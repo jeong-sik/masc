@@ -6120,6 +6120,40 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       check_clean "operation_id" d.operation_id;
       check_clean "prompt_preview" d.prompt_preview
   | None -> Alcotest.fail "expected secret delegate summary");
+  (* Direct scrub_secrets_in_text edge cases: single line-break/tab evasions
+     must redact, while blank-line paragraph breaks, trailing newlines, and
+     empty/punctuation delimiters must not corrupt following prose. *)
+  List.iter
+    (fun (label, input, expected) ->
+      Alcotest.(check string) label expected
+        (Chat_transcript.scrub_secrets_in_text input))
+    [
+      ("scrub Bearer+tab", "Bearer\tsecret_tok_999", "Bearer [redacted]");
+      ("scrub Bearer+LF", "Bearer\njwt_leak_222", "Bearer [redacted]");
+      ("scrub Bearer+CRLF+spaces", "Bearer\r\n  jwt_leak_crlf", "Bearer [redacted]");
+      ("scrub api_key:+LF", "api_key:\nplain_api_secret_333", "api_key:\n[redacted]");
+      ( "scrub api_key:+CRLF+spaces"
+      , "api_key:\r\n  plain_api_secret_crlf"
+      , "api_key:\r\n  [redacted]" );
+      ( "scrub Authorization Bearer+LF+indent"
+      , "Authorization: Bearer\n  hdr_secret_444"
+      , "Authorization: Bearer [redacted]" );
+      ("preserve bearer+blank-line prose", "bearer\n\nhello", "bearer\n\nhello");
+      ("preserve bearer+CRLF blank-line prose", "bearer\r\n\r\nhello", "bearer\r\n\r\nhello");
+      ("preserve bearer+spaced blank-line prose", "bearer\n  \nhello", "bearer\n  \nhello");
+      ("preserve token:+blank-line prose", "token:\n\nparagraph text", "token:\n\nparagraph text");
+      ("preserve token:+blank-line quoted", "token:\n\n\"quoted\"", "token:\n\n\"quoted\"");
+      ( "preserve token:+CRLF blank-line prose"
+      , "token:\r\n\r\nparagraph text"
+      , "token:\r\n\r\nparagraph text" );
+      ( "preserve Authorization Bearer+blank-line prose"
+      , "Authorization: Bearer\n\nhello world"
+      , "Authorization: [redacted]\n\nhello world" );
+      ("preserve trailing Bearer+LF", "Bearer\n", "Bearer\n");
+      ("preserve trailing api_key:+LF", "api_key:\n", "api_key:\n");
+      ("preserve api_key:+brace delimiter", "api_key: }", "api_key: }");
+      ("preserve api_key:+comma delimiter", "api_key: , next", "api_key: , next");
+    ];
   Alcotest.(check string) "tool histogram ko"
     "Read ×2 · 위임(@worker-alpha)"
     (Chat_transcript.summarize_tool_histogram ~lang:Say.Lang_ko
@@ -6836,10 +6870,11 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
     true
     (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks)
 
-(* The Keepers list and a keeper's work tab read the active schedules: the
-   list's next-due column and the tab's schedule rows depend on them. The tab
-   is opened from Pulse, whose own fetches never ask for schedules, so the
-   request comes from the tab. A schedule change refetches them there too. *)
+(* The Keepers list, Pulse All-clear guard (#54672), and a keeper's work tab
+   read the active schedules: the list's next-due column, Pulse's honest
+   All-clear banner, and the tab's schedule rows depend on them. Opening the
+   tab from Knowledge (whose own fetches never ask for schedules) proves the
+   request comes from the tab itself, and a schedule change refetches them. *)
 let test_keepers_views_request_active_schedules () =
   let m0 = Model.initial ~cols:140 ~rows:40 () in
   let is_active_schedules = function
@@ -6856,19 +6891,22 @@ let test_keepers_views_request_active_schedules () =
   Alcotest.(check bool) "Keepers requests active schedules" true
     (requests_active_schedules keepers);
   let pulse = { m0 with nav = { m0.nav with workspace = Nav.Pulse } } in
-  Alcotest.(check bool) "Pulse alone does not request schedules" false
+  Alcotest.(check bool) "Pulse requests active schedules for honest All-clear guard" true
     (requests_active_schedules pulse);
+  let knowledge = { m0 with nav = { m0.nav with workspace = Nav.Knowledge } } in
+  Alcotest.(check bool) "Knowledge alone does not request schedules" false
+    (requests_active_schedules knowledge);
   let work_tab =
     {
-      pulse with
+      knowledge with
       nav =
         {
-          pulse.nav with
+          knowledge.nav with
           dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
         };
     }
   in
-  Alcotest.(check bool) "Keeper work tab over Pulse requests active schedules" true
+  Alcotest.(check bool) "Keeper work tab over Knowledge requests active schedules" true
     (requests_active_schedules work_tab);
   let _, cmds =
     Update.step ~now:t0 work_tab
@@ -13599,8 +13637,23 @@ let test_ux_batch4_knowledge_runtime_infra () =
     }
   in
   let m_wiki_e, _ = step m_wiki_multi (char_key "e") in
-  Alcotest.(check bool) "UX-29 multiline wiki [e] shows $EDITOR hint toast" true
-    (Option.is_some m_wiki_e.toast);
+  Alcotest.(check bool)
+    "UX-29 multiline wiki [e] opens inline editor without $EDITOR nag toast"
+    true
+    (Option.is_some m_wiki_e.inline_modal && Option.is_none m_wiki_e.toast);
+  (match m_wiki_e.inline_modal with
+  | None -> Alcotest.fail "expected inline wiki edit modal"
+  | Some modal ->
+      Alcotest.(check string)
+        "UX-29 multiline wiki [e] preserves raw multiline markdown"
+        multi_wiki.body_markdown
+        (Model.modal_field_raw_value ~key:"wiki_body" modal);
+      Alcotest.(check bool)
+        "UX-29 wiki_body field enables native multiline editing" true
+        (List.exists
+           (fun (f : Model.modal_form_field) ->
+             String.equal f.key "wiki_body" && Model.modal_field_multiline f)
+           modal.fields));
 
   (* UX-30: set_memory_diff_window resets selection/scroll/reading *)
   let k_dirty =
@@ -19459,7 +19512,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_login
                {
-                 keeper = "sangsu";
+                 keeper = "keeper-a";
                  result =
                    Ok
                      (Wire_keeper_context.Oauth_login_exchange
@@ -19494,7 +19547,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
                req =
                  Cmd.Get_oauth_attempt_status
                    {
-                     keeper = "sangsu";
+                     keeper = "keeper-a";
                      provider = "github";
                      attempt_id = "att-7";
                    };
@@ -19519,7 +19572,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
                req =
                  Cmd.Get_oauth_attempt_status
                    {
-                     keeper = "sangsu";
+                     keeper = "keeper-a";
                      provider = "github";
                      attempt_id = "att-7";
                    };
@@ -19536,7 +19589,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_attempt_status
                {
-                 keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
+                 keeper = "keeper-a"; provider = "github"; attempt_id = "att-7";
                  result =
                    Ok
                      {
@@ -19551,7 +19604,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
     (List.exists
        (function
          | Cmd.Http_get
-             { req = Cmd.Get_oauth_attached_tools { keeper = "sangsu" }; _ } ->
+             { req = Cmd.Get_oauth_attached_tools { keeper = "keeper-a" }; _ } ->
              true
          | _ -> false)
        (Cmd.flatten settled_cmds));
@@ -19578,7 +19631,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_login
                {
-                 keeper = "sangsu";
+                 keeper = "keeper-a";
                  result =
                    Ok
                      (Wire_keeper_context.Oauth_login_exchange
@@ -19613,7 +19666,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
                  reply =
                    Msg.Reply_oauth_attempt_status
                      {
-                       keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
+                       keeper = "keeper-a"; provider = "github"; attempt_id = "att-7";
                        result =
                          Error
                            (Msg.Http_error
@@ -19642,7 +19695,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_attempt_status
                {
-                 keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
+                 keeper = "keeper-a"; provider = "github"; attempt_id = "att-7";
                  result =
                    Error
                      (Msg.Http_error
@@ -19661,7 +19714,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
       (Msg.Github_login_chunk
          {
            epoch = m0.epoch;
-           keeper = "sangsu";
+           keeper = "keeper-a";
            text =
              "First copy your one-time code: ABCD-5678\nOpen https://github.com/login/device";
          })
@@ -19678,7 +19731,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
       (Msg.Github_login_chunk
          {
            epoch = m_gh1.epoch;
-           keeper = "sangsu";
+           keeper = "keeper-a";
            text = "Still waiting on https://github.com/login/device";
          })
   in
@@ -24511,11 +24564,12 @@ let () =
                 (f_candle.kind = Wire_config.Field_enum [ "painted"; "dotted" ]
                  && f_candle.reload_scope = Wire_config.Hot_reload);
               let f_opening = find_f "tui.opening" in
-              Alcotest.(check bool) "tui.opening normalized to overview/last/keeper Field_enum + Hot_reload"
+              Alcotest.(check bool)
+                "tui.opening normalized to overview/last/keeper Field_enum + Restart_required"
                 true
                 (f_opening.kind
                  = Wire_config.Field_enum Config_store.valid_opening_values
-                 && f_opening.reload_scope = Wire_config.Hot_reload
+                 && f_opening.reload_scope = Wire_config.Restart_required
                  && f_opening.description
                     <> Some "Declared runtime.toml key tui.opening");
               let f_retired = find_f "tui.voice_send_on_stop" in

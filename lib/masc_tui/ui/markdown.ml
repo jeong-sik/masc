@@ -192,17 +192,6 @@ let span style text = { text; style; hyperlink = None }
 let spans_width =
   List.fold_left (fun width s -> width + Grapheme.display_width s.text) 0
 
-let fit_prefix ~width spans =
-  let rec fit remaining = function
-    | [] -> []
-    | _ when remaining <= 0 -> []
-    | head :: tail ->
-        let used = Grapheme.display_width head.text in
-        if used <= remaining then head :: fit (remaining - used) tail
-        else []
-  in
-  List.rev (fit width (List.rev spans))
-
 module Inline = Cmarkit.Inline
 module Block = Cmarkit.Block
 
@@ -351,20 +340,28 @@ let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
   newline ();
   List.rev !rows
 
-type line_layout = {
-  base : Style.t;
-  next_prefix : unit -> styled_span list;
-  continuation : styled_span list;
+type line_prefix = {
+  first : styled_span;
+  rest : styled_span;
+  first_row : int;
 }
 
-let inset layout ~(first : styled_span) ~(rest : styled_span) =
-  let pending = ref true in
-  let next_prefix () =
-    let marker = if !pending then first else rest in
-    pending := false;
-    layout.next_prefix () @ [ marker ]
+type line_layout = {
+  base : Style.t;
+  prefixes : line_prefix list;
+}
+
+let fit_prefix ~width select layout =
+  let rec fit remaining visible = function
+    | [] -> visible
+    | _ when remaining <= 0 -> visible
+    | prefix :: rest ->
+        let span = select prefix in
+        let used = Grapheme.display_width span.text in
+        if used <= remaining then fit (remaining - used) (span :: visible) rest
+        else visible
   in
-  { layout with next_prefix; continuation = layout.continuation @ [ rest ] }
+  fit width [] layout.prefixes
 
 (* Cmarkit 0.4.0 reparses each nested link label while looking for a valid
    destination. Deep bracket runs have exponential cost, even when the text
@@ -382,7 +379,7 @@ let safe_link_depth raw =
              until the paragraph ends instead of trying to lex them twice. *)
           let depth = if opaque then depth else Int.max 0 (depth - 1) in
           scan (i + 1) depth false opaque
-      | '`' | '<' | '$' -> scan (i + 1) depth false true
+      | '`' | '<' | '$' -> scan (i + 1) depth false (opaque || depth > 0)
       | '\\' when i + 1 < length ->
           (match raw.[i + 1] with
           | '[' | ']' | '\\' -> scan (i + 2) depth false opaque
@@ -466,25 +463,36 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   let muted_style = Typography.whisper ~bg ~italic:false theme in
   let hairline_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
   let quote_rail_style = Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg () in
-  let doc = Cmarkit.Doc.of_string ~strict:false ~locs:true raw in
+  let locs = String.contains raw '|' || String.contains raw '[' in
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs raw in
   let defs = Cmarkit.Doc.defs doc in
   let used_labels =
     if Cmarkit.Label.Map.is_empty defs then Cmarkit.Label.Map.empty
     else referenced_labels doc
   in
-  let out = ref [] in
-  let push_lines lines = out := List.rev_append lines !out in
+  let out = ref [] and row_count = ref 0 in
+  let push_lines lines =
+    row_count := !row_count + List.length lines;
+    out := List.rev_append lines !out
+  in
+  let inset layout ~first ~rest =
+    { layout with prefixes = { first; rest; first_row = !row_count } :: layout.prefixes }
+  in
   let fit = fit_prefix ~width:(width - 4) in
+  let prefix layout =
+    fit (fun p -> if p.first_row = !row_count then p.first else p.rest) layout
+  in
+  let continuation layout = fit (fun p -> p.rest) layout in
   let wrap layout spans =
-    wrap_styled_spans ~width ~prefix:(fit (layout.next_prefix ()))
-      ~continuation:(fit layout.continuation) spans
+    wrap_styled_spans ~width ~prefix:(prefix layout)
+      ~continuation:(continuation layout) spans
   in
   let draw_rows layout rows = List.iter (fun row -> push_lines (wrap layout row)) rows in
   let draw_inlines layout inline =
     inline_rows ~theme ~defs ~osc8 ~base:layout.base inline |> draw_rows layout
   in
   let draw_rule layout requested_width =
-    let prefix = fit (layout.next_prefix ()) in
+    let prefix = prefix layout in
     let count = Int.min requested_width (width - spans_width prefix) in
     let rule = String.concat "" (List.init count (fun _ -> Glyph.to_utf8 Glyph.Box_h)) in
     push_lines [ { spans = prefix @ [ span hairline_style rule ] } ]
@@ -508,7 +516,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
         (Glyph.to_utf8 Glyph.Left_rail ^ " ")
     in
     let layout = inset layout ~first:gutter ~rest:gutter in
-    let inner_w = width - spans_width (fit layout.continuation) in
+    let inner_w = width - spans_width (continuation layout) in
     let draw rows =
       List.iter
         (fun spans ->
@@ -555,7 +563,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   in
   let draw_table layout table =
     let separator = span hairline_style (" " ^ Glyph.to_utf8 Glyph.Box_v ^ " ") in
-    let row_width = width - spans_width (fit layout.continuation) in
+    let row_width = width - spans_width (continuation layout) in
     let columns = Block.Table.col_count table in
     let column_width = (row_width - (3 * (columns - 1))) / Int.max 1 columns in
     let header_style =
@@ -597,7 +605,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
                   (fun line -> (pad_line_to_width ~width:column_width ~pad_style:style line).spans)
                   visible
               in
-              let prefix = fit (layout.next_prefix ()) in
+              let prefix = prefix layout in
               let rec join_cells = function
                 | [] -> []
                 | [ cell ] -> cell
@@ -690,7 +698,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     | Block.Blocks ([], _) -> draw_rows inner [ [] ]
     | body -> render inner body
   in
-  let layout = { base = base_style; next_prefix = (fun () -> []); continuation = [] } in
+  let layout = { base = base_style; prefixes = [] } in
   render layout (Cmarkit.Doc.block doc);
   match !out with
   | [] -> [ { spans = [] } ]

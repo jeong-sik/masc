@@ -64,6 +64,7 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts keeper turn changes', () => {
     expect(SSEEventTypeSchema.parse('keeper_turn_changed')).toBe('keeper_turn_changed')
+    expect(SSEEventTypeSchema.parse('keeper_turn_succeeded')).toBe('keeper_turn_succeeded')
     expect(SSEEventTypeSchema.parse('keeper_turn_preview_changed')).toBe('keeper_turn_preview_changed')
   })
 

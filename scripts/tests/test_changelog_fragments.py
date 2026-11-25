@@ -1098,6 +1098,14 @@ class ReleaseCoverageShallowTests(unittest.TestCase):
         # No partial count may be reported as a fact.
         self.assertNotIn("post-cut pull request(s)", res.stderr)
 
+    def test_unresolvable_ancestor_probe_returns_none_not_false(self) -> None:
+        # A 40-hex SHA git does not know must surface as cannot-answer (None),
+        # never as a plain False — shallow_truncation_reason refuses on None
+        # from either side of the probe.
+        self.assertIsNone(
+            CF._git_is_ancestor("0123456789abcdef0123456789abcdef01234567", "HEAD")
+        )
+
     def test_boundary_at_cut_still_counts_normally(self) -> None:
         # A boundary sitting at the cut commit itself leaves the walk complete.
         shallow = self._shallow_clone(depth=3)

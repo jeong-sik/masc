@@ -594,14 +594,25 @@ def _git_is_shallow() -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
-def _git_is_ancestor(old: str, new: str) -> bool:
+def _git_is_ancestor(old: str, new: str) -> bool | None:
+    """True/False for a resolvable probe, None when git cannot answer.
+
+    `git merge-base --is-ancestor` exits 0 for yes, 1 for no, and anything
+    else (unknown revision, corrupt repository) for cannot-answer. Callers
+    decide what cannot-answer means; this wrapper must not flatten it into
+    a plain False.
+    """
     probe = subprocess.run(
         ["git", "merge-base", "--is-ancestor", old, new],
         text=True,
         capture_output=True,
         check=False,
     )
-    return probe.returncode == 0
+    if probe.returncode == 0:
+        return True
+    if probe.returncode == 1:
+        return False
+    return None
 
 
 def shallow_truncation_reason(cut: str, head: str) -> str | None:
@@ -632,7 +643,16 @@ def shallow_truncation_reason(cut: str, head: str) -> str | None:
     for boundary in shallow_file.read_text(encoding="utf-8").split():
         if not boundary:
             continue
-        if _git_is_ancestor(boundary, head) and not _git_is_ancestor(boundary, cut):
+        in_head = _git_is_ancestor(boundary, head)
+        if in_head is None:
+            return (
+                f"shallow boundary {boundary[:12]} cannot be resolved "
+                f"against {head[:12]}"
+            )
+        if not in_head:
+            continue
+        in_cut = _git_is_ancestor(boundary, cut)
+        if in_cut is not True:
             return f"shallow boundary {boundary[:12]} lies inside {cut[:12]}..{head}"
     return None
 

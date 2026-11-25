@@ -1822,6 +1822,66 @@ details[open] > .kp-sub-summary::before {
   overflow-wrap: anywhere;
 }
 
+/* ── Memory fact tables ── */
+/* A short cell: one line, cut with an ellipsis. */
+.kp-mem-clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kp-mem-claim {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  /* Prose reads from the left, also in a card, where values sit on the right. */
+  text-align: left;
+}
+
+.kp-mem-claim-text {
+  width: 100%;
+  min-width: 0;
+  /* The line height of the markdown inside, so the cut falls between lines. */
+  line-height: 1.55;
+  max-height: 3lh;
+  overflow: hidden;
+}
+
+/* Cut, a claim is its first lines, all of one height: a gap between blocks or
+   a taller heading would put the cut through the middle of a line. */
+.kp-mem-claim:not([data-open="true"]) .kp-mem-claim-text :where(h1, h2, h3, h4, h5, h6, p, ul, ol, pre, blockquote, hr) {
+  margin-block: 0;
+}
+
+.kp-mem-claim:not([data-open="true"]) .kp-mem-claim-text :where(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.kp-mem-claim:not([data-open="true"]) .kp-mem-claim-text :where(pre) {
+  padding-block: 0;
+  border-block: none;
+}
+
+.kp-mem-claim[data-open="true"] .kp-mem-claim-text {
+  max-height: none;
+}
+
+.kp-mem-claim-toggle {
+  padding: var(--sp-1) 0 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.kp-mem-claim-toggle:hover {
+  color: var(--fg-1);
+}
+
 .kp-sr-copy-buffer {
   position: fixed;
   top: 0;
@@ -1832,12 +1892,9 @@ details[open] > .kp-sub-summary::before {
   pointer-events: none;
 }
 
-/* Memory fact tables keep the card's width: fixed columns, and a claim with a
-   long path, URL or code wraps inside its cell instead of widening the table. */
-.kp-mem-facts .dtable {
-  table-layout: fixed;
-}
-
+/* Memory fact tables keep the card's width: the columns declare their widths
+   (keeper-memory-tab.ts), and a claim with a long path, URL or code wraps
+   inside its cell instead of widening the table. */
 .kp-mem-facts .dtable td {
   overflow-wrap: anywhere;
   vertical-align: top;
@@ -1848,12 +1905,6 @@ details[open] > .kp-sub-summary::before {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
-.kp-mem-facts-ordinary .dtable th:nth-child(1) { width: 18%; }
-.kp-mem-facts-ordinary .dtable th:nth-child(3) { width: 8em; }
-.kp-mem-facts-ordinary .dtable th:nth-child(4) { width: 10em; }
-.kp-mem-facts-source .dtable th:nth-child(1) { width: 30%; }
-.kp-mem-facts-source .dtable th:nth-child(3) { width: 10em; }
 
 .kp-mem-facts .dtable td button {
   white-space: nowrap;

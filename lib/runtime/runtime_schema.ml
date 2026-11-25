@@ -91,6 +91,7 @@ type capabilities =
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 let exact_body_timeout_s_key = "exact-body-timeout-s"
+let admission_timeout_s_key = "admission-timeout-s"
 let admission_priority_run_limit_key = "admission-priority-run-limit"
 let store_key = "store"
 let truncation_key = "truncation"
@@ -143,6 +144,7 @@ type acp_options =
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; timeout_s : float
+  ; admission_timeout_s : float
   }
 [@@deriving show, eq]
 

@@ -848,7 +848,7 @@ let spawn_persistent_entry
                ; cwd = acp_cwd
                ; oauth_source = config.oauth_source
                ; dangerously_skip_permissions = key.dangerously_skip_permissions
-               ; admission_timeout_s = Acp.init_timeout_s
+               ; admission_timeout_s = config.admission_timeout_s
                }
              in
              match
@@ -3043,7 +3043,7 @@ let run_without_lifecycle
           ; cwd = acp_cwd
           ; oauth_source = config.oauth_source
           ; dangerously_skip_permissions = key.dangerously_skip_permissions
-          ; admission_timeout_s = Acp.init_timeout_s
+          ; admission_timeout_s = config.admission_timeout_s
           }
         in
         let* client =

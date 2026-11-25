@@ -276,7 +276,9 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
             (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
 ;;
 
-let acp_exclusive_option_keys = [ "driver"; "args"; "strip-env"; "skills-dirs"; "mode" ]
+let acp_exclusive_option_keys =
+  [ "driver"; "args"; "strip-env"; "skills-dirs"; "mode"; Runtime_schema.admission_timeout_s_key ]
+;;
 
 let parse_string_list_field ~(path : string) ~(key : string) (tbl : Otoml.t) =
   match Otoml.find_opt tbl Fun.id [ key ] with
@@ -381,18 +383,37 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
       | Ok None -> Ok Runtime_acp_client.default_timeout_s
       | Ok (Some timeout_s) -> Ok timeout_s
     in
+    let admission_timeout_result =
+      match
+        strict_float_find path tbl Runtime_schema.admission_timeout_s_key
+        |> positive_finite_float_opt_field
+             ~path
+             ~key:Runtime_schema.admission_timeout_s_key
+      with
+      | Error _ as err -> err
+      | Ok None -> Ok Runtime_acp_client.init_timeout_s
+      | Ok (Some admission_timeout_s) -> Ok admission_timeout_s
+    in
     (match
        driver_result, args_result, strip_env_result, skills_dirs_result, effort_result,
-       mode_result, timeout_result
+       mode_result, timeout_result, admission_timeout_result
      with
-     | Error e, _, _, _, _, _, _
-     | _, Error e, _, _, _, _, _
-     | _, _, Error e, _, _, _, _
-     | _, _, _, Error e, _, _, _
-     | _, _, _, _, Error e, _, _
-     | _, _, _, _, _, Error e, _
-     | _, _, _, _, _, _, Error e -> Error e
-     | Ok driver, Ok args, Ok strip_env, Ok skills_dirs, Ok effort, Ok mode, Ok timeout_s ->
+     | Error e, _, _, _, _, _, _, _
+     | _, Error e, _, _, _, _, _, _
+     | _, _, Error e, _, _, _, _, _
+     | _, _, _, Error e, _, _, _, _
+     | _, _, _, _, Error e, _, _, _
+     | _, _, _, _, _, Error e, _, _
+     | _, _, _, _, _, _, Error e, _
+     | _, _, _, _, _, _, _, Error e -> Error e
+     | ( Ok driver
+       , Ok args
+       , Ok strip_env
+       , Ok skills_dirs
+       , Ok effort
+       , Ok mode
+       , Ok timeout_s
+       , Ok admission_timeout_s ) ->
        Ok
          (Some
             { Runtime_schema.driver
@@ -402,6 +423,7 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
             ; effort
             ; mode
             ; timeout_s
+            ; admission_timeout_s
             }))
   | Messages_api
   | Chat_completions_api

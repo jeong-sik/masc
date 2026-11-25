@@ -80,6 +80,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; mode = None
       ; oauth_source = None
       ; timeout_s = 1.
+      ; admission_timeout_s = 1.
       }
     in
     let acp_host =

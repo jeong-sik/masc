@@ -824,7 +824,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ; cwd = isolated_cwd
          ; oauth_source = execution.oauth_source
          ; dangerously_skip_permissions = false
-         ; admission_timeout_s = Runtime_acp_client.init_timeout_s
+         ; admission_timeout_s = execution.admission_timeout_s
          }
        in
        match

@@ -70,6 +70,7 @@ type capabilities =
 
 val connect_timeout_s_key : string
 val exact_body_timeout_s_key : string
+val admission_timeout_s_key : string
 val admission_priority_run_limit_key : string
 val store_key : string
 val truncation_key : string
@@ -120,6 +121,7 @@ type acp_options =
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; timeout_s : float
+  ; admission_timeout_s : float
   }
 [@@deriving show, eq]
 

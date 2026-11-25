@@ -2482,6 +2482,25 @@ let format_failover_reason (p : Wire_runtime.provider_probe_row) =
   | None, Some err -> err
   | None, None -> p.status
 
+let fusion_observation_is_stale (model : Model.t) =
+  Observed.is_stale model.runtime.fusion_runs
+  || match model.freshness.observer with
+     | Health.Live _ -> false
+     | Health.Connecting | Health.Reconnecting _ | Health.Stale _
+     | Health.Disconnected _ | Health.Workspace_mismatch _ -> true
+
+let fusion_elapsed ~now_unix ~stale (run : Wire_runtime.fusion_run) =
+  match run.status, run.finished_at_unix with
+  | Wire_runtime.Fusion_running, _ when not stale ->
+      H.format_age ~now_unix run.started_at_unix
+  | (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _),
+    Some finished when finished >= run.started_at_unix ->
+      Format_val.format_duration_s (finished -. run.started_at_unix)
+  | Wire_runtime.Fusion_running, _
+  | (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _),
+    (None | Some _) ->
+      Glyph.to_utf8 Glyph.Missing_unreported
+
 let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
@@ -3362,6 +3381,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         ();
       incr y
     end;
+    let stale = fusion_observation_is_stale model in
     match rt.fusion_runs with
     | Observed.Value { data = runs; _ } when runs <> [] ->
         List.iter
@@ -3369,8 +3389,10 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
             if !y < bot then begin
               let g, tone, st_lbl =
                 match f.status with
+                | Wire_runtime.Fusion_running when stale ->
+                    (Glyph.Transport_stale, Theme.Status_attention, "Last observed")
                 | Wire_runtime.Fusion_running ->
-                    (Glyph.Live_working, Theme.Status_active, "Running")
+                    (Glyph.Live_working, Theme.Status_active, "Running · " ^ f.stage)
                 | Wire_runtime.Fusion_completed ->
                     (Glyph.Live_healthy, Theme.Status_ok, "Completed")
                 | Wire_runtime.Fusion_failed { code; error } ->
@@ -3380,7 +3402,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
               in
               let topo = Wire_runtime.fusion_topology_to_string f.topology in
               let dec = match f.decision with Some d -> " · " ^ d | None -> "" in
-              let age = H.format_age ~now_unix f.started_at_unix in
+              let age = fusion_elapsed ~now_unix ~stale f in
               let aw = Grapheme.display_width age in
               let left_s =
                 Printf.sprintf "%s %s [%s/%s] %s%s" (Glyph.to_utf8 g) f.keeper
@@ -3403,7 +3425,11 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
             (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
                ~max_w:runs_content.w ~style:(H.whisper_style ~theme ())
                (Say.resolve lang
-                  (Say.make ~ko:"최근 Fusion 실행 없음" ~en:"No recent Fusion runs")))
+                   (if stale then
+                      Say.make ~ko:"마지막으로 확인한 실행은 없습니다"
+                        ~en:"No runs in the last observation"
+                    else
+                      Say.make ~ko:"최근 Fusion 실행 없음" ~en:"No recent Fusion runs")))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -3422,9 +3448,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let rt = model.runtime in
   let now_unix = model.freshness.last_wall_unix in
   let runs = Runtime_store.filtered_fusion_runs rt in
-  let exact_runs =
-    match Observed.to_option rt.exact_lane_runs with Some xs -> xs | None -> []
-  in
+  let stale = fusion_observation_is_stale model in
   let bar_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
     | [ a; b ] -> (a, b)
@@ -3463,28 +3487,43 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ]
       | None -> []
   in
+  let run_label, run_tone, run_glyph =
+    let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+    match rt.fusion_runs with
+    | Observed.Value _ when stale ->
+        (say ~ko:"Fusion 마지막 관측" ~en:"Fusion last observed",
+         Theme.Status_attention, Glyph.Transport_stale)
+    | Observed.Value _ ->
+        (Printf.sprintf "%s (%d · %d %s)"
+           (say ~ko:"퓨전 실행" ~en:"Fusion Runs")
+           (List.length runs) running_n (say ~ko:"진행 중" ~en:"active"),
+         (if running_n > 0 then Theme.Status_active else Theme.Status_ok),
+         (if running_n > 0 then Glyph.Live_working else Glyph.Live_healthy))
+    | Observed.Loading _ ->
+        (say ~ko:"Fusion 이력 조회 중" ~en:"Loading Fusion runs",
+         Theme.Status_historical, Glyph.Transport_reconnecting)
+    | Observed.Failed _ ->
+        (say ~ko:"Fusion 이력 조회 실패" ~en:"Fusion fetch failed",
+         Theme.Status_critical, Glyph.Live_failing)
+    | Observed.Absent | Observed.Unreported ->
+        (say ~ko:"Fusion 이력 미확인" ~en:"Fusion runs unobserved",
+         Theme.Status_historical, Glyph.Missing_unreported)
+  in
+  let exact_pill runs =
+    {
+      H.label =
+        Printf.sprintf "%s (%d)"
+          (Say.resolve lang (Say.make ~ko:"Exact 레인" ~en:"Exact Lanes"))
+          (List.length runs);
+      active = false;
+      tone = Some Theme.Status_historical;
+      glyph = None;
+    }
+  in
   let pills =
-    [
-      {
-        H.label =
-          Printf.sprintf "%s (%d · %d %s)"
-            (Say.resolve lang (Say.make ~ko:"퓨전 실행" ~en:"Fusion Runs"))
-            (List.length runs) running_n
-            (Say.resolve lang (Say.make ~ko:"실행중" ~en:"active"));
-        active = true;
-        tone = Some (if running_n > 0 then Theme.Status_active else Theme.Status_ok);
-        glyph = Some (if running_n > 0 then Glyph.Live_working else Glyph.Live_healthy);
-      };
-      {
-        H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"Exact 레인" ~en:"Exact Lanes"))
-            (List.length exact_runs);
-        active = false;
-        tone = Some Theme.Status_historical;
-        glyph = None;
-      };
-    ]
+    [ { H.label = run_label; active = true; tone = Some run_tone;
+        glyph = Some run_glyph } ]
+    @ (Observed.to_option rt.exact_lane_runs |> Option.map exact_pill |> Option.to_list)
     @ preset_pill
   in
   ignore
@@ -3550,7 +3589,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             };
             {
               id = "age";
-              header = Say.make ~ko:"경과" ~en:"Age";
+              header = Say.make ~ko:"경과/소요" ~en:"Elapsed";
               priority = 2;
               min_width = 5;
               max_width = Some 8;
@@ -3564,6 +3603,8 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (fun (f : Wire_runtime.fusion_run) ->
               let g, tone, st_lbl =
                 match f.status with
+                | Wire_runtime.Fusion_running when stale ->
+                    (Glyph.Transport_stale, Theme.Status_attention, "Last")
                 | Wire_runtime.Fusion_running ->
                     (Glyph.Live_working, Theme.Status_active, "Run")
                 | Wire_runtime.Fusion_completed ->
@@ -3575,6 +3616,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 Printf.sprintf "%s / %s" f.preset
                   (Wire_runtime.fusion_topology_to_string f.topology)
               in
+              let elapsed = fusion_elapsed ~now_unix ~stale f in
               {
                 Table.id = f.run_id;
                 cells =
@@ -3589,7 +3631,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         f.stage );
                     ( "age"
                     , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                        (H.format_age ~now_unix f.started_at_unix) );
+                        elapsed );
                   ];
               })
             runs
@@ -3606,8 +3648,12 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                (Say.make ~ko:"[f] 키를 눌러 새 퓨전 패널을 실행하세요"
                   ~en:"Press [f] to launch a new Fusion panel"))
           (Say.resolve lang
-             (Say.make ~ko:"최근 Fusion 실행 이력이 없습니다"
-                ~en:"No recent Fusion runs"))
+             (if stale then
+                Say.make ~ko:"마지막으로 확인한 실행은 없습니다"
+                  ~en:"No runs in the last observation"
+              else
+                Say.make ~ko:"최근 Fusion 실행 이력이 없습니다"
+                  ~en:"No recent Fusion runs"))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported

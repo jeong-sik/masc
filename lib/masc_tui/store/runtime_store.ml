@@ -1872,7 +1872,7 @@ let filtered_fusion_runs t =
               status = Wire_runtime.Fusion_completed;
               stage = "evidence";
               started_at_unix = h.created_at_unix;
-              finished_at_unix = Some h.created_at_unix;
+              finished_at_unix = None;
               decision = None;
               summary = Some h.title;
             })
@@ -2717,12 +2717,29 @@ let mark_stale_all t =
 
 let apply_fusion_runs_snapshot ~observed_at
     (snap : Wire_runtime.fusion_runs_snapshot) t =
-  {
-    t with
-    fusion_runs = Observed.value ~observed_at snap.runs;
-    fusion_replay = snap.replay;
-    fusion_historical_evidence = snap.historical_evidence;
-  }
+  let next =
+    {
+      t with
+      fusion_runs = Observed.value ~observed_at snap.runs;
+      fusion_replay = snap.replay;
+      fusion_historical_evidence = snap.historical_evidence;
+    }
+  in
+  match selected_fusion_run t with
+  | None -> next
+  | Some previous ->
+      (match
+         List.find_index
+           (fun (r : Wire_runtime.fusion_run) ->
+             String.equal r.run_id previous.run_id)
+           (filtered_fusion_runs next)
+       with
+      | None -> next
+      | Some index ->
+          let delta = index - t.fusion_selected_index in
+          { next with
+            fusion_selected_index = index;
+            fusion_scroll_offset = Int.max 0 (t.fusion_scroll_offset + delta) })
 
 let apply_fusion_detail ~observed_at ~run_id detail t =
   { t with fusion_detail = Observed.value ~observed_at (run_id, detail) }

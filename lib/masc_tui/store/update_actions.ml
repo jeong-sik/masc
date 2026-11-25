@@ -4157,7 +4157,14 @@ and execute_action ~now (m : Model.t) action =
         when not (Model.sidebar_has_focus m)
              && (match Model.active_dive m with
                  | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
-                 | _ -> false) ->
+                 | Some
+                     ( Nav.Dive_knowledge
+                         (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+                     | Nav.Dive_keeper _
+                     | Nav.Dive_work _
+                     | Nav.Dive_runtime _
+                     | Nav.Dive_infra _ )
+                 | None -> false) ->
           ({ m with knowledge = Knowledge_store.toggle_thread_view m.knowledge }, [])
       | None ->
           let n = Model.focusable_pane_count m in

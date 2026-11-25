@@ -1457,7 +1457,14 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Model.body_has_focus model
           && (match Model.active_dive model with
               | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
-              | _ -> false)
+              | Some
+                  ( Nav.Dive_knowledge
+                      (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+                  | Nav.Dive_keeper _
+                  | Nav.Dive_work _
+                  | Nav.Dive_runtime _
+                  | Nav.Dive_infra _ )
+              | None -> false)
         in
         let show_tab_hint =
           match model.nav.overlay with

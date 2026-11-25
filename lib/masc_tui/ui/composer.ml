@@ -142,12 +142,14 @@ let pending_tx_label = function
            ~en:(if n > 1 then Printf.sprintf "Queued %d" n else "Queued"))
   | Tx_sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
   | Tx_awaiting_turn -> Some (Say.make ~ko:"응답 대기" ~en:"Waiting for response")
-  | Tx_thinking -> Some (Say.make ~ko:"추론 중…" ~en:"Thinking…")
+  (* The same words the status strip uses for a turn the server reports
+     (Fleet_store.open_work_of_preview), so both read alike. *)
+  | Tx_thinking -> Some (Say.make ~ko:"추론 중" ~en:"Thinking")
   | Tx_tool_running tool ->
-      Some (Say.make ~ko:("도구 사용 중 · " ^ tool) ~en:("Using tool · " ^ tool))
+      Some (Say.make ~ko:("도구 실행 중 · " ^ tool) ~en:("Running " ^ tool))
   | Tx_tool_waiting tool ->
       Some (Say.make ~ko:("도구 결과 대기 · " ^ tool) ~en:("Waiting for tool result · " ^ tool))
-  | Tx_streaming -> Some (Say.make ~ko:"응답 생성 중…" ~en:"Streaming reply…")
+  | Tx_streaming -> Some (Say.make ~ko:"답변 중" ~en:"Answering")
   | Tx_turn_running { label; _ } -> Some label
   | Tx_confirming -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
   | Tx_interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")

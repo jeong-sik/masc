@@ -16645,6 +16645,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       revision = None;
       preparation = None;
       work_context = None;
+      open_activities = None;
     }
   in
   let active_turn_no_tail : Wire_fleet.active_turn =
@@ -17197,7 +17198,7 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   let preview revision text : Wire_fleet.turn_preview =
     { status_text = "streaming"; activity = Preview_streaming; text_tail = text;
       last_tool = None; updated_at_unix = 100.0; revision = Some revision;
-      preparation = None; work_context = None }
+      preparation = None; work_context = None; open_activities = None }
   in
   let row ~keeper_name ~token ~ref_id ~revision ~text : Wire_fleet.keeper_turn_row =
     { keeper_name; chat_control_token = Some (keeper_name ^ "-control");
@@ -22968,6 +22969,202 @@ let test_hidden_score_command () =
     "Enter on a typed /score opens the viewer" [ (newest_first, 1) ]
     (requested enter_cmds)
 
+(* --- The open work of a running turn names it
+       (RFC turn-activity-is-open-work D4, D5) --- *)
+
+let open_response channel since =
+  Wire_fleet.Open_response
+    { channel; started_at_unix = since -. 1.0; since_unix = since }
+;;
+
+let open_tool ?tool_use_id name stage since =
+  Wire_fleet.Open_tool
+    { tool_use_id; name; stage; started_at_unix = since -. 2.0; since_unix = since }
+;;
+
+let preview_reporting ?(activity = Wire_fleet.Preview_streaming) open_activities last_tool
+    : Wire_fleet.turn_preview =
+  { status_text = ""; activity; text_tail = ""; last_tool; updated_at_unix = 100.0;
+    revision = Some 1; preparation = None; work_context = None; open_activities }
+;;
+
+let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last_tool
+    : Wire_fleet.active_turn =
+  { lane = Wire_fleet.Lane_proactive; turn_ref = None; started_at_unix = 90.0;
+    interrupt_token = "tok-open-work"; phase = None; tool_in_flight = None;
+    elapsed_ms = None; preview_observed_through = Some 1;
+    preview = Some (preview_reporting ~activity activities last_tool) }
+;;
+
+let ko phrase = Say.resolve Say.Lang_ko phrase
+let en phrase = Say.resolve Say.Lang_en phrase
+
+let holds needle haystack =
+  let rec loop i =
+    i + String.length needle > String.length haystack
+    || String.equal (String.sub haystack i (String.length needle)) needle
+    || loop (i + 1)
+  in
+  loop 0
+
+let kind_name = function
+  | Fleet_store.Open_tool_running -> "tool running"
+  | Fleet_store.Open_tool_called -> "tool called"
+  | Fleet_store.Open_reasoning -> "reasoning"
+  | Fleet_store.Open_answer -> "answer"
+  | Fleet_store.Open_nothing_yet -> "nothing yet"
+  | Fleet_store.Open_nothing -> "nothing"
+
+let test_open_work_of_preview_names_what_is_open () =
+  let phrase activities =
+    match Fleet_store.open_work_of_preview (preview_reporting (Some activities) None) with
+    | Some work -> Some (ko work.phrase, en work.phrase)
+    | None -> None
+  in
+  Alcotest.(check (option (pair string string))) "a tool that runs"
+    (Some ("도구 실행 중 · Execute", "Running Execute"))
+    (phrase [ open_tool "Execute" Wire_fleet.Tool_executing 10.0 ]);
+  Alcotest.(check (option (pair string string)))
+    "a call the model is still making, behind the answer that carries it"
+    (Some ("도구 실행 전 · Read", "Calling Read"))
+    (phrase [ open_response Wire_fleet.Channel_text 5.0; open_tool "Read" Wire_fleet.Tool_requested 8.0 ]);
+  Alcotest.(check (option (pair string string))) "reasoning"
+    (Some ("추론 중", "Thinking"))
+    (phrase [ open_response Wire_fleet.Channel_thinking 5.0 ]);
+  Alcotest.(check (option (pair string string))) "the answer"
+    (Some ("답변 중", "Answering"))
+    (phrase [ open_response Wire_fleet.Channel_text 5.0 ]);
+  Alcotest.(check (option (pair string string))) "a response with nothing in it yet"
+    (Some ("모델 응답 대기", "Waiting for model"))
+    (phrase [ open_response Wire_fleet.Channel_none 5.0 ]);
+  Alcotest.(check (option (pair string string))) "nothing open"
+    (Some ("열린 일 없음", "Nothing open"))
+    (phrase []);
+  Alcotest.(check (option (pair string string))) "two calls of one tool stay two"
+    (Some ("도구 실행 중 · Read 외 1건", "Running Read +1 more"))
+    (phrase [ open_tool "Read" Wire_fleet.Tool_executing 3.0; open_tool "Read" Wire_fleet.Tool_executing 4.0 ]);
+  (match
+     Fleet_store.open_work_of_preview
+       (preview_reporting
+          (Some [ open_response Wire_fleet.Channel_none 5.0; open_tool "Execute" Wire_fleet.Tool_executing 12.0 ])
+          None)
+   with
+  | Some { kind; since_unix; _ } ->
+      Alcotest.(check (pair string (option (float 0.0001))))
+        "a tool outranks the response that asked for it, from when it began to run"
+        ("tool running", Some 12.0) (kind_name kind, since_unix)
+  | None -> Alcotest.fail "the server reported open work");
+  let legacy activity =
+    Fleet_store.open_work_of_preview
+      (preview_reporting ~activity None (Some "Read"))
+    |> Option.map (fun (work : Fleet_store.open_work) -> ko work.phrase)
+  in
+  Alcotest.(check (option string)) "a server that does not report the open work" None
+    (legacy Wire_fleet.Preview_tool_observed);
+  let of_activity activity =
+    Fleet_store.open_work_of_preview (preview_reporting ~activity (Some []) None)
+    |> Option.map (fun (work : Fleet_store.open_work) -> ko work.phrase)
+  in
+  Alcotest.(check (option string)) "a failed attempt is not open work" None
+    (of_activity Wire_fleet.Preview_failed);
+  Alcotest.(check (option string)) "a turn still preparing is not open work" None
+    (of_activity Wire_fleet.Preview_preparing);
+;;
+
+let test_chat_status_uses_the_same_words_for_every_turn () =
+  Alcotest.(check string) "a running turn says which tool runs"
+    "도구 실행 중 · Execute"
+    (ko (Chat_transcript.active_turn_short_activity
+           (running_turn_with (Some [ open_tool "Execute" Wire_fleet.Tool_executing 10.0 ]) None)));
+  Alcotest.(check string) "and tells reasoning from the answer"
+    "추론 중"
+    (ko (Chat_transcript.active_turn_short_activity
+           (running_turn_with (Some [ open_response Wire_fleet.Channel_thinking 10.0 ]) None)));
+  Alcotest.(check string) "an older server keeps its wording"
+    "최근 도구 · Read"
+    (ko (Chat_transcript.active_turn_short_activity
+           (running_turn_with ~activity:Wire_fleet.Preview_tool_observed None (Some "Read"))));
+  Alcotest.(check string) "the operator's own turn names the tool the same way"
+    "도구 실행 중 · gh_pr_view"
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label (Masc_tui_ui.Composer.Tx_tool_running "gh_pr_view"))));
+  Alcotest.(check string) "and its answer" "답변 중"
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label Masc_tui_ui.Composer.Tx_streaming)));
+  Alcotest.(check string) "and its reasoning" "추론 중"
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label Masc_tui_ui.Composer.Tx_thinking)));
+  let queued =
+    Chat_transcript.composer_pending_tx_of_phase
+      (Chat_transcript.Phase_turn_running
+         { turn = running_turn_with (Some [ open_tool "Execute" Wire_fleet.Tool_executing 10.0 ]) None;
+           queued_count = 1 })
+    |> Masc_tui_ui.Composer.pending_tx_label |> Option.get |> ko
+  in
+  Alcotest.(check bool) "a waiting message says why it waits, before what the turn is doing"
+    true
+    (String.starts_with ~prefix:"메시지 1건 대기 · 지금 턴이 끝나면 실행" queued
+     && holds "도구 실행 중 · Execute" queued)
+;;
+
+let test_wire_reads_the_open_work () =
+  let owner_key = String.make 64 'a' in
+  let decode open_json =
+    Wire_fleet.decode_turn_preview_update
+      (`Assoc
+         [ "owner_key", `String owner_key
+         ; "preview",
+             `Assoc
+               [ "status_text", `String ""; "activity", `String "tool";
+                 "text_tail", `String ""; "updated_at_unix", `Float 100.0;
+                 "revision", `Int 3; "open_activities", open_json ]
+         ])
+  in
+  let open_of (result : (Wire_fleet.turn_preview_update, string) result) =
+    match result with
+    | Error detail -> Alcotest.fail detail
+    | Ok update -> update.preview.open_activities
+  in
+  Alcotest.(check bool) "each open activity is read with its kind, stage and clocks" true
+    (open_of
+       (decode
+          (`List
+             [ `Assoc [ "kind", `String "response"; "channel", `String "thinking";
+                        "started_at_unix", `Float 9.0; "since_unix", `Float 10.0 ];
+               `Assoc [ "kind", `String "tool"; "tool_use_id", `String "toolu_a";
+                        "name", `String "Execute"; "stage", `String "executing";
+                        "started_at_unix", `Float 9.0; "since_unix", `Float 11.0 ] ]))
+     = Some
+         [ open_response Wire_fleet.Channel_thinking 10.0;
+           open_tool ~tool_use_id:"toolu_a" "Execute" Wire_fleet.Tool_executing 11.0 ]);
+  Alcotest.(check bool) "a call with no id reads as one with no id" true
+    (open_of
+       (decode
+          (`List [ `Assoc [ "kind", `String "tool"; "tool_use_id", `Null; "name", `String "Read";
+                            "stage", `String "requested"; "started_at_unix", `Float 6.0;
+                            "since_unix", `Float 8.0 ] ]))
+     = Some [ open_tool "Read" Wire_fleet.Tool_requested 8.0 ]);
+  Alcotest.(check bool) "a server that leaves the field out sent no open work" true
+    (open_of
+       (Wire_fleet.decode_turn_preview_update
+          (`Assoc
+             [ "owner_key", `String owner_key;
+               "preview",
+                 `Assoc [ "status_text", `String ""; "activity", `String "waiting";
+                          "text_tail", `String ""; "updated_at_unix", `Float 100.0;
+                          "revision", `Int 3 ] ]))
+     = None);
+  (match decode (`List [ `Assoc [ "kind", `String "guess"; "started_at_unix", `Float 1.0; "since_unix", `Float 1.0 ] ]) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an unknown kind of open work was accepted");
+  (match decode (`List [ `Assoc [ "kind", `String "tool"; "tool_use_id", `Null; "name", `String "Read"; "stage", `String "finished"; "started_at_unix", `Float 1.0; "since_unix", `Float 1.0 ] ]) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an unknown tool stage was accepted");
+  let with_open activities = preview_reporting (Some activities) None in
+  Alcotest.(check bool) "two previews with different open work are different" false
+    (Wire_fleet.equal_turn_preview (with_open []) (with_open [ open_tool "Read" Wire_fleet.Tool_executing 4.0 ]));
+  Alcotest.(check bool) "and the same open work is the same preview" true
+    (Wire_fleet.equal_turn_preview (with_open [ open_tool "Read" Wire_fleet.Tool_executing 4.0 ])
+       (with_open [ open_tool "Read" Wire_fleet.Tool_executing 4.0 ]))
+;;
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -23203,6 +23400,12 @@ let () =
             `Quick test_interrupt_reply_and_stream_completion_are_request_scoped;
           Alcotest.test_case "preview events update only the observed turn owner without a fleet read"
             `Quick test_turn_preview_updates_keep_owner_and_skip_fleet_reads;
+          Alcotest.test_case "the open work of a preview names what the turn is doing"
+            `Quick test_open_work_of_preview_names_what_is_open;
+          Alcotest.test_case "chat status uses the same words for every turn and names a waiting message"
+            `Quick test_chat_status_uses_the_same_words_for_every_turn;
+          Alcotest.test_case "the turns wire reads the open work, and misses it from an older server"
+            `Quick test_wire_reads_the_open_work;
           Alcotest.test_case
             "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
             `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;

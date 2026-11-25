@@ -192,6 +192,27 @@ type turn_preview_activity =
   | Preview_tool_observed
   | Preview_failed
 
+type turn_response_channel = Channel_none | Channel_thinking | Channel_text
+
+type turn_tool_stage = Tool_requested | Tool_executing
+
+(** Work the server saw start in a running turn and did not see end. An
+    activity carries when it began and when its channel or stage last
+    changed. *)
+type turn_open_activity =
+  | Open_response of {
+      channel : turn_response_channel;
+      started_at_unix : float;
+      since_unix : float;
+    }
+  | Open_tool of {
+      tool_use_id : string option;
+      name : string;
+      stage : turn_tool_stage;
+      started_at_unix : float;
+      since_unix : float;
+    }
+
 type turn_preparation_phase =
   | Prep_task
   | Prep_world
@@ -227,6 +248,8 @@ type turn_preview = {
   revision : int option;
   preparation : turn_preparation option;
   work_context : turn_work_context option;
+  open_activities : turn_open_activity list option;
+    (** [None] from a server that does not report the open work. *)
 }
 
 type turn_preview_update = {
@@ -517,6 +540,19 @@ let turn_preview_activity_of_string raw =
   | "failed" -> Some Preview_failed
   | _ -> None
 
+let turn_response_channel_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "none" -> Some Channel_none
+  | "thinking" -> Some Channel_thinking
+  | "text" -> Some Channel_text
+  | _ -> None
+
+let turn_tool_stage_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "requested" -> Some Tool_requested
+  | "executing" -> Some Tool_executing
+  | _ -> None
+
 let turn_preparation_phase_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
   | "task" -> Some Prep_task
@@ -590,6 +626,32 @@ let equal_turn_preparation (a : turn_preparation) (b : turn_preparation) =
   && equal_turn_preparation_state a.state b.state
   && Float.equal a.started_at_unix b.started_at_unix
 
+let turn_response_channel_tag = function
+  | Channel_none -> 0
+  | Channel_thinking -> 1
+  | Channel_text -> 2
+
+let equal_turn_response_channel a b =
+  Int.equal (turn_response_channel_tag a) (turn_response_channel_tag b)
+
+let turn_tool_stage_tag = function
+  | Tool_requested -> 0
+  | Tool_executing -> 1
+
+let equal_turn_open_activity (a : turn_open_activity) (b : turn_open_activity) =
+  match a, b with
+  | Open_response a, Open_response b ->
+      equal_turn_response_channel a.channel b.channel
+      && Float.equal a.started_at_unix b.started_at_unix
+      && Float.equal a.since_unix b.since_unix
+  | Open_tool a, Open_tool b ->
+      Option.equal String.equal a.tool_use_id b.tool_use_id
+      && String.equal a.name b.name
+      && Int.equal (turn_tool_stage_tag a.stage) (turn_tool_stage_tag b.stage)
+      && Float.equal a.started_at_unix b.started_at_unix
+      && Float.equal a.since_unix b.since_unix
+  | Open_response _, Open_tool _ | Open_tool _, Open_response _ -> false
+
 let equal_turn_preview (a : turn_preview) (b : turn_preview) =
   String.equal a.status_text b.status_text
   && equal_turn_preview_activity a.activity b.activity
@@ -603,6 +665,7 @@ let equal_turn_preview (a : turn_preview) (b : turn_preview) =
          Option.equal String.equal a.task_id b.task_id
          && List.equal String.equal a.start_reasons b.start_reasons)
        a.work_context b.work_context
+  && Option.equal (List.equal equal_turn_open_activity) a.open_activities b.open_activities
 
 let equal_active_turn (a : active_turn) (b : active_turn) =
   equal_turn_lane a.lane b.lane
@@ -855,6 +918,32 @@ let decode_turn_work_context json =
   in
   Ok { task_id; start_reasons }
 
+let decode_turn_open_activity json =
+  let* kind = required_string_field json "kind" in
+  let* started_at_unix = required_finite_float json "started_at_unix" in
+  let* since_unix = required_finite_float json "since_unix" in
+  match kind with
+  | "response" ->
+      let* channel =
+        decode_enum ~field:"channel" turn_response_channel_of_string json
+      in
+      Ok (Open_response { channel; started_at_unix; since_unix })
+  | "tool" ->
+      let* tool_use_id = optional_nonblank_string json "tool_use_id" in
+      let* name = required_nonblank_string json "name" in
+      let* stage = decode_enum ~field:"stage" turn_tool_stage_of_string json in
+      Ok (Open_tool { tool_use_id; name; stage; started_at_unix; since_unix })
+  | other -> Error (Printf.sprintf "unknown open activity kind %S" other)
+
+let decode_turn_open_activities items =
+  let rec loop before = function
+    | [] -> Ok (List.rev before)
+    | item :: rest ->
+        let* activity = decode_turn_open_activity item in
+        loop (activity :: before) rest
+  in
+  loop [] items
+
 let decode_turn_preview json =
   let* status_text = required_string_field json "status_text" in
   let* activity =
@@ -883,7 +972,25 @@ let decode_turn_preview json =
     | None -> Ok None
     | Some json -> Result.map Option.some (decode_turn_work_context json)
   in
-  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; revision; preparation; work_context }
+  (* A server that does not report the open work leaves the field out. *)
+  let* open_activities =
+    if not (has_field json "open_activities") then Ok None
+    else
+      Result.bind (optional_list_field json "open_activities")
+        decode_turn_open_activities
+      |> Result.map Option.some
+  in
+  Ok
+    { status_text
+    ; activity
+    ; text_tail
+    ; last_tool
+    ; updated_at_unix
+    ; revision
+    ; preparation
+    ; work_context
+    ; open_activities
+    }
 
 let decode_turn_preview_update json =
   let* owner_key = required_nonblank_string json "owner_key" in

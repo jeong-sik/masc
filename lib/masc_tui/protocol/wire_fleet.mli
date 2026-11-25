@@ -72,6 +72,27 @@ type turn_preview_activity =
   | Preview_tool_observed
   | Preview_failed
 
+type turn_response_channel = Channel_none | Channel_thinking | Channel_text
+
+type turn_tool_stage = Tool_requested | Tool_executing
+
+(** Work the server saw start in a running turn and did not see end. An
+    activity carries when it began and when its channel or stage last
+    changed. *)
+type turn_open_activity =
+  | Open_response of {
+      channel : turn_response_channel;
+      started_at_unix : float;
+      since_unix : float;
+    }
+  | Open_tool of {
+      tool_use_id : string option;
+      name : string;
+      stage : turn_tool_stage;
+      started_at_unix : float;
+      since_unix : float;
+    }
+
 type turn_preparation_phase =
   | Prep_task
   | Prep_world
@@ -107,6 +128,8 @@ type turn_preview = {
   revision : int option;
   preparation : turn_preparation option;
   work_context : turn_work_context option;
+  open_activities : turn_open_activity list option;
+    (** [None] from a server that does not report the open work. *)
 }
 
 type turn_preview_update = {

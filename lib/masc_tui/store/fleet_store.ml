@@ -225,6 +225,101 @@ let equal_thinking_display a b =
   | Thinking_hidden, (Thinking_folded | Thinking_full) ->
       false
 
+(* RFC turn-activity-is-open-work D5. What the server saw start and did not
+   see end names the turn. A server that does not report it leaves the field
+   out, and the wording in use before stays. A failed attempt and a turn that
+   is still preparing say so before any open work. *)
+type open_work_kind =
+  | Open_tool_running
+  | Open_tool_called
+  | Open_reasoning
+  | Open_answer
+  | Open_nothing_yet
+  | Open_nothing
+
+type open_work = {
+  kind : open_work_kind;
+  phrase : Say.t;
+  since_unix : float option;
+    (** When the open state began. [None] when nothing is open. *)
+}
+
+let open_activity_kind = function
+  | Wire_fleet.Open_tool { stage = Wire_fleet.Tool_executing; _ } -> Open_tool_running
+  | Wire_fleet.Open_tool { stage = Wire_fleet.Tool_requested; _ } -> Open_tool_called
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_thinking; _ } ->
+      Open_reasoning
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_text; _ } -> Open_answer
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_none; _ } ->
+      Open_nothing_yet
+
+let open_activity_phrase = function
+  | Wire_fleet.Open_tool { name; stage = Wire_fleet.Tool_executing; _ } ->
+      Say.make ~ko:("도구 실행 중 · " ^ name) ~en:("Running " ^ name)
+  | Wire_fleet.Open_tool { name; stage = Wire_fleet.Tool_requested; _ } ->
+      Say.make ~ko:("도구 실행 전 · " ^ name) ~en:("Calling " ^ name)
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_thinking; _ } ->
+      Say.make ~ko:"추론 중" ~en:"Thinking"
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_text; _ } ->
+      Say.make ~ko:"답변 중" ~en:"Answering"
+  | Wire_fleet.Open_response { channel = Wire_fleet.Channel_none; _ } ->
+      Say.make ~ko:"모델 응답 대기" ~en:"Waiting for model"
+
+let open_activity_since = function
+  | Wire_fleet.Open_response { since_unix; _ }
+  | Wire_fleet.Open_tool { since_unix; _ } ->
+      since_unix
+
+let is_tool_call = function
+  | Wire_fleet.Open_tool _ -> true
+  | Wire_fleet.Open_response _ -> false
+
+let open_work_of_preview (p : Wire_fleet.turn_preview) =
+  let reported =
+    match p.activity with
+    | Wire_fleet.Preview_failed | Wire_fleet.Preview_preparing -> None
+    | Wire_fleet.Preview_waiting
+    | Wire_fleet.Preview_streaming
+    | Wire_fleet.Preview_tool_observed ->
+        p.open_activities
+  in
+  match reported with
+  | None -> None
+  | Some [] ->
+      Some
+        { kind = Open_nothing
+        ; phrase = Say.make ~ko:"열린 일 없음" ~en:"Nothing open"
+        ; since_unix = None
+        }
+  | Some (first :: more) -> (
+      (* A tool says more than the response that asked for it. Other open
+         calls are counted behind the one that is named. *)
+      match List.filter is_tool_call (first :: more) with
+      | named :: others ->
+          let phrase =
+            match others with
+            | [] -> open_activity_phrase named
+            | _ :: _ ->
+                Say.concat ~sep:" "
+                  [ open_activity_phrase named
+                  ; Say.make
+                      ~ko:(Printf.sprintf "외 %d건" (List.length others))
+                      ~en:(Printf.sprintf "+%d more" (List.length others))
+                  ]
+          in
+          Some
+            { kind = open_activity_kind named
+            ; phrase
+            ; since_unix = Some (open_activity_since named)
+            }
+      | [] ->
+          (* The server keeps one response open at a time. *)
+          Some
+            { kind = open_activity_kind first
+            ; phrase = open_activity_phrase first
+            ; since_unix = Some (open_activity_since first)
+            })
+
 let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
   match turn_opt with
   | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn"
@@ -250,23 +345,26 @@ let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
                   } ->
                   Say.make ~ko:"준비 중단" ~en:"Preparation halted"
               | None -> (
-                  match p.activity with
-                  | Wire_fleet.Preview_tool_observed -> (
-                      match p.last_tool with
-                      | Some tool ->
-                          Say.make
-                            ~ko:("도구 활동: " ^ tool)
-                            ~en:("Tool activity: " ^ tool)
-                      | None ->
-                          Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
-                  | Wire_fleet.Preview_streaming ->
-                      Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
-                  | Wire_fleet.Preview_waiting ->
-                      Say.make ~ko:"응답 대기 중" ~en:"Waiting for model"
-                  | Wire_fleet.Preview_preparing ->
-                      Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
-                  | Wire_fleet.Preview_failed ->
-                      Say.make ~ko:"시도 실패" ~en:"Attempt failed"))
+                  match open_work_of_preview p with
+                  | Some work -> work.phrase
+                  | None -> (
+                      match p.activity with
+                      | Wire_fleet.Preview_tool_observed -> (
+                          match p.last_tool with
+                          | Some tool ->
+                              Say.make
+                                ~ko:("도구 활동: " ^ tool)
+                                ~en:("Tool activity: " ^ tool)
+                          | None ->
+                              Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
+                      | Wire_fleet.Preview_streaming ->
+                          Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
+                      | Wire_fleet.Preview_waiting ->
+                          Say.make ~ko:"응답 대기 중" ~en:"Waiting for model"
+                      | Wire_fleet.Preview_preparing ->
+                          Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+                      | Wire_fleet.Preview_failed ->
+                          Say.make ~ko:"시도 실패" ~en:"Attempt failed")))
           | None -> (
               match turn.phase with
               | Some phase -> Say.literal phase

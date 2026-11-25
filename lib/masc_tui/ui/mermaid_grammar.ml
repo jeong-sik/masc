@@ -474,7 +474,11 @@ let parse_node c declared =
                     (* A box draws its label one row per line, so its breaks
                        stay newlines and need no undrawn report. *)
                     let as_newline =
-                      match shape with Rect | Round -> true | _ -> false
+                      match shape with
+                      | Rect | Round -> true
+                      | Diamond | Hexagon | Asymmetric | Database | Subroutine
+                      | Stadium | Circle | Bar ->
+                          false
                     in
                     let source = Option.map (fun _ -> label_at ~as_newline (c.base_byte + start) raw) declared.on_label in
                     declare ?source declared (Named id)

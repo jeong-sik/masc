@@ -4736,7 +4736,7 @@ let post_keeper_operator_note ~keeper ~text ~modal_submission_id (m : Model.t) =
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
   | None -> (m, [])
-  | Some modal when modal.submitting -> (m, [])
+  | Some modal when modal.submitting || Option.is_some modal.note_prefill_id -> (m, [])
   | Some modal -> (
       let missing_required =
         List.find_opt

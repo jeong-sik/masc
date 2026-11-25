@@ -1469,7 +1469,7 @@ let start_operator_note_write ~keeper t =
 
 (* With overlapping writes, the order of HTTP receipts does not establish which
    note the server stored last. The last receipt releases one fresh read. *)
-let settle_operator_note_write ~now ~keeper ~confirmed t =
+let settle_operator_note_write ~now ~keeper t =
   let ks = get_keeper ~keeper t in
   let operator_note_writes, settlement =
     match ks.operator_note_writes with
@@ -1484,10 +1484,7 @@ let settle_operator_note_write ~now ~keeper ~confirmed t =
     | Reread_note, (Observed.Absent | Observed.Unreported | Observed.Failed _ | Observed.Loading _) ->
         Observed.loading ~since_ns:now
   in
-  let operator_note_read_after =
-    if confirmed || settlement = Reread_note then Clock.Mono.max ks.operator_note_read_after now
-    else ks.operator_note_read_after
-  in
+  let operator_note_read_after = Clock.Mono.max ks.operator_note_read_after now in
   let t =
     update_keeper ~keeper
       (fun ks ->

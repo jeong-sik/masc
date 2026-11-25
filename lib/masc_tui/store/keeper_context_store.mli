@@ -404,7 +404,7 @@ val apply_purge_result :
 val start_operator_note_write : keeper:string -> t -> t
 
 val settle_operator_note_write :
-  now:Clock.Mono.t -> keeper:string -> confirmed:bool -> t -> t * note_write_settlement
+  now:Clock.Mono.t -> keeper:string -> t -> t * note_write_settlement
 
 val apply_operator_note :
   observed_at:Clock.Mono.t ->

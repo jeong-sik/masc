@@ -295,9 +295,9 @@ let apply_operator_note_read ~now ~keeper ~modal_prefill_id ~requested_at result
   | Error (Msg.Workspace_mismatch _ as err) -> record_http_incident ~now ~source ~context err m
   | _ when Option.is_some modal_prefill_id && not owns_prefill -> m, []
   | _ when (match ks.operator_note_writes with
-            | Keeper_context_store.Overlapping_note_writes _ -> true
-            | Keeper_context_store.No_note_writes | Keeper_context_store.One_note_write -> false) ->
-      (* The last overlapping save re-reads for the still-pristine owner. *)
+            | Keeper_context_store.One_note_write | Keeper_context_store.Overlapping_note_writes _ -> true
+            | Keeper_context_store.No_note_writes -> false) ->
+      (* A read may see the previous value until the pending save settles. *)
       m, []
   | _ when Clock.Mono.compare requested_at ks.operator_note_read_after < 0 ->
       if owns_prefill then reread_operator_note ~keeper m else m, []
@@ -332,13 +332,14 @@ let apply_operator_note_save ~now ~keeper ~modal_submission_id result (m : Model
   in
   let owned = Option.exists owns_modal m.inline_modal in
   let keeper_context, settlement =
-    Keeper_context_store.settle_operator_note_write ~now ~keeper ~confirmed:(Result.is_ok result)
-      m.keeper_context
+    Keeper_context_store.settle_operator_note_write ~now ~keeper m.keeper_context
   in
   let m = { m with keeper_context } in
   let followup m =
     match settlement with
     | Keeper_context_store.Reread_note -> reread_operator_note ~keeper m
+    | Keeper_context_store.Isolated_note_write when Option.is_some (operator_note_prefill ~keeper m) ->
+        reread_operator_note ~keeper m
     | Keeper_context_store.Isolated_note_write | Keeper_context_store.Await_note_writes -> m, []
   in
   match result with
@@ -359,7 +360,7 @@ let apply_operator_note_save ~now ~keeper ~modal_submission_id result (m : Model
                     ~en:("Operator note saved: " ^ keeper)) m
              else m
            in
-           m, []
+           followup m
        | Keeper_context_store.Await_note_writes | Keeper_context_store.Reread_note ->
            followup m)
   | Error ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err) ->

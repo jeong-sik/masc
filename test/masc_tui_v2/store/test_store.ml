@@ -24239,7 +24239,7 @@ let () =
                     | _ -> None)
               in
               let changed = { note with text = "confirmed write" } in
-              let committed, _ = receive_at ~now:t1 (slash_save first changed.text)
+              let committed, post_read = receive_at ~now:t1 (slash_save first changed.text)
                   (save_result None (Ok changed)) in
               let missing = Error (Msg.Http_error { status = 404; body = ""; api_error = None }) in
               let unavailable = Error (Msg.Transport (Health.Other_io "disconnected")) in
@@ -24254,14 +24254,16 @@ let () =
                   (read_result ~keeper:"beta" None (Ok other)) in
               Alcotest.(check (option string)) "write boundary belongs to its Keeper"
                 (Some other.text) (shared ~keeper:"beta" other_state);
-              let waiting, reissued = receive_at ~now:t2 committed
+              let waiting, discarded = receive_at ~now:t2 committed
                   (read_result (Some first_id) missing) in
+              Alcotest.(check (list (option int))) "late original prefill does not duplicate the post-save read"
+                [] (rereads discarded);
               let fresh_owner previous cmds =
                 match rereads cmds with
                 | [Some id] when not (Int.equal previous id) -> id
                 | _ -> Alcotest.fail "expected one fresh prefill for the still-pristine draft"
               in
-              let fresh_id = fresh_owner first_id reissued in
+              let fresh_id = fresh_owner first_id post_read in
               let receive_latest m reply = fst (receive_at ~now:t2 m reply) in
               let fresh = read_result ~requested_at:t2 (Some fresh_id) (Ok changed) in
               Alcotest.(check (option string)) "reissued read settles the pristine draft"
@@ -24269,11 +24271,41 @@ let () =
               Alcotest.(check (option string)) "editing before the reissued read protects the draft"
                 (Some "typed") (field (receive_latest (edit "typed" waiting) fresh));
               let seeded = receive m_ws (loaded None) in
-              let overlapping = slash_save (slash_save seeded "first save") "second save" in
-              let draft, draft_id = open_note overlapping in
               let last_read (m : Model.t) =
                 Observed.is_stale (Keeper_context_store.get_keeper ~keeper:"alpha" m.keeper_context).operator_note
               in
+              let in_flight, saving_id = submit (edit changed.text primed) changed.text in
+              let closed, _ = Update.step ~now:t0 in_flight (Msg.Key_event (key Keymap.Input.Escape)) in
+              Alcotest.(check (option string)) "Escape closes the sending editor" None (field closed);
+              let reopened, pending_id = open_note closed in
+              let before_save = receive reopened (read_result (Some pending_id) (Ok note)) in
+              let before_save = receive before_save (read_result None missing) in
+              Alcotest.(check (option string)) "earlier GET cannot prefill a reopened editor during save"
+                (Some "") (field before_save);
+              Alcotest.(check bool) "the shared observation remains stale during a single save" true
+                (last_read before_save && shared ~keeper:"alpha" before_save = Some note.text);
+              let still_pending, cmds = Update_nav.submit_inline_modal ~now:t0 before_save in
+              Alcotest.(check bool) "Enter on a waiting editor preserves its owner and emits no write" true
+                (cmds = [] && match still_pending.inline_modal with
+                 | Some { note_prefill_id = Some id; error = None; submitting = false; _ } -> Int.equal id pending_id
+                 | Some _ | None -> false);
+              ignore (submit (edit "typed while waiting" before_save) "typed while waiting");
+              List.iter (fun (result, from_disk) ->
+                  let settled, cmds = receive_at ~now:t1 before_save (save_result (Some saving_id) result) in
+                  let readback_id = fresh_owner pending_id cmds in
+                  let settled = receive_latest settled (read_result (Some pending_id) (Ok note)) in
+                  Alcotest.(check (option string)) "only post-settlement read can fill reopened editor"
+                    (Some "") (field settled);
+                  let fresh = read_result ~requested_at:t2 (Some readback_id) (Ok from_disk) in
+                  Alcotest.(check (option string)) "reopened editor settles from disk after success or failure"
+                    (Some from_disk.text) (field (receive_latest settled fresh));
+                  let dirty, cmds = receive_at ~now:t1 (edit "keep typed draft" before_save)
+                      (save_result (Some saving_id) result) in
+                  Alcotest.(check bool) "settling an isolated save keeps a newer typed draft"
+                    true (field dirty = Some "keep typed draft" && rereads cmds = []))
+                [Ok changed, changed; unavailable, note];
+              let overlapping = slash_save (slash_save seeded "first save") "second save" in
+              let draft, draft_id = open_note overlapping in
               Alcotest.(check bool) "overlap keeps the previous note as last read" true (last_read draft);
               let mid, first_cmds = receive_at ~now:t1 draft (save_result None (Ok changed)) in
               Alcotest.(check (option string)) "overlapping save receipt cannot publish the final note"

@@ -23369,13 +23369,202 @@ let test_discord_reply_source_and_receipt () =
   Alcotest.(check bool) "server's delivered ID unlocks a fresh compose" true
     (Discord_reply_store.can_compose attempt)
 
+(* #54820 review: a jump to a Board post the feed does not list must show and
+   act on that post, and a wiki jump made before the index lands must still
+   select its page once the index arrives. *)
+let test_uncached_knowledge_jumps () =
+  let post id : Wire_knowledge.board_post =
+    {
+      id;
+      title = "Title " ^ id;
+      body = "body " ^ id;
+      author = "alpha-1";
+      hearth = Some "ops";
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = 100.0;
+      updated_at_unix = None;
+      score = 1;
+      comment_count = 0;
+      author_karma = Observed.value ~observed_at:t0 10;
+      succession_chain_root_id = None;
+      chain_depth = None;
+      is_signal = true;
+      pinned = false;
+    }
+  in
+  let listed = post "post-listed" in
+  let far = post "post-far" in
+  let m0 = Model.initial () in
+  let on_board board =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; dive_stack = [] };
+      knowledge =
+        { (Knowledge_store.set_tab Nav.Knowledge_board m0.knowledge) with board };
+    }
+  in
+  let feed =
+    Observed.value ~observed_at:t0
+      {
+        Wire_knowledge.posts = [ listed ];
+        count = 1;
+        sort_by = "recent";
+        signal_only = true;
+      }
+  in
+  let thread_reply (m : Model.t) post_id result =
+    fst
+      (Update.step ~now:t0 m
+         (Msg.Http_reply
+            { epoch = m.epoch; reply = Msg.Reply_board_thread { post_id; result } }))
+  in
+  let thread_gets cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req = Cmd.Get_board_thread { post_id; _ }; _ } -> Some post_id
+        | _ -> None)
+      (Cmd.flatten cmds)
+  in
+  let detail_id (m : Model.t) =
+    Option.map
+      (fun (p : Wire_knowledge.board_post) -> p.id)
+      (Knowledge_store.board_detail_post m.knowledge)
+  in
+  let crud_id (m : Model.t) =
+    let opened, _ = Update.step ~now:t0 m (Msg.Key_event (char_key "c")) in
+    match opened.nav.overlay with
+    | Some (Nav.Inline_action (Nav.Board_comment { post_id; parent_id = None })) ->
+        Some post_id
+    | Some _ | None -> None
+  in
+  (* Feed loaded, target absent from it. *)
+  let jumped, cmds = Update_nav.jump_to_knowledge_thread (on_board feed) "post-far" in
+  Alcotest.(check (list string)) "the jump asks only for the target thread"
+    [ "post-far" ] (thread_gets cmds);
+  let shown = thread_reply jumped "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "the target thread reply is kept"
+    (Some "post-far")
+    (Option.map
+       (fun ((tp : Wire_knowledge.board_post), _) -> tp.id)
+       (Observed.to_option shown.knowledge.active_thread));
+  Alcotest.(check (option string)) "the detail shows the target" (Some "post-far")
+    (detail_id shown);
+  Alcotest.(check (option string)) "comment and vote act on the target"
+    (Some "post-far") (crud_id shown);
+  let other = thread_reply shown "post-listed" (Ok (listed, [])) in
+  Alcotest.(check (option string)) "a reply for the list selection does not replace it"
+    (Some "post-far") (detail_id other);
+  (* Feed not loaded yet. *)
+  let jumped_absent, _ =
+    Update_nav.jump_to_knowledge_thread (on_board Observed.absent) "post-far"
+  in
+  let shown_absent = thread_reply jumped_absent "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "without a feed the detail shows the loaded thread"
+    (Some "post-far") (detail_id shown_absent);
+  Alcotest.(check (option string)) "without a feed comment and vote act on it"
+    (Some "post-far") (crud_id shown_absent);
+  (* Moving the list selection returns the detail to the list. *)
+  let two_feed =
+    Observed.value ~observed_at:t0
+      {
+        Wire_knowledge.posts = [ listed; post "post-next" ];
+        count = 2;
+        sort_by = "recent";
+        signal_only = true;
+      }
+  in
+  let jumped2, _ = Update_nav.jump_to_knowledge_thread (on_board two_feed) "post-far" in
+  let shown2 = thread_reply jumped2 "post-far" (Ok (far, [])) in
+  let moved =
+    { shown2 with
+      knowledge = Knowledge_store.move_selection ~delta:1 shown2.knowledge }
+  in
+  Alcotest.(check (option string)) "moving the selection shows the listed post"
+    (Some "post-next") (detail_id moved);
+  (* Wiki: the jump lands before the index. *)
+  let summary slug : Wire_knowledge.wiki_page_summary =
+    {
+      slug;
+      file = slug ^ ".md";
+      title = "Title " ^ slug;
+      summary = "Summary " ^ slug;
+      source = Wire_knowledge.Source_research;
+      author = "alpha-1";
+      created = "2026-11-01";
+      updated = "2026-11-22";
+      revision = 1;
+      tags = [];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-" ^ slug;
+    }
+  in
+  let lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let index : Wire_knowledge.wiki_index =
+    {
+      pages_total = 3;
+      pages_readable = 3;
+      pages_unreadable = 0;
+      pages = [ summary "alpha"; summary "beta"; summary "gamma" ];
+      unreadable_pages = [];
+      lint;
+    }
+  in
+  let wiki_jumped, _ = Update_nav.jump_to_knowledge_wiki (on_board Observed.absent) "gamma" in
+  Alcotest.(check (option string)) "the jump keeps the slug the index does not list yet"
+    (Some "gamma") wiki_jumped.knowledge.pending_wiki_jump_slug;
+  let indexed, index_cmds =
+    Update.step ~now:t0 wiki_jumped
+      (Msg.Http_reply
+         { epoch = wiki_jumped.epoch; reply = Msg.Reply_wiki_index (Ok index) })
+  in
+  Alcotest.(check (option string)) "the index selects the jumped page" (Some "gamma")
+    (Option.map
+       (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+       (Knowledge_store.selected_wiki_page indexed.knowledge));
+  Alcotest.(check (list string)) "and asks for that page"
+    [ "gamma" ]
+    (List.filter_map
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page }; _ } -> Some page
+         | _ -> None)
+       (Cmd.flatten index_cmds));
+  Alcotest.(check (option string)) "the pending slug is spent" None
+    indexed.knowledge.pending_wiki_jump_slug
+
 let () =
   Alcotest.run "masc_tui_store"
     [
       ( "discord_reply"
       , [ Alcotest.test_case "recorded origin and safe receipt recovery" `Quick
             test_discord_reply_source_and_receipt ] );
-
+      ( "uncached_knowledge_jumps"
+      , [ Alcotest.test_case "uncached Board and wiki jumps show their target" `Quick
+            test_uncached_knowledge_jumps ] );
       ( "hidden_music_command"
       , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
             test_hidden_music_command;

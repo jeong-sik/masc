@@ -185,6 +185,7 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   pending_wiki_edit_slug : string option;
+  pending_wiki_jump_slug : string option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
@@ -266,6 +267,7 @@ let empty =
     wiki_lint = Observed.unreported;
     wiki_edit_base = None;
     pending_wiki_edit_slug = None;
+    pending_wiki_jump_slug = None;
     artifacts = Observed.unreported;
     active_artifact_detail = Observed.absent;
     active_artifact_detail_target = None;
@@ -642,6 +644,34 @@ let visual_row_for_selection t ~selected_index =
 let selected_post t =
   let ps = board_display_posts t in
   List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
+
+(* A jump to a post the feed does not list leaves the list selection where it
+   was and records the post as [active_thread_target]. That target, not the
+   list selection, is what the Board detail shows until the selection moves. *)
+let uncached_thread_target t =
+  match t.active_thread_target with
+  | Some post_id ->
+      if
+        List.exists
+          (fun (p : Wire_knowledge.board_post) -> String.equal p.id post_id)
+          (board_display_posts t)
+      then None
+      else Some post_id
+  | None -> None
+
+let board_detail_post_id t =
+  match uncached_thread_target t with
+  | Some post_id -> Some post_id
+  | None ->
+      Option.map (fun (p : Wire_knowledge.board_post) -> p.id) (selected_post t)
+
+let board_detail_post t =
+  match uncached_thread_target t with
+  | Some post_id -> (
+      match Observed.to_option t.active_thread with
+      | Some (tp, _) when String.equal tp.Wire_knowledge.id post_id -> Some tp
+      | Some _ | None -> None)
+  | None -> selected_post t
 
 type board_space_effect =
   | Board_space_toggle_chain of string
@@ -1877,16 +1907,36 @@ let apply_wiki_index ~observed_at idx t =
   else
     let display = wiki_display_pages next in
     let len = List.length display in
+    let jumped =
+      Option.bind next.pending_wiki_jump_slug (fun sl ->
+          index_of_wiki_slug sl display)
+    in
     let selected_index =
-      match Option.bind prev_slug (fun sl -> index_of_wiki_slug sl display) with
+      match jumped with
       | Some idx -> idx
-      | None -> clamp_index len next.selected_index
+      | None -> (
+          match
+            Option.bind prev_slug (fun sl -> index_of_wiki_slug sl display)
+          with
+          | Some idx -> idx
+          | None -> clamp_index len next.selected_index)
     in
     let header_row, vis_row = visual_row_for_selection next ~selected_index in
     let scroll_offset =
       adjust_grouped_scroll ~scroll:next.scroll_offset ~header_row vis_row
     in
-    { next with selected_index; scroll_offset }
+    let detail_scroll_offset =
+      match jumped with
+      | Some _ -> 0
+      | None -> next.detail_scroll_offset
+    in
+    {
+      next with
+      selected_index;
+      scroll_offset;
+      detail_scroll_offset;
+      pending_wiki_jump_slug = None;
+    }
 
 let apply_wiki_log ~observed_at log t =
   { t with wiki_log = Observed.value ~observed_at log }
@@ -2033,11 +2083,22 @@ let select_wiki_slug ~slug t =
     | Some idx -> idx
     | None -> base1.selected_index
   in
+  let pending_wiki_jump_slug =
+    match index_of_wiki_slug slug (wiki_display_pages base1) with
+    | Some _ -> None
+    | None -> Some slug
+  in
   let header_row, vis_row = visual_row_for_selection base1 ~selected_index in
   let scroll_offset =
     adjust_grouped_scroll ~scroll:base1.scroll_offset ~header_row vis_row
   in
-  { base1 with selected_index; scroll_offset; detail_scroll_offset = 0 }
+  {
+    base1 with
+    selected_index;
+    scroll_offset;
+    detail_scroll_offset = 0;
+    pending_wiki_jump_slug;
+  }
 
 let select_artifact_by_id ~id_or_sha t =
   let base0 = set_tab Nav.Knowledge_artifacts t in
@@ -2740,9 +2801,17 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         let pending_wiki_edit_slug =
           if same_selection then t.pending_wiki_edit_slug else None
         in
+        let active_thread_target =
+          match uncached_thread_target t with
+          | Some _ when not same_selection -> None
+          | Some _ | None -> t.active_thread_target
+        in
         {
           t with
           selected_index;
+          active_thread_target;
+          pending_wiki_jump_slug =
+            (if same_selection then t.pending_wiki_jump_slug else None);
           scroll_offset;
           detail_scroll_offset;
           pending_wiki_edit_slug;

@@ -675,7 +675,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       ]
   in
   ignore (H.draw_pills ~grid ~rect:filter_rect ~theme pills);
-  let selected_post = Knowledge_store.selected_post k in
+  let selected_post = Knowledge_store.board_detail_post k in
   if model.nav.zoomed then
     draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix
       ~model ~k selected_post ~focused:(Model.body_has_focus model)
@@ -809,7 +809,9 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
        | Observed.Value _ when filtered <> [] ->
            let groups = Knowledge_store.group_succession_chains filtered in
            let sel_id =
-             match selected_post with Some p -> Some p.id | None -> None
+             match Knowledge_store.selected_post k with
+             | Some p -> Some p.id
+             | None -> None
            in
            let visual_rows = ref [] in
            List.iter

@@ -1174,7 +1174,7 @@ let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post optio
       if
         Nav.equal_workspace m.nav.workspace Nav.Knowledge
         && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
-      then Knowledge_store.selected_post m.knowledge
+      then Knowledge_store.board_detail_post m.knowledge
       else None
 
 let open_board_comment_for_selected (m : Model.t) =

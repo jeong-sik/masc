@@ -728,18 +728,18 @@ let fetches_for_workspace ~force (m : Model.t) =
       match m.knowledge.active_tab with
       | Nav.Knowledge_board ->
           let selected_thread_req =
-            match Knowledge_store.selected_post m.knowledge with
+            match Knowledge_store.board_detail_post_id m.knowledge with
             | None -> []
-            | Some p ->
+            | Some post_id ->
                 let thread_matches =
                   match m.knowledge.active_thread with
                   | Observed.Value { data = tp, _; stale = false; _ } ->
-                      String.equal tp.id p.id && not force
+                      String.equal tp.id post_id && not force
                   | Observed.Failed { retryable = false; _ }
                   | Observed.Loading _
                     when not force ->
                       Option.equal String.equal m.knowledge.active_thread_target
-                        (Some p.id)
+                        (Some post_id)
                   | Observed.Loading _
                   | Observed.Value { stale = true; _ }
                   | Observed.Absent
@@ -750,8 +750,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                 if thread_matches then []
                 else
                   [
-                    Cmd.Get_board_thread
-                      { post_id = p.id; comment_limit = Some 100 };
+                    Cmd.Get_board_thread { post_id; comment_limit = Some 100 };
                   ]
           in
           ([]

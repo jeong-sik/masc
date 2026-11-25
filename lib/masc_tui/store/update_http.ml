@@ -1259,8 +1259,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         match Model.active_dive m with
         | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
-            match Knowledge_store.selected_post m.knowledge with
-            | Some p -> String.equal p.id post_id || String.equal p.id tp.id
+            match Knowledge_store.board_detail_post_id m.knowledge with
+            | Some id -> String.equal id post_id || String.equal id tp.id
             | None -> true)
       in
       if not matches_active then (m, [])
@@ -1278,8 +1278,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         match Model.active_dive m with
         | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
-            match Knowledge_store.selected_post m.knowledge with
-            | Some p -> String.equal p.id meta.post_id
+            match Knowledge_store.board_detail_post_id m.knowledge with
+            | Some id -> String.equal id meta.post_id
             | None -> true)
       in
       if not matches_active then (m, [])
@@ -1294,8 +1294,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         match Model.active_dive m with
         | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
         | None -> (
-            match Knowledge_store.selected_post m.knowledge with
-            | Some p -> String.equal p.id post_id
+            match Knowledge_store.board_detail_post_id m.knowledge with
+            | Some id -> String.equal id post_id
             | None -> true)
       in
       if not matches_active then (m, [])

@@ -175,6 +175,9 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   pending_wiki_edit_slug : string option;
+  pending_wiki_jump_slug : string option;
+      (** A wiki jump whose slug the loaded index did not list yet. The next
+          {!apply_wiki_index} selects it; moving the selection forgets it. *)
       (** Wiki slug whose edit modal should open automatically once its fresh
           page detail arrives (Issue #54490). *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
@@ -581,6 +584,15 @@ val hottest_signal_threads : t -> Wire_knowledge.board_post list
 val selected_pulse_thread : t -> Wire_knowledge.board_post option
 val move_pulse_thread : ?viewport_rows:int -> delta:int -> t -> t
 val selected_post : t -> Wire_knowledge.board_post option
+
+val board_detail_post_id : t -> string option
+(** The post the Board detail shows: an [active_thread_target] the feed does
+    not list (set by a jump to an uncached post) until the selection moves,
+    otherwise the list selection. *)
+
+val board_detail_post : t -> Wire_knowledge.board_post option
+(** The post of {!board_detail_post_id}. For an uncached jump target it is the
+    loaded thread's post, and [None] while that thread is not loaded. *)
 
 (** What [Space] does on the Board list: it folds the selected post's
     succession chain when the post belongs to one, and otherwise flips the

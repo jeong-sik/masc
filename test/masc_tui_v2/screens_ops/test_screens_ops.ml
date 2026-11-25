@@ -761,6 +761,7 @@ let make_populated_model ~cols ~rows ~lang =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "msg-2";
@@ -775,6 +776,7 @@ let make_populated_model ~cols ~rows ~lang =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "msg-3";
@@ -789,6 +791,7 @@ let make_populated_model ~cols ~rows ~lang =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "msg-4";
@@ -804,6 +807,7 @@ let make_populated_model ~cols ~rows ~lang =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
              ];
            has_more = false;
@@ -1436,6 +1440,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "msg-asst";
@@ -1450,6 +1455,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  provenance = operation_provenance "op-2" Terminal_result;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "msg-code";
@@ -1464,6 +1470,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
              ];
            has_more = false;
@@ -2318,6 +2325,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "sec-2";
@@ -2332,6 +2340,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "sec-3";
@@ -2346,6 +2355,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
                {
                  id = "sec-4";
@@ -2363,6 +2373,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  provenance = None;
                  failure_kind = None;
                  thinking = None;
+                 retained_images = [];
                };
              ];
            has_more = false;
@@ -2433,6 +2444,7 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
                    provenance = None;
                    failure_kind = None;
                    thinking = None;
+                   retained_images = [];
                  };
                ];
              has_more = false;
@@ -2917,6 +2929,7 @@ let test_p1_chat_transcript_render_parity () =
       provenance;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let json_1line =
@@ -3119,6 +3132,7 @@ let test_chat_peer_rows_name_their_author () =
       provenance = None;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let broadcast =
@@ -3276,6 +3290,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       provenance = operation_provenance "op-old" Accepted_user;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let m1 =
@@ -3419,6 +3434,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              provenance = operation_provenance req_a Accepted_user;
                              failure_kind = None;
                              thinking = None;
+                             retained_images = [];
                            };
                            {
                              id = "hist-3";
@@ -3433,6 +3449,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              provenance = operation_provenance req_a Settled_failure;
                              failure_kind = Some "turn_exception";
                              thinking = None;
+                             retained_images = [];
                            };
                          ];
                        has_more = false;
@@ -3966,6 +3983,7 @@ let history_msg ~id ~role ~content ~thinking ~seconds_ago :
     provenance = None;
     failure_kind = None;
     thinking;
+    retained_images = [];
   }
 
 let apply_history keeper messages fleet =

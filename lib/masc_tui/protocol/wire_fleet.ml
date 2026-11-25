@@ -1913,6 +1913,8 @@ type history_thinking =
   | Thinking_redacted
   | Thinking_partial of string
 
+type retained_image = { media_path : string; caption : string option }
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -1926,6 +1928,7 @@ type chat_message = {
   provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
   thinking : history_thinking option;
+  retained_images : retained_image list;
 }
 
 type chat_history_page = {
@@ -2283,6 +2286,29 @@ let extract_history_thinking (json : Yojson.Safe.t) : history_thinking option =
           else Some (Thinking_visible joined))
   | _ -> None
 
+let decode_retained_images json =
+  let prefix = "/api/v1/media/" in
+  match member "blocks" json with
+  | `List blocks ->
+      List.filter_map
+        (fun block ->
+          match member "t" block, member "src" block with
+          | `String "image", `String media_path
+            when String.starts_with ~prefix media_path ->
+              let start = String.length prefix in
+              let token = String.sub media_path start (String.length media_path - start) in
+              if Wire_runtime.is_lowercase_sha256_hex token then
+                let caption =
+                  match member "cap" block with
+                  | `String cap when not (String.equal (String.trim cap) "") -> Some cap
+                  | _ -> None
+                in
+                Some { media_path; caption }
+              else None
+          | _ -> None)
+        blocks
+  | _ -> []
+
 let decode_chat_message json =
   let* id = required_nonblank_string json "id" in
   let* role = decode_chat_role json in
@@ -2314,6 +2340,7 @@ let decode_chat_message json =
       provenance;
       failure_kind;
       thinking;
+      retained_images = decode_retained_images json;
     }
 
 let decode_chat_history = function

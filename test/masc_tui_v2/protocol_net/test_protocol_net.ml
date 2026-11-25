@@ -3534,6 +3534,8 @@ let test_agui_chat_stream_and_history_provenance () =
                   "ts": 1795252100.0,
                   "blocks": [
                     { "t": "thinking", "content": "Plan step 1" },
+                    { "t": "image", "src": "/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cap": "Report" },
+                    { "t": "image", "src": "https://example.invalid/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
                     { "t": "trace", "trace": [
                       { "kind": "think", "text": "Inspect file" },
                       { "kind": "reason", "text": "Check diff", "detail": "2 hunks" }
@@ -3575,6 +3577,12 @@ let test_agui_chat_stream_and_history_provenance () =
               "next_cursor": null
             }|}))
   in
+  let reply = List.hd thinking_page.messages in
+  Alcotest.(check string) "retained media preserves original reply" "Done." reply.content;
+  Alcotest.(check (list (pair string (option string)))) "only canonical workspace image is retained"
+    [ ("/api/v1/media/" ^ String.make 64 'a', Some "Report") ]
+    (List.map (fun (image : Wire_fleet.retained_image) -> image.media_path, image.caption)
+       reply.retained_images);
   (match (List.nth thinking_page.messages 0).thinking with
   | Some (Wire_fleet.Thinking_visible s) ->
       Alcotest.(check string) "blocks thinking extracted"

@@ -254,31 +254,32 @@ describe('workspaces/settings', () => {
     }) as typeof fetch
 
     render(html`<${SettingsWorkspace} subroute="runtime" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi()
-
-    const input = container.querySelector<HTMLInputElement>('[aria-label="server.port"]')!
+    const input = await vi.waitFor(() => {
+      const field = container.querySelector<HTMLInputElement>('[aria-label="server.port"]')
+      expect(field).not.toBeNull()
+      return field!
+    })
     expect(input.value).toBe('8935')
     expect(container.querySelector('[aria-label="server.broken"]')).toBeNull()
     const preview = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Preview Diff'))!
     input.value = ''
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi()
+    await vi.waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'))
     expect(input.value).toBe('')
-    expect(input.getAttribute('aria-invalid')).toBe('true')
     expect(preview.disabled).toBe(true)
     expect(patchBodies).toHaveLength(0)
 
     input.value = '0'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi()
-    expect(preview.disabled).toBe(false)
+    await vi.waitFor(() => expect(preview.disabled).toBe(false))
     preview.click()
-    await flushUi()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid configuration patch receipt')
+    })
 
     expect(patchBodies[0]?.changes).toEqual([
       { op: 'set_int', table: 'server', key: 'port', full_key: 'server.port', value: 0 },
     ])
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid configuration patch receipt')
     expect(container.querySelector('[data-testid="settings-dry-run-panel"]')).toBeNull()
   })
 
@@ -342,14 +343,16 @@ describe('workspaces/settings', () => {
 
     navigate('/settings?section=candle')
     render(html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
-    const activeCatBtn = container.querySelector('nav button[aria-current="page"]')
-    expect(activeCatBtn?.textContent).toContain('Board, Memory & Candle')
+    await vi.waitFor(() => {
+      const activeCategory = container.querySelector('nav button[aria-current="page"]')
+      expect(activeCategory?.textContent).toContain('Board, Memory & Candle')
+    })
 
     navigate('/settings?key=providers.openai')
-    await flushUi(20)
-    const searchInput = container.querySelector('input[aria-label="설정 키 검색"]') as HTMLInputElement
-    expect(searchInput.value).toBe('providers.openai')
-    expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="설정 키 검색"]')
+      expect(searchInput?.value).toBe('providers.openai')
+      expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
+    })
   })
 })

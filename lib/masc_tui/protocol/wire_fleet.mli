@@ -607,6 +607,8 @@ type history_thinking =
   | Thinking_redacted
   | Thinking_partial of string
 
+type retained_image = { media_path : string; caption : string option }
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -620,6 +622,7 @@ type chat_message = {
   provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
   thinking : history_thinking option;
+  retained_images : retained_image list;
 }
 
 type chat_history_page = {

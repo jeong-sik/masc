@@ -1429,7 +1429,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     ~pace:Frame_scheduler.Pace_interactive !scheduler
               end;
 
-              if Document_graphics.take_dirty document_graphics then
+              if Document_graphics.take_dirty document_graphics ~now then
                 scheduler :=
                   Frame_scheduler.mark_dirty
                     ~pace:Frame_scheduler.Pace_interactive !scheduler;
@@ -1571,8 +1571,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let probe_obs = Probe.current_observation () in
                     let theme = Theme.of_preset !model.theme_preset in
                     let desired_document =
-                      Document_graphics.prepare document_graphics ~sw
+                      Document_graphics.prepare document_graphics ~sw ~now:now_after
                         ~base_path:cli.base_path
+                        ~endpoint:(Cmd_executor.current_endpoint executor)
+                        ~fetch_retained:(fun endpoint ~path ~max_body_bytes ->
+                          Http_client.get_raw_limited ~io ~clock ~max_body_bytes endpoint ~path)
                         ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
                         ~probe:probe_obs ~theme grid
                     in
@@ -1646,6 +1649,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let (Frame_scheduler.Next_deadline_ns deadline_ns) =
                       Frame_scheduler.next_deadline ~now_ns:sleep_now_ns
                         ~output_behind:(Terminal_out.behind ()) !scheduler
+                    in
+                    let deadline_ns =
+                      earliest_opt deadline_ns
+                        (Option.map Clock.Mono.to_ns
+                           (Document_graphics.next_retry_deadline document_graphics))
                     in
                     ignore
                       (Wake_bell.await_until_ns ~clock ~now_ns:sleep_now_ns

@@ -41,6 +41,7 @@ import {
   readQueuedChatOperations,
 } from '../../lib/keeper-chat-queue'
 import { randomUuid } from '../../lib/uuid'
+import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { decodeKeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import {
   dedupeHistoryToolRows,
@@ -60,6 +61,7 @@ import type {
   ChatSpeakerAuthority,
   ChatToolBlock,
   ChatTranscriptEntry,
+  RetainedChatImage,
   CheckpointInventoryData,
   KeeperAttachedProvider,
   KeeperActiveTurn,
@@ -782,6 +784,10 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
       ? roleRaw
       : 'assistant'
   const content = typeof raw.content === 'string' ? raw.content : ''
+  const retainedImages = Array.isArray(raw.blocks) ? raw.blocks.flatMap((block) =>
+    isRecord(block) && block.t === 'image' && isWorkspaceMediaPath(block.src)
+      ? [{ path: block.src, caption: asStr(block.cap) ?? undefined, workspaceEpoch: currentSessionEpoch() }] : [],
+  ) : []
   const ts = asNum(raw.ts) ?? Date.now() / 1000
   const decodedBlocks = decodeHistoryBlocks(raw.blocks)
   const rawThinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
@@ -853,6 +859,7 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     role,
     speakerLabel,
     content,
+    retainedImages: retainedImages.length > 0 ? retainedImages : undefined,
     thinking,
     ts,
     deliveryProvenance: decodeKeeperChatDeliveryProvenance(raw.delivery_key, raw.transcript_slot).value ?? undefined,
@@ -1439,6 +1446,7 @@ export interface StreamKeeperChatCallbacks {
   readonly onAttemptStarted?: () => void
   readonly onModelActivity?: (channel: 'thinking' | 'text') => void
   readonly onTextDelta?: (delta: string) => void
+  readonly onRetainedImages?: (images: readonly RetainedChatImage[]) => void
   readonly onThinkingDelta?: (delta: string, blockKey?: string) => void
   readonly onThinkingSnapshot?: (snapshot: string, blockKey?: string) => void
   readonly onToolStart?: (toolName: string, toolCallId?: string, streamKey?: string) => void
@@ -1578,6 +1586,18 @@ export async function streamKeeperChat(params: {
         const decoder = new TextDecoder()
         let buf = ''
         let terminal = false
+        let mediaOwnership = FRESH_OWNERSHIP
+        const completedMedia = new Map<string, RetainedChatImage>()
+
+        const admitMediaOwner = (owner: ChatJournalTextOwner) => {
+          if (owner.kind === 'observed_response'
+            && (!Number.isSafeInteger(owner.contentGeneration) || (owner.contentGeneration ?? -1) < 0
+              || !Number.isSafeInteger(owner.streamScope) || (owner.streamScope ?? -1) < 0)) return false
+          const admitted = admitOwner(mediaOwnership, owner)
+          if (!admitted.accept) return false
+          mediaOwnership = admitted.ownership
+          return true
+        }
 
         const handleFrame = (rawFrame: string) => {
           if (!isEpochCurrent(startEpoch) || controller.signal.aborted) return
@@ -1597,6 +1617,7 @@ export async function streamKeeperChat(params: {
           if (type === 'RUN_STARTED') {
             params.callbacks.onRunStarted?.()
           } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
+            admitMediaOwner(decodeTextOwner(parsed))
             params.callbacks.onTextDelta?.(parsed.delta)
           } else if (type === 'TOOL_CALL_START') {
             params.callbacks.onToolStart?.(
@@ -1638,15 +1659,20 @@ export async function streamKeeperChat(params: {
             const name = asStr(parsed.name)
             const val = isRecord(parsed.value) ? parsed.value : null
             if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+              mediaOwnership = retireAttempt(mediaOwnership)
               params.callbacks.onAttemptStarted?.()
+            } else if (name === 'KEEPER_STREAM_MESSAGE_START' && val) {
+              admitMediaOwner(decodeTextOwner({ ...val, response: val }))
             } else if (name === 'KEEPER_MODEL_CONTENT_ACTIVITY' && val) {
               const ch = asStr(val.channel)
               if (ch === 'thinking' || ch === 'text') {
                 params.callbacks.onModelActivity?.(ch)
               }
             } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
+              admitMediaOwner(decodeTextOwner(val))
               params.callbacks.onThinkingDelta?.(val.delta, extractThinkingBlockKey(val))
             } else if (name === 'KEEPER_THINKING_SNAPSHOT' && val && typeof val.snapshot === 'string') {
+              admitMediaOwner(decodeTextOwner(val))
               params.callbacks.onThinkingSnapshot?.(val.snapshot, extractThinkingBlockKey(val))
             } else if (name === 'KEEPER_TOOL_CALL_ADMITTED' && val) {
               const admittedName = asStr(val.toolCallName)
@@ -1714,6 +1740,19 @@ export async function streamKeeperChat(params: {
               const operationId = asStr(val.operation_id)
               const executionId = asStr(val.execution_id)
               if (operationId && executionId) params.callbacks.onBatchBound?.(operationId, executionId)
+            } else if (name === 'KEEPER_MEDIA_DELTA' && val
+              && isWorkspaceMediaPath(val.media_ref) && isWorkspaceRasterMime(val.media_type)
+              && val.source_type === 'base64') {
+              const index = asNum(val.index)
+              const owner = decodeTextOwner(val)
+              if (index !== null && Number.isSafeInteger(index) && index >= 0
+                && owner.kind === 'observed_response' && admitMediaOwner(owner)) {
+                const key = `${owner.contentGeneration}:${owner.streamScope}:${index}`
+                if (!completedMedia.has(key)) {
+                  completedMedia.set(key, { path: val.media_ref, workspaceEpoch: startEpoch })
+                  params.callbacks.onRetainedImages?.([...completedMedia.values()])
+                }
+              }
             } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
               const state = asStr(val.state) ?? 'Queued'
               const inter = isRecord(val.interactive) ? val.interactive : null

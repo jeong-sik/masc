@@ -86,11 +86,13 @@ const renderMarkdownDocument = memoizeLru(
 )
 
 function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
+  if (event.defaultPrevented || event.button !== 0
+    || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   const root = event.currentTarget
   const link = event.target instanceof Element
     ? event.target.closest<HTMLAnchorElement>('a[href^="#"]')
     : null
-  if (event.defaultPrevented || !link || !root.contains(link)) return
+  if (!link || !root.contains(link) || (link.target && link.target !== '_self')) return
 
   const fragment = link.getAttribute('href')?.slice(1) ?? ''
   if (fragment.startsWith('/')) return
@@ -108,8 +110,10 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   } catch {
     // An explicit anchor can contain a literal percent sign.
   }
-  const target = Array.from(root.querySelectorAll<HTMLElement>('[id], a[name]'))
-    .find((element) => element.id === anchor || element.getAttribute('name') === anchor)
+  const targets = Array.from(root.querySelectorAll<HTMLElement>('[id], a[name]'))
+  const findTarget = (id: string) =>
+    targets.find((element) => element.id === id || element.getAttribute('name') === id)
+  const target = findTarget(anchor) ?? (anchor !== fragment ? findTarget(fragment) : undefined)
   target?.scrollIntoView({ block: 'start' })
 }
 

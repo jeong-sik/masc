@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
-import { authSession, bumpSessionEpoch, resetAuthStateForTests } from '../../core/auth'
+import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
@@ -36,6 +36,7 @@ import {
 } from './keeper-debug-companion'
 import { releaseAllViewStreams, getActiveViewStreamKey } from '../../core/view-stream-slot'
 import { KeeperChatTab } from './keeper-chat-tab'
+import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { toolResultMarkdownPreview } from './chat-blocks'
 import { KeeperHeader, isKeeperBooted } from './keeper-header'
 import { KeeperMemoryTab } from './keeper-memory-tab'
@@ -43,7 +44,7 @@ import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
-import type { KeeperRosterItem, TurnRecordItem } from './types'
+import type { KeeperRosterItem, KeeperToolCallEntry, TurnRecordItem } from './types'
 
 const queuedOperations = (
   sequences: readonly number[] = [],
@@ -328,6 +329,28 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     vi.restoreAllMocks()
   })
 
+  it('renders an explicit Markdown preview in the tool inspector and preserves literal logs', async () => {
+    const source = `[masc:blob sha256=${'a'.repeat(64)} bytes=64 mime=text/markdown preview="**Report**"]`
+    const entry: KeeperToolCallEntry = {
+      ts: 100,
+      record_kind: 'tool_call',
+      keeper: 'code-reviewer-sister',
+      tool: 'publish_artifact',
+      duration_ms: 1,
+      wire_outcome: 'ok',
+      input: null,
+      output: source,
+    }
+    const view = render(html`<${KeeperToolCallInspector} keeperName=${entry.keeper} entry=${entry} />`)
+    expect(view.container.querySelector('.markdown-content strong')?.textContent).toBe('Report')
+    expect(view.getByTestId('tool-call-inspector-output').textContent).toBe(source)
+
+    const log = '[WARN]: phase\n  * worker[2]\n'
+    view.rerender(html`<${KeeperToolCallInspector} keeperName=${entry.keeper} entry=${{ ...entry, output: log }} />`)
+    expect(view.container.querySelector('.markdown-content')).toBeNull()
+    expect(view.getByTestId('tool-call-inspector-output').textContent).toBe(log)
+  })
+
   it('preserves literal tool output and honors stored Markdown in history and live events', async () => {
     const log = '[WARN]: phase\n  * worker[2]\n\n<log>\n'
     const marker = `[masc:blob sha256=${'a'.repeat(64)} bytes=64 mime=text/markdown preview="**report**"]`
@@ -368,6 +391,54 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(live).toEqual({ terminal: true, error: null })
     expect(onToolResult.mock.calls.map(([id, content]) => [id, content]))
       .toEqual(toolCalls.map((tool, index) => [tool.id, results[index]]))
+  })
+
+  it('keeps stored and completed images while rejecting late response frames', async () => {
+    const before = `/api/v1/media/${'a'.repeat(64)}`
+    const after = `/api/v1/media/${'b'.repeat(64)}`
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      messages: [{
+        id: 'saved', role: 'assistant', content: '',
+        blocks: [
+          { t: 'image', src: after, cap: '보고서' },
+          { t: 'image', src: `//example.com${before}` },
+        ],
+      }],
+    }), { headers: { 'Content-Type': 'application/json' } })))
+    const history = await fetchKeeperChatHistoryPageApi('code-reviewer-sister')
+    const workspaceEpoch = currentSessionEpoch()
+    expect(history.ok && history.value.messages[0]?.retainedImages)
+      .toEqual([{ path: after, caption: '보고서', workspaceEpoch }])
+
+    const media = (contentGeneration: number, path: string) => ({
+      type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA',
+      value: {
+        index: 0, media_type: 'image/png', source_type: 'base64', media_ref: path,
+        response: { content_generation: contentGeneration, stream_scope: 1 },
+      },
+    })
+    const events = [
+      media(1, before),
+      { type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: {} },
+      media(2, after),
+      media(1, before),
+      { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: { content_generation: 3, stream_scope: 2 } },
+      media(2, before),
+      { type: 'RUN_FINISHED' },
+    ]
+    const onRetainedImages = vi.fn()
+    await streamKeeperChat({
+      keeper: 'code-reviewer-sister', message: 'Draw', operationId: 'op-images', mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => new Response(
+        events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      )),
+      callbacks: { onRetainedImages },
+    })
+    expect(onRetainedImages.mock.calls).toEqual([
+      [[{ path: before, workspaceEpoch }]],
+      [[{ path: before, workspaceEpoch }, { path: after, workspaceEpoch }]],
+    ])
   })
 
   it('attributes saved user messages to their recorded speakers', async () => {

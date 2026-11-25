@@ -215,7 +215,10 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${onNavigate} onInspect=${onInspect} />`,
       container,
     )
-    await flushUi(40)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="provider-usage-unavailable"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="quota-tier-3"]')).not.toBeNull()
+    })
 
     // Verify days=14 clamp on 30d window
     expect(seenUrls).toContain('/api/v1/dashboard/provider-usage-history?days=14')
@@ -503,12 +506,13 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${(p: WorkspaceInspectPayload) => inspected.push(p)} />`,
       container,
     )
-    await flushUi(50)
+    const probeRows = '[data-testid="failover-probes-list"] .vlist-row'
+    await vi.waitFor(() => expect(container.querySelector(probeRows)).not.toBeNull())
 
     // Strict < 1,000 DOM nodes even with 240 probes!
     const totalDomNodes = container.querySelectorAll('*').length
     expect(totalDomNodes).toBeLessThan(1000)
-    const renderedProbeRows = container.querySelectorAll('[data-testid="failover-probes-list"] .vlist-row').length
+    const renderedProbeRows = container.querySelectorAll(probeRows).length
     expect(renderedProbeRows).toBeGreaterThan(0)
     expect(renderedProbeRows).toBeLessThan(60)
 
@@ -517,14 +521,15 @@ describe('workspaces/runtime', () => {
       b.textContent?.trim() === 'Exact Output',
     ) as HTMLButtonElement
     exactTabBtn.click()
-    await flushUi(40)
-
-    const rowEl = container.querySelector('tbody tr') as HTMLTableRowElement
-    expect(rowEl).not.toBeNull()
+    const rowEl = await vi.waitFor(() => {
+      const exactRow = Array.from(container.querySelectorAll<HTMLTableRowElement>('tbody tr')).find(
+        (row) => row.textContent?.includes('run-exact-1'),
+      )
+      expect(exactRow).toBeDefined()
+      return exactRow!
+    })
     rowEl.click()
-    await flushUi(40)
-
-    expect(inspected.length).toBeGreaterThanOrEqual(1)
+    await vi.waitFor(() => expect(inspected.length).toBeGreaterThanOrEqual(1))
     expect(inspected[inspected.length - 1]!.kind).toBe('exact_lane_run')
     expect(inspected[inspected.length - 1]!.title).toContain('librarian_exact')
   })
@@ -603,15 +608,16 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="tools" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(35)
-    expect(activeViewStreamKey.value).toBe('runtime-tools')
+    await vi.waitFor(() => {
+      expect(activeViewStreamKey.value).toBe('runtime-tools')
+      expect(container.textContent).toContain('masc_board_post')
+    })
     expect(toolStreamCalls).toEqual([
       {
         url: '/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=0',
         instanceHeader: 'inst-tools.42',
       },
     ])
-    expect(container.textContent).toContain('masc_board_post')
   })
 
   it('handles Browser Lane HTTP 503 unattached state gracefully on Addons tab', async () => {
@@ -818,11 +824,12 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(40)
-
-    const asksPanel = container.querySelector('[data-testid="lane-addon-asks-panel"]')
-    expect(asksPanel).not.toBeNull()
-    const input = asksPanel!.querySelector('input[aria-labelledby]') as HTMLInputElement
+    const asksPanel = await vi.waitFor(() => {
+      const panel = container.querySelector('[data-testid="lane-addon-asks-panel"]')
+      expect(panel?.querySelector('input[aria-labelledby]')).toBeInstanceOf(HTMLInputElement)
+      return panel!
+    })
+    const input = asksPanel.querySelector('input[aria-labelledby]') as HTMLInputElement
     const prompt = document.getElementById(input.getAttribute('aria-labelledby')!)
     expect(prompt?.querySelector('strong')?.textContent).toBe('Workspace')
     expect(prompt?.textContent?.trim()).toBe('Workspace name?')
@@ -830,7 +837,7 @@ describe('workspaces/runtime', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi(10)
 
-    const submitBtn = Array.from(asksPanel!.querySelectorAll('button')).find((b) =>
+    const submitBtn = Array.from(asksPanel.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('질문 응답 제출'),
     ) as HTMLButtonElement
     submitBtn.click()

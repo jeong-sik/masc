@@ -229,10 +229,10 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
       html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(50)
-
-    expect(container.querySelector('[data-lane-row="failover:coding"]')).not.toBeNull()
-    expect(container.querySelector('[data-lane-row="exact_output:verifier_exact"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-lane-row="failover:coding"]')).not.toBeNull()
+      expect(container.querySelector('[data-lane-row="exact_output:verifier_exact"]')).not.toBeNull()
+    })
 
     // Edit 'coding' lane -> move second candidate UP -> Preview Diff -> CAS Save
     const editBtn = container.querySelector('[data-lane-row="failover:coding"] button') as HTMLButtonElement
@@ -602,7 +602,7 @@ candidates = ["safe.model"]
       html`<${KeeperChatTab} keeper=${makeKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
       container,
     )
-    await flushUi(50)
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="chat-thinking-card"]')).not.toBeNull())
 
     // Defaults: Thinking collapsed (present, open=false), Tools summary (present, open=false), Memory/Autonomous hidden
     const thinkingCard = container.querySelector('[data-testid="chat-thinking-card"]') as HTMLDetailsElement

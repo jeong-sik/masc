@@ -600,6 +600,28 @@ let markdown_body_lines ~theme ~width ~rail_present ~prefix text =
   let rewritten = rewrite_masc_links_for_markdown text in
   Markdown.render_lines ~theme ~width:body_w ~osc8:true rewritten
 
+let retained_image_height ~(model : Model.t) ~keeper ~width =
+  let fresh =
+    Fleet_store.String_map.find_opt keeper model.fleet.chat_histories
+    |> Option.exists (fun history -> Observed.is_value history && not (Observed.is_stale history))
+  in
+  match (Probe.current_observation ()).graphics with
+  | Some Graphics_supported when fresh && width >= 16 -> 6
+  | Some Graphics_supported | Some (Graphics_refused _) | None -> 1
+
+let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
+  List.concat_map
+    (fun ({ media_path; caption } : Wire_fleet.retained_image) ->
+      let name = Option.value caption ~default:(Say.resolve lang (Say.make ~ko:"생성 이미지" ~en:"Generated image")) in
+      let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) name in
+      let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
+      let count = height - 1 in
+      let rows : Cell_grid.document_image_rows = { source = Retained_png media_path; count } in
+      { Markdown.spans; image_part = None }
+      :: List.init count (fun index ->
+             { Markdown.spans = []; image_part = Some { rows; index; left_inset = 0 } }))
+    images
+
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =
   let buf_op_id = Option.value buf.operation_id ~default:buf.request_id in
@@ -2165,6 +2187,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
     Printf.sprintf "00:00 %s " (Glyph.to_utf8 Glyph.Live_healthy)
   in
   let cut_replies = Fleet_store.cut_replies_by_row ~keeper model.fleet in
+  let retained_height = retained_image_height ~model ~keeper ~width in
   let count_history hist_msgs =
     let _, total =
       List.fold_left
@@ -2252,7 +2275,8 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                     ~prefix:"  " msg.content
                 + cut_reply_r
           in
-          (false, acc + spacing + msg_r))
+          let media_r = retained_height * List.length msg.retained_images in
+          (false, acc + spacing + msg_r + media_r))
         (true, 0) (history_tool_groups ~tools_mode hist_msgs)
     in
     total

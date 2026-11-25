@@ -28,6 +28,7 @@
  (modules test_pele_and_probe)
  (libraries
   masc_tui_core
+  masc_tui_net
   masc_tui_term
   masc_tui_ui
   masc_tui_store

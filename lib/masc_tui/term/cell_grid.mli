@@ -60,6 +60,7 @@ val copy_into : src:t -> dst:t -> unit
 type document_image =
   | Mermaid of string
   | Embedded_png of Graphics.embedded_png
+  | Retained_png of string
 
 type document_image_rows = {
   source : document_image;

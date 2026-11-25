@@ -392,6 +392,7 @@ type history_layout = {
   thinking_mode : Fleet_store.thinking_display;
   runtimes : Wire_runtime.runtime_option list;
   cut_replies : string Fleet_store.String_map.t;
+  retained_image_height : int;
 }
 
 let history_layout_of ~(model : Model.t) ~keeper_name ~width =
@@ -406,6 +407,8 @@ let history_layout_of ~(model : Model.t) ~keeper_name ~width =
     thinking_mode = model.fleet.chat_thinking_mode;
     runtimes = Runtime_store.runtime_options model.runtime;
     cut_replies = Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet;
+    retained_image_height =
+      Chat_transcript.retained_image_height ~model ~keeper:keeper_name ~width;
   }
 
 let build_history_rows ~(layout : history_layout)
@@ -709,7 +712,14 @@ let build_history_rows ~(layout : history_layout)
                    ~prefix_fg:theme.status_critical ~bg_rgb:base_bg msg.content)
               @ cut_reply_rows
         in
-        loop (Some hhmm) (List.rev_append (spacing @ msg_rows) acc) rest
+        let media_rows =
+          Chat_transcript.retained_image_rows ~theme ~lang ~width
+            ~height:layout.retained_image_height msg.retained_images
+          |> List.map (fun (line : Markdown.rendered_line) ->
+              make_row ~prefix:"  " ~prefix_fg:theme.text_muted ~bg_rgb:base_bg
+                ?image_part:line.image_part line.spans)
+        in
+        loop (Some hhmm) (List.rev_append (spacing @ msg_rows @ media_rows) acc) rest
   in
   loop None []
     (Chat_transcript.history_tool_groups ~tools_mode messages)

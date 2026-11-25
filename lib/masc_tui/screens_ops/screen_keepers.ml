@@ -1181,7 +1181,9 @@ let draw_unreadable_keepers grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~max_w:rect.w ~style line))
       rows
 
-let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+let render_with_history_rows
+    ~(history_rows : Keeper_dive.History_rows.t option)
+    ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
@@ -1207,7 +1209,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     then
       match selected_keeper_opt with
       | Some k ->
-          Keeper_dive.render_tabs_body ~embedded:false ~name:k.name
+          Keeper_dive.render_tabs_body ?history_rows ~embedded:false ~name:k.name
             ~tab:model.fleet.keeper_dive_tab ~model ~cache ~rect grid
       | None -> ()
     else if is_split then
@@ -1317,7 +1319,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model;
           (match selected_keeper_opt with
           | Some k ->
-              Keeper_dive.render_tabs_body ~embedded:true ~name:k.name
+              Keeper_dive.render_tabs_body ?history_rows ~embedded:true ~name:k.name
                 ~tab:model.fleet.keeper_dive_tab ~model ~cache ~rect:right_rect
                 grid
           | None ->
@@ -1412,6 +1414,17 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_full_width_roster grid ~rect:roster_rect ~theme ~model;
       draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model
 
+(* The same screens without kept chat history rows: every call lays the
+   history out again. *)
+let render ~model ~cache ~rect grid =
+  render_with_history_rows ~history_rows:None ~model ~cache ~rect grid
+
+let render_dive_with_history_rows
+    ~(history_rows : Keeper_dive.History_rows.t option)
+    ~name ~tab ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+  Keeper_dive.render_tabs_body ?history_rows ~embedded:false ~name ~tab ~model
+    ~cache ~rect grid
+
 let render_dive ~name ~tab ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
-  Keeper_dive.render_tabs_body ~embedded:false ~name ~tab ~model ~cache ~rect
-    grid
+  render_dive_with_history_rows ~history_rows:None ~name ~tab ~model ~cache
+    ~rect grid

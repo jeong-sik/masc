@@ -56,6 +56,10 @@ let blank_row ~bg_rgb =
 
 let wrap_plain_lines = Chat_transcript.wrap_plain_lines
 
+(* [Ops_common.say] for a language on its own: the history rows are laid out
+   from a {!history_layout}, which carries the language and not the model. *)
+let say_in (lang : Say.lang) ~ko ~en = Say.resolve lang (Say.make ~ko ~en)
+
 (* Summarize tool args/output cleanly so raw JSON walls and secrets never flood Chat. *)
 let concise_tool_preview ~max_w raw =
   let trimmed = String.trim raw in
@@ -102,7 +106,8 @@ let concise_tool_preview ~max_w raw =
     in
     Grapheme.truncate_to_width ~max_width:(Int.max 8 max_w) one_line
 
-let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+let build_history_thinking_rows ~(theme : Theme.t) ~(lang : Say.lang)
+    ~(thinking_mode : Fleet_store.thinking_display) ~width
     (thinking : Wire_fleet.history_thinking option) =
   let base_bg = theme.surface_1 in
   let redacted_row () =
@@ -111,7 +116,7 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
         ~prefix:(Glyph.to_utf8 Glyph.Ai_spark ^ " ")
         ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold
         ~text:
-          (Ops_common.say model ~ko:"추론 · 비공개 (redacted)"
+          (say_in lang ~ko:"추론 · 비공개 (redacted)"
              ~en:"Thinking · redacted")
         ~text_fg:theme.text_muted ~attrs:Attr.italic ~bg_rgb:base_bg ();
     ]
@@ -123,11 +128,11 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
       let approx_toks = Int.max 1 (String.length text / 4) in
       let partial_suffix =
         if is_partial then
-          Ops_common.say model ~ko:" · 일부 비공개" ~en:" · partially redacted"
+          say_in lang ~ko:" · 일부 비공개" ~en:" · partially redacted"
         else ""
       in
       let lbl =
-        Ops_common.say model
+        say_in lang
           ~ko:(Printf.sprintf "추론 · %d tok%s" approx_toks partial_suffix)
           ~en:(Printf.sprintf "Thinking · %d tok%s" approx_toks partial_suffix)
       in
@@ -142,7 +147,7 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
               ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold ~text:lbl
               ~text_fg:theme.text_muted ~attrs:Attr.italic
               ~right_meta:
-                (Ops_common.say model ~ko:"[Alt+T] 펼치기" ~en:"[Alt+T] expand")
+                (say_in lang ~ko:"[Alt+T] 펼치기" ~en:"[Alt+T] expand")
               ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
               ~bg_rgb:base_bg ();
           ]
@@ -169,7 +174,7 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
   match thinking with
   | None -> []
   | Some th -> (
-      match model.fleet.chat_thinking_mode with
+      match thinking_mode with
       | Fleet_store.Thinking_hidden -> []
       | (Fleet_store.Thinking_folded | Fleet_store.Thinking_full) as mode -> (
           match th with
@@ -179,16 +184,16 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           | Wire_fleet.Thinking_partial text ->
               render_visible ~is_partial:true ~mode text))
 
-let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
+let delegate_card_spans ~(theme : Theme.t) ~(lang : Say.lang) ~bg ~width
     (del : Chat_transcript.delegate_summary) =
   let action_lbl =
     match del.kind with
     | Chat_transcript.Delegate_invoke ->
-        Ops_common.say model ~ko:"위임" ~en:"Delegate"
+        say_in lang ~ko:"위임" ~en:"Delegate"
     | Chat_transcript.Delegate_status ->
-        Ops_common.say model ~ko:"위임 조회" ~en:"Delegate status"
+        say_in lang ~ko:"위임 조회" ~en:"Delegate status"
     | Chat_transcript.Delegate_cancel ->
-        Ops_common.say model ~ko:"위임 취소" ~en:"Delegate cancel"
+        say_in lang ~ko:"위임 취소" ~en:"Delegate cancel"
   in
   let target_suffix =
     match del.target_keepers with
@@ -196,7 +201,7 @@ let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
     | [ single ] -> " → @" ^ single
     | first :: rest ->
         let n_rest = List.length rest in
-        Ops_common.say model
+        say_in lang
           ~ko:(Printf.sprintf " → @%s 외 %d명" first n_rest)
           ~en:(Printf.sprintf " → @%s +%d" first n_rest)
   in
@@ -204,7 +209,7 @@ let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
   let meta_parts =
     (if del.operation_count > 1 then
        [
-         Ops_common.say model
+         say_in lang
            ~ko:(Printf.sprintf "%d건" del.operation_count)
            ~en:(Printf.sprintf "%d ops" del.operation_count);
        ]
@@ -212,7 +217,7 @@ let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
     @ (match del.operation_id with Some op -> [ "op:" ^ op ] | None -> [])
     @ (if del.artifact_count > 0 then
          [
-           Ops_common.say model
+           say_in lang
              ~ko:(Printf.sprintf "아티팩트 %d" del.artifact_count)
              ~en:(Printf.sprintf "%d artifacts" del.artifact_count);
          ]
@@ -244,15 +249,13 @@ let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
     ]
   else []
 
-let tool_group_row ~(model : Model.t) ~(theme : Theme.t) ?right_meta ~count
+let tool_group_row ~(lang : Say.lang) ~(theme : Theme.t) ?right_meta ~count
     items =
   let label =
-    Ops_common.say model ~ko:(Printf.sprintf "도구 호출 %d회" count)
+    say_in lang ~ko:(Printf.sprintf "도구 호출 %d회" count)
       ~en:(Printf.sprintf "%d tool calls" count)
   in
-  let histogram =
-    Chat_transcript.summarize_tool_histogram ~lang:model.lang items
-  in
+  let histogram = Chat_transcript.summarize_tool_histogram ~lang items in
   let text =
     if String.equal histogram "" then label
     else label ^ Typography.sep_dot ^ histogram
@@ -270,8 +273,8 @@ let tool_group_row ~(model : Model.t) ~(theme : Theme.t) ?right_meta ~count
     ~right_meta ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
     ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
 
-let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
-  let tools_mode = Chat_transcript.tools_mode model in
+let preview_tool_output_rows ~(theme : Theme.t) ~(lang : Say.lang)
+    ~(tools_mode : Slash.tools_mode) ~width raw =
   let max_preview, show_expand_hint =
     match tools_mode with
     | Slash.Tools_compact -> (0, false)
@@ -295,7 +298,7 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
     if hidden > 0 then
       let overflow_txt =
         if show_expand_hint then
-          Ops_common.say model
+          say_in lang
             ~ko:
               (Printf.sprintf "%s +%d줄 더 보기 [Ctrl+O]"
                  (Glyph.to_utf8 Glyph.Ellipsis) hidden)
@@ -303,7 +306,7 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
               (Printf.sprintf "%s +%d more lines [Ctrl+O]"
                  (Glyph.to_utf8 Glyph.Ellipsis) hidden)
         else
-          Ops_common.say model
+          say_in lang
             ~ko:
               (Printf.sprintf "%s 외 %d줄 생략 (최대 %d줄 표시)"
                  (Glyph.to_utf8 Glyph.Ellipsis) hidden max_preview)
@@ -347,22 +350,22 @@ let markdown_rows ?rail_rgb ~(theme : Theme.t) ~width ~prefix ~cont_prefix
 
 (* The header of a [user] row the operator did not write: the author the server
    recorded, and the route when it is not a direct message. *)
-let peer_label model (peer : Wire_fleet.chat_peer)
+let peer_label (lang : Say.lang) (peer : Wire_fleet.chat_peer)
     (surface : Wire_fleet.chat_surface option) =
   let author =
     match peer with
     | Wire_fleet.Peer_keeper name | Wire_fleet.Peer_external name -> name
     | Wire_fleet.Peer_unresolved None ->
-        Ops_common.say model ~ko:"보낸 사람 모름" ~en:"unknown sender"
+        say_in lang ~ko:"보낸 사람 모름" ~en:"unknown sender"
     | Wire_fleet.Peer_unresolved (Some id) ->
         Printf.sprintf "%s (%s)" id
-          (Ops_common.say model ~ko:"확인 안 됨" ~en:"unverified")
+          (say_in lang ~ko:"확인 안 됨" ~en:"unverified")
   in
   let route =
     match surface with
     | None | Some (Wire_fleet.Surface_dashboard | Wire_fleet.Surface_agent) -> None
     | Some Wire_fleet.Surface_broadcast ->
-        Some (Ops_common.say model ~ko:"방송" ~en:"broadcast")
+        Some (say_in lang ~ko:"방송" ~en:"broadcast")
     | Some Wire_fleet.Surface_discord -> Some "Discord"
     | Some Wire_fleet.Surface_slack -> Some "Slack"
     | Some Wire_fleet.Surface_webhook -> Some "Webhook"
@@ -372,16 +375,54 @@ let peer_label model (peer : Wire_fleet.chat_peer)
   | None -> author
   | Some r -> Printf.sprintf "%s · %s" author r
 
-let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
+(* Everything the history rows of one keeper depend on besides the messages.
+   [history_layout_of] is the only place that reads the model for them, and
+   {!build_history_rows} reads this record alone: the same record and the
+   same messages always give the same rows. That is what lets
+   {!History_rows} keep the rows from one frame to the next. The theme is read
+   back from its preset, so compared layouts carry no colors. *)
+type history_layout = {
+  keeper_name : string;
+  width : int;
+  theme_preset : Theme.preset;
+  lang : Say.lang;
+  tz_offset_sec : int;
+  origin_mode : Fleet_store.chat_display_origin;
+  tools_mode : Slash.tools_mode;
+  thinking_mode : Fleet_store.thinking_display;
+  runtimes : Wire_runtime.runtime_option list;
+  cut_replies : string Fleet_store.String_map.t;
+}
+
+let history_layout_of ~(model : Model.t) ~keeper_name ~width =
+  {
+    keeper_name;
+    width;
+    theme_preset = model.theme_preset;
+    lang = model.lang;
+    tz_offset_sec = model.tz_offset_sec;
+    origin_mode = model.fleet.chat_origin_mode;
+    tools_mode = Chat_transcript.tools_mode model;
+    thinking_mode = model.fleet.chat_thinking_mode;
+    runtimes = Runtime_store.runtime_options model.runtime;
+    cut_replies = Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet;
+  }
+
+let build_history_rows ~(layout : history_layout)
     (messages : Wire_fleet.chat_message list) =
+  let theme = Theme.of_preset layout.theme_preset in
+  let keeper_name = layout.keeper_name in
+  let width = layout.width in
+  let lang = layout.lang in
+  let tz_offset_sec = layout.tz_offset_sec in
+  let tools_mode = layout.tools_mode in
+  let thinking_mode = layout.thinking_mode in
   let base_bg = theme.surface_1 in
   let user_bg = theme.surface_2 in
-  let runtimes = Runtime_store.runtime_options model.runtime in
-  let cut_replies =
-    Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet
-  in
+  let runtimes = layout.runtimes in
+  let cut_replies = layout.cut_replies in
   let origin_mode =
-    match model.fleet.chat_origin_mode with
+    match layout.origin_mode with
     | Fleet_store.Display_origin_inline ->
         if width < 56 then Fleet_store.Display_origin_row
         else Fleet_store.Display_origin_inline
@@ -398,18 +439,18 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               let tname =
                 match msg.tool_call_name with
                 | Some n -> n
-                | None -> Ops_common.say model ~ko:"도구" ~en:"tool"
+                | None -> say_in lang ~ko:"도구" ~en:"tool"
               in
               (tname, msg.content))
             calls
         in
         let hhmm =
-          Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
+          Ops_common.format_hhmm ~tz_offset_sec
             (List.fold_left (fun _ (msg : Wire_fleet.chat_message) -> msg.ts_unix)
                first.ts_unix related)
         in
         let row =
-          tool_group_row ~model ~theme
+          tool_group_row ~lang ~theme
             ~right_meta:(Printf.sprintf "[Ctrl+O] · %s" hhmm)
             ~count:(List.length calls) items
         in
@@ -417,7 +458,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
         loop (Some hhmm) (row :: acc) rest
     | Chat_transcript.Single (msg : Wire_fleet.chat_message) :: rest ->
         let hhmm =
-          Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec msg.ts_unix
+          Ops_common.format_hhmm ~tz_offset_sec msg.ts_unix
         in
         let same_min = Option.equal String.equal prev_minute (Some hhmm) in
         let spacing = if acc = [] then [] else [ blank_row ~bg_rgb:base_bg ] in
@@ -433,7 +474,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                       single_span_row ~rail_rgb:theme.accent
                         ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
                         ~prefix_fg:theme.accent ~prefix_attrs:Attr.bold
-                        ~text:(Ops_common.say model ~ko:"운영자" ~en:"Operator")
+                        ~text:(say_in lang ~ko:"운영자" ~en:"Operator")
                         ~text_fg:theme.text_bright ~attrs:Attr.bold
                         ~right_meta:hhmm ~right_meta_fg:theme.text_muted
                         ~right_meta_attrs:Attr.italic ~bg_rgb:user_bg
@@ -442,14 +483,14 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 | Fleet_store.Display_origin_row ->
                     let origin_meta =
                       Printf.sprintf "%s · %s"
-                        (Ops_common.say model ~ko:"직접 입력" ~en:"direct")
+                        (say_in lang ~ko:"직접 입력" ~en:"direct")
                         hhmm
                     in
                     [
                       single_span_row ~rail_rgb:theme.accent
                         ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
                         ~prefix_fg:theme.accent ~prefix_attrs:Attr.bold
-                        ~text:(Ops_common.say model ~ko:"운영자" ~en:"Operator")
+                        ~text:(say_in lang ~ko:"운영자" ~en:"Operator")
                         ~text_fg:theme.text_bright ~attrs:Attr.bold
                         ~right_meta:origin_meta ~right_meta_fg:theme.text_muted
                         ~right_meta_attrs:Attr.italic ~bg_rgb:user_bg
@@ -478,7 +519,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               single_span_row ~rail_rgb:theme.border_subtle
                 ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
                 ~prefix_fg:theme.text_muted ~prefix_attrs:Attr.bold
-                ~text:(peer_label model peer surface)
+                ~text:(peer_label lang peer surface)
                 ~text_fg:theme.text_primary ~attrs:Attr.bold ~right_meta:hhmm
                 ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
                 ~bg_rgb:base_bg ~full_bleed_bg:true ()
@@ -494,7 +535,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                     Printf.sprintf "%s · %s" human_m hhmm
                 | None ->
                     Printf.sprintf "%s · %s"
-                      (Ops_common.say model ~ko:"키퍼 응답" ~en:"keeper")
+                      (say_in lang ~ko:"키퍼 응답" ~en:"keeper")
                       hhmm
               in
               let header_row =
@@ -540,7 +581,8 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                     None
               in
               let thinking_rows =
-                build_history_thinking_rows ~theme ~model ~width msg.thinking
+                build_history_thinking_rows ~theme ~lang ~thinking_mode ~width
+                  msg.thinking
               in
               thinking_rows @ header_row
               @ markdown_rows ?rail_rgb:body_rail ~theme ~width ~prefix
@@ -552,7 +594,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                   ~prefix:(Glyph.to_utf8 Glyph.External_arrow ^ " ")
                   ~prefix_fg:theme.status_active ~prefix_attrs:Attr.bold
                   ~text:
-                    (Ops_common.say model ~ko:"외부 · 브로드캐스트"
+                    (say_in lang ~ko:"외부 · 브로드캐스트"
                        ~en:"external · broadcast")
                   ~text_fg:theme.text_secondary ~right_meta:hhmm
                   ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
@@ -568,10 +610,10 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               let tname =
                 match msg.tool_call_name with
                 | Some n -> n
-                | None -> Ops_common.say model ~ko:"도구" ~en:"tool"
+                | None -> say_in lang ~ko:"도구" ~en:"tool"
               in
               let expanded =
-                match Chat_transcript.tools_mode model with
+                match tools_mode with
                 | Slash.Tools_compact -> false
                 | Slash.Tools_results | Slash.Tools_full -> true
               in
@@ -588,7 +630,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 match del_opt with
                 | Some del ->
                     ( theme.accent
-                    , delegate_card_spans ~theme ~model ~bg ~width del )
+                    , delegate_card_spans ~theme ~lang ~bg ~width del )
                 | None ->
                     let preview =
                       concise_tool_preview ~max_w:(Int.max 10 (width - 28))
@@ -624,7 +666,8 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               in
               let detail_rows =
                 if expanded then
-                  preview_tool_output_rows ~theme ~model ~width msg.content
+                  preview_tool_output_rows ~theme ~lang ~tools_mode ~width
+                    msg.content
                 else []
               in
               compact_line :: detail_rows
@@ -638,7 +681,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 single_span_row ~rail_rgb:theme.status_critical
                   ~prefix:(Glyph.to_utf8 Glyph.Live_failing ^ " ")
                   ~prefix_fg:theme.status_critical ~prefix_attrs:Attr.bold
-                  ~text:(Ops_common.say model ~ko:"요청 실패" ~en:"Request failed")
+                  ~text:(say_in lang ~ko:"요청 실패" ~en:"Request failed")
                   ~text_fg:theme.status_critical ~attrs:Attr.bold
                   ~right_meta:meta ~right_meta_fg:theme.text_muted
                   ~right_meta_attrs:Attr.italic ~bg_rgb:base_bg ()
@@ -653,7 +696,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                     single_span_row ~rail_rgb:theme.border_inactive
                       ~prefix:(Glyph.to_utf8 Glyph.Tree_corner ^ " ")
                       ~prefix_fg:theme.text_muted
-                      ~text:(Ops_common.say model ~ko:"끊긴 답장" ~en:"Cut reply")
+                      ~text:(say_in lang ~ko:"끊긴 답장" ~en:"Cut reply")
                       ~text_fg:theme.text_secondary ~attrs:Attr.italic
                       ~bg_rgb:base_bg ()
                     :: markdown_rows ~rail_rgb:theme.border_inactive ~theme
@@ -669,8 +712,107 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
         loop (Some hhmm) (List.rev_append (spacing @ msg_rows) acc) rest
   in
   loop None []
-    (Chat_transcript.history_tool_groups ~tools_mode:(Chat_transcript.tools_mode model)
-       messages)
+    (Chat_transcript.history_tool_groups ~tools_mode messages)
+
+(* The history rows of the keepers whose chat was drawn last, one keeper per
+   slot. A frame asks for the rows of one keeper and gets them back without
+   laying the messages out again, as long as the layout and the messages are
+   still equal to the ones the entry was built from. A new message, another
+   width, theme, language, time zone, origin mode, tools mode or thinking
+   mode lays them out again and replaces what was kept for that keeper. The
+   program that runs the TUI creates it and hands it to {!render_tabs_body};
+   a caller that hands over none lays the rows out on every call, with the
+   same result. *)
+module History_rows = struct
+  type entry = {
+    layout : history_layout;
+    messages : Wire_fleet.chat_message list;
+    rows : transcript_row list;
+    mutable last_used : int;
+  }
+
+  type stats = {
+    capacity : int;
+    entries : int;
+    hits : int;
+    misses : int;
+    evictions : int;
+  }
+
+  type t = {
+    capacity : int;
+    mutable tick : int;
+    mutable hits : int;
+    mutable misses : int;
+    mutable evictions : int;
+    mutable entries : entry list;
+  }
+
+  (* An entry holds the rows of one keeper's whole stored history, which is
+     far more than a card, so the bound counts keepers. *)
+  let default_capacity = 8
+
+  let create ?(capacity = default_capacity) () =
+    {
+      capacity = Int.max 1 capacity;
+      tick = 0;
+      hits = 0;
+      misses = 0;
+      evictions = 0;
+      entries = [];
+    }
+
+  let stats t =
+    {
+      capacity = t.capacity;
+      entries = List.length t.entries;
+      hits = t.hits;
+      misses = t.misses;
+      evictions = t.evictions;
+    }
+
+  (* Compared with [=]: a field added to [history_layout] is then compared
+     too, where an equality written by hand could leave it out. *)
+  let rows t ~layout ~messages =
+    t.tick <- t.tick + 1;
+    match
+      List.find_opt
+        (fun e -> e.layout = layout && e.messages = messages)
+        t.entries
+    with
+    | Some e ->
+        e.last_used <- t.tick;
+        t.hits <- t.hits + 1;
+        e.rows
+    | None ->
+        t.misses <- t.misses + 1;
+        let rows = build_history_rows ~layout messages in
+        let fresh = { layout; messages; rows; last_used = t.tick } in
+        (* A keeper has one slot. Its rows change with every message, so a
+           miss replaces what was kept for it. A keeper that was not kept
+           takes a slot, and drops the keeper drawn longest ago when every
+           slot is taken. *)
+        let others =
+          List.filter
+            (fun e ->
+              not (String.equal e.layout.keeper_name layout.keeper_name))
+            t.entries
+        in
+        if List.length others < t.capacity then t.entries <- fresh :: others
+        else begin
+          (* Every entry was last used at a tick of its own, so the smallest
+             [last_used] belongs to one entry. *)
+          let oldest =
+            List.fold_left
+              (fun acc e -> Int.min acc e.last_used)
+              max_int others
+          in
+          t.entries <-
+            fresh :: List.filter (fun e -> e.last_used <> oldest) others;
+          t.evictions <- t.evictions + 1
+        end;
+        rows
+end
 
 let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
     (sp : Chat_transcript.stream_projection) =
@@ -777,7 +919,9 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                   (call.tool_name, Option.value call.args_preview ~default:""))
                 calls
             in
-            push (tool_group_row ~model ~theme ~count:(List.length calls) items)
+            push
+              (tool_group_row ~lang:model.lang ~theme
+                 ~count:(List.length calls) items)
         | Chat_transcript.Single (tc : Fleet_store.active_tool_call) ->
         let rail_rgb, pill_txt, pill_fg =
           match tc.tool_state with
@@ -821,7 +965,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
         in
         let spans =
           match del_opt with
-          | Some del -> delegate_card_spans ~theme ~model ~bg ~width del
+          | Some del -> delegate_card_spans ~theme ~lang:model.lang ~bg ~width del
           | None ->
               let args_part =
                 match tc.args_preview with
@@ -855,7 +999,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
              ~full_bleed_bg:true spans);
         match expanded_tools, tc.output_preview with
         | true, Some out ->
-            push_all (preview_tool_output_rows ~theme ~model ~width out)
+            push_all (preview_tool_output_rows ~theme ~lang:model.lang ~tools_mode ~width out)
         | false, _ | true, None -> ())
       (Chat_transcript.stream_tool_groups ~tools_mode buf.tools);
   (* 3. Live Assistant Text Delta *)
@@ -1421,8 +1565,8 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
            ~style:(Typography.status ~bg theme Theme.Status_attention) voice_text)
   end
 
-let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
-    ~name keeper_opt =
+let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~name keeper_opt =
   if Rect.is_empty rect then ()
   else
     let status_h = if rect.h >= 2 then 1 else 0 in
@@ -1432,6 +1576,14 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let pad_x = Ops_common.pad_x_for ~model body_rect in
     let prose_w =
       Int.max 16 (Int.min (Int.max 16 (body_rect.w - (2 * pad_x))) 96)
+    in
+    (* The history is laid out again only when its layout or its messages
+       changed since the rows were kept. *)
+    let history_section_rows msgs =
+      let layout = history_layout_of ~model ~keeper_name:name ~width:prose_w in
+      match history_rows with
+      | Some kept -> History_rows.rows kept ~layout ~messages:msgs
+      | None -> build_history_rows ~layout msgs
     in
     let hist_obs =
       match Fleet_store.String_map.find_opt name model.fleet.chat_histories with
@@ -1445,9 +1597,7 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           (fun (first, acc) sec ->
             let sec_rows =
               match sec with
-              | Chat_transcript.Section_history msgs ->
-                  build_history_rows ~theme ~model ~keeper_name:name
-                    ~width:prose_w msgs
+              | Chat_transcript.Section_history msgs -> history_section_rows msgs
               | Chat_transcript.Section_active_turn turn ->
                   build_active_turn_rows ~theme ~model ~keeper:name ~width:prose_w turn
               | Chat_transcript.Section_pending items ->
@@ -3588,7 +3738,7 @@ let render_identity_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* --- Unified 9-Tab Keeper Dive Entrypoint --- *)
 
-let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
+let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
@@ -3839,8 +3989,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
       if not (Rect.is_empty content_rect) then
         match tab with
         | Nav.Keeper_chat ->
-            render_chat_tab grid ~rect:content_rect ~theme ~model ~name
-              keeper_opt
+            render_chat_tab ?history_rows grid ~rect:content_rect ~theme ~model
+              ~name keeper_opt
         | Nav.Keeper_context ->
             Keeper_context_view.draw_context_tab grid ~rect:content_rect ~theme
               ~model ~name

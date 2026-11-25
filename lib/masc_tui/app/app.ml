@@ -1521,7 +1521,27 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         | Work_exit.Shutdown -> ()
         | Eio.Exn.Multiple exns
           when List.exists (fun (ex, _) -> ex == Work_exit.Shutdown) exns ->
-            ());
+            let unexpected =
+              List.filter
+                (fun (ex, _) ->
+                  not
+                    (ex == Work_exit.Shutdown
+                    || match ex with
+                       | Eio.Cancel.Cancelled _ -> true
+                       | _ -> false))
+                exns
+            in
+            (match unexpected with
+             | [] -> ()
+             | (ex, _) :: _ ->
+                 if
+                   Exit_reason.is_normal !exit_reason
+                   || Exit_reason.equal !exit_reason Exit_reason.Unrecorded
+                 then
+                   exit_reason :=
+                     Exit_reason.Exception
+                       ("shutdown teardown: " ^ Printexc.to_string ex);
+                 exit_code_ref := 1));
         !exit_code_ref)
       in
       if !restart_requested then begin

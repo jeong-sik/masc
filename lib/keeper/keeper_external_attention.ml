@@ -609,6 +609,27 @@ let load_recent_evidence_events ~base_path ~keeper_name =
   load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
 ;;
 
+let discord_message_dedupe_key ~conversation_id ~message_id =
+  Printf.sprintf "discord:%s:%s" conversation_id message_id
+;;
+
+let recent_recorded_item ~base_path ~keeper_name ~event_id =
+  let path = attention_path ~base_path ~keeper_name in
+  let open Fs_compat in
+  match read_private_jsonl_tail_locked_result path ~max_bytes:dedup_window_bytes with
+  | Private_file_succeeded (Private_jsonl_tail.Tail_missing
+      | Tail_present { incomplete_tail = true; _ }) -> Ok None
+  | Private_file_succeeded (Private_jsonl_tail.Tail_present { rows; incomplete_tail = false; _ }) ->
+    events_of_rows ~path rows
+    |> Result.map (fun events -> recorded_item_by_event_id events event_id)
+    |> Result.map_error read_error_to_string
+  | Private_file_failed error ->
+    Error (Private_jsonl_tail.error_to_string error)
+  | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ }
+  | Private_file_failed_with_cleanup_failure { cleanup_failure; _ } ->
+    Error (private_jsonl_operation_failure_to_string cleanup_failure)
+;;
+
 (* Strict snapshots use the same path mutex and descriptor lock. The timestamp
    describes admission, but is not an ordering key: the Librarian consumes
    external evidence by its durable admission-row cursor even after rollback. *)

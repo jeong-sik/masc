@@ -3916,7 +3916,7 @@ let test_wave2_tools_artifacts_board_renders () =
   (* Tool_dive *)
   let g_td =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_runtime.render_dive ~target:(Nav.Tool_dive "masc_board_post")
+        Screen_runtime.render_inspector ~target:(`Tool "masc_board_post")
           ~model:{ m_base with runtime = rt1 } ~cache ~rect gr)
   in
   assert_grid_invariants ~label:"Wave2/ToolDive" g_td;
@@ -4035,7 +4035,7 @@ let test_wave2_tools_artifacts_board_renders () =
   in
   let g_sd =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_runtime.render_dive ~target:(Nav.Skill_dive "ocaml-coding")
+        Screen_runtime.render_inspector ~target:(`Skill "ocaml-coding")
           ~model:{ m_base with runtime = rt_sd } ~cache ~rect gr)
   in
   assert_grid_invariants ~label:"Wave4L3/SkillDive" g_sd;
@@ -4085,7 +4085,7 @@ let test_wave2_tools_artifacts_board_renders () =
   in
   let g_erd =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_runtime.render_dive ~target:(Nav.Exact_run_dive "run-42")
+        Screen_runtime.render_inspector ~target:(`Exact_run "run-42")
           ~model:{ m_base with runtime = rt_l4 } ~cache ~rect gr)
   in
   assert_grid_invariants ~label:"Wave4L4/ExactRunDive" g_erd;

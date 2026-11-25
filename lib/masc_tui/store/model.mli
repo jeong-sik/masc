@@ -32,8 +32,8 @@ type memory_diff_pin_frame = {
 
 type workspace_return_frame = {
   workspace : Nav.workspace;
-  dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool * Nav.overlay option) list;
+  inspector : Nav.inspector option;
+  inspector_return : (int * bool * Nav.overlay option) option;
   work_tab : Nav.work_tab;
   work_return_entity_id : string option;
       (** Selected Goal ID (on {!Nav.Work_pipeline}) or Task ID (on
@@ -53,14 +53,15 @@ type workspace_return_frame = {
 
 type nav_state = {
   workspace : Nav.workspace;
-  dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool * Nav.overlay option) list;
-      (** Parallel return frames [(pane_index, zoomed, overlay)] captured on
-          {!Update_nav.push_dive} and restored when [Esc] pops {!dive_stack}. *)
+  inspector : Nav.inspector option;
+  inspector_return : (int * bool * Nav.overlay option) option;
+      (** Return frame [(pane_index, zoomed, overlay)] captured on
+          {!Update_nav.open_inspector} (preserved across depth-1 inspector
+          replacements) and restored by {!Update_nav.close_inspector}. *)
   workspace_return_stack : workspace_return_frame list;
       (** Explicit cross-workspace jump return frames captured by
           {!Update_nav.jump_to_workspace} and restored on [Esc] without
-          relying on {!dive_stack} or discarding an open Ask draft. *)
+          relying on {!inspector} or discarding an open Ask draft. *)
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -74,7 +75,8 @@ type nav_state = {
   sidebar_focused : bool;
   sidebar_cursor : int;
   sidebar_scroll : int;
-  dive_scroll_offset : int;
+  inspector_scroll_offset : int;
+  keeper_detail_scroll_offset : int;
   json_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
@@ -85,7 +87,7 @@ type nav_state = {
 }
 
 val has_preserved_ask_return : nav_state -> bool
-(** [true] when either {!nav_state.dive_return_stack} or
+(** [true] when either {!nav_state.inspector_return} or
     {!nav_state.workspace_return_stack} preserves a suspended {!Nav.Ask_answer}
     overlay whose {!t.ask_modal} draft must stay alive. *)
 
@@ -418,7 +420,7 @@ val task_dive_has_two_main_panes : t -> string -> bool
     panes. *)
 
 val dive_work_json_pane_index : t -> int option
-(** Active pane index of the opt-in Raw JSON card inside [Verification_dive] or
+(** Active pane index of the opt-in Raw JSON card inside [Verification_inspector] or
     zoomed Work Goal/Task detail, or [None] when [show_raw_json] is off. Returns
     [Some 0] when the viewport is too narrow ([< 88] cols) and JSON replaces the
     main card. *)
@@ -440,7 +442,7 @@ val initial :
   unit ->
   t
 
-val active_dive : t -> Nav.dive option
+val active_inspector : t -> Nav.inspector option
 
 val drawer_queue :
   keeper:string -> t -> Fleet_store.chat_queue * Drafts.pending_message list

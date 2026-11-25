@@ -48,16 +48,11 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
-type work_dive_target = Verification_dive of string
-
-type runtime_dive_target =
-  | Tool_dive of string
-  | Skill_dive of string
-  | Exact_run_dive of string
-
-type dive =
-  | Dive_work of work_dive_target
-  | Dive_runtime of runtime_dive_target
+type inspector =
+  | Verification_inspector of string
+  | Tool_inspector of string
+  | Skill_inspector of string
+  | Exact_run_inspector of string
 
 type settings_tab =
   | Settings_general_ui
@@ -190,7 +185,7 @@ type overlay =
 type focus_scope =
   | Global
   | Workspace_focused of workspace
-  | Dive_focused of dive
+  | Inspector_focused of inspector
   | Composer_focused
   | Ask_choice_focused
   | Approval_strip_focused
@@ -504,25 +499,18 @@ let keeper_tab_index = function
 
 let equal_keeper_tab a b = Int.equal (keeper_tab_index a) (keeper_tab_index b)
 
-let equal_work_dive_target (Verification_dive x) (Verification_dive y) =
-  String.equal x y
-
-let equal_runtime_dive_target a b =
+let equal_inspector a b =
   match a, b with
-  | Tool_dive x, Tool_dive y
-  | Skill_dive x, Skill_dive y
-  | Exact_run_dive x, Exact_run_dive y ->
+  | Verification_inspector x, Verification_inspector y
+  | Tool_inspector x, Tool_inspector y
+  | Skill_inspector x, Skill_inspector y
+  | Exact_run_inspector x, Exact_run_inspector y ->
       String.equal x y
-  | Tool_dive _, (Skill_dive _ | Exact_run_dive _)
-  | Skill_dive _, (Tool_dive _ | Exact_run_dive _)
-  | Exact_run_dive _, (Tool_dive _ | Skill_dive _) ->
+  | Verification_inspector _, (Tool_inspector _ | Skill_inspector _ | Exact_run_inspector _)
+  | Tool_inspector _, (Verification_inspector _ | Skill_inspector _ | Exact_run_inspector _)
+  | Skill_inspector _, (Verification_inspector _ | Tool_inspector _ | Exact_run_inspector _)
+  | Exact_run_inspector _, (Verification_inspector _ | Tool_inspector _ | Skill_inspector _) ->
       false
-
-let equal_dive a b =
-  match a, b with
-  | Dive_work x, Dive_work y -> equal_work_dive_target x y
-  | Dive_runtime x, Dive_runtime y -> equal_runtime_dive_target x y
-  | Dive_work _, Dive_runtime _ | Dive_runtime _, Dive_work _ -> false
 
 let settings_tab_index = function
   | Settings_general_ui -> 0
@@ -796,15 +784,15 @@ let equal_focus_scope a b =
   | Approval_strip_focused, Approval_strip_focused ->
       true
   | Workspace_focused x, Workspace_focused y -> equal_workspace x y
-  | Dive_focused x, Dive_focused y -> equal_dive x y
+  | Inspector_focused x, Inspector_focused y -> equal_inspector x y
   | Overlay_focused x, Overlay_focused y -> equal_overlay x y
-  | Global, (Workspace_focused _ | Dive_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
-  | Workspace_focused _, (Global | Dive_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
-  | Dive_focused _, (Global | Workspace_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
-  | Composer_focused, (Global | Workspace_focused _ | Dive_focused _ | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
-  | Ask_choice_focused, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Approval_strip_focused | Overlay_focused _)
-  | Approval_strip_focused, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Ask_choice_focused | Overlay_focused _)
-  | Overlay_focused _, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused) ->
+  | Global, (Workspace_focused _ | Inspector_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
+  | Workspace_focused _, (Global | Inspector_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
+  | Inspector_focused _, (Global | Workspace_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
+  | Composer_focused, (Global | Workspace_focused _ | Inspector_focused _ | Ask_choice_focused | Approval_strip_focused | Overlay_focused _)
+  | Ask_choice_focused, (Global | Workspace_focused _ | Inspector_focused _ | Composer_focused | Approval_strip_focused | Overlay_focused _)
+  | Approval_strip_focused, (Global | Workspace_focused _ | Inspector_focused _ | Composer_focused | Ask_choice_focused | Overlay_focused _)
+  | Overlay_focused _, (Global | Workspace_focused _ | Inspector_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused) ->
       false
 
 type menu_section =

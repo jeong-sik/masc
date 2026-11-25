@@ -71,7 +71,7 @@ let test_keymap_ctrl_k_never_approves () =
       Nav.Global;
       Nav.Workspace_focused Nav.Pulse;
       Nav.Workspace_focused Nav.Work;
-      Nav.Dive_focused (Nav.Dive_work (Nav.Verification_dive "v-1"));
+      Nav.Inspector_focused (Nav.Verification_inspector "v-1");
       Nav.Composer_focused;
       Nav.Ask_choice_focused;
       Nav.Approval_strip_focused;

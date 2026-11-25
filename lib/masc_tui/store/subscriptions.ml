@@ -100,7 +100,7 @@ let is_blocked_by_gate (m : Model.t) =
       false
 
 let view_scoped_stream (m : Model.t) : stream_id option =
-  match Model.active_dive m with
+  match Model.active_inspector m with
   | Some _ -> None
   | None -> (
       match m.nav.workspace with

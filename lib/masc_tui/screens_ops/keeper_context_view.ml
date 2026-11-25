@@ -1213,17 +1213,15 @@ let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Int.min (List.length manifest.parts - 1)
                       st.selected_part_idx))
           in
-          let is_dive = Option.is_some (Model.active_dive model) in
           let is_zoomed =
-            (not is_dive) && model.nav.zoomed
-            && Model.can_zoom_current_view model
+            model.nav.zoomed && Model.can_zoom_current_view model
           in
           let left_focused =
-            if is_dive || is_zoomed then Model.pane_focused model 0
+            if is_zoomed then Model.pane_focused model 0
             else Model.pane_focused model 1
           in
           let right_focused =
-            if is_dive || is_zoomed then Model.pane_focused model 1
+            if is_zoomed then Model.pane_focused model 1
             else Model.pane_focused model 2
           in
           ignore
@@ -1917,17 +1915,15 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             Int.max 0
               (Int.min (List.length page.entries - 1) st.selected_call_idx)
           in
-          let is_dive = Option.is_some (Model.active_dive model) in
           let is_zoomed =
-            (not is_dive) && model.nav.zoomed
-            && Model.can_zoom_current_view model
+            model.nav.zoomed && Model.can_zoom_current_view model
           in
           let left_focused =
-            if is_dive || is_zoomed then Model.pane_focused model 0
+            if is_zoomed then Model.pane_focused model 0
             else Model.pane_focused model 1
           in
           let right_focused =
-            if is_dive || is_zoomed then Model.pane_focused model 1
+            if is_zoomed then Model.pane_focused model 1
             else Model.pane_focused model 2
           in
           ignore

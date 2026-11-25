@@ -13,11 +13,18 @@ open Masc_tui_screens_domain
 open Masc_tui_app
 
 let render_body ~(model : Model.t) ~cache ~history_rows rect grid =
-  match Model.active_dive model with
-  | Some (Nav.Dive_work target) ->
-      Screen_work.render_dive ~target ~model ~cache ~rect grid
-  | Some (Nav.Dive_runtime target) ->
-      Screen_runtime.render_dive ~target ~model ~cache ~rect grid
+  match Model.active_inspector model with
+  | Some (Nav.Verification_inspector req_id) ->
+      Screen_work.render_verification ~req_id ~model ~cache ~rect grid
+  | Some (Nav.Tool_inspector tool_name) ->
+      Screen_runtime.render_inspector ~target:(`Tool tool_name) ~model ~cache
+        ~rect grid
+  | Some (Nav.Skill_inspector ref_s) ->
+      Screen_runtime.render_inspector ~target:(`Skill ref_s) ~model ~cache
+        ~rect grid
+  | Some (Nav.Exact_run_inspector run_id) ->
+      Screen_runtime.render_inspector ~target:(`Exact_run run_id) ~model ~cache
+        ~rect grid
   | None -> (
       match model.nav.workspace with
       | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect grid

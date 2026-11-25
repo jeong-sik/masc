@@ -173,8 +173,8 @@ let settings_dry_run_max_scroll (m : Model.t) =
 
 let keeper_config_dry_run_max_scroll (m : Model.t) =
   let name_opt, embedded =
-    match Model.active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+    match Model.active_inspector m with
+    | Some _ ->
         (None, true)
     | None ->
         let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
@@ -734,7 +734,8 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
                          {
                            m'.nav with
                            workspace = Nav.Infra;
-                           dive_stack = [];
+                           inspector = None;
+                           inspector_return = None;
                            overlay = None;
                            zoomed = false;
                          };
@@ -1097,15 +1098,15 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
     | Some "."
       when Option.is_some (Memory_diagram.active_memory_content_rect m)
            || (Option.is_none m.nav.overlay
-               && Option.is_none (Model.active_dive m)
+               && Option.is_none (Model.active_inspector m)
                && Nav.equal_workspace m.nav.workspace Nav.Knowledge
                && Nav.equal_knowledge_tab m.knowledge.active_tab
                     Nav.Knowledge_memory) ->
         Update_nav.open_memory_diagram ~now
           ~kind:Knowledge_store.Diagram_pele_card m
     | Some _ | None -> (
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
+        match Model.active_inspector m with
+        | Some (Nav.Skill_inspector ref_s) -> (
             match printable_char with
             | Some "R" ->
                 ( Model.with_toast ~now ~level:Model.Toast_info
@@ -1142,8 +1143,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 | None -> (m, []))
             | Some _ | None -> (m, []))
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Exact_run_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -1169,8 +1171,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                          Nav.Runtime_failover_lanes -> (
                     match Observed.to_option m.runtime.exact_lane_runs with
                     | Some (first :: _) ->
-                        Update_nav.push_dive m
-                          (Nav.Dive_runtime (Nav.Exact_run_dive first.run_id))
+                        Update_nav.open_inspector m
+                          (Nav.Exact_run_inspector first.run_id)
                     | Some [] | None -> (m, []))
                 | Some "O"
                   when Nav.equal_runtime_tab m.runtime.active_tab
@@ -1339,8 +1341,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             | Nav.Infra | Nav.Pulse -> (m, [])))
 
 let keeper_config_target_name (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None ->
       if Model.is_keeper_config_active m then Model.selected_keeper_name m
       else None
@@ -2568,7 +2570,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                          the composer and inserts the character instead of
                          letting Korean jamo replay trigger centered modals. *)
                       let keeper_chat_korean =
-                        match Model.active_dive m, norm.key with
+                        match Model.active_inspector m, norm.key with
                         | None, Keymap.Input.Char s
                           when is_printable_key norm && is_korean_char s
                                && Model.is_in_keeper_chat m
@@ -2585,7 +2587,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 in
                                 Some ({ m with drafts }, [])
                             | None -> None)
-                        | ( ( Some (Nav.Dive_work _ | Nav.Dive_runtime _)
+                        | ( ( Some _
                             | None )
                           , ( Keymap.Input.Char _
                             | Keymap.Input.Enter
@@ -2609,7 +2611,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Some _ as handled -> handled
                       | None -> (
                           let replayed = Keymap.replay_ime_event norm in
-                          match Model.active_dive m, replayed.key with
+                          match Model.active_inspector m, replayed.key with
                           | None, Keymap.Input.Char "J"
                             when is_printable_key replayed
                                  && Model.is_work_goal_zoomed m
@@ -2669,9 +2671,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             when is_printable_key replayed
                                  && Model.is_memory_diff_pin_surface m ->
                               Some (Update_nav.pin_memory_diff_range m)
-                          | ( ( Some
-                                  ( Nav.Dive_work (Nav.Verification_dive _)
-                                  | Nav.Dive_runtime _ )
+                          | ( ( Some _
                               | None )
                             , ( Keymap.Input.Char _
                               | Keymap.Input.Enter
@@ -2714,7 +2714,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                           else
                             match key_char_opt replayed.key with
                             | Some "s"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && ((Nav.equal_workspace m.nav.workspace
                                           Nav.Knowledge
                                         && Nav.equal_knowledge_tab
@@ -2730,7 +2730,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                   Nav.Infra_code))) ->
                                 Some Keymap.Cycle_signal_or_source
                             | Some "m"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && Nav.equal_workspace m.nav.workspace
                                         Nav.Knowledge
                                    && Nav.equal_knowledge_tab
@@ -2740,7 +2740,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             | Some "Y"
                               when Option.is_none
                                      (Model.fast_approval_strip_item m)
-                                   && Option.is_none (Model.active_dive m)
+                                   && Option.is_none (Model.active_inspector m)
                                    && Nav.equal_workspace m.nav.workspace
                                         Nav.Knowledge
                                    && Nav.equal_knowledge_tab
@@ -2751,7 +2751,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                               when Model.is_artifact_dive_search_active m ->
                                 Some Keymap.Search_prev_match
                             | Some "p"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && ((Nav.equal_workspace m.nav.workspace
                                           Nav.Knowledge
                                         && Nav.equal_knowledge_tab
@@ -2786,14 +2786,14 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                    (Model.selected_keeper_name m)))) ->
                                 Some Keymap.Probe_sandbox
                             | Some "g"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && Nav.equal_workspace m.nav.workspace
                                         Nav.Work
                                    && Nav.equal_work_tab m.work.active_tab
                                         Nav.Work_tasks ->
                                 Some Keymap.Link_task_goal
                             | Some "R"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && Nav.equal_workspace m.nav.workspace
                                         Nav.Knowledge
                                    && Nav.equal_knowledge_tab
@@ -2801,7 +2801,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                         Nav.Knowledge_board ->
                                 Some Keymap.Context_primary_action
                             | Some "t"
-                              when Option.is_none (Model.active_dive m)
+                              when Option.is_none (Model.active_inspector m)
                                    && Nav.equal_workspace m.nav.workspace
                                         Nav.Runtime
                                    && Nav.equal_runtime_tab m.runtime.active_tab
@@ -3219,7 +3219,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
         in
         if over_sidebar then
           (* Sidebar mouse wheel only scrolls the sidebar viewport — never
-             navigates workspaces or destroys the active dive_stack. *)
+             navigates workspaces or closes the active inspector. *)
           let inner_h =
             match Model.sidebar_rect m with
             | Some sr -> Int.max 1 (sr.h - 2)
@@ -3267,9 +3267,8 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
                 Nav.equal_workspace m_scrolled.nav.workspace m_base.nav.workspace
                 && Option.equal Nav.equal_overlay m_scrolled.nav.overlay
                      m_base.nav.overlay
-                && Int.equal
-                     (List.length m_scrolled.nav.dive_stack)
-                     (List.length m_base.nav.dive_stack)
+                && Option.equal Nav.equal_inspector m_scrolled.nav.inspector
+                     m_base.nav.inspector
               in
               let m_final =
                 if same_view then

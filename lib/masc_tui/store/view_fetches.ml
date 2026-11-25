@@ -496,52 +496,50 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
   if waiting_needed then Cmd.Get_keeper_waiting_inventory { keeper = name } :: base
   else base
 
-let fetches_for_dive ~force (m : Model.t) =
-  match Model.active_dive m with
+let fetches_for_inspector ~force (m : Model.t) =
+  match Model.active_inspector m with
   | None -> []
-  | Some (Nav.Dive_work target) ->
+  | Some (Nav.Verification_inspector req_id) ->
       let extra =
-        match target with
-        | Nav.Verification_dive req_id ->
-            let ev_reqs =
-              if (not force) && m.work.verification_evidence_auth_denied then []
-              else
-                let needed =
-                  match m.work.verification_evidence with
-                  | Observed.Value { data = vid, _; stale = false; _ } ->
-                      force || not (String.equal vid req_id)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.work.verification_evidence
-                in
-                if not needed then []
-                else
-                  match
-                    List.find_opt
-                      (fun (v : Wire_work.verification_request) ->
-                        String.equal v.request_id req_id)
-                      (Work_store.verifications_list m.work)
-                  with
-                  | Some v ->
-                      [
-                        Cmd.Get_verification_evidence
-                          { task_id = v.task_id; verification_id = v.request_id };
-                      ]
-                  | None -> []
+        let ev_reqs =
+          if (not force) && m.work.verification_evidence_auth_denied then []
+          else
+            let needed =
+              match m.work.verification_evidence with
+              | Observed.Value { data = vid, _; stale = false; _ } ->
+                  force || not (String.equal vid req_id)
+              | Observed.Loading _
+              | Observed.Value { stale = true; _ }
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  needs_fetch ~force m.work.verification_evidence
             in
-            ev_reqs
-            |> add_if
-                 (needs_fetch ~force m.work.verification_summary)
-                 Cmd.Get_verification_summary
-            |> add_if
-                 (needs_fetch ~force m.work.verification_specs)
-                 Cmd.Get_verification_specs
-            |> add_if
-                 (needs_fetch ~force m.work.verification_tlc_results)
-                 Cmd.Get_verification_tlc_results
+            if not needed then []
+            else
+              match
+                List.find_opt
+                  (fun (v : Wire_work.verification_request) ->
+                    String.equal v.request_id req_id)
+                  (Work_store.verifications_list m.work)
+              with
+              | Some v ->
+                  [
+                    Cmd.Get_verification_evidence
+                      { task_id = v.task_id; verification_id = v.request_id };
+                  ]
+              | None -> []
+        in
+        ev_reqs
+        |> add_if
+             (needs_fetch ~force m.work.verification_summary)
+             Cmd.Get_verification_summary
+        |> add_if
+             (needs_fetch ~force m.work.verification_specs)
+             Cmd.Get_verification_specs
+        |> add_if
+             (needs_fetch ~force m.work.verification_tlc_results)
+             Cmd.Get_verification_tlc_results
       in
       ([]
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
@@ -550,7 +548,7 @@ let fetches_for_dive ~force (m : Model.t) =
            (Cmd.Get_verifications
               { view = m.work.verification_view; limit = 50; offset = 0 }))
       @ extra
-  | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
+  | Some (Nav.Tool_inspector tool_name) ->
       let bucket, since_hours =
         Runtime_store.tools_window_params m.runtime.tools_window
       in
@@ -572,7 +570,7 @@ let fetches_for_dive ~force (m : Model.t) =
       |> add_if series_needed
            (Cmd.Get_tool_series_filtered
               { bucket; since_hours; tool = Some tool_name })
-  | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+  | Some (Nav.Skill_inspector _) ->
       []
       |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
       |> add_if
@@ -587,7 +585,7 @@ let fetches_for_dive ~force (m : Model.t) =
                && not m.runtime.skill_editor_tools_auth_denied)
            && needs_fetch ~force m.runtime.skill_editor_tools)
            Cmd.Get_skill_editor_tools
-  | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) ->
+  | Some (Nav.Exact_run_inspector run_id) ->
       let detail_needed =
         match m.runtime.exact_run_detail with
         | Observed.Value { data = rid, _; stale = false; _ } ->
@@ -606,7 +604,7 @@ let fetches_for_dive ~force (m : Model.t) =
    keeps its own page in the same slot, so nothing is asked while one is
    open. *)
 let selected_wiki_page_reqs ~force (m : Model.t) =
-  match (Model.active_dive m, m.knowledge.active_tab) with
+  match (Model.active_inspector m, m.knowledge.active_tab) with
   | Some _, _
   | None, (Nav.Knowledge_board | Nav.Knowledge_artifacts | Nav.Knowledge_memory)
     ->
@@ -1391,14 +1389,14 @@ let fetches_for_workspace ~force (m : Model.t) =
 let fetches_for_current_view ?(force = false) (m : Model.t) =
   let reqs =
     fetches_for_workspace ~force m
-    @ fetches_for_dive ~force m
+    @ fetches_for_inspector ~force m
     @ fetches_for_overlay ~force m
     |> dedup_reqs
   in
   let get_cmds = List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs in
   let post_cmds =
     if
-      Option.is_none (Model.active_dive m)
+      Option.is_none (Model.active_inspector m)
       && Nav.equal_workspace m.nav.workspace Nav.Runtime
       && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
     then
@@ -1432,11 +1430,12 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
   in
   let mcp_schema_cmds =
     let on_tool_surface =
-      match Model.active_dive m with
-      | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> true
+      match Model.active_inspector m with
+      | Some (Nav.Tool_inspector _) -> true
       | Some
-          ( Nav.Dive_work _
-          | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _) ) ->
+          ( Nav.Verification_inspector _
+          | Nav.Skill_inspector _
+          | Nav.Exact_run_inspector _ ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -1468,8 +1467,8 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     else []
   in
   let skill_read_cmds =
-    match Model.active_dive m with
-    | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> (
+    match Model.active_inspector m with
+    | Some (Nav.Skill_inspector ref_s) -> (
         (* Wait for a fresh [skills] snapshot before reading SKILL.md so a
            post-Save reload never sends a stale content_revision (HTTP 409). *)
         let skills_fresh =
@@ -1512,8 +1511,9 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
               ]
           | Some { reference_json = None; _ } | None -> [])
     | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
+        ( Nav.Verification_inspector _
+        | Nav.Tool_inspector _
+        | Nav.Exact_run_inspector _ )
     | None ->
         []
   in
@@ -1527,8 +1527,8 @@ let overlay_fetches (m : Model.t) =
 (* The keeper's Chat transcript is on screen on the Keepers workspace Chat tab
    with no dive open. *)
 let chat_tab_shown ~keeper (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match Model.active_inspector m with
+  | Some _ -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
@@ -1542,8 +1542,8 @@ let cut_reply_fetches ~keeper (m : Model.t) =
   else []
 
 let active_chat_keeper (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -1671,7 +1671,7 @@ let bootstrap_fetches (m : Model.t) =
   in
   let view_reqs =
     fetches_for_workspace ~force:true m
-    @ fetches_for_dive ~force:true m
+    @ fetches_for_inspector ~force:true m
     @ fetches_for_overlay ~force:true m
   in
   dedup_reqs (core_reqs @ view_reqs)
@@ -1680,7 +1680,7 @@ let bootstrap_fetches (m : Model.t) =
 let keeper_lifecycle_refresh_fetches ~name (m : Model.t) =
   let tab_reqs =
     if
-      Option.is_none (Model.active_dive m)
+      Option.is_none (Model.active_inspector m)
       && Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Option.equal String.equal (Model.selected_keeper_name m) (Some name)
     then fetches_for_keeper_tab ~force:true ~name ~tab:m.fleet.keeper_dive_tab m

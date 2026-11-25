@@ -5,8 +5,8 @@ open Masc_tui_protocol
 let active_memory_reading (m : Model.t) :
     Knowledge_store.memory_reading_entry option =
   let scope_opt =
-    match Model.active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+    match Model.active_inspector m with
+    | Some _ -> None
     | None -> (
         match m.nav.workspace with
         | Nav.Knowledge
@@ -73,8 +73,8 @@ let extract_first_http_url (text : string) : string option =
 (* The keeper whose conversation is on screen: the selected row of the Keepers
    workspace (whether in split view or zoomed Focus Mode). *)
 let viewed_keeper_name (m : Model.t) : string option =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None -> (
       match m.nav.workspace with
       | Nav.Keepers -> Model.selected_keeper_name m
@@ -164,8 +164,8 @@ let find_writable_runtime_field (schema : Wire_config.config_schema) =
 let apply_model_selection ~now ~runtime_id (m : Model.t) =
   let m0 = { m with nav = { m.nav with overlay = None } } in
   let target_keeper =
-    match Model.active_dive m0 with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+    match Model.active_inspector m0 with
+    | Some _ -> None
     | None ->
         if
           Nav.equal_workspace m0.nav.workspace Nav.Keepers
@@ -290,7 +290,7 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
 let find_actionable_ask (m : Model.t) =
   let on_work_inbox =
     Option.is_none m.nav.overlay
-    && m.nav.dive_stack = []
+    && Option.is_none m.nav.inspector
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
@@ -788,7 +788,7 @@ let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
 
 let resolve_memory_act_keeper (m : Model.t) =
   let keeper_tab_active =
-    Option.is_none (Model.active_dive m)
+    Option.is_none (Model.active_inspector m)
     && Nav.equal_workspace m.nav.workspace Nav.Keepers
     && (m.nav.pane_index >= 1 || m.nav.zoomed)
     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
@@ -954,7 +954,7 @@ let runtime_config_revision_opt (m : Model.t) : string option =
     (Observed.to_option m.runtime.runtime_config_raw)
 
 let selected_lane_for_crud (m : Model.t) : Wire_runtime.failover_lane option =
-  match Model.active_dive m with
+  match Model.active_inspector m with
   | Some _ -> None
   | None ->
       if
@@ -1168,8 +1168,8 @@ let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
 let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -1279,16 +1279,16 @@ let keeper_is_offline = function
 
 let selected_keeper_for_lifecycle (m : Model.t) :
     Wire_fleet.keeper_summary option =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
         Fleet_store.selected_keeper_summary m.fleet
       else None
 
 let selected_keeper_name_for_lifecycle (m : Model.t) : string option =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+  match Model.active_inspector m with
+  | Some _ -> None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
         Model.selected_keeper_name m
@@ -1479,8 +1479,8 @@ let open_connector_form_populated (m : Model.t) =
 let active_keeper_for_tab target_tab (m : Model.t) =
   if Option.is_some m.nav.overlay then None
   else
-    match Model.active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+    match Model.active_inspector m with
+    | Some _ -> None
     | None ->
         if
           Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -1619,8 +1619,8 @@ let active_artifact_target (m : Model.t) =
           (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
       None
   | None -> (
-      match Model.active_dive m with
-      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+      match Model.active_inspector m with
+      | Some _ -> None
       | None ->
           if
             Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -1649,8 +1649,8 @@ let active_keeper_for_context (m : Model.t) =
       | Nav.System_gate _ ) ->
       None
   | None -> (
-      match Model.active_dive m with
-      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+      match Model.active_inspector m with
+      | Some _ -> None
       | None ->
           if
             Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -2544,11 +2544,11 @@ let rec execute_slash ~now (m : Model.t) cmd =
             { runtime with mcp_call_result = Observed.loading ~since_ns:now }
           in
           let m_exec = { m with runtime } in
-          let dive = Nav.Dive_runtime (Nav.Tool_dive tool_name) in
+          let insp = Nav.Tool_inspector tool_name in
           let m_dive, dive_cmds =
-            if Option.equal Nav.equal_dive (Model.active_dive m_exec) (Some dive)
+            if Option.equal Nav.equal_inspector (Model.active_inspector m_exec) (Some insp)
             then (m_exec, [])
-            else Update_nav.push_dive m_exec dive
+            else Update_nav.open_inspector m_exec insp
           in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:("MCP 도구 실행 중: " ^ tool_name)
@@ -2607,7 +2607,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
           in
           (m2, cmds)
       | Slash.Skill_read ref_s ->
-          Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
+          Update_nav.open_inspector m (Nav.Skill_inspector ref_s)
       | Slash.Skill_edit ref_s -> (
           match Runtime_store.skill_mutation_target ~reference:ref_s m.runtime with
           | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_only; _ }) ->
@@ -2627,7 +2627,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
               , cmds )
           | Some (Runtime_store.Catalog_skill _) | None ->
               let m1, cmds =
-                Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
+                Update_nav.open_inspector m (Nav.Skill_inspector ref_s)
               in
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
@@ -2768,13 +2768,16 @@ let rec execute_slash ~now (m : Model.t) cmd =
           {
             m_in.nav with
             workspace = Nav.Runtime;
-            dive_stack = [];
-            dive_return_stack = [];
+            inspector = None;
+            inspector_return = None;
             workspace_return_stack = [];
             overlay = None;
             pane_index = 0;
             pre_zoom_pane_index = None;
             zoomed = false;
+            inspector_scroll_offset = 0;
+            keeper_detail_scroll_offset = 0;
+            json_scroll_offset = 0;
           }
         in
         let runtime =
@@ -2793,13 +2796,16 @@ let rec execute_slash ~now (m : Model.t) cmd =
             {
               m.nav with
               workspace = Nav.Runtime;
-              dive_stack = [];
-              dive_return_stack = [];
+              inspector = None;
+              inspector_return = None;
               workspace_return_stack = [];
               overlay = None;
               pane_index = 0;
               pre_zoom_pane_index = None;
               zoomed = false;
+              inspector_scroll_offset = 0;
+              keeper_detail_scroll_offset = 0;
+              json_scroll_offset = 0;
             }
           in
           let runtime =
@@ -3064,8 +3070,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 };
             ] )
       | Slash.Lane_run_inspect run_id ->
-          Update_nav.push_dive m
-            (Nav.Dive_runtime (Nav.Exact_run_dive run_id))
+          Update_nav.open_inspector m (Nav.Exact_run_inspector run_id)
       | Slash.Lane_quarantines keeper ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:("보드 주목 격리 조회 중: @" ^ keeper)
@@ -4000,7 +4005,8 @@ and confirm_palette ~now (m : Model.t) =
                          {
                            m'.nav with
                            workspace = Nav.Infra;
-                           dive_stack = [];
+                           inspector = None;
+                           inspector_return = None;
                            overlay = None;
                            zoomed = false;
                          };
@@ -4406,8 +4412,8 @@ and execute_action ~now (m : Model.t) action =
                 }
               , [] )
             else
-              match Model.active_dive m with
-              | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+              match Model.active_inspector m with
+              | Some _ ->
                   focus_composer_for_slash m
               | None -> (
                   match m.nav.workspace with
@@ -4982,7 +4988,7 @@ and execute_action ~now (m : Model.t) action =
             else
               let active_chat_interrupt =
                 if
-                  Option.is_none (Model.active_dive m)
+                  Option.is_none (Model.active_inspector m)
                   && Model.is_in_keeper_chat m
                 then
                   match Model.selected_keeper_name m with
@@ -5011,97 +5017,9 @@ and execute_action ~now (m : Model.t) action =
               | Some (keeper, target) ->
                   request_keeper_interrupt ~from_escape:true ~now ~keeper ~target m
               | None -> (
-                  match m.nav.dive_stack with
-                  | _ :: rest -> (
-                        let (ret_pane, ret_zoom, ret_overlay), ret_rest =
-                          match m.nav.dive_return_stack with
-                          | hd :: tl -> (hd, tl)
-                          | [] -> ((0, false, None), [])
-                        in
-                        let keep_ask =
-                          Model.has_preserved_ask_return
-                            { m.nav with dive_return_stack = ret_rest }
-                        in
-                        let restored_overlay, restored_ask_modal =
-                          match ret_overlay with
-                          | Some Nav.Ask_answer ->
-                              if Option.is_some m.ask_modal then
-                                (Some Nav.Ask_answer, m.ask_modal)
-                              else (None, None)
-                          | Some
-                              (( Nav.Incidents
-                               | Nav.Queue_context _
-                               | Nav.Palette
-                               | Nav.Settings _
-                               | Nav.Inline_action _
-                               | Nav.Help
-                               | Nav.System_gate _ ) as ov) ->
-                              (Some ov, if keep_ask then m.ask_modal else None)
-                          | None -> (None, if keep_ask then m.ask_modal else None)
-                        in
-                        let next0 =
-                          {
-                            m with
-                            nav =
-                              {
-                                m.nav with
-                                dive_stack = rest;
-                                dive_return_stack = ret_rest;
-                                overlay = None;
-                                pane_index = 0;
-                                zoomed = false;
-                                dive_scroll_offset = 0;
-                                json_scroll_offset = 0;
-                              };
-                            ask_modal = restored_ask_modal;
-                            knowledge =
-                              {
-                                (m.knowledge
-                                |> Knowledge_store.unpin_memory_diff_revs
-                                |> Knowledge_store.clear_pending_artifact_revision
-                                |> Knowledge_store.close_memory_diagram
-                                |> Knowledge_store.clear_pending_wiki_edit)
-                                with
-                                board_recovery =
-                                  Board_recovery.close m.knowledge.board_recovery;
-                              };
-                            infra = { m.infra with show_raw_json = false };
-                          }
-                        in
-                        let restored_zoom =
-                          ret_zoom && Model.can_zoom_current_view next0
-                        in
-                        let next1 =
-                          {
-                            next0 with
-                            nav =
-                              {
-                                next0.nav with
-                                zoomed = restored_zoom;
-                                pane_index = ret_pane;
-                              };
-                          }
-                        in
-                        let max_pane =
-                          max 0 (Model.focusable_pane_count next1 - 1)
-                        in
-                        let clamped_pane = max 0 (min max_pane ret_pane) in
-                        let next2 =
-                          {
-                            next1 with
-                            nav = { next1.nav with pane_index = clamped_pane };
-                          }
-                          |> Update_nav.clamp_for_pane
-                        in
-                        let next =
-                          {
-                            next2 with
-                            nav = { next2.nav with overlay = restored_overlay };
-                          }
-                          |> Update_nav.sync_config_for_keeper_view
-                        in
-                        (next, View_fetches.fetches_for_current_view next))
-                  | [] ->
+                  match m.nav.inspector with
+                  | Some _ -> Update_nav.close_inspector m
+                  | None ->
                       let m =
                         if m.nav.zoomed && not (Model.can_zoom_current_view m)
                         then
@@ -5370,7 +5288,7 @@ and execute_action ~now (m : Model.t) action =
         (not (Drafts.is_focused m.drafts))
         && (Option.is_some (Memory_diagram.active_memory_content_rect m)
            || (Option.is_none m.nav.overlay
-              && Option.is_none (Model.active_dive m)
+              && Option.is_none (Model.active_inspector m)
               && Nav.equal_workspace m.nav.workspace Nav.Knowledge
               && Nav.equal_knowledge_tab m.knowledge.active_tab
                    Nav.Knowledge_memory))
@@ -5522,8 +5440,8 @@ and execute_action ~now (m : Model.t) action =
       | None ->
           if Model.sidebar_has_focus m then (m, [])
           else (
-          match Model.active_dive m with
-          | Some (Nav.Dive_work _) ->
+          match Model.active_inspector m with
+          | Some (Nav.Verification_inspector _) ->
               let infra = Infra_store.toggle_raw_json m.infra in
               let pane_index =
                 if infra.show_raw_json then m.nav.pane_index else 0
@@ -5537,7 +5455,10 @@ and execute_action ~now (m : Model.t) action =
                 |> Update_nav.clamp_for_pane
               in
               (next, [])
-          | Some (Nav.Dive_runtime _) ->
+          | Some
+              ( Nav.Tool_inspector _
+              | Nav.Skill_inspector _
+              | Nav.Exact_run_inspector _ ) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -5890,12 +5811,13 @@ and execute_action ~now (m : Model.t) action =
       | None ->
           if Model.sidebar_has_focus m then (m, [])
           else (
-          match Model.active_dive m with
-          | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+          match Model.active_inspector m with
+          | Some (Nav.Skill_inspector _) ->
               execute_slash ~now m (Slash.Skill Slash.Skill_new)
           | Some
-              ( Nav.Dive_work _
-              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) ) ->
+              ( Nav.Verification_inspector _
+              | Nav.Tool_inspector _
+              | Nav.Exact_run_inspector _ ) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -6126,8 +6048,8 @@ and execute_action ~now (m : Model.t) action =
                 (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ) ->
             `Other
         | None -> (
-            match Model.active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> `Other
+            match Model.active_inspector m with
+            | Some _ -> `Other
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -6143,7 +6065,7 @@ and execute_action ~now (m : Model.t) action =
       | `Artifact art -> copy_artifact_body art
       | `Other
         when Option.is_none m.nav.overlay
-             && Option.is_none (Model.active_dive m)
+             && Option.is_none (Model.active_inspector m)
              && Nav.equal_workspace m.nav.workspace Nav.Work
              && Nav.equal_work_tab m.work.active_tab Nav.Work_harness ->
           open_harness_overrule_for_selected ~verdict:"approve" ~now m
@@ -6289,8 +6211,8 @@ and execute_action ~now (m : Model.t) action =
             match reading_copy_opt with
             | Some txt -> Some txt
             | None -> (
-            match Model.active_dive m with
-            | Some (Nav.Dive_work (Nav.Verification_dive id)) -> (
+            match Model.active_inspector m with
+            | Some (Nav.Verification_inspector id) -> (
                 match
                   List.find_opt
                     (fun (v : Wire_work.verification_request) ->
@@ -6299,9 +6221,9 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some v -> Some v.task_title
                 | None -> Some id)
-            | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
-            | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
-            | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) -> Some run_id
+            | Some (Nav.Tool_inspector name) -> Some name
+            | Some (Nav.Skill_inspector ref_s) -> Some ref_s
+            | Some (Nav.Exact_run_inspector run_id) -> Some run_id
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge -> (
@@ -6674,10 +6596,8 @@ and execute_action ~now (m : Model.t) action =
                 | None -> extract_first_http_url detail.body_markdown)
             | None -> None
           in
-          match Model.active_dive m with
-          | Some (Nav.Dive_work (Nav.Verification_dive _))
-          | Some (Nav.Dive_runtime _) ->
-              (m, [])
+          match Model.active_inspector m with
+          | Some _ -> (m, [])
           | None -> (
               match m.nav.workspace with
               | Nav.Infra -> (
@@ -6836,11 +6756,8 @@ and execute_action ~now (m : Model.t) action =
         else (m, [])
       else
         let zoomed = not m.nav.zoomed in
-        let in_dive = Option.is_some (Model.active_dive m) in
         let next =
-          if in_dive then
-            { m with nav = { m.nav with zoomed } }
-          else if zoomed then
+          if zoomed then
             let z_pane =
               if
                 Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -6913,13 +6830,9 @@ and execute_action ~now (m : Model.t) action =
             in
             { m0 with nav = { m0.nav with pane_index = restored } }
         in
-        if
-          Option.is_some (Memory_diagram.active_diagram next)
-          && (not in_dive
-             || not (Int.equal (Model.inner_body_width next) (Model.inner_body_width m)))
-        then
+        if Option.is_some (Memory_diagram.active_diagram next) then
           Update_nav.refresh_open_memory_diagram ~now next
-        else if zoomed && not in_dive then
+        else if zoomed then
           (next, View_fetches.fetches_for_current_view next)
         else (next, [])
   | Keymap.Cycle_memory_view ->
@@ -6927,7 +6840,7 @@ and execute_action ~now (m : Model.t) action =
         if
           Option.is_none m.nav.overlay
           && (not (Model.sidebar_has_focus m))
-          && Option.is_none (Model.active_dive m)
+          && Option.is_none (Model.active_inspector m)
           && Nav.equal_workspace m.nav.workspace Nav.Keepers
           && (m.nav.pane_index >= 1 || m.nav.zoomed)
           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
@@ -6947,8 +6860,8 @@ and execute_action ~now (m : Model.t) action =
             Option.is_none m.nav.overlay
             && (not (Model.sidebar_has_focus m))
             &&
-            match Model.active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+            match Model.active_inspector m with
+            | Some _ -> false
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge ->
@@ -6969,7 +6882,7 @@ and execute_action ~now (m : Model.t) action =
             let next =
               {
                 m with
-                nav = { m.nav with dive_scroll_offset = 0 };
+                nav = { m.nav with keeper_detail_scroll_offset = 0 };
                 knowledge;
               }
             in
@@ -6980,8 +6893,8 @@ and execute_action ~now (m : Model.t) action =
         Option.is_none m.nav.overlay
         && (not (Model.sidebar_has_focus m))
         &&
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+        match Model.active_inspector m with
+        | Some _ -> false
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge ->
@@ -7001,7 +6914,7 @@ and execute_action ~now (m : Model.t) action =
         , [] )
       else (m, [])
   | Keymap.Cycle_signal_or_source -> (
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -7053,7 +6966,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Cycle_sort_or_speak -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
+        match Model.active_inspector m with
         | Some _ -> (m, [])
         | None -> (
             match m.nav.workspace with
@@ -7093,11 +7006,15 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Cycle_hearth_or_overrule -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Verification_inspector _) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now
               m
-        | Some (Nav.Dive_runtime _) -> (m, [])
+        | Some
+            ( Nav.Tool_inspector _
+            | Nav.Skill_inspector _
+            | Nav.Exact_run_inspector _ ) ->
+            (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge
@@ -7128,15 +7045,15 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Cycle_time_window -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Tool_inspector _) ->
             let runtime = Runtime_store.cycle_tools_window m.runtime in
             let next = { m with runtime } in
             (next, View_fetches.fetches_for_current_view next)
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
-            ) ->
+            ( Nav.Verification_inspector _
+            | Nav.Skill_inspector _
+            | Nav.Exact_run_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -7207,13 +7124,17 @@ and execute_action ~now (m : Model.t) action =
           | None -> (
               if Option.is_some m.nav.overlay then (m, [])
               else
-                match Model.active_dive m with
-                | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+                match Model.active_inspector m with
+                | Some (Nav.Verification_inspector _) ->
                     let work = Work_store.cycle_verification_dive_tab m.work in
-                    let nav = { m.nav with dive_scroll_offset = 0 } in
+                    let nav = { m.nav with inspector_scroll_offset = 0 } in
                     let next = { m with nav; work } in
                     (next, View_fetches.fetches_for_current_view next)
-                | Some (Nav.Dive_runtime _) -> (m, [])
+                | Some
+                    ( Nav.Tool_inspector _
+                    | Nav.Skill_inspector _
+                    | Nav.Exact_run_inspector _ ) ->
+                    (m, [])
                 | None -> (
                     match m.nav.workspace with
                     | Nav.Work
@@ -7268,7 +7189,7 @@ and execute_action ~now (m : Model.t) action =
                           Knowledge_store.cycle_keeper_memory_subview
                             m.knowledge
                         in
-                        let nav = { m.nav with dive_scroll_offset = 0 } in
+                        let nav = { m.nav with keeper_detail_scroll_offset = 0 } in
                         let next = { m with nav; knowledge } in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Keepers
@@ -7387,8 +7308,8 @@ and execute_action ~now (m : Model.t) action =
       | None -> (
           if Option.is_some m.nav.overlay then (m, [])
           else
-            match Model.active_dive m with
-            | Some (Nav.Dive_work (Nav.Verification_dive _) | Nav.Dive_runtime _) ->
+            match Model.active_inspector m with
+            | Some _ ->
                 (m, [])
             | None -> (
                 match m.nav.workspace with
@@ -7423,7 +7344,7 @@ and execute_action ~now (m : Model.t) action =
                             zoomed;
                             pre_zoom_pane_index;
                             pane_index;
-                            dive_scroll_offset = 0;
+                            keeper_detail_scroll_offset = 0;
                             filter_focused = false;
                           }
                         in
@@ -7615,7 +7536,7 @@ and execute_action ~now (m : Model.t) action =
       if
         Option.is_none m.nav.overlay
         && (not (Model.sidebar_has_focus m))
-        && Option.is_none (Model.active_dive m)
+        && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Keepers
         && (m.nav.pane_index >= 1 || m.nav.zoomed)
         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
@@ -7645,8 +7566,8 @@ and execute_action ~now (m : Model.t) action =
       | None -> (
           if Option.is_some m.nav.overlay then (m, [])
           else
-            match Model.active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
+            match Model.active_inspector m with
+            | Some _ -> (m, [])
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge
@@ -7724,8 +7645,8 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         let in_memory =
-          match Model.active_dive m with
-          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+          match Model.active_inspector m with
+          | Some _ -> false
           | None ->
               (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                && Nav.equal_knowledge_tab m.knowledge.active_tab
@@ -7743,10 +7664,10 @@ and execute_action ~now (m : Model.t) action =
               m.knowledge
           in
           let next =
-            { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
+            { m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; knowledge }
           in
           (next, View_fetches.fetches_for_current_view next)
-        else if Option.is_some (Model.active_dive m) then (m, [])
+        else if Option.is_some (Model.active_inspector m) then (m, [])
         else
           match m.nav.workspace with
           | Nav.Runtime
@@ -7764,8 +7685,8 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_unreported -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
+        match Model.active_inspector m with
+        | Some _ -> (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Knowledge
@@ -7811,7 +7732,7 @@ and execute_action ~now (m : Model.t) action =
                 ] )
           | Some Update_nav.Identity_github | None -> (m, []))
       | None ->
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -7896,8 +7817,8 @@ and execute_action ~now (m : Model.t) action =
                   ] )
             | Some Update_nav.Identity_github | None -> (m, []))
         | None ->
-        match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
+        match Model.active_inspector m with
+        | Some (Nav.Verification_inspector req_id) -> (
             match
               List.find_opt
                 (fun (v : Wire_work.verification_request) ->
@@ -7906,7 +7827,11 @@ and execute_action ~now (m : Model.t) action =
             with
             | Some v -> Update_nav.approve_verification_request ~now m v
             | None -> (m, []))
-        | Some (Nav.Dive_runtime _) -> (m, [])
+        | Some
+            ( Nav.Tool_inspector _
+            | Nav.Skill_inspector _
+            | Nav.Exact_run_inspector _ ) ->
+            (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Work
@@ -8072,8 +7997,8 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Entity_reject_or_cancel -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
+        match Model.active_inspector m with
+        | Some (Nav.Verification_inspector req_id) -> (
             match
               List.find_opt
                 (fun (v : Wire_work.verification_request) ->
@@ -8087,9 +8012,9 @@ and execute_action ~now (m : Model.t) action =
                        ~en:"Verification request not found")
                     m
                 , [] ))
-        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+        | Some (Nav.Skill_inspector ref_s) ->
             execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
-        | Some (Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)) ->
+        | Some (Nav.Tool_inspector _ | Nav.Exact_run_inspector _) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -8289,8 +8214,8 @@ and execute_action ~now (m : Model.t) action =
       | None -> (
           if Option.is_some m.nav.overlay then (m, [])
           else
-            match Model.active_dive m with
-            | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
+            match Model.active_inspector m with
+            | Some (Nav.Tool_inspector tool_name) ->
                 let skeleton =
                   match
                     Runtime_store.mcp_tool_schema_for ~name:tool_name m.runtime
@@ -8307,10 +8232,10 @@ and execute_action ~now (m : Model.t) action =
                 Update_nav.open_inline_modal m
                   (Nav.Tool_execute_form
                      { tool_name = Some tool_name; args_json = skeleton })
-            | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+            | Some (Nav.Skill_inspector ref_s) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
-            | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) -> (m, [])
-            | Some (Nav.Dive_work (Nav.Verification_dive _)) -> (m, [])
+            | Some (Nav.Exact_run_inspector _) -> (m, [])
+            | Some (Nav.Verification_inspector _) -> (m, [])
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -8353,7 +8278,7 @@ and execute_action ~now (m : Model.t) action =
                       Knowledge_store.View_evolution m.knowledge
                   in
                   let next =
-                    { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
+                    { m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; knowledge }
                   in
                   (next, View_fetches.fetches_for_current_view next)
                 else if
@@ -8520,7 +8445,7 @@ and execute_action ~now (m : Model.t) action =
       | Some keeper ->
           Update_nav.open_inline_modal m (Nav.Github_token_form keeper)
       | None ->
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -8576,7 +8501,7 @@ and execute_action ~now (m : Model.t) action =
                 ] )
           | None -> (m, []))
       | None ->
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -8622,7 +8547,7 @@ and execute_action ~now (m : Model.t) action =
         | Some keeper ->
             open_keeper_lifecycle_modal m ~keeper ~default_action:"boot"
         | None ->
-            if Option.is_some (Model.active_dive m) then (m, [])
+            if Option.is_some (Model.active_inspector m) then (m, [])
             else
               match m.nav.workspace with
               | Nav.Runtime -> (
@@ -8656,8 +8581,8 @@ and execute_action ~now (m : Model.t) action =
       | None ->
           if Option.is_some m.nav.overlay then (m, [])
           else (
-            match Model.active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (m, [])
+            match Model.active_inspector m with
+            | Some _ -> (m, [])
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Work
@@ -8675,11 +8600,15 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Dismiss_errors -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
-        match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Verification_inspector _) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now
               m
-        | Some (Nav.Dive_runtime _) -> (m, [])
+        | Some
+            ( Nav.Tool_inspector _
+            | Nav.Skill_inspector _
+            | Nav.Exact_run_inspector _ ) ->
+            (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Keepers
@@ -8704,8 +8633,8 @@ and execute_action ~now (m : Model.t) action =
       let target_opt =
         if Option.is_some m.nav.overlay then None
         else
-          match Model.active_dive m with
-          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+          match Model.active_inspector m with
+          | Some _ -> None
           | None ->
               if
                 Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -8752,7 +8681,7 @@ and execute_action ~now (m : Model.t) action =
               ( { m with knowledge }
               , [ Cmd.Http_post { epoch = m.epoch; req } ] )))
   | Keymap.Toggle_memory_scope -> (
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -8809,7 +8738,7 @@ and execute_action ~now (m : Model.t) action =
       then toggle_board_pin ~now m
       else if
         Option.is_none m.nav.overlay
-        && Option.is_none (Model.active_dive m)
+        && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Infra
         && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
       then
@@ -8834,7 +8763,7 @@ and execute_action ~now (m : Model.t) action =
         (m1, cmds)
       else if
         Option.is_none m.nav.overlay
-        && Option.is_none (Model.active_dive m)
+        && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Runtime
         && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
       then
@@ -8862,8 +8791,8 @@ and execute_action ~now (m : Model.t) action =
       let target_opt =
         if Option.is_some m.nav.overlay then None
         else
-          match Model.active_dive m with
-          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+          match Model.active_inspector m with
+          | Some _ -> None
           | None -> (
               match m.nav.workspace with
               | Nav.Infra
@@ -8900,7 +8829,7 @@ and execute_action ~now (m : Model.t) action =
             ] )
       | None -> (m, []))
   | Keymap.Refresh_browser_tabs -> (
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
+      if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
       then (m, [])
       else
         match m.nav.workspace with
@@ -8952,8 +8881,8 @@ and execute_action ~now (m : Model.t) action =
         && Option.is_none m.knowledge.memory_reading
         && (not (Model.sidebar_has_focus m))
         &&
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+        match Model.active_inspector m with
+        | Some _ -> false
         | None ->
             (Nav.equal_workspace m.nav.workspace Nav.Knowledge
              && Nav.equal_knowledge_tab m.knowledge.active_tab
@@ -8978,8 +8907,8 @@ and execute_action ~now (m : Model.t) action =
         , [] )
   | Keymap.Open_external_editor -> (
       let wiki_slug =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+        match Model.active_inspector m with
+        | Some _ -> None
         | None ->
             if
               Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -9003,7 +8932,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Interrupt_turn -> (
       let keeper_opt =
         if
-          Option.is_none (Model.active_dive m)
+          Option.is_none (Model.active_inspector m)
           && Nav.equal_workspace m.nav.workspace Nav.Keepers
         then
           match Model.selected_keeper_name m with
@@ -9054,7 +8983,7 @@ and execute_action ~now (m : Model.t) action =
                   (Nav.Board_delete_post { post_id = p.id; title = p.title })
             | None -> (
                 if
-                  Option.is_none (Model.active_dive m)
+                  Option.is_none (Model.active_inspector m)
                   && Nav.equal_workspace m.nav.workspace Nav.Runtime
                   && Nav.equal_runtime_tab m.runtime.active_tab
                        Nav.Runtime_addons_browser
@@ -9073,9 +9002,9 @@ and execute_action ~now (m : Model.t) action =
                   in
                   let nav =
                     if
-                      Option.is_none (Model.active_dive m)
+                      Option.is_none (Model.active_inspector m)
                       && Nav.equal_workspace m.nav.workspace Nav.Keepers
-                    then { m.nav with dive_scroll_offset = 0 }
+                    then { m.nav with keeper_detail_scroll_offset = 0 }
                     else m.nav
                   in
                   let next = { m with nav; knowledge } in
@@ -9091,8 +9020,8 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then (m, [])
       else
         let task_opt =
-          match Model.active_dive m with
-          | Some (Nav.Dive_work (Nav.Verification_dive _) | Nav.Dive_runtime _) ->
+          match Model.active_inspector m with
+          | Some _ ->
               None
           | None ->
               if

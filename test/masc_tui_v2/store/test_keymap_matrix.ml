@@ -71,11 +71,18 @@ let render_full ~(model : Model.t) =
   let grid = Cell_grid.create ~cols ~rows in
   let cache = Card.Cache.create () in
   let render_body rect g =
-    match Model.active_dive model with
-    | Some (Nav.Dive_work target) ->
-        Screen_work.render_dive ~target ~model ~cache ~rect g
-    | Some (Nav.Dive_runtime target) ->
-        Screen_runtime.render_dive ~target ~model ~cache ~rect g
+    match Model.active_inspector model with
+    | Some (Nav.Verification_inspector req_id) ->
+        Screen_work.render_verification ~req_id ~model ~cache ~rect g
+    | Some (Nav.Tool_inspector name) ->
+        Screen_runtime.render_inspector ~target:(`Tool name) ~model ~cache ~rect
+          g
+    | Some (Nav.Skill_inspector ref_s) ->
+        Screen_runtime.render_inspector ~target:(`Skill ref_s) ~model ~cache
+          ~rect g
+    | Some (Nav.Exact_run_inspector run_id) ->
+        Screen_runtime.render_inspector ~target:(`Exact_run run_id) ~model
+          ~cache ~rect g
     | None -> (
         match model.nav.workspace with
         | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect g
@@ -1097,7 +1104,7 @@ let test_axis_a_screen_dive_matrix () =
         {
           m.nav with
           workspace = ws;
-          dive_stack = [];
+          inspector = None;
           overlay = None;
           pane_index = 0;
           zoomed;
@@ -1336,8 +1343,7 @@ let test_axis_a_screen_dive_matrix () =
   List.iter
     (fun (ctx_name, (m : Model.t)) ->
       let panes_before = Model.focusable_pane_count m in
-      let dive_before = Model.active_dive m in
-      let depth_before = List.length m.nav.dive_stack in
+      let dive_before = Model.active_inspector m in
       let is_micro = Model.equal_breakpoint m.breakpoint Model.Micro in
       List.iter
         (fun (kname, ev) ->
@@ -1387,12 +1393,12 @@ let test_axis_a_screen_dive_matrix () =
                 expected m'.nav.pane_index
             end
           end;
-          (* Invariant 3: Enter inside any remaining Dive never pushes duplicate/nested dive. *)
+          (* Invariant 3: Enter inside any Inspector stays on the same inspector (no nesting). *)
           if String.equal kname "Enter" && Option.is_some dive_before then
             Alcotest.(check bool)
-              (tag ^ " Dive Enter never deepens dive_stack")
+              (tag ^ " Inspector Enter never replaces or drops inspector")
               true
-              (List.length m'.nav.dive_stack <= depth_before);
+              (Option.equal Nav.equal_inspector m'.nav.inspector dive_before);
           (* Invariant 4: Zero invisible filter traps on '/' *)
           if String.equal kname "/" then begin
             if is_micro then
@@ -2174,14 +2180,14 @@ let test_journeys_slash_palette_filter () =
   let m_pal_kp_go, _ = step m_pal_kp (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "J6 Ctrl+K keeper entry jumps to Keepers beta" true
     (Nav.equal_workspace m_pal_kp_go.nav.workspace Nav.Keepers
-     && Option.is_none (Model.active_dive m_pal_kp_go)
+     && Option.is_none (Model.active_inspector m_pal_kp_go)
      && Option.equal String.equal (Model.selected_keeper_name m_pal_kp_go)
           (Some "beta")
      && Nav.equal_keeper_tab m_pal_kp_go.fleet.keeper_dive_tab Nav.Keeper_chat);
   let m_pal_goal, _ = type_str m_pal "Harden TUI Matrix" in
   let m_pal_goal_go, _ = step m_pal_goal (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "J6 Ctrl+K goal entry jumps to Work > Goals zoomed on goal-1" true
-    (Option.is_none (Model.active_dive m_pal_goal_go)
+    (Option.is_none (Model.active_inspector m_pal_goal_go)
      && Nav.equal_workspace m_pal_goal_go.nav.workspace Nav.Work
      && Nav.equal_work_tab m_pal_goal_go.work.active_tab Nav.Work_pipeline
      && m_pal_goal_go.nav.zoomed
@@ -2260,7 +2266,7 @@ let test_journeys_tab_multipane_dives_safety () =
   let p_goal_dive, _ = step p_pane2 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
     "J10 Pulse pane 2 (Goals) Enter jumps to top-ranked Goal zoomed (goal-2)" true
-    (Option.is_none (Model.active_dive p_goal_dive)
+    (Option.is_none (Model.active_inspector p_goal_dive)
      && Nav.equal_workspace p_goal_dive.nav.workspace Nav.Work
      && Nav.equal_work_tab p_goal_dive.work.active_tab Nav.Work_pipeline
      && p_goal_dive.nav.zoomed
@@ -2272,7 +2278,7 @@ let test_journeys_tab_multipane_dives_safety () =
   let p_goal1_dive, _ = step p_pane2_dn (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
     "J10 Pulse pane 2 Down + Enter jumps to 2nd Goal zoomed (goal-1)" true
-    (Option.is_none (Model.active_dive p_goal1_dive)
+    (Option.is_none (Model.active_inspector p_goal1_dive)
      && Nav.equal_workspace p_goal1_dive.nav.workspace Nav.Work
      && Nav.equal_work_tab p_goal1_dive.work.active_tab Nav.Work_pipeline
      && p_goal1_dive.nav.zoomed
@@ -2284,7 +2290,7 @@ let test_journeys_tab_multipane_dives_safety () =
   let p_thread_jump, _ = step p_pane3 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
     "J10 Pulse pane 3 (World) Enter jumps to Knowledge > Board on post-1" true
-    (Option.is_none (Model.active_dive p_thread_jump)
+    (Option.is_none (Model.active_inspector p_thread_jump)
      && Nav.equal_workspace p_thread_jump.nav.workspace Nav.Knowledge
      && Nav.equal_knowledge_tab p_thread_jump.knowledge.active_tab
           Nav.Knowledge_board
@@ -2445,7 +2451,7 @@ let test_journeys_tab_multipane_dives_safety () =
     (if item1_is_ask then
        Option.equal Nav.equal_overlay m_inb_dive.nav.overlay
          (Some Nav.Ask_answer)
-     else Option.is_some (Model.active_dive m_inb_dive));
+     else Option.is_some (Model.active_inspector m_inb_dive));
 
   (* J14: Keepers Wide split pane 1 scrolls preview & ']' cycles embedded tab *)
   record_case ();
@@ -2659,8 +2665,8 @@ let test_journeys_tab_multipane_dives_safety () =
     }
   in
   let m_dk_c, _ = step m_dk (char_key "c") in
-  Alcotest.(check int) "J18 Keepers Focus Mode [c] keeps dive_stack depth=0" 0
-    (List.length m_dk_c.nav.dive_stack);
+  Alcotest.(check bool) "J18 Keepers Focus Mode [c] keeps inspector = None" true
+    (Option.is_none m_dk_c.nav.inspector);
   Alcotest.(check bool)
     "J18 Keepers Focus Mode [c] switches to Keeper_chat + focuses composer" true
     (Nav.equal_workspace m_dk_c.nav.workspace Nav.Keepers
@@ -2900,7 +2906,7 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_wp_n1_ent, _ = step m_wp_n1 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "R1 pane 1 Enter zooms Goal Detail (never Verification_dive)"
     true
-    (Option.is_none (Model.active_dive m_wp_n1_ent)
+    (Option.is_none (Model.active_inspector m_wp_n1_ent)
      && m_wp_n1_ent.nav.zoomed
      && Nav.equal_workspace m_wp_n1_ent.nav.workspace Nav.Work
      && Nav.equal_work_tab m_wp_n1_ent.work.active_tab Nav.Work_pipeline);
@@ -3108,7 +3114,7 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check bool) "R5c '/keeper alpha' executes exact 'alpha' (not 'alpha-dev')"
     true
     (Nav.equal_workspace m_p5c_ent.nav.workspace Nav.Keepers
-     && Option.is_none (Model.active_dive m_p5c_ent)
+     && Option.is_none (Model.active_inspector m_p5c_ent)
      && Option.equal String.equal (Model.selected_keeper_name m_p5c_ent)
           (Some "alpha")
      && Nav.equal_keeper_tab m_p5c_ent.fleet.keeper_dive_tab Nav.Keeper_chat);
@@ -3139,8 +3145,8 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_z_art2, _ = step m_z_tab (char_key "z") in
   Alcotest.(check bool) "R6 'z' on Knowledge_artifacts toggles zoomed = true" true
     m_z_art2.nav.zoomed;
-  let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_runtime (Nav.Tool_dive "masc_status")) in
-  Alcotest.(check bool) "R6 push_dive resets zoomed = false" false
+  let m_z_dive, _ = Update_nav.open_inspector m_z_kw1 (Nav.Tool_inspector "masc_status") in
+  Alcotest.(check bool) "R6 open_inspector resets zoomed = false" false
     m_z_dive.nav.zoomed;
   let m_z_filtered =
     { m_z_kw1 with knowledge = Knowledge_store.set_filter "arch" m_z_kw1.knowledge }
@@ -4118,13 +4124,13 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   in
   let m_kmem_end, _ = step m_kmem (mk_key Keymap.Input.End) in
   Alcotest.(check bool) "Keeper_memory End goes past old 160 cap (>180)" true
-    (m_kmem_end.nav.dive_scroll_offset > 180);
+    (m_kmem_end.nav.keeper_detail_scroll_offset > 180);
   let m_kmem_dn, _ = step m_kmem_end (mk_key Keymap.Input.Down) in
   Alcotest.(check int) "Keeper_memory Down at End does NOT overshoot"
-    m_kmem_end.nav.dive_scroll_offset m_kmem_dn.nav.dive_scroll_offset;
+    m_kmem_end.nav.keeper_detail_scroll_offset m_kmem_dn.nav.keeper_detail_scroll_offset;
   let m_kmem_up, _ = step m_kmem_end (mk_key Keymap.Input.Up) in
   Alcotest.(check int) "Keeper_memory Up from End immediately decrements by 1"
-    (m_kmem_end.nav.dive_scroll_offset - 1) m_kmem_up.nav.dive_scroll_offset;
+    (m_kmem_end.nav.keeper_detail_scroll_offset - 1) m_kmem_up.nav.keeper_detail_scroll_offset;
   let txt_kmem = grid_all_text (render_full ~model:m_kmem_end) in
   Alcotest.(check bool) "Keeper_memory at End renders bottom row (never blank)"
     true
@@ -4183,10 +4189,10 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   in
   let m_kwc_end, _ = step m_kwc (mk_key Keymap.Input.End) in
   Alcotest.(check bool) "Keeper_work_candle End goes past old 160 cap" true
-    (m_kwc_end.nav.dive_scroll_offset > 160);
+    (m_kwc_end.nav.keeper_detail_scroll_offset > 160);
   let m_kwc_dn, _ = step m_kwc_end (mk_key Keymap.Input.Down) in
   Alcotest.(check int) "Keeper_work_candle Down at End clamps cleanly"
-    m_kwc_end.nav.dive_scroll_offset m_kwc_dn.nav.dive_scroll_offset;
+    m_kwc_end.nav.keeper_detail_scroll_offset m_kwc_dn.nav.keeper_detail_scroll_offset;
   let txt_kwc = grid_all_text (render_full ~model:m_kwc_end) in
   Alcotest.(check bool) "Keeper_work_candle at End renders last post row (never blank)"
     true (Store_scroll.contains_ci ~needle:"Alpha board update 019" txt_kwc);
@@ -4912,7 +4918,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   in
   assert_scroll_exact ~label:"Keeper_work_candle (Done + Cancelled tasks)"
     ~needle:"CANDLE_LAST_POST"
-    ~get_off:(fun m -> m.nav.dive_scroll_offset)
+    ~get_off:(fun m -> m.nav.keeper_detail_scroll_offset)
     m_kwc_dc;
   (* 10d. 3 Knowledge > Board pane 1 (wrapped long post body, Fixed 1 + 0.48/0.54) *)
   let long_board_post =
@@ -5519,18 +5525,18 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     }
   in
   let dives_with_sentinels =
-    let dive_off (m : Model.t) = m.nav.dive_scroll_offset in
+    let insp_off (m : Model.t) = m.nav.inspector_scroll_offset in
     [
-      ( "Verification_dive"
-      , Nav.Dive_work (Nav.Verification_dive "verif-1")
+      ( "Verification_inspector"
+      , Nav.Verification_inspector "verif-1"
       , "Missing artifacts"
-      , dive_off );
+      , insp_off );
     ]
   in
   List.iter
-    (fun (dname, dive, needle, get_off) ->
+    (fun (dname, insp, needle, get_off) ->
       let md0 =
-        { m_dives_base with nav = { m_dives_base.nav with dive_stack = [ dive ] } }
+        { m_dives_base with nav = { m_dives_base.nav with inspector = Some insp } }
       in
       assert_scroll_exact ~label:dname ~needle ~get_off md0)
     dives_with_sentinels;
@@ -5869,10 +5875,10 @@ let test_enter_hint_follows_enter_plan () =
         "hidden"
         (enter_hint_name (Update_nav.enter_hint m));
       let m', cmds = Update_nav.dive_selected m in
-      Alcotest.(check int)
-        (label ^ ": Enter pushes no dive")
-        (List.length m.nav.dive_stack)
-        (List.length m'.nav.dive_stack);
+      Alcotest.(check bool)
+        (label ^ ": Enter opens no inspector")
+        true
+        (Option.equal Nav.equal_inspector m.nav.inspector m'.nav.inspector);
       Alcotest.(check int) (label ^ ": Enter sends no request") 0
         (List.length cmds))
     no_target_views;
@@ -5888,15 +5894,15 @@ let test_enter_hint_follows_enter_plan () =
   let infra_logs_dived, _ = Update_nav.dive_selected infra_logs_populated in
   Alcotest.(check bool) "Infra/Logs (populated): Enter zooms log detail in place"
     true
-    (infra_logs_dived.nav.zoomed && infra_logs_dived.nav.dive_stack = []);
+    (infra_logs_dived.nav.zoomed && Option.is_none infra_logs_dived.nav.inspector);
   let keepers =
     { m_base with nav = { m_base.nav with workspace = Nav.Keepers } }
   in
   Alcotest.(check string) "Keepers: footer offers Enter" "dive"
     (enter_hint_name (Update_nav.enter_hint keepers));
   let dived, _ = Update_nav.dive_selected keepers in
-  Alcotest.(check bool) "Keepers: Enter toggles Focus Mode (zoomed=true, dive_stack=[])"
-    true (dived.nav.zoomed && dived.nav.dive_stack = []);
+  Alcotest.(check bool) "Keepers: Enter toggles Focus Mode (zoomed=true, inspector=None)"
+    true (dived.nav.zoomed && Option.is_none dived.nav.inspector);
   (* Keeper config takes Enter before the keymap and edits a field, both in
      Focus Mode (zoomed) and in the Keepers detail pane. *)
   let config_dive =
@@ -6364,7 +6370,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
         {
           base.nav with
           workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "req-1") ];
+          inspector = Some (Nav.Verification_inspector "req-1");
         };
     }
   in
@@ -6617,7 +6623,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
       (Nav.Menu_keeper_tab Nav.Keeper_trace)
   in
   Alcotest.(check bool) "Compact live preview does NOT zoom prematurely"
-    true ((not m_cmp_preview.nav.zoomed) && Option.is_none (Model.active_dive m_cmp_preview));
+    true ((not m_cmp_preview.nav.zoomed) && Option.is_none (Model.active_inspector m_cmp_preview));
   let m_cmp_act, _ =
     Update_nav.navigate_menu_target ~keep_sidebar_focus:false m_cmp_kp
       (Nav.Menu_keeper_tab Nav.Keeper_trace)
@@ -6626,7 +6632,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
     true
     (Nav.equal_workspace m_cmp_act.nav.workspace Nav.Keepers
      && m_cmp_act.nav.zoomed
-     && Option.is_none (Model.active_dive m_cmp_act)
+     && Option.is_none (Model.active_inspector m_cmp_act)
      && Nav.equal_keeper_tab m_cmp_act.fleet.keeper_dive_tab Nav.Keeper_trace)
 
 (* ---------- Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices & Secret Masking ---------- *)
@@ -6800,7 +6806,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
         {
           base.nav with
           workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "verif-1") ];
+          inspector = Some (Nav.Verification_inspector "verif-1");
         };
       work =
         Work_store.mark_verification_evidence_denied ~at:t0 ~reason:"403 CanAdmin"
@@ -7862,7 +7868,7 @@ let test_part1_ask_modal_and_honest_surfaces () =
   let m_with_asks asks =
     {
       base with
-      nav = { base.nav with workspace = Nav.Pulse; overlay = None; dive_stack = [] };
+      nav = { base.nav with workspace = Nav.Pulse; overlay = None; inspector = None };
       work =
         Work_store.empty
         |> Work_store.apply_asks ~observed_at:t0 asks;
@@ -7920,7 +7926,7 @@ let test_part1_ask_modal_and_honest_surfaces () =
   let m_modal_chat, _ = step m_inb_enter (char_key ~shift:true "C") in
   Alcotest.(check bool) "Ask modal 'C' jumps to Keepers > Chat" true
     (Option.is_none m_modal_chat.nav.overlay
-     && Option.is_none (Model.active_dive m_modal_chat)
+     && Option.is_none (Model.active_inspector m_modal_chat)
      && Nav.equal_workspace m_modal_chat.nav.workspace Nav.Keepers
      && Option.equal String.equal (Model.selected_keeper_name m_modal_chat)
           (Some "alpha")
@@ -7928,7 +7934,7 @@ let test_part1_ask_modal_and_honest_surfaces () =
      && Option.is_some m_modal_chat.ask_modal);
   let m_inb_chat, _ = step m_j_esc (char_key ~shift:true "C") in
   Alcotest.(check bool) "Work > Inbox 'C' on Ask jumps to Keepers > Chat" true
-    (Option.is_none (Model.active_dive m_inb_chat)
+    (Option.is_none (Model.active_inspector m_inb_chat)
      && Nav.equal_workspace m_inb_chat.nav.workspace Nav.Keepers
      && Option.equal String.equal (Model.selected_keeper_name m_inb_chat)
           (Some "alpha")
@@ -8357,7 +8363,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
               pane_index = 0;
               sidebar_focused = false;
               overlay = None;
-              dive_stack = [];
+              inspector = None;
             };
         }
       in
@@ -8474,7 +8480,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           workspace = Nav.Work;
           pane_index = 0;
           sidebar_focused = false;
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-1") ];
+          inspector = Some (Nav.Verification_inspector "ver-1");
         };
     }
   in
@@ -8484,8 +8490,8 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
     true
     ((not (Model.sidebar_has_focus m_dg_rt))
      &&
-     match Model.active_dive m_dg_rt with
-     | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
+     match Model.active_inspector m_dg_rt with
+     | Some (Nav.Verification_inspector "ver-1") -> true
      | _ -> false);
   Alcotest.(check int) "Dive_work Verification_dive Left -> Right emits 0 refetches" 0
     (List.length (Cmd.flatten cmds_dg_rt));
@@ -8521,7 +8527,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           workspace = Nav.Keepers;
           pane_index = 0;
           zoomed = false;
-          dive_stack = [];
+          inspector = None;
           sidebar_focused = false;
         };
     }
@@ -8547,7 +8553,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           workspace = Nav.Keepers;
           pane_index = 0;
           zoomed = true;
-          dive_stack = [];
+          inspector = None;
           sidebar_focused = false;
         };
       fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
@@ -8797,7 +8803,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           base.nav with
           workspace = Nav.Keepers;
           pane_index = 1;
-          dive_stack = [];
+          inspector = None;
           sidebar_focused = false;
         };
       fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
@@ -8903,7 +8909,7 @@ let test_keeper_lifecycle_keymap_matrix () =
   let m_with_ask =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Pulse; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Pulse; overlay = None; inspector = None };
       work = Work_store.empty |> Work_store.apply_asks ~observed_at:t0 [ mk_single_ask () ];
     }
     |> Model.rebuild_attention
@@ -8988,7 +8994,7 @@ let test_p1_shortcut_and_classifier_regressions () =
   let m_know_mem =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; inspector = None };
       knowledge = { m0.knowledge with active_tab = Nav.Knowledge_memory };
     }
   in
@@ -9017,7 +9023,7 @@ let test_p1_shortcut_and_classifier_regressions () =
   let m_art_ask =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; inspector = None };
       knowledge = { m0.knowledge with active_tab = Nav.Knowledge_artifacts };
       work = Work_store.empty |> Work_store.apply_asks ~observed_at:t0 [ mk_single_ask () ];
     }
@@ -9037,7 +9043,7 @@ let test_p1_shortcut_and_classifier_regressions () =
   let m_tasks =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Work; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Work; overlay = None; inspector = None };
       work = { m0.work with active_tab = Nav.Work_tasks };
     }
   in
@@ -9199,7 +9205,7 @@ let test_batch_d_toast_tag_ime_and_keymap_ssot () =
   let m_k_view =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Keepers; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Keepers; overlay = None; inspector = None };
     }
   in
   let m_stop1, _ = step m_k_view (char_key ~shift:true "D") in
@@ -9251,7 +9257,7 @@ let test_batch_d_toast_tag_ime_and_keymap_ssot () =
   let m_art =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; inspector = None };
       knowledge = { m0.knowledge with active_tab = Nav.Knowledge_artifacts };
     }
   in
@@ -9316,7 +9322,7 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
     {
       m0 with
       nav =
-        { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+        { m0.nav with workspace = Nav.Knowledge; overlay = None; inspector = None };
       knowledge = { m0.knowledge with active_tab = Nav.Knowledge_memory };
     }
   in
@@ -9335,7 +9341,7 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
           workspace = Nav.Keepers;
           pane_index = 1;
           overlay = None;
-          dive_stack = [];
+          inspector = None;
         };
       fleet = { m0.fleet with keeper_dive_tab = Nav.Keeper_memory };
     }
@@ -9379,7 +9385,7 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
     let base = populated_model ~with_attention:true () in
     {
       base with
-      nav = { base.nav with workspace = Nav.Work; overlay = None; dive_stack = [] };
+      nav = { base.nav with workspace = Nav.Work; overlay = None; inspector = None };
       work =
         {
           base.work with
@@ -9399,7 +9405,7 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
     {
       m0 with
       nav =
-        { m0.nav with workspace = Nav.Runtime; overlay = None; dive_stack = [] };
+        { m0.nav with workspace = Nav.Runtime; overlay = None; inspector = None };
       runtime = { m0.runtime with active_tab = Nav.Runtime_failover_lanes };
     }
   in

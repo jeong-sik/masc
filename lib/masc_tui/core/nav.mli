@@ -1,5 +1,6 @@
 (** Converged navigation model: 6 Workspaces, 1st-class Sub-Tabs (zero hidden
-    submodes), 5 Dives, 7 Overlays, Left Navigation Sidebar Tree SSOT, and Focus Scope.
+    submodes), Depth-1 Inspectors (Verification / Tool / Skill / Exact Run),
+    8 Overlays, Left Navigation Sidebar Tree SSOT, and Focus Scope.
 
     Closed algebraic types with zero hidden string routes. *)
 
@@ -53,16 +54,11 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
-type work_dive_target = Verification_dive of string
-
-type runtime_dive_target =
-  | Tool_dive of string
-  | Skill_dive of string
-  | Exact_run_dive of string
-
-type dive =
-  | Dive_work of work_dive_target
-  | Dive_runtime of runtime_dive_target
+type inspector =
+  | Verification_inspector of string
+  | Tool_inspector of string
+  | Skill_inspector of string
+  | Exact_run_inspector of string
 
 type settings_tab =
   | Settings_general_ui
@@ -195,7 +191,7 @@ type overlay =
 type focus_scope =
   | Global
   | Workspace_focused of workspace
-  | Dive_focused of dive
+  | Inspector_focused of inspector
   | Composer_focused
   | Ask_choice_focused
   | Approval_strip_focused
@@ -257,9 +253,7 @@ val equal_keepers_fleet_mode : keepers_fleet_mode -> keepers_fleet_mode -> bool
 val equal_runtime_tab : runtime_tab -> runtime_tab -> bool
 val equal_infra_tab : infra_tab -> infra_tab -> bool
 val equal_keeper_tab : keeper_tab -> keeper_tab -> bool
-val equal_work_dive_target : work_dive_target -> work_dive_target -> bool
-val equal_runtime_dive_target : runtime_dive_target -> runtime_dive_target -> bool
-val equal_dive : dive -> dive -> bool
+val equal_inspector : inspector -> inspector -> bool
 val equal_settings_tab : settings_tab -> settings_tab -> bool
 val equal_queue_context_tab : queue_context_tab -> queue_context_tab -> bool
 val equal_keeper_destructive_action :

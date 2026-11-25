@@ -1298,12 +1298,12 @@ let test_keymap_and_slash_commands () =
     Update.step ~now:t0 m_k4 (Msg.Key_event (key Keymap.Input.Enter))
   in
   Alcotest.(check bool) "Enter on Keepers enters Focus Mode (zoomed=true, dive_stack=[])" true
-    (m_dive.nav.zoomed && Option.is_none (Model.active_dive m_dive));
+    (m_dive.nav.zoomed && Option.is_none (Model.active_inspector m_dive));
   let m_popped, _ =
     Update.step ~now:t0 m_dive (Msg.Key_event (key Keymap.Input.Escape))
   in
   Alcotest.(check bool) "Esc exits Keepers Focus Mode" true
-    ((not m_popped.nav.zoomed) && Option.is_none (Model.active_dive m_popped));
+    ((not m_popped.nav.zoomed) && Option.is_none (Model.active_inspector m_popped));
   (* Slash commands: exercise all 27 *)
   let slash_cases =
     [
@@ -1749,7 +1749,7 @@ let test_verifier_regressions () =
   in
   Alcotest.(check bool) "Goal fast-approve jumps to zoomed Goal instead of posting fake tokens"
     true
-    (Option.is_none (Model.active_dive m_goal_dived)
+    (Option.is_none (Model.active_inspector m_goal_dived)
      && Nav.equal_workspace m_goal_dived.nav.workspace Nav.Work
      && Nav.equal_work_tab m_goal_dived.work.active_tab Nav.Work_pipeline
      && m_goal_dived.nav.zoomed
@@ -3500,8 +3500,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   let m_wp_vdive, _ = step m_work_vp (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Work_pipeline pane 1 Enter dives into Verification_dive"
     true
-    (match Model.active_dive m_wp_vdive with
-    | Some (Nav.Dive_work (Nav.Verification_dive "ver-100")) -> true
+    (match Model.active_inspector m_wp_vdive with
+    | Some (Nav.Verification_inspector "ver-100") -> true
     | _ -> false);
   let m_sched_tab =
     { m_work with work = Work_store.set_tab Nav.Work_schedules m_work.work }
@@ -3515,7 +3515,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   let m_vdive =
     {
       m_work with
-      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-100") ] };
+      nav = { m_work.nav with inspector = Some (Nav.Verification_inspector "ver-100") };
     }
   in
   let _, cmds_vapp = step m_vdive (char_key "a") in
@@ -4198,7 +4198,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   | _ -> Alcotest.fail "expected edit modal to auto-open on Reply_wiki_page");
   (* Navigating away before the reply arrives clears pending without hijacking. *)
   let m_waway =
-    { m_wagain with nav = { m_wagain.nav with workspace = Nav.Pulse; dive_stack = [] } }
+    { m_wagain with nav = { m_wagain.nav with workspace = Nav.Pulse; inspector = None } }
   in
   let m_waway_replied, _ =
     Update.step ~now:t1 m_waway
@@ -4295,7 +4295,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   let m_wtab =
     {
       m_wiki with
-      nav = { m_wiki.nav with workspace = Nav.Knowledge; dive_stack = [] };
+      nav = { m_wiki.nav with workspace = Nav.Knowledge; inspector = None };
       knowledge =
         Knowledge_store.empty
         |> Knowledge_store.set_tab Nav.Knowledge_wiki
@@ -4530,7 +4530,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   in
   let m_rt_q_enter, _ = step m_rt_quotas_with_lane (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Runtime Quotas Enter does NOT dive or zoom lane detail" true
-    (Option.is_none (Model.active_dive m_rt_q_enter) && not m_rt_q_enter.nav.zoomed);
+    (Option.is_none (Model.active_inspector m_rt_q_enter) && not m_rt_q_enter.nav.zoomed);
   let m_rt_lane = { m_rt_failover with runtime = rt_with_lane } in
   let m_rt_enter, cmds_rt_enter = step m_rt_lane (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Runtime Enter does NOT hijack with Post_fusion_launch" false
@@ -4540,7 +4540,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_rt_enter);
   Alcotest.(check bool) "Runtime Failover Enter zooms lane detail in place" true
-    (m_rt_enter.nav.zoomed && Option.is_none (Model.active_dive m_rt_enter));
+    (m_rt_enter.nav.zoomed && Option.is_none (Model.active_inspector m_rt_enter));
 
   (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
   let chat_page : Wire_fleet.chat_history_page =
@@ -6577,7 +6577,7 @@ let test_p1_pulse_collapsed_company_dive_and_scroll () =
   Alcotest.(check bool)
     "Enter on Pulse collapsed org-beta jumps to Keepers beta-1 (not alpha-1)" true
     (Nav.equal_workspace m_dived.nav.workspace Nav.Keepers
-     && Option.is_none (Model.active_dive m_dived)
+     && Option.is_none (Model.active_inspector m_dived)
      && Option.equal String.equal (Model.selected_keeper_name m_dived)
           (Some "beta-1")
      && Nav.equal_keeper_tab m_dived.fleet.keeper_dive_tab Nav.Keeper_chat
@@ -7673,7 +7673,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
   let m_embedded =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Keepers; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Keepers; inspector = None };
       fleet =
         m0.fleet
         |> Fleet_store.select_keeper "alpha-leader"
@@ -7867,7 +7867,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
   let m_emb_fail =
     {
       m_c3 with
-      nav = { m_c3.nav with workspace = Nav.Keepers; dive_stack = [] };
+      nav = { m_c3.nav with workspace = Nav.Keepers; inspector = None };
       fleet =
         m_c3.fleet
         |> Fleet_store.select_keeper "alpha-leader"
@@ -8125,7 +8125,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     | Some (Knowledge_store.Reading_activity { event; _ }) ->
         String.equal event.identity "ev-2"
     | _ -> false);
-  Alcotest.(check int) "dive_stack not deepened" 0 (List.length m_read.nav.dive_stack);
+  Alcotest.(check bool) "inspector not opened" true (Option.is_none m_read.nav.inspector);
   (* Short entry does NOT overshoot scroll past its exact projected line bound;
      long multi-line entry scrolls cleanly up to exact projected max_scroll (< 200) and stops. *)
   let m_read_short_scr, _ = Update.step ~now:t0 m_read (Msg.Key_event (char_key "j")) in
@@ -8259,8 +8259,8 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     Update.step ~now:t0 m_dive
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
   in
-  Alcotest.(check int) "Enter in Keeper_memory Focus Mode keeps dive_stack depth=0" 0
-    (List.length m_dive_read.nav.dive_stack);
+  Alcotest.(check bool) "Enter in Keeper_memory Focus Mode keeps inspector = None" true
+    (Option.is_none m_dive_read.nav.inspector);
   Alcotest.(check bool) "Enter in Keeper_memory Focus Mode opens full reading" true
     (Option.is_some m_dive_read.knowledge.memory_reading);
   let m_dive_esc1, _ =
@@ -9062,7 +9062,7 @@ let test_wiki_index_reply_requests_selected_page () =
   let on_wiki_tab =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Knowledge; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Knowledge; inspector = None };
       knowledge =
         Knowledge_store.set_tab Nav.Knowledge_wiki m0.knowledge;
     }
@@ -11378,7 +11378,7 @@ let test_cut_reply_reads_the_operation_journal () =
   let split =
     {
       with_roster with
-      nav = { with_roster.nav with workspace = Nav.Keepers; dive_stack = [] };
+      nav = { with_roster.nav with workspace = Nav.Keepers; inspector = None };
       fleet = { with_roster.fleet with keeper_dive_tab = Nav.Keeper_chat };
     }
   in
@@ -12093,7 +12093,7 @@ let test_single_slot_dive_error_target_guards () =
         {
           base.nav with
           workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "verif-B") ];
+          inspector = Some (Nav.Verification_inspector "verif-B");
         };
     }
   in
@@ -13211,7 +13211,7 @@ let test_ux_batch3_work_keepers_chat_mouse () =
     true
     (match Model.active_focus_scope m_sb with
     | Nav.Workspace_focused Nav.Work -> true
-    | Nav.Global | Nav.Workspace_focused _ | Nav.Dive_focused _
+    | Nav.Global | Nav.Workspace_focused _ | Nav.Inspector_focused _
     | Nav.Composer_focused | Nav.Ask_choice_focused | Nav.Approval_strip_focused
     | Nav.Overlay_focused _ ->
         false);
@@ -13524,7 +13524,7 @@ let test_ux_batch3_work_keepers_chat_mouse () =
       nav =
         {
           m_dive.nav with
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "v-1") ];
+          inspector = Some (Nav.Verification_inspector "v-1");
           sidebar_open = Some true;
           sidebar_scroll = 0;
         };
@@ -13536,8 +13536,8 @@ let test_ux_batch3_work_keepers_chat_mouse () =
          (Masc_tui_term.Input_decoder.Wheel
             { dir = Masc_tui_term.Input_decoder.Wheel_down; col = 5; row = 10 }))
   in
-  Alcotest.(check bool) "UX-27 sidebar wheel does not wipe dive_stack" true
-    (m_sb_wheel.nav.dive_stack <> []);
+  Alcotest.(check bool) "UX-27 sidebar wheel does not wipe inspector" true
+    (Option.is_some m_sb_wheel.nav.inspector);
   let rects_pipe = Model.pane_rects m_pipe_tiny in
   Alcotest.(check bool) "UX-27 Model.pane_rects computes non-empty rects" true
     (rects_pipe <> []);
@@ -13605,8 +13605,8 @@ let test_ux_batch4_knowledge_runtime_infra () =
        m_kmem_health.knowledge.memory_view_mode
      && Knowledge_store.equal_memory_view_mode m_kmem_f.knowledge.memory_view_mode
           m_kmem_health.knowledge.memory_view_mode);
-  Alcotest.(check int) "UX-28 [Enter] on Health subview pushes no dive" 0
-    (List.length m_kmem_ret.nav.dive_stack);
+  Alcotest.(check bool) "UX-28 [Enter] on Health subview opens no inspector" true
+    (Option.is_none m_kmem_ret.nav.inspector);
 
   (* A pinned revision range survives a sandbox detail round trip: the jump
      unpins it, and Esc re-pins the same range on the same keeper. *)
@@ -13919,7 +13919,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
     }
   in
   let m_pushed, _ =
-    Update_nav.push_dive m_raw (Nav.Dive_work (Nav.Verification_dive "ver-1"))
+    Update_nav.open_inspector m_raw (Nav.Verification_inspector "ver-1")
   in
   Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
     m_pushed.infra.show_raw_json;
@@ -15037,7 +15037,7 @@ let test_ux_sweep_12_fixes () =
   List.iter
     (fun (lbl, (m_res : Model.t)) ->
       Alcotest.(check bool) lbl true
-        (Option.is_none (Model.active_dive m_res)
+        (Option.is_none (Model.active_inspector m_res)
          && Nav.equal_workspace m_res.nav.workspace Nav.Work
          && Nav.equal_work_tab m_res.work.active_tab Nav.Work_pipeline
          && m_res.nav.zoomed
@@ -15212,13 +15212,13 @@ let test_ux_sweep_12_fixes () =
     { base_with_ws with nav = { base_with_ws.nav with workspace = Nav.Pulse; pane_index = 2 } }
   in
   let m_dived_p2, _ =
-    Update_nav.push_dive m_from_p2 (Nav.Dive_runtime (Nav.Tool_dive "masc_status"))
+    Update_nav.open_inspector m_from_p2 (Nav.Tool_inspector "masc_status")
   in
   let m_popped_p2, _ = step m_dived_p2 (mk_key Keymap.Input.Escape) in
   Alcotest.(check int) "Item 4: Esc restores exact Pulse pane_index=2" 2
     m_popped_p2.nav.pane_index;
-  Alcotest.(check int) "Item 4: dive_return_stack stays synchronized" 0
-    (List.length m_popped_p2.nav.dive_return_stack);
+  Alcotest.(check bool) "Item 4: inspector_return cleared on close" true
+    (Option.is_none m_popped_p2.nav.inspector_return);
   let m_zoom_know =
     {
       base_with_ws with
@@ -15232,14 +15232,14 @@ let test_ux_sweep_12_fixes () =
     }
   in
   let m_z_dived, _ =
-    Update_nav.push_dive m_zoom_know (Nav.Dive_runtime (Nav.Tool_dive "masc_status"))
+    Update_nav.open_inspector m_zoom_know (Nav.Tool_inspector "masc_status")
   in
   let m_z_popped, _ = step m_z_dived (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool) "Item 4: Esc restores exact zoomed=true state" true
     m_z_popped.nav.zoomed;
   let m_sw, _ = Update_nav.switch_workspace m_z_dived Nav.Pulse in
-  Alcotest.(check bool) "Item 4: switch_workspace clears dive_return_stack" true
-    (m_sw.nav.dive_stack = [] && m_sw.nav.dive_return_stack = []);
+  Alcotest.(check bool) "Item 4: switch_workspace clears inspector and inspector_return" true
+    (Option.is_none m_sw.nav.inspector && Option.is_none m_sw.nav.inspector_return);
 
   (* === 6 & 7. Work > Goals phase filter/sort & Goal_dive 2-section Enter drill === *)
   let mk_goal id phase priority updated_at =
@@ -15369,7 +15369,7 @@ let test_ux_sweep_12_fixes () =
     m_gd_down.work.goal_dive_task_index;
   let m_gd_td, _ = step m_gd_down (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "Item 7: Zoomed Goal pane 0 Enter jumps to Work > Tasks zoomed on tk-2" true
-    (Option.is_none (Model.active_dive m_gd_td)
+    (Option.is_none (Model.active_inspector m_gd_td)
      && Nav.equal_workspace m_gd_td.nav.workspace Nav.Work
      && Nav.equal_work_tab m_gd_td.work.active_tab Nav.Work_tasks
      && m_gd_td.nav.zoomed
@@ -15386,8 +15386,8 @@ let test_ux_sweep_12_fixes () =
   let m_gd_vd, _ = step m_gd_vdown (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "Item 7: Zoomed Goal pane 1 Enter pushes Verification_dive ver-2"
     true
-    (match Model.active_dive m_gd_vd with
-     | Some (Nav.Dive_work (Nav.Verification_dive "ver-2")) -> true
+    (match Model.active_inspector m_gd_vd with
+     | Some (Nav.Verification_inspector "ver-2") -> true
      | _ -> false);
   let m_gd_back, _ = step m_gd_vd (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool) "Item 4+7: Esc from nested Verification_dive restores zoomed Goal pane 1"
@@ -15472,7 +15472,7 @@ let test_ux_sweep_12_fixes () =
   (* === 9. Eliminate 'a'/'x' HTTP 400 + Goal_drop note modal + error extraction === *)
   (* 9a. Already-approved verification 'a' and 'x' emit 0 HTTP POSTs *)
   let m_vd_done, _ =
-    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Verification_dive "ver-2"))
+    Update_nav.open_inspector m_work (Nav.Verification_inspector "ver-2")
   in
   let m_vd_done_a, cmds_vda = step m_vd_done (char_k "a") in
   let m_vd_done_x, cmds_vdx = step m_vd_done (char_k "x") in
@@ -15649,7 +15649,7 @@ let test_ux_sweep_12_fixes () =
       |> Work_store.apply_verifications ~observed_at:t0 [ v_fail ]
     in
     let m0 = { m_work with work } in
-    fst (Update_nav.push_dive m0 (Nav.Dive_work (Nav.Verification_dive "ver-fail")))
+    fst (Update_nav.open_inspector m0 (Nav.Verification_inspector "ver-fail"))
   in
   Alcotest.(check bool)
     "Item 9 (Finding #6): Review_failed + AwaitingVerification passes precondition"
@@ -15791,8 +15791,8 @@ let test_ux_sweep_12_fixes () =
   let m_td1_enter, _ = step m_td1_p1 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "Item 10: Enter on Zoomed Task pane 1 pushes Verification_dive"
     true
-    (match Model.active_dive m_td1_enter with
-     | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
+    (match Model.active_inspector m_td1_enter with
+     | Some (Nav.Verification_inspector "ver-1") -> true
      | _ -> false);
 
   (* === 11. Knowledge > Board pane 1 unified comment PgDn scroll & thread fetch === *)
@@ -15900,7 +15900,7 @@ let test_ux_sweep_12_fixes () =
       m_split_chat with
       viewport = { Model.cols = 90; rows = 28 };
       breakpoint = Model.Compact;
-      nav = { m_split_chat.nav with workspace = Nav.Keepers; dive_stack = []; zoomed = false };
+      nav = { m_split_chat.nav with workspace = Nav.Keepers; inspector = None; zoomed = false };
       fleet = { m_split_chat.fleet with keeper_dive_tab = Nav.Keeper_chat; chat_scroll_offset = 0 };
       drafts = m_split_chat.drafts |> Drafts.set_focus true;
     }
@@ -15974,7 +15974,7 @@ let test_ux_sweep_12_fixes () =
 
   (* Finding #4: Esc consumes quit arm & clears arm toast without popping active dive *)
   let m_dive_arm0, _ =
-    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Verification_dive "ver-1"))
+    Update_nav.open_inspector m_work (Nav.Verification_inspector "ver-1")
   in
   let m_dive_arm1, _ = step_at ~now:t0 m_dive_arm0 (char_k ~ctrl:true "q") in
   let m_dive_esc, _ = step_at ~now:t0 m_dive_arm1 (mk_key Keymap.Input.Escape) in
@@ -15983,8 +15983,8 @@ let test_ux_sweep_12_fixes () =
     true
     (Option.is_none m_dive_esc.quit_armed_at
      && Option.is_none m_dive_esc.toast
-     && match Model.active_dive m_dive_esc with
-        | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
+     && match Model.active_inspector m_dive_esc with
+        | Some (Nav.Verification_inspector "ver-1") -> true
         | _ -> false);
 
   (* Finding #5: advance_past_in_flight ~query honors Work_inbox filter & Ask skip advances *)
@@ -16025,8 +16025,8 @@ let test_ux_sweep_12_fixes () =
     true
     (Model.focusable_pane_count m_td_nd = 1
      && m_td_nd_dn.work.task_dive_verif_scroll > 0
-     && match Model.active_dive m_td_nd_enter with
-        | Some (Nav.Dive_work (Nav.Verification_dive "ver-nodesc")) -> true
+     && match Model.active_inspector m_td_nd_enter with
+        | Some (Nav.Verification_inspector "ver-nodesc") -> true
         | _ -> false);
 
   (* Round-2 Verifier Fixes (#496 / #497 / #498):
@@ -16053,7 +16053,7 @@ let test_ux_sweep_12_fixes () =
      && m_gd_80_sp.infra.show_raw_json
      && m_gd_80_sp.nav.pane_index = 0
      && m_gd_80_dn.work.goal_dive_verif_index = 0
-     && Option.is_none (Model.active_dive m_gd_80_ent)
+     && Option.is_none (Model.active_inspector m_gd_80_ent)
      && m_gd_80_ent.nav.zoomed);
   let m_td_80 =
     let m1, _ = Update_nav.jump_to_task ~zoomed:true m_td_big "tk-1" in
@@ -16075,7 +16075,7 @@ let test_ux_sweep_12_fixes () =
      && m_td_80_sp.infra.show_raw_json
      && m_td_80_sp.nav.pane_index = 0
      && m_td_80_dn.work.task_dive_verif_scroll = 0
-     && Option.is_none (Model.active_dive m_td_80_ent)
+     && Option.is_none (Model.active_inspector m_td_80_ent)
      && m_td_80_ent.nav.zoomed);
 
   (* Round-2 #496 P2: Filtered Work > Inbox Gate_reject submit advances within filtered list *)
@@ -16124,7 +16124,7 @@ let test_ux_sweep_12_fixes () =
     "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (pops Verification_dive)"
     true
     (Option.is_none m_dive_exp_esc.quit_armed_at
-     && Option.is_none (Model.active_dive m_dive_exp_esc));
+     && Option.is_none (Model.active_inspector m_dive_exp_esc));
 
   (* === Round-3 GitHub CR Fixes (P2 #1, P2 #2, P2 #3) === *)
   (* CR P2 #1: Board post B with stale active_thread A never shows/scrolls A or votes on A's comment *)
@@ -17063,7 +17063,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       nav =
         { m0.nav with
           workspace = Nav.Knowledge;
-          dive_stack = [];
+          inspector = None;
           overlay = Some (Nav.Queue_context Nav.Drawer_queue);
         };
     }
@@ -20645,7 +20645,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
         {
           base.nav with
           workspace = Nav.Runtime;
-          dive_stack = [ Nav.Dive_runtime (Nav.Tool_dive "bash") ];
+          inspector = Some (Nav.Tool_inspector "bash");
           pane_index = 0;
         };
       runtime;
@@ -20756,21 +20756,21 @@ let test_layer2_pane_scroll_nav_wayfinding () =
         {
           base.nav with
           workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-keep") ];
+          inspector = Some (Nav.Verification_inspector "ver-keep");
         };
     }
   in
   let m_sb_open, _ = step_k m_in_dive (char_key "b") in
   let m_sb_dn, cmds_sb_dn = step_k m_sb_open (key Keymap.Input.Down) in
   Alcotest.(check bool) "#12: Sidebar Down preserves active dive_stack" true
-    (Option.is_some (Model.active_dive m_sb_dn));
+    (Option.is_some (Model.active_inspector m_sb_dn));
   Alcotest.(check int) "#12: Sidebar Down emits 0 premature fetches" 0
     (List.length cmds_sb_dn);
   let m_sb_esc, _ = step_k m_sb_dn (key Keymap.Input.Escape) in
   Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Verification_dive"
     true
-    (match Model.active_dive m_sb_esc with
-    | Some (Nav.Dive_work (Nav.Verification_dive "ver-keep")) -> true
+    (match Model.active_inspector m_sb_esc with
+    | Some (Nav.Verification_inspector "ver-keep") -> true
     | _ -> false);
 
   (* #14a: Zoomed Goal Measure/Procedure scrolls via J/K *)
@@ -20871,7 +20871,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   let m_inc_zoom, _ = step_k m_inc (key Keymap.Input.Enter) in
   Alcotest.(check bool) "#15c: Enter in Incidents expands inline (no dive)" true
     (m_inc_zoom.incidents.zoomed
-    && Option.is_none (Model.active_dive m_inc_zoom)
+    && Option.is_none (Model.active_inspector m_inc_zoom)
     && Option.equal Nav.equal_overlay m_inc_zoom.nav.overlay (Some Nav.Incidents));
   let m_inc_back, _ = step_k m_inc_zoom (key Keymap.Input.Escape) in
   Alcotest.(check bool) "#15c: Esc collapses zoomed incident back to Incidents list"
@@ -21014,7 +21014,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   let m_mem_d, _ = step_k m_mem (char_key "D") in
   Alcotest.(check bool) "#16c: [D] on Knowledge > Memory pins Window_revs and zooms in place"
     true
-    (Option.is_none (Model.active_dive m_mem_d)
+    (Option.is_none (Model.active_inspector m_mem_d)
     && m_mem_d.nav.zoomed
     && Knowledge_store.equal_memory_diff_window
          m_mem_d.knowledge.memory_diff_window
@@ -21117,7 +21117,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_vdive, _ =
-    Update_nav.push_dive m_vtab (Nav.Dive_work (Nav.Verification_dive "v-1"))
+    Update_nav.open_inspector m_vtab (Nav.Verification_inspector "v-1")
   in
   Alcotest.(check bool)
     "#20b: push_dive Verification_dive resets tab to Verif_tab_evidence" true
@@ -23399,7 +23399,7 @@ let test_uncached_knowledge_jumps () =
   let on_board board =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Work; dive_stack = [] };
+      nav = { m0.nav with workspace = Nav.Work };
       knowledge =
         { (Knowledge_store.set_tab Nav.Knowledge_board m0.knowledge) with board };
     }
@@ -24307,8 +24307,8 @@ let () =
                      | _ -> false)
                    cmds_exec);
               Alcotest.(check bool) "/exec opens Tool_dive" true
-                (Model.active_dive m_exec
-                 = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_status")));
+                (Model.active_inspector m_exec
+                 = Some (Nav.Tool_inspector "masc_status"));
               let m_picker, _ =
                 Update_nav.open_inline_modal m1
                   (Nav.Tool_execute_form { tool_name = None; args_json = "{}" })
@@ -24406,10 +24406,9 @@ let () =
                 (Option.is_none m_done.inline_modal);
               Alcotest.(check bool) "owned reply opens the tool with its return state"
                 true
-                (Model.active_dive m_done
-                 = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_who"))
-                 && List.length m_done.nav.dive_stack
-                    = List.length m_done.nav.dive_return_stack);
+                (Option.equal Nav.equal_inspector (Model.active_inspector m_done)
+                   (Some (Nav.Tool_inspector "masc_who"))
+                 && Option.is_some m_done.nav.inspector_return);
               let _, cmds_bad = run_slash m1 "/exec masc_status [1,2,3]" in
               Alcotest.(check bool) "/exec rejects non-object JSON" false
                 (List.exists
@@ -24634,8 +24633,8 @@ let () =
               (* /skill read pushes Skill_dive and emits Post_skill_editor_read *)
               let m_dive, cmds_read = run_slash m1 "/skill read ocaml-coding" in
               Alcotest.(check bool) "/skill read pushes Skill_dive" true
-                (Model.active_dive m_dive
-                 = Some (Nav.Dive_runtime (Nav.Skill_dive "ocaml-coding")));
+                (Model.active_inspector m_dive
+                 = Some (Nav.Skill_inspector "ocaml-coding"));
               Alcotest.(check bool) "Skill_dive fetches Post_skill_editor_read"
                 true
                 (List.exists
@@ -24858,7 +24857,7 @@ let () =
                   {
                     m1.nav with
                     workspace = Nav.Runtime;
-                    dive_stack = [];
+                    inspector = None;
                     overlay = None;
                     pane_index = 1;
                   }
@@ -24904,8 +24903,8 @@ let () =
               in
               let m_ro_dive =
                 let m_d, _ =
-                  Update_nav.push_dive m_skills_view
-                    (Nav.Dive_runtime (Nav.Skill_dive "my-skill"))
+                  Update_nav.open_inspector m_skills_view
+                    (Nav.Skill_inspector "my-skill")
                 in
                 {
                   m_d with
@@ -25190,7 +25189,7 @@ let () =
                 | _ -> false);
               let m_d, cmds_d = press "D" m1 in
               Alcotest.(check bool) "[D] pushes Exact_run_dive run-42" true
-                (Model.active_dive m_d = Some (Nav.Dive_runtime (Nav.Exact_run_dive "run-42")));
+                (Model.active_inspector m_d = Some (Nav.Exact_run_inspector "run-42"));
               Alcotest.(check bool) "Exact_run_dive fetches Get_exact_lane_run_detail" true
                 (List.exists
                    (function
@@ -26302,8 +26301,8 @@ let () =
                 "Sidebar focus after Ask_answer jump keeps ask_modal intact"
                 true (Option.is_some m_j_sb.ask_modal);
               let m_j_dive, _ =
-                Update_nav.push_dive m_jumped
-                  (Nav.Dive_work (Nav.Verification_dive "ver-1"))
+                Update_nav.open_inspector m_jumped
+                  (Nav.Verification_inspector "ver-1")
               in
               let m_j_dive_pop, _ =
                 step_k m_j_dive (key Keymap.Input.Escape)
@@ -26334,7 +26333,7 @@ let () =
                 "jump_to_workspace from inside dive preserves ask_modal and restores dive on Esc"
                 true
                 (Option.is_some m_j_from_dive.ask_modal
-                && Option.is_some (Model.active_dive m_j_from_dive_back)
+                && Option.is_some (Model.active_inspector m_j_from_dive_back)
                 && Option.is_some m_j_from_dive_back.ask_modal);
               (* 5. P1-3: Subview flip clears zoom; stale zoom on non-zoomable view normalizes on Esc *)
               let m_rules_z =
@@ -26406,7 +26405,7 @@ let () =
               let m_lane_z, _ = step_k m_lanes (key Keymap.Input.Enter) in
               Alcotest.(check bool)
                 "Failover Enter zooms in place without pushing dive" true
-                (m_lane_z.nav.zoomed && Option.is_none (Model.active_dive m_lane_z));
+                (m_lane_z.nav.zoomed && Option.is_none (Model.active_inspector m_lane_z));
               let m_lz_sp, _ = step_k m_lane_z (char_key " ") in
               Alcotest.(check bool)
                 "Zoomed Failover [Space] toggles show_raw_json" true
@@ -26440,7 +26439,7 @@ let () =
                 (Nav.equal_workspace m_j_rt.nav.workspace Nav.Runtime
                 && Nav.equal_runtime_tab m_j_rt.runtime.active_tab
                      Nav.Runtime_failover_lanes
-                && Option.is_none (Model.active_dive m_j_rt)
+                && Option.is_none (Model.active_inspector m_j_rt)
                 && (match Runtime_store.selected_lane m_j_rt.runtime with
                    | Some l -> String.equal l.id "lane-b"
                    | None -> false)
@@ -26471,7 +26470,7 @@ let () =
                 (Nav.equal_workspace m_j_sb.nav.workspace Nav.Infra
                 && Nav.equal_infra_tab m_j_sb.infra.active_tab
                      Nav.Infra_sandboxes
-                && Option.is_none (Model.active_dive m_j_sb)
+                && Option.is_none (Model.active_inspector m_j_sb)
                 && Option.equal String.equal m_j_sb.infra.pending_sandbox_keeper
                      (Some "alpha")
                 && Int.equal (List.length m_j_sb.nav.workspace_return_stack) 1);
@@ -26548,7 +26547,7 @@ let () =
                 "Incidents [o] on Source_client_http zooms inline without dive"
                 true
                 (m_o_zoom.incidents.zoomed
-                && Option.is_none (Model.active_dive m_o_zoom));
+                && Option.is_none (Model.active_inspector m_o_zoom));
               let m_sp_zoom, _ = step_k m_o_zoom (char_key " ") in
               Alcotest.(check bool)
                 "Zoomed Incidents [Space] toggles show_raw_json without mutating show_dismissed"
@@ -26631,7 +26630,7 @@ let () =
               Alcotest.(check bool)
                 "[D] pins Window_revs {10..22}, zooms in place, and fetches diff"
                 true
-                (Option.is_none (Model.active_dive m_pin)
+                (Option.is_none (Model.active_inspector m_pin)
                 && m_pin.nav.zoomed
                 && Knowledge_store.equal_memory_diff_window
                      m_pin.knowledge.memory_diff_window
@@ -27951,7 +27950,7 @@ let () =
                 "Ask_answer [C] jumps to Keepers > Chat beta preserving ask_modal"
                 true
                 (Nav.equal_workspace m_ask_c.nav.workspace Nav.Keepers
-                && Option.is_none (Model.active_dive m_ask_c)
+                && Option.is_none (Model.active_inspector m_ask_c)
                 && Option.is_none m_ask_c.nav.overlay
                 && Option.equal String.equal (Model.selected_keeper_name m_ask_c)
                      (Some "beta")
@@ -28158,7 +28157,7 @@ let () =
               Alcotest.(check bool)
                 "Infra > Activity_logs [Enter] jumps to Keepers > Trace (Trace_runtime) for beta with zero dive"
                 true
-                (Option.is_none (Model.active_dive m_rt_jump)
+                (Option.is_none (Model.active_inspector m_rt_jump)
                 && Nav.equal_workspace m_rt_jump.nav.workspace Nav.Keepers
                 && Nav.equal_keeper_tab m_rt_jump.fleet.keeper_dive_tab
                      Nav.Keeper_trace
@@ -28321,7 +28320,7 @@ let () =
               let m_bz, _ = step_k m_board (key Keymap.Input.Enter) in
               Alcotest.(check bool)
                 "Board [Enter] zooms without pushing dive_stack" true
-                (m_bz.nav.zoomed && Option.is_none (Model.active_dive m_bz));
+                (m_bz.nav.zoomed && Option.is_none (Model.active_inspector m_bz));
               (* 2. [v] enters Thread_comments; Tab stays in unified focus ring (never hijacked!) *)
               let m_bc, _ = step_k m_bz (char_key "v") in
               Alcotest.(check bool) "[v] switches Board detail to Thread_comments"
@@ -28377,7 +28376,8 @@ let () =
                 true
                 (m_art_n.knowledge.artifact_search_match_idx = 1
                  && m_art_n.knowledge.detail_scroll_offset > 0
-                 && m_art_n.nav.dive_scroll_offset = 0);
+                 && m_art_n.nav.inspector_scroll_offset = 0
+                 && m_art_n.nav.keeper_detail_scroll_offset = 0);
               let m_art_esc1, _ = step_k m_art_n (key Keymap.Input.Escape) in
               Alcotest.(check bool) "1st Esc clears artifact_search_query while staying zoomed"
                 true
@@ -28399,7 +28399,7 @@ let () =
                 (Nav.equal_workspace m_jumped.nav.workspace Nav.Knowledge
                  && Nav.equal_knowledge_tab m_jumped.knowledge.active_tab
                       Nav.Knowledge_board
-                 && Option.is_none (Model.active_dive m_jumped)
+                 && Option.is_none (Model.active_inspector m_jumped)
                  && m_jumped.nav.workspace_return_stack <> []);
               let m_ret, _ = step_k m_jumped (key Keymap.Input.Escape) in
               Alcotest.(check bool) "Esc returns to Pulse" true
@@ -28586,5 +28586,119 @@ let () =
                     (Model.focusable_pane_count m)
                     (List.length (Model.pane_rects m)))
                 zoomed_views);
+          Alcotest.test_case
+            "Wave 3 Layer 3: Depth-1 inspector replacement, Ask return preservation, Skill delete close, scroll isolation"
+            `Quick
+            (fun () ->
+              let key k : Keymap.Input.key_event =
+                { key = k; mods = Keymap.Input.no_mods }
+              in
+              let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+              let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+              (* 1. Depth-1 replacement preserves original workspace return frame; single Esc returns cleanly *)
+              let m_origin =
+                {
+                  base with
+                  nav =
+                    {
+                      base.nav with
+                      workspace = Nav.Pulse;
+                      pane_index = 2;
+                      keeper_detail_scroll_offset = 17;
+                    };
+                }
+              in
+              let m_insp1, _ =
+                Update_nav.open_inspector m_origin (Nav.Tool_inspector "masc_status")
+              in
+              let m_insp1_sc =
+                { m_insp1 with nav = { m_insp1.nav with inspector_scroll_offset = 9 } }
+              in
+              let m_insp2, _ =
+                Update_nav.open_inspector m_insp1_sc (Nav.Skill_inspector "ocaml-coding")
+              in
+              Alcotest.(check bool)
+                "Depth-1 replacement replaces inspector and resets inspector_scroll_offset while keeping keeper_detail_scroll_offset"
+                true
+                (Option.equal Nav.equal_inspector (Model.active_inspector m_insp2)
+                   (Some (Nav.Skill_inspector "ocaml-coding"))
+                 && m_insp2.nav.inspector_scroll_offset = 0
+                 && m_insp2.nav.keeper_detail_scroll_offset = 17);
+              let m_back, _ = step_k m_insp2 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Single Esc from replaced inspector restores original Pulse pane 2 and preserves keeper_detail_scroll_offset"
+                true
+                (Option.is_none m_back.nav.inspector
+                 && Option.is_none m_back.nav.inspector_return
+                 && Nav.equal_workspace m_back.nav.workspace Nav.Pulse
+                 && m_back.nav.pane_index = 2
+                 && m_back.nav.inspector_scroll_offset = 0
+                 && m_back.nav.keeper_detail_scroll_offset = 17);
+              (* 2. Ask_answer overlay draft survives depth-1 inspector replacement and restores on Esc *)
+              let ask = sample_ask ~id:"w3-ask-1" ~keeper:"alpha" () in
+              let m_ask =
+                {
+                  base with
+                  nav =
+                    {
+                      base.nav with
+                      workspace = Nav.Work;
+                      pane_index = 1;
+                      overlay = Some Nav.Ask_answer;
+                    };
+                  work = Work_store.set_tab Nav.Work_inbox base.work;
+                  ask_modal = Some (Model.ask_modal_for ask);
+                }
+              in
+              let m_a1, _ =
+                Update_nav.open_inspector m_ask (Nav.Tool_inspector "masc_status")
+              in
+              let m_a2, _ =
+                Update_nav.open_inspector m_a1 (Nav.Skill_inspector "ocaml-coding")
+              in
+              let m_a_back, _ = step_k m_a2 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc after depth-1 inspector replacement restores Ask_answer overlay and draft"
+                true
+                (Option.is_none m_a_back.nav.inspector
+                 && Option.equal Nav.equal_overlay m_a_back.nav.overlay
+                      (Some Nav.Ask_answer)
+                 && Option.is_some m_a_back.ask_modal);
+              (* 3. Skill delete HTTP success closes Skill_inspector via close_inspector and restores return pane *)
+              let outcome : Wire_runtime.skill_editor_outcome =
+                {
+                  status = "deleted";
+                  snapshot_revision = None;
+                  reason = None;
+                  recovery_id = None;
+                  audit_status = None;
+                  preview = None;
+                }
+              in
+              let m_del, cmds_del =
+                Update.step ~now:t0 m_insp2
+                  (Msg.Http_reply
+                     {
+                       epoch = m_insp2.epoch;
+                       reply =
+                         Msg.Reply_skill_editor_outcome
+                           {
+                             action = `Delete;
+                             reference = "ocaml-coding";
+                             result = Ok outcome;
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "Skill delete closes Skill_inspector, restores original pane 2, and clears inspector_return"
+                true
+                (Option.is_none m_del.nav.inspector
+                 && Option.is_none m_del.nav.inspector_return
+                 && m_del.nav.pane_index = 2
+                 && List.exists
+                      (function
+                        | Cmd.Http_get { req = Cmd.Get_skills; _ } -> true
+                        | _ -> false)
+                      cmds_del));
         ] );
     ]

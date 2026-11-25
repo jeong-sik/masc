@@ -1275,17 +1275,17 @@ let test_work_all_4_subtabs_and_empty_inbox () =
 let test_work_dives_and_json_tree () =
   let viewports = [ (140, 40); (90, 28) ] in
   let langs = [ Say.Lang_ko; Say.Lang_en ] in
-  let targets = [ Nav.Verification_dive "verif-901" ] in
+  let targets = [ "verif-901" ] in
   List.iter
     (fun (cols, rows) ->
       List.iter
         (fun lang ->
           let m = make_populated_model ~cols ~rows ~lang in
           List.iter
-            (fun target ->
+            (fun req_id ->
               let g1 =
                 render_to_grid ~cols ~rows
-                  (Screen_work.render_dive ~target ~model:m)
+                  (Screen_work.render_verification ~req_id ~model:m)
               in
               Alcotest.(check bool) "work dive populated" true
                 (non_empty_row_count g1 >= 8);
@@ -1296,7 +1296,7 @@ let test_work_dives_and_json_tree () =
               let m_j = { m with infra = Infra_store.toggle_raw_json m.infra } in
               let g2 =
                 render_to_grid ~cols ~rows
-                  (Screen_work.render_dive ~target ~model:m_j)
+                  (Screen_work.render_verification ~req_id ~model:m_j)
               in
               Alcotest.(check bool) "work dive with Json_tree populated" true
                 (non_empty_row_count g2 >= 8);
@@ -1756,10 +1756,10 @@ let test_p2_tight_populated_rects_preserve_borders () =
   List.iter
     (fun (cols, rows) ->
       List.iter
-        (fun target ->
+        (fun req_id ->
           let g =
             render_to_grid ~cols ~rows
-              (Screen_work.render_dive ~target ~model:m)
+              (Screen_work.render_verification ~req_id ~model:m)
           in
           let bl = Cell_grid.get g ~x:0 ~y:(rows - 1) in
           let br = Cell_grid.get g ~x:(cols - 1) ~y:(rows - 1) in
@@ -1773,7 +1773,7 @@ let test_p2_tight_populated_rects_preserve_borders () =
             true
             (Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_br))
              || Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_br))))
-        [ Nav.Verification_dive "verif-901" ];
+        [ "verif-901" ];
       (* Also test populated Work tabs + Keeper Dive tabs on tight rects *)
       List.iter
         (fun tab ->
@@ -2645,7 +2645,7 @@ let test_degenerate_empty_and_tiny_rects () =
       Screen_keepers.render_dive ~name:"missing" ~tab:Nav.Keeper_chat
         ~model:m_empty ~cache ~rect g;
       Screen_work.render ~model:m_empty ~cache ~rect g;
-      Screen_work.render_dive ~target:(Nav.Verification_dive "missing") ~model:m_empty
+      Screen_work.render_verification ~req_id:"missing" ~model:m_empty
         ~cache ~rect g;
       (* 2. Populated model resilience across ALL Keepers modes, ALL 5 Keeper Dive
             tabs (both embedded:false & embedded:true), ALL 4 Work tabs, and ALL
@@ -2670,10 +2670,10 @@ let test_degenerate_empty_and_tiny_rects () =
           Screen_work.render ~model:mw ~cache ~rect g)
         Nav.all_work_tabs;
       List.iter
-        (fun target ->
-          Screen_work.render_dive ~target ~model:m_pop_ko ~cache ~rect g;
-          Screen_work.render_dive ~target ~model:m_pop_json ~cache ~rect g)
-        [ Nav.Verification_dive "ver-1" ])
+        (fun req_id ->
+          Screen_work.render_verification ~req_id ~model:m_pop_ko ~cache ~rect g;
+          Screen_work.render_verification ~req_id ~model:m_pop_json ~cache ~rect g)
+        [ "ver-1" ])
     tiny_sizes
 
 let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =

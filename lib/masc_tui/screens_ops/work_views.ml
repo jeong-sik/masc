@@ -3022,9 +3022,14 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                           | [] | _ :: _ :: _ -> false
                         in
                         if instant_single then
-                          Ops_common.say model
-                            ~ko:"[Enter/Y] 답변 · [N] 건너뛰기 · [a..d]"
-                            ~en:"[Enter/Y] Answer · [N] Skip · [a..d]"
+                          if Model.pane_focused model 1 then
+                            Ops_common.say model
+                              ~ko:"[a..d] 선택 · [Enter/Y] 모달 · [N] 건너뛰기 · [^B] 메뉴"
+                              ~en:"[a..d] Choose · [Enter/Y] Modal · [N] Skip · [^B] Menu"
+                          else
+                            Ops_common.say model
+                              ~ko:"[Enter/Y] 답변 · [Tab] 선택지[a..d] · [N] 건너뛰기"
+                              ~en:"[Enter/Y] Answer · [Tab] Choices[a..d] · [N] Skip"
                         else
                           Ops_common.say model
                             ~ko:"[Enter/Y] 답변 모달 · [N] 건너뛰기"

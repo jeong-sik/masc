@@ -3384,10 +3384,21 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           not (Chat_transcript.interrupt_target_pending ~model ~keeper:name target)
       | None -> false
     in
+    let board_recovery_open =
+      Nav.equal_keeper_tab tab Nav.Keeper_work_candle
+      && ((not embedded) || Model.pane_focused model 1
+          || (model.nav.zoomed && Model.can_zoom_current_view model))
+      && Board_recovery.shown ~keeper:name model.knowledge.board_recovery
+    in
     let hotkey =
       if Nav.equal_keeper_tab tab Nav.Keeper_memory then None
       else if embedded then
-        if Nav.equal_keeper_tab tab Nav.Keeper_config then
+        if board_recovery_open then
+          Some
+            (Ops_common.say model
+               ~ko:"[↑↓] 항목 · [Enter/c] 복구 · [v/Esc] 닫기"
+               ~en:"[↑↓] Item · [Enter/c] Recover · [v/Esc] Close")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_config then
           if Model.is_keeper_config_active model then
             Some
               (Ops_common.say model
@@ -3412,6 +3423,11 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           Some
             (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
                ~en:"[Ctrl+T] Queue · [z] Zoom")
+      else if board_recovery_open then
+        Some
+          (Ops_common.say model
+             ~ko:"[↑↓] 항목 · [Enter/c] 복구 · [v/Esc] 닫기"
+             ~en:"[↑↓] Item · [Enter/c] Recover · [v/Esc] Close")
       else if Nav.equal_keeper_tab tab Nav.Keeper_config then
         Some
           (Ops_common.say model

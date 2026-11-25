@@ -46,7 +46,12 @@ let is_korean_char (s : string) =
 let save_settings_config = Update_actions.save_settings_config
 
 let stage_remove_settings_key ~now (m : Model.t) =
-  match m.config.settings_pane with
+  let cfg0 =
+    if not (Config_store.is_two_pane_width ~cols:m.viewport.cols) then
+      Config_store.set_pane Config_store.Pane_inspector m.config
+    else m.config
+  in
+  match cfg0.settings_pane with
   | Config_store.Pane_tree ->
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make ~ko:"[Tab]으로 검사기(오른쪽)로 이동한 뒤 키를 삭제하세요"
@@ -54,7 +59,7 @@ let stage_remove_settings_key ~now (m : Model.t) =
           m
       , [] )
   | Config_store.Pane_inspector -> (
-      match Config_store.stage_remove_selected m.config with
+      match Config_store.stage_remove_selected cfg0 with
       | Ok config ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
@@ -66,6 +71,47 @@ let stage_remove_settings_key ~now (m : Model.t) =
           ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason)
               m
           , [] ))
+
+let settings_edit_allows_global_action (act : Keymap.action) =
+  Keymap.equal_action act Keymap.Quit_app
+  || Keymap.equal_action act Keymap.Confirm_selected
+  || Keymap.equal_action act Keymap.Pop_back_or_close
+
+let settings_is_open (m : Model.t) =
+  match m.nav.overlay with
+  | Some (Nav.Settings _) -> true
+  | Some
+      ( Nav.Palette
+      | Nav.Incidents
+      | Nav.Queue_context _
+      | Nav.Inline_action _
+      | Nav.Ask_answer
+      | Nav.Help
+      | Nav.System_gate _ )
+  | None -> false
+
+let guard_settings_dirty_leave ~now (m : Model.t) act =
+  let next, commands = Update_actions.execute_action ~now m act in
+  if settings_is_open m && not (settings_is_open next)
+     && not (Keymap.equal_action act Keymap.Pop_back_or_close)
+     && Config_store.dirty_count m.config > 0
+  then
+    let n = Config_store.dirty_count m.config in
+    ( Model.with_toast ~now ~level:Model.Toast_warning
+        (Say.make
+           ~ko:
+             (Printf.sprintf
+                "저장하지 않은 변경 %d건 — [Ctrl+S]로 저장하거나 [Esc] 두 번으로 버리고 닫은 뒤 다시 시도하세요"
+                n)
+           ~en:
+             (Printf.sprintf
+                "%d unsaved change(s) — save with [Ctrl+S], or press [Esc] twice to discard and close, then retry"
+                n))
+        { m with
+          nav = { m.nav with filter_focused = false };
+          config = Config_store.disarm_discard_confirm m.config }
+    , [] )
+  else (next, commands)
 
 let extract_embedded_json_opt s =
   let trimmed = String.trim s in
@@ -271,7 +317,7 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
   | Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Keymap.Input.Char "?" when is_printable_key norm ->
-      Some (Update_actions.execute_action ~now m Keymap.Open_help)
+      Some (guard_settings_dirty_leave ~now m Keymap.Open_help)
   | Keymap.Input.Char "d" when is_printable_key norm -> (
       match Config_store.build_patch_request ~dry_run:true m.config with
       | Ok req ->
@@ -638,6 +684,8 @@ let dispatch_ask_answer_overlay_key ~now (m : Model.t)
               Some
                 (Update_actions.execute_action ~now m
                    (Keymap.Sub_tab Keymap.Next))
+          | Keymap.Input.Char "?" when is_printable_key norm ->
+              Some (Update_actions.execute_action ~now m Keymap.Open_help)
           | Keymap.Input.Char s
             when is_printable_key norm && Int.equal (String.length s) 1 -> (
               match Model.ask_choice_index_of_char s.[0] with
@@ -2703,7 +2751,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
           | Keymap.Input.Page_down
           | Keymap.Input.Function _ -> (
               match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
-              | Some act -> Update_actions.execute_action ~now m act
+              | Some act -> guard_settings_dirty_leave ~now m act
               | None -> (m, []))
         else
           (* 2. Active text-owning and action-owning overlays *)
@@ -3296,8 +3344,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                     Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
                       norm
                   with
-                  | Some act -> Update_actions.execute_action ~now m act
-                  | None -> (m, [])))
+                  | Some act when settings_edit_allows_global_action act ->
+                      Update_actions.execute_action ~now m act
+                  | Some _ | None -> (m, [])))
           | Some (Nav.Settings _) -> (
               let m =
                 if Keymap.Input.equal_key norm.key Keymap.Input.Escape then m
@@ -3311,7 +3360,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                     Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
                       norm
                   with
-                  | Some act -> Update_actions.execute_action ~now m act
+                  | Some act -> guard_settings_dirty_leave ~now m act
                   | None -> (m, [])))
           | Some Nav.Incidents -> (
               let is_clear_key =
@@ -3601,6 +3650,30 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                             m.knowledge.active_tab
                                             Nav.Knowledge_artifacts) ->
                                 Some Keymap.Copy_public_url
+                            | Some "N"
+                              when (not
+                                      (String.equal
+                                         (String.trim
+                                            m.knowledge.artifact_search_query)
+                                         ""))
+                                   &&
+                                   (match Model.active_dive m with
+                                   | Some
+                                       (Nav.Dive_knowledge (Nav.Artifact_dive _))
+                                     ->
+                                       true
+                                   | Some
+                                       ( Nav.Dive_knowledge
+                                           ( Nav.Thread_dive _
+                                           | Nav.Wiki_dive _
+                                           | Nav.Memory_diff_dive _ )
+                                       | Nav.Dive_keeper _
+                                       | Nav.Dive_work _
+                                       | Nav.Dive_runtime _
+                                       | Nav.Dive_infra _ )
+                                   | None ->
+                                       false) ->
+                                Some Keymap.Search_prev_match
                             | Some "p"
                               when (match Model.active_dive m with
                                    | Some

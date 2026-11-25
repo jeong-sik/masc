@@ -3694,19 +3694,27 @@ let test_pillar1_keeper_config_and_settings_lr () =
         | None ->
             false)
        && m_set.config.target = Wire_config.Target_keeper "alpha");
-    (* Dangling edit & target guard: e -> n (Target_keeper_create + editing) -> Ctrl+K -> Esc
-       must cancel editing_field_key and restore Target_keeper alpha! *)
+    (* Dangling edit & target guard: e -> n (Target_keeper_create + editing):
+       Ctrl+K while editing is guarded so active text entry is not abandoned;
+       Esc cancels editing, then Ctrl+K -> Esc restores Target_keeper alpha! *)
     let m_leak_n, _ = step m_set (char_key "n") in
     Alcotest.(check bool) (label ^ ": e -> n enters Target_keeper_create editing")
       true
       (m_leak_n.config.target = Wire_config.Target_keeper_create
        && Config_store.is_editing_field m_leak_n.config);
-    let m_leak_pal, _ = step m_leak_n (char_key ~ctrl:true "k") in
-    Alcotest.(check bool) (label ^ ": Ctrl+K cancels dangling editing_field_key")
-      false (Config_store.is_editing_field m_leak_pal.config);
+    let m_leak_guarded, _ = step m_leak_n (char_key ~ctrl:true "k") in
+    Alcotest.(check bool)
+      (label ^ ": Ctrl+K while editing Settings does not abandon active edit")
+      true (Config_store.is_editing_field m_leak_guarded.config);
+    let m_leak_cancel, _ = step m_leak_guarded (mk_key Keymap.Input.Escape) in
+    Alcotest.(check bool) (label ^ ": Esc cancels active editing_field_key")
+      false (Config_store.is_editing_field m_leak_cancel.config);
+    let m_leak_pal, _ = step m_leak_cancel (char_key ~ctrl:true "k") in
+    Alcotest.(check bool) (label ^ ": Ctrl+K after Esc opens Palette cleanly")
+      true (Option.equal Nav.equal_overlay m_leak_pal.nav.overlay (Some Nav.Palette));
     let m_leak_esc, _ = step m_leak_pal (mk_key Keymap.Input.Escape) in
     Alcotest.(check bool)
-      (label ^ ": e -> n -> Ctrl+K -> Esc restores Target_keeper alpha & editing=false")
+      (label ^ ": e -> n -> Esc -> Ctrl+K -> Esc restores Target_keeper alpha & editing=false")
       true
       (m_leak_esc.config.target = Wire_config.Target_keeper "alpha"
        && not (Config_store.is_editing_field m_leak_esc.config))
@@ -7764,7 +7772,7 @@ let test_part1_ask_modal_and_honest_surfaces () =
   let m_mq_inb =
     {
       m_mq0 with
-      nav = { m_mq0.nav with workspace = Nav.Work };
+      nav = { m_mq0.nav with workspace = Nav.Work; pane_index = 1 };
       work = Work_store.set_tab Nav.Work_inbox m_mq0.work;
     }
   in

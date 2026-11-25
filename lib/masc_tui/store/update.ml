@@ -99,9 +99,14 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
     if overlay_hidden_locked then false else next2.nav.filter_focused
   in
   let config =
-    if overlay_hidden_locked && Config_store.is_editing_field next2.config then
-      Config_store.cancel_edit_field next2.config
-    else next2.config
+    let cfg0 =
+      if overlay_hidden_locked && Config_store.is_editing_field next2.config then
+        Config_store.cancel_edit_field next2.config
+      else next2.config
+    in
+    if not (Config_store.is_two_pane_width ~cols:next2.viewport.cols) then
+      Config_store.set_pane Config_store.Pane_inspector cfg0
+    else cfg0
   in
   let overlay =
     if not micro_locked then
@@ -247,12 +252,28 @@ let apply_voice_event ~now (m : Model.t) = function
       ({ m with drafts = Drafts.voice_set_transcribing m.drafts }, [])
   | Msg.Voice_idle -> ({ m with drafts = Drafts.voice_set_off m.drafts }, [])
   | Msg.Voice_transcript text ->
-      let drafts =
-        m.drafts
-        |> Drafts.voice_apply_transcript text
-        |> Drafts.set_focus true
+      let can_focus_composer =
+        Option.is_none m.nav.overlay
+        && (not m.nav.filter_focused)
+        && (not (Model.sidebar_has_focus m))
+        && (not (Model.is_keeper_config_active m && Config_store.is_editing_field m.config))
+        && (not (Model.is_too_small_viewport m.viewport))
+        && not (Model.equal_breakpoint m.breakpoint Model.Micro)
       in
-      ({ m with drafts }, [])
+      let drafts =
+        let d0 = Drafts.voice_apply_transcript text m.drafts in
+        if can_focus_composer then Drafts.set_focus true d0 else d0
+      in
+      let next =
+        if can_focus_composer || String.equal (String.trim text) "" then
+          { m with drafts }
+        else
+          Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make ~ko:"음성 입력이 컴포저 초안에 추가됨"
+               ~en:"Voice transcript appended to composer draft")
+            { m with drafts }
+      in
+      (next, [])
   | Msg.Voice_capabilities caps ->
       ({ m with drafts = Drafts.set_voice_capabilities caps m.drafts }, [])
   | Msg.Voice_failed reason ->
@@ -574,14 +595,11 @@ let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
   let next0 =
-    if
-      next0.nav.pane_index > 0
-      && Option.is_none next0.nav.overlay
-      && next0.nav.dive_stack = []
-      && Nav.equal_workspace next0.nav.workspace Nav.Work
-      && Nav.equal_work_tab next0.work.active_tab Nav.Work_inbox
-      && Model.focusable_pane_count next0 = 1
-    then { next0 with nav = { next0.nav with pane_index = 0 } }
+    if Option.is_none next0.nav.overlay then
+      let max_pane = Int.max 0 (Model.focusable_pane_count next0 - 1) in
+      let clamped = Int.max 0 (Int.min max_pane next0.nav.pane_index) in
+      if Int.equal clamped next0.nav.pane_index then next0
+      else { next0 with nav = { next0.nav with pane_index = clamped } }
     else next0
   in
   let view_stream_changed =

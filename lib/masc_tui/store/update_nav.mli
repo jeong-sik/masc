@@ -104,6 +104,7 @@ val navigate_menu_target :
   ?keep_sidebar_focus:bool -> Model.t -> Nav.menu_target -> Model.t * Cmd.t list
 val enter_sidebar_focus : Model.t -> Model.t
 val exit_sidebar_focus : Model.t -> Model.t
+val clear_btw_if_leaving : Model.t -> Drafts.t -> Drafts.t
 val move_sidebar : Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
 val activate_sidebar_cursor : Model.t -> Model.t * Cmd.t list
 val open_overlay : Model.t -> Nav.overlay -> Model.t * Cmd.t list

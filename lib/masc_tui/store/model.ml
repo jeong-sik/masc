@@ -1148,6 +1148,7 @@ let active_focus_scope m =
                 && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
                 && Work_store.equal_inbox_subview m.work.inbox_subview
                      Work_store.Inbox_queue
+                && (m.nav.pane_index = 1 || focusable_pane_count m <= 1)
                 &&
                 if
                   not (Attention.is_empty m.attention)
@@ -1283,6 +1284,10 @@ let active_focus_label m =
               | Nav.Keeper_logs
               | Nav.Keeper_identity ->
                   Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
+            else if
+              Nav.equal_keeper_tab tab Nav.Keeper_work_candle
+              && Board_recovery.shown ~keeper:name m.knowledge.board_recovery
+            then Say.make ~ko:("격리 복구 · " ^ name) ~en:("QUARANTINE · " ^ name)
             else Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name))
         | Some (Nav.Dive_work target) -> (
             match dive_work_json_pane_index m with
@@ -1388,13 +1393,28 @@ let active_focus_label m =
                       pane_prefix ~ko:"기억 탐색" ~en:"Explorer"
                     else pane_prefix ~ko:"기억 범위" ~en:"Memory Scope")
             | Nav.Keepers ->
+                let board_recovery_active =
+                  Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                    Nav.Keeper_work_candle
+                  &&
+                  match Fleet_store.selected_keeper_summary m.fleet with
+                  | Some k ->
+                      Board_recovery.shown ~keeper:k.name
+                        m.knowledge.board_recovery
+                  | None -> false
+                in
                 if m.nav.zoomed && can_zoom_current_view m then
-                  let tab_lbl = Nav.keeper_tab_label m.fleet.keeper_dive_tab in
-                  Say.make
-                    ~ko:("확대 · " ^ Say.resolve Say.Lang_ko tab_lbl)
-                    ~en:("ZOOM · " ^ Say.resolve Say.Lang_en tab_lbl)
+                  if board_recovery_active then
+                    Say.make ~ko:"확대 · 격리 복구" ~en:"ZOOM · Quarantine"
+                  else
+                    let tab_lbl = Nav.keeper_tab_label m.fleet.keeper_dive_tab in
+                    Say.make
+                      ~ko:("확대 · " ^ Say.resolve Say.Lang_ko tab_lbl)
+                      ~en:("ZOOM · " ^ Say.resolve Say.Lang_en tab_lbl)
                 else if m.nav.pane_index = 1 then
-                  pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
+                  if board_recovery_active then
+                    pane_prefix ~ko:"격리 복구" ~en:"Quarantine"
+                  else pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
             | Nav.Runtime -> (
                 match m.runtime.active_tab with

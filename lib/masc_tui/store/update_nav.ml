@@ -602,6 +602,14 @@ let sync_fleet_for_keeper_tab ~name ~tab fleet =
   | Nav.Keeper_identity ->
       fleet
 
+let close_board_recovery (k : Knowledge_store.t) =
+  { k with board_recovery = Board_recovery.close k.board_recovery }
+
+let clear_btw_if_leaving (m : Model.t) drafts =
+  if Option.exists (Nav.equal_overlay (Nav.Inline_action Nav.Btw_query)) m.nav.overlay then
+    Drafts.clear_btw drafts
+  else drafts
+
 let sync_config_for_keeper_view (m : Model.t) =
   match m.nav.overlay with
   | Some (Nav.Settings _) -> m
@@ -616,10 +624,15 @@ let sync_config_for_keeper_view (m : Model.t) =
   | None -> (
       match Model.active_dive m with
       | Some (Nav.Dive_keeper { name; tab }) ->
+          let knowledge =
+            if Nav.equal_keeper_tab tab Nav.Keeper_work_candle then m.knowledge
+            else close_board_recovery m.knowledge
+          in
           {
             m with
             config = sync_config_for_keeper_tab ~name ~tab m.config;
             fleet = sync_fleet_for_keeper_tab ~name ~tab m.fleet;
+            knowledge;
           }
       | Some
           ( Nav.Dive_work _
@@ -630,7 +643,7 @@ let sync_config_for_keeper_view (m : Model.t) =
       | None -> (
           match m.nav.workspace, Fleet_store.selected_keeper_summary m.fleet with
           | Nav.Keepers, Some k ->
-              let knowledge =
+              let knowledge0 =
                 if Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
                 then
                   if
@@ -644,6 +657,13 @@ let sync_config_for_keeper_view (m : Model.t) =
                   m.knowledge
                   |> Knowledge_store.close_memory_reading
                   |> Knowledge_store.close_memory_diagram
+              in
+              let knowledge =
+                if
+                  Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                    Nav.Keeper_work_candle
+                then knowledge0
+                else close_board_recovery knowledge0
               in
               {
                 m with
@@ -661,7 +681,8 @@ let sync_config_for_keeper_view (m : Model.t) =
                 knowledge =
                   m.knowledge
                   |> Knowledge_store.close_memory_reading
-                  |> Knowledge_store.close_memory_diagram;
+                  |> Knowledge_store.close_memory_diagram
+                  |> close_board_recovery;
               }
           | (Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra), _ ->
               m))
@@ -702,7 +723,7 @@ let enter_sidebar_focus (m : Model.t) =
         sidebar_cursor = cursor;
         sidebar_scroll = scroll;
       };
-    drafts = Drafts.set_focus false m.drafts;
+    drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m;
     config = Config_store.cancel_edit_field m.config;
     inline_modal = None;
     ask_modal = None;
@@ -724,7 +745,7 @@ let switch_workspace (m : Model.t) ws =
       json_scroll_offset = 0;
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   let knowledge =
     m.knowledge
@@ -733,6 +754,7 @@ let switch_workspace (m : Model.t) ws =
     |> Knowledge_store.clear_pending_wiki_edit
     |> Knowledge_store.clear_armed_vote
     |> Knowledge_store.clear_pending_artifact_revision
+    |> close_board_recovery
   in
   let attention =
     match ws with
@@ -841,7 +863,11 @@ let open_overlay (m : Model.t) overlay =
       modal_edit_cursor = 0;
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts =
+    let drafts = Drafts.set_focus false m.drafts in
+    if Nav.equal_overlay overlay (Nav.Inline_action Nav.Btw_query) then drafts
+    else clear_btw_if_leaving m drafts
+  in
   let config =
     (match overlay, m.config.target with
     | Nav.Settings _, Wire_config.Target_keeper_create -> m.config
@@ -879,12 +905,15 @@ let open_overlay (m : Model.t) overlay =
   let ask_modal =
     match overlay with
     | Nav.Ask_answer -> m.ask_modal
+    | Nav.Help ->
+        if Option.equal Nav.equal_overlay return_overlay (Some Nav.Ask_answer)
+        then m.ask_modal
+        else None
     | Nav.Palette
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Queue_context _
     | Nav.Inline_action _
-    | Nav.Help
     | Nav.System_gate _ ->
         None
   in
@@ -953,14 +982,15 @@ let push_dive (m : Model.t) dive =
         m.work
   in
   let drafts =
-    match dive with
+    (match dive with
     | Nav.Dive_keeper { name; _ } ->
         m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus false
     | Nav.Dive_work _
     | Nav.Dive_knowledge _
     | Nav.Dive_runtime _
     | Nav.Dive_infra _ ->
-        Drafts.set_focus false m.drafts
+        Drafts.set_focus false m.drafts)
+    |> clear_btw_if_leaving m
   in
   let fleet =
     match dive with
@@ -987,9 +1017,34 @@ let push_dive (m : Model.t) dive =
   in
   let infra = { m.infra with show_raw_json = false } in
   let knowledge =
-    let base =
+    let base0 =
       m.knowledge |> Knowledge_store.clear_armed_vote
       |> Knowledge_store.clear_pending_artifact_revision
+    in
+    let base =
+      match dive with
+      | Nav.Dive_keeper { name; tab = Nav.Keeper_work_candle }
+        when Board_recovery.shown ~keeper:name base0.board_recovery ->
+          base0
+      | Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ->
+          close_board_recovery base0
     in
     match dive with
     | Nav.Dive_keeper { name; tab = Nav.Keeper_memory } ->
@@ -1235,59 +1290,12 @@ let open_inline_modal (m : Model.t) kind =
     }
   in
   let drafts =
-    let d0 = Drafts.set_focus false m.drafts in
-    match kind, d0.btw with
-    | Nav.Btw_query, (Drafts.Btw_answered _ | Drafts.Btw_failed _) ->
-        Drafts.clear_btw d0
-    | ( Nav.Btw_query
-      | Nav.Gate_reject _
-      | Nav.Verification_reject _
-      | Nav.Harness_overrule _
-      | Nav.Task_cancel _
-      | Nav.Goal_drop _
-      | Nav.Schedule_form
-      | Nav.Connector_form
-      | Nav.Repo_add_form
-      | Nav.Board_new_post
-      | Nav.Board_comment _
-      | Nav.Github_token_form _
-      | Nav.Code_finder_form
-      | Nav.Code_search_form
-      | Nav.Keeper_control_confirm _
-      | Nav.Keeper_clear_form _
-      | Nav.Keeper_operator_note_form _
-      | Nav.Tool_execute_form _
-      | Nav.Skill_create_form
-      | Nav.Skill_edit_form _
-      | Nav.Skill_delete_confirm _
-      | Nav.Prompt_override_form _
-      | Nav.Preset_create_form
-      | Nav.Runtime_param_set_form _
-      | Nav.Default_route_edit
-      | Nav.Lane_rename_form _
-      | Nav.Addon_decl_form _
-      | Nav.Addon_act_form _
-      | Nav.Browser_interact_form _
-      | Nav.Runtime_lane_create
-      | Nav.Runtime_lane_edit _
-      | Nav.Runtime_lane_delete _
-      | Nav.Task_create_form
-      | Nav.Task_transition_form _
-      | Nav.Task_link_goal _
-      | Nav.Goal_upsert_form _
-      | Nav.Board_delete_post _
-      | Nav.Keeper_lifecycle_form _
-      | Nav.Keeper_purge_confirm _
-      | Nav.Addon_attach_form
-      | Nav.Addon_detach_confirm _
-      | Nav.Addon_invoke_action _
-      | Nav.Setup_login_input_form _ )
-      , ( Drafts.Btw_idle
-        | Drafts.Btw_sending _
-        | Drafts.Btw_streaming _
-        | Drafts.Btw_answered _
-        | Drafts.Btw_failed _ ) ->
-        d0
+    let drafts = Drafts.set_focus false m.drafts in
+    if Nav.equal_inline_action_kind kind Nav.Btw_query then
+      match drafts.btw with
+      | Drafts.Btw_answered _ | Drafts.Btw_failed _ -> Drafts.clear_btw drafts
+      | Drafts.Btw_idle | Drafts.Btw_sending _ | Drafts.Btw_streaming _ -> drafts
+    else clear_btw_if_leaving m drafts
   in
   let config = Config_store.cancel_edit_field m.config in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
@@ -1304,7 +1312,7 @@ let open_ask_modal ?preselect_choice_1based (m : Model.t)
       sidebar_open = close_drawer_if_floating m;
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   ({ m with nav; drafts; config; inline_modal = None; ask_modal = Some modal }, [])
 
@@ -1321,7 +1329,7 @@ let open_palette (m : Model.t) mode =
       palette_scroll_offset = 0;
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   let next =
     { m with nav; drafts; config; palette; inline_modal = None; ask_modal = None }
@@ -1358,7 +1366,13 @@ let cycle_sub_tab (m : Model.t) dir =
   match m.nav.overlay with
   | Some (Nav.Settings _) ->
       let config = Config_store.cycle_tab dir m.config in
-      let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
+      let nav =
+        {
+          m.nav with
+          overlay = Some (Nav.Settings config.active_tab);
+          filter_focused = false;
+        }
+      in
       let next = { m with nav; config } in
       (next, View_fetches.fetches_for_current_view next)
   | Some (Nav.Queue_context tab) ->
@@ -1374,6 +1388,7 @@ let cycle_sub_tab (m : Model.t) dir =
             {
               m.nav with
               overlay = Some (Nav.Queue_context next_tab);
+              filter_focused = false;
               queue_scroll_offset = 0;
             };
         } |> refresh_queue_on_entry
@@ -1405,6 +1420,7 @@ let cycle_sub_tab (m : Model.t) dir =
               m.nav with
               dive_stack = Nav.Dive_keeper { name; tab = next_tab } :: rest;
               pane_index = 0;
+              filter_focused = false;
               dive_scroll_offset = 0;
             }
           in
@@ -1425,11 +1441,15 @@ let cycle_sub_tab (m : Model.t) dir =
             | Nav.Keeper_memory ->
                 m.knowledge
                 |> Knowledge_store.close_memory_diagram
+                |> close_board_recovery
                 |> Knowledge_store.set_memory_diff_keeper (Some name)
+            | Nav.Keeper_work_candle ->
+                m.knowledge
+                |> Knowledge_store.close_memory_reading
+                |> Knowledge_store.close_memory_diagram
             | Nav.Keeper_chat
             | Nav.Keeper_context
             | Nav.Keeper_tool_calls
-            | Nav.Keeper_work_candle
             | Nav.Keeper_sandbox
             | Nav.Keeper_config
             | Nav.Keeper_logs
@@ -1437,6 +1457,7 @@ let cycle_sub_tab (m : Model.t) dir =
                 m.knowledge
                 |> Knowledge_store.close_memory_reading
                 |> Knowledge_store.close_memory_diagram
+                |> close_board_recovery
           in
           let next = { m with nav; drafts; fleet; config; knowledge } in
           (next, View_fetches.fetches_for_current_view next)
@@ -1456,14 +1477,18 @@ let cycle_sub_tab (m : Model.t) dir =
                   Attention.sync_selection ~query:work.filter_query m.attention
                 else m.attention
               in
-              let nav = { m.nav with pane_index = 0; zoomed = false } in
+              let nav =
+                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+              in
               let next =
                 { m with nav; work; attention } |> Model.sync_sidebar_cursor
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Knowledge ->
               let knowledge = Knowledge_store.cycle_tab dir m.knowledge in
-              let nav = { m.nav with pane_index = 0; zoomed = false } in
+              let nav =
+                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+              in
               let next =
                 { m with nav; knowledge } |> Model.sync_sidebar_cursor
               in
@@ -1480,25 +1505,33 @@ let cycle_sub_tab (m : Model.t) dir =
                   then m.drafts
                   else Drafts.set_focus false m.drafts
                 in
-                let nav = { m.nav with dive_scroll_offset = 0 } in
+                let nav =
+                  { m.nav with filter_focused = false; dive_scroll_offset = 0 }
+                in
                 let next =
                   { m with nav; drafts; fleet } |> sync_config_for_keeper_view
                 in
                 (next, View_fetches.fetches_for_current_view next)
               else
                 let fleet = Fleet_store.cycle_fleet_mode dir m.fleet in
-                let nav = { m.nav with pane_index = 0; zoomed = false } in
+                let nav =
+                  { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+                in
                 ({ m with nav; fleet }, [])
           | Nav.Runtime ->
               let runtime = Runtime_store.cycle_tab dir m.runtime in
-              let nav = { m.nav with pane_index = 0; zoomed = false } in
+              let nav =
+                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+              in
               let next =
                 { m with nav; runtime } |> Model.sync_sidebar_cursor
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Infra ->
               let infra = Infra_store.cycle_tab dir m.infra in
-              let nav = { m.nav with pane_index = 0; zoomed = false } in
+              let nav =
+                { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
+              in
               let next = { m with nav; infra } |> Model.sync_sidebar_cursor in
               (next, View_fetches.fetches_for_current_view next)))
 
@@ -9732,7 +9765,9 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
           modal_edit_cursor = String.length (Model.modal_active_field_value modal);
         }
       in
-      let drafts = Drafts.set_focus false m.drafts in
+      let drafts =
+        m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m
+      in
       let config = Config_store.cancel_edit_field m.config in
       ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
   | None ->
@@ -9781,7 +9816,7 @@ let open_schedule_form_populated (m : Model.t) =
       modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
 

@@ -449,11 +449,66 @@ let is_mouse_toggle_key (kev : Input_decoder.key_event) =
   | Input_decoder.Function _ ->
       false
 
+let is_korean_jamo_mouse_key (kev : Input_decoder.key_event) =
+  match kev.key with
+  | Input_decoder.Char s -> String.length s > 1
+  | Input_decoder.Enter
+  | Input_decoder.Tab
+  | Input_decoder.Backspace
+  | Input_decoder.Escape
+  | Input_decoder.Delete
+  | Input_decoder.Insert
+  | Input_decoder.Up
+  | Input_decoder.Down
+  | Input_decoder.Left
+  | Input_decoder.Right
+  | Input_decoder.Home
+  | Input_decoder.End
+  | Input_decoder.Page_up
+  | Input_decoder.Page_down
+  | Input_decoder.Function _ ->
+      false
+
 let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
+  let on_knowledge_memory =
+    Option.is_none (Model.active_dive m)
+    && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+    && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
+  in
+  let korean_in_keeper_chat =
+    is_korean_jamo_mouse_key kev
+    &&
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) -> true
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_context
+                | Nav.Keeper_tool_calls
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ )
+    | None ->
+        false
+  in
   is_mouse_toggle_key kev
   && (not (Model.is_too_small_viewport m.viewport))
+  && (not (Model.equal_breakpoint m.breakpoint Model.Micro))
   && Option.is_none m.nav.overlay
-  && not (Model.is_text_capture_active m)
+  && (not (Model.sidebar_has_focus m))
+  && (not (Model.is_text_capture_active m))
+  && (not on_knowledge_memory)
+  && not korean_in_keeper_chat
 
 let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
     ~last_voice_tick_ns ~toast_expires_ns ~voice_recording =
@@ -1089,7 +1144,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                   ~en:"Native terminal drag-select ON (mouse capture OFF)"
             in
             model :=
-              Model.with_toast ~now ~level:Model.Toast_info notice !model;
+              { !model with quit_armed_at = None }
+              |> Model.with_toast ~now ~level:Model.Toast_info notice;
             scheduler :=
               Frame_scheduler.mark_dirty
                 ~pace:Frame_scheduler.Pace_interactive !scheduler

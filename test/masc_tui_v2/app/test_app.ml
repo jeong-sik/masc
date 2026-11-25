@@ -2002,7 +2002,51 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
   Alcotest.(check bool) "[ㅡ] blocked while composer focused" false
     (App.should_toggle_mouse_capture m_comp bare_eu);
   Alcotest.(check bool) "[ㅡ] blocked while filter focused" false
-    (App.should_toggle_mouse_capture m_filter bare_eu)
+    (App.should_toggle_mouse_capture m_filter bare_eu);
+
+  (* Layer 1 #9: Micro, sidebar focus, Knowledge>Memory, and Korean jamo in Keeper_chat *)
+  let m_micro = Masc_tui_store.Model.initial ~cols:60 ~rows:20 () in
+  Alcotest.(check bool) "[m] blocked on Micro viewport" false
+    (App.should_toggle_mouse_capture m_micro bare_m);
+  let m_sidebar =
+    { m_norm with nav = { m_norm.nav with sidebar_focused = true } }
+  in
+  Alcotest.(check bool) "[m] blocked while sidebar focused" false
+    (App.should_toggle_mouse_capture m_sidebar bare_m);
+  let m_know_mem =
+    {
+      m_norm with
+      nav = { m_norm.nav with workspace = Masc_tui_core.Nav.Knowledge };
+      knowledge =
+        Masc_tui_store.Knowledge_store.set_tab Masc_tui_core.Nav.Knowledge_memory
+          m_norm.knowledge;
+    }
+  in
+  Alcotest.(check bool) "[m] yielded to Toggle_memory_scope on Knowledge > Memory"
+    false (App.should_toggle_mouse_capture m_know_mem bare_m);
+  Alcotest.(check bool) "[ㅡ] yielded on Knowledge > Memory" false
+    (App.should_toggle_mouse_capture m_know_mem bare_eu);
+  let m_chat_dive =
+    {
+      m_norm with
+      nav =
+        {
+          m_norm.nav with
+          workspace = Masc_tui_core.Nav.Keepers;
+          dive_stack =
+            [
+              Masc_tui_core.Nav.Dive_keeper
+                { name = "alpha"; tab = Masc_tui_core.Nav.Keeper_chat };
+            ];
+        };
+    }
+  in
+  Alcotest.(check bool) "ASCII [m] still toggles mouse in unfocused Keeper_chat dive"
+    true (App.should_toggle_mouse_capture m_chat_dive bare_m);
+  Alcotest.(check bool) "Korean [ㅡ] yields to Pillar 3 auto-focus in Keeper_chat dive"
+    false (App.should_toggle_mouse_capture m_chat_dive bare_eu);
+  Alcotest.(check bool) "Korean NFD [U+1173] yields in Keeper_chat dive"
+    false (App.should_toggle_mouse_capture m_chat_dive bare_eu_nfd)
 
 (* A chat stream that drops while the server reports its operation queued or
    running is posted again with its last journal seq, and only to the server

@@ -95,6 +95,8 @@ type t = {
   interrupting_turn_tokens : string String_map.t;
       (** In-flight interrupt token per keeper for observed turns without a
           local chat stream or pending tx. *)
+  esc_attempted_turn_tokens : string String_map.t;
+  esc_attempted_operation_ids : string String_map.t;
   turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
       (** Recent turn records per keeper, read for the Ctrl+T Context tab. *)
   chat_control_tokens : string String_map.t;
@@ -285,6 +287,14 @@ val is_operation_interrupting : keeper:string -> operation_id:string -> t -> boo
 val mark_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
 val clear_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
 val is_turn_interrupting : keeper:string -> interrupt_token:string -> t -> bool
+val mark_esc_interrupt_attempted_turn :
+  keeper:string -> interrupt_token:string -> t -> t
+val is_esc_interrupt_attempted_turn :
+  keeper:string -> interrupt_token:string -> t -> bool
+val mark_esc_interrupt_attempted_op :
+  keeper:string -> operation_id:string -> t -> t
+val is_esc_interrupt_attempted_op :
+  keeper:string -> operation_id:string -> t -> bool
 
 val clear_inactive_chat_stream_error : keeper:string -> t -> t
 

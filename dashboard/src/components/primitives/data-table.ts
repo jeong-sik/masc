@@ -6,6 +6,7 @@
  * - Automatic `@container dtable (max-width: 767px)` mobile card collapse via `data-label`.
  * - Virtualized scrolling via `@tanstack/virtual-core` when row count exceeds `virtualizeThreshold`.
  *   A windowed row is measured as drawn; `estimateRowHeight` stands in only until then.
+ * - Columns with a declared `width` keep their place whichever rows are drawn.
  */
 
 import { html } from 'htm/preact'
@@ -42,6 +43,19 @@ export interface DataTableColumn<T> {
   readonly numeric?: boolean
   readonly sortable?: boolean
   readonly sortValue?: (row: T) => string | number
+  /**
+   * The column's width, as CSS: `'8rem'`, `'30%'`.
+   *
+   * A table with a width on any column is laid out from its columns and not
+   * from its rows. A windowed table needs that: sized from the rows it has
+   * drawn, its columns move as it scrolls.
+   *
+   * Give a column the width of its widest value on one line. With a width on
+   * every column, room left over is spread across them in proportion, and a
+   * table with less room than their sum scrolls sideways. A column without a
+   * width takes what the others leave, down to nothing.
+   */
+  readonly width?: string
 }
 
 export interface DataTableProps<T> {
@@ -128,6 +142,7 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
 
   const rows = table.getRowModel().rows
   const shouldVirtualize = rows.length > threshold
+  const sized = props.columns.some((col) => col.width !== undefined)
 
   // A measured height belongs to a row, not to a position: after a sort or a
   // filter the row at an index is another row.
@@ -163,8 +178,15 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
   return html`
     <div class=${`dtable-wrap ${props.className ?? ''}`.trim()}>
       <div ref=${scrollRef} class="dtable-scroll" style=${scrollStyle}>
-        <table class="dtable">
+        <table class="dtable" data-sized=${sized ? 'true' : undefined}>
           ${props.caption && html`<caption class="sr-only">${props.caption}</caption>`}
+          ${sized && html`
+            <colgroup>
+              ${props.columns.map((col) => html`
+                <col key=${col.id} style=${col.width !== undefined ? { width: col.width } : undefined} />
+              `)}
+            </colgroup>
+          `}
           <thead>
             ${table.getHeaderGroups().map((group) => html`
               <tr key=${group.id}>
@@ -184,6 +206,7 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                       scope="col"
                       class=${meta?.numeric ? 'is-num' : ''}
                       aria-sort=${ariaSort}
+                      title=${sized ? meta?.header : undefined}
                     >
                       ${canSort
                         ? html`
@@ -192,7 +215,7 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                               class="dtable-sort-btn"
                               onClick=${header.column.getToggleSortingHandler()}
                             >
-                              <span>${label}</span>
+                              <span class="dtable-sort-label">${label}</span>
                               <span aria-hidden="true">
                                 ${sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '↕'}
                               </span>

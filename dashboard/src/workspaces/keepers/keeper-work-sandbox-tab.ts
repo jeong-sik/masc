@@ -322,11 +322,12 @@ function KeeperLocalToolCalls(props: Pick<KeeperWorkSandboxTabProps, 'keeperName
   const { data: toolCalls } = callsRead
 
   const toolCallColumns = useMemo<readonly DataTableColumn<KeeperToolCallEntry>[]>(() => [
-    { id: 'tool', header: 'Tool', accessor: (r) => r.tool, sortable: true },
-    { id: 'kind', header: 'Kind', accessor: (r) => r.record_kind },
+    { id: 'tool', header: 'Tool', width: '16rem', accessor: (r) => r.tool, sortable: true },
+    { id: 'kind', header: 'Kind', width: '5.5rem', accessor: (r) => r.record_kind },
     {
       id: 'outcome',
       header: 'Outcome',
+      width: '7rem',
       cell: (r) => html`
         <span class="kp-pill" data-tone=${recordedToolOutcomeTone(r)}>
           ${r.disposition ?? r.wire_outcome}
@@ -336,11 +337,12 @@ function KeeperLocalToolCalls(props: Pick<KeeperWorkSandboxTabProps, 'keeperName
     {
       id: 'duration',
       header: 'Duration (ms)',
+      width: '8rem',
       accessor: (r) => Math.round(r.duration_ms),
       numeric: true,
       sortable: true,
     },
-    { id: 'turn', header: 'Turn', accessor: (r) => r.turn ?? null, numeric: true },
+    { id: 'turn', header: 'Turn', width: '4.5rem', accessor: (r) => r.turn ?? null, numeric: true },
   ], [])
 
   const callsWarning = toolSourceWarning(toolCalls)

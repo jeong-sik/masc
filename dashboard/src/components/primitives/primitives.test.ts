@@ -497,6 +497,41 @@ describe('components/primitives', () => {
     }
   })
 
+  it('DataTable with a width on a column declares the widths of its columns', () => {
+    const columns: readonly DataTableColumn<LongRow>[] = [
+      { id: 'label', header: 'Label', accessor: (r) => r.label },
+      { id: 'id', header: 'Id', width: '6rem', accessor: (r) => r.id },
+    ]
+    render(html`<${DataTable} data=${longRows.slice(0, 3)} columns=${columns} />`, container)
+
+    expect(container.querySelector('table.dtable')?.getAttribute('data-sized')).toBe('true')
+    const widths = [...container.querySelectorAll<HTMLElement>('colgroup col')].map((col) => col.style.width)
+    expect(widths).toEqual(['', '6rem'])
+    // A header can be cut to its column, so the whole of it is the tooltip.
+    expect([...container.querySelectorAll('thead th')].map((th) => th.getAttribute('title'))).toEqual(['Label', 'Id'])
+  })
+
+  it('DataTable without column widths stays laid out from its rows', () => {
+    render(html`<${DataTable} data=${longRows.slice(0, 3)} columns=${longColumns} />`, container)
+
+    expect(container.querySelector('table.dtable')?.hasAttribute('data-sized')).toBe(false)
+    expect(container.querySelector('colgroup')).toBeNull()
+    expect(container.querySelector('thead th')?.hasAttribute('title')).toBe(false)
+  })
+
+  it('DataTable opens in the order it is given and shows it in the header', () => {
+    const columns: readonly DataTableColumn<LongRow>[] = [
+      { id: 'label', header: 'Label', accessor: (r) => r.label, sortable: true },
+    ]
+    render(
+      html`<${DataTable} data=${longRows.slice(0, 3)} columns=${columns} initialSort=${{ id: 'label', desc: true }} />`,
+      container,
+    )
+
+    expect([...container.querySelectorAll('tbody td')].map((cell) => cell.textContent)).toEqual(['Row 2', 'Row 1', 'Row 0'])
+    expect(container.querySelector('th')?.getAttribute('aria-sort')).toBe('descending')
+  })
+
   it('command-search matches both fuzzy Latin queries (uFuzzy) and Korean/Hangul labels', () => {
     const searcher = createCommandSearcher([
       { id: 'overview', label: 'Overview 대시보드', keywords: ['home', 'summary'] },

@@ -181,6 +181,28 @@
   user-select: none;
 }
 
+/* Columns with declared widths: the table is laid out from its <col>s, so a
+   column keeps its place whichever rows are drawn. */
+.dtable[data-sized="true"] {
+  table-layout: fixed;
+}
+
+.dtable[data-sized="true"] th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A sortable header that does not fit cuts its label and keeps the sort mark. */
+.dtable[data-sized="true"] .dtable-sort-btn {
+  max-width: 100%;
+}
+
+.dtable[data-sized="true"] .dtable-sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dtable th.is-num,
 .dtable td.is-num {
   text-align: right;
@@ -231,6 +253,9 @@
 }
 
 @container dtable (max-width: 767px) {
+  /* A card is one column: the declared column widths do not apply to it. */
+  .dtable[data-sized="true"] { table-layout: auto; }
+  .dtable colgroup { display: none; }
   .dtable thead { display: none; }
   .dtable tbody, .dtable tr, .dtable td { display: block; width: 100%; }
   .dtable tr {

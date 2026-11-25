@@ -528,6 +528,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'keeper',
       header: 'Keeper',
+      width: '20.5rem',
       sortable: true,
       sortValue: (r) => r.keeper,
       cell: (r) => html`<${KeeperBadge} id=${r.keeper} size="sm" />`,
@@ -535,6 +536,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'turns',
       header: '월간 턴',
+      width: '4.5rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.turns,
@@ -543,6 +545,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'tokens',
       header: '토큰 (24h)',
+      width: '6rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.totalTokens,
@@ -551,6 +554,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'cacheHit',
       header: '월간 캐시 %',
+      width: '6rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.cacheHitPct,
@@ -559,6 +563,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'spend',
       header: '비용 (24h USD)',
+      width: '7.75rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.spendUsd,
@@ -567,6 +572,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'tools',
       header: '월간 도구 호출',
+      width: '6.75rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.toolCalls,
@@ -575,6 +581,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'errors',
       header: '월간 도구 실패',
+      width: '6.75rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.toolErrors,
@@ -583,6 +590,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     {
       id: 'p95',
       header: 'p95 지연 (24h)',
+      width: '7.75rem',
       numeric: true,
       sortable: true,
       observed: (r) => r.p95LatencyMs,

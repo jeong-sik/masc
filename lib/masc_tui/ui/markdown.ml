@@ -17,320 +17,6 @@ type rendered_line = {
   spans : styled_span list;
 }
 
-type inline_kind =
-  | Inl_plain
-  | Inl_strong
-  | Inl_emphasis
-  | Inl_strong_emphasis
-  | Inl_strike
-  | Inl_code
-  | Inl_link of string
-  | Inl_link_target
-  | Inl_nested of inline_kind * inline_kind
-
-type inline_piece = {
-  text : string;
-  kind : inline_kind;
-}
-
-let starts_at text index marker =
-  let len = String.length marker in
-  index + len <= String.length text
-  &&
-  let rec same k =
-    k >= len || (Char.equal text.[index + k] marker.[k] && same (k + 1))
-  in
-  same 0
-
-let find_close text ~from ~marker =
-  let len = String.length marker in
-  let limit = String.length text in
-  let rec scan i =
-    if i + len > limit then None
-    else if starts_at text i marker then Some i
-    else scan (i + 1)
-  in
-  if from >= limit then None else scan from
-
-let is_word_byte c =
-  (c >= 'a' && c <= 'z')
-  || (c >= 'A' && c <= 'Z')
-  || (c >= '0' && c <= '9')
-  || Char.code c >= 0x80
-
-let underscore_opens text idx =
-  let before = if idx = 0 then ' ' else text.[idx - 1] in
-  let after =
-    if idx + 1 >= String.length text then ' ' else text.[idx + 1]
-  in
-  (not (is_word_byte before)) && not (Char.equal after ' ')
-
-let underscore_closes text idx =
-  let before = if idx = 0 then ' ' else text.[idx - 1] in
-  let after =
-    if idx + 1 >= String.length text then ' ' else text.[idx + 1]
-  in
-  (not (Char.equal before ' ')) && not (is_word_byte after)
-
-let is_url_prefix text idx =
-  starts_at text idx "https://"
-  || starts_at text idx "http://"
-  || starts_at text idx "file://"
-
-let scan_bare_url text idx =
-  let limit = String.length text in
-  let rec scan i =
-    if i >= limit then i
-    else
-      match text.[i] with
-      | ' ' | '\t' | '\n' | '\r' | '<' | '>' | '"' | ')' | ']' -> i
-      | _ -> scan (i + 1)
-  in
-  let raw_stop = scan idx in
-  (* Trim trailing sentence punctuation. *)
-  let rec trim s =
-    if s <= idx then idx
-    else
-      match text.[s - 1] with
-      | '.' | ',' | ';' | ':' | '!' | '?' -> trim (s - 1)
-      | _ -> s
-  in
-  trim raw_stop
-
-let has_non_space text ~from ~stop =
-  let rec scan i =
-    if i >= stop then false
-    else
-      match text.[i] with
-      | ' ' | '\t' | '\n' | '\r' | '\x0c' -> scan (i + 1)
-      | _ -> true
-  in
-  scan from
-
-let rec parse_inline ?(enclosing = []) ~osc8 text =
-  let limit = String.length text in
-  let out = ref [] in
-  let pending = Buffer.create limit in
-  let flush () =
-    if Buffer.length pending > 0 then begin
-      out := { text = Buffer.contents pending; kind = Inl_plain } :: !out;
-      Buffer.clear pending
-    end
-  in
-  let emit kind body =
-    if String.length body > 0 then begin
-      flush ();
-      out := { text = body; kind } :: !out
-    end
-  in
-  (* Monotonic closing-index caches per delimiter marker: since [walk] advances
-     [idx] strictly monotonically and closing predicates depend only on the
-     closing position in [text], each delimiter scans [text] at most once
-     across the entire line (O(N) worst case even on pathological unmatched
-     delimiters). *)
-  let next_backtick = ref (-1) in
-  let next_dstar = ref (-1) in
-  let next_tstar = ref (-1) in
-  let next_dunder = ref (-1) in
-  let next_tunder = ref (-1) in
-  let next_dtilde = ref (-1) in
-  let next_star = ref (-1) in
-  let next_under = ref (-1) in
-  let next_rbracket = ref (-1) in
-  let next_rparen = ref (-1) in
-  let last_link_target_check = ref (-1, false) in
-  let find_cached_close ~cache ~closes ~marker ~opening =
-    let cached = !cache in
-    if cached >= opening then
-      if cached >= limit then None else Some cached
-    else
-      let rec seek from =
-        match find_close text ~from ~marker with
-        | None -> None
-        | Some close ->
-            if closes close then Some close
-            else seek (close + String.length marker)
-      in
-      let res = seek opening in
-      cache := (match res with Some c -> c | None -> limit);
-      res
-  in
-  let find_cached_char ~cache ~ch ~from =
-    let cached = !cache in
-    if cached >= from then
-      if cached >= limit then None else Some cached
-    else
-      let res =
-        if from >= limit then None else String.index_from_opt text from ch
-      in
-      cache := (match res with Some c -> c | None -> limit);
-      res
-  in
-  let links_allowed =
-    not
-      (List.exists
-         (function
-           | Inl_link _ -> true
-           | Inl_plain | Inl_strong | Inl_emphasis | Inl_strong_emphasis
-           | Inl_strike | Inl_code | Inl_link_target | Inl_nested _ -> false)
-         enclosing)
-  in
-  let emit_nested kind body =
-    parse_inline ~enclosing:(kind :: enclosing) ~osc8 body
-    |> List.iter (fun piece -> emit (Inl_nested (kind, piece.kind)) piece.text)
-  in
-  let rec walk idx =
-    if idx >= limit then ()
-    else
-      let literal () =
-        Buffer.add_char pending text.[idx];
-        walk (idx + 1)
-      in
-      let styled ~cache ?(closes = fun _ -> true) marker kind =
-        let opening = idx + String.length marker in
-        match
-          if List.mem kind enclosing then None
-          else find_cached_close ~cache ~closes ~marker ~opening
-        with
-        | None -> literal ()
-        | Some close ->
-            if not (has_non_space text ~from:opening ~stop:close) then
-              literal ()
-            else begin
-              let body = String.sub text opening (close - opening) in
-              (match kind with
-              | Inl_code -> emit kind body
-              | Inl_plain | Inl_strong | Inl_emphasis | Inl_strong_emphasis
-              | Inl_strike | Inl_link _ | Inl_link_target | Inl_nested _ ->
-                  emit_nested kind body);
-              walk (close + String.length marker)
-            end
-      in
-      if links_allowed && is_url_prefix text idx then begin
-        let stop = scan_bare_url text idx in
-        if stop > idx then begin
-          let url = String.sub text idx (stop - idx) in
-          emit (Inl_link url) url;
-          walk stop
-        end
-        else literal ()
-      end
-      else
-        match text.[idx] with
-        | '\\' when idx + 1 < limit
-                      && String.contains {punct|!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~|punct} text.[idx + 1] ->
-            Buffer.add_char pending text.[idx + 1];
-            walk (idx + 2)
-        | '`' -> styled ~cache:next_backtick "`" Inl_code
-        | '*' when starts_at text idx "***" ->
-            styled ~cache:next_tstar "***" Inl_strong_emphasis
-        | '*' when starts_at text idx "**" ->
-            styled ~cache:next_dstar "**" Inl_strong
-        | '_' when starts_at text idx "___" && underscore_opens text idx ->
-            styled ~cache:next_tunder
-              ~closes:(fun c -> underscore_closes text (c + 2))
-              "___" Inl_strong_emphasis
-        | '_' when starts_at text idx "__" ->
-            if underscore_opens text idx then
-              styled ~cache:next_dunder
-                ~closes:(fun c -> underscore_closes text (c + 1))
-                "__" Inl_strong
-            else literal ()
-        | '~' when starts_at text idx "~~" ->
-            styled ~cache:next_dtilde "~~" Inl_strike
-        | '*' -> styled ~cache:next_star "*" Inl_emphasis
-        | '_' ->
-            if underscore_opens text idx then
-              styled ~cache:next_under ~closes:(underscore_closes text) "_"
-                Inl_emphasis
-            else literal ()
-        | ('[' | '!') when links_allowed
-                           && (Char.equal text.[idx] '[' || starts_at text idx "![") -> (
-            let image = Char.equal text.[idx] '!' in
-            let label_start = idx + if image then 2 else 1 in
-            match
-              find_cached_char ~cache:next_rbracket ~ch:']' ~from:label_start
-            with
-            | Some close_lbl when starts_at text (close_lbl + 1) "(" -> (
-                match
-                  find_cached_char ~cache:next_rparen ~ch:')'
-                    ~from:(close_lbl + 2)
-                with
-                | Some close_url ->
-                    let has_label = image || close_lbl > label_start in
-                    let has_target =
-                      let prev_lbl, prev_ok = !last_link_target_check in
-                      if Int.equal prev_lbl close_lbl then prev_ok
-                      else begin
-                        let ok =
-                          has_non_space text ~from:(close_lbl + 2)
-                            ~stop:close_url
-                        in
-                        last_link_target_check := (close_lbl, ok);
-                        ok
-                      end
-                    in
-                    if has_label && has_target then begin
-                      let label =
-                        String.sub text label_start (close_lbl - label_start)
-                      in
-                      let target =
-                        String.trim
-                          (String.sub text (close_lbl + 2)
-                             (close_url - close_lbl - 2))
-                      in
-                      let kind = Inl_link target in
-                      if image then emit kind (if String.equal label "" then "▧" else "▧ ");
-                      emit_nested kind label;
-                      if not osc8 then
-                        emit Inl_link_target (Printf.sprintf " (%s)" target);
-                      walk (close_url + 1)
-                    end
-                    else literal ()
-                | None -> literal ())
-            | Some _ | None -> literal ())
-        | _ -> literal ()
-  in
-  walk 0;
-  flush ();
-  List.rev !out
-
-let rec style_of_inline ~(theme : Theme.t) ~(base_style : Style.t) = function
-  | Inl_plain -> (base_style, None)
-  | Inl_strong ->
-      ( Style.make
-          ~fg:(Color.of_rgb theme.text_bright)
-          ~bg:base_style.bg
-          ~attrs:Attr.(bold lor base_style.attrs)
-          (),
-        None )
-  | Inl_emphasis -> (Style.add_attr Attr.italic base_style, None)
-  | Inl_strong_emphasis ->
-      let style, _ = style_of_inline ~theme ~base_style Inl_strong in
-      (Style.add_attr Attr.italic style, None)
-  | Inl_strike -> (Style.add_attr Attr.strike base_style, None)
-  | Inl_code ->
-      ( Style.make
-          ~fg:(Color.of_rgb theme.text_bright)
-          ~bg:(Color.of_rgb theme.surface_2) ~attrs:base_style.attrs (),
-        None )
-  | Inl_link url ->
-      ( Style.make
-          ~fg:(Color.of_rgb theme.status_active)
-          ~bg:base_style.bg
-          ~attrs:Attr.(underline lor base_style.attrs) (),
-        Some url )
-  | Inl_link_target ->
-      ( Style.make
-          ~fg:(Color.of_rgb theme.text_muted)
-          ~bg:base_style.bg
-          ~attrs:Attr.italic (),
-        None )
-  | Inl_nested (outer, inner) ->
-      let base_style, outer_link = style_of_inline ~theme ~base_style outer in
-      let style, inner_link = style_of_inline ~theme ~base_style inner in
-      (style, Option.fold ~none:outer_link ~some:Option.some inner_link)
-
 let wrap_styled_spans ~width ~prefix ~continuation spans =
   let width = Int.max 4 width in
   let lines = ref [] in
@@ -428,96 +114,6 @@ let pad_line_to_width ~width ~pad_style (line : rendered_line) =
         @ [ { text = String.make rem ' '; style = pad_style; hyperlink = None } ];
     }
 
-let heading_prefix line =
-  let len = String.length line in
-  let rec count i =
-    if i < len && Char.equal line.[i] '#' && i < 6 then count (i + 1) else i
-  in
-  let lvl = count 0 in
-  if lvl >= 1 && (lvl = len || Char.equal line.[lvl] ' ') then
-    Some (lvl, String.trim (String.sub line lvl (len - lvl)))
-  else None
-
-let ordered_list_prefix trimmed =
-  let len = String.length trimmed in
-  let rec digits i =
-    if i < len && trimmed.[i] >= '0' && trimmed.[i] <= '9' && i < 4 then
-      digits (i + 1)
-    else i
-  in
-  let d = digits 0 in
-  if d >= 1 && d + 1 < len && Char.equal trimmed.[d] '.' && Char.equal trimmed.[d + 1] ' '
-  then
-    let num = String.sub trimmed 0 (d + 1) in
-    let body = String.trim (String.sub trimmed (d + 2) (len - d - 2)) in
-    Some (num, body)
-  else None
-
-let is_thematic_break trimmed =
-  let len = String.length trimmed in
-  if len < 3 then false
-  else
-    let ch = trimmed.[0] in
-    (Char.equal ch '-' || Char.equal ch '*' || Char.equal ch '_')
-    &&
-    let n = ref 0 in
-    let ok = ref true in
-    for i = 0 to len - 1 do
-      if Char.equal trimmed.[i] ch then incr n
-      else if not (Char.equal trimmed.[i] ' ') then ok := false
-    done;
-    !ok && !n >= 3
-
-type fence = { marker : char; length : int }
-
-let fence_run text marker =
-  let rec count i =
-    if i < String.length text && Char.equal text.[i] marker then count (i + 1)
-    else i
-  in
-  count 0
-
-let fence_open trimmed =
-  let marker = trimmed.[0] in
-  if Char.equal marker '`' || Char.equal marker '~' then
-    let length = fence_run trimmed marker in
-    if length < 3 then None
-    else
-      let info = String.sub trimmed length (String.length trimmed - length) |> String.trim in
-      if Char.equal marker '`' && String.contains info '`' then None
-      else Some ({ marker; length }, info)
-  else None
-
-let fence_close { marker; length } trimmed =
-  fence_run trimmed marker >= length
-  && String.for_all (Char.equal marker) trimmed
-
-let split_table_cells line =
-  let trimmed = String.trim line in
-  let len = String.length trimmed in
-  if len < 2 || not (Char.equal trimmed.[0] '|') then None
-  else
-    let inner =
-      if Char.equal trimmed.[len - 1] '|' then String.sub trimmed 1 (len - 2)
-      else String.sub trimmed 1 (len - 1)
-    in
-    Some (List.map String.trim (String.split_on_char '|' inner))
-
-let is_table_rule line =
-  let trimmed = String.trim line in
-  String.length trimmed >= 3
-  && Char.equal trimmed.[0] '|'
-  &&
-  let has_dash = ref false in
-  let valid = ref true in
-  for i = 0 to String.length trimmed - 1 do
-    match trimmed.[i] with
-    | '-' -> has_dash := true
-    | '|' | ':' | ' ' | '\t' -> ()
-    | _ -> valid := false
-  done;
-  !valid && !has_dash
-
 let max_inline_mermaid_bytes = 8192
 let max_inline_mermaid_lines = 80
 
@@ -591,18 +187,588 @@ let fence_kind tag rest =
   | "alphatex" | "atex" -> Score { rhythm = String.equal rest "rhythm" }
   | _ -> Code
 
-let fence_tokens info =
-  let trimmed = String.trim info in
-  let len = String.length trimmed in
-  let rec stop i =
-    if i >= len then len
-    else
-      match trimmed.[i] with
-      | ' ' | '\t' -> i
-      | _ -> stop (i + 1)
+let span style text = { text; style; hyperlink = None }
+
+let spans_width =
+  List.fold_left (fun width s -> width + Grapheme.display_width s.text) 0
+
+module Inline = Cmarkit.Inline
+module Block = Cmarkit.Block
+
+let bare_url text index =
+  let has_prefix prefix =
+    let n = String.length prefix in
+    index + n <= String.length text
+    && String.equal (String.sub text index n) prefix
   in
-  let tag_end = stop 0 in
-  (String.sub trimmed 0 tag_end, String.sub trimmed tag_end (len - tag_end) |> String.trim)
+  has_prefix "https://" || has_prefix "http://" || has_prefix "file://"
+
+let bare_url_end text start =
+  let rec scan index parens =
+    if index >= String.length text then index
+    else
+      match text.[index] with
+      | ' ' | '\t' | '\n' | '\r' | '<' | '>' | '"' | ']' -> index
+      | '(' -> scan (index + 1) (parens + 1)
+      | ')' when parens = 0 -> index
+      | ')' -> scan (index + 1) (parens - 1)
+      | _ -> scan (index + 1) parens
+  in
+  let rec trim stop =
+    if stop <= start then start
+    else
+      match text.[stop - 1] with
+      | '.' | ',' | ';' | ':' | '!' | '?' -> trim (stop - 1)
+      | _ -> stop
+  in
+  trim (scan start 0)
+
+let safe_target target =
+  not (String.equal target "")
+  && String.equal (String.trim target) target
+  && String.equal (Grapheme.sanitize_controls target) target
+  && (not (Inline.Link.is_unsafe target)
+      || String.starts_with ~prefix:"file:" (String.lowercase_ascii target))
+
+let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
+  let rows = ref [] and spans = ref [] in
+  let emit style hyperlink text =
+    if not (String.equal text "") then
+      spans := { text; style; hyperlink } :: !spans
+  in
+  let newline () =
+    rows := List.rev !spans :: !rows;
+    spans := []
+  in
+  let link_style (style : Style.t) =
+    Style.make ~fg:(Color.of_rgb theme.status_active) ~bg:style.bg
+      ~attrs:Attr.(underline lor style.attrs) ()
+  in
+  let code_style (style : Style.t) =
+    Style.make ~fg:(Color.of_rgb theme.text_bright)
+      ~bg:(Color.of_rgb theme.surface_2) ~attrs:style.attrs ()
+  in
+  let render_text style link text =
+    let length = String.length text in
+    let rec scan start index =
+      if index >= length then emit style link (String.sub text start (index - start))
+      else if
+        Option.is_none link
+        && (match text.[index] with 'h' | 'f' -> bare_url text index | _ -> false)
+      then begin
+        let stop = bare_url_end text index in
+        let uri = String.sub text index (stop - index) in
+        if safe_target uri then begin
+          emit style link (String.sub text start (index - start));
+          emit (link_style style) (Some uri) uri;
+          scan stop stop
+        end else scan start stop
+      end else scan start (index + 1)
+    in
+    scan 0 0
+  in
+  let rec render (style : Style.t) link = function
+    | Inline.Inlines (children, _) -> List.iter (render style link) children
+    | Inline.Text (text, _) ->
+        if String.contains text '\n' then
+          List.iteri
+            (fun index line ->
+              if index > 0 then newline ();
+              render_text style link line)
+            (String.split_on_char '\n' text)
+        else render_text style link text
+    | Inline.Break _ -> newline ()
+    | Inline.Emphasis (em, _) ->
+        render (Style.add_attr Attr.italic style) link (Inline.Emphasis.inline em)
+    | Inline.Strong_emphasis (em, _) ->
+        let strong =
+          Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg:style.bg
+            ~attrs:Attr.(bold lor style.attrs) ()
+        in
+        render strong link (Inline.Emphasis.inline em)
+    | Inline.Ext_strikethrough (struck, _) ->
+        render (Style.add_attr Attr.strike style) link
+          (Inline.Strikethrough.inline struck)
+    | Inline.Code_span (code, _) -> emit (code_style style) link (Inline.Code_span.code code)
+    | Inline.Ext_math_span (math, _) ->
+        let delimiter = if Inline.Math_span.display math then "$$" else "$" in
+        emit (code_style style) link (delimiter ^ Inline.Math_span.tex math ^ delimiter)
+    | Inline.Autolink (auto, _) ->
+        let label, _ = Inline.Autolink.link auto in
+        let target = if Inline.Autolink.is_email auto then "mailto:" ^ label else label in
+        if safe_target target then emit (link_style style) (Some target) label
+        else emit style link label
+    | Inline.Link (node, _) -> render_link style link ~image:false node
+    | Inline.Image (node, _) -> render_link style link ~image:true node
+    | Inline.Raw_html (lines, _) ->
+        List.iteri
+          (fun index line ->
+            if index > 0 then newline ();
+            emit style link (Cmarkit.Block_line.tight_to_string line))
+          lines
+    | _ -> ()
+  and render_link (style : Style.t) enclosing ~image node =
+    let label = Inline.Link.text node in
+    let definition = Inline.Link.reference_definition defs node in
+    let target =
+      match definition with
+      | Some (Cmarkit.Link_definition.Def (definition, _)) -> (
+          match Cmarkit.Link_definition.dest definition with
+          | Some (url, _) when safe_target url -> Some url
+          | Some _ | None -> None)
+      | _ -> None
+    in
+    let link =
+      if image && Option.is_some enclosing then enclosing
+      else Option.fold ~none:enclosing ~some:Option.some target
+    in
+    let styled = if Option.is_some link then link_style style else style in
+    if image then
+      emit styled link (if Inline.is_empty label then "▧" else "▧ ");
+    (match definition with
+    | Some (Block.Footnote.Def _) ->
+        emit styled link "[";
+        render styled link label;
+        emit styled link "]"
+    | _ -> render styled link label);
+    if not osc8 then
+      Option.iter
+        (fun url -> emit (Typography.whisper ~bg:style.bg theme) None (" (" ^ url ^ ")"))
+        target
+  in
+  render base None inline;
+  newline ();
+  List.rev !rows
+
+type line_prefix = {
+  first : styled_span;
+  rest : styled_span;
+  first_row : int;
+}
+
+type line_layout = {
+  base : Style.t;
+  prefixes : line_prefix list;
+}
+
+let fit_prefix ~width select layout =
+  let rec fit remaining visible = function
+    | [] -> visible
+    | _ when remaining <= 0 -> visible
+    | prefix :: rest ->
+        let span = select prefix in
+        let used = Grapheme.display_width span.text in
+        if used <= remaining then fit (remaining - used) (span :: visible) rest
+        else visible
+  in
+  fit width [] layout.prefixes
+
+(* Cmarkit 0.4.0 reparses each nested link label while looking for a valid
+   destination. Deep bracket runs have exponential cost, even when the text
+   has no link. Bound that recursion before using it on a live UI frame. *)
+let safe_link_depth raw =
+  let max_link_depth = 8 in
+  let length = String.length raw in
+  let rec backtick_run_end i =
+    if i < length && raw.[i] = '`' then backtick_run_end (i + 1) else i
+  in
+  (* The next equal-width run closes a code span. Index it once so many
+     unmatched runs take linear time too. Table cells parse independently. *)
+  let code_closers = lazy (
+    let closers = Hashtbl.create 16 in
+    let previous = Hashtbl.create 8 in
+    let rec index i =
+      if i < length then
+        match raw.[i] with
+        | '\n' | '\r' | '|' ->
+            Hashtbl.reset previous;
+            index (i + 1)
+        | '`' ->
+            let next = backtick_run_end (i + 1) in
+            let width = next - i in
+            Option.iter
+              (fun opener -> Hashtbl.add closers opener next)
+              (Hashtbl.find_opt previous width);
+            Hashtbl.replace previous width i;
+            index next
+        | _ -> index (i + 1)
+    in
+    index 0;
+    closers)
+  in
+  let rec skip_indent i =
+    if i < length && (raw.[i] = ' ' || raw.[i] = '\t') then skip_indent (i + 1)
+    else i
+  in
+  let starts_item i =
+    (i = 0 || raw.[i - 1] = '\n' || raw.[i - 1] = '\r')
+    && i + 1 < length && (raw.[i + 1] = ' ' || raw.[i + 1] = '\t')
+    && let content = skip_indent (i + 1) in
+       content < length && raw.[content] <> '\n' && raw.[content] <> '\r'
+  in
+  let rec scan i depth blank opaque =
+    if i >= length then true
+    else
+      match raw.[i] with
+      | ('-' | '+' | '*') when starts_item i ->
+          (* An unindented nonempty bullet interrupts the previous paragraph.
+             Even adjacent tight-list items use independent inline parse state. *)
+          scan (i + 1) 0 false false
+      | '[' -> depth < max_link_depth && scan (i + 1) (depth + 1) false opaque
+      | ']' ->
+          (* These inline atoms may contain a literal closer. Count conservatively
+             until the paragraph ends instead of trying to lex them twice. *)
+          let depth = if opaque then depth else Int.max 0 (depth - 1) in
+          scan (i + 1) depth false opaque
+      | '`' ->
+          (match Hashtbl.find_opt (Lazy.force code_closers) i with
+          | Some next -> scan next depth false opaque
+          | None -> scan (backtick_run_end (i + 1)) depth false (opaque || depth > 0))
+      | '<' | '$' -> scan (i + 1) depth false (opaque || depth > 0)
+      | '\\' when i + 1 < length ->
+          (match raw.[i + 1] with
+          | '[' | ']' | '\\' -> scan (i + 2) depth false opaque
+          | '`' ->
+              let next = backtick_run_end (i + 2) in
+              (* An escaped run may open with a different width. Keep the
+                 conservative paragraph fallback for that case. *)
+              scan next depth false (opaque || (next > i + 2 && depth > 0))
+          | _ -> scan (i + 1) depth false opaque)
+      | '\n' | '\r' ->
+          let next =
+            if raw.[i] = '\r' && i + 1 < length && raw.[i + 1] = '\n' then i + 2
+            else i + 1
+          in
+          if blank then scan next 0 true false else scan next depth true opaque
+      | ' ' | '\t' -> scan (i + 1) depth blank opaque
+      | _ -> scan (i + 1) depth false opaque
+  in
+  scan 0 0 true false
+
+let render_literal ~width ~base_style raw =
+  let width = Int.max 4 width in
+  String.split_on_char '\n' raw
+  |> List.concat_map (fun line ->
+         let rows = ref [] and cells = ref 0 in
+         let row = Buffer.create (Int.min width (String.length line)) in
+         let push_row () =
+           rows :=
+             { spans = [ span base_style (Buffer.contents row) ] }
+             :: !rows;
+           Buffer.clear row;
+           cells := 0
+         in
+         Grapheme.iter_clusters line
+           (fun ~text ~start_offset ~end_offset ~cell_width ->
+             if !cells + cell_width > width then push_row ();
+             Buffer.add_substring row text start_offset (end_offset - start_offset);
+             cells := !cells + cell_width);
+         push_row ();
+         List.rev !rows)
+
+let source_lines raw meta =
+  let loc = Cmarkit.Meta.textloc meta in
+  if Cmarkit.Textloc.is_none loc || Cmarkit.Textloc.is_empty loc then []
+  else
+    let first = Cmarkit.Textloc.first_byte loc in
+    let last = Cmarkit.Textloc.last_byte loc in
+    String.sub raw first (last - first + 1)
+    |> String.split_on_char '\n'
+    |> List.map (fun line ->
+           if String.ends_with ~suffix:"\r" line then
+             String.sub line 0 (String.length line - 1)
+           else line)
+
+(* Cmarkit's table extension requires both outer pipes. Preserve tables with
+   optional outer pipes by retrying just the paragraph, outside code/HTML. *)
+let table_without_outer_pipes ~defs raw meta =
+  let has_pipe line = String.contains line '|' in
+  let full_row line =
+    String.starts_with ~prefix:"|" line && String.ends_with ~suffix:"|" line
+  in
+  let is_rule line =
+    String.contains line '-'
+    && String.for_all (function '|' | '-' | ':' | ' ' | '\t' -> true | _ -> false) line
+  in
+  let normalize line =
+    let line = String.trim line in
+    let line = if String.starts_with ~prefix:"|" line then line else "| " ^ line in
+    if String.ends_with ~suffix:"|" line then line else line ^ " |"
+  in
+  match List.map String.trim (source_lines raw meta) with
+  | header :: rule :: rest when has_pipe header && is_rule rule
+      && not (full_row header && full_row rule) ->
+      let rec table_rows = function
+        | row :: tail when has_pipe row -> normalize row :: table_rows tail
+        | lines -> lines
+      in
+      let source = String.concat "\n" (normalize header :: normalize rule :: table_rows rest) in
+      let parsed = Cmarkit.Doc.of_string ~defs ~strict:false source |> Cmarkit.Doc.block in
+      (match parsed with
+      | Block.Ext_table _ | Block.Blocks (Block.Ext_table _ :: _, _) -> Some parsed
+      | _ -> None)
+  | _ -> None
+
+let referenced_labels doc =
+  let module Folder = Cmarkit.Folder in
+  let module Labels = Cmarkit.Label.Map in
+  let inline folder used = function
+    | Inline.Link (node, _) | Inline.Image (node, _) ->
+        let used =
+          match Inline.Link.referenced_label node with
+          | None -> used
+          | Some label -> Labels.add (Cmarkit.Label.key label) () used
+        in
+        Folder.ret (Folder.fold_inline folder used (Inline.Link.text node))
+    | _ -> Folder.default
+  in
+  Folder.fold_doc (Folder.make ~inline ()) Labels.empty doc
+
+let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw =
+  let bg = base_style.bg in
+  let muted_style = Typography.whisper ~bg ~italic:false theme in
+  let hairline_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
+  let quote_rail_style = Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg () in
+  let locs = String.contains raw '|' || String.contains raw '[' in
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs raw in
+  let defs = Cmarkit.Doc.defs doc in
+  let used_labels =
+    if Cmarkit.Label.Map.is_empty defs then Cmarkit.Label.Map.empty
+    else referenced_labels doc
+  in
+  let out = ref [] and row_count = ref 0 in
+  let push_lines lines =
+    row_count := !row_count + List.length lines;
+    out := List.rev_append lines !out
+  in
+  let inset layout ~first ~rest =
+    { layout with prefixes = { first; rest; first_row = !row_count } :: layout.prefixes }
+  in
+  let fit = fit_prefix ~width:(width - 4) in
+  let prefix layout =
+    fit (fun p -> if p.first_row = !row_count then p.first else p.rest) layout
+  in
+  let continuation layout = fit (fun p -> p.rest) layout in
+  let wrap layout spans =
+    wrap_styled_spans ~width ~prefix:(prefix layout)
+      ~continuation:(continuation layout) spans
+  in
+  let draw_rows layout rows = List.iter (fun row -> push_lines (wrap layout row)) rows in
+  let draw_inlines layout inline =
+    inline_rows ~theme ~defs ~osc8 ~base:layout.base inline |> draw_rows layout
+  in
+  let draw_rule layout requested_width =
+    let prefix = prefix layout in
+    let count = Int.min requested_width (width - spans_width prefix) in
+    let rule = String.concat "" (List.init count (fun _ -> Glyph.to_utf8 Glyph.Box_h)) in
+    push_lines [ { spans = prefix @ [ span hairline_style rule ] } ]
+  in
+  let draw_code layout code =
+    let lang_tag, info_tail =
+      Option.bind (Block.Code_block.info_string code)
+        (fun (info, _) -> Block.Code_block.language_of_info_string info)
+      |> Option.value ~default:("", "")
+    in
+    let closed =
+      match Block.Code_block.layout code with
+      | `Fenced { closing_fence; _ } -> Option.is_some closing_fence
+      | `Indented -> false
+    in
+    let body_lines = List.map Cmarkit.Block_line.to_string (Block.Code_block.code code) in
+    let code_bg = Color.of_rgb theme.surface_0 in
+    let code_pad = Typography.primary ~bg:code_bg theme in
+    let gutter =
+      span (Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg:code_bg ())
+        (Glyph.to_utf8 Glyph.Left_rail ^ " ")
+    in
+    let layout = inset layout ~first:gutter ~rest:gutter in
+    let inner_w = width - spans_width (continuation layout) in
+    let draw rows =
+      List.iter
+        (fun spans ->
+          wrap layout spans
+          |> List.map (pad_line_to_width ~width ~pad_style:code_pad)
+          |> push_lines)
+        rows
+    in
+    if not (String.equal lang_tag "") then
+      draw [ [ span (Typography.whisper ~bg:code_bg theme) lang_tag ] ];
+    let rendered =
+      match fence_kind lang_tag info_tail, closed with
+      | Diagram, true -> (
+          match try_render_mermaid_fence ~inner_w body_lines with
+          | None -> false
+          | Some rows ->
+              let line_style =
+                Style.make ~fg:(Color.of_rgb theme.status_active) ~bg:code_bg ()
+              in
+              let label_style =
+                Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg:code_bg ()
+              in
+              draw (List.map (style_mermaid_row ~line_style ~label_style ~max_width:inner_w) rows);
+              true)
+      | Score { rhythm }, true -> (
+          let source = String.concat "\n" body_lines in
+          match Alphatex.render_tab ~rhythm ~max_width:inner_w source with
+          | Ok rows ->
+              draw (List.map (fun row -> [ span code_pad row ]) rows);
+              true
+          | Error reason ->
+              let style = Typography.status ~bg:code_bg theme Theme.Status_attention in
+              draw [ [ span style (Alphatex.failure_text reason) ] ];
+              false)
+      | (Diagram | Score _), false | Code, _ -> false
+    in
+    if not rendered then
+      Code_lexer.rows_of_source ~language:(Code_lexer.language_of_tag lang_tag)
+        (String.concat "\n" body_lines)
+      |> List.map
+           (List.map (fun (seg : Code_lexer.segment) ->
+                span (Code_lexer.style_of_token ~theme ~bg:code_bg seg.kind) seg.text))
+      |> draw
+  in
+  let draw_table layout table =
+    let separator = span hairline_style (" " ^ Glyph.to_utf8 Glyph.Box_v ^ " ") in
+    let row_width = width - spans_width (continuation layout) in
+    let columns = Block.Table.col_count table in
+    let column_width = (row_width - (3 * (columns - 1))) / Int.max 1 columns in
+    let header_style =
+      Typography.structure ~bg:(Color.of_rgb theme.surface_2) ~bold:true theme
+    in
+    let cell_rows style content =
+      inline_rows ~theme ~defs ~osc8 ~base:style content
+      |> List.concat_map (wrap_styled_spans ~width:column_width ~prefix:[] ~continuation:[])
+    in
+    let draw_cells style cells =
+      let cells = List.map fst cells in
+      if column_width < 4 then begin
+        draw_rule layout row_width;
+        List.iter
+          (fun cell ->
+            let marker = span hairline_style (Glyph.to_utf8 Glyph.Box_v ^ " ") in
+            let padding = span style "  " in
+            let cell_layout = inset layout ~first:marker ~rest:padding in
+            draw_inlines { cell_layout with base = style } cell)
+          cells
+      end else
+        let cells = List.filteri (fun i _ -> i < columns) cells in
+        let wrapped = List.map (cell_rows style) cells in
+        let wrapped = wrapped @ List.init (columns - List.length cells) (fun _ -> []) in
+        let rec join = function
+          | [] -> ()
+          | rows when List.for_all (function [] -> true | _ :: _ -> false) rows -> ()
+          | rows ->
+              let visible, remaining =
+                List.split
+                  (List.map
+                     (function
+                       | [] -> { spans = [] }, []
+                       | current :: rest -> current, rest)
+                     rows)
+              in
+              let parts =
+                List.map
+                  (fun line -> (pad_line_to_width ~width:column_width ~pad_style:style line).spans)
+                  visible
+              in
+              let prefix = prefix layout in
+              let rec join_cells = function
+                | [] -> []
+                | [ cell ] -> cell
+                | cell :: rest -> cell @ (separator :: join_cells rest)
+              in
+              let spans = prefix @ join_cells parts in
+              push_lines [ { spans } ];
+              join remaining
+        in
+        join wrapped
+    in
+    List.iter
+      (fun ((row, _), _) ->
+        match row with
+        | `Header cells -> draw_cells header_style cells
+        | `Sep _ -> if column_width >= 4 then draw_rule layout row_width
+        | `Data cells -> draw_cells layout.base cells)
+      (Block.Table.rows table)
+  in
+  let rec render layout = function
+    | Block.Blocks (blocks, _) -> List.iter (render layout) blocks
+    | Block.Blank_line _ -> draw_rows layout [ [] ]
+    | Block.Paragraph (p, meta) -> (
+        match table_without_outer_pipes ~defs raw meta with
+        | Some table -> render layout table
+        | None -> draw_inlines layout (Block.Paragraph.inline p))
+    | Block.Block_quote (quote, _) ->
+        let rail = span quote_rail_style (Glyph.to_utf8 Glyph.Left_rail ^ " ") in
+        let quoted = inset layout ~first:rail ~rest:rail in
+        render { quoted with base = Typography.whisper ~bg theme } (Block.Block_quote.block quote)
+    | Block.Heading (h, _) ->
+        let level = Block.Heading.level h in
+        let inline = Block.Heading.inline h in
+        let style =
+          if level <= 2 then Typography.anchor ~bg theme
+          else Typography.structure ~bg ~bold:true theme
+        in
+        draw_inlines { layout with base = style } inline;
+        if level = 1 then begin
+          let text = String.concat " " (Inline.to_plain_text ~break_on_soft:false inline |> List.map (String.concat "")) in
+          draw_rule layout (Int.max 12 (Grapheme.display_width text + 2))
+        end
+    | Block.Thematic_break _ -> draw_rule layout width
+    | Block.Code_block (code, _) | Block.Ext_math_block (code, _) -> draw_code layout code
+    | Block.Html_block (lines, _) ->
+        List.map (fun (text, _) -> [ span layout.base text ]) lines |> draw_rows layout
+    | Block.List (items, _) -> List.iter (render_item layout) (Block.List'.items items)
+    | Block.Ext_table (table, _) -> draw_table layout table
+    | Block.Ext_footnote_definition (footnote, _) ->
+        let label = "[" ^ Cmarkit.Label.text_to_string (Block.Footnote.label footnote) ^ "]: " in
+        render (hanging layout (Typography.structure ~bg theme) label)
+          (Block.Footnote.block footnote)
+    | Block.Link_reference_definition (definition, meta) ->
+        let referenced =
+          Cmarkit.Link_definition.defined_label definition
+          |> Option.exists (fun label ->
+                 Cmarkit.Label.Map.mem (Cmarkit.Label.key label) used_labels)
+        in
+        (* Log lines such as "[ERROR]: timeout" also parse as definitions. *)
+        if not referenced then
+          source_lines raw meta
+          |> List.map (fun text -> [ span layout.base text ])
+          |> draw_rows layout
+    | _ -> ()
+  and hanging layout style text =
+    let first = span style text in
+    let rest = span layout.base (String.make (Grapheme.display_width text) ' ') in
+    inset layout ~first ~rest
+  and render_item layout (item, _) =
+    let glyph marker = Glyph.to_utf8 marker in
+    let marker, style =
+      match Block.List_item.ext_task_marker item with
+      | Some (codepoint, _) -> (
+          match Block.List_item.task_status_of_task_marker codepoint with
+          | `Checked -> glyph Glyph.Check_mark, Typography.status ~bg ~bold:true theme Theme.Status_ok
+          | `Unchecked -> glyph Glyph.Live_idle, muted_style
+          | `Cancelled -> "−", muted_style
+          | `Other marker ->
+              let text = Buffer.create 4 in
+              Buffer.add_utf_8_uchar text marker;
+              Buffer.contents text, muted_style)
+      | None ->
+          let marker, _ = Block.List_item.marker item in
+          match marker with
+          | "-" | "*" | "+" -> glyph Glyph.Separator_dot, Typography.accent ~bg ~bold:true theme
+          | marker -> marker, Typography.structure ~bg theme
+    in
+    let inner = hanging layout style (marker ^ " ") in
+    match Block.List_item.block item with
+    | Block.Blocks ([], _) -> draw_rows inner [ [] ]
+    | body -> render inner body
+  in
+  let layout = { base = base_style; prefixes = [] } in
+  render layout (Cmarkit.Doc.block doc);
+  match !out with
+  | [] -> [ { spans = [] } ]
+  | rows -> List.rev rows
 
 let md_render_cache_mu = Stdlib.Mutex.create ()
 let md_render_cache :
@@ -618,346 +784,8 @@ let max_md_render_cache_total_bytes = 4 * 1024 * 1024
 let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
   let width = Int.max 8 width in
   let base_style = Option.value base_style ~default:(Typography.primary theme) in
-  let bg = base_style.bg in
-  let muted_style = Typography.whisper ~bg ~italic:false theme in
-  let hairline_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
-  let accent_style = Typography.accent ~bg ~bold:true theme in
-  let quote_rail_style = Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg () in
-  let quote_style = Typography.whisper ~bg theme in
-  let raw_lines =
-    String.split_on_char '\n' raw
-    |> List.map (fun l ->
-           let n = String.length l in
-           if n > 0 && Char.equal l.[n - 1] '\r' then String.sub l 0 (n - 1)
-           else l)
-  in
-  let out = ref [] in
-  let push_lines ls = out := List.rev_append ls !out in
-  let render_inline_line ~base ~prefix ~continuation body =
-    let pieces = parse_inline ~osc8 body in
-    let spans =
-      List.map
-        (fun p ->
-          let style, hyperlink = style_of_inline ~theme ~base_style:base p.kind in
-          { text = p.text; style; hyperlink })
-        pieces
-    in
-    push_lines (wrap_styled_spans ~width ~prefix ~continuation spans)
-  in
-  let rec walk = function
-    | [] -> ()
-    | line :: rest -> (
-        let trimmed = String.trim line in
-        if String.length trimmed = 0 then begin
-          push_lines [ { spans = [] } ];
-          walk rest
-        end
-        else
-          match fence_open trimmed with
-          | Some (fence, info) ->
-              let rec collect acc = function
-                | [] -> (List.rev acc, [], false)
-                | l :: tl ->
-                    if fence_close fence (String.trim l) then (List.rev acc, tl, true)
-                    else collect (l :: acc) tl
-              in
-              let body_lines, after, closed = collect [] rest in
-              let lang_tag, info_tail = fence_tokens info in
-              let code_bg = Color.of_rgb theme.surface_0 in
-              let code_pad = Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:code_bg () in
-              let gutter_span =
-                {
-                  text = Glyph.to_utf8 Glyph.Left_rail ^ " ";
-                  style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg:code_bg ();
-                  hyperlink = None;
-                }
-              in
-              let gutter_w = Grapheme.display_width gutter_span.text in
-              let inner_w = Int.max 0 (width - gutter_w) in
-              if String.length lang_tag > 0 then begin
-                let hdr_line =
-                  pad_line_to_width ~width ~pad_style:code_pad
-                    {
-                      spans =
-                        [
-                          gutter_span;
-                          {
-                            text = lang_tag;
-                            style = Typography.whisper ~bg:code_bg theme;
-                            hyperlink = None;
-                          };
-                        ];
-                    }
-                in
-                push_lines [ hdr_line ]
-              end;
-              let draw_special_rows ~style rows =
-                List.iter
-                  (fun text ->
-                    let span = { text; style; hyperlink = None } in
-                    let lines =
-                      if Grapheme.display_width text <= inner_w then
-                        [ { spans = [ gutter_span; span ] } ]
-                      else
-                        wrap_styled_spans ~width ~prefix:[ gutter_span ]
-                          ~continuation:[ gutter_span ] [ span ]
-                    in
-                    push_lines (List.map (pad_line_to_width ~width ~pad_style:code_pad) lines))
-                  rows
-              in
-              let rendered =
-                match fence_kind lang_tag info_tail, closed with
-                | Diagram, true ->
-                    (match try_render_mermaid_fence ~inner_w body_lines with
-                    | None -> false
-                    | Some rows ->
-                        let line_style =
-                          Style.make ~fg:(Color.of_rgb theme.status_active) ~bg:code_bg ()
-                        in
-                        let label_style =
-                          Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg:code_bg ()
-                        in
-                        List.iter
-                          (fun row ->
-                            let spans = style_mermaid_row ~line_style ~label_style ~max_width:inner_w row in
-                            push_lines
-                              [ pad_line_to_width ~width ~pad_style:code_pad
-                                  { spans = gutter_span :: spans } ])
-                          rows;
-                        true)
-                | Score { rhythm }, true ->
-                    let source = String.concat "\n" body_lines in
-                    (match Alphatex.render_tab ~rhythm ~max_width:inner_w source with
-                    | Ok rows ->
-                        draw_special_rows ~style:code_pad rows;
-                        true
-                    | Error reason ->
-                        let style = Typography.status ~bg:code_bg theme Theme.Status_attention in
-                        let span = { text = Alphatex.failure_text reason; style; hyperlink = None } in
-                        push_lines
-                          (wrap_styled_spans ~width ~prefix:[ gutter_span ]
-                             ~continuation:[ gutter_span ] [ span ]);
-                        false)
-                | (Diagram | Score _), false | Code, _ -> false
-              in
-              if not rendered then begin
-                  let language = Code_lexer.language_of_tag lang_tag in
-                  let lexed_rows =
-                    Code_lexer.rows_of_source ~language
-                      (String.concat "\n" body_lines)
-                  in
-                  List.iter
-                    (fun row_segs ->
-                      let row_spans =
-                        List.map
-                          (fun (seg : Code_lexer.segment) ->
-                            {
-                              text = seg.text;
-                              style =
-                                Code_lexer.style_of_token ~theme ~bg:code_bg
-                                  seg.kind;
-                              hyperlink = None;
-                            })
-                          row_segs
-                      in
-                      let wrapped =
-                        wrap_styled_spans ~width ~prefix:[ gutter_span ]
-                          ~continuation:[ gutter_span ] row_spans
-                        |> List.map (pad_line_to_width ~width ~pad_style:code_pad)
-                      in
-                      push_lines wrapped)
-                    lexed_rows
-              end;
-              walk after
-          | None -> (
-              match heading_prefix trimmed with
-              | Some (lvl, heading_text) ->
-                  let h_style =
-                    if lvl <= 2 then Typography.anchor ~bg theme
-                    else Typography.structure ~bg ~bold:true theme
-                  in
-                  render_inline_line ~base:h_style ~prefix:[] ~continuation:[]
-                    heading_text;
-                  if lvl = 1 then begin
-                    let rule_w =
-                      Int.min width
-                        (Int.max 12 (Grapheme.display_width heading_text + 2))
-                    in
-                    let rule =
-                      String.concat ""
-                        (List.init rule_w (fun _ -> Glyph.to_utf8 Glyph.Box_h))
-                    in
-                    push_lines
-                      [
-                        {
-                          spans =
-                            [ { text = rule; style = hairline_style; hyperlink = None } ];
-                        };
-                      ]
-                  end;
-                  walk rest
-              | None ->
-                  if is_thematic_break trimmed then begin
-                    let rule =
-                      String.concat ""
-                        (List.init width (fun _ -> Glyph.to_utf8 Glyph.Box_h))
-                    in
-                    push_lines
-                      [
-                        {
-                          spans =
-                            [ { text = rule; style = hairline_style; hyperlink = None } ];
-                        };
-                      ];
-                    walk rest
-                  end
-                  else if Char.equal trimmed.[0] '>' then begin
-                    let body =
-                      String.trim (String.sub trimmed 1 (String.length trimmed - 1))
-                    in
-                    let q_pref =
-                      [
-                        {
-                          text = Glyph.to_utf8 Glyph.Left_rail ^ " ";
-                          style = quote_rail_style;
-                          hyperlink = None;
-                        };
-                      ]
-                    in
-                    render_inline_line ~base:quote_style ~prefix:q_pref
-                      ~continuation:q_pref body;
-                    walk rest
-                  end
-                  else if
-                    String.length trimmed >= 2
-                    && (Char.equal trimmed.[0] '-'
-                       || Char.equal trimmed.[0] '*'
-                       || Char.equal trimmed.[0] '+')
-                    && Char.equal trimmed.[1] ' '
-                  then begin
-                    let body =
-                      String.trim (String.sub trimmed 2 (String.length trimmed - 2))
-                    in
-                    let bullet_text, clean_body, bullet_style =
-                      if starts_at body 0 "[x] " || starts_at body 0 "[X] " then
-                        ( Glyph.to_utf8 Glyph.Check_mark ^ " ",
-                          String.sub body 4 (String.length body - 4),
-                          Typography.status ~bg ~bold:true theme Theme.Status_ok )
-                      else if starts_at body 0 "[ ] " then
-                        ( Glyph.to_utf8 Glyph.Live_idle ^ " ",
-                          String.sub body 4 (String.length body - 4),
-                          muted_style )
-                      else
-                        ( Glyph.to_utf8 Glyph.Separator_dot ^ " ",
-                          body,
-                          accent_style )
-                    in
-                    let pref =
-                      [ { text = "  " ^ bullet_text; style = bullet_style; hyperlink = None } ]
-                    in
-                    let cont =
-                      [ { text = "    "; style = base_style; hyperlink = None } ]
-                    in
-                    render_inline_line ~base:base_style ~prefix:pref
-                      ~continuation:cont clean_body;
-                    walk rest
-                  end
-                  else
-                    match ordered_list_prefix trimmed with
-                    | Some (num, body) ->
-                        let pref_text = "  " ^ num ^ " " in
-                        let cont_text =
-                          String.make (Grapheme.display_width pref_text) ' '
-                        in
-                        let pref =
-                          [
-                            {
-                              text = pref_text;
-                              style = Typography.structure ~bg theme;
-                              hyperlink = None;
-                            };
-                          ]
-                        in
-                        let cont =
-                          [ { text = cont_text; style = base_style; hyperlink = None } ]
-                        in
-                        render_inline_line ~base:base_style ~prefix:pref
-                          ~continuation:cont body;
-                        walk rest
-                    | None -> (
-                        match (split_table_cells trimmed, rest) with
-                        | Some header_cells, next_line :: after_rule
-                          when is_table_rule next_line ->
-                            let rec collect_rows acc = function
-                              | r :: tl -> (
-                                  match split_table_cells r with
-                                  | Some cells -> collect_rows (cells :: acc) tl
-                                  | None -> (List.rev acc, r :: tl))
-                              | [] -> (List.rev acc, [])
-                            in
-                            let body_rows, remaining = collect_rows [] after_rule in
-                            let col_count = Int.max 1 (List.length header_cells) in
-                            let sep_w = 3 * (col_count - 1) in
-                            let col_w = Int.max 4 ((width - sep_w) / col_count) in
-                            let format_trow style cells =
-                              let padded =
-                                List.init col_count (fun i ->
-                                    let cell =
-                                      match List.nth_opt cells i with
-                                      | Some c -> c
-                                      | None -> ""
-                                    in
-                                    let fit =
-                                      Grapheme.truncate_to_width ~max_width:col_w cell
-                                    in
-                                    let pad =
-                                      Int.max 0 (col_w - Grapheme.display_width fit)
-                                    in
-                                    fit ^ String.make pad ' ')
-                              in
-                              let sep = " " ^ Glyph.to_utf8 Glyph.Box_v ^ " " in
-                              {
-                                spans =
-                                  [
-                                    {
-                                      text = String.concat sep padded;
-                                      style;
-                                      hyperlink = None;
-                                    };
-                                  ];
-                              }
-                            in
-                            let hdr_bg = Color.of_rgb theme.surface_2 in
-                            let hdr_style =
-                              Typography.structure ~bg:hdr_bg ~bold:true theme
-                            in
-                            let rule_line =
-                              {
-                                spans =
-                                  [
-                                    {
-                                      text =
-                                        String.concat ""
-                                          (List.init width (fun _ -> Glyph.to_utf8 Glyph.Box_h));
-                                      style = hairline_style;
-                                      hyperlink = None;
-                                    };
-                                  ];
-                              }
-                            in
-                            push_lines
-                              (pad_line_to_width ~width ~pad_style:hdr_style
-                                 (format_trow hdr_style header_cells)
-                               :: rule_line
-                               :: List.map (format_trow base_style) body_rows);
-                            walk remaining
-                        | _ ->
-                            render_inline_line ~base:base_style ~prefix:[]
-                              ~continuation:[] line;
-                            walk rest)))
-  in
-  walk raw_lines;
-  List.rev !out
+  if safe_link_depth raw then render_document ~theme ~width ~osc8 ~base_style raw
+  else render_literal ~width ~base_style raw
 
 let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
   let width = Int.max 8 width in

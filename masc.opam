@@ -22,6 +22,7 @@ depends: [
   "ocaml-msx"
   "ocaml-dos"
   "conf-ncurses" {build}
+  "cmarkit" {= "0.4.0"}
   "re" {>= "1.10"}
   "ptime" {>= "1.2"}
   "zarith"

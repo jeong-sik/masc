@@ -2285,6 +2285,43 @@ let test_markdown_parse_inline_linear_unmatched_delimiters () =
          String.equal s.text "site"
          && Option.equal String.equal s.hyperlink (Some "https://example.com"))
        spans);
+  let targets =
+    List.init 12 (fun index -> Printf.sprintf "https://example.com/files/%d" index)
+  in
+  let code_links =
+    List.mapi
+      (fun index target -> Printf.sprintf "[``file[`%d]``](%s)" index target)
+      targets
+  in
+  let rows prefix suffix =
+    List.map (fun link -> prefix ^ link ^ suffix) code_links |> String.concat "\r\n"
+  in
+  List.iter
+    (fun (context, source) ->
+      let linked_spans =
+        Markdown.render_lines ~theme ~width:120 ~osc8:true source
+        |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+      in
+      List.iter
+        (fun target ->
+          Alcotest.(check bool) (context ^ " keeps the OSC 8 link " ^ target) true
+            (List.exists
+               (fun (span : Markdown.styled_span) ->
+                 Option.equal String.equal span.hyperlink (Some target))
+               linked_spans))
+        targets)
+    [ ("tight list", rows "- " "");
+      ("ordered list", rows "1. " "");
+      ("nested list in quote", "> - Files\r\n" ^ rows ">   - " "");
+      ("table", "| File |\r\n| --- |\r\n" ^ rows "| " " |");
+      ("paragraph", String.concat " " code_links) ];
+  let nested = "- " ^ String.make 20 '[' ^ "[site](https://example.com)" in
+  let fallback =
+    Markdown.render_lines ~theme ~width:120 ~osc8:true nested
+    |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+  in
+  Alcotest.(check bool) "over-deep labels inside one bullet keep literal source" true
+    (List.for_all (fun (span : Markdown.styled_span) -> Option.is_none span.hyperlink) fallback);
   let pathological =
     [
       String.concat " " (List.init 10_000 (fun _ -> "_a"));

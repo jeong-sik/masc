@@ -26,8 +26,9 @@ val render_lines :
   ?base_style:Style.t ->
   string ->
   rendered_line list
-(** Parse and wrap Markdown into styled terminal lines of at most [width]
-    columns. Fenced [mermaid] code blocks within safety bounds are rendered
+(** Parse CommonMark with tables, strike-through and task-list extensions.
+    Wrap styled rows to [width] columns (minimum eight). Closed [mermaid]
+    fences within the inline renderer limits are rendered
     inline via {!Mermaid.render_adaptive}. The [pele] fence uses the same
     text drawing. Fenced [alphatex] and [atex] are drawn as tablature via
     {!Alphatex.render_tab}. Unsupported input keeps its code and, for scores,
@@ -35,6 +36,10 @@ val render_lines :
     links attach their URI to {!styled_span.hyperlink} for OSC 8 interning;
     when [false], links include a muted italic [" (target)"] preview so the
     destination stays visible. *)
+
+val render_literal :
+  width:int -> base_style:Style.t -> string -> rendered_line list
+(** Wrap plain text with line breaks preserved and without Markdown parsing. *)
 
 val draw :
   Cell_grid.t ->

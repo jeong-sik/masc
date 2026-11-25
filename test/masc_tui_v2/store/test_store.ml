@@ -1004,6 +1004,10 @@ let test_workspace_mismatch_recovery () =
   in
   let m0 =
     { initial with
+      fleet =
+        { initial.fleet with
+          sandbox_profiles =
+            Fleet_store.String_map.singleton "alpha" Wire_fleet.Profile_docker };
       infra =
         Infra_store.set_keeper_sandbox ~keeper:"alpha"
           (Observed.value ~observed_at:t0 prior) infra }
@@ -1034,6 +1038,7 @@ let test_workspace_mismatch_recovery () =
     true
     (Option.is_none (Observed.to_option m1.infra.sandboxes)
      && not m1.infra.sandboxes_fallback_404
+     && Option.is_none (Fleet_store.sandbox_profile_of ~keeper:"alpha" m1.fleet)
      && Option.is_none
           (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m1.infra
            |> Infra_store.keeper_sandbox_detail));
@@ -1115,7 +1120,17 @@ let test_workspace_mismatch_recovery () =
     true
     (Option.is_none
        (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" after_failure.infra
-        |> Infra_store.keeper_sandbox_detail))
+        |> Infra_store.keeper_sandbox_detail));
+  let unavailable =
+    Msg.Reply_sandboxes
+      (Error (Msg.Http_error { status = 404; body = ""; api_error = None }))
+  in
+  let fallback, _ =
+    Update.step ~now:t2 after_failure
+      (Msg.Http_reply { epoch = after_failure.epoch; reply = unavailable })
+  in
+  Alcotest.(check (option string)) "roster fallback cannot reconstruct a previous workspace's Keeper"
+    None (Infra_store.selected_sandbox_keeper fallback.infra)
 
 (* 5. Subscriptions.plan bounded across all 6 workspaces + zero idle polling *)
 let test_subscriptions_bounded_and_zero_polling () =

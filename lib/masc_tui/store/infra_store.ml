@@ -292,9 +292,6 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
   let dockers = ref [] in
   List.iter
     (fun (keeper, prof) ->
-      let is_running =
-        Option.value ~default:false (Hashtbl.find_opt running_tbl keeper)
-      in
       match prof with
       | Wire_fleet.Profile_microvm ->
           (* Without /api/v1/infra/sandboxes we have no live agent socket
@@ -317,11 +314,17 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
           in
           microvms := guest :: !microvms
       | Wire_fleet.Profile_remote_ssh ->
+          let binding_state =
+            match Hashtbl.find_opt running_tbl keeper with
+            | Some true -> "active"
+            | Some false -> "idle"
+            | None -> "unobserved"
+          in
           let row : Wire_infra.ssh_unbound_keeper =
             {
               keeper;
               backend = "remote_ssh";
-              binding_state = (if is_running then "active" else "idle");
+              binding_state;
               remote_endpoint = None;
               metrics_24h = empty_tool_metrics_24h;
             }

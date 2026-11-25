@@ -2,7 +2,13 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
-  let m = { m with infra = Infra_store.clear_sandbox_observations m.infra } in
+  let m =
+    {
+      m with
+      infra = Infra_store.clear_sandbox_observations m.infra;
+      fleet = { m.fleet with sandbox_profiles = Fleet_store.String_map.empty };
+    }
+  in
   let exp_s = match expected with Some s -> s | None -> "?" in
   let obs_s = match observed with Some s -> s | None -> "?" in
   let summary =
@@ -4780,16 +4786,19 @@ let apply_http_reply ~now (m : Model.t) reply =
       match err with
       | Msg.Http_error { status = 404; _ } ->
           let keepers =
-            match Observed.to_option m.fleet.keepers with
-            | Some ks -> ks
-            | None -> []
+            if Observed.is_stale m.fleet.keepers then []
+            else Option.value ~default:[] (Observed.to_option m.fleet.keepers)
+          in
+          let tool_series_totals =
+            if Observed.is_stale m.runtime.tool_series then None
+            else Runtime_store.tool_series_totals m.runtime
           in
           let infra =
             Infra_store.apply_sandboxes_fallback ~observed_at:now
               ~wall_unix:m.freshness.last_wall_unix ~keepers
               ~sandbox_profiles:
                 (Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-              ~tool_series_totals:(Runtime_store.tool_series_totals m.runtime)
+              ~tool_series_totals
               m.infra
           in
           finish_fleet_sandboxes infra m

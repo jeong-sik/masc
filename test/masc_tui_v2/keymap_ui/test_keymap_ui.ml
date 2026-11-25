@@ -2369,7 +2369,16 @@ let test_markdown_inline_mermaid_blocks () =
   Alcotest.(check int) "draw empty rect == 0" 0
     (Markdown.draw empty_grid ~rect:(Rect.make ~x:0 ~y:0 ~w:0 ~h:5) ~theme
        ~osc8:true md_lr);
-  ignore (check_parity ~width:4 md_lr);
+  (* render_lines raises a tiny width to its floor, so only the line count
+     is compared here. *)
+  let total_w4 =
+    List.length (Markdown.render_lines ~theme ~width:4 ~osc8:true md_lr)
+  in
+  let grid_w4 = Cell_grid.create ~cols:4 ~rows:(max 4 (total_w4 + 2)) in
+  Alcotest.(check int) "width=4 draw == render_lines length" total_w4
+    (Markdown.draw grid_w4
+       ~rect:(Rect.make ~x:0 ~y:0 ~w:4 ~h:(max 4 (total_w4 + 2)))
+       ~theme ~osc8:true md_lr);
 
   (* 5. Parse-error mermaid falls back cleanly to raw source lines with exact parity *)
   let md_parse_err = "```mermaid\nflowchart TD\nA[\"bad\"]::: --> B\n```" in

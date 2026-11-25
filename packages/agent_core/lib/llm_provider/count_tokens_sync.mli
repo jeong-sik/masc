@@ -11,6 +11,18 @@
     string carried by custom or proxy configurations. *)
 val count_tokens_url : Provider_config.t -> string
 
+(** The Gemini [countTokens] body for the request {!Backend_gemini.build_request}
+    builds from [messages] and [tools]. A Vertex AI publisher base URL
+    ({!Vertex_endpoint.parse_base_url}) gets a top-level [CountTokensRequest]
+    holding [contents], [systemInstruction], [tools] and [generationConfig];
+    any other base URL gets the Gemini Developer API shape,
+    [{"generateContentRequest": {"model": "models/<model_id>", ...}}]. *)
+val gemini_count_tokens_body
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> (string, Http_client.http_error) result
+
 (** Exact provider-owned measurement of one fully prepared completion request.
 
     The caller supplies the immutable {!Llm_transport.completion_request} that

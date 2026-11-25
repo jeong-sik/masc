@@ -6,6 +6,33 @@
 
     @since 0.205.9 *)
 
+type gemini_target =
+  { base_url : string
+  ; model_resource : string
+  }
+
+let gemini_target ~(config : Provider_config.t) =
+  let base_url = config.base_url in
+  let rec end_of_base length =
+    if length > 0 && Char.equal base_url.[length - 1] '/'
+    then end_of_base (length - 1)
+    else length
+  in
+  let base_url = String.sub base_url 0 (end_of_base (String.length base_url)) in
+  let model_resource =
+    if String.starts_with ~prefix:"models/" config.model_id
+    then config.model_id
+    else "models/" ^ config.model_id
+  in
+  { base_url; model_resource }
+;;
+
+let gemini_model_url target method_name =
+  Printf.sprintf "%s/%s:%s" target.base_url target.model_resource method_name
+;;
+
+let gemini_count_tokens_url target = gemini_model_url target "countTokens"
+
 (** Construct the URL for a Gemini API call.
     Sync: [base_url/models/model_id:generateContent]
     Stream: [base_url/models/model_id:streamGenerateContent?alt=sse]
@@ -14,9 +41,7 @@
     [x-goog-api-key] header via {!Provider_config.auth_headers_for_config}. *)
 let gemini_url ~(config : Provider_config.t) ~stream =
   let method_name = if stream then "streamGenerateContent" else "generateContent" in
-  let base =
-    Printf.sprintf "%s/models/%s:%s" config.base_url config.model_id method_name
-  in
+  let base = gemini_model_url (gemini_target ~config) method_name in
   if stream then base ^ "?alt=sse" else base
 ;;
 

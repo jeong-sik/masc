@@ -1051,6 +1051,135 @@ let test_transport_success () =
     body
 ;;
 
+(* Gemini counts through models/{model}:countTokens with the whole
+   generateContent body wrapped as generateContentRequest, so the count is of
+   the request the dispatch sends (system instruction and tools included). *)
+let gemini_config ?(model_id = "input-count-fixture") base_url =
+  Provider_config.make
+    ~kind:Provider_config.Gemini
+    ~model_id
+    ~base_url
+    ~api_key:"test-key"
+    ~max_context:512
+    ~system_prompt:"Count the exact projected input."
+    ()
+;;
+
+(* Text only: the count must reach the mock server, which waits for one
+   request. The image and tool-result fixtures above are Anthropic-shaped
+   cases; the Gemini wire for them is covered by test_backend_gemini. *)
+let gemini_messages = [ msg User [ Text "Inspect artifact.png" ] ]
+
+(* Built before any server waits on a request, so a body the builder refuses
+   fails here with its reason instead of leaving the mock waiting. *)
+let gemini_body_or_fail config =
+  match
+    Count_tokens_sync.gemini_count_tokens_body ~config ~messages:gemini_messages ~tools:[ tool ]
+  with
+  | Ok body -> body
+  | Error (Http_client.AcceptRejected { reason }) -> fail ("Gemini count body refused: " ^ reason)
+  | Error _ -> fail "Gemini count body refused before dispatch"
+;;
+
+let test_gemini_transport_success () =
+  ignore (gemini_body_or_fail (gemini_config "https://generativelanguage.googleapis.com/v1beta"));
+  let result, (path, headers, body) =
+    with_mock ~status:`OK ~response:{|{"totalTokens":91}|}
+    @@ fun ~sw ~net ~base_url ->
+    let config = gemini_config ~model_id:"models/input-count-fixture" (base_url ^ "/") in
+    check
+      string
+      "Gemini generation shares the count model route"
+      (base_url ^ "/models/input-count-fixture:streamGenerateContent?alt=sse")
+      (Complete_sampling.gemini_url ~config ~stream:true);
+    (* Fail inside the server's scope: a measurement that stops before
+       dispatch would otherwise leave the mock waiting for a request. *)
+    match
+      Count_tokens_sync.measure_completion_request
+        ~sw
+        ~net
+        { (completion_request config) with messages = gemini_messages }
+    with
+    | Ok _ as ok -> ok
+    | Error (Count_tokens_sync.Input_count_failed (Count.Transport (Http_client.AcceptRejected { reason }))) ->
+      fail ("Gemini count refused before dispatch: " ^ reason)
+    | Error (Count_tokens_sync.Input_count_failed (Count.Unsupported _)) ->
+      fail "Gemini count reported Unsupported"
+    | Error (Count_tokens_sync.Output_token_resolution_failed _) ->
+      fail "Gemini output-token receipt failed before dispatch"
+    | Error _ as error -> error
+  in
+  (match result with
+   | Ok measurement ->
+     check int "Gemini input tokens" 91 measurement.input_count.input_tokens;
+     check
+       bool
+       "Gemini protocol"
+       true
+       (Count.equal_protocol measurement.input_count.protocol Count.Gemini_count_tokens)
+   | Error _ -> fail "expected native Gemini count success");
+  check string "Gemini count path" "/models/input-count-fixture:countTokens" path;
+  check
+    (option string)
+    "Gemini api key header"
+    (Some "test-key")
+    (Cohttp.Header.get headers "x-goog-api-key");
+  let expected =
+    match
+      Backend_gemini.build_request
+        ~config:(gemini_config "unused")
+        ~messages:gemini_messages
+        ~tools:[ tool ]
+        ()
+      |> Yojson.Safe.from_string
+    with
+    | `Assoc fields ->
+      `Assoc
+        [ ( "generateContentRequest"
+          , `Assoc (("model", `String "models/input-count-fixture") :: fields) )
+        ]
+    | _ -> fail "Gemini request body is not an object"
+  in
+  check
+    string
+    "Gemini count body wraps the generateContent body"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (Yojson.Safe.from_string body))
+;;
+
+let test_gemini_vertex_count_body_is_top_level () =
+  let base_url =
+    match Vertex_endpoint.base_url ~project:"count-fixture" ~location:(Regional "us-central1") with
+    | Ok url -> url
+    | Error detail -> fail detail
+  in
+  let config = gemini_config ~model_id:"models/input-count-fixture" (base_url ^ "/") in
+  let target = Complete_sampling.gemini_target ~config in
+  check
+    string
+    "Vertex count model path"
+    (base_url ^ "/models/input-count-fixture:countTokens")
+    (Complete_sampling.gemini_count_tokens_url target);
+  let body = gemini_body_or_fail config in
+  (match Yojson.Safe.from_string body with
+     | `Assoc fields ->
+       check
+         (list string)
+         "Vertex CountTokensRequest takes only its own top-level fields"
+         [ "contents"; "generationConfig"; "systemInstruction"; "tools" ]
+         (List.map fst fields |> List.sort compare)
+     | _ -> fail "Vertex count body is not an object")
+;;
+
+let test_gemini_admission_selects_exact_fit () =
+  check
+    bool
+    "Gemini is measured before dispatch"
+    true
+    (Count_tokens_sync.supports_completion_request_measurement
+       (gemini_config "https://generativelanguage.googleapis.com/v1beta"))
+;;
+
 let test_kimi_transport_success () =
   let result, (path, headers, body) =
     with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
@@ -2955,6 +3084,15 @@ let () =
             `Quick
             test_unsupported_provider_blocks_stream_dispatch
         ; test_case "typed HTTP error" `Quick test_transport_error
+        ; test_case "Gemini countTokens transport" `Quick test_gemini_transport_success
+        ; test_case
+            "Gemini Vertex count body is top-level"
+            `Quick
+            test_gemini_vertex_count_body_is_top_level
+        ; test_case
+            "Gemini admission measures before dispatch"
+            `Quick
+            test_gemini_admission_selects_exact_fit
         ; test_case "non-Anthropic unsupported" `Quick test_unsupported
         ; test_case
             "missing output ceiling precedes I/O"

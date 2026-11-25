@@ -27,6 +27,66 @@ let transport_error_stage = function
     Measurement_response_received status, error
 ;;
 
+let post_count_request
+      ?connection_cache
+      ?clock
+      ?timeout_s
+      ~net
+      ~protocol
+      ~(config : Provider_config.t)
+      ~url
+      ~headers
+      ~body
+      ()
+  =
+  let open Result.Syntax in
+  let* auth_headers =
+    Provider_config.resolve_auth_headers config
+    |> Result.map_error (fun reason ->
+      Count_failed
+        ( Input_token_count.Transport (Http_client.AcceptRejected { reason })
+        , Measurement_before_dispatch ))
+  in
+  match
+    Http_client.post_sync_once_with_evidence
+      ?cache:connection_cache
+      ?clock
+      ?body_timeout_s:timeout_s
+      ~net
+      ~url
+      ~headers:
+        (headers
+         @ auth_headers
+         @ [ "Content-Type", "application/json"
+           ; "Content-Length", string_of_int (String.length body)
+           ])
+      ~body
+      ()
+  with
+  | Error transport_error ->
+    let stage, error = transport_error_stage transport_error in
+    Error (Count_failed (Input_token_count.Transport error, stage))
+  | Ok receipt ->
+    let response = receipt.Http_client.response in
+    let response_body =
+      if response.status >= 200 && response.status < 300
+      then Ok response.body
+      else
+        Error
+          (Http_client.HttpError
+             { code = response.status
+             ; body = receipt.body_receipt
+             ; retry_after_header = response.retry_after_header
+             })
+    in
+    Input_token_count.decode_transport_result
+      ~protocol
+      ~model_id:config.model_id
+      response_body
+    |> Result.map_error (fun error ->
+      Count_failed (error, Measurement_response_received response.status))
+;;
+
 let count_anthropic_staged
       ?connection_cache
       ?clock
@@ -41,63 +101,24 @@ let count_anthropic_staged
   let protocol = Input_token_count.Anthropic_messages_count_tokens in
   match config.kind with
   | Provider_config.Anthropic | Provider_config.Kimi ->
-    let request_body =
-      try
-        Ok (Backend_anthropic.build_count_tokens_request ~config ~messages ~tools ())
-      with
-      | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
-    in
-    let result =
-      match request_body with
-      | Error error ->
-        Error
-          (Count_failed (Input_token_count.Transport error, Measurement_before_dispatch))
-      | Ok body ->
-        let open Result.Syntax in
-        let* auth_headers = Provider_config.resolve_auth_headers config
-          |> Result.map_error (fun reason ->
-            Count_failed (Input_token_count.Transport (Http_client.AcceptRejected { reason }), Measurement_before_dispatch)) in
-        let transport =
-          Http_client.post_sync_once_with_evidence
-            ?cache:connection_cache
-            ?clock
-            ?body_timeout_s:timeout_s
-            ~net
-            ~url:(count_tokens_url config)
-            ~headers:
-              (Backend_anthropic.request_headers ~body config.headers
-               @ auth_headers
-               @ [ "Content-Type", "application/json"
-                 ; "Content-Length", string_of_int (String.length body)
-                 ])
-            ~body
-            ()
-        in
-        (match transport with
-         | Error transport_error ->
-           let stage, error = transport_error_stage transport_error in
-           Error (Count_failed (Input_token_count.Transport error, stage))
-         | Ok receipt ->
-           let response = receipt.Http_client.response in
-           let response_body =
-             if response.status >= 200 && response.status < 300
-             then Ok response.body
-             else
-               Error
-                 (Http_client.HttpError
-                    { code = response.status
-                    ; body = receipt.body_receipt
-                    ; retry_after_header = response.retry_after_header
-                    })
-           in
-           Input_token_count.decode_transport_result
-             ~protocol
-             ~model_id:config.model_id
-             response_body
-           |> Result.map_error (fun error ->
-             Count_failed (error, Measurement_response_received response.status)))
-    in
-    result
+    (match Backend_anthropic.build_count_tokens_request ~config ~messages ~tools () with
+     | exception Invalid_argument reason ->
+       Error
+         (Count_failed
+            ( Input_token_count.Transport (Http_client.AcceptRejected { reason })
+            , Measurement_before_dispatch ))
+     | body ->
+       post_count_request
+         ?connection_cache
+         ?clock
+         ?timeout_s
+         ~net
+         ~protocol
+         ~config
+         ~url:(count_tokens_url config)
+         ~headers:(Backend_anthropic.request_headers ~body config.headers)
+         ~body
+         ())
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini
@@ -106,6 +127,84 @@ let count_anthropic_staged
       (Count_failed
          ( Input_token_count.Unsupported { protocol; model_id = config.model_id }
          , Measurement_before_dispatch ))
+;;
+
+(* Gemini [models/{model}:countTokens] counts a whole request: system
+   instruction, tools and generation config included. The body comes from
+   {!Backend_gemini.build_request} for the same messages and tools, so the
+   count is of the request the dispatch sends. Both routes use the same
+   canonical model ({!Complete_sampling.gemini_target}).
+
+   The two Gemini endpoints take different count bodies:
+   - Gemini Developer API: [{"generateContentRequest": {"model": "models/<id>", ...}}]
+     (aistudio.google.com/api-reference/tokens).
+   - Vertex AI publisher endpoint ([Vertex_endpoint.parse_base_url] accepts
+     the base URL): a top-level [CountTokensRequest] with [contents],
+     [systemInstruction], [tools] and [generationConfig]; the model comes
+     from the URL (cloud.google.com aiplatform.v1 CountTokensRequest). *)
+let vertex_count_tokens_fields = [ "contents"; "systemInstruction"; "tools"; "generationConfig" ]
+
+let build_gemini_count_tokens_body
+      ~(target : Complete_sampling.gemini_target)
+      ~config
+      ~messages
+      ~tools
+  =
+  match Backend_gemini.build_request ~config ~messages ~tools () |> Yojson.Safe.from_string with
+  | `Assoc fields ->
+    (match Vertex_endpoint.parse_base_url target.base_url with
+     | Ok (_ : string * Vertex_endpoint.location) ->
+       Ok
+         (Yojson.Safe.to_string
+            (`Assoc
+                (List.filter
+                   (fun (name, _) -> List.mem name vertex_count_tokens_fields)
+                   fields)))
+     | Error (_ : string) ->
+       Ok
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ ( "generateContentRequest"
+                  , `Assoc (("model", `String target.model_resource) :: fields) )
+                ])))
+  | _ ->
+    Error (Http_client.AcceptRejected { reason = "Gemini request body is not a JSON object" })
+  | exception Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
+  | exception Yojson.Json_error reason -> Error (Http_client.AcceptRejected { reason })
+;;
+
+let gemini_count_tokens_body ~config ~messages ~tools =
+  let target = Complete_sampling.gemini_target ~config in
+  build_gemini_count_tokens_body ~target ~config ~messages ~tools
+;;
+
+let count_gemini_staged
+      ?connection_cache
+      ?clock
+      ?timeout_s
+      ~net
+      ~(config : Provider_config.t)
+      ~messages
+      ~tools
+      ()
+  =
+  let protocol = Input_token_count.Gemini_count_tokens in
+  let target = Complete_sampling.gemini_target ~config in
+  match build_gemini_count_tokens_body ~target ~config ~messages ~tools with
+  | Error error ->
+    Error (Count_failed (Input_token_count.Transport error, Measurement_before_dispatch))
+  | Ok body ->
+    post_count_request
+      ?connection_cache
+      ?clock
+      ?timeout_s
+      ~net
+      ~protocol
+      ~config
+      ~url:(Complete_sampling.gemini_count_tokens_url target)
+      ~headers:config.headers
+      ~body
+      ()
 ;;
 
 type completion_request_measurement =
@@ -123,11 +222,8 @@ type completion_request_dispatch_error =
 
 let supports_completion_request_measurement (config : Provider_config.t) =
   match config.kind with
-  | Provider_config.Anthropic | Provider_config.Kimi -> true
-  | Provider_config.OpenAI_compat
-  | Provider_config.Ollama
-  | Provider_config.Gemini
-  | Provider_config.Glm -> false
+  | Provider_config.Anthropic | Provider_config.Kimi | Provider_config.Gemini -> true
+  | Provider_config.OpenAI_compat | Provider_config.Ollama | Provider_config.Glm -> false
 ;;
 
 let measure_completion_request_staged
@@ -138,43 +234,58 @@ let measure_completion_request_staged
       ~net
       (request : Llm_transport.completion_request)
   =
-  let config = request.config in
-  if supports_completion_request_measurement config
-  then (
-    let config = Provider_config.freeze_for_request config in
-    let output_token_receipt =
-      Backend_anthropic.required_output_token_receipt config
-      |> Result.map_error (fun error ->
-        Completion_request_failed
-          (Output_token_resolution_failed error, Measurement_before_dispatch))
-    in
-    match output_token_receipt with
-    | Error _ as error -> error
-    | Ok output_token_receipt ->
-      (match
-         count_anthropic_staged
-           ?connection_cache
-           ?clock
-           ?timeout_s
-           ~sw
-           ~net
-           ~config
-           ~messages:request.messages
-           ~tools:request.tools
-           ()
-       with
-       | Error (Count_failed (error, stage)) ->
-         Error (Completion_request_failed (Input_count_failed error, stage))
-       | Ok input_count -> Ok { input_count; output_token_receipt }))
-  else
-    Error
-      (Completion_request_failed
-         ( Input_count_failed
-             (Input_token_count.Unsupported
-                { protocol = Input_token_count.Anthropic_messages_count_tokens
-                ; model_id = config.model_id
-                })
-         , Measurement_before_dispatch ))
+  let config = Provider_config.freeze_for_request request.config in
+  let before_dispatch error =
+    Error (Completion_request_failed (error, Measurement_before_dispatch))
+  in
+  let with_input_count output_token_receipt = function
+    | Error (Count_failed (error, stage)) ->
+      Error (Completion_request_failed (Input_count_failed error, stage))
+    | Ok input_count -> Ok { input_count; output_token_receipt }
+  in
+  match config.kind with
+  | Provider_config.Anthropic | Provider_config.Kimi ->
+    (match Backend_anthropic.required_output_token_receipt config with
+     | Error error -> before_dispatch (Output_token_resolution_failed error)
+     | Ok output_token_receipt ->
+       count_anthropic_staged
+         ?connection_cache
+         ?clock
+         ?timeout_s
+         ~sw
+         ~net
+         ~config
+         ~messages:request.messages
+         ~tools:request.tools
+         ()
+       |> with_input_count output_token_receipt)
+  | Provider_config.Gemini ->
+    (match
+       Input_budget.resolve_output_token_receipt
+         ~envelope:
+           (Provider_http_codec.output_token_envelope
+              Provider_http_codec.gemini_generate_content)
+         config
+     with
+     | Error error -> before_dispatch (Output_token_resolution_failed error)
+     | Ok output_token_receipt ->
+       count_gemini_staged
+         ?connection_cache
+         ?clock
+         ?timeout_s
+         ~net
+         ~config
+         ~messages:request.messages
+         ~tools:request.tools
+         ()
+       |> with_input_count output_token_receipt)
+  | Provider_config.OpenAI_compat | Provider_config.Ollama | Provider_config.Glm ->
+    before_dispatch
+      (Input_count_failed
+         (Input_token_count.Unsupported
+            { protocol = Input_token_count.Anthropic_messages_count_tokens
+            ; model_id = config.model_id
+            }))
 ;;
 
 let measure_completion_request ?connection_cache ?clock ?timeout_s ~sw ~net request =

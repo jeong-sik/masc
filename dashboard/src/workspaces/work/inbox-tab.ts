@@ -987,7 +987,7 @@ export function InboxTab(props: WorkspaceViewProps) {
             </div>
             ${goalConfError && html`<div class="wk-notice wk-notice--err" role="alert">${goalConfError}</div>`}
             ${goalConfEvidence && html`
-              <pre class="wk-code-preview">${goalConfEvidence.evidence}</pre>
+              <${MarkdownContent} class="wk-prose" text=${goalConfEvidence.evidence} />
               <${TargetLockedAction}
                 target=${{
                   workspaceId: wsId,

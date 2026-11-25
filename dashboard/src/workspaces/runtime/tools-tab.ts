@@ -12,6 +12,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import {
@@ -126,6 +127,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   // Skills editor state
   const [selectedSkill, setSelectedSkill] = useState<SkillSummaryItem | null>(null)
   const [skillSource, setSkillSource] = useState('')
+  const [skillReading, setSkillReading] = useState(true)
   const [skillAccess, setSkillAccess] = useState<'read_only' | 'read_write'>('read_only')
   const [skillPreviewNote, setSkillPreviewNote] = useState<string | null>(null)
   const [skillBusy, setSkillBusy] = useState(false)
@@ -446,6 +448,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     const ctrl = new AbortController()
     skillReadRef.current = ctrl
     setSelectedSkill(skill)
+    setSkillReading(true)
     setSkillSource('')
     setSkillPreviewNote(null)
     setSkillBusy(true)
@@ -779,6 +782,9 @@ export function ToolsTab(_props: WorkspaceViewProps) {
               <h3>${selectedSkill ? `SKILL.md · ${selectedSkill.identity.name}` : 'SKILL.md 뷰어 / 편집기'}</h3>
               ${selectedSkill && html`
                 <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+                  <button type="button" class="btn-ghost" aria-pressed=${!skillReading} onClick=${() => setSkillReading(value => !value)}>
+                    ${skillReading ? '원문' : '읽기'}
+                  </button>
                   <button type="button" class="btn-ghost" disabled=${skillBusy} onClick=${handlePreviewSkill}>미리보기 검증</button>
                   <button type="button" class="btn-primary" disabled=${skillBusy || skillAccess !== 'read_write'} onClick=${handleSaveSkill}>저장</button>
                 </div>
@@ -786,7 +792,9 @@ export function ToolsTab(_props: WorkspaceViewProps) {
             </div>
             ${skillPreviewNote && html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--info-fg)' }}>${skillPreviewNote}</div>`}
             ${selectedSkill
-              ? html`
+              ? skillReading
+                ? html`<${MarkdownContent} text=${skillSource} document />`
+                : html`
                   <textarea
                     rows=${14}
                     readOnly=${skillAccess !== 'read_write'}

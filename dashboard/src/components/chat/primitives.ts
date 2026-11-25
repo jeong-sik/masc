@@ -46,6 +46,7 @@ import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
 import { useInViewOnce } from '../common/use-in-view'
+import { enhanceRichCode, richCodeKind } from '../common/rich-code-preview'
 import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { hashForRoute, navigate } from '../../router'
@@ -1055,10 +1056,16 @@ async function copyWithToast(text: string, successMessage: string): Promise<void
 
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
   const codeId = useId()
+  const root = useRef<HTMLDivElement>(null)
   const plain = codeBlockText(htmlContent, source)
+  const kind = cap && richCodeKind(cap.split(/\s+/, 1)[0] ?? '')
+  useEffect(() => {
+    if (kind && root.current) return enhanceRichCode(root.current)
+    return undefined
+  }, [kind, htmlContent])
 
   return html`
-    <div class="chat-block-code" data-chat-block="code">
+    <div ref=${root} class="chat-block-code" data-chat-block="code">
       <div class="chat-block-code-hd">
         ${cap ? html`<span class="chat-block-code-cap">${cap}</span>` : html`<span class="chat-block-code-cap" />`}
         <button
@@ -1071,7 +1078,7 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
           복사
         </button>
       </div>
-      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>
+      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code class=${kind ? `language-${kind}` : undefined} dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>
     </div>
   `
 }

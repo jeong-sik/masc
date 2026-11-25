@@ -55,6 +55,7 @@ import {
   nextToolsMode,
   parseChatMessageBlocks,
   prettyFormatPayload,
+  toolResultMarkdownPreview,
   saveChatBlockPrefs,
   shouldRenderChatEntry,
   summarizeCompact,
@@ -248,6 +249,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [liveToolPulse, setLiveToolPulse] = useState<KeeperLiveToolPulse | null>(null)
 
   const chatListRef = useRef<HTMLDivElement>(null)
+  const chatFeedRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const voiceInputRef = useRef<HTMLInputElement>(null)
@@ -352,6 +354,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       el.scrollTo({ top: el.scrollHeight, behavior })
     }
   }, [])
+
+  useEffect(() => {
+    const feed = chatFeedRef.current
+    if (!feed || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollToBottom()
+    })
+    observer.observe(feed)
+    return () => observer.disconnect()
+  }, [scrollToBottom])
 
   const handleChatScroll = useCallback(() => {
     const el = chatListRef.current
@@ -1562,6 +1574,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const progressText = formatToolResultProgress(cachedRes)
     const isExpandedPre = expandedPreKeys[preKey] === true
     const isLong = isLongToolOutput(text)
+    const markdown = opts && (cachedRes?.status !== 'loaded' || (cachedRes.eof && !cachedRes.isBinary))
+      ? toolResultMarkdownPreview(text) : null
+    const raw = html`<pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>`
     const showPager = Boolean(
       executionId
       && cachedRes?.status === 'loaded'
@@ -1602,7 +1617,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `}
         </div>
       </div>
-      <pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>
+      ${markdown === null ? raw : html`
+        <${MarkdownContent} text=${markdown} />
+        <details open=${isExpandedPre || undefined}>
+          <summary>저장 참조</summary>
+          ${raw}
+        </details>
+      `}
       ${showPager && html`
         <div class="kp-tool-result-pager" data-testid="tool-result-pager">
           <span class="kp-pill" data-tone="warn">
@@ -1742,11 +1763,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const renderToolCard = (tb: ChatToolBlock, idx: number, keyPrefix: string) => {
     const cachedRes = tb.executionId ? toolResultCache[tb.executionId] : undefined
     const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
-    const displayResult = tb.result
-      ? prettyFormatPayload(tb.result)
-      : cachedRes?.status === 'loaded'
-        ? cachedRes.displayContent
-        : undefined
+    const displayResult = tb.result ?? (cachedRes?.status === 'loaded' ? cachedRes.displayContent : undefined)
     const effectiveStatus =
       cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
     const statusMeta = toolStatusMeta(effectiveStatus)
@@ -2053,6 +2070,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             aria-label="Keeper 대화 기록"
             onScroll=${handleChatScroll}
           >
+            <div class="kp-chat-feed" ref=${chatFeedRef}>
             ${loadingHistory && messages.length === 0
               ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
               : displayItems.length === 0 && !showLiveTurnCard
@@ -2254,7 +2272,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
                         ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
                           ${blocks.bodyText
-                            ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} />`
+                            ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
                             : html`<div class="kp-msg-body">응답 생성 중…</div>`}
                         `}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
@@ -2300,6 +2318,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 </div>
               </section>
             `}
+            </div>
           </div>
           ${!isNearBottom && (visibleEntries.length > 0 || showLiveTurnCard) && html`
             <button
@@ -2434,7 +2453,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 <strong>Q:</strong>
                 <${MarkdownContent} text=${btw.prompt} />
                 ${btw.reply
-                  ? html`<${MarkdownContent} text=${btw.reply} />`
+                  ? html`<${MarkdownContent} text=${btw.reply} streaming=${btw.status === 'streaming'} />`
                   : btw.status === 'streaming' && html`<div>응답 수신 중…</div>`}
                 ${btw.error && html`<div class="ap-error">${btw.error}</div>`}
               </div>

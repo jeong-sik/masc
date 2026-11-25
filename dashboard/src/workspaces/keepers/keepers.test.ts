@@ -15,6 +15,7 @@ import {
   decodeChatJournalPage,
   decodeKeeperMemoryFacts,
   decodeKeeperRoster,
+  fetchKeeperChatHistoryPageApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
@@ -24,6 +25,7 @@ import {
   parseOrdinaryMemoryBranch,
   parseSourceBoundMemoryBranch,
   reconstructJournalReply,
+  streamKeeperChat,
   transcribeVoiceAudio,
 } from './keepers-api'
 import {
@@ -34,6 +36,7 @@ import {
 } from './keeper-debug-companion'
 import { releaseAllViewStreams, getActiveViewStreamKey } from '../../core/view-stream-slot'
 import { KeeperChatTab } from './keeper-chat-tab'
+import { toolResultMarkdownPreview } from './chat-blocks'
 import { KeeperHeader, isKeeperBooted } from './keeper-header'
 import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
@@ -323,6 +326,48 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     releaseAllViewStreams()
     resetPortraitCacheForTests()
     vi.restoreAllMocks()
+  })
+
+  it('preserves literal tool output and honors stored Markdown in history and live events', async () => {
+    const log = '[WARN]: phase\n  * worker[2]\n\n<log>\n'
+    const marker = `[masc:blob sha256=${'a'.repeat(64)} bytes=64 mime=text/markdown preview="**report**"]`
+    const results = [log, marker, '{\n  "ok": true\n}']
+    const toolCalls = [
+      { id: 'log', name: 'shell', result: log },
+      { id: 'report', name: 'artifact', result: marker },
+      { id: 'json', name: 'status', result: { ok: true } },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      messages: [{ id: 'saved', role: 'assistant', content: 'History', tool_calls: toolCalls }],
+      has_more: false,
+    }), { headers: { 'Content-Type': 'application/json' } })))
+
+    const history = await fetchKeeperChatHistoryPageApi('code-reviewer-sister')
+    expect(history.ok && history.value.messages[0]?.toolCalls?.map((tool) => tool.result))
+      .toEqual(results)
+    expect(results.map(toolResultMarkdownPreview)).toEqual([null, '**report**', null])
+
+    const events = [
+      { type: 'TOOL_CALL_RESULT', toolCallId: 'log', content: log },
+      { type: 'TOOL_CALL_RESULT', toolCallId: 'report', content: marker },
+      { type: 'TOOL_CALL_RESULT', toolCallId: 'json', result: { ok: true } },
+      { type: 'RUN_FINISHED' },
+    ]
+    const onToolResult = vi.fn()
+    const live = await streamKeeperChat({
+      keeper: 'code-reviewer-sister',
+      message: 'Run the tools',
+      operationId: 'op-tool-results',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => new Response(
+        events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      )),
+      callbacks: { onToolResult },
+    })
+    expect(live).toEqual({ terminal: true, error: null })
+    expect(onToolResult.mock.calls.map(([id, content]) => [id, content]))
+      .toEqual(toolCalls.map((tool, index) => [tool.id, results[index]]))
   })
 
   it('attributes saved user messages to their recorded speakers', async () => {

@@ -8,8 +8,9 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
-import { prettyFormatPayload } from './chat-blocks'
+import { prettyFormatPayload, toolResultMarkdownPreview } from './chat-blocks'
 import { fetchKeeperToolResultApi } from './keepers-api'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
@@ -214,6 +215,14 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
         : 'ok'
   const progressText = formatToolResultProgress(resultState ?? undefined)
   const previewTruncated = isPreviewTruncated(entry)
+  const completeOutput = hydratedLoaded ? resultState.eof && !resultState.isBinary : !previewTruncated
+  const markdown = completeOutput ? toolResultMarkdownPreview(effectiveOutput) : null
+  const rawOutput = html`
+    <pre
+      class=${outputExpanded ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}
+      data-testid="tool-call-inspector-output"
+    >${effectiveOutput}</pre>
+  `
   const canLoadMore = Boolean(
     executionId
     && hydratedLoaded
@@ -366,11 +375,12 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
         `}
 
         ${effectiveOutput
-          ? html`
-              <pre
-                class=${outputExpanded ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}
-                data-testid="tool-call-inspector-output"
-              >${effectiveOutput}</pre>
+          ? markdown === null ? rawOutput : html`
+              <${MarkdownContent} text=${markdown} />
+              <details open=${outputExpanded || undefined}>
+                <summary>저장 참조</summary>
+                ${rawOutput}
+              </details>
             `
           : hydratedLoaded
             ? html`<div class="kp-block-status">(빈 출력 · 0 B)</div>`

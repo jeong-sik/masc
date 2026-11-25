@@ -21,21 +21,6 @@ let decode_backlog ~path json =
   |> Result.map_error (fun msg ->
     Printf.sprintf "[read_backlog] backlog decode failed for %s: %s" path msg)
 
-(** Filesystem backlog cache keyed by path and file version: device, inode,
-    size and modification time.
-
-    CPU sampling showed that reading + Yojson-decoding backlog.json is one
-    of the hottest paths in dashboard/keeper snapshot code, and the file is
-    read many times between mutations. [write_backlog] invalidates this
-    process's cache after persisting. Every writer replaces the file with a
-    rename, and a rename gives the path another inode than the file it
-    replaces, so a write in another process is seen even when it keeps the
-    size and the modification time. A rewrite in place that sets the old
-    size and modification time back goes unseen, and so can a later
-    replacement that gets a freed inode number back within one file-time
-    tick at the same size.
-    A Memory backend may use the same path for a different authoritative
-    value, so it neither reads nor populates this filesystem cache. *)
 module Task_id_map = Map.Make (String)
 module Task_id_set = Set.Make (String)
 
@@ -112,30 +97,21 @@ let prepare_backlog (backlog : backlog) : prepared_backlog =
 let find_task_in_backlog_opt (backlog : backlog) (task_id : string) : task option =
   Task_id_map.find_opt task_id (prepare_backlog backlog).tasks_by_id
 
-type backlog_cache_entry = {
-  read_version : File_version_cache.version;
-  backlog : backlog;
-  mutable prepared : prepared_backlog option;
-}
+type decoded_backlog =
+  { backlog : backlog
+  ; prepared : prepared_backlog option Atomic.t
+  }
 
-let backlog_cache : (string, backlog_cache_entry) Hashtbl.t = Hashtbl.create 16
-let backlog_cache_mu = Stdlib.Mutex.create ()
-(* A miss may finish decoding after invalidation. Its token prevents it from
-   repopulating the cache with a value read before that invalidation. *)
-let backlog_cache_generation = ref (ref ())
+let decoded_backlog backlog = { backlog; prepared = Atomic.make None }
+
+(* Only the filesystem primary uses this cache. The prepared index is a
+   projection of the same immutable backlog, built when first requested. *)
+let backlog_cache : decoded_backlog File_version_cache.t = File_version_cache.create ()
 
 (* Test seam for an in-flight miss racing invalidation. *)
 let before_backlog_cache_registration_hook = Atomic.make (fun () -> ())
 
-let file_stat_opt path =
-  try Some (Unix.stat path) with Unix.Unix_error _ | Sys_error _ -> None
-
-let clear_backlog_cache_for path =
-  Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-      backlog_cache_generation := ref ();
-      Hashtbl.remove backlog_cache path)
-
-let invalidate_backlog_cache config = clear_backlog_cache_for (backlog_path config)
+let invalidate_backlog_cache config = File_version_cache.forget backlog_cache (backlog_path config)
 
 type backlog_recovery = {
   primary_error : string;
@@ -152,7 +128,7 @@ type prepared_backlog_observation = {
   recovered_from : backlog_recovery option;
 }
 
-let read_backlog_with_source_r config =
+let read_decoded_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
     let recovery_path = backlog_recovery_path config in
@@ -167,11 +143,7 @@ let read_backlog_with_source_r config =
            "read_backlog: primary backlog unreadable, recovered from %s (%s)"
            recovery_path
            primary_msg;
-         Ok
-           {
-             observed_backlog = backlog;
-             recovered_from = Some { primary_error = primary_msg; recovery_path };
-           }
+         Ok (decoded_backlog backlog, Some { primary_error = primary_msg; recovery_path })
        | Error recovery_msg ->
          Error
            (Printf.sprintf
@@ -186,120 +158,55 @@ let read_backlog_with_source_r config =
            recovery_path
            (json_doc_error_to_string recovery_error))
   in
-  let cached, generation =
-    match config.backend with
-    | Memory _ -> None, None
-    | FileSystem _ ->
-        Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-            let cached =
-              match Hashtbl.find_opt backlog_cache path with
-              | None -> None
-              | Some entry -> (
-                  match file_stat_opt path with
-                  | None -> None
-                  | Some st ->
-                      if File_version_cache.same_version (File_version_cache.version_of_stats st) entry.read_version
-                      then Some entry.backlog
-                      else None)
-            in
-            cached, Some !backlog_cache_generation)
+  let read_primary () =
+    match
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Result.map (Option.map (decode_backlog ~path)) (read_json_doc config path))
+    with
+    | Ok None -> Error (Printf.sprintf "no backlog at %s" path)
+    | Ok (Some decoded) -> Result.map decoded_backlog decoded
+    | Error primary_error ->
+      Error
+        (Printf.sprintf "backlog read failed for %s: %s" path
+           (json_doc_error_to_string primary_error))
   in
-  match cached with
-  | Some backlog ->
-    Ok { observed_backlog = backlog; recovered_from = None }
-  | None -> (
-      (* Cache the decoded backlog keyed on the file's version. A
-         writer commits under [with_backlog_file_lock] and clears this cache
-         after its write, but the reader takes no such lock: statting only
-         after the read would register (new stat, old backlog) when a commit
-         lands between the two — an entry the writer's clear has already
-         passed, poisoning hits until the next write. Stat before the read
-         too and only register when nothing changed across it. *)
-      let stat_before =
-        match config.backend with
-        | Memory _ -> None
-        | FileSystem _ -> file_stat_opt path
-      in
-      (* The miss path — the read, the JSON parse and the typed decode of a
-         file that is 2 MB on a live root — runs as one job on the domain pool
-         when one is installed and inline otherwise. Every keeper wake reads
-         the backlog and every writer's commit clears this cache, so on a busy
-         fleet most reads miss; on the calling fiber each miss held the main
-         domain about 60 ms (RFC main-domain-scheduler-latency §8.8). The
-         stats stay on the fiber: they order the cache registration against a
-         concurrent commit, not the decode. *)
-      match
-        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-          Result.map (Option.map (decode_backlog ~path)) (read_json_doc config path))
-      with
-      | Ok None -> recover (Printf.sprintf "no backlog at %s" path)
-      | Ok (Some decoded) ->
-          (match decoded with
-          | Ok backlog ->
-              let stat_after =
-                match stat_before with None -> None | Some _ -> file_stat_opt path
-              in
-              (match (stat_before, stat_after, generation) with
-              | Some before, Some after, Some generation
-                when File_version_cache.same_version
-                       (File_version_cache.version_of_stats before)
-                       (File_version_cache.version_of_stats after) ->
-                  (Atomic.get before_backlog_cache_registration_hook) ();
-                  Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-                      if !backlog_cache_generation == generation then
-                        Hashtbl.replace backlog_cache path
-                          { read_version = File_version_cache.version_of_stats after
-                          ; backlog
-                          ; prepared = None
-                          })
-              | _ ->
-                  (* The file moved under the read (or vanished before it):
-                     hand back the value but leave the cache to the next
-                     reader, which starts from a miss. *)
-                  ());
-              Ok { observed_backlog = backlog; recovered_from = None }
-          | Error primary_msg -> recover primary_msg)
-      | Error primary_error ->
-          recover
-            (Printf.sprintf "backlog read failed for %s: %s" path
-               (json_doc_error_to_string primary_error)))
+  let primary =
+    match config.backend with
+    | Memory _ -> read_primary ()
+    | FileSystem _ ->
+      File_version_cache.load backlog_cache path ~decode:(fun () ->
+        Result.map (fun decoded ->
+          (Atomic.get before_backlog_cache_registration_hook) ();
+          decoded) (read_primary ()))
+  in
+  match primary with
+  | Ok decoded -> Ok (decoded, None)
+  | Error detail -> recover detail
+
+let read_backlog_with_source_r config =
+  read_decoded_backlog_with_source_r config
+  |> Result.map (fun (decoded, recovered_from) ->
+       { observed_backlog = decoded.backlog; recovered_from })
 
 let read_prepared_backlog_with_source_r config =
-  let path = backlog_path config in
-  Result.map
-    (fun { observed_backlog; recovered_from } ->
-       let cached_prepared =
-         match config.backend with
-         | Memory _ -> None
-         | FileSystem _ ->
-           Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-             match Hashtbl.find_opt backlog_cache path with
-             | Some entry when entry.backlog == observed_backlog -> entry.prepared
-             | Some _ | None -> None)
-       in
+  read_decoded_backlog_with_source_r config
+  |> Result.map (fun (decoded, recovered_from) ->
        let observed_prepared =
-         match cached_prepared with
+         match Atomic.get decoded.prepared with
          | Some prepared -> prepared
          | None ->
            let prepared =
              match Atomic.get last_prepared_backlog with
-             | Some prepared when prepared.backlog == observed_backlog -> prepared
+             | Some prepared when prepared.backlog == decoded.backlog -> prepared
              | Some _ | None ->
                Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-                 prepare_backlog observed_backlog)
+                 prepare_backlog decoded.backlog)
            in
-           (match config.backend with
-            | Memory _ -> ()
-            | FileSystem _ ->
-              Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-                match Hashtbl.find_opt backlog_cache path with
-                | Some entry when entry.backlog == observed_backlog ->
-                  entry.prepared <- Some prepared
-                | Some _ | None -> ()));
-           prepared
+           if Atomic.compare_and_set decoded.prepared None (Some prepared)
+           then prepared
+           else Option.value (Atomic.get decoded.prepared) ~default:prepared
        in
        { observed_prepared; recovered_from })
-    (read_backlog_with_source_r config)
 
 let read_prepared_backlog_observation_with_source_r =
   read_prepared_backlog_with_source_r
@@ -488,8 +395,7 @@ let write_backlog_result ?after_commit config backlog =
            primary_path
            message)
       primary_commit.mirror_error;
-    clear_backlog_cache_for primary_path;
-    clear_backlog_cache_for recovery_path;
+    invalidate_backlog_cache config;
     announce_committed config;
     let mutation_observer_error =
       try
@@ -584,8 +490,7 @@ let repair_backlog_copies_result config backlog =
          a cancellation arriving while the observer yields was re-raised and
          the observer was skipped even though the repair had committed. *)
       protect_backlog_commit_settlement (fun () ->
-        clear_backlog_cache_for primary_path;
-        clear_backlog_cache_for recovery_path;
+        invalidate_backlog_cache config;
         announce_committed config;
         try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
         | Eio.Cancel.Cancelled _ as error -> raise error

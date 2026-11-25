@@ -1012,10 +1012,25 @@ type setup_integration = {
   configured_runtime_ids : string list;
 }
 
+(** The email and plan labels a provider's own login file reports
+    (setup inventory [account_emails]), or why it was not read. Display only. *)
+type setup_account_state =
+  | Account_read of { email : string; plan : string list }
+  | Account_not_read of { cause : string }
+
+type setup_account_email = {
+  integration_id : string;
+  account : setup_account_state;
+}
+
 type setup_inventory = {
   default_runtime_id : string option;
   integrations : setup_integration list;
+  account_emails : setup_account_email list;
 }
+
+val setup_account_line : setup_account_state -> string
+(** [email · plan…] for a read login, [? <cause>] otherwise. *)
 
 val decode_setup_inventory : Yojson.Safe.t -> (setup_inventory, string) result
 

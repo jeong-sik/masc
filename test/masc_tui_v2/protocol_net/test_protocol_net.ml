@@ -2990,11 +2990,21 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
           "enabled": true,
           "credential_kind": "none",
           "configured_runtime_ids": ["vibe_acp.devstral-2"]
-        }]
+        }],
+        "account_emails": [
+          {"integration_id": "codex_a", "state": "read", "email": "a@example.com", "plan": ["promax"]},
+          {"integration_id": "claude_b", "state": "not_read", "cause": "environment_credential"}
+        ]
       }|}
   in
   let inv = expect_ok "setup_inventory" (Wire_runtime.decode_setup_inventory inv_json) in
   Alcotest.(check int) "1 setup integration" 1 (List.length inv.integrations);
+  Alcotest.(check (list (pair string string))) "account rows keep email, plan and cause"
+    [ ("codex_a", "a@example.com · promax"); ("claude_b", "? environment_credential") ]
+    (List.map
+       (fun (row : Wire_runtime.setup_account_email) ->
+         (row.integration_id, Wire_runtime.setup_account_line row.account))
+       inv.account_emails);
   Alcotest.(check string) "vibe_acp setup_support" "existing_binding"
     (List.hd inv.integrations).setup_support;
   let receipt_json =

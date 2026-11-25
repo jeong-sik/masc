@@ -2869,6 +2869,21 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
               ();
             incr y
           end;
+          (* Each slot names the account its provider runs on, so two slots
+             of one model on different logins read apart. *)
+          let slot_account rid =
+            match
+              (Hashtbl.find_opt runtimes_tbl rid, Observed.to_option rt.setup_inventory)
+            with
+            | Some r, Some inv ->
+                List.find_map
+                  (fun (row : Wire_runtime.setup_account_email) ->
+                    if String.equal row.integration_id r.provider_id then
+                      Some (Wire_runtime.setup_account_line row.account)
+                    else None)
+                  inv.account_emails
+            | (Some _ | None), _ -> None
+          in
           let avail_slot_rows = Int.max 1 (bot - !y) in
           let slot_skip =
             Int.min
@@ -2879,7 +2894,12 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
             (fun local_idx rid ->
               let idx = slot_skip + local_idx in
               if !y < bot then begin
-                let lbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
+                let lbl =
+                  let slot = Wire_runtime.human_runtime_slot_label ~runtimes rid in
+                  match slot_account rid with
+                  | Some account -> slot ^ " · " ^ account
+                  | None -> slot
+                in
                 let transport_s =
                   match Hashtbl.find_opt runtimes_tbl rid with
                   | Some { transport = Some t; _ } -> String.uppercase_ascii t

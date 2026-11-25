@@ -23028,12 +23028,14 @@ let test_open_work_of_preview_names_what_is_open () =
   in
   Alcotest.(check (option string)) "a server that does not report the open work" None
     (legacy Wire_fleet.Preview_tool_observed);
+  let of_activity activity =
+    Fleet_store.open_work_of_preview (preview_reporting ~activity (Some []) None)
+    |> Option.map (fun (work : Fleet_store.open_work) -> ko work.phrase)
+  in
   Alcotest.(check (option string)) "a failed attempt is not open work" None
-    (Option.map (fun work -> ko work.phrase)
-       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Wire_fleet.Preview_failed (Some []) None)));
+    (of_activity Wire_fleet.Preview_failed);
   Alcotest.(check (option string)) "a turn still preparing is not open work" None
-    (Option.map (fun work -> ko work.phrase)
-       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Wire_fleet.Preview_preparing (Some []) None)))
+    (of_activity Wire_fleet.Preview_preparing);
 ;;
 
 let test_chat_status_uses_the_same_words_for_every_turn () =

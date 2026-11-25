@@ -4024,25 +4024,26 @@ let test_chat_history_rows_kept_draw_a_fresh_layout () =
   Alcotest.(check int) "second draw reused the rows" 1 s.hits;
   Alcotest.(check int) "one keeper kept" 1 s.entries
 
+(* The messages the model stores for one keeper. *)
+let stored_history (model : Model.t) keeper =
+  match Fleet_store.String_map.find_opt keeper model.fleet.chat_histories with
+  | Some obs -> (
+      match Observed.to_option obs with
+      | Some page -> page.messages
+      | None -> Alcotest.fail "the stored history is not reported")
+  | None -> Alcotest.fail "the keeper has no stored history"
+
 let test_chat_history_rows_are_laid_out_again_when_an_input_changes () =
   let name = "e-masc-the-leader" in
   let m = make_history_model ~n:12 [ name ] in
   let kept = Keeper_dive.History_rows.create () in
   ignore (draw_chat ~history_rows:kept ~cols:140 ~name m);
-  let page =
-    match Fleet_store.String_map.find_opt name m.fleet.chat_histories with
-    | Some obs -> (
-        match Observed.to_option obs with
-        | Some page -> page
-        | None -> Alcotest.fail "the stored history is not reported")
-    | None -> Alcotest.fail "the keeper has no stored history"
-  in
   let with_one_more_message =
     {
       m with
       fleet =
         apply_history name
-          (page.messages
+          (stored_history m name
           @ [
               history_msg ~id:"h-new" ~role:Wire_fleet.Role_user
                 ~content:"새 메시지" ~thinking:None ~seconds_ago:1.;
@@ -4104,6 +4105,38 @@ let test_chat_history_rows_keep_the_keepers_drawn_last () =
   Alcotest.(check int) "a dropped keeper is laid out again" 4 s.misses;
   Alcotest.(check int) "the keeper now drawn longest ago was dropped" 2 s.evictions
 
+let test_chat_history_rows_keep_one_slot_per_keeper () =
+  let first = "e-masc-the-leader" in
+  let second = "code-reviewer" in
+  let m = make_history_model ~n:4 [ first; second ] in
+  let kept = Keeper_dive.History_rows.create ~capacity:2 () in
+  let draw name model =
+    ignore (draw_chat ~history_rows:kept ~cols:140 ~name model)
+  in
+  (* The first keeper gets one more message. *)
+  let with_one_more_message model =
+    let extra =
+      history_msg ~id:"h-new" ~role:Wire_fleet.Role_user ~content:"새 메시지"
+        ~thinking:None ~seconds_ago:1.
+    in
+    let messages = stored_history model first @ [ extra ] in
+    { model with fleet = apply_history first messages model.fleet }
+  in
+  draw first m;
+  draw second m;
+  (* Both slots are taken. The keeper drawn first gets two messages in a
+     row, each laid out again. *)
+  let m1 = with_one_more_message m in
+  draw first m1;
+  let m2 = with_one_more_message m1 in
+  draw first m2;
+  draw second m;
+  let s = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "two keepers kept" 2 s.entries;
+  Alcotest.(check int) "four histories laid out" 4 s.misses;
+  Alcotest.(check int) "the other keeper still has its rows" 1 s.hits;
+  Alcotest.(check int) "a new message dropped no keeper" 0 s.evictions
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -4151,6 +4184,8 @@ let () =
             test_chat_history_rows_are_laid_out_again_when_an_input_changes;
           Alcotest.test_case "kept chat history rows hold the keepers drawn last"
             `Quick test_chat_history_rows_keep_the_keepers_drawn_last;
+          Alcotest.test_case "kept chat history rows keep one slot per keeper"
+            `Quick test_chat_history_rows_keep_one_slot_per_keeper;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
           Alcotest.test_case "Keeper cadence window counts wake causes and notes short windows"

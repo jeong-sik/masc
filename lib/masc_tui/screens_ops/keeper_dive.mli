@@ -31,13 +31,16 @@ val history_layout_of :
 type transcript_row
 (** One row of the chat transcript. *)
 
-(** The history rows of the keepers whose chat was drawn last.
-    [rows] lays the messages out the first time it is asked for a layout and
-    messages, and returns the same rows while both are still equal. A frame
-    that draws a chat therefore does not lay its stored messages out again;
-    a new message, or another width, theme, language, time zone, origin
-    mode, tools mode or thinking mode, lays them out again. The program that
-    runs the TUI creates one and hands it to {!render_tabs_body}. *)
+(** The history rows of the keepers whose chat was drawn last, one keeper
+    per slot. [rows] lays the messages out the first time it is asked for a
+    layout and messages, and returns the same rows while both are still
+    equal. A frame that draws a chat therefore does not lay its stored
+    messages out again; a new message, or another width, theme, language,
+    time zone, origin mode, tools mode or thinking mode, lays them out again
+    in that keeper's slot. A keeper that was not kept takes a slot and, when
+    every slot is taken, the keeper drawn longest ago loses theirs
+    ([evictions]). The program that runs the TUI creates one and hands it to
+    {!render_tabs_body}. *)
 module History_rows : sig
   type t
 

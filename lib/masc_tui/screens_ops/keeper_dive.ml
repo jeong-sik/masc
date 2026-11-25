@@ -714,14 +714,15 @@ let build_history_rows ~(layout : history_layout)
   loop None []
     (Chat_transcript.history_tool_groups ~tools_mode messages)
 
-(* The history rows of the keepers whose chat was drawn last. A frame asks for
-   the rows of one keeper and gets them back without laying the messages out
-   again, as long as the layout and the messages are still equal to the ones
-   the entry was built from. A new message, another width, theme, language,
-   time zone, origin mode, tools mode or thinking mode lays them out again.
-   The program that runs the TUI creates it and hands it to
-   {!render_tabs_body}; a caller that hands over none lays the rows out on
-   every call, with the same result. *)
+(* The history rows of the keepers whose chat was drawn last, one keeper per
+   slot. A frame asks for the rows of one keeper and gets them back without
+   laying the messages out again, as long as the layout and the messages are
+   still equal to the ones the entry was built from. A new message, another
+   width, theme, language, time zone, origin mode, tools mode or thinking
+   mode lays them out again and replaces what was kept for that keeper. The
+   program that runs the TUI creates it and hands it to {!render_tabs_body};
+   a caller that hands over none lays the rows out on every call, with the
+   same result. *)
 module History_rows = struct
   type entry = {
     layout : history_layout;
@@ -787,19 +788,29 @@ module History_rows = struct
         t.misses <- t.misses + 1;
         let rows = build_history_rows ~layout messages in
         let fresh = { layout; messages; rows; last_used = t.tick } in
-        if List.length t.entries >= t.capacity then begin
+        (* A keeper has one slot. Its rows change with every message, so a
+           miss replaces what was kept for it. A keeper that was not kept
+           takes a slot, and drops the keeper drawn longest ago when every
+           slot is taken. *)
+        let others =
+          List.filter
+            (fun e ->
+              not (String.equal e.layout.keeper_name layout.keeper_name))
+            t.entries
+        in
+        if List.length others < t.capacity then t.entries <- fresh :: others
+        else begin
           (* Every entry was last used at a tick of its own, so the smallest
              [last_used] belongs to one entry. *)
           let oldest =
             List.fold_left
               (fun acc e -> Int.min acc e.last_used)
-              max_int t.entries
+              max_int others
           in
           t.entries <-
-            fresh :: List.filter (fun e -> e.last_used <> oldest) t.entries;
+            fresh :: List.filter (fun e -> e.last_used <> oldest) others;
           t.evictions <- t.evictions + 1
-        end
-        else t.entries <- fresh :: t.entries;
+        end;
         rows
 end
 

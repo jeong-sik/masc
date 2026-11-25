@@ -326,11 +326,9 @@ let test_v2_payload_contract () =
     | json -> json) (fun _ _ binary _ ->
       check bool "new binary rejects old schema" true (match inspect binary with
         | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false));
-  List.iter (fun binary_asset ->
-    with_fixture ~change_receipt:(replace_field "binary_asset" (`String binary_asset))
-      (fun _ _ binary _ -> check bool "macOS requires bundled runtime" true (match inspect binary with
-        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)))
-    ["masc-macos-arm64"; "masc-macos-x64"]
+  with_fixture ~change_receipt:(replace_field "binary_asset" (`String "masc-macos-arm64"))
+    (fun _ _ binary _ -> check bool "macOS requires bundled runtime" true (match inspect binary with
+      | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
 let test_invalid_v2_payload_metadata () =
   let invalid name change_receipt = with_payload_fixture ~change_receipt (fun _ _ binary _ ->
     check bool name true (match inspect binary with

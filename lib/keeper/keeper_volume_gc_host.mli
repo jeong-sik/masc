@@ -30,7 +30,7 @@ type ready
 
 (** Checks the host and asks Apple Container for its inventory. [Error]
     carries the readiness check's words for why this host has no answering
-    Apple Container (a Linux host, an Intel Mac, a stopped service). *)
+    Apple Container (an unsupported host or a stopped service). *)
 val apple_container_ready : unit -> (ready, string) result
 
 (** {!Keeper_volume_gc.apple_keeper_volume_gc} with [base_path]'s keeper

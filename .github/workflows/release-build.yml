@@ -36,9 +36,6 @@ jobs:
           - os: macos-15  # Apple Silicon
             arch: macos-arm64
             shim-arch: ''    # the exec shim is a Linux guest binary; none here
-          - os: macos-15-intel
-            arch: macos-x64
-            shim-arch: ''
           - os: ubuntu-24.04
             arch: linux-x64
             shim-arch: amd64
@@ -583,7 +580,7 @@ jobs:
           mkdir -p release-assets
           cp scripts/install.sh release-assets/install.sh
           cp scripts/install-runtime-setup.py release-assets/install-runtime-setup.py
-          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
+          for arch in macos-arm64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
               "masc-tui-$arch" \
@@ -602,7 +599,7 @@ jobs:
               cp "dist/$asset" "release-assets/$asset"
             done
           done
-          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
+          for arch in macos-arm64 linux-x64 linux-arm64; do
             asset="masc-runtime-$arch.tar.gz"
             test -f "dist/$asset"
             cp "dist/$asset" "release-assets/$asset"

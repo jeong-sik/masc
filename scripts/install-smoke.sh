@@ -60,7 +60,7 @@ done
 # which is the flag a host without microvm keepers uses.
 case "$ARCH" in
   macos-arm64|linux-arm64) SHIM_ASSET="masc-exec-shim-linux-arm64" ;;
-  macos-x64|linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
+  linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
   *) SHIM_ASSET="" ;;
 esac
 SHIM_FLAG="--no-guest-shim"

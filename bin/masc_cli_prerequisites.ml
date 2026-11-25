@@ -66,13 +66,13 @@ let container_user_config () =
    readiness answer and the offered fix name the same missing piece. *)
 let apple_builder host dependency =
   match host, dependency with
-  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container
+  | Sandbox.Macos {major}, Prerequisites.Sandbox Apple_container
     when major >= 26 && Sandbox.apple_container_needs_rosetta ~run:Sandbox.system_runner ->
     Prerequisites.Needs_missing_rosetta {user_config=container_user_config ()}
-  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container
+  | Sandbox.Macos {major}, Prerequisites.Sandbox Apple_container
     when major >= 26 && Sandbox.apple_container_needs_default_kernel ~run:Sandbox.system_runner ->
     Prerequisites.Needs_default_kernel
-  | ( Sandbox.Macos {architecture=(Arm64 | X64); _} | Sandbox.Linux _ | Sandbox.Unsupported ),
+  | ( Sandbox.Macos _ | Sandbox.Linux _ | Sandbox.Unsupported ),
     ( Prerequisites.Sandbox (Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh)
     | Prerequisites.Codex_cli | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
     | Prerequisites.Vibe_cli | Prerequisites.Kimi_cli
@@ -129,19 +129,17 @@ let actions ?searxng_container host dependency =
     |> List.map (fun action -> Standard action)
   in
   match host, dependency with
-  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
+  | Sandbox.Macos {major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
     (match apple_builder with
      | Prerequisites.Needs_missing_rosetta _ | Prerequisites.Needs_default_kernel -> standard
      | Prerequisites.Builder_unchecked -> Verified_apple_install :: standard)
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
-  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
-  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Vibe_cli | Prerequisites.Kimi_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser)))))))
-  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
-  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Vibe_cli | Prerequisites.Kimi_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser)))))))
+  | (Sandbox.Macos _, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
+  | (Sandbox.Macos _, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Vibe_cli | Prerequisites.Kimi_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser)))))))
   | ((Sandbox.Unsupported | Sandbox.Linux _), _)
   | (Sandbox.Macos _, Prerequisites.Searxng _)
-  | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
+  | (Macos _, Sandbox Apple_container) -> standard
 let to_json actions =
   let standard = List.filter_map (function Standard action -> Some action
     | Verified_apple_install | Verified_docker_install | Verified_docker_launch -> None) actions in

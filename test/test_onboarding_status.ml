@@ -396,7 +396,7 @@ let doctor_sandbox ~keeper_toml responses = with_workspace @@ fun base ->
 (* What the probe itself answers for Apple Container on the same fixture. *)
 let apple_probe responses =
   let run, _ = fixture_runner responses in
-  (Readiness.probe ~host:(Readiness.Macos {architecture = Readiness.Arm64; major = 26}) ~run
+  (Readiness.probe ~host:(Readiness.Macos {major = 26}) ~run
      ~require_rootless:false ~require_userns:false Readiness.Apple_container).state
 
 (* masc doctor used to print one fixed sentence for every declared sandbox.

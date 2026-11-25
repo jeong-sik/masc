@@ -368,7 +368,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dist', type=Path, required=True)
     parser.add_argument('--stage', type=Path, required=True)
-    parser.add_argument('--platform', choices=['macos-arm64', 'macos-x64'], required=True)
+    parser.add_argument('--platform', choices=['macos-arm64'], required=True)
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--python-lock', type=Path, default=Path(__file__).with_name('portable-python-runtime.lock.json'))
     add_ocaml_notice_arguments(parser)

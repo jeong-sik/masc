@@ -14,15 +14,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC(**Multi-Agent Shared Context**)는 각자의 역할과 개성을 가진 에이전트 팀을
-꾸리고, 목표를 향해 움직이는 모습을 지켜보는 프로젝트입니다. **Keeper**들은 맥락을
-이어가며 일을 나누고, 서로 논의하고, 결과를 검증합니다. 사용자는 큰 방향을 정하고,
-때때로 개입하며 팀을 이끌어갑니다.
-
-Bullfrog의 *Dungeon Keeper*처럼, 서로 다른 구성원들에게 일을 맡기고 예상하지
-못한 전개를 지켜보는 재미를 담고 싶었습니다.
-
-터미널 UI에서 진행 상황을 살펴보고, MCP로 다른 에이전트를 연결할 수 있습니다.
+MASC(**Multi-Agent Shared Context**)는 장기 실행 에이전트인 **Keeper**와
+외부 MCP 클라이언트를 한 작업 공간에 연결합니다. Keeper는 대화와 작업 기록을
+보존하고 Goal, Task, Board를 통해 협업합니다. 터미널 UI에서 진행 상황을 보고
+질문에 답하거나 도구 사용을 승인할 수 있습니다.
 
 > **1.0 이전 버전입니다.** 신뢰할 수 있는 로컬 작업 공간을 전제로 개발하고 있으며,
 > API와 설정은 바뀔 수 있습니다. 무인 실행이나 서버 공개 전에는 [한계](#한계)를
@@ -50,9 +45,10 @@ MASC의 여러 기능은 에이전트가 목표와 지금까지의 과정을 이
 
 ### 설치
 
-바이너리 릴리스는 macOS(Apple Silicon·Intel)와 Linux(x86_64·ARM64)를 대상으로
-합니다. 바이너리를 설치할 때는 OCaml이나 Node.js 개발 도구가 필요하지 않습니다.
-[플랫폼 요구사항](docs/INSTALL.md#platforms-and-prerequisites)과
+바이너리 릴리스는 macOS 15 이상인 Apple Silicon Mac과 Linux(x86_64·ARM64)를
+지원합니다. 인텔 Mac은 지원하지 않습니다. 바이너리 설치에는 OCaml이나 Node.js가
+필요하지 않습니다. [첫 설치 순서](docs/INSTALL.ko.md#첫-설치를-틱으로-따라가면),
+[플랫폼 요구사항](docs/INSTALL.ko.md#플랫폼과-준비물),
 [배포된 파일](https://github.com/jeong-sik/masc/releases/latest)을 확인하세요.
 모델 연결은 별도로 준비합니다. 지원하는 CLI 로그인, API 인증 정보 또는 접속 가능한
 로컬 모델 서버 중 하나가 필요합니다. 설정 화면에서 실행 환경을 고르고 준비합니다.
@@ -108,7 +104,7 @@ Keeper가 답변이나 승인을 기다리고 있다면 TUI의 [승인 대기열
 
 ### 소스에서
 
-Git, opam, C 개발 도구, Python 3, Node.js 22, Corepack과 native 라이브러리를 먼저 설치합니다.
+Git, opam, C 개발 도구, Python 3, Node.js 22.13 이상(22.x), Corepack과 native 라이브러리를 먼저 설치합니다.
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
   libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
@@ -116,9 +112,20 @@ Git, opam, C 개발 도구, Python 3, Node.js 22, Corepack과 native 라이브�
   Ubuntu 22.04 패키지의 3.12는 이를 지원하지 않으므로 더 새로운
   [upstream protoc](https://github.com/protocolbuffers/protobuf/releases)를 `PATH` 앞쪽에
   둡니다(릴리스 빌드는 25.1 사용, [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh) 참고).
-- macOS(Homebrew): `flock gmp libpq openssl@3 zstd protobuf`를 설치하고,
-  [Release workflow](.github/workflows/release.yml)의 macOS 단계처럼 `openssl@3`와
-  `libpq`에 맞춰 `PKG_CONFIG_PATH`, `CPATH`, `LIBRARY_PATH`를 export합니다.
+- macOS(Homebrew): Xcode 명령줄 도구가 없다면 `xcode-select --install`로 설치합니다.
+  빌드할 셸에서 아래 명령을 실행합니다.
+
+  ```bash
+  brew install pkg-config gmp libpq openssl@3 zstd protobuf
+  libpq_prefix="$(brew --prefix libpq)"
+  openssl_prefix="$(brew --prefix openssl@3)"
+  export PATH="$libpq_prefix/bin:$openssl_prefix/bin:$PATH"
+  export PKG_CONFIG_PATH="$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export CPATH="$openssl_prefix/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="$openssl_prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export CPPFLAGS="-I$openssl_prefix/include${CPPFLAGS:+ $CPPFLAGS}"
+  export LDFLAGS="-L$openssl_prefix/lib${LDFLAGS:+ $LDFLAGS}"
+  ```
 
 체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
 코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)을 따릅니다.
@@ -139,9 +146,8 @@ scripts/build-dashboard-if-needed.sh --force
 
 `--no-install`은 pin 스크립트가 opam-repository에 없는 의존성을 등록하기 전에
 switch가 의존성을 풀려다 실패하지 않게 합니다. 컴파일러 버전은 `dune-project`에
-고정돼 있고, `--locked`는 CI가 쓰는 정확한 Dune과 라이브러리 버전을
-`masc.opam.locked`에서 설치합니다. 첫 빌드는 몇 분
-걸립니다. Dune은 두 프로그램을 `_build/default/bin/main_eio.exe`(서버와
+고정돼 있습니다. `--locked`를 주면 opam은 `masc.opam.locked`에 기록된
+Dune과 라이브러리 버전을 사용합니다. Dune은 두 프로그램을 `_build/default/bin/main_eio.exe`(서버와
 CLI)와 `_build/default/bin/masc_tui.exe`(TUI)에 둡니다. `masc`는 자기 옆이나
 `PATH`에서 `masc-tui`라는 이름으로 TUI를 찾기 때문에, 이름을 붙여 주기 전까지
 체크아웃의 `masc`는 TUI 대신 서버를 띄웁니다.
@@ -153,7 +159,14 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
 대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`와
-배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요.
+배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다.
+`eval "$(opam env)"`를 적용한 셸에서 실행하세요. 새 작업 공간은 경로를 명시합니다.
+
+```bash
+scripts/install-local-build.sh --base-path "$HOME/MASC"
+"$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
+```
+
 평소 설치는 microVM 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않습니다.
 서버·shim 변경을 microVM 에 배포하거나 `remote_shim_outdated` 를 해결할 때만
 `--refresh-guest-shim` 을 붙이세요. 기존 릴리즈 shim 을 갱신합니다.

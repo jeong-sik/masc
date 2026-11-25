@@ -119,8 +119,7 @@ profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 uses `release.yml` with an existing version tag, `rc_run_id`, and explicit
 `publish=true`. The tagged commit must match the latest successful complete candidate run.
-Here complete candidate verification means full type/compile, four-platform
-installation and every suite in the versioned essential behavior manifest. It
+Here complete candidate verification means full type/compile, installation on the supported platforms and every suite in the versioned essential behavior manifest. It
 does not mean repository-wide regression. Artifact publication and production
 readiness are separate claims: production-ready also requires every quantitative
 fleet, continuity, performance and Agent Core gate in
@@ -141,7 +140,7 @@ job exercises Goal, schedule, turn-record, verification, portrait, lifecycle and
 memory behavior directly; test selection does not scan backend source strings.
 Installer script tests run once on Linux in the distribution
 job and once on macOS with stock Bash and BSD utilities;
-each of the four native targets still builds and verifies its shipped binaries
+each supported native target still builds and verifies its shipped binaries
 and installation. Native files are uploaded after installation validation;
 early unverified duplicates and the separate fixture-preview bundle are omitted.
 The release behavior selection uses isolated fixtures; full regression builds its own sandbox image where required.

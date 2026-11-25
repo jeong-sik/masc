@@ -375,7 +375,6 @@ let platform_release_asset () =
   in
   match uname "-s", uname "-m" with
   | "Darwin", "arm64" -> "masc-macos-arm64"
-  | "Darwin", "x86_64" -> "masc-macos-x64"
   | "Linux", "x86_64" -> "masc-linux-x64"
   | "Linux", ("aarch64" | "arm64") -> "masc-linux-arm64"
   | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
@@ -441,7 +440,7 @@ let stage_release_mirror base_path =
      asset name so missing-shim failures cannot hide wizard behavior. *)
   let shim_arch =
     match suffix with
-    | "linux-x64" | "macos-x64" -> "amd64"
+    | "linux-x64" -> "amd64"
     | "linux-arm64" | "macos-arm64" -> "arm64"
     | other -> failf "unsupported guest shim fixture platform: %s" other
   in
@@ -475,7 +474,7 @@ let stage_release_mirror base_path =
    | _ -> fail "release fixture binary must report embedded commit");
   let runtime_args =
     match suffix with
-    | "macos-arm64" | "macos-x64" | "linux-arm64" | "linux-x64" ->
+    | "macos-arm64" | "linux-arm64" | "linux-x64" ->
       let runtime_root = Filename.concat dir "fixture-runtime" in
       let runtime_archive = Filename.concat dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
       (* This forwards to the test host's interpreter. It exercises the verified

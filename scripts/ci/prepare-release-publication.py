@@ -14,7 +14,7 @@ import zipfile
 
 from release_behavior import load_profile
 
-PLATFORMS = ('macos-arm64', 'macos-x64', 'linux-x64', 'linux-arm64')
+PLATFORMS = ('macos-arm64', 'linux-x64', 'linux-arm64')
 
 
 def api(repo, endpoint, *, pages=False):

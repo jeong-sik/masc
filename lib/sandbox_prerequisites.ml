@@ -341,7 +341,7 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
           ~source_url ~requires_admin:true
           [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"poppler-utils"]]]
      | Other -> [])
-  | Sandbox Sandbox_readiness.Apple_container, Macos {architecture=Arm64; major} when major >= 26 ->
+  | Sandbox Sandbox_readiness.Apple_container, Macos {major} when major >= 26 ->
     (match apple_builder with
      (* A service that answered and a builder that cannot start is one missing
         piece, not a missing install: offering the installer again here would
@@ -359,11 +359,10 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
         commands ~id:"apple_container_start" ~label:"Start Apple Container service"
           ~detail:"Start the installed service for this account, then recheck sandbox prerequisites."
           ~source_url:apple_source ~requires_admin:false [["container";"system";"start"]]])
-  | Sandbox Docker, Macos {architecture; _} ->
-    let arch = match architecture with Arm64 -> "arm64" | X64 -> "amd64" in
-    let url = "https://desktop.docker.com/mac/main/" ^ arch ^ "/Docker.dmg" in
+  | Sandbox Docker, Macos _ ->
+    let url = "https://desktop.docker.com/mac/main/arm64/Docker.dmg" in
     [open_ ~id:"docker_desktop_official_install" ~label:"Download the official Docker Desktop installer"
-       ~detail:"Complete Docker Desktop's macOS installation and any vendor terms. This opens the architecture-specific official download; it does not assert installation or signature verification."
+       ~detail:"Complete Docker Desktop's macOS installation and any vendor terms. This opens the official Apple Silicon download; it does not assert installation or signature verification."
        ~source_url:docker_mac_source url;
      commands ~id:"docker_desktop_start" ~label:"Open installed Docker Desktop"
        ~detail:"Launch Docker Desktop and finish its first-start prompts, then recheck the engine."

@@ -118,8 +118,14 @@ workspace_root=""
 workspace_kind=""
 install_args=("$@")
 case "$(uname -s)" in
-  Darwin|Linux) ;;
-  *) echo "install-local-build: macOS and Linux only" >&2; exit 2 ;;
+  Darwin)
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" != 1 ]; then
+      echo "install-local-build: Intel Macs are not supported." >&2
+      exit 2
+    fi
+    ;;
+  Linux) ;;
+  *) echo "install-local-build: Apple Silicon Macs and Linux only" >&2; exit 2 ;;
 esac
 
 while [ $# -gt 0 ]; do

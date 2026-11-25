@@ -18,9 +18,8 @@ let checksum body =
     | [digest; ("*Docker.dmg" | "Docker.dmg")] -> Some digest
     | _ -> None) in
   match matches with [digest] when valid_sha digest -> Ok digest | _ -> Error Invalid_checksum
-let architecture = function
-  | Sandbox_readiness.Macos {architecture=Arm64;_} -> Ok "arm64"
-  | Sandbox_readiness.Macos {architecture=X64;_} -> Ok "amd64"
+let require_macos = function
+  | Sandbox_readiness.Macos _ -> Ok ()
   | Linux _ | Unsupported -> Error Unsupported_host
 let same_file a b =
   a.Unix.st_dev=b.Unix.st_dev && a.st_ino=b.st_ino && a.st_kind=b.st_kind
@@ -83,8 +82,8 @@ let cleanup_directory ~directory ~path =
   (* See mounted: never recursively remove a directory containing an unconfirmed mount. *)
   ignore (remove_empty directory)
 let acquire ~host ~run =
-  let* arch = architecture host in
-  let base = "https://desktop.docker.com/mac/main/" ^ arch ^ "/" in
+  let* () = require_macos host in
+  let base = "https://desktop.docker.com/mac/main/arm64/" in
   let* body = run ["/usr/bin/curl";"--fail";"--silent";"--show-error";"--proto";"=https";base ^ "checksums.txt"]
     |> Result.map_error (fun () -> Download_failed) in
   let* sha256 = checksum body in
@@ -172,7 +171,7 @@ let completion_of_output output =
     | _ -> Error Invalid_completion
   with Yojson.Json_error _ -> Error Invalid_completion
 let install ~executable_path ~run ~host ~probe_run ~require_rootless ~require_userns artifact =
-  let* _ = architecture host in
+  let* () = require_macos host in
   let* () = verify_digest ~path:artifact.path ~sha256:artifact.sha256 ~size:artifact.size in
   try
     let executable_path = Unix.realpath executable_path in
@@ -184,7 +183,7 @@ let install ~executable_path ~run ~host ~probe_run ~require_rootless ~require_us
     Ok {completion;service}
   with Unix.Unix_error _ -> Error Installer_failed
 let launch_and_recheck ~run ~host ~probe_run ~require_rootless ~require_userns () =
-  let* _ = architecture host in
+  let* () = require_macos host in
   (* Official install target. Custom application destinations are not this action. *)
   let app = "/Applications/Docker.app" in
   let* () = verify_app ~run app in
@@ -192,7 +191,7 @@ let launch_and_recheck ~run ~host ~probe_run ~require_rootless ~require_userns (
   Ok (Sandbox_readiness.probe ~host ~run:probe_run ~require_rootless ~require_userns Docker)
 module For_testing = struct let install_staged = install_staged end
 let error_message = function
-  | Unsupported_host -> "This Docker Desktop installer is for macOS. Choose the Linux Docker setup on Linux."
+  | Unsupported_host -> "Docker Desktop setup requires Apple Silicon and macOS 15 or later."
   | Invalid_checksum -> "Docker's official checksum did not identify exactly one installer. Refresh the download."
   | Download_failed -> "The official Docker download failed. Check connectivity and retry."
   | Invalid_file -> "The private Docker installer could not be read safely. Download it again."

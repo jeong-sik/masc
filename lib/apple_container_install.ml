@@ -76,7 +76,7 @@ let verify ~run ~release ~path =
   Ok {release;path}
 let acquire ~host ~run =
   match host with
-  | Sandbox_readiness.Macos {architecture=Arm64;major} when major >= 26 ->
+  | Sandbox_readiness.Macos {major} when major >= 26 ->
     let* metadata = run ["/usr/bin/curl";"--fail";"--silent";"--show-error";"--proto";"=https";metadata_url]
       |> Result.map_error (fun () -> Download_failed) in
     let* release = (try release_of_json (Yojson.Safe.from_string metadata)
@@ -94,8 +94,7 @@ let acquire ~host ~run =
           keep := true;
           Ok artifact)
      with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file)
-  | Sandbox_readiness.Macos { architecture = Sandbox_readiness.X64; major = _ }
-  | Sandbox_readiness.Unsupported | Sandbox_readiness.Linux _ | Macos {architecture=Arm64; _ } -> Error Unsupported_host
+  | Sandbox_readiness.Unsupported | Sandbox_readiness.Linux _ | Macos _ -> Error Unsupported_host
 let install ~executable_path ~run ~elevate artifact =
   let* verified = verify ~run ~release:artifact.release ~path:artifact.path in
   try

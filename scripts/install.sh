@@ -721,7 +721,7 @@ print_install_summary() {
     printf '\nNot activated yet? masc auth bootstrap activates it first, while no server runs.\n'
   else
     if [ "$RUN_SETUP_JOURNEY" -eq 1 ]; then
-      printf 'Setup finished. Reopen this workspace:\n  '
+      printf 'Open this workspace or continue setup:\n  '
       print_workspace_command
     else
       printf 'Next: choose a model and sandbox, then meet imp:\n  '
@@ -1206,8 +1206,6 @@ if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
   die "--sandbox requires --team; existing keepers use their own sandbox_profile"
 fi
 
-choose_install_base_path
-
 # Releases use a checksummed private runtime before invoking Python (the
 # system python3 may be a Command Line Tools installer stub).
 installer_python_ready() {
@@ -1223,9 +1221,8 @@ RUNTIME_STAGE=""
 RUNTIME_ARCHIVE=""
 RUNTIME_ARGS=()
 DRY_RUN_WITHOUT_PYTHON=0
-# The CPU architecture, not the process's. A shell running under Rosetta 2
-# reports x86_64 from `uname -m` on Apple Silicon, which would install the Intel
-# build and apply the Intel macOS minimum.
+# A Rosetta 2 shell reports x86_64 from `uname -m` on Apple Silicon.
+# Use the host architecture to select the native release.
 host_arch() {
   local arch
   arch=$(uname -m)
@@ -1237,11 +1234,15 @@ host_arch() {
 }
 
 if [ "$(uname -s)" = Darwin ]; then
-  case "$(host_arch)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
+  case "$(host_arch)" in
+    arm64) ;;
+    x86_64) die "Intel Macs are not supported." ;;
+    *) die "unsupported macOS architecture" ;;
+  esac
   os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
   major=${os_version%%.*}
   case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
-  [ "$major" -ge "$minimum" ] || die "macOS $os_version is below the released binary minimum macOS $minimum.0"
+  [ "$major" -ge 15 ] || die "macOS $os_version is below the released binary minimum macOS 15.0"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would verify and install bundled macOS libraries and Python; no Homebrew or Command Line Tools required"
     # A prefix symlink has not been verified yet, so do not execute a private
@@ -1319,7 +1320,6 @@ detect_asset() {
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
-    Darwin/x86_64) echo "masc-macos-x64" ;;
     Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
@@ -1337,6 +1337,7 @@ BROWSER_ADDON_WORKER_ASSET="masc-browser-addon-worker-$PLATFORM_SUFFIX"
 DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
 BUNDLE_HELPER_ASSET="masc-release-dashboard-bundle-$PLATFORM_SUFFIX.py"
 log "platform: $ASSET"
+choose_install_base_path
 
 
 # --- 2. resolve version -------------------------------------------------------
@@ -1606,7 +1607,7 @@ install_release_companion "$BROWSER_ADDON_WORKER_ASSET" "$BROWSER_ADDON_WORKER_D
 guest_shim_asset() {
   case "$PLATFORM_SUFFIX" in
     macos-arm64|linux-arm64) echo "masc-exec-shim-linux-arm64" ;;
-    macos-x64|linux-x64) echo "masc-exec-shim-linux-amd64" ;;
+    linux-x64) echo "masc-exec-shim-linux-amd64" ;;
     *) die "no guest exec shim asset for platform $PLATFORM_SUFFIX" ;;
   esac
 }

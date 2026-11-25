@@ -24,10 +24,9 @@ Claude Code와 Codex는 해당 CLI가 `PATH`에 있거나 공식 설치기가 �
 설치기가 바꾼 PATH를 아직 반영하지 않은 터미널에서도 찾습니다.
 `masc runtime-client-path --client claude-code`가 setup과 런타임이 쓸 경로를
 보여 줍니다. 연결 검사가
-실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 준비가
-필요하면 설치·시작 동작을 제안합니다. macOS에서는 공식 다운로드나 안내 페이지를
-열며, MASC가 업체 설치기의 서명이나 체크섬을 검증하는 것은 아닙니다. Linux에서는
-제안된 배포판 패키지 명령을 실행합니다.
+실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. 샌드박스 준비가
+필요하면 설치·시작 동작을 제안합니다. macOS에서는 Apple Container와 Docker
+Desktop의 공식 설치 파일을 검증해 설치하는 동작도 제공합니다.
 
 설치 중 셸 PATH 변경에 동의했다면 새 터미널에서 `masc`를 쓸 수 있습니다.
 변경을 건너뛰었거나 비대화형으로 설치했다면 설치 경로를 PATH에 직접 추가하세요.
@@ -51,17 +50,28 @@ bash /tmp/masc-install.sh
 여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서
 확인하세요. 다중 선택은 0.35.2부터 지원합니다.
 
+## 첫 설치를 틱으로 따라가면
+
+Apple Silicon Mac에서 릴리스를 받아 첫 Keeper 대화를 확인하는 순서입니다.
+
+| 틱 | 일어나는 일 | 멈추는 조건 |
+|---|---|---|
+| N | `curl`로 설치기를 받아 Bash로 실행합니다. 터미널에서는 새 작업 공간으로 `~/MASC`를 제안합니다. 실행 파일은 기본 `~/.local/bin`, 설정과 데이터는 선택한 경로의 `.masc`에 둡니다. Rosetta 셸에서도 Apple Silicon 자산을 선택합니다. | 네트워크, 쓰기 권한, Apple Silicon 및 macOS 15 이상 조건. |
+| N+1 | 릴리스 태그와 `SHA256SUMS`를 읽고 번들 런타임 압축 파일의 해시를 검증합니다. 이후 설치에는 번들 Python을 씁니다. | 체크섬 누락·불일치, 압축 해제 실패, Python 기동 실패. Homebrew, Xcode 명령줄 도구, 시스템 Python, opam, OCaml, Node.js는 필요하지 않습니다. |
+| N+2 | 서버·TUI·보조 실행 파일·대시보드를 검증해 배치합니다. 작업 공간을 사전점검하고 기본 설정과 수동 시작 Keeper `imp`를 준비합니다. `masc --version`을 확인한 뒤 설치를 확정합니다. | 필수 배포 파일 누락, 기존 상태를 읽을 수 없음, 설정 쓰기 또는 실행 파일 검사 실패. |
+| N+3 | `masc setup`에서 모델을 고르고 응답과 도구 호출을 확인합니다. 지원하는 CLI 로그인, API 사용 권한, 접속 가능한 로컬 모델 서버 중 하나가 필요합니다. | 인증, 사용량 한도, 서버 연결이나 도구 호출 실패. 설정을 보류해도 설치한 파일은 남습니다. |
+| N+4 | 샌드박스 서비스를 확인하고 이미지를 준비합니다. 작업 공간 서버를 시작하거나 연결한 뒤 로컬 운영자 인증을 준비하고, 모델 설정을 적용하고, `imp`를 시작한 뒤 TUI를 엽니다. | Docker 엔진 미기동, Apple Container 준비 조건 미충족, 이미지 빌드 실패, 포트 충돌. |
+| N+5 | Keeper 채팅에서 첫 답변과 `pwd`·`ls` 결과를 보고, 생성한 Board 글과 Task를 작업 공간 화면에서 찾아봅니다. | 도구 호출이 거부되거나 승인을 기다리면 요청이 멈출 수 있습니다. 완료 검증, 대체 모델 전환, 재시작 뒤 대화 연속성은 각각 해당 동작으로 확인합니다. |
+
 ## 플랫폼과 준비물
 
 | OS / CPU | 릴리스 자산 suffix | 검증 환경 |
 |---|---|---|
 | Linux x86-64 | `linux-x64` | Ubuntu 24.04 runner + 새 Ubuntu 24.04 container |
 | Linux ARM64 | `linux-arm64` | Ubuntu 24.04 ARM runner + 새 Ubuntu 24.04 container |
-| macOS Apple Silicon | `macos-arm64` | macOS 14 ARM runner |
-| macOS Intel | `macos-x64` | macOS 15 Intel runner |
+| macOS 15 이상, Apple Silicon | `macos-arm64` | macOS 15 ARM runner |
 
-이 표는 CI 대상입니다. 성공한 해당 릴리스의 `Release` 실행과 실제 자산을
-확인해야 설치 검증이 완료된 것입니다.
+인텔 Mac은 지원하지 않습니다. 설치할 버전의 릴리스 후보 검증 결과와 배포 자산을 확인하세요.
 
 Linux 바이너리는 Ubuntu 22.04 컨테이너에서 빌드하므로 **glibc 2.35 이상**이
 필요합니다. Ubuntu 22.04, Debian 12, RHEL 10 그리고 그 이후 배포판이 해당합니다.
@@ -69,8 +79,7 @@ Linux 바이너리는 Ubuntu 22.04 컨테이너에서 빌드하므로 **glibc 2.
 의도가 아니라 검사 대상입니다(`scripts/check-glibc-floor.sh`). glibc 기준과
 아래 공유 라이브러리 목록은 별개이며, 라이브러리는 배포판마다 따로 갖춰야
 합니다. RHEL 9는 glibc 2.34라서 이 기준에 못 미칩니다. Alpine을 비롯한 musl
-배포판과 위보다 오래된 macOS는 검증 대상이 아닙니다. Intel Mac은 Apple
-Container 기반 microVM을 제공하지 않으므로 Docker 또는 remote SSH를 선택합니다.
+배포판에는 별도 빌드가 필요합니다.
 Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images)을 따릅니다.
 
 설치 스크립트는 Bash, curl, tar, `sha256sum` 또는 `shasum`을 사용합니다.
@@ -95,14 +104,10 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
-macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
-
-설정 화면에서 sandbox 서비스를 확인하고 빠진 준비물의 설치·시작 동작을 제안합니다.
-macOS에서는 공식 다운로드나 안내 페이지를 열며 MASC가 업체 설치기의 서명이나 체크섬을
-검증하는 것은 아닙니다. Linux에서는 제안된 패키지 명령을 실행합니다. 지원되는 Apple
-Silicon Mac에서는 Apple Container를, macOS와 Linux에서는 Docker를 선택할 수 있습니다.
-모델 연결에는 해당 제공자의 구독이나 API 사용 권한이 필요합니다. Claude Code와 Codex는
-연결 검사가 실패했을 때 모델 선택을 유지한 채 로그인 화면을 열 수 있습니다.
+Apple Container는 Apple Silicon과 macOS 26 이상이 필요합니다. 설정 화면은
+선택한 샌드박스 서비스를 확인하고 필요한 동작을 제안합니다. macOS에서는 해당
+동작을 선택하면 Apple Container 또는 Docker Desktop의 공식 설치 파일을 검증해
+설치할 수 있습니다. 서비스를 시작하고 준비 상태를 다시 확인한 뒤 진행하세요.
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
@@ -491,7 +496,7 @@ Debian base image와 패키지를 받는 네트워크가 필요합니다.
 | 실행 환경 | 준비 | 검증 범위 |
 |---|---|---|
 | Linux + Docker | 설정 화면의 동작으로든 직접이든 Docker daemon을 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
-| Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | macOS 14 서버 CI 통과만으로 이 backend를 증명하지 않음 |
+| Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | 이 백엔드에서 이미지 준비와 게스트 시작을 확인 |
 | Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 작업 볼륨을 멱등 생성·inspect 확인; 실제 Kata 검증 필요, policy networking 미지원 |
 | remote SSH | 원격 endpoint와 인증·shim·도구 준비 | 로컬 Docker/microVM 이미지와 독립적인 원격 환경 |
 
@@ -684,7 +689,7 @@ Goal 등)은 정리할 때까지 비어 있거나 오류를 반환합니다.
 
 ## 릴리스 검증
 
-`Release` workflow는 네 native target을 모두 필수로 빌드하고, checksum을
+릴리스 후보 검증은 지원 플랫폼별로 바이너리를 빌드하고, checksum을
 사용하는 `file://` 설치 → config seed → 설치된 서버 health → 대시보드 검증을
 수행합니다. Linux는 OCaml 개발 환경이 없는 새 Ubuntu container에서도 같은
 설치를 실행합니다. TUI의 `--help`로 동적 로더가 동작하는지도 확인합니다.
@@ -694,10 +699,8 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 일치해야 통과합니다. 모델 품질·실제 API 인증·장시간 연속성은 이 fixture가
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
-`workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `vX.Y.Z` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
-`SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
-각각 확인해야 합니다.
+`Release` 워크플로는 게시를 요청하면 기존 버전 태그에 검증한 후보 자산과
+`SHA256SUMS`를 게시합니다.
 
 ## 제거
 

@@ -3,7 +3,7 @@ module D = Masc.Docker_desktop_install
 module S = Masc.Sandbox_readiness
 let payload = "official fixture disk image bytes"
 let sha256 = Agent_core_sha256.(to_hex (digest_string payload))
-let host = S.Macos {architecture=S.Arm64;major=26}
+let host = S.Macos {major=26}
 let with_source f =
   let directory = Filename.temp_dir "docker-install-fixture-" "" in
   let source = Filename.concat directory "source.dmg" in

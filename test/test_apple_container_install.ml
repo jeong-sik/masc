@@ -75,7 +75,7 @@ let test_acquisition () =
   (match A.acquire ~host:(S.Linux S.Arm64) ~run with
    | Error A.Unsupported_host -> () | _ -> fail "wrong platform offered installation");
   check bool "unsupported platform does not acquire" true (!download=None);
-  match A.acquire ~host:(S.Macos {architecture=S.Arm64;major=26}) ~run with
+  match A.acquire ~host:(S.Macos {major=26}) ~run with
   | Error _ -> fail "fixture acquisition failed"
   | Ok artifact ->
     check bool "acquisition did not run installer" false

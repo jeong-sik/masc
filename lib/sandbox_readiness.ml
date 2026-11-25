@@ -1,5 +1,5 @@
 type architecture = Arm64 | X64
-type host = Macos of { architecture : architecture; major : int } | Linux of architecture | Unsupported
+type host = Macos of { major : int } | Linux of architecture | Unsupported
 type backend = Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh
 type state = Service_ready | Missing_prerequisite of string | Unsupported_host of string
   | Unsupported_capability of string | Probe_failed of string | Needs_configuration of string
@@ -27,15 +27,21 @@ let of_microvm = function Keeper_microvm_backend.Apple_container -> Apple_contai
   | Nerdctl_kata -> Nerdctl_kata | Microsandbox -> Microsandbox
 let architecture = function "arm64" | "aarch64" -> Some Arm64 | "x86_64" -> Some X64 | _ -> None
 let detect_host ~run =
+  let translated () =
+    match run ["sysctl"; "-n"; "sysctl.proc_translated"] with
+    | Ok value -> String.trim value = "1"
+    | Error _ -> false
+  in
   match run ["uname"; "-s"], run ["uname"; "-m"] with
   | Ok os, Ok arch -> (match String.trim os, architecture (String.trim arch) with
     | "Linux", Some arch -> Linux arch
-    | "Darwin", Some architecture -> (match run ["sw_vers"; "-productVersion"] with
-      | Ok version -> (match String.split_on_char '.' (String.trim version) with
-        | major :: _ -> (match int_of_string_opt major with
-          | Some major when major > 0 -> Macos {architecture; major} | _ -> Unsupported)
-        | [] -> Unsupported)
-      | Error _ -> Unsupported)
+    | "Darwin", Some arch when arch = Arm64 || translated () ->
+      (match run ["sw_vers"; "-productVersion"] with
+       | Ok version -> (match String.split_on_char '.' (String.trim version) with
+         | major :: _ -> (match int_of_string_opt major with
+           | Some major when major >= 15 -> Macos {major} | _ -> Unsupported)
+         | [] -> Unsupported)
+       | Error _ -> Unsupported)
     | _ -> Unsupported)
   | Ok _, Error _ | Error _, (Ok _ | Error _) -> Unsupported
 let system_runner argv =
@@ -138,7 +144,7 @@ let apple_container_needs_default_kernel ~run =
   | Service_ready -> not (apple_default_kernel_configured ~run)
   | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _
   | Needs_configuration _ -> false
-let unsupported_host_reason = "Supported hosts are macOS and Linux on ARM64 or x64"
+let unsupported_host_reason = "Supported hosts are Apple Silicon Macs with macOS 15 or later and Linux on ARM64 or x64"
 (* What every Apple Container command needs before it runs: a host that can
    run Apple Container, and a service that answers its inventory. The image
    builder is [probe]'s further question; a command that builds nothing, such
@@ -146,9 +152,9 @@ let unsupported_host_reason = "Supported hosts are macOS and Linux on ARM64 or x
 let apple_container_service ~host ~run =
   match host with
   | Unsupported -> Unsupported_host unsupported_host_reason
-  | Linux (Arm64) | Linux (X64) | Macos { architecture = X64; _ } ->
+  | Linux (Arm64) | Linux (X64) ->
     Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
-  | Macos {major; _} when major < 26 ->
+  | Macos {major} when major < 26 ->
     Unsupported_host "Apple Container requires macOS 26 or newer"
   | Macos _ -> apple_inventory ~run
 let probe ~host ~run ~require_rootless ~require_userns backend =
@@ -195,7 +201,7 @@ let recommend ~host ~configured entries =
   | Some backend when ready backend -> Some backend
   | _ ->
     let candidates = match host with
-      | Macos {architecture=Arm64; major} when major >= 26 -> [Apple_container; Docker]
+      | Macos {major} when major >= 26 -> [Apple_container; Docker]
       | Macos _ | Linux (Arm64) | Linux (X64) -> [Docker]
       | Unsupported -> [] in
     List.find_opt ready candidates

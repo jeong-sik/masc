@@ -24,7 +24,7 @@ class PortableBootstrap(unittest.TestCase):
             path.write_text('#!/bin/sh\n' + body + '\n')
             path.chmod(0o755)
         command('uname', 'case "$1" in -m) echo arm64 ;; *) echo Darwin ;; esac')
-        command('sw_vers', 'echo "${TEST_MACOS_VERSION:-14.0}"')
+        command('sw_vers', 'echo "${TEST_MACOS_VERSION:-15.0}"')
         command('python3', 'exit 98')
         for name in ('brew', 'xcode-select'):
             command(name, 'echo ' + name + ' >> ' + shlex.quote(str(self.calls)) + '; exit 98')
@@ -134,13 +134,22 @@ class PortableBootstrap(unittest.TestCase):
 
     def test_rosetta_shell_selects_apple_silicon_build(self):
         # Under Rosetta 2 `uname -m` says x86_64; the CPU is still arm64, so the
-        # arm64 build and its macOS 14 minimum apply.
+        # arm64 build and its macOS 15 minimum apply.
         (self.bin / 'uname').write_text('#!/bin/sh\ncase "$1" in -m) echo x86_64 ;; *) echo Darwin ;; esac\n')
         (self.bin / 'sysctl').write_text('#!/bin/sh\n[ "$2" = sysctl.proc_translated ] && echo 1\n')
         (self.bin / 'sysctl').chmod(0o755)
-        result = self.run_installer(['--dry-run', '--version', 'v9.9.9'], TEST_MACOS_VERSION='14.0')
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9'], TEST_MACOS_VERSION='15.0')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('platform: masc-macos-arm64', result.stdout + result.stderr)
+
+    def test_intel_mac_is_refused_before_release_resolution(self):
+        (self.bin / 'uname').write_text('#!/bin/sh\ncase "$1" in -m) echo x86_64 ;; *) echo Darwin ;; esac\n')
+        (self.bin / 'sysctl').write_text('#!/bin/sh\nexit 1\n')
+        (self.bin / 'sysctl').chmod(0o755)
+        result = self.run_installer([])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('Intel Macs are not supported', result.stderr)
+        self.assertNotIn('resolving latest release', result.stderr)
 
     def test_version_without_v_prefix_is_normalized(self):
         result = self.run_installer(['--dry-run', '--version', '9.9.9'])
@@ -148,9 +157,9 @@ class PortableBootstrap(unittest.TestCase):
         self.assertIn('version: v9.9.9', result.stdout + result.stderr)
 
     def test_old_macos_fails_before_download(self):
-        result = self.run_installer(['--version', 'v9.9.9'], TEST_MACOS_VERSION='13.6')
+        result = self.run_installer(['--version', 'v9.9.9'], TEST_MACOS_VERSION='14.7')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('minimum macOS 14.0', result.stderr)
+        self.assertIn('minimum macOS 15.0', result.stderr)
 
     def test_offline_uninstall_needs_no_interpreter(self):
         self.fixture.old()

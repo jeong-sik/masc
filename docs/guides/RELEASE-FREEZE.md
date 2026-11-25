@@ -94,7 +94,7 @@ checker self-tests are not product behavior proof. Review test cleanup as a
 separate change rather than deleting useful coverage during an RC failure.
 
 The current `release-candidate.yml` workflow runs full compile/type checks,
-four-platform installation checks, and the explicit essential behavior
+installation checks on the supported platforms, and the explicit essential behavior
 selection declared in `config/release-behavior.json` (`release-behavior.yml`).
 Full root `@runtest` (`test.yml`) remains a separate manual regression lane.
 The candidate ledger records its latest run id, or `미실행` if it did not run
@@ -106,7 +106,7 @@ successful same-run assets under the existing workflow.
 
 Require independent review of the final candidate and successful exact-SHA
 verification of every declared candidate stage: full type/compile checks,
-four-platform install checks, and the versioned essential behavior profile in
+installation checks on the supported platforms, and the versioned essential behavior profile in
 `config/release-behavior.json` (whose exact profile list and SHA-256 hash are
 recorded in the candidate receipt). A source approval, partial pass, cancelled
 run or old candidate is not complete verification. Production-ready

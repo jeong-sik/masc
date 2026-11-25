@@ -128,6 +128,26 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `arcade` | — | masc | 이 저장소의 MIT |
 | `toxic` | — | masc | 이 저장소의 MIT |
 
+## TUI 프리셋 5개 (`lib/masc_tui/core/theme.ml`)
+
+`/theme` 으로 고르는 프리셋 14개 중 5개는 다른 프로젝트의 팔레트를 쓴다.
+색 값이 `config/themes/` 의 TOML 이 아니라 `theme.ml` 에 들어 있어서, 위 54개와 따로 이 표에 적는다.
+
+| 프리셋 | 원본 | 저작권 표시 | 조건 |
+|---|---|---|---|
+| `solarized_dark` | [altercation/solarized](https://github.com/altercation/solarized) | Copyright (c) 2011 Ethan Schoonover | MIT |
+| `nord` | [nordtheme/nord](https://github.com/nordtheme/nord) | Copyright (c) 2016-present Sven Greb <development@svengreb.de> (https://www.svengreb.de) | MIT |
+| `dracula` | [dracula/dracula-theme](https://github.com/dracula/dracula-theme) | Copyright (c) 2023 Dracula Theme | MIT |
+| `gruvbox_dark` | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | 저작권 줄 없음. `colors/gruvbox.vim` 머리말에 `Author: morhetz` | README 가 `MIT/X11` 이라고 밝힘 |
+| `catppuccin_mocha` | [catppuccin/palette](https://github.com/catppuccin/palette) | Copyright (c) 2021 Catppuccin | MIT |
+
+- 값은 각 프로젝트의 원본 파일(Solarized README 의 색 표, Nord `src/nord.css`, Dracula README 의 색 표, `gruvbox.vim`, Catppuccin `palette.json`)을 읽어서 뽑았다. 손으로 옮겨 적지 않았다.
+- 프리셋이 쓰는 공개 색 72개 중 64개는 같은 이름의 TOML 스킴(`solarized-dark`, `nord`, `dracula`, `gruvbox-dark-hard`, `catppuccin-mocha`)에 같은 값으로 있다. 나머지 8개는 base16 의 16칸에 없는 색이다: Gruvbox `dark0`·`dark0_soft`, Catppuccin `overlay1`·`overlay2`·`pink`·`sapphire`·`subtext0`·`subtext1`.
+- Solarized, Nord, Dracula, Catppuccin 의 MIT 허가 문구는 위 tinted-theming 원문과 글자가 같다. 저작권 표시는 위 표에 적었다.
+- Gruvbox 저장소에는 라이선스 파일이 없다(2026-11-25 GitHub API 확인). README 의 `License` 절이 `MIT/X11` 이라고 밝히고, 같은 값이 위 `gruvbox-dark-hard` 로 이미 실려 있어서 넣었다. 원저자가 이 선언을 거두면 `gruvbox_dark` 를 뺀다.
+- 팔레트에 없는 자리(`surface_1`, 선택 줄, 중간 밝기 글자 등)는 공개 색 두 개를 Oklab 에서 섞었다. `theme.ml` 의 줄마다 주석으로 원본 색 이름과 섞은 비율을 적었다.
+- 대비가 AA(4.5:1)에 못 미치는 공개 색은 `build_theme` 가 밝기만 올린다. 화면에 보이는 색이 공개 값보다 밝을 수 있다.
+
 ## 여기 없는 것
 
 ### 조건이 걸려서 뺀 것 — `material-palenight`

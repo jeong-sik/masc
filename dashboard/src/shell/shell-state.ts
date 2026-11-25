@@ -370,6 +370,7 @@ export const hitlLoading = signal<boolean>(false)
 export type HitlSourceKey = 'approvals' | 'asks' | 'gate' | 'planning' | 'verification'
 
 export type HitlSourceState =
+  | { readonly kind: 'unread' }
   | { readonly kind: 'ok' }
   | { readonly kind: 'unbridged'; readonly reason: 'multi_account_unbridged' }
   | { readonly kind: 'failed'; readonly message: string }
@@ -377,11 +378,11 @@ export type HitlSourceState =
 export type HitlSourceStatusMap = Readonly<Record<HitlSourceKey, HitlSourceState>>
 
 const DEFAULT_HITL_SOURCE_STATUS: HitlSourceStatusMap = {
-  approvals: { kind: 'ok' },
-  asks: { kind: 'ok' },
-  gate: { kind: 'ok' },
-  planning: { kind: 'ok' },
-  verification: { kind: 'ok' },
+  approvals: { kind: 'unread' },
+  asks: { kind: 'unread' },
+  gate: { kind: 'unread' },
+  planning: { kind: 'unread' },
+  verification: { kind: 'unread' },
 }
 
 export const hitlSourceStatus = signal<HitlSourceStatusMap>(DEFAULT_HITL_SOURCE_STATUS)
@@ -425,6 +426,23 @@ export const hitlUncheckedSummary = computed<readonly HitlUncheckedSource[]>(() 
   }
   return out
 })
+
+export const inboxUncheckedSources = computed(
+  () => hitlUncheckedSummary.value.filter((source) => source.key !== 'verification'),
+)
+
+export function uncheckedHitlStatusLabel(state: HitlUncheckedSource['state']): string {
+  switch (state.kind) {
+    case 'unread': return '조회 대기'
+    case 'unbridged': return '멀티 계정 미지원'
+    case 'failed': return '조회 실패'
+  }
+}
+
+export function formatInboxPendingCount(count: number, unchecked: boolean): string {
+  if (!unchecked) return String(count)
+  return count > 0 ? `${count}건 표시 · 일부 미확인` : '일부 미확인'
+}
 
 export const HITL_POLL_TIMEOUT_MS = 15_000
 
@@ -646,20 +664,18 @@ export async function refreshPendingHitl(
         approvals: { kind: 'unbridged', reason: 'multi_account_unbridged' },
         asks: { kind: 'unbridged', reason: 'multi_account_unbridged' },
         gate: { kind: 'unbridged', reason: 'multi_account_unbridged' },
-        planning: hitlSourceStatus.peek().planning.kind === 'unbridged' ? { kind: 'ok' } : hitlSourceStatus.peek().planning,
+        planning: hitlSourceStatus.peek().planning.kind === 'unbridged' ? { kind: 'unread' } : hitlSourceStatus.peek().planning,
         verification: { kind: 'unbridged', reason: 'multi_account_unbridged' },
       }
       const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', reqOpts)
       if (!isCurrent()) return
       if (planRes.ok) {
         clearHitlIncident('planning')
-        setHitlSourceState('planning', { kind: 'ok' })
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+        setHitlSourceState('planning', { kind: 'ok' })
       } else if (
         planRes.error.kind !== 'epoch_stale'
         && planRes.error.kind !== 'aborted'
-        && planRes.error.kind !== 'forbidden'
-        && planRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
         recordHitlIncidentOnce(
@@ -688,12 +704,11 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (approvalsRes.ok) {
         clearHitlIncident('approvals')
-        setHitlSourceState('approvals', { kind: 'ok' })
         pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
+        setHitlSourceState('approvals', { kind: 'ok' })
       } else if (
         approvalsRes.error.kind !== 'epoch_stale'
         && approvalsRes.error.kind !== 'aborted'
-        && approvalsRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('approvals', { kind: 'failed', message: approvalsRes.error.message })
         recordHitlIncidentOnce(
@@ -708,13 +723,11 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (asksRes.ok) {
         clearHitlIncident('asks')
-        setHitlSourceState('asks', { kind: 'ok' })
         pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
+        setHitlSourceState('asks', { kind: 'ok' })
       } else if (
         asksRes.error.kind !== 'epoch_stale'
         && asksRes.error.kind !== 'aborted'
-        && asksRes.error.kind !== 'forbidden'
-        && asksRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('asks', { kind: 'failed', message: asksRes.error.message })
         recordHitlIncidentOnce(
@@ -753,8 +766,6 @@ export async function refreshPendingHitl(
       } else if (
         gateRes.error.kind !== 'epoch_stale'
         && gateRes.error.kind !== 'aborted'
-        && gateRes.error.kind !== 'forbidden'
-        && gateRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('gate', { kind: 'failed', message: gateRes.error.message })
         recordHitlIncidentOnce(
@@ -769,13 +780,11 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (planRes.ok) {
         clearHitlIncident('planning')
-        setHitlSourceState('planning', { kind: 'ok' })
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+        setHitlSourceState('planning', { kind: 'ok' })
       } else if (
         planRes.error.kind !== 'epoch_stale'
         && planRes.error.kind !== 'aborted'
-        && planRes.error.kind !== 'forbidden'
-        && planRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
         recordHitlIncidentOnce(
@@ -805,8 +814,6 @@ export async function refreshPendingHitl(
       } else if (
         verifRes.error.kind !== 'epoch_stale'
         && verifRes.error.kind !== 'aborted'
-        && verifRes.error.kind !== 'forbidden'
-        && verifRes.error.kind !== 'not_found'
       ) {
         setHitlSourceState('verification', { kind: 'failed', message: verifRes.error.message })
         recordHitlIncidentOnce(

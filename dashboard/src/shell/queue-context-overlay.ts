@@ -15,14 +15,16 @@ import { navigate } from '../routes/router'
 import {
   closeActiveOverlay,
   effectiveHitlSourceStatus,
-  hitlUncheckedSummary,
+  formatInboxPendingCount,
   inboxPendingCount,
+  inboxUncheckedSources,
   pendingApprovals,
   pendingAsks,
   pendingGateApprovals,
   pendingGoalConfirmations,
   pendingVerifications,
   refreshPendingHitl,
+  uncheckedHitlStatusLabel,
   type HitlSourceState,
 } from './shell-state'
 
@@ -133,15 +135,14 @@ export function QueueContextOverlayBody(): VNode {
   const verifications = pendingVerifications.value
   const totalHitl = inboxPendingCount.value
   const sourceStatus = effectiveHitlSourceStatus.value
-  const uncheckedSources = hitlUncheckedSummary.value
-  const inboxUnchecked = uncheckedSources.filter((u) => u.key !== 'verification')
+  const inboxUnchecked = inboxUncheckedSources.value
   const observed = resourceCache.observe<ShellQueueSummary>(SHELL_CACHE_KEY).value
   const schedulesObs = resourceCache.observe<QuickPeekScheduleSummary>(SCHEDULES_CACHE_KEY).value
 
   const sectionCountLabel = (count: number, st: HitlSourceState): string => {
-    if (st.kind === 'unbridged') return '멀티 계정 미지원'
-    if (st.kind === 'failed') return count > 0 ? `${count} · 조회 실패` : '조회 실패'
-    return String(count)
+    if (st.kind === 'ok') return String(count)
+    const status = uncheckedHitlStatusLabel(st)
+    return count > 0 ? `${count} · ${status}` : status
   }
 
   useEffect(() => {
@@ -191,14 +192,14 @@ export function QueueContextOverlayBody(): VNode {
               <div class="ap-mini-kpi">
                 <span class="ap-mini-kpi-k">HITL Queue</span>
                 <strong class="ap-mini-kpi-v tnum">
-                  ${inboxUnchecked.length > 0 ? `확인된 ${totalHitl}건 · 일부 미확인` : String(totalHitl)}
+                  ${formatInboxPendingCount(totalHitl, inboxUnchecked.length > 0)}
                 </strong>
                 ${verifications.length > 0 && html`
                   <span class="ap-mini-kpi-sub tnum">+${verifications.length} verif</span>
                 `}
                 ${sourceStatus.verification.kind !== 'ok' && html`
                   <span class="ap-mini-kpi-sub">
-                    검증 ${sourceStatus.verification.kind === 'unbridged' ? '멀티 계정 미지원' : '조회 실패'}
+                    검증 ${uncheckedHitlStatusLabel(sourceStatus.verification)}
                   </span>
                 `}
               </div>

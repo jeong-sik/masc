@@ -17,6 +17,7 @@ import {
   activeWorkspaceId,
   authSession,
   bootstrapAuthSession,
+  isAuthenticated,
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
@@ -45,7 +46,9 @@ import { ShellIcon } from './icons'
 import {
   activeOverlay,
   buildConnectionInfo,
+  formatInboxPendingCount,
   inboxPendingCount,
+  inboxUncheckedSources,
   isMobileViewport,
   openCommandPalette,
   probeBuildConnectionInfo,
@@ -462,6 +465,9 @@ export function TopBar(): VNode {
   const navDef = WORKSPACE_NAV_BY_ID[route.workspace]
   const mobile = isMobileViewport.value
   const pending = inboxPendingCount.value
+  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const pendingLabel = pendingUnchecked ? formatInboxPendingCount(pending, true) : `${pending}건 대기`
+  const pendingBadge = pendingUnchecked ? '?' : pending
   const unreadInc = unreadIncidentCount.value
   const overlay = activeOverlay.value
   const win = timeWindow.value
@@ -545,14 +551,14 @@ export function TopBar(): VNode {
         ${!mobile && html`
           <button
             type="button"
-            class=${`ap-pill${pending > 0 ? ' ap-pill--warn' : ''}`}
-            aria-label=${`Inbox (${pending}건 대기)`}
+            class=${`ap-pill${pending > 0 || pendingUnchecked ? ' ap-pill--warn' : ''}`}
+            aria-label=${`Inbox (${pendingLabel})`}
             data-testid="inbox-pill"
             onClick=${() => navigate('/work/inbox')}
           >
             <${ShellIcon} name="inbox" size=${13} />
             <span class="ap-pill-label">Inbox</span>
-            <span class="ap-pill-count tnum">${pending}</span>
+            <span class="ap-pill-count tnum" title=${pendingLabel}>${pendingBadge}</span>
           </button>
 
           <button

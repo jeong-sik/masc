@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
-import { act, fireEvent } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 import {
   activeWorkspaceId,
   authSession,
@@ -49,6 +49,18 @@ import {
 import { TopBar } from './top-bar'
 
 const AUTH_METHODS = { google: true, github: true, dev_token: false } as const
+
+const EMPTY_HITL: Readonly<Record<string, object>> = {
+  '/api/v1/keepers/tool-approvals': { pending: [] },
+  '/api/v1/keepers/asks': { asks: [] },
+  '/api/v1/dashboard/gate': { approval_queue: [] },
+  '/api/v1/dashboard/planning': { goals: [] },
+  '/api/v1/verification/requests': { requests: [] },
+}
+
+function hitlJson(payload: object, status = 200): Response {
+  return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
+}
 
 describe('Proposal A+ Shell components', () => {
   let container: HTMLDivElement
@@ -172,6 +184,66 @@ describe('Proposal A+ Shell components', () => {
     expect(sessionEpoch.value).toBeGreaterThan(beforeEpoch)
   })
 
+  it('reports unread and inaccessible HITL sources until a successful empty read', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+
+    let release!: () => void
+    const firstRead = new Promise<void>((resolve) => { release = resolve })
+    let recovered = false
+    const blockedStatuses: Readonly<Record<string, number>> = {
+      '/api/v1/keepers/tool-approvals': 404,
+      '/api/v1/keepers/asks': 403,
+      '/api/v1/dashboard/gate': 404,
+      '/api/v1/dashboard/planning': 403,
+      '/api/v1/verification/requests': 404,
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path = new URL(String(input), location.href).pathname
+      const status = blockedStatuses[path]
+      if (status && !recovered) {
+        await firstRead
+        return hitlJson({ error: 'HITL source unavailable' }, status)
+      }
+      return hitlJson(EMPTY_HITL[path] ?? {})
+    })
+
+    await act(async () => {
+      render(h('div', {}, h(TopBar, {}), h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    const askEmpty = '대기 중인 Keeper 질문이 없습니다.'
+    const strip = () => container.querySelector('[data-testid="fast-approval-strip"]')
+    const inboxBadge = () => container.querySelector('[data-testid="inbox-pill"] .ap-pill-count')?.textContent
+    expect(container.textContent).toContain('Pending Tool Approvals (조회 대기)')
+    expect(container.textContent).toContain('Open Keeper Asks (조회 대기)')
+    expect(container.textContent).not.toContain(askEmpty)
+    expect(strip()?.textContent).toContain('일부 미확인')
+    expect(inboxBadge()).toBe('?')
+
+    release()
+    await waitFor(() => {
+      expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
+      expect(container.textContent).toContain('Open Keeper Asks (조회 실패)')
+      expect(container.textContent).toContain('Channel Gate Approvals (조회 실패)')
+      expect(container.textContent).toContain('Goal Confirmations (조회 실패)')
+      expect(container.textContent).toContain('Awaiting Verifications (조회 실패)')
+    })
+    expect(container.textContent).not.toContain(askEmpty)
+    expect(strip()?.textContent).toContain('일부 미확인')
+    expect(inboxBadge()).toBe('?')
+
+    recovered = true
+    await act(async () => { await refreshPendingHitl() })
+    expect(container.textContent).toContain(askEmpty)
+    expect(strip()).toBeNull()
+    expect(inboxBadge()).toBe('0')
+  })
+
   it('FastApprovalStrip renders 0px when clear, wraps mutations in TargetLockedAction, and locks on sessionEpoch drift', async () => {
     authSession.value = {
       kind: 'single_user_local',
@@ -181,6 +253,8 @@ describe('Proposal A+ Shell components', () => {
       workspaceId: 'default',
     }
 
+    const fetchEmpty: typeof fetch = async (input) => hitlJson(EMPTY_HITL[new URL(String(input), location.href).pathname] ?? {})
+    await refreshPendingHitl(fetchEmpty)
     await act(async () => {
       render(h(FastApprovalStrip, {}), container)
     })
@@ -552,11 +626,11 @@ describe('Proposal A+ Shell components', () => {
     const strip = container.querySelector('[data-testid="fast-approval-strip"]')
     expect(strip).not.toBeNull()
     expect(strip?.getAttribute('data-hitl-unchecked')).toBe('true')
-    expect(strip?.textContent).toContain('확인된 0건 · 일부 미확인')
+    expect(strip?.textContent).toContain('일부 미확인')
     expect(strip?.textContent).toContain('멀티 계정 미지원')
 
     const overlay = container.querySelector('[data-testid="queue-context-overlay"]')!
-    expect(overlay.textContent).toContain('확인된 0건 · 일부 미확인')
+    expect(overlay.textContent).toContain('일부 미확인')
     expect(overlay.textContent).toContain('Pending Tool Approvals (멀티 계정 미지원)')
     expect(overlay.textContent).toContain('Open Keeper Asks (멀티 계정 미지원)')
     expect(overlay.textContent).toContain('Channel Gate Approvals (멀티 계정 미지원)')
@@ -596,7 +670,7 @@ describe('Proposal A+ Shell components', () => {
     })
     expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
     expect(container.textContent).toContain('도구 승인 조회 실패')
-    expect(container.textContent).toContain('확인된 0건 · 일부 미확인')
+    expect(container.textContent).toContain('일부 미확인')
     vi.unstubAllGlobals()
   })
 })

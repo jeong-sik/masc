@@ -1,7 +1,7 @@
 /**
  * Conditional 1-Row Fast-Path Approval Strip (`Proposal A+` + `code-reviewer-sister` K4).
  *
- * - Renders ONLY when pending Tool Approvals or Keeper Asks exist (`null` = 0px when clear).
+ * - Shows pending actions or incomplete Inbox reads and collapses after a confirmed empty read.
  * - Wraps every approve/deny mutation in `TargetLockedAction` displaying immutable
  *   `(workspace_id, keeper, request_id, revision)` and auto-locking on revision or epoch drift.
  * - Supports `[Y]` Approve, `[N]` Deny, `[J]` Jump to Inbox (`Alt+Y` / `Alt+N` while typing).
@@ -11,12 +11,13 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { activeWorkspaceId, sessionEpoch } from '../core/auth'
+import { activeWorkspaceId, isAuthenticated, sessionEpoch } from '../core/auth'
 import { TargetLockedAction, type TargetLockState } from '../components/primitives/target-locked-action'
 import { navigate } from '../routes/router'
 import {
   commandPaletteOpen,
-  hitlUncheckedSummary,
+  formatInboxPendingCount,
+  inboxUncheckedSources,
   isMobileViewport,
   mobileMoreOpen,
   pendingApprovals,
@@ -26,6 +27,7 @@ import {
   refreshPendingHitl,
   submitFastToolApproval,
   toggleQueueContextOverlay,
+  uncheckedHitlStatusLabel,
 } from './shell-state'
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -39,7 +41,7 @@ export function FastApprovalStrip(): VNode | null {
   const asks = pendingAsks.value
   const gates = pendingGateApprovals.value
   const goalConfirms = pendingGoalConfirmations.value
-  const inboxUnchecked = hitlUncheckedSummary.value.filter((u) => u.key !== 'verification')
+  const inboxUnchecked = inboxUncheckedSources.value
   const mobile = isMobileViewport.value
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(() => sessionEpoch.peek())
@@ -97,14 +99,14 @@ export function FastApprovalStrip(): VNode | null {
   }, [headApproval, headAsk, headGate, headGoalConfirm, capturedEpoch, submittingId])
 
   const totalPending = approvals.length + asks.length + gates.length + goalConfirms.length
-  const countTag = inboxUnchecked.length > 0 ? `확인된 ${totalPending}건 · 일부 미확인` : String(totalPending)
+  const countTag = formatInboxPendingCount(totalPending, inboxUnchecked.length > 0)
 
   // 0px when genuinely clear with all inbox HITL sources observed.
   if (!headApproval && !headAsk && !headGate && !headGoalConfirm) {
-    if (inboxUnchecked.length === 0) return null
+    if (!isAuthenticated.value || inboxUnchecked.length === 0) return null
     const allUnbridged = inboxUnchecked.every((u) => u.state.kind === 'unbridged')
     const detailText = inboxUnchecked
-      .map((u) => (u.state.kind === 'unbridged' ? `${u.label}(멀티 계정 미지원)` : `${u.label}(조회 실패)`))
+      .map((source) => `${source.label}(${uncheckedHitlStatusLabel(source.state)})`)
       .join(' · ')
     return html`
       <section
@@ -116,7 +118,7 @@ export function FastApprovalStrip(): VNode | null {
       >
         <div class="ap-fast-row">
           <div class="ap-fast-summary">
-            <span class="ap-fast-pill">HITL · 확인된 0건 · 일부 미확인</span>
+            <span class="ap-fast-pill">HITL · ${countTag}</span>
             <span class="ap-fast-question">
               ${allUnbridged ? '멀티 계정 미지원 소스: ' : '미확인 소스: '}${detailText}
             </span>

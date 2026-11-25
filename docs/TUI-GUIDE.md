@@ -146,7 +146,9 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
    - **`Ctrl+T` → Work & Queue** shows the observed turn, its recorded start reasons, and the Task and Goal linked by the planning records. It reads queued chats in the server's sequence order and identifies batch bindings when reported. The next scheduled work is in **Schedules**.
    - The drawer shows a separate entry for a local transmission until its operation appears in the server queue. A failed read displays its error. After a stream disconnect, the TUI looks up the original operation to confirm its state. If the Keeper reports that this exact ID has no status record, the message stays visible with its ID and can be dismissed with `X`. A later matching receipt can still update it. Sending the text again creates a new request.
    - Compact chat groups adjacent tool calls with the same turn identity and confirmed successful live calls from the same stream. Use **`Ctrl+O`** to see individual calls and results.
-   - **`Shift+Enter`** or **`Ctrl+J`** — Insert a literal newline inside the composer.
+   - **`Ctrl+J`** or **`Shift+Enter`** — Insert a literal newline inside the composer.
+     To use `Shift+Enter` in tmux 3.5a or later, set `set -s extended-keys on`
+     in tmux and open the TUI in a terminal that reports extended keys.
    - **`/` or `@` popup** — Type `/` (command or argument completion) or `@` (Keeper mention) to open the interactive popup: `↑`/`↓` (`PgUp`/`PgDn`, `Home`/`End`) move selection, `Tab` completes, `Enter` executes or inserts, and `Esc` dismisses the popup while keeping the composer focused (second `Esc` blurs).
    - **`Ctrl+W`** / **`Alt+Backspace`** — Delete the previous word; **`Ctrl+U`** clears to line start; **`Ctrl+A`/`E`** jump to line start/end.
    - **`←` / `→` / `Home` / `End`** — Move the editing cursor inside the draft (`Ctrl+←/→` or `Alt+←/→` jump by word).

@@ -175,26 +175,34 @@ let drain ~within_s =
   if behind () && still_stuck () then abandon ()
   else wait ~seen:(Atomic.get progress) ~deadline:(Mono.after_s (Mono.now ()) within_s)
 
-let enter_screen_seq ~kitty_keyboard ~mouse ~bracketed_paste =
+type keyboard = Legacy | Kitty | Xterm
+
+let enter_screen_seq ~keyboard ~mouse ~bracketed_paste =
   let buf = Buffer.create 64 in
   Buffer.add_string buf "\x1b[?1049h\x1b[?25l";
   if bracketed_paste then Buffer.add_string buf "\x1b[?2004h";
   if mouse then Buffer.add_string buf "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
-  if kitty_keyboard then Buffer.add_string buf "\x1b[>1u";
+  (match keyboard with
+  | Legacy -> ()
+  | Kitty -> Buffer.add_string buf Input_decoder.enable_kitty_keyboard
+  | Xterm -> Buffer.add_string buf "\x1b[>4;2m");
   Buffer.contents buf
 
-let leave_screen_seq ~kitty_keyboard =
+let leave_screen_seq ~keyboard =
   let buf = Buffer.create 64 in
-  if kitty_keyboard then Buffer.add_string buf "\x1b[<u";
+  (match keyboard with
+  | Legacy -> ()
+  | Kitty -> Buffer.add_string buf Input_decoder.disable_kitty_keyboard
+  | Xterm -> Buffer.add_string buf "\x1b[>4;0m");
   Buffer.add_string buf
     "\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?7h\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l";
   Buffer.contents buf
 
-let install_switch_teardown ~sw ~kitty_keyboard ?on_after_drain () =
+let install_switch_teardown ~sw ~keyboard ?on_after_drain () =
   Atomic.set shutting_down false;
   Eio.Switch.on_release sw (fun () ->
       Atomic.set shutting_down true;
-      write (leave_screen_seq ~kitty_keyboard);
+      write (leave_screen_seq ~keyboard);
       ignore (drain ~within_s:handoff_limit_s : drained);
       Atomic.set shutting_down false;
       match on_after_drain with

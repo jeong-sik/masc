@@ -1011,7 +1011,7 @@ let bindings : binding list =
         ~action:Composer_newline ~key_display:"Shift+Enter"
         ~hint_label:(Say.make ~ko:"줄바꿈" ~en:"Newline")
         ~help_desc:(Say.make ~ko:"컴포저에 줄바꿈 삽입" ~en:"Insert literal newline")
-        ~footer_priority:2 (mk_chord ~shift:true Input.Enter);
+        ~footer_priority:0 (mk_chord ~shift:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
         ~action:Submit_steer ~key_display:"Alt+Enter"
         ~hint_label:(Say.make ~ko:"Steer" ~en:"Steer")
@@ -1026,7 +1026,7 @@ let bindings : binding list =
         ~action:Composer_newline ~key_display:"Ctrl+J"
         ~hint_label:(Say.make ~ko:"줄바꿈" ~en:"Newline")
         ~help_desc:(Say.make ~ko:"컴포저에 줄바꿈 삽입" ~en:"Insert literal newline")
-        ~footer_priority:0 (ctrl_char 'j');
+        ~footer_priority:2 (ctrl_char 'j');
       bind ~scope:Composer_focused ~tier:Universal_ctrl ~category:Cat_composer
         ~action:Composer_kill_word ~key_display:"Ctrl+W"
         ~hint_label:(Say.make ~ko:"단어 삭제" ~en:"Kill word")

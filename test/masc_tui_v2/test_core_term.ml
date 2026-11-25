@@ -525,11 +525,18 @@ let test_hit_map_probe_clipboard () =
     (String.starts_with ~prefix:"\x1bPtmux;" (Clipboard.osc52_sequence ~in_tmux:true "hi"));
 
   (* Terminal_out leave_screen_seq resets DECSCUSR cursor shape before showing cursor *)
-  let leave = Terminal_out.leave_screen_seq ~kitty_keyboard:true in
+  let leave = Terminal_out.leave_screen_seq ~keyboard:Terminal_out.Kitty in
   Alcotest.(check bool) "leave pops Kitty keyboard" true
     (String.starts_with ~prefix:"\x1b[<u" leave);
   Alcotest.(check bool) "leave resets DECSCUSR before show-cursor" true
     (string_contains ~needle:"\x1b[0 q\x1b[?25h" leave);
+  let keyboard = Terminal_out.Xterm in
+  Alcotest.(check bool) "tmux uses modifyOtherKeys mode 2" true
+    (string_contains ~needle:"\x1b[>4;2m"
+       (Terminal_out.enter_screen_seq ~keyboard ~mouse:false ~bracketed_paste:true));
+  Alcotest.(check bool) "tmux clears modifyOtherKeys on release" true
+    (String.starts_with ~prefix:"\x1b[>4;0m"
+       (Terminal_out.leave_screen_seq ~keyboard));
 
   (* Health 3-channel predicates *)
   let attn = Health.Pending_ask { ask_id = "a1"; keeper = "k1" } in

@@ -965,6 +965,16 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         Eio.Switch.on_release sw restore_raw;
 
         let caps = detect_capabilities () in
+        let in_tmux =
+          match Sys.getenv_opt "TMUX" with
+          | Some s -> not (String.equal (String.trim s) "")
+          | None -> false
+        in
+        let keyboard =
+          if in_tmux then Terminal_out.Xterm
+          else if caps.kitty_keyboard then Terminal_out.Kitty
+          else Terminal_out.Legacy
+        in
         (* Keep mouse tracking OFF by default so native terminal drag-select and
            copy ALWAYS work cleanly; operator may opt in/out at runtime via [m]. *)
         let mouse_capture = ref default_mouse_capture in
@@ -975,8 +985,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         in
         let write_enter_screen () =
           Terminal_out.write
-            (Terminal_out.enter_screen_seq ~kitty_keyboard:caps.kitty_keyboard
-               ~mouse:false ~bracketed_paste:true);
+            (Terminal_out.enter_screen_seq ~keyboard ~mouse:false
+               ~bracketed_paste:true);
           if !mouse_capture then
             Terminal_out.write (mouse_capture_seq true);
           Terminal_out.flush ()
@@ -986,16 +996,10 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         Eio.Switch.on_release sw (fun () ->
             Terminal_out.set_on_write_lost (fun () -> ()));
         write_enter_screen ();
-        Terminal_out.install_switch_teardown ~sw
-          ~kitty_keyboard:caps.kitty_keyboard ();
+        Terminal_out.install_switch_teardown ~sw ~keyboard ();
 
         let term_program =
           Graphics.effective_term_program ~getenv:Sys.getenv_opt
-        in
-        let in_tmux =
-          match Sys.getenv_opt "TMUX" with
-          | Some s -> not (String.equal (String.trim s) "")
-          | None -> false
         in
         let active_memory_graphic : memory_graphic_state option ref = ref None in
         let clear_active_memory_graphic () =
@@ -1087,9 +1091,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     input_handle := None;
                     stop_input_reader h
                 | None -> ());
-                Terminal_out.write
-                  (Terminal_out.leave_screen_seq
-                     ~kitty_keyboard:caps.kitty_keyboard);
+                Terminal_out.write (Terminal_out.leave_screen_seq ~keyboard);
                 ignore
                   (Terminal_out.drain ~within_s:Terminal_out.handoff_limit_s
                     : Terminal_out.drained);

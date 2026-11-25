@@ -40,18 +40,20 @@ val handoff_limit_s : float
 val drain : within_s:float -> drained
 (** Wait until queued bytes reach stdout or stall past [within_s]. *)
 
-val enter_screen_seq :
-  kitty_keyboard:bool -> mouse:bool -> bracketed_paste:bool -> string
-(** Enter alt-screen, hide cursor, enable optional bracketed paste, SGR mouse,
-    and Kitty keyboard protocol ([CSI > 1 u]). *)
+type keyboard = Legacy | Kitty | Xterm
 
-val leave_screen_seq : kitty_keyboard:bool -> string
-(** Pop Kitty keyboard protocol ([CSI < u]), disable paste/mouse, show cursor,
+val enter_screen_seq :
+  keyboard:keyboard -> mouse:bool -> bracketed_paste:bool -> string
+(** Enter alt-screen, hide cursor, enable optional bracketed paste, SGR mouse,
+    and the requested keyboard protocol. *)
+
+val leave_screen_seq : keyboard:keyboard -> string
+(** Restore keyboard mode, disable paste/mouse, show cursor,
     reset SGR, and leave alt-screen. *)
 
 val install_switch_teardown :
   sw:Eio.Switch.t ->
-  kitty_keyboard:bool ->
+  keyboard:keyboard ->
   ?on_after_drain:(unit -> unit) ->
   unit ->
   unit

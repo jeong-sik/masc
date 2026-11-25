@@ -580,3 +580,20 @@ val focused_artifact : t -> Wire_knowledge.artifact_entry option
     actions: resolves the [Nav.Artifact_dive] target when diving into an
     artifact (never falling back to an unrelated list selection), otherwise
     returns [Knowledge_store.selected_artifact m.knowledge]. *)
+
+type keeper_banner_row = {
+  tone : Theme.status_token;
+  glyph : Glyph.t;
+  text : string;
+}
+
+val keeper_diagnostic_banner : name:string -> t -> keeper_banner_row list
+(** Pure SSOT diagnostic banner lines for a keeper (active blockers, failures on
+    unhealthy keepers, runnable path rest, waiting inventory, actionable
+    disposition). Benign server values (["pass"], ["direct_message"]) are
+    suppressed so healthy keepers render zero banner rows. *)
+
+val keeper_diagnostic_banner_height : name:string -> avail_h:int -> t -> int
+(** Exact number of rows [Keeper_dive.render_tabs_body] deducts for
+    {!keeper_diagnostic_banner}, shared by {!Chat_transcript} and
+    {!Memory_diagram} so chat scroll and Kitty image placement stay in sync. *)

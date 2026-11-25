@@ -1873,22 +1873,46 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
   let card_inner_h =
     if target_rect.w >= 2 && target_rect.h >= 2 then target_rect.h - 2 else 0
   in
-  if not embedded then (card_inner_w, card_inner_h)
-  else
-    let has_keeper =
-      Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
-    in
-    let after_hero_h =
-      if has_keeper && card_inner_h >= 16 then card_inner_h - 5
-      else card_inner_h
-    in
-    let content_h =
+  let raw_content_h =
+    if not embedded then card_inner_h
+    else
+      let has_keeper =
+        Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
+      in
+      let after_hero_h =
+        if has_keeper && card_inner_h >= 16 then card_inner_h - 5
+        else card_inner_h
+      in
       if after_hero_h >= 3 then
         let body_h1 = after_hero_h - 1 in
         if body_h1 >= 6 then body_h1 - 1 else body_h1
       else after_hero_h
-    in
-    (card_inner_w, Int.max 0 content_h)
+  in
+  let active_name_opt =
+    if embedded then
+      Option.map
+        (fun (k : Wire_fleet.keeper_summary) -> k.name)
+        (Fleet_store.selected_keeper_summary model.fleet)
+    else
+      match Model.active_dive model with
+      | Some (Nav.Dive_keeper { name; _ }) -> Some name
+      | Some
+          ( Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ )
+      | None ->
+          Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary model.fleet)
+  in
+  let banner_h =
+    match active_name_opt with
+    | Some name ->
+        Model.keeper_diagnostic_banner_height ~name ~avail_h:raw_content_h model
+    | None -> 0
+  in
+  (card_inner_w, Int.max 0 (raw_content_h - banner_h))
 
 let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
   let cols = Int.max 0 model.viewport.cols in

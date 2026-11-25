@@ -295,6 +295,24 @@ let format_age ~now_unix ts ~lang =
     | Say.Lang_ko -> dur ^ " 전"
     | Say.Lang_en -> dur ^ " ago"
 
+let format_due_delta ~now_unix ts ~lang =
+  if
+    (not (Float.is_finite ts))
+    || (not (Float.is_finite now_unix))
+    || now_unix <= 0.0
+    || ts <= 0.0
+  then Glyph.to_utf8 Glyph.Missing_absent
+  else if ts >= now_unix then
+    let dur = Format_val.format_duration_s (ts -. now_unix) in
+    match lang with
+    | Say.Lang_ko -> dur ^ " 뒤"
+    | Say.Lang_en -> "in " ^ dur
+  else
+    let dur = Format_val.format_duration_s (now_unix -. ts) in
+    match lang with
+    | Say.Lang_ko -> dur ^ " 늦음"
+    | Say.Lang_en -> dur ^ " late"
+
 let format_hhmm ?(tz_offset_sec = 0) ts =
   if (not (Float.is_finite ts)) || ts <= 0.0 then "--:--"
   else

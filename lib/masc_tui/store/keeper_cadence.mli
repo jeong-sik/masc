@@ -6,6 +6,9 @@ open Masc_tui_protocol
 
 type window = {
   turns : int;  (** Every turn in the window's slots, of any outcome. *)
+  ok : int;
+  rested : int;
+  failed : int;
   scheduled : int;
   reacted : int;
   chat : int;

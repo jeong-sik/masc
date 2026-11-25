@@ -89,6 +89,7 @@ type t = {
   models_metrics : Wire_runtime.models_metrics_snapshot Observed.t;
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
+  runtime_standings : Wire_runtime.runtime_standing String_map.t;
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
@@ -299,6 +300,7 @@ let empty =
     models_metrics = Observed.unreported;
     runtime_metrics = Observed.unreported;
     runtime_resolved = Observed.unreported;
+    runtime_standings = String_map.empty;
     runtime_config_raw = Observed.unreported;
     setup_inventory = Observed.unreported;
     setup_login_receipt = None;
@@ -2803,6 +2805,25 @@ let keeper_waiting_inventory_for ~keeper t =
   match Observed.to_option t.keeper_waiting_inventory with
   | Some (k, inv) when String.equal k keeper -> Some inv
   | Some _ | None -> None
+
+let apply_runtime_standings entries t =
+  let runtime_standings =
+    List.fold_left
+      (fun acc (rid, st) -> String_map.add rid st acc)
+      String_map.empty entries
+  in
+  { t with runtime_standings }
+
+let standing_for ~runtime_id t =
+  String_map.find_opt runtime_id t.runtime_standings
+
+let degraded_standings ~now_unix t =
+  String_map.fold
+    (fun rid st acc ->
+      if Wire_runtime.standing_is_degraded ~now_unix st then (rid, st) :: acc
+      else acc)
+    t.runtime_standings []
+  |> List.rev
 
 let apply_mcp_tools_list ~observed_at tools t =
   { t with mcp_tools_list = Observed.value ~observed_at tools }

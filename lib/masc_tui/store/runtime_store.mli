@@ -100,6 +100,7 @@ type t = {
   models_metrics : Wire_runtime.models_metrics_snapshot Observed.t;
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
+  runtime_standings : Wire_runtime.runtime_standing String_map.t;
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
@@ -542,6 +543,15 @@ val apply_keeper_waiting_inventory :
   t
 val keeper_waiting_inventory_for :
   keeper:string -> t -> Wire_runtime.keeper_waiting_inventory option
+
+val apply_runtime_standings :
+  (string * Wire_runtime.runtime_standing) list -> t -> t
+
+val standing_for :
+  runtime_id:string -> t -> Wire_runtime.runtime_standing option
+
+val degraded_standings :
+  now_unix:float -> t -> (string * Wire_runtime.runtime_standing) list
 val apply_mcp_tools_list :
   observed_at:Clock.Mono.t -> Wire_runtime.mcp_tool_schema_entry list -> t -> t
 val mcp_tool_schema_for :

@@ -7009,12 +7009,166 @@ let test_unfold_json_strings_bounded () =
         (unfolded_count > 0 && unfolded_count <= 64)
   | _ -> Alcotest.fail "expected list result from unfold_json_strings"
 
+let test_layer2_keeper_diagnostics_runtime_standings_and_observer () =
+  (* 1. Keeper roster extras: diagnostics, path rest, walk failures, truncation, turn breakdown *)
+  let now_unix = 1795254000.0 in
+  let slot_ts = (int_of_float now_unix / 1800) * 1800 in
+  let roster_json =
+    parse_json
+      (Printf.sprintf
+         {|{
+           "total": 10,
+           "limit": 2,
+           "truncated": true,
+           "keepers": [
+             {
+               "name": "alpha",
+               "phase": "Failing",
+               "failing_since": 1795253000.0,
+               "next_action": "Check provider auth",
+               "last_failure": { "cause": "HTTP 401 unauthorized", "at_unix": 1795253500.0 },
+               "runtime_blocker_summary": "All candidates resting",
+               "runtime_blocker_signature": "quota_rest_all",
+               "runtime_path_rest": {
+                 "status": "resting",
+                 "runtime_id": "claude-sonnet-4",
+                 "release_at": 1795254600.0,
+                 "release_basis": "quota_reset"
+               },
+               "runtime_lane_observation": {
+                 "state": "observed",
+                 "evidence": {
+                   "failures": [
+                     {
+                       "attempt": 1,
+                       "runtime_id": "claude-sonnet-4",
+                       "dispatch": "http",
+                       "summary": "HTTP 429 rate limited",
+                       "api_candidate_fault": { "kind": "binding", "fact": "rate_limit" }
+                     }
+                   ],
+                   "terminal": {
+                     "kind": "candidate",
+                     "attempt": 1,
+                     "runtime_id": "claude-sonnet-4",
+                     "dispatch": "http",
+                     "summary": "HTTP 429 rate limited"
+                   }
+                 }
+               },
+               "operator_disposition": "operator_action_required",
+               "operator_disposition_reason": "awaiting key rotation",
+               "recent_turns": {
+                 "known_since": %d.0,
+                 "slots": [
+                   {
+                     "starts_at": %d,
+                     "ok": 4, "rested": 2, "failed": 1,
+                     "scheduled": 5, "reacted": 1, "chat": 1, "own": 0, "unknown": 0
+                   }
+                 ]
+               }
+             }
+           ]
+         }|}
+         (slot_ts - 1800) slot_ts)
+  in
+  let extras =
+    expect_ok "decode_keepers_roster_extras diagnostics"
+      (Wire_fleet.decode_keepers_roster_extras roster_json)
+  in
+  Alcotest.(check (option int)) "roster_total = Some 10" (Some 10)
+    extras.roster_total;
+  Alcotest.(check bool) "roster_truncated = true" true extras.roster_truncated;
+  let diag = List.assoc "alpha" extras.diagnostics in
+  Alcotest.(check (option string)) "blocker summary decoded"
+    (Some "All candidates resting") diag.runtime_blocker_summary;
+  Alcotest.(check (option string)) "blocker signature decoded"
+    (Some "quota_rest_all") diag.runtime_blocker_signature;
+  Alcotest.(check (option string)) "last failure cause decoded"
+    (Some "HTTP 401 unauthorized") diag.last_failure_cause;
+  Alcotest.(check int) "lane_failures decoded" 1 (List.length diag.lane_failures);
+  Alcotest.(check bool) "runtime_path_rest status = resting" true
+    (match diag.runtime_path_rest with
+     | Some r -> String.equal r.status "resting" && Option.is_some r.release_at_unix
+     | None -> false);
+  let pulse = List.assoc "alpha" extras.turn_pulses in
+  let ok_n, rested_n, failed_n =
+    Wire_fleet.turn_outcome_breakdown_24h ~now_unix pulse
+  in
+  Alcotest.(check int) "24h ok" 4 ok_n;
+  Alcotest.(check int) "24h rested" 2 rested_n;
+  Alcotest.(check int) "24h failed" 1 failed_n;
+
+  (* 2. Runtime standings sidecar decoder & degradation predicate *)
+  let resolved_json =
+    parse_json
+      {|{
+        "runtimes": [
+          {
+            "id": "rt-quota",
+            "quota_rest": { "cause": "weekly_cap", "reset_stated": true, "until": 1795257600.0 }
+          },
+          {
+            "id": "rt-429",
+            "rate_limited": true,
+            "rate_limit_resets_at": 1795254300.0
+          },
+          {
+            "id": "rt-expired",
+            "rate_limited": true,
+            "rate_limit_resets_at": 1795250000.0
+          },
+          {
+            "id": "rt-refused",
+            "credential_refused_at": 1795253900.0,
+            "failed_attempt": { "noted_at": 1795253900.0, "failure": "401 invalid token", "recorded_by": "alpha" }
+          }
+        ]
+      }|}
+  in
+  let standings =
+    expect_ok "decode_runtime_standings"
+      (Wire_runtime.decode_runtime_standings resolved_json)
+  in
+  Alcotest.(check bool) "rt-quota degraded while until > now" true
+    (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-quota" standings));
+  Alcotest.(check bool) "rt-429 degraded while resets_at > now" true
+    (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-429" standings));
+  Alcotest.(check bool) "rt-expired NOT degraded once resets_at <= now" false
+    (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-expired" standings));
+  Alcotest.(check bool) "rt-refused degraded on credential_refused_at" true
+    (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-refused" standings));
+
+  (* 3. Observer distinguishes chat_operation vs non-chat waiting inventory events *)
+  let chat_ev_json =
+    parse_json
+      {|{"type":"keeper_waiting_inventory_changed","keeper_name":"alpha","queue_kind":"chat_operation"}|}
+  in
+  let tool_ev_json =
+    parse_json
+      {|{"type":"keeper_waiting_inventory_changed","keeper_name":"alpha","queue_kind":"approval_detail"}|}
+  in
+  (match Wire_observer.event_of_json chat_ev_json with
+   | Ok (Wire_observer.Keeper_chat_queue_changed "alpha") -> ()
+   | _ -> Alcotest.fail "expected Keeper_chat_queue_changed for chat_operation");
+  match Wire_observer.event_of_json tool_ev_json with
+  | Ok
+      (Wire_observer.Keeper_waiting_inventory_changed
+         { keeper = "alpha"; queue_kind = "approval_detail" }) ->
+      ()
+  | _ ->
+      Alcotest.fail
+        "expected Keeper_waiting_inventory_changed for non-chat queue_kind"
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
       ( "protocol"
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
+          Alcotest.test_case "layer2_keeper_diagnostics_runtime_standings_and_observer"
+            `Quick test_layer2_keeper_diagnostics_runtime_standings_and_observer;
           Alcotest.test_case "unfold_json_strings_bounded" `Quick
             test_unfold_json_strings_bounded;
           Alcotest.test_case "wire_fleet" `Quick test_wire_fleet;

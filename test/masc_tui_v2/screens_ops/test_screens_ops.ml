@@ -2077,6 +2077,9 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
            candle_balances_milli = [ ("e-masc-the-leader", 4250) ];
            candle_summary = None;
            turn_pulses = [];
+           diagnostics = [];
+           roster_total = None;
+           roster_truncated = false;
          }
   in
   let runtime =
@@ -2484,6 +2487,9 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
             candle_balances_milli = [ ("e-masc-the-leader", 4250) ];
             candle_summary = None;
             turn_pulses = [];
+            diagnostics = [];
+            roster_total = None;
+            roster_truncated = false;
           }
           m0.fleet
       in
@@ -2700,6 +2706,9 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
                candle_balances_milli = [];
                candle_summary = None;
                turn_pulses = [ (k_high_lifetime.name, pulse_25) ];
+               diagnostics = [];
+               roster_total = None;
+               roster_truncated = false;
              };
     }
   in
@@ -2728,6 +2737,9 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
                candle_balances_milli = [];
                candle_summary = None;
                turn_pulses = [];
+               diagnostics = [];
+               roster_total = None;
+               roster_truncated = false;
              };
     }
   in
@@ -2755,6 +2767,9 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
                candle_balances_milli = [];
                candle_summary = None;
                turn_pulses = [];
+               diagnostics = [];
+               roster_total = None;
+               roster_truncated = false;
              };
     }
   in
@@ -3724,11 +3739,142 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
   let g_es = render_to_grid ~cols:140 ~rows:40 (Screen_work.render ~model:m_empty_sched) in
   Alcotest.(check bool) "Empty Work_schedules renders honest notice" true
     (non_empty_row_count g_es >= 5)
+let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
+  let now_unix = 1795254000.0 in
+  (* 1. Signed due delta distinguishes future vs overdue *)
+  let future_en =
+    Ops_common.format_due_delta ~now_unix (now_unix +. 300.0) ~lang:Say.Lang_en
+  in
+  let future_ko =
+    Ops_common.format_due_delta ~now_unix (now_unix +. 300.0) ~lang:Say.Lang_ko
+  in
+  let past_en =
+    Ops_common.format_due_delta ~now_unix (now_unix -. 300.0) ~lang:Say.Lang_en
+  in
+  let past_ko =
+    Ops_common.format_due_delta ~now_unix (now_unix -. 300.0) ~lang:Say.Lang_ko
+  in
+  Alcotest.(check bool) "future EN starts with 'in '" true
+    (contains_sub ~needle:"in " future_en);
+  Alcotest.(check bool) "future KO ends with '뒤'" true
+    (contains_sub ~needle:"뒤" future_ko);
+  Alcotest.(check bool) "past EN contains 'late'" true
+    (contains_sub ~needle:"late" past_en);
+  Alcotest.(check bool) "past KO contains '늦음'" true
+    (contains_sub ~needle:"늦음" past_ko);
+
+  (* 2. Keeper_cadence.window exposes ok/rested/failed breakdown *)
+  let slot_ts = (int_of_float now_unix / 1800) * 1800 in
+  let pulse : Wire_fleet.turn_pulse =
+    {
+      known_since = Float.of_int (slot_ts - 3600);
+      slots =
+        [
+          {
+            starts_at = slot_ts;
+            ok = 3;
+            rested = 2;
+            failed = 1;
+            scheduled = 4;
+            reacted = 1;
+            chat = 1;
+            own = 0;
+            unknown = 0;
+          };
+        ];
+    }
+  in
+  let w = Keeper_cadence.window ~now_unix ~hours:6 pulse in
+  Alcotest.(check int) "cadence total turns" 6 w.turns;
+  Alcotest.(check int) "cadence ok" 3 w.ok;
+  Alcotest.(check int) "cadence rested" 2 w.rested;
+  Alcotest.(check int) "cadence failed" 1 w.failed;
+
+  (* 3. Fleet_store.path_rest_for gates on runnable keepers + Keeper_dive renders diagnostic banner *)
+  let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let extras : Wire_fleet.keeper_roster_extras =
+    {
+      sandbox_profiles = [];
+      candle_balances_milli = [];
+      candle_summary = None;
+      turn_pulses = [];
+      diagnostics =
+        [
+          ( "e-masc-the-leader"
+          , {
+              Wire_fleet.empty_keeper_diagnostics with
+              runtime_blocker_summary = Some "Quota resting across lane";
+              runtime_blocker_signature = Some "lane_quota_rest";
+              runtime_path_rest =
+                Some
+                  {
+                    status = "resting";
+                    runtime_id = "claude-sonnet-4";
+                    release_at_unix = Some (now_unix +. 600.0);
+                    release_basis = Some "quota_reset";
+                  };
+            } );
+        ];
+      roster_total = Some 25;
+      roster_truncated = true;
+    }
+  in
+  let fleet = Fleet_store.apply_roster_extras extras m0.fleet in
+  let m1 =
+    {
+      m0 with
+      fleet;
+      freshness = { m0.freshness with last_wall_unix = now_unix };
+    }
+  in
+  let leader =
+    match Fleet_store.find_keeper ~name:"e-masc-the-leader" m1.fleet with
+    | Some k -> k
+    | None -> Alcotest.fail "e-masc-the-leader missing in populated model"
+  in
+  Alcotest.(check bool) "runnable keeper surfaces path_rest" true
+    (Option.is_some (Fleet_store.path_rest_for ~keeper:leader m1.fleet));
+  Alcotest.(check bool) "paused keeper suppresses path_rest" false
+    (Option.is_some
+       (Fleet_store.path_rest_for ~keeper:{ leader with paused = true } m1.fleet));
+  let g_keepers =
+    render_to_grid ~cols:140 ~rows:40 (Screen_keepers.render ~model:m1)
+  in
+  let txt_keepers = grid_all_text g_keepers in
+  Alcotest.(check bool) "Keepers surfaces truncated roster ratio badge" true
+    (contains_sub ~needle:"/25" txt_keepers);
+  Alcotest.(check bool) "Keeper dive renders diagnostic blocker banner" true
+    (contains_sub ~needle:"Quota resting" txt_keepers);
+  (* Healthy keeper with benign server pass/direct_message produces 0 banner rows *)
+  let benign_extras : Wire_fleet.keeper_roster_extras =
+    {
+      extras with
+      diagnostics =
+        [
+          ( "e-masc-the-leader"
+          , {
+              Wire_fleet.empty_keeper_diagnostics with
+              operator_disposition = Some "pass";
+              operator_disposition_reason = Some "healthy";
+              next_action = Some "direct_message";
+            } );
+        ];
+    }
+  in
+  let m_benign =
+    { m0 with fleet = Fleet_store.apply_roster_extras benign_extras m0.fleet }
+  in
+  Alcotest.(check int) "benign pass/direct_message emits 0 banner rows" 0
+    (List.length
+       (Model.keeper_diagnostic_banner ~name:"e-masc-the-leader" m_benign))
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
       ( "keepers"
       , [
+          Alcotest.test_case "layer2 due_delta, cadence outcomes, path_rest & diagnostics" `Quick
+            test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics;
           Alcotest.test_case "cadence window counts causes" `Quick
             test_keeper_cadence_window_counts_causes;
           Alcotest.test_case "cadence next due is the keeper's earliest" `Quick

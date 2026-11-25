@@ -117,6 +117,9 @@ val draw_observed_empty :
     Coral non-italic left rail on [Failed]) without leaving a raw void. *)
 
 val format_age : now_unix:float -> float -> lang:Say.lang -> string
+val format_due_delta : now_unix:float -> float -> lang:Say.lang -> string
+(** Signed schedule due countdown: ["5m 뒤"] / ["in 5m"] for future timestamps
+    and ["5m 늦음"] / ["5m late"] for overdue timestamps. *)
 val format_hhmm : ?tz_offset_sec:int -> float -> string
 val samples_of_floats : float list -> Chart.Series.sample array
 val format_milli_candles : int -> string

@@ -201,8 +201,8 @@ let is_viewing_memory (m : Model.t) =
 let reads_schedules (m : Model.t) =
   let workspace_reads =
     match m.nav.workspace with
-    | Nav.Work | Nav.Keepers -> true
-    | Nav.Pulse | Nav.Knowledge | Nav.Runtime | Nav.Infra -> false
+    | Nav.Pulse | Nav.Work | Nav.Keepers -> true
+    | Nav.Knowledge | Nav.Runtime | Nav.Infra -> false
   in
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { tab = Nav.Keeper_work_candle; _ }) -> true
@@ -429,7 +429,8 @@ let apply_dataset_invalidation (m : Model.t) ds =
               get_cmd e Cmd.Get_runtime_resolved;
               get_cmd e (Cmd.Get_provider_usage { days = 7 });
             ]
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
+        | Nav.Pulse | Nav.Keepers -> [ get_cmd e Cmd.Get_runtime_resolved ]
+        | Nav.Work | Nav.Knowledge | Nav.Infra -> []
       in
       ({ m with runtime }, cmds)
   | Wire_observer.Dataset_runtime_probe ->
@@ -466,13 +467,13 @@ let apply_dataset_invalidation (m : Model.t) ds =
       in
       let cmds =
         match ws with
-        | Nav.Work ->
+        | Nav.Work | Nav.Pulse ->
             [
               get_cmd e
                 (Cmd.Get_verifications
                    { view = work.verification_view; limit = 50; offset = 0 });
             ]
-        | Nav.Pulse | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+        | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
       in
       ({ m with work }, cmds)
   | Wire_observer.Dataset_scheduled_automation ->
@@ -542,14 +543,21 @@ let apply_dataset_invalidation (m : Model.t) ds =
         {
           m.runtime with
           lane_addons = Observed.mark_stale m.runtime.lane_addons;
+          lane_addon_asks = Observed.mark_stale m.runtime.lane_addon_asks;
           browser_lane = Observed.mark_stale m.runtime.browser_lane;
         }
       in
       let cmds =
         match ws with
         | Nav.Runtime ->
-            [ get_cmd e Cmd.Get_lane_addons; get_cmd e Cmd.Get_browser_lane ]
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
+            [
+              get_cmd e Cmd.Get_lane_addons;
+              get_cmd e (Cmd.Get_lane_addon_asks { include_resolved = false });
+              get_cmd e Cmd.Get_browser_lane;
+            ]
+        | Nav.Pulse ->
+            [ get_cmd e (Cmd.Get_lane_addon_asks { include_resolved = false }) ]
+        | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
       in
       ({ m with runtime }, cmds)
   | Wire_observer.Dataset_logs
@@ -883,6 +891,65 @@ let apply_observer_event (m : Model.t) = function
         then [get_cmd m.epoch (Cmd.Get_chat_queue { keeper })] else []
       in
       (next, reads @ View_fetches.chat_status_fetches ~keeper next)
+  | Wire_observer.Keeper_waiting_inventory_changed { keeper; queue_kind = _ } ->
+      let slot_matches =
+        match m.runtime.keeper_waiting_inventory with
+        | Observed.Value { data = k, _; _ } -> String.equal k keeper
+        | Observed.Loading _ | Observed.Absent | Observed.Unreported
+        | Observed.Failed _ ->
+            true
+      in
+      let runtime =
+        if slot_matches then
+          {
+            m.runtime with
+            keeper_waiting_inventory =
+              Observed.mark_stale m.runtime.keeper_waiting_inventory;
+            keeper_waiting_inventory_absent = false;
+          }
+        else m.runtime
+      in
+      let next = { m with runtime } in
+      let viewing_keeper =
+        match Model.active_dive next with
+        | Some (Nav.Dive_keeper { name; _ }) -> String.equal name keeper
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match next.nav.workspace with
+            | Nav.Keepers ->
+                Option.equal String.equal (Model.target_keeper next) (Some keeper)
+            | Nav.Runtime
+              when Nav.equal_runtime_tab next.runtime.active_tab
+                     Nav.Runtime_tools_usage
+                   && Runtime_store.equal_tools_subview
+                        next.runtime.tools_subview Runtime_store.Tools_quality_gate
+              ->
+                let keeper_names =
+                  match Observed.to_option next.fleet.keepers with
+                  | Some ks ->
+                      List.map
+                        (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                        ks
+                  | None -> []
+                in
+                Option.equal String.equal
+                  (Runtime_store.selected_tools_surface_keeper ~keeper_names
+                     next.runtime)
+                  (Some keeper)
+            | Nav.Runtime | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Infra ->
+                false)
+      in
+      let cmds =
+        if viewing_keeper then
+          [ get_cmd next.epoch (Cmd.Get_keeper_waiting_inventory { keeper }) ]
+        else []
+      in
+      (next, cmds)
   | Wire_observer.Keeper_chat_appended { keeper; _ } ->
       let fleet = Fleet_store.mark_chat_history_stale ~keeper m.fleet in
       let viewing_chat = is_viewing_keeper_chat ~keeper m in

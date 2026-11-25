@@ -168,6 +168,7 @@ type event =
       at_unix : float;
     }
   | Keeper_chat_queue_changed of string
+  | Keeper_waiting_inventory_changed of { keeper : string; queue_kind : string }
   | Keeper_chat_stream_frame of {
       keeper : string;
       operation_id : string;
@@ -396,7 +397,11 @@ let decode_typed_event type_name json =
         if String.equal kind "chat_operation" then
           let* keeper = required_nonblank_string json "keeper_name" in
           Ok (Keeper_chat_queue_changed keeper)
-        else Ok (Other type_name)
+        else (
+          match optional_nonblank_string json "keeper_name" with
+          | Ok (Some keeper) ->
+              Ok (Keeper_waiting_inventory_changed { keeper; queue_kind = kind })
+          | Ok None | Error _ -> Ok (Other type_name))
     | "keeper_chat_appended" ->
         let* keeper = required_nonblank_string json "name" in
         let* at_unix = required_finite_float json "ts_unix" in

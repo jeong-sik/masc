@@ -1343,6 +1343,110 @@ let decode_runtime_resolved json =
   in
   Ok { generated_at_iso; config_path; default_route; lanes; runtimes; usage_windows }
 
+type runtime_standing = {
+  quota_rest_cause : string option;
+  quota_rest_until_unix : float option;
+  quota_rest_reset_stated : bool;
+  credential_refused_at_unix : float option;
+  rate_limited : bool;
+  rate_limit_resets_at_unix : float option;
+  failed_attempt_failure : string option;
+  failed_attempt_noted_at_unix : float option;
+  failed_attempt_by : string option;
+}
+
+let standing_is_degraded ~now_unix (s : runtime_standing) =
+  let quota_active =
+    match s.quota_rest_cause, s.quota_rest_until_unix with
+    | Some _, Some until_u -> Float.is_finite until_u && until_u > now_unix
+    | Some _, None -> true
+    | None, _ -> false
+  in
+  let rl_active =
+    s.rate_limited
+    &&
+    match s.rate_limit_resets_at_unix with
+    | Some until_u -> Float.is_finite until_u && until_u > now_unix
+    | None -> true
+  in
+  quota_active || rl_active
+  || Option.is_some s.credential_refused_at_unix
+  || Option.is_some s.failed_attempt_failure
+
+let decode_runtime_standing_row json =
+  let opt_str obj k =
+    match optional_nonblank_string obj k with Ok v -> v | Error _ -> None
+  in
+  let opt_f obj k =
+    match optional_finite_float obj k with Ok v -> v | Error _ -> None
+  in
+  match opt_str json "id" with
+  | None -> None
+  | Some id ->
+      let quota_rest_cause, quota_rest_until_unix, quota_rest_reset_stated =
+        match optional_object_field json "quota_rest" with
+        | Ok (Some qr) ->
+            let stated =
+              match decode_bool_field_or qr "reset_stated" ~default:false with
+              | Ok b -> b
+              | Error _ -> false
+            in
+            (opt_str qr "cause", opt_f qr "until", stated)
+        | Ok None | Error _ -> (None, None, false)
+      in
+      let credential_refused_at_unix = opt_f json "credential_refused_at" in
+      let rate_limited =
+        match decode_bool_field_or json "rate_limited" ~default:false with
+        | Ok b -> b
+        | Error _ -> false
+      in
+      let rate_limit_resets_at_unix = opt_f json "rate_limit_resets_at" in
+      let failed_attempt_failure, failed_attempt_noted_at_unix, failed_attempt_by
+          =
+        match optional_object_field json "failed_attempt" with
+        | Ok (Some fa) ->
+            ( opt_str fa "failure"
+            , opt_f fa "noted_at"
+            , opt_str fa "recorded_by" )
+        | Ok None | Error _ -> (None, None, None)
+      in
+      let st =
+        {
+          quota_rest_cause;
+          quota_rest_until_unix;
+          quota_rest_reset_stated;
+          credential_refused_at_unix;
+          rate_limited;
+          rate_limit_resets_at_unix;
+          failed_attempt_failure;
+          failed_attempt_noted_at_unix;
+          failed_attempt_by;
+        }
+      in
+      if
+        Option.is_some st.quota_rest_cause
+        || Option.is_some st.credential_refused_at_unix
+        || st.rate_limited
+        || Option.is_some st.failed_attempt_failure
+      then Some (id, st)
+      else None
+
+let decode_runtime_standings json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* rt_items = optional_list_field body "runtimes" in
+  let from_list = List.filter_map decode_runtime_standing_row rt_items in
+  let from_default =
+    match optional_object_field body "default_runtime" with
+    | Ok (Some def_obj) -> (
+        match decode_runtime_standing_row def_obj with
+        | Some (id, _) as row
+          when not (List.exists (fun (k, _) -> String.equal k id) from_list) ->
+            Option.to_list row
+        | Some _ | None -> [])
+    | Ok None | Error _ -> []
+  in
+  Ok (from_default @ from_list)
+
 let is_hex_char = function
   | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
   | _ -> false

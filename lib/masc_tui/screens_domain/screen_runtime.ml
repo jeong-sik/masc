@@ -396,24 +396,85 @@ let probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows
       provider_quota_status ~now_unix ~provider:r.provider_id usage_windows
   | None -> Quota_ok
 
-let is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows
-    (p : Wire_runtime.provider_probe_row) =
-  match p.reachable with
-  | Some true -> (
-      match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
-      | Quota_ok -> true
-      | Quota_cooldown _ | Quota_exhausted -> false)
-  | Some false | None -> false
-
-let is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows
-    (p : Wire_runtime.provider_probe_row) =
-  match p.reachable with
-  | Some false -> true
-  | Some true -> (
-      match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
-      | Quota_ok -> false
-      | Quota_cooldown _ | Quota_exhausted -> true)
+let is_standing_degraded ~now_unix ~(rt : Runtime_store.t) rid =
+  match Runtime_store.standing_for ~runtime_id:rid rt with
+  | Some st -> Wire_runtime.standing_is_degraded ~now_unix st
   | None -> false
+
+let standing_override_for ~now_unix ~lang ~(rt : Runtime_store.t) rid =
+  match Runtime_store.standing_for ~runtime_id:rid rt with
+  | Some st when Wire_runtime.standing_is_degraded ~now_unix st -> (
+      match st.credential_refused_at_unix with
+      | Some _ ->
+          Some
+            ( Glyph.Live_failing
+            , Theme.Status_critical
+            , Say.resolve lang (Say.make ~ko:"인증 거부" ~en:"Cred refused")
+            , "" )
+      | None -> (
+          match st.quota_rest_cause with
+          | Some _
+            when match st.quota_rest_until_unix with
+                 | None -> true
+                 | Some u -> u > now_unix ->
+              let eta =
+                match st.quota_rest_until_unix with
+                | Some ts -> " " ^ H.format_countdown ~now_unix ts
+                | None -> ""
+              in
+              Some
+                ( Glyph.Live_paused
+                , Theme.Status_attention
+                , Say.resolve lang (Say.make ~ko:"쿼터 휴식" ~en:"Quota rest")
+                  ^ eta
+                , "" )
+          | Some _ | None ->
+              if
+                st.rate_limited
+                && match st.rate_limit_resets_at_unix with
+                   | None -> true
+                   | Some u -> u > now_unix
+              then
+                let eta =
+                  match st.rate_limit_resets_at_unix with
+                  | Some ts -> " " ^ H.format_countdown ~now_unix ts
+                  | None -> ""
+                in
+                Some
+                  ( Glyph.Live_paused
+                  , Theme.Status_attention
+                  , Say.resolve lang (Say.make ~ko:"속도 제한" ~en:"Rate limit")
+                    ^ eta
+                  , "429" )
+              else
+                match st.failed_attempt_failure with
+                | Some f ->
+                    Some (Glyph.Warning_triangle, Theme.Status_attention, f, "")
+                | None -> None))
+  | Some _ | None -> None
+
+let is_probe_effectively_ok ~now_unix ~rt ~runtimes_tbl ~usage_windows
+    (p : Wire_runtime.provider_probe_row) =
+  if is_standing_degraded ~now_unix ~rt p.runtime_id then false
+  else
+    match p.reachable with
+    | Some true -> (
+        match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
+        | Quota_ok -> true
+        | Quota_cooldown _ | Quota_exhausted -> false)
+    | Some false | None -> false
+
+let is_probe_effectively_failed ~now_unix ~rt ~runtimes_tbl ~usage_windows
+    (p : Wire_runtime.provider_probe_row) =
+  if is_standing_degraded ~now_unix ~rt p.runtime_id then true
+  else
+    match p.reachable with
+    | Some false -> true
+    | Some true -> (
+        match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
+        | Quota_ok -> false
+        | Quota_cooldown _ | Quota_exhausted -> true)
+    | None -> false
 
 let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
@@ -435,14 +496,14 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
   let active_ok =
     List.fold_left
       (fun acc p ->
-        if is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows p then
-          acc + 1
+        if is_probe_effectively_ok ~now_unix ~rt ~runtimes_tbl ~usage_windows p
+        then acc + 1
         else acc)
       0 active_probes
   in
   let active_bad =
     List.filter
-      (is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows)
+      (is_probe_effectively_failed ~now_unix ~rt ~runtimes_tbl ~usage_windows)
       active_probes
   in
   let active_http_bad =
@@ -451,8 +512,38 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
         match p.reachable with Some false -> true | Some true | None -> false)
       active_probes
   in
+  let degraded_standings = Runtime_store.degraded_standings ~now_unix rt in
+  let any_failed =
+    Observed.is_failed rt.runtime_resolved
+    || Observed.is_failed rt.runtime_probe
+    || Observed.is_failed rt.usage_windows
+  in
+  let any_loading =
+    Observed.is_loading rt.runtime_resolved
+    || Observed.is_loading rt.runtime_probe
+    || Observed.is_loading rt.usage_windows
+  in
+  let is_settled obs =
+    match obs with
+    | Observed.Value _ | Observed.Absent -> true
+    | Observed.Loading _ | Observed.Unreported | Observed.Failed _ -> false
+  in
+  let all_observed =
+    is_settled rt.runtime_resolved
+    && is_settled rt.runtime_probe
+    && is_settled rt.usage_windows
+  in
+  let any_stale =
+    Observed.is_stale rt.runtime_resolved
+    || Observed.is_stale rt.runtime_probe
+    || Observed.is_stale rt.usage_windows
+  in
   let badge =
-    let alerts = List.length cooldown_accts + List.length active_http_bad in
+    let alerts =
+      List.length cooldown_accts
+      + List.length active_http_bad
+      + List.length degraded_standings
+    in
     if alerts > 0 then
       Some
         (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
@@ -460,6 +551,24 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
               (Say.make
                  ~ko:(Printf.sprintf "%d 경고" alerts)
                  ~en:(Printf.sprintf "%d alerts" alerts))))
+    else if any_failed then
+      Some
+        (H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+           (Say.resolve lang (Say.make ~ko:"조회 실패" ~en:"Failed")))
+    else if any_loading && not all_observed then
+      Some
+        (H.make_badge ~glyph:Glyph.Transport_reconnecting
+           ~tone:Theme.Status_active
+           (Say.resolve lang (Say.make ~ko:"불러오는 중" ~en:"Loading")))
+    else if not all_observed then
+      Some
+        (H.make_badge ~glyph:Glyph.Missing_unreported
+           ~tone:Theme.Status_historical
+           (Say.resolve lang (Say.make ~ko:"미관측" ~en:"Unreported")))
+    else if any_stale then
+      Some
+        (H.make_badge ~glyph:Glyph.Transport_stale ~tone:Theme.Status_attention
+           (Say.resolve lang (Say.make ~ko:"갱신 지연" ~en:"Stale")))
     else
       Some
         (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
@@ -522,22 +631,115 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
         ();
       incr y
     end;
-    if cooldown_accts = [] && active_bad = [] then begin
+    if cooldown_accts = [] && active_bad = [] && degraded_standings = [] then begin
       if !y < bottom then begin
+        let tone, glyph, msg =
+          if any_failed then
+            ( Theme.Status_critical
+            , Glyph.Live_failing
+            , Say.resolve lang
+                (Say.make ~ko:"프로바이더 상태 조회 실패"
+                   ~en:"Provider health fetch failed") )
+          else if any_loading && not all_observed then
+            ( Theme.Status_active
+            , Glyph.Transport_reconnecting
+            , Say.resolve lang
+                (Say.make ~ko:"프로바이더 헬스 불러오는 중..."
+                   ~en:"Loading provider health...") )
+          else if not all_observed then
+            ( Theme.Status_historical
+            , Glyph.Missing_unreported
+            , Say.resolve lang
+                (Say.make ~ko:"프로바이더 헬스 미관측"
+                   ~en:"Provider health not yet observed") )
+          else if any_stale then
+            ( Theme.Status_attention
+            , Glyph.Transport_stale
+            , Say.resolve lang
+                (Say.make ~ko:"프로바이더 헬스 갱신 지연"
+                   ~en:"Provider health data stale") )
+          else
+            ( Theme.Status_ok
+            , Glyph.Live_healthy
+            , Say.resolve lang
+                (Say.make ~ko:"활성 쿨다운 없음 · 보고된 모든 계정 정상"
+                   ~en:"No active cooldowns · all reported accounts healthy") )
+        in
         ignore
           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
-             ~style:(H.status_style ~theme Theme.Status_ok)
-             (Glyph.to_utf8 Glyph.Live_healthy
-             ^ " "
-             ^ Say.resolve lang
-                 (Say.make ~ko:"활성 쿨다운 없음 · 보고된 모든 계정 정상"
-                    ~en:"No active cooldowns · all reported accounts healthy")));
+             ~style:(H.status_style ~theme tone)
+             (Glyph.to_utf8 glyph ^ " " ^ msg));
         incr y
       end
     end
     else begin
       let max_alerts = Int.max 1 (Int.min 4 (bottom - !y - 4)) in
       let shown = ref 0 in
+      List.iter
+        (fun (rid, (st : Wire_runtime.runtime_standing)) ->
+          if !y < bottom && !shown < max_alerts then begin
+            let runtimes = Runtime_store.runtime_options rt in
+            let lbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
+            let glyph, tone, detail =
+              match st.credential_refused_at_unix with
+              | Some _ ->
+                  ( Glyph.Live_failing
+                  , Theme.Status_critical
+                  , Say.resolve lang (Say.make ~ko:"인증 거부" ~en:"Cred refused") )
+              | None -> (
+                  match st.quota_rest_cause with
+                  | Some cause
+                    when match st.quota_rest_until_unix with
+                         | None -> true
+                         | Some u -> u > now_unix ->
+                      let eta =
+                        match st.quota_rest_until_unix with
+                        | Some ts -> " " ^ H.format_countdown ~now_unix ts
+                        | None -> ""
+                      in
+                      ( Glyph.Live_paused
+                      , Theme.Status_attention
+                      , Printf.sprintf "%s (%s)%s"
+                          (Say.resolve lang
+                             (Say.make ~ko:"쿼터 휴식" ~en:"Quota rest"))
+                          cause eta )
+                  | Some _ | None ->
+                      if
+                        st.rate_limited
+                        && match st.rate_limit_resets_at_unix with
+                           | None -> true
+                           | Some u -> u > now_unix
+                      then
+                        let eta =
+                          match st.rate_limit_resets_at_unix with
+                          | Some ts -> " " ^ H.format_countdown ~now_unix ts
+                          | None -> ""
+                        in
+                        ( Glyph.Live_paused
+                        , Theme.Status_attention
+                        , Printf.sprintf "HTTP 429%s" eta )
+                      else
+                        match st.failed_attempt_failure with
+                        | Some f ->
+                            (Glyph.Warning_triangle, Theme.Status_attention, f)
+                        | None ->
+                            ( Glyph.Live_paused
+                            , Theme.Status_attention
+                            , Say.resolve lang
+                                (Say.make ~ko:"런타임 저하" ~en:"Degraded") ))
+            in
+            Card.draw_left_rail ~bg ~tone grid ~x:content.x ~y:!y ~h:1 ~theme;
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                 ~max_w:(Int.max 0 (content.w - 2))
+                 ~style:(H.status_style ~theme tone)
+                 (Printf.sprintf "%s %s · %s"
+                    (Glyph.to_utf8 glyph)
+                    lbl detail));
+            incr y;
+            incr shown
+          end)
+        degraded_standings;
       List.iter
         (fun (a : Wire_runtime.account_usage) ->
           if !y < bottom && !shown < max_alerts then begin
@@ -2301,15 +2503,17 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let active_ok =
     List.fold_left
       (fun acc p ->
-        if is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows p then
-          acc + 1
+        if is_probe_effectively_ok ~now_unix ~rt ~runtimes_tbl ~usage_windows p
+        then acc + 1
         else acc)
       0 active_probes
   in
   let active_failed =
     List.fold_left
       (fun acc p ->
-        if is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows p
+        if
+          is_probe_effectively_failed ~now_unix ~rt ~runtimes_tbl ~usage_windows
+            p
         then acc + 1
         else acc)
       0 active_probes
@@ -2585,7 +2789,18 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                         (Observed.to_option rt.usage_windows)
                   | None -> Quota_ok
                 in
+                let standing_override =
+                  standing_override_for ~now_unix ~lang ~rt rid
+                in
                 let status_g, status_tone, status_txt, rtt_txt =
+                  match quota_st, standing_override with
+                  | Quota_exhausted, _ ->
+                      ( Glyph.Live_failing
+                      , Theme.Status_critical
+                      , Format_val.format_cost Format_val.Exhausted_zero ~lang
+                      , "" )
+                  | (Quota_ok | Quota_cooldown _), Some s -> s
+                  | (Quota_ok | Quota_cooldown _), None ->
                   match (Hashtbl.find_opt probe_tbl rid, quota_st) with
                   | _, Quota_exhausted ->
                       ( Glyph.Live_failing
@@ -2803,12 +3018,14 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         let reach_n =
           List.fold_left
             (fun acc rid ->
-              match slot_quota_st rid with
-              | Quota_cooldown _ | Quota_exhausted -> acc
-              | Quota_ok -> (
-                  match Hashtbl.find_opt probe_tbl rid with
-                  | Some { reachable = Some true; _ } -> acc + 1
-                  | Some { reachable = Some false | None; _ } | None -> acc))
+              if is_standing_degraded ~now_unix ~rt rid then acc
+              else
+                match slot_quota_st rid with
+                | Quota_cooldown _ | Quota_exhausted -> acc
+                | Quota_ok -> (
+                    match Hashtbl.find_opt probe_tbl rid with
+                    | Some { reachable = Some true; _ } -> acc + 1
+                    | Some { reachable = Some false | None; _ } | None -> acc))
             0 lane.runtime_ids
         in
         let primary_rid = match lane.runtime_ids with r :: _ -> r | [] -> "" in
@@ -2886,31 +3103,39 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                   | Some { transport = None; _ } | None -> "—"
                 in
                 let st_g, st_tone, st_val =
-                  match (Hashtbl.find_opt probe_tbl rid, slot_quota_st rid) with
-                  | _, Quota_exhausted ->
+                  match
+                    ( slot_quota_st rid
+                    , standing_override_for ~now_unix ~lang ~rt rid )
+                  with
+                  | Quota_exhausted, _ ->
                       ( Glyph.Live_failing
                       , Theme.Status_critical
                       , Format_val.format_cost Format_val.Exhausted_zero ~lang )
-                  | _, Quota_cooldown dur ->
+                  | (Quota_ok | Quota_cooldown _), Some (g, tone, txt, _) ->
+                      (g, tone, txt)
+                  | Quota_cooldown dur, None ->
                       ( Glyph.Live_paused
                       , Theme.Status_attention
                       , "Cooldown " ^ dur )
-                  | Some pr, Quota_ok -> (
-                      match pr.reachable with
-                      | Some true ->
-                          let lat =
-                            match pr.latency_ms with
-                            | Some ms ->
-                                Format_val.format_value Format_val.Milliseconds ms
-                            | None -> "ok"
-                          in
-                          (Glyph.Live_healthy, Theme.Status_ok, lat)
-                      | Some false ->
-                          ( Glyph.Live_failing
-                          , Theme.Status_critical
-                          , format_failover_reason pr )
-                      | None -> (Glyph.Live_idle, Theme.Status_active, pr.status))
-                  | None, Quota_ok -> (Glyph.Live_idle, Theme.Status_historical, "—")
+                  | Quota_ok, None -> (
+                      match Hashtbl.find_opt probe_tbl rid with
+                      | Some pr -> (
+                          match pr.reachable with
+                          | Some true ->
+                              let lat =
+                                match pr.latency_ms with
+                                | Some ms ->
+                                    Format_val.format_value
+                                      Format_val.Milliseconds ms
+                                | None -> "ok"
+                              in
+                              (Glyph.Live_healthy, Theme.Status_ok, lat)
+                          | Some false ->
+                              ( Glyph.Live_failing
+                              , Theme.Status_critical
+                              , format_failover_reason pr )
+                          | None -> (Glyph.Live_idle, Theme.Status_active, pr.status))
+                      | None -> (Glyph.Live_idle, Theme.Status_historical, "—"))
                 in
                 let right_s = Printf.sprintf "%s · %s" transport_s st_val in
                 let rw = Grapheme.display_width right_s in

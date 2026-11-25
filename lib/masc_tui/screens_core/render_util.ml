@@ -161,9 +161,25 @@ let freshness_pill ~(model : Model.t) ~compact =
     let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
     (Glyph.Live_idle, lbl, Theme.Status_critical)
   else
+    let fleet_degraded_pill () =
+      let lbl =
+        Say.resolve lang
+          (if compact then Say.make ~ko:"저하" ~en:"DEGR"
+           else Say.make ~ko:"플리트 저하" ~en:"DEGRADED")
+      in
+      (Glyph.Transport_stale, lbl, Theme.Status_attention)
+    in
+    let is_degraded = Option.is_some model.fleet.fleet_degradation in
     match Model.active_view_ssot_mode model with
     | Model.Live_sse { freshness; live_count; planned_count; _ } -> (
         match freshness with
+        | Health.Disconnected _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
+            (Glyph.Live_idle, lbl, Theme.Status_critical)
+        | Health.Workspace_mismatch _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
+            (Glyph.Transport_stale, lbl, Theme.Status_critical)
+        | Health.Live _ when is_degraded -> fleet_degraded_pill ()
         | Health.Live _ ->
             let lbl =
               if compact then Say.resolve lang (Say.make ~ko:"LIVE" ~en:"LIVE")
@@ -195,13 +211,7 @@ let freshness_pill ~(model : Model.t) ~compact =
                   (Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE"))
                   (Format_val.format_duration_s age_sec)
             in
-            (Glyph.Transport_stale, lbl, Theme.Status_attention)
-        | Health.Disconnected _ ->
-            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
-            (Glyph.Live_idle, lbl, Theme.Status_critical)
-        | Health.Workspace_mismatch _ ->
-            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
-            (Glyph.Transport_stale, lbl, Theme.Status_critical))
+            (Glyph.Transport_stale, lbl, Theme.Status_attention))
     | Model.Synced_snapshot { observer; observed_at } -> (
         let age_suffix =
           match snapshot_age_str ~model observed_at with
@@ -209,6 +219,13 @@ let freshness_pill ~(model : Model.t) ~compact =
           | None -> ""
         in
         match observer with
+        | Health.Disconnected _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
+            (Glyph.Live_idle, lbl, Theme.Status_critical)
+        | Health.Workspace_mismatch _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
+            (Glyph.Transport_stale, lbl, Theme.Status_critical)
+        | Health.Live _ when is_degraded -> fleet_degraded_pill ()
         | Health.Live _ ->
             let lbl =
               if compact then Say.resolve lang (Say.make ~ko:"동기화" ~en:"SYNCED")
@@ -240,13 +257,7 @@ let freshness_pill ~(model : Model.t) ~compact =
                   (Say.resolve lang (Say.make ~ko:"동기화 지연" ~en:"SYNCED STALE"))
                   (Format_val.format_duration_s age_sec)
             in
-            (Glyph.Transport_stale, lbl, Theme.Status_attention)
-        | Health.Disconnected _ ->
-            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
-            (Glyph.Live_idle, lbl, Theme.Status_critical)
-        | Health.Workspace_mismatch _ ->
-            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
-            (Glyph.Transport_stale, lbl, Theme.Status_critical))
+            (Glyph.Transport_stale, lbl, Theme.Status_attention))
     | Model.Snapshot_only { observed_at } ->
         let lbl =
           if compact then Say.resolve lang (Say.make ~ko:"스냅샷" ~en:"SNAP")

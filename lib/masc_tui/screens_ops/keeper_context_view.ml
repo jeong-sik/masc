@@ -520,8 +520,14 @@ let draw_composition_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                       | Wire_keeper_context.Forecast_serving ->
                           ("serving", Theme.Status_ok)
                       | Wire_keeper_context.Forecast_resting
-                          { release_basis; _ } ->
-                          ("resting:" ^ release_basis, Theme.Status_attention)
+                          { release_at_unix; release_basis } ->
+                          let eta =
+                            Ops_common.format_due_delta
+                              ~now_unix:model.freshness.last_wall_unix
+                              release_at_unix ~lang:model.lang
+                          in
+                          ( Printf.sprintf "resting:%s (%s)" release_basis eta
+                          , Theme.Status_attention )
                     in
                     let lane_s =
                       match cand.lane with

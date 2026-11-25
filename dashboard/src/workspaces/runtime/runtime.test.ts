@@ -521,10 +521,13 @@ describe('workspaces/runtime', () => {
       b.textContent?.trim() === 'Exact Output',
     ) as HTMLButtonElement
     exactTabBtn.click()
-    await vi.waitFor(() => expect(container.querySelector('tbody tr')).not.toBeNull())
-
-    const rowEl = container.querySelector('tbody tr') as HTMLTableRowElement
-    expect(rowEl).not.toBeNull()
+    const rowEl = await vi.waitFor(() => {
+      const exactRow = Array.from(container.querySelectorAll('tbody tr')).find(
+        (row) => row.textContent?.includes('run-exact-1'),
+      )
+      expect(exactRow).toBeDefined()
+      return exactRow!
+    })
     rowEl.click()
     await vi.waitFor(() => expect(inspected.length).toBeGreaterThanOrEqual(1))
     expect(inspected[inspected.length - 1]!.kind).toBe('exact_lane_run')

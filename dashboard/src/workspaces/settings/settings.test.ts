@@ -343,14 +343,16 @@ describe('workspaces/settings', () => {
 
     navigate('/settings?section=candle')
     render(html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
-    const activeCatBtn = container.querySelector('nav button[aria-current="page"]')
-    expect(activeCatBtn?.textContent).toContain('Board, Memory & Candle')
+    await vi.waitFor(() => {
+      const activeCategory = container.querySelector('nav button[aria-current="page"]')
+      expect(activeCategory?.textContent).toContain('Board, Memory & Candle')
+    })
 
     navigate('/settings?key=providers.openai')
-    await flushUi(20)
-    const searchInput = container.querySelector('input[aria-label="설정 키 검색"]') as HTMLInputElement
-    expect(searchInput.value).toBe('providers.openai')
-    expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="설정 키 검색"]')
+      expect(searchInput?.value).toBe('providers.openai')
+      expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
+    })
   })
 })

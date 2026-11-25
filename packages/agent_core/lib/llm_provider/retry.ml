@@ -547,6 +547,11 @@ let signals_of_object_fields fields : error_signals =
   in
   let top_type = Option.bind (List.assoc_opt "type" fields) json_string_opt in
   let err_type = Option.bind (List.assoc_opt "error_type" fields) json_string_opt in
+  (* Muse ACP puts its turn failure class in [error.data.error.kind], one of
+     the MSP [TurnErrorKind] values ([muse schema generate-json-schema]),
+     e.g. ["contextOverflow"] or ["modelError"]. It is a typed field, read the
+     same way as [type]. *)
+  let kind_type = Option.bind (List.assoc_opt "kind" fields) json_string_opt in
   let metadata_fields =
     match List.assoc_opt "metadata" fields with
     | Some (`Assoc mf) -> Some mf
@@ -557,7 +562,7 @@ let signals_of_object_fields fields : error_signals =
     Option.bind metadata_fields (fun mf ->
       Option.bind (List.assoc_opt "error_type" mf) json_string_opt)
   in
-  let types = List.filter_map Fun.id [ top_type; err_type; meta_type ] in
+  let types = List.filter_map Fun.id [ top_type; err_type; kind_type; meta_type ] in
   let statuses =
     match Option.bind (List.assoc_opt "status" fields) json_string_opt with
     | Some s -> [ s ]
@@ -789,6 +794,7 @@ let is_structured_context_overflow_code code =
 
 let is_structured_context_overflow_type t =
   match String.lowercase_ascii (String.trim t) with
+  | "contextoverflow" (* Muse MSP TurnErrorKind [contextOverflow] *)
   | "context_length_exceeded"
   | "context_window_exceeded"
   | "exceed_context_size_error"

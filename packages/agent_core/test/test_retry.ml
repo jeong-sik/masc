@@ -647,6 +647,20 @@ let test_structured_json_signals_and_status_optional_ssot () =
    with
    | Some (Retry.Signal_context_overflow { limit = Some 400000; message = "cap hit" }) -> ()
    | _ -> fail "expected Signal_context_overflow from error_code without HTTP status");
+  (* Muse ACP: [error.data] carries the MSP TurnErrorKind in [error.kind].
+     Shape from a live [muse acp] 1.4.25 failure (2026-11-25). *)
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"kind":"contextOverflow","message":"window full","retryable":false}}|})
+   with
+   | Some (Retry.Signal_context_overflow { limit = None; message = "window full" }) -> ()
+   | _ -> fail "Muse ACP kind=contextOverflow must classify as Signal_context_overflow");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"kind":"modelError","message":"model `muse-ember-1.0` does not exist or you lack access","retryable":false}}|})
+   with
+   | None -> ()
+   | Some _ -> fail "Muse ACP kind=modelError carries no overflow, quota or auth class");
   (match
      Retry.classify_structured_json
        (parse {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","retryAfter":15,"message":"rpm"}}|})

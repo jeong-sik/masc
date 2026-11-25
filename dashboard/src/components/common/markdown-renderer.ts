@@ -7,6 +7,7 @@ import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { sanitizeHtml } from '../../lib/dompurify'
 import { memoizeLru } from '../../lib/lru-cache'
+import { parseUrl } from '../../lib/parse-url'
 
 const documentRenderer = {
   image(this: Renderer, token: Tokens.Image) {
@@ -116,7 +117,7 @@ function linkUnloadedImages(container: HTMLElement) {
   const cleanups: Array<() => void> = []
   for (const image of container.querySelectorAll('img[src]')) {
     if (!(image instanceof HTMLImageElement) || image.closest('a')) continue
-    const url = URL.parse(image.src, container.ownerDocument.baseURI)
+    const url = parseUrl(image.src, container.ownerDocument.baseURI)
     if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) continue
     const showOriginal = () => {
       const link = container.ownerDocument.createElement('a')

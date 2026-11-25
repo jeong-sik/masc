@@ -22949,12 +22949,12 @@ let open_tool ?tool_use_id name stage since =
     { tool_use_id; name; stage; started_at_unix = since -. 2.0; since_unix = since }
 ;;
 
-let preview_reporting ?(activity = Preview_streaming) open_activities last_tool =
+let preview_reporting ?(activity = Wire_fleet.Preview_streaming) open_activities last_tool =
   { status_text = ""; activity; text_tail = ""; last_tool; updated_at_unix = 100.0;
     revision = Some 1; preparation = None; work_context = None; open_activities }
 ;;
 
-let running_turn_with ?(activity = Preview_streaming) activities last_tool =
+let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last_tool =
   { lane = Wire_fleet.Lane_proactive; turn_ref = None; started_at_unix = 90.0;
     interrupt_token = "tok-open-work"; phase = None; tool_in_flight = None;
     elapsed_ms = None; preview_observed_through = Some 1;
@@ -23017,13 +23017,13 @@ let test_open_work_of_preview_names_what_is_open () =
     |> Option.map (fun work -> ko work.phrase)
   in
   Alcotest.(check (option string)) "a server that does not report the open work" None
-    (legacy Preview_tool_observed);
+    (legacy Wire_fleet.Preview_tool_observed);
   Alcotest.(check (option string)) "a failed attempt is not open work" None
     (Option.map (fun work -> ko work.phrase)
-       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Preview_failed (Some []) None)));
+       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Wire_fleet.Preview_failed (Some []) None)));
   Alcotest.(check (option string)) "a turn still preparing is not open work" None
     (Option.map (fun work -> ko work.phrase)
-       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Preview_preparing (Some []) None)))
+       (Fleet_store.open_work_of_preview (preview_reporting ~activity:Wire_fleet.Preview_preparing (Some []) None)))
 ;;
 
 let test_chat_status_uses_the_same_words_for_every_turn () =
@@ -23038,7 +23038,7 @@ let test_chat_status_uses_the_same_words_for_every_turn () =
   Alcotest.(check string) "an older server keeps its wording"
     "최근 도구 · Read"
     (ko (Chat_transcript.active_turn_short_activity
-           (running_turn_with ~activity:Preview_tool_observed None (Some "Read"))));
+           (running_turn_with ~activity:Wire_fleet.Preview_tool_observed None (Some "Read"))));
   Alcotest.(check string) "the operator's own turn names the tool the same way"
     "도구 실행 중 · gh_pr_view"
     (ko (Option.get (Composer.pending_tx_label (Composer.Tx_tool_running "gh_pr_view"))));

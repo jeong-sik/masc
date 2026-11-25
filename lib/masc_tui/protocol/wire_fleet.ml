@@ -976,8 +976,8 @@ let decode_turn_preview json =
   let* open_activities =
     if not (has_field json "open_activities") then Ok None
     else
-      optional_list_field json "open_activities"
-      |> Result.bind decode_turn_open_activities
+      Result.bind (optional_list_field json "open_activities")
+        decode_turn_open_activities
       |> Result.map Option.some
   in
   Ok

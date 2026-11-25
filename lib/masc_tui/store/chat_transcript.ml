@@ -453,37 +453,63 @@ let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw
       Style.make ~fg:(Color.of_rgb theme.text_secondary)
         ~bg:(Color.of_rgb theme.surface_0) ()
     in
+    let literal text =
+      let text = String.concat "    " (String.split_on_char '\t' text) in
+      Markdown.render_literal ~width:body_w ~base_style:style text
+    in
+    let artifact_lines (artifact : Tool_output.artifact_ref) =
+      let preview = scrub_secrets_in_text artifact.preview in
+      let reference = Tool_output.with_preview artifact "" in
+      let original =
+        Tool_output.encode_for_agent_core (Stored reference)
+        |> scrub_secrets_in_text |> literal
+      in
+      let mime =
+        Tool_blob_media_store.blob_mime artifact.mime |> String.lowercase_ascii
+      in
+      let preview_lines =
+        if String.equal preview "" then []
+        else if String.equal mime "text/markdown" then
+          Markdown.render_lines ~theme ~width:body_w ~base_style:style preview
+        else literal preview
+      in
+      original @ preview_lines
+    in
     let all_lines =
       match Yojson.Safe.from_string trimmed with
-      | json ->
-          let scrubbed = scrub_json_secrets json in
-          let flat =
-            Json_tree.flatten ~max_depth ~redact_secrets:true scrubbed
-          in
-          let string_of_val = function
-            | Json_tree.Object_node { count } -> Printf.sprintf "{%d keys}" count
-            | Json_tree.Array_node { count } -> Printf.sprintf "[%d items]" count
-            | Json_tree.String_val s -> s
-            | Json_tree.Redacted_secret -> "[redacted]"
-            | Json_tree.Int_val n -> Int.to_string n
-            | Json_tree.Float_val f -> Printf.sprintf "%g" f
-            | Json_tree.Bool_val b -> if b then "true" else "false"
-            | Json_tree.Null_val -> "null"
-          in
-          List.map
-            (fun (ln : Json_tree.line) ->
-              let ind = String.make (ln.depth * 2) ' ' in
-              let vs = string_of_val ln.value in
-              let text =
-                match ln.key with
-                | Some k -> Printf.sprintf "%s%s: %s" ind k vs
-                | None -> ind ^ vs
-              in
-              ({ spans = [ { text; style; hyperlink = None } ] } : Markdown.rendered_line))
-            flat
+      | json -> (
+          match Tool_output.normalized_artifact_ref_of_json json with
+          | Decoded_normalized_artifact_ref artifact -> artifact_lines artifact
+          | Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+            let scrubbed = scrub_json_secrets json in
+            let flat =
+              Json_tree.flatten ~max_depth ~redact_secrets:true scrubbed
+            in
+            let string_of_val = function
+              | Json_tree.Object_node { count } -> Printf.sprintf "{%d keys}" count
+              | Json_tree.Array_node { count } -> Printf.sprintf "[%d items]" count
+              | Json_tree.String_val s -> s
+              | Json_tree.Redacted_secret -> "[redacted]"
+              | Json_tree.Int_val n -> Int.to_string n
+              | Json_tree.Float_val f -> Printf.sprintf "%g" f
+              | Json_tree.Bool_val b -> if b then "true" else "false"
+              | Json_tree.Null_val -> "null"
+            in
+            List.map
+              (fun (ln : Json_tree.line) ->
+                let ind = String.make (ln.depth * 2) ' ' in
+                let vs = string_of_val ln.value in
+                let text =
+                  match ln.key with
+                  | Some k -> Printf.sprintf "%s%s: %s" ind k vs
+                  | None -> ind ^ vs
+                in
+                ({ spans = [ { text; style; hyperlink = None } ] } : Markdown.rendered_line))
+              flat)
       | exception Yojson.Json_error _ ->
-          let scrubbed = scrub_secrets_in_text trimmed in
-          Markdown.render_lines ~theme ~width:body_w ~base_style:style scrubbed
+          (match Tool_output.decode_from_agent_core raw with
+          | Decoded artifact -> artifact_lines artifact
+          | Not_marker | Invalid_marker _ -> literal (scrub_secrets_in_text raw))
     in
     let shown = List.take max_preview all_lines in
     let hidden = List.length all_lines - List.length shown in

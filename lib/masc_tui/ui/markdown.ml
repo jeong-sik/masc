@@ -410,13 +410,25 @@ let safe_link_depth raw =
   scan 0 0 true false
 
 let render_literal ~width ~base_style raw =
+  let width = Int.max 4 width in
   String.split_on_char '\n' raw
   |> List.concat_map (fun line ->
-         let line = if String.ends_with ~suffix:"\r" line
-           then String.sub line 0 (String.length line - 1)
-           else line
+         let rows = ref [] and cells = ref 0 in
+         let row = Buffer.create (Int.min width (String.length line)) in
+         let push_row () =
+           rows :=
+             { spans = [ span base_style (Buffer.contents row) ] }
+             :: !rows;
+           Buffer.clear row;
+           cells := 0
          in
-         wrap_styled_spans ~width ~prefix:[] ~continuation:[] [ span base_style line ])
+         Grapheme.iter_clusters line
+           (fun ~text ~start_offset ~end_offset ~cell_width ->
+             if !cells + cell_width > width then push_row ();
+             Buffer.add_substring row text start_offset (end_offset - start_offset);
+             cells := !cells + cell_width);
+         push_row ();
+         List.rev !rows)
 
 let source_lines raw meta =
   let loc = Cmarkit.Meta.textloc meta in

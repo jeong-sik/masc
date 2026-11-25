@@ -37,6 +37,10 @@ val render_lines :
     when [false], links include a muted italic [" (target)"] preview so the
     destination stays visible. *)
 
+val render_literal :
+  width:int -> base_style:Style.t -> string -> rendered_line list
+(** Wrap plain text with line breaks preserved and without Markdown parsing. *)
+
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

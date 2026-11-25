@@ -19,8 +19,9 @@ val tool_output_display_lines :
   theme:Theme.t -> tools_mode:Slash.tools_mode -> width:int -> string ->
   Markdown.rendered_line list * int
 (** [(shown_lines, hidden_count)] for a tool output payload using
-    {!Json_tree.flatten} (8-line cap in [Tools_results], 48-line cap in
-    [Tools_full]) or the shared Markdown renderer for non-JSON payloads. *)
+    {!Json_tree.flatten} or a literal rendering. Blob references with a
+    declared Markdown preview also render the preview. The cap is eight
+    lines in [Tools_results] and 48 in [Tools_full]. *)
 
 val thinking_body_lines :
   theme:Theme.t -> width:int -> string -> Markdown.rendered_line list

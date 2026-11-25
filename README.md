@@ -176,7 +176,9 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 "$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
 ```
 
-Local installation leaves a microVM guest shim alone without querying releases.
+For a new source installation, choose Docker in setup. To use Apple Container,
+first [build and install the Linux ARM64 guest shim from the same checkout](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기),
+using the same workspace path. The source installer keeps existing release shims by default.
 Use `--refresh-guest-shim` when deploying a server/shim change to microVM Keepers
 or addressing `remote_shim_outdated`; it refreshes an existing release shim
 (`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another

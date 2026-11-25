@@ -123,6 +123,15 @@ case "$(uname -s)" in
       echo "install-local-build: Intel Macs are not supported." >&2
       exit 2
     fi
+    os_version=$(sw_vers -productVersion 2>/dev/null || true)
+    major=${os_version%%.*}
+    case "$major" in
+      ''|*[!0-9]*) echo "install-local-build: cannot read macOS version" >&2; exit 2 ;;
+    esac
+    if [ "$major" -lt 15 ]; then
+      echo "install-local-build: macOS 15.0 or later is required (found $os_version)." >&2
+      exit 2
+    fi
     ;;
   Linux) ;;
   *) echo "install-local-build: Apple Silicon Macs and Linux only" >&2; exit 2 ;;

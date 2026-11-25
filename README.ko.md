@@ -167,7 +167,9 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 "$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
 ```
 
-평소 설치는 microVM 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않습니다.
+새 소스 설치에서는 설정 화면에서 Docker를 고릅니다. Apple Container를 쓰려면
+먼저 [같은 체크아웃에서 Linux ARM64 게스트 shim을 빌드해 같은 작업 공간에 설치합니다](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기).
+로컬 설치기는 새 작업 공간에 shim을 추가하지 않으며, 기존 릴리스 shim은 기본적으로 보존합니다.
 서버·shim 변경을 microVM 에 배포하거나 `remote_shim_outdated` 를 해결할 때만
 `--refresh-guest-shim` 을 붙이세요. 기존 릴리즈 shim 을 갱신합니다.
 아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`을 검사합니다.

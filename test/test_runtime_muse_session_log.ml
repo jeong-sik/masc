@@ -279,7 +279,7 @@ let child_cancelled = read_fixture "muse-acp-1.4.25-observer-child-cancelled.jso
 let child_a_counts = counts ~input:1981 ~output:255 ~cache_read:1521 ~reasoning:197
 let both_children_counts = counts ~input:4735 ~output:454 ~cache_read:3298 ~reasoning:338
 
-let observers_of ?(cache_write = 0) ~observer_counts ~finished ~running ~without_journal =
+let observers_of ~cache_write ~observer_counts ~finished ~running ~without_journal =
   { Log.counts = observer_counts
   ; cache_write_tokens = cache_write
   ; finished
@@ -290,6 +290,7 @@ let observers_of ?(cache_write = 0) ~observer_counts ~finished ~running ~without
 
 let both_children_finished =
   observers_of
+    ~cache_write:0
     ~observer_counts:both_children_counts
     ~finished:2
     ~running:0
@@ -627,6 +628,7 @@ let test_adds_the_observers_a_prompt_linked () =
       "the two requests of the children, none for the cancelled one"
       (observers_prompt
          (observers_of
+            ~cache_write:0
             ~observer_counts:both_children_counts
             ~finished:3
             ~running:0
@@ -650,6 +652,7 @@ let test_leaves_out_an_observer_that_is_still_running () =
       "child B has a request but no terminal record"
       (observers_prompt
          (observers_of
+            ~cache_write:0
             ~observer_counts:child_a_counts
             ~finished:1
             ~running:1
@@ -683,6 +686,7 @@ let test_reports_an_observer_linked_without_a_journal () =
       "child B has no journal to read"
       (observers_prompt
          (observers_of
+            ~cache_write:0
             ~observer_counts:child_a_counts
             ~finished:1
             ~running:0

@@ -815,10 +815,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
     in
     let dive_segment_label = function
-      | Nav.Dive_work (Nav.Goal_dive id) ->
-          Say.resolve lang (Say.make ~ko:"목표" ~en:"Goal") ^ " " ^ id
-      | Nav.Dive_work (Nav.Task_dive id) ->
-          Say.resolve lang (Say.make ~ko:"작업" ~en:"Task") ^ " " ^ id
       | Nav.Dive_work (Nav.Verification_dive id) ->
           let tab_tag =
             match model.work.verification_dive_tab with
@@ -1509,9 +1505,12 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || (model.infra.show_raw_json
               && Option.is_none (Model.active_dive model)
               && Model.detail_visible model
-              && ((Nav.equal_workspace model.nav.workspace Nav.Runtime
-                   && Nav.equal_runtime_tab model.runtime.active_tab
-                        Nav.Runtime_failover_lanes)
+              && ((Nav.equal_workspace model.nav.workspace Nav.Work
+                   && (Nav.equal_work_tab model.work.active_tab Nav.Work_pipeline
+                       || Nav.equal_work_tab model.work.active_tab Nav.Work_tasks))
+                  || (Nav.equal_workspace model.nav.workspace Nav.Runtime
+                      && Nav.equal_runtime_tab model.runtime.active_tab
+                           Nav.Runtime_failover_lanes)
                   || (Nav.equal_workspace model.nav.workspace Nav.Infra
                       && Nav.equal_infra_tab model.infra.active_tab
                            Nav.Infra_sandboxes)))

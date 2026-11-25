@@ -43,6 +43,20 @@ val build_rejection_diff_rows :
 (** Build a structured rejection diff comparing expected contract/required
     artifacts against observed evidence and verifier critique. *)
 
+val split_dive_with_json : model:Model.t -> Rect.t -> Rect.t * Rect.t
+(** Split [rect] into peer main + Raw JSON cards when [show_raw_json] is active
+    (side-by-side 58/42 at [w >= 88], full-width JSON when narrow). *)
+
+val render_opt_in_json_tree :
+  Cell_grid.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  model:Model.t ->
+  cache:Card.Cache.t ->
+  Yojson.Safe.t ->
+  unit
+(** Render the opt-in [[Space]] scrubbed [Json_tree] inspector card. *)
+
 val render_pipeline :
   model:Model.t ->
   cache:Card.Cache.t ->

@@ -1747,10 +1747,16 @@ let test_verifier_regressions () =
   let m_goal_dived, cmds_goal =
     Update.execute_action ~now:t1 m_goal Keymap.Fast_approve_top
   in
-  Alcotest.(check bool) "Goal fast-approve dives instead of posting fake tokens"
+  Alcotest.(check bool) "Goal fast-approve jumps to zoomed Goal instead of posting fake tokens"
     true
-    (Option.equal Nav.equal_dive (Model.active_dive m_goal_dived)
-       (Some (Nav.Dive_work (Nav.Goal_dive "g-1"))));
+    (Option.is_none (Model.active_dive m_goal_dived)
+     && Nav.equal_workspace m_goal_dived.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_goal_dived.work.active_tab Nav.Work_pipeline
+     && m_goal_dived.nav.zoomed
+     &&
+     match Work_store.selected_goal m_goal_dived.work with
+     | Some g -> String.equal g.id "g-1"
+     | None -> false);
   let is_http_post = function
     | Cmd.Http_post _ -> true
     | Cmd.Batch _
@@ -3645,15 +3651,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Work_dive [Space] toggles show_raw_json" true
     m_vjson.infra.show_raw_json;
 
-  (* Task_dive [x] -> Task_cancel modal -> submit *)
-  let m_tdive =
-    {
-      m_work with
-      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Task_dive "task-100") ] };
-    }
-  in
+  (* Zoomed Work > Tasks [x] -> Task_cancel modal -> submit *)
+  let m_tdive, _ = Update_nav.jump_to_task ~zoomed:true m_work "task-100" in
   let m_tc, _ = step m_tdive (char_key "x") in
-  Alcotest.(check bool) "Task_dive [x] opens Task_cancel modal" true
+  Alcotest.(check bool) "Zoomed Work > Tasks [x] opens Task_cancel modal" true
     (Option.equal Nav.equal_overlay m_tc.nav.overlay
        (Some (Nav.Inline_action (Nav.Task_cancel "task-100"))));
   let _, cmds_tc = step m_tc (key Keymap.Input.Enter) in
@@ -3798,22 +3799,17 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     [ {|{"channel_id":"1234","keeper_name":"alpha"}|} ]
     (List.map Yojson.Safe.to_string (posted_bodies cmds_conn));
 
-  (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
-  let m_gdive_conf =
-    {
-      m_work with
-      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-100") ] };
-    }
-  in
+  (* Zoomed Work > Goals: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
+  let m_gdive_conf, _ = Update_nav.jump_to_goal ~zoomed:true m_work "goal-100" in
   let m_gconf_mod, cmds_gconf0 = step m_gdive_conf (char_key "a") in
-  Alcotest.(check bool) "Goal_dive [a] never fires fabricated Post_goal_confirmation directly"
+  Alcotest.(check bool) "Zoomed Goal [a] never fires fabricated Post_goal_confirmation directly"
     false
     (has_cmd
        (function
          | Cmd.Http_post { req = Cmd.Post_goal_confirmation _; _ } -> true
          | _ -> false)
        cmds_gconf0);
-  Alcotest.(check bool) "Goal_dive [a] opens explicit proof modal with empty server-issued fields"
+  Alcotest.(check bool) "Zoomed Goal [a] opens explicit proof modal with empty server-issued fields"
     true
     (match m_gconf_mod.inline_modal with
     | Some md ->
@@ -3971,14 +3967,9 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              } -> true
          | _ -> false)
        cmds_gconf_auto);
-  let m_gdive_exec =
-    {
-      m_work with
-      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-101") ] };
-    }
-  in
+  let m_gdive_exec, _ = Update_nav.jump_to_goal ~zoomed:true m_work "goal-101" in
   let _, cmds_greq = step m_gdive_exec (char_key "a") in
-  Alcotest.(check bool) "Goal_dive Executing [a] emits Request_complete" true
+  Alcotest.(check bool) "Zoomed Goal Executing [a] emits Request_complete" true
     (has_cmd
        (function
          | Cmd.Http_post
@@ -4000,7 +3991,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     "Goal transition posts nothing before /health names the workspace" 0
     (List.length (posted_bodies cmds_greq_unknown));
   let _, cmds_gpause = step m_gdive_exec (char_key "x") in
-  Alcotest.(check bool) "Goal_dive Executing [x] emits Pause" true
+  Alcotest.(check bool) "Zoomed Goal Executing [x] emits Pause" true
     (has_cmd
        (function
          | Cmd.Http_post
@@ -13405,29 +13396,27 @@ let test_ux_batch3_work_keepers_chat_mouse () =
     | Some { level = Model.Toast_warning; _ } -> true
     | Some _ | None -> false);
 
-  (* UX-25: Dive_work Raw JSON toggle exposes pane 1 with independent json_scroll_offset *)
+  (* UX-25: Zoomed Work > Tasks Raw JSON toggle exposes pane 1 with independent json_scroll_offset *)
   let m_dive =
+    let m_tz, _ = Update_nav.jump_to_task ~zoomed:true m_tasks "t-1" in
     {
-      m_tasks with
-      nav =
-        {
-          m_tasks.nav with
-          dive_stack = [ Nav.Dive_work (Nav.Task_dive "t-1") ];
-          pane_index = 0;
-        };
-      infra = { m_tasks.infra with show_raw_json = true };
+      m_tz with
+      infra = { m_tz.infra with show_raw_json = true };
     }
   in
-  Alcotest.(check int) "UX-25 Dive_work with Raw JSON on wide viewport has 2 panes" 2
+  Alcotest.(check int) "UX-25 Zoomed Work > Tasks with Raw JSON on wide viewport has 2 panes" 2
     (Model.focusable_pane_count m_dive);
   let m_dive_p1, _ = step m_dive (key Keymap.Input.Tab) in
   Alcotest.(check int) "UX-25 Tab focuses Raw JSON pane 1" 1
     m_dive_p1.nav.pane_index;
-  let m_dive_js, _ = step m_dive_p1 (key Keymap.Input.Down) in
+  let m_dive_short =
+    { m_dive_p1 with viewport = { Model.cols = 140; rows = 12 } }
+  in
+  let m_dive_js, _ = step m_dive_short (key Keymap.Input.Down) in
   Alcotest.(check bool) "UX-25 Down in JSON pane increments json_scroll_offset" true
     (m_dive_js.nav.json_scroll_offset > 0);
-  Alcotest.(check int) "UX-25 JSON scroll leaves dive_scroll_offset untouched" 0
-    m_dive_js.nav.dive_scroll_offset;
+  Alcotest.(check int) "UX-25 JSON scroll leaves task_dive_desc_scroll untouched" 0
+    m_dive_js.work.task_dive_desc_scroll;
 
   (* UX-26: Keepers empty filtered roster collapses to 1 pane; Keeper_config [d] dry-run works on Bool *)
   let m_k_empty =
@@ -13532,7 +13521,13 @@ let test_ux_batch3_work_keepers_chat_mouse () =
   let m_sb_dive =
     {
       m_dive with
-      nav = { m_dive.nav with sidebar_open = Some true; sidebar_scroll = 0 };
+      nav =
+        {
+          m_dive.nav with
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "v-1") ];
+          sidebar_open = Some true;
+          sidebar_scroll = 0;
+        };
     }
   in
   let m_sb_wheel, _ =
@@ -13924,7 +13919,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
     }
   in
   let m_pushed, _ =
-    Update_nav.push_dive m_raw (Nav.Dive_work (Nav.Goal_dive "g-1"))
+    Update_nav.push_dive m_raw (Nav.Dive_work (Nav.Verification_dive "ver-1"))
   in
   Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
     m_pushed.infra.show_raw_json;
@@ -15040,15 +15035,20 @@ let test_ux_sweep_12_fixes () =
   let m_p2_enter, _ = step m_p2 (mk_key Keymap.Input.Enter) in
   let m_p2_j, _ = step m_p2 (char_k ~shift:true "J") in
   List.iter
-    (fun (lbl, m_res) ->
+    (fun (lbl, (m_res : Model.t)) ->
       Alcotest.(check bool) lbl true
-        (match Model.active_dive m_res with
-         | Some (Nav.Dive_work (Nav.Goal_dive "goal-2")) -> true
-         | _ -> false))
+        (Option.is_none (Model.active_dive m_res)
+         && Nav.equal_workspace m_res.nav.workspace Nav.Work
+         && Nav.equal_work_tab m_res.work.active_tab Nav.Work_pipeline
+         && m_res.nav.zoomed
+         &&
+         match Work_store.selected_goal m_res.work with
+         | Some g -> String.equal g.id "goal-2"
+         | None -> false))
     [
-      ("Item 1: Y on selected goal-2 pushes Goal_dive", m_p2_y);
-      ("Item 1: Enter on selected goal-2 pushes Goal_dive", m_p2_enter);
-      ("Item 1: J on selected goal-2 pushes Goal_dive", m_p2_j);
+      ("Item 1: Y on selected goal-2 jumps to zoomed Goal", m_p2_y);
+      ("Item 1: Enter on selected goal-2 jumps to zoomed Goal", m_p2_enter);
+      ("Item 1: J on selected goal-2 jumps to zoomed Goal", m_p2_j);
     ];
   (* Mark selected row 2 in-flight: Y must NOT silently jump to row 0 (ta-0)! *)
   let m_p2_inflight =
@@ -15360,40 +15360,45 @@ let test_ux_sweep_12_fixes () =
         | first :: _ -> String.equal first.id "g-done"
         | [] -> false);
 
-  (* Item 7: Goal_dive 2 sections (Linked Tasks & Verifier Runs) + Enter drill *)
-  let m_gd, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
-  Alcotest.(check int) "Item 7: Goal_dive has 2 focusable panes" 2
+  (* Item 7: Zoomed Work > Goals 2 sections (Linked Tasks & Verifier Runs) + Enter drill *)
+  let m_gd, _ = Update_nav.jump_to_goal ~zoomed:true m_work "g-exec" in
+  Alcotest.(check int) "Item 7: Zoomed Goal has 2 focusable panes" 2
     (Model.focusable_pane_count m_gd);
   let m_gd_down, _ = step m_gd (mk_key Keymap.Input.Down) in
-  Alcotest.(check int) "Item 7: Goal_dive pane 0 Down moves task cursor to 1" 1
+  Alcotest.(check int) "Item 7: Zoomed Goal pane 0 Down moves task cursor to 1" 1
     m_gd_down.work.goal_dive_task_index;
   let m_gd_td, _ = step m_gd_down (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Item 7: Goal_dive pane 0 Enter pushes Task_dive tk-2" true
-    (match Model.active_dive m_gd_td with
-     | Some (Nav.Dive_work (Nav.Task_dive "tk-2")) -> true
-     | _ -> false);
+  Alcotest.(check bool) "Item 7: Zoomed Goal pane 0 Enter jumps to Work > Tasks zoomed on tk-2" true
+    (Option.is_none (Model.active_dive m_gd_td)
+     && Nav.equal_workspace m_gd_td.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_gd_td.work.active_tab Nav.Work_tasks
+     && m_gd_td.nav.zoomed
+     &&
+     match Work_store.selected_task m_gd_td.work with
+     | Some tk -> String.equal tk.id "tk-2"
+     | None -> false);
   let m_gd_tab, _ = step m_gd (mk_key Keymap.Input.Tab) in
-  Alcotest.(check int) "Item 7: Goal_dive Tab focuses pane 1 (Verifier Runs)" 1
+  Alcotest.(check int) "Item 7: Zoomed Goal Tab focuses pane 1 (Verifier Runs)" 1
     m_gd_tab.nav.pane_index;
   let m_gd_vdown, _ = step m_gd_tab (mk_key Keymap.Input.Down) in
-  Alcotest.(check int) "Item 7: Goal_dive pane 1 Down selects 2nd verifier run" 1
+  Alcotest.(check int) "Item 7: Zoomed Goal pane 1 Down selects 2nd verifier run" 1
     m_gd_vdown.work.goal_dive_verif_index;
   let m_gd_vd, _ = step m_gd_vdown (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Item 7: Goal_dive pane 1 Enter pushes Verification_dive ver-2"
+  Alcotest.(check bool) "Item 7: Zoomed Goal pane 1 Enter pushes Verification_dive ver-2"
     true
     (match Model.active_dive m_gd_vd with
      | Some (Nav.Dive_work (Nav.Verification_dive "ver-2")) -> true
      | _ -> false);
   let m_gd_back, _ = step m_gd_vd (mk_key Keymap.Input.Escape) in
-  Alcotest.(check int) "Item 4+7: Esc from nested Verification_dive restores Goal_dive pane 1"
-    1 m_gd_back.nav.pane_index;
+  Alcotest.(check bool) "Item 4+7: Esc from nested Verification_dive restores zoomed Goal pane 1"
+    true (m_gd_back.nav.zoomed && m_gd_back.nav.pane_index = 1);
 
   (* === 8. Harness_overrule auto-seed + missing-hash block + Schedule_form prefill === *)
   let hash64 =
     "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
   in
   let m_gd_nohh_h, _ = step m_gd (char_k "h") in
-  Alcotest.(check bool) "Item 8: Goal_dive [h] without harness verdict warns, no empty modal"
+  Alcotest.(check bool) "Item 8: Zoomed Goal [h] without harness verdict warns, no empty modal"
     true
     (Option.is_none m_gd_nohh_h.nav.overlay && Option.is_some m_gd_nohh_h.toast);
   let hh_linked : Wire_work.harness_health =
@@ -15479,7 +15484,7 @@ let test_ux_sweep_12_fixes () =
     (Option.is_none m_vd_done_x.nav.overlay && List.length (Cmd.flatten cmds_vdx) = 0);
   (* 9b. Goal 'c' on Paused / Completed emits 0 POSTs *)
   let m_gd_paused, _ =
-    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-paused"))
+    Update_nav.jump_to_goal ~zoomed:true m_work "g-paused"
   in
   let m_gp_c, cmds_gpc = step m_gd_paused (char_k "c") in
   Alcotest.(check bool) "Item 9: 'c' on Paused goal blocked locally (0 POSTs)" true
@@ -15715,12 +15720,12 @@ let test_ux_sweep_12_fixes () =
         work = Work_store.apply_harness_health ~observed_at:t0 hh_two m_work.work;
       }
     in
-    let m1, _ = Update_nav.push_dive m0 (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    let m1, _ = Update_nav.jump_to_goal ~zoomed:true m0 "g-exec" in
     fst (step m1 (mk_key Keymap.Input.Down))
   in
   let m_gd_two_h, _ = step m_gd_two (char_k "h") in
   Alcotest.(check string)
-    "Item 8 (Finding #8): Goal_dive [h] on selected tk-2 seeds tk-2's hash (not tk-1)"
+    "Item 8 (Finding #8): Zoomed Goal [h] on selected tk-2 seeds tk-2's hash (not tk-1)"
     hash_tk2
     (match m_gd_two_h.nav.overlay with
      | Some (Nav.Inline_action (Nav.Harness_overrule hash)) -> hash
@@ -15734,21 +15739,21 @@ let test_ux_sweep_12_fixes () =
            (fun (f : Model.modal_form_field) -> f.key)
            (List.nth_opt md.fields md.active_field)
      | None -> None);
-  (* 9g. Finding #7: Goal_dive Raw JSON scrolls json_scroll_offset on wide & <88 cols *)
+  (* 9g. Finding #7: Zoomed Goal Raw JSON scrolls json_scroll_offset on wide & <88 cols *)
   let m_gd_json =
-    let m1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    let m1, _ = Update_nav.jump_to_goal ~zoomed:true m_work "g-exec" in
     {
       m1 with
       viewport = { Model.cols = 140; rows = 16 };
       infra = { m1.infra with show_raw_json = true };
     }
   in
-  Alcotest.(check int) "Item 7 (Finding #7): Goal_dive wide + Raw JSON has 3 panes" 3
+  Alcotest.(check int) "Item 7 (Finding #7): Zoomed Goal wide + Raw JSON has 3 panes" 3
     (Model.focusable_pane_count m_gd_json);
   let m_gd_j2 = { m_gd_json with nav = { m_gd_json.nav with pane_index = 2 } } in
   let m_gd_j2_dn, _ = step m_gd_j2 (mk_key Keymap.Input.Down) in
   Alcotest.(check bool)
-    "Item 7 (Finding #7): Goal_dive pane 2 Down scrolls json_scroll_offset without moving task cursor"
+    "Item 7 (Finding #7): Zoomed Goal pane 2 Down scrolls json_scroll_offset without moving task cursor"
     true
     (m_gd_j2_dn.nav.json_scroll_offset > 0
      && m_gd_j2_dn.work.goal_dive_task_index = 0);
@@ -15762,15 +15767,15 @@ let test_ux_sweep_12_fixes () =
   in
   let m_gd_nj_dn, _ = step m_gd_narrow_json (mk_key Keymap.Input.Down) in
   Alcotest.(check bool)
-    "Item 7 (Finding #7): Goal_dive <88 cols Raw JSON scrolls JSON and leaves task cursor at 0"
+    "Item 7 (Finding #7): Zoomed Goal <88 cols Raw JSON scrolls JSON and leaves task cursor at 0"
     true
     (Model.focusable_pane_count m_gd_narrow_json = 1
      && m_gd_nj_dn.nav.json_scroll_offset > 0
      && m_gd_nj_dn.work.goal_dive_task_index = 0);
 
-  (* === 10. Task_dive independent Description & Verification scroll + Enter === *)
-  let m_td1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Task_dive "tk-1")) in
-  Alcotest.(check int) "Item 10: Task_dive with linked verification has 2 panes" 2
+  (* === 10. Zoomed Task independent Description & Verification scroll + Enter === *)
+  let m_td1, _ = Update_nav.jump_to_task ~zoomed:true m_work "tk-1" in
+  Alcotest.(check int) "Item 10: Zoomed Task with linked verification has 2 panes" 2
     (Model.focusable_pane_count m_td1);
   let desc_max, _ = Update_nav.task_dive_scroll_bounds m_td1 tk1 in
   Alcotest.(check bool) "Item 10: long Description yields positive desc_max" true
@@ -15781,10 +15786,10 @@ let test_ux_sweep_12_fixes () =
     (m_td1_dn.work.task_dive_desc_scroll > 0
      && m_td1_dn.work.task_dive_verif_scroll = 0);
   let m_td1_p1, _ = step m_td1_dn (mk_key Keymap.Input.Tab) in
-  Alcotest.(check int) "Item 10: Tab focuses Task_dive pane 1 (Verification)" 1
+  Alcotest.(check int) "Item 10: Tab focuses Zoomed Task pane 1 (Verification)" 1
     m_td1_p1.nav.pane_index;
   let m_td1_enter, _ = step m_td1_p1 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Item 10: Enter on Task_dive pane 1 pushes Verification_dive"
+  Alcotest.(check bool) "Item 10: Enter on Zoomed Task pane 1 pushes Verification_dive"
     true
     (match Model.active_dive m_td1_enter with
      | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
@@ -15968,16 +15973,18 @@ let test_ux_sweep_12_fixes () =
      && not (has_cmd is_thread_get cmds_boundary_up));
 
   (* Finding #4: Esc consumes quit arm & clears arm toast without popping active dive *)
-  let m_dive_arm0, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+  let m_dive_arm0, _ =
+    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Verification_dive "ver-1"))
+  in
   let m_dive_arm1, _ = step_at ~now:t0 m_dive_arm0 (char_k ~ctrl:true "q") in
   let m_dive_esc, _ = step_at ~now:t0 m_dive_arm1 (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool)
-    "Finding #4: Esc disarms Ctrl+Q and clears arm toast without popping Goal_dive"
+    "Finding #4: Esc disarms Ctrl+Q and clears arm toast without popping Verification_dive"
     true
     (Option.is_none m_dive_esc.quit_armed_at
      && Option.is_none m_dive_esc.toast
      && match Model.active_dive m_dive_esc with
-        | Some (Nav.Dive_work (Nav.Goal_dive "g-exec")) -> true
+        | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
         | _ -> false);
 
   (* Finding #5: advance_past_in_flight ~query honors Work_inbox filter & Ask skip advances *)
@@ -15987,7 +15994,7 @@ let test_ux_sweep_12_fixes () =
     true
     (Option.is_some (Model.fast_approval_strip_item m_skip_next));
 
-  (* Finding #9: Task_dive pane 1 PgDn + description=None single-pane Verification *)
+  (* Finding #9: Zoomed Task pane 1 PgDn + description=None single-pane Verification *)
   let many_reqs = List.init 30 (fun i -> Printf.sprintf "required-artifact-%02d" i) in
   let v1_big = { v1 with required_artifacts = many_reqs } in
   let tk_nodesc : Wire_work.task =
@@ -16003,20 +16010,18 @@ let test_ux_sweep_12_fixes () =
     in
     { m_work with work }
   in
-  let m_td_v2, _ = Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-1")) in
+  let m_td_v2, _ = Update_nav.jump_to_task ~zoomed:true m_td_big "tk-1" in
   let m_td_v2_p1, _ = step m_td_v2 (mk_key Keymap.Input.Tab) in
   let m_td_v2_pgdn, _ = step m_td_v2_p1 (mk_key Keymap.Input.Page_down) in
   Alcotest.(check bool)
-    "Finding #9: Task_dive pane 1 PgDn increments task_dive_verif_scroll"
+    "Finding #9: Zoomed Task pane 1 PgDn increments task_dive_verif_scroll"
     true
     (m_td_v2_pgdn.work.task_dive_verif_scroll > 0);
-  let m_td_nd, _ =
-    Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-nodesc"))
-  in
+  let m_td_nd, _ = Update_nav.jump_to_task ~zoomed:true m_td_big "tk-nodesc" in
   let m_td_nd_dn, _ = step m_td_nd (mk_key Keymap.Input.Page_down) in
   let m_td_nd_enter, _ = step m_td_nd (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
-    "Finding #9: Task_dive description=None + v_opt=Some has 1 pane, scrolls verif & Enter dives"
+    "Finding #9: Zoomed Task description=None + v_opt=Some has 1 pane, scrolls verif & Enter dives"
     true
     (Model.focusable_pane_count m_td_nd = 1
      && m_td_nd_dn.work.task_dive_verif_scroll > 0
@@ -16025,11 +16030,11 @@ let test_ux_sweep_12_fixes () =
         | _ -> false);
 
   (* Round-2 Verifier Fixes (#496 / #497 / #498):
-     1. Space Raw JSON clamp at 80x24 from pane_index = 1 in Goal_dive & 2-pane Task_dive
+     1. Space Raw JSON clamp at 80x24 from pane_index = 1 in zoomed Goal & 2-pane zoomed Task
      2. Filtered Work > Inbox Gate_reject advance_past_in_flight
      3. Expired quit_armed_at (>2.5s) does NOT swallow Esc *)
   let m_gd_80 =
-    let m1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    let m1, _ = Update_nav.jump_to_goal ~zoomed:true m_work "g-exec" in
     {
       m1 with
       viewport = { Model.cols = 80; rows = 24 };
@@ -16042,17 +16047,16 @@ let test_ux_sweep_12_fixes () =
   let m_gd_80_dn, _ = step m_gd_80_sp (mk_key Keymap.Input.Down) in
   let m_gd_80_ent, _ = step m_gd_80_sp (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
-    "Round-2 #497 P1: Goal_dive 80x24 Tab -> Space clamps pane_index=0, leaves hidden verif untouched & Enter stays in Goal_dive"
+    "Round-2 #497 P1: Zoomed Goal 80x24 Tab -> Space clamps pane_index=0, leaves hidden verif untouched & Enter stays on Goal"
     true
     (m_gd_80_p1.nav.pane_index = 1
      && m_gd_80_sp.infra.show_raw_json
      && m_gd_80_sp.nav.pane_index = 0
      && m_gd_80_dn.work.goal_dive_verif_index = 0
-     && match Model.active_dive m_gd_80_ent with
-        | Some (Nav.Dive_work (Nav.Goal_dive "g-exec")) -> true
-        | _ -> false);
+     && Option.is_none (Model.active_dive m_gd_80_ent)
+     && m_gd_80_ent.nav.zoomed);
   let m_td_80 =
-    let m1, _ = Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-1")) in
+    let m1, _ = Update_nav.jump_to_task ~zoomed:true m_td_big "tk-1" in
     {
       m1 with
       viewport = { Model.cols = 80; rows = 24 };
@@ -16065,15 +16069,14 @@ let test_ux_sweep_12_fixes () =
   let m_td_80_dn, _ = step m_td_80_sp (mk_key Keymap.Input.Down) in
   let m_td_80_ent, _ = step m_td_80_sp (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
-    "Round-2 #497 P1: 2-pane Task_dive 80x24 Tab -> Space clamps pane_index=0 & Enter does not dive hidden Verification"
+    "Round-2 #497 P1: 2-pane zoomed Task 80x24 Tab -> Space clamps pane_index=0 & Enter does not dive hidden Verification"
     true
     (m_td_80_p1.nav.pane_index = 1
      && m_td_80_sp.infra.show_raw_json
      && m_td_80_sp.nav.pane_index = 0
      && m_td_80_dn.work.task_dive_verif_scroll = 0
-     && match Model.active_dive m_td_80_ent with
-        | Some (Nav.Dive_work (Nav.Task_dive "tk-1")) -> true
-        | _ -> false);
+     && Option.is_none (Model.active_dive m_td_80_ent)
+     && m_td_80_ent.nav.zoomed);
 
   (* Round-2 #496 P2: Filtered Work > Inbox Gate_reject submit advances within filtered list *)
   let g_beta1 : Wire_work.gate_pending =
@@ -16118,7 +16121,7 @@ let test_ux_sweep_12_fixes () =
   let t_expired = Clock.Mono.of_ns 15_000_000_000L in
   let m_dive_exp_esc, _ = step_at ~now:t_expired m_dive_arm1 (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool)
-    "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (pops Goal_dive)"
+    "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (pops Verification_dive)"
     true
     (Option.is_none m_dive_exp_esc.quit_armed_at
      && Option.is_none (Model.active_dive m_dive_exp_esc));
@@ -20753,7 +20756,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
         {
           base.nav with
           workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-keep") ];
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-keep") ];
         };
     }
   in
@@ -20764,13 +20767,13 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   Alcotest.(check int) "#12: Sidebar Down emits 0 premature fetches" 0
     (List.length cmds_sb_dn);
   let m_sb_esc, _ = step_k m_sb_dn (key Keymap.Input.Escape) in
-  Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Goal_dive"
+  Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Verification_dive"
     true
     (match Model.active_dive m_sb_esc with
-    | Some (Nav.Dive_work (Nav.Goal_dive "g-keep")) -> true
+    | Some (Nav.Dive_work (Nav.Verification_dive "ver-keep")) -> true
     | _ -> false);
 
-  (* #14a: Goal_dive Measure/Procedure scrolls via J/K *)
+  (* #14a: Zoomed Goal Measure/Procedure scrolls via J/K *)
   let long_goal =
     let base_g = sample_goal ~id:"g-long" ~phase:Wire_work.Executing () in
     let long_txt =
@@ -20781,26 +20784,23 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   in
   let m_gd =
     let base = Model.initial ~cols:140 ~rows:30 () in
-    {
-      base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-long") ];
-        };
-      work =
-        Work_store.apply_planning ~observed_at:t0
-          { goals = [ long_goal ]; tasks = [] }
-          base.work;
-    }
+    let m_seeded =
+      {
+        base with
+        work =
+          Work_store.apply_planning ~observed_at:t0
+            { goals = [ long_goal ]; tasks = [] }
+            base.work;
+      }
+    in
+    fst (Update_nav.jump_to_goal ~zoomed:true m_seeded "g-long")
   in
   let m_gd_j, _ = step_k m_gd (char_key "J") in
-  Alcotest.(check bool) "#14a: [J] in Goal_dive scrolls Measure/Procedure down"
-    true (m_gd_j.nav.dive_scroll_offset > 0);
+  Alcotest.(check bool) "#14a: [J] in zoomed Goal scrolls Measure/Procedure down"
+    true (m_gd_j.work.detail_scroll_offset > 0);
   let m_gd_k, _ = step_k m_gd_j (char_key "K") in
-  Alcotest.(check int) "#14a: [K] in Goal_dive scrolls Measure/Procedure back to 0"
-    0 m_gd_k.nav.dive_scroll_offset;
+  Alcotest.(check int) "#14a: [K] in zoomed Goal scrolls Measure/Procedure back to 0"
+    0 m_gd_k.work.detail_scroll_offset;
 
   (* #14b: Empty Work > Inbox scrolls Recent Decisions Audit (24h) *)
   let decisions =
@@ -26303,7 +26303,7 @@ let () =
                 true (Option.is_some m_j_sb.ask_modal);
               let m_j_dive, _ =
                 Update_nav.push_dive m_jumped
-                  (Nav.Dive_work (Nav.Goal_dive "g-1"))
+                  (Nav.Dive_work (Nav.Verification_dive "ver-1"))
               in
               let m_j_dive_pop, _ =
                 step_k m_j_dive (key Keymap.Input.Escape)
@@ -28404,5 +28404,187 @@ let () =
               let m_ret, _ = step_k m_jumped (key Keymap.Input.Escape) in
               Alcotest.(check bool) "Esc returns to Pulse" true
                 (Nav.equal_workspace m_ret.nav.workspace Nav.Pulse));
+          Alcotest.test_case
+            "Wave 3 Layer 2: Work Goals/Tasks zoom replaces Goal_dive/Task_dive (Get_verifications, Space JSON, [e] zoomed guard, Esc cascade)"
+            `Quick
+            (fun () ->
+              let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+              let g1 = sample_goal ~id:"w3-g1" ~phase:Wire_work.Executing () in
+              let tk1 : Wire_work.task =
+                {
+                  id = "w3-tk1";
+                  title = "W3 Task 1";
+                  description = Some "Task description line";
+                  priority = 1;
+                  status =
+                    Wire_work.InProgress
+                      { assignee = "alpha"; started_at = "2026-11-25T10:00:00Z" };
+                  goal_link = Wire_work.Linked "w3-g1";
+                  created_at = Some "2026-11-25T09:00:00Z";
+                  updated_at = Some "2026-11-25T10:00:00Z";
+                }
+              in
+              let g2 : Wire_work.goal =
+                { g1 with id = "w3-g2"; title = "Wave 3 Second Goal" }
+              in
+              let tk2 : Wire_work.task =
+                { tk1 with id = "w3-t2"; title = "Wave 3 Task 2"; goal_link = Wire_work.Linked "w3-g2" }
+              in
+              let v1 : Wire_work.verification_request =
+                {
+                  request_id = "w3-v1";
+                  task_id = "w3-t1";
+                  task_title = "Wave 3 Task";
+                  submitted_by = "alpha";
+                  created_at_unix = Some 1700000000.0;
+                  completion_contract = [];
+                  required_artifacts = [];
+                  submitted_evidence = [];
+                  evidence_projection_error = None;
+                  review_observation = None;
+                }
+              in
+              let m0 =
+                let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work; pane_index = 0 };
+                  work =
+                    base.work
+                    |> Work_store.set_tab Nav.Work_tasks
+                    |> Work_store.apply_planning ~observed_at:t0
+                         { goals = [ g1; g2 ]; tasks = [ tk1; tk2 ] }
+                    |> Work_store.apply_verifications ~observed_at:t0 [ v1 ];
+                }
+              in
+              (* 1. Work_tasks fetches Get_verifications alongside Get_planning *)
+              let task_fetches =
+                View_fetches.fetches_for_current_view ~force:true m0
+                |> Cmd.flatten
+              in
+              Alcotest.(check bool)
+                "Work_tasks fetches Get_verifications for Task detail checklist/diff"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_verifications _; _ } -> true
+                     | _ -> false)
+                   task_fetches);
+              (* 2. Work_tasks pane 0 Space cycles filter, pane 1 Space toggles inline JSON & 1st Esc clears *)
+              let m_t_sp0, _ = step_k m0 (char_key " ") in
+              Alcotest.(check bool) "Work_tasks pane 0 Space cycles task_status_filter"
+                true
+                (not
+                   (Work_store.equal_task_status_filter
+                      m_t_sp0.work.task_status_filter m0.work.task_status_filter));
+              let m_t_p1 = { m0 with nav = { m0.nav with pane_index = 1 } } in
+              let m_t_json, _ = step_k m_t_p1 (char_key " ") in
+              Alcotest.(check bool) "Work_tasks pane 1 Space toggles show_raw_json"
+                true m_t_json.infra.show_raw_json;
+              let m_t_esc, _ = step_k m_t_json (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Work_tasks Esc clears show_raw_json first"
+                false m_t_esc.infra.show_raw_json;
+              (* 3. Work_pipeline zoomed pane 1 (Linked Verifs) [e] opens Goal edit modal (never blocked by unzoomed verif guard) *)
+              let m_gz, _ = Update_nav.jump_to_goal ~zoomed:true m0 "w3-g1" in
+              let m_gz_p1, _ = step_k m_gz (key Keymap.Input.Tab) in
+              Alcotest.(check int) "Zoomed Goal Tab moves to pane 1 (Verifier Runs)"
+                1 m_gz_p1.nav.pane_index;
+              let m_gz_e, _ = step_k m_gz_p1 (char_key "e") in
+              Alcotest.(check bool)
+                "Zoomed Goal pane 1 [e] opens Goal_upsert_form modal" true
+                (Option.equal Nav.equal_overlay m_gz_e.nav.overlay
+                   (Some (Nav.Inline_action (Nav.Goal_upsert_form (Some "w3-g1")))));
+              (* 4. Zoomed Goal Esc cascade: Space JSON -> 1st Esc clears JSON -> 2nd Esc unzooms *)
+              let m_gz_json, _ = step_k m_gz (char_key " ") in
+              Alcotest.(check bool) "Zoomed Goal Space enables show_raw_json" true
+                m_gz_json.infra.show_raw_json;
+              let m_gz_e1, _ = step_k m_gz_json (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Zoomed Goal 1st Esc clears show_raw_json while staying zoomed"
+                true ((not m_gz_e1.infra.show_raw_json) && m_gz_e1.nav.zoomed);
+              let m_gz_e2, _ = step_k m_gz_e1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Zoomed Goal 2nd Esc unzooms to Work > Goals"
+                false m_gz_e2.nav.zoomed;
+              (* 5. Zoomed Goal #2 -> Linked Task #2 -> Esc unzooms -> Esc restores Goal #2 (not Goal #1) *)
+              let m_g2z, _ = Update_nav.jump_to_goal ~zoomed:true m0 "w3-g2" in
+              (* Pane 0 of a zoomed goal is Linked Tasks; Enter there drills. *)
+              let m_g2_tk, _ = step_k m_g2z (key Keymap.Input.Enter) in
+              Alcotest.(check bool)
+                "Drill from Zoomed Goal #2 opens Tasks on linked Task #2"
+                true
+                (Nav.equal_work_tab m_g2_tk.work.active_tab Nav.Work_tasks
+                 && Option.equal String.equal
+                      (Option.map (fun (t : Wire_work.task) -> t.id)
+                         (Work_store.selected_task m_g2_tk.work))
+                      (Some "w3-t2"));
+              let m_g2_back1, _ = step_k m_g2_tk (key Keymap.Input.Escape) in
+              let m_g2_back2, _ = step_k m_g2_back1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc from Task returns to Zoomed Goal #2 with exact goal ID preserved"
+                true
+                (Nav.equal_work_tab m_g2_back2.work.active_tab Nav.Work_pipeline
+                 && m_g2_back2.nav.zoomed
+                 && Option.equal String.equal
+                      (Option.map (fun (g : Wire_work.goal) -> g.id)
+                         (Work_store.selected_goal m_g2_back2.work))
+                      (Some "w3-g2"));
+              (* #54821 review: an unlisted goal or task ID never zooms whatever
+                 stays selected. *)
+              let m_missing, missing_cmds = Update_nav.jump_to_goal ~zoomed:true m0 "w3-gone" in
+              Alcotest.(check bool)
+                "A jump to an unlisted goal stays put and pushes no return frame"
+                true
+                (Nav.equal_workspace m_missing.nav.workspace m0.nav.workspace
+                 && Nav.equal_work_tab m_missing.work.active_tab Nav.Work_tasks
+                 && (not m_missing.nav.zoomed)
+                 && List.is_empty m_missing.nav.workspace_return_stack
+                 && List.is_empty missing_cmds
+                 && Option.is_some m_missing.toast);
+              let m_task_missing, _ = Update_nav.jump_to_task ~zoomed:true m0 "w3-gone" in
+              Alcotest.(check bool) "A jump to an unlisted task stays put" true
+                ((not m_task_missing.nav.zoomed)
+                 && List.is_empty m_task_missing.nav.workspace_return_stack);
+              (* A return frame whose goal is gone restores the tab, unzoomed. *)
+              let gone =
+                {
+                  m_g2_tk with
+                  work =
+                    Work_store.apply_planning ~observed_at:t0
+                      { goals = [ g1 ]; tasks = [ tk1; tk2 ] } m_g2_tk.work;
+                }
+              in
+              let gone_back1, _ = step_k gone (key Keymap.Input.Escape) in
+              let gone_back2, _ = step_k gone_back1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc to a goal that is no longer listed does not zoom another goal"
+                true
+                (Nav.equal_work_tab gone_back2.work.active_tab Nav.Work_pipeline
+                 && not gone_back2.nav.zoomed);
+              (* #54821 review: one pane rect per focusable pane when the zoomed
+                 goal has a single pane (narrow raw JSON). *)
+              let narrow =
+                let base = Model.initial ~cols:80 ~rows:36 ~lang:Say.Lang_en () in
+                { m0 with breakpoint = base.breakpoint; viewport = base.viewport }
+              in
+              let with_json (m : Model.t) =
+                { m with infra = { m.infra with show_raw_json = true } }
+              in
+              let zoomed_views =
+                [
+                  ("goal", fst (Update_nav.jump_to_goal ~zoomed:true m0 "w3-g1"));
+                  ("goal, narrow JSON",
+                    with_json (fst (Update_nav.jump_to_goal ~zoomed:true narrow "w3-g1")));
+                  ("task without verifier runs",
+                    fst (Update_nav.jump_to_task ~zoomed:true m0 "w3-t2"));
+                  ("task, narrow JSON",
+                    with_json (fst (Update_nav.jump_to_task ~zoomed:true narrow "w3-t2")));
+                ]
+              in
+              List.iter
+                (fun (label, (m : Model.t)) ->
+                  Alcotest.(check int)
+                    ("pane_rects matches focusable_pane_count: " ^ label)
+                    (Model.focusable_pane_count m)
+                    (List.length (Model.pane_rects m)))
+                zoomed_views);
         ] );
     ]

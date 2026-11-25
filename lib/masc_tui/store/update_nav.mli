@@ -148,6 +148,10 @@ val jump_to_knowledge_thread :
   ?zoomed:bool -> ?return_from:Model.t -> Model.t -> string -> Model.t * Cmd.t list
 val jump_to_knowledge_wiki :
   ?zoomed:bool -> ?return_from:Model.t -> Model.t -> string -> Model.t * Cmd.t list
+val jump_to_goal :
+  ?zoomed:bool -> ?return_from:Model.t -> Model.t -> string -> Model.t * Cmd.t list
+val jump_to_task :
+  ?zoomed:bool -> ?return_from:Model.t -> Model.t -> string -> Model.t * Cmd.t list
 val knowledge_detail_max_scroll : Model.t -> int
 val pop_workspace_return : Model.t -> (Model.t * Cmd.t list) option
 val navigate_menu_target :

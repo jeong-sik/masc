@@ -3973,9 +3973,11 @@ and confirm_palette ~now (m : Model.t) =
               let fleet = Fleet_store.set_filter company m_closed.fleet in
               Update_nav.switch_workspace { m_closed with fleet } Nav.Keepers
           | Update_nav.Pal_dive_goal id ->
-              Update_nav.push_dive m_closed (Nav.Dive_work (Nav.Goal_dive id))
+              Update_nav.jump_to_goal ~zoomed:true ~return_from:m_closed m_closed
+                id
           | Update_nav.Pal_dive_task id ->
-              Update_nav.push_dive m_closed (Nav.Dive_work (Nav.Task_dive id))
+              Update_nav.jump_to_task ~zoomed:true ~return_from:m_closed m_closed
+                id
           | Update_nav.Pal_dive_thread id ->
               Update_nav.jump_to_knowledge_thread ~return_from:m_closed m_closed
                 id
@@ -5148,14 +5150,20 @@ and execute_action ~now (m : Model.t) action =
                       else if
                         m.infra.show_raw_json
                         && Model.detail_visible m
-                        && ((Nav.equal_workspace m.nav.workspace Nav.Runtime
-                             && Nav.equal_runtime_tab m.runtime.active_tab
-                                  Nav.Runtime_failover_lanes)
+                        && ((Nav.equal_workspace m.nav.workspace Nav.Work
+                             && (Nav.equal_work_tab m.work.active_tab
+                                   Nav.Work_pipeline
+                                 || Nav.equal_work_tab m.work.active_tab
+                                      Nav.Work_tasks))
+                            || (Nav.equal_workspace m.nav.workspace Nav.Runtime
+                                && Nav.equal_runtime_tab m.runtime.active_tab
+                                     Nav.Runtime_failover_lanes)
                             || (Nav.equal_workspace m.nav.workspace Nav.Infra
                                 && Nav.equal_infra_tab m.infra.active_tab
                                      Nav.Infra_sandboxes))
                       then
-                        ( {
+                        let next =
+                          {
                             m with
                             infra =
                               {
@@ -5167,7 +5175,9 @@ and execute_action ~now (m : Model.t) action =
                               { m.runtime with detail_scroll_offset = 0 };
                             nav = { m.nav with json_scroll_offset = 0 };
                           }
-                        , [] )
+                          |> Update_nav.clamp_for_pane
+                        in
+                        (next, [])
                       else if
                         Knowledge_store.is_memory_diff_pinned m.knowledge
                         && Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -5662,31 +5672,64 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Work -> (
                   match m.work.active_tab with
                   | Nav.Work_tasks ->
-                      let next =
-                        {
-                          m with
-                          work = Work_store.cycle_task_status_filter m.work;
-                        }
-                      in
-                      (next, [])
+                      if
+                        Model.is_work_task_zoomed m
+                        || Model.detail_pane_focused ~detail_index:1 m
+                      then
+                        let infra = Infra_store.toggle_raw_json m.infra in
+                        let next =
+                          {
+                            m with
+                            infra;
+                            nav = { m.nav with json_scroll_offset = 0 };
+                          }
+                          |> Update_nav.clamp_for_pane
+                        in
+                        (next, [])
+                      else
+                        let next =
+                          {
+                            m with
+                            work = Work_store.cycle_task_status_filter m.work;
+                          }
+                        in
+                        (next, [])
                   | Nav.Work_pipeline ->
-                      let work = Work_store.cycle_goal_phase_filter m.work in
-                      let lbl =
-                        match work.goal_phase_filter with
-                        | Work_store.Goal_filter_all ->
-                            Say.make ~ko:"목표 필터: 전체" ~en:"Goals filter: All"
-                        | Work_store.Goal_filter_active ->
-                            Say.make ~ko:"목표 필터: 진행 중" ~en:"Goals filter: Active"
-                        | Work_store.Goal_filter_verifying ->
-                            Say.make ~ko:"목표 필터: 검증/확인" ~en:"Goals filter: Verifying"
-                        | Work_store.Goal_filter_held ->
-                            Say.make ~ko:"목표 필터: 보류/차단" ~en:"Goals filter: Held"
-                        | Work_store.Goal_filter_closed ->
-                            Say.make ~ko:"목표 필터: 완료/중단" ~en:"Goals filter: Closed"
+                      let detail_idx =
+                        if Model.work_pipeline_has_linked_card m then 2 else 1
                       in
-                      ( Model.with_toast ~now ~level:Model.Toast_info lbl
-                          { m with work }
-                      , [] )
+                      if
+                        Model.is_work_goal_zoomed m
+                        || Model.detail_pane_focused ~detail_index:detail_idx m
+                      then
+                        let infra = Infra_store.toggle_raw_json m.infra in
+                        let next =
+                          {
+                            m with
+                            infra;
+                            nav = { m.nav with json_scroll_offset = 0 };
+                          }
+                          |> Update_nav.clamp_for_pane
+                        in
+                        (next, [])
+                      else
+                        let work = Work_store.cycle_goal_phase_filter m.work in
+                        let lbl =
+                          match work.goal_phase_filter with
+                          | Work_store.Goal_filter_all ->
+                              Say.make ~ko:"목표 필터: 전체" ~en:"Goals filter: All"
+                          | Work_store.Goal_filter_active ->
+                              Say.make ~ko:"목표 필터: 진행 중" ~en:"Goals filter: Active"
+                          | Work_store.Goal_filter_verifying ->
+                              Say.make ~ko:"목표 필터: 검증/확인" ~en:"Goals filter: Verifying"
+                          | Work_store.Goal_filter_held ->
+                              Say.make ~ko:"목표 필터: 보류/차단" ~en:"Goals filter: Held"
+                          | Work_store.Goal_filter_closed ->
+                              Say.make ~ko:"목표 필터: 완료/중단" ~en:"Goals filter: Closed"
+                        in
+                        ( Model.with_toast ~now ~level:Model.Toast_info lbl
+                            { m with work }
+                        , [] )
                   | Nav.Work_schedules
                   | Nav.Work_inbox
                   | Nav.Work_candle_scorecard
@@ -6247,33 +6290,15 @@ and execute_action ~now (m : Model.t) action =
             | Some txt -> Some txt
             | None -> (
             match Model.active_dive m with
-            | Some (Nav.Dive_work wd) -> (
-                match wd with
-                | Nav.Goal_dive id -> (
-                    match
-                      List.find_opt
-                        (fun (g : Wire_work.goal) -> String.equal g.id id)
-                        (Work_store.goals m.work)
-                    with
-                    | Some g -> Some g.title
-                    | None -> Some id)
-                | Nav.Task_dive id -> (
-                    match
-                      List.find_opt
-                        (fun (tk : Wire_work.task) -> String.equal tk.id id)
-                        (Work_store.tasks m.work)
-                    with
-                    | Some tk -> Some tk.title
-                    | None -> Some id)
-                | Nav.Verification_dive id -> (
-                    match
-                      List.find_opt
-                        (fun (v : Wire_work.verification_request) ->
-                          String.equal v.request_id id)
-                        (Work_store.verifications_list m.work)
-                    with
-                    | Some v -> Some v.task_title
-                    | None -> Some id))
+            | Some (Nav.Dive_work (Nav.Verification_dive id)) -> (
+                match
+                  List.find_opt
+                    (fun (v : Wire_work.verification_request) ->
+                      String.equal v.request_id id)
+                    (Work_store.verifications_list m.work)
+                with
+                | Some v -> Some v.task_title
+                | None -> Some id)
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) -> Some run_id
@@ -6650,28 +6675,6 @@ and execute_action ~now (m : Model.t) action =
             | None -> None
           in
           match Model.active_dive m with
-          | Some (Nav.Dive_work (Nav.Goal_dive id)) ->
-              let url_opt =
-                Option.bind
-                  (List.find_opt
-                     (fun (g : Wire_work.goal) -> String.equal g.id id)
-                     (Work_store.goals m.work))
-                  (fun (g : Wire_work.goal) ->
-                    match extract_first_http_url g.procedure with
-                    | Some u -> Some u
-                    | None -> extract_first_http_url g.measure)
-              in
-              open_url_or_notice url_opt
-          | Some (Nav.Dive_work (Nav.Task_dive id)) ->
-              let url_opt =
-                Option.bind
-                  (List.find_opt
-                     (fun (tk : Wire_work.task) -> String.equal tk.id id)
-                     (Work_store.tasks m.work))
-                  (fun (tk : Wire_work.task) ->
-                    Option.bind tk.description extract_first_http_url)
-              in
-              open_url_or_notice url_opt
           | Some (Nav.Dive_work (Nav.Verification_dive _))
           | Some (Nav.Dive_runtime _) ->
               (m, [])
@@ -6853,15 +6856,29 @@ and execute_action ~now (m : Model.t) action =
                 | None -> m.drafts
               else m.drafts
             in
+            let work =
+              if Nav.equal_workspace m.nav.workspace Nav.Work then
+                match m.work.active_tab with
+                | Nav.Work_pipeline -> Work_store.reset_goal_dive_state m.work
+                | Nav.Work_tasks -> Work_store.reset_task_dive_scroll m.work
+                | Nav.Work_schedules
+                | Nav.Work_inbox
+                | Nav.Work_candle_scorecard
+                | Nav.Work_harness ->
+                    m.work
+              else m.work
+            in
             {
               m with
               drafts;
+              work;
               nav =
                 {
                   m.nav with
                   zoomed = true;
                   pre_zoom_pane_index = Some m.nav.pane_index;
                   pane_index = z_pane;
+                  json_scroll_offset = 0;
                 };
             }
           else
@@ -6878,7 +6895,13 @@ and execute_action ~now (m : Model.t) action =
               {
                 m with
                 knowledge;
-                nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+                nav =
+                  {
+                    m.nav with
+                    zoomed = false;
+                    pre_zoom_pane_index = None;
+                    json_scroll_offset = 0;
+                  };
                 infra = { m.infra with show_raw_json = false };
               }
             in
@@ -7047,7 +7070,8 @@ and execute_action ~now (m : Model.t) action =
                 in
                 (next, View_fetches.fetches_for_current_view next)
             | Nav.Work
-              when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline ->
+              when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
+                   && not (Model.is_work_goal_zoomed m) ->
                 let work = Work_store.cycle_goal_sort_mode m.work in
                 let lbl =
                   match work.goal_sort_mode with
@@ -7070,9 +7094,7 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some
-            (Nav.Dive_work
-              (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
+        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now
               m
         | Some (Nav.Dive_runtime _) -> (m, [])
@@ -7191,15 +7213,12 @@ and execute_action ~now (m : Model.t) action =
                     let nav = { m.nav with dive_scroll_offset = 0 } in
                     let next = { m with nav; work } in
                     (next, View_fetches.fetches_for_current_view next)
-                | Some
-                    ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
-                    | Nav.Dive_runtime _
-                    ) ->
-                    (m, [])
+                | Some (Nav.Dive_runtime _) -> (m, [])
                 | None -> (
                     match m.nav.workspace with
                     | Nav.Work
-                      when Nav.equal_work_tab m.work.active_tab Nav.Work_tasks ->
+                      when Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
+                           && not (Model.is_work_task_zoomed m) ->
                         let work = Work_store.cycle_task_status_filter m.work in
                         ({ m with work }, [])
                     | Nav.Work
@@ -7369,22 +7388,6 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-                match
-                  List.find_opt
-                    (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-                    (Work_store.goals m.work)
-                with
-                | Some g -> Update_nav.request_goal_complete_guarded ~now m g
-                | None -> (m, []))
-            | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
-                match
-                  List.find_opt
-                    (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
-                    (Work_store.tasks m.work)
-                with
-                | Some tk -> open_task_transition_modal ~now m tk
-                | None -> (m, []))
             | Some (Nav.Dive_work (Nav.Verification_dive _) | Nav.Dive_runtime _) ->
                 (m, [])
             | None -> (
@@ -7894,14 +7897,6 @@ and execute_action ~now (m : Model.t) action =
             | Some Update_nav.Identity_github | None -> (m, []))
         | None ->
         match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-            match
-              List.find_opt
-                (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-                (Work_store.goals m.work)
-            with
-            | Some g -> goal_action_on_approve ~now m g
-            | None -> (m, []))
         | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
             match
               List.find_opt
@@ -7911,8 +7906,7 @@ and execute_action ~now (m : Model.t) action =
             with
             | Some v -> Update_nav.approve_verification_request ~now m v
             | None -> (m, []))
-        | Some (Nav.Dive_work (Nav.Task_dive _) | Nav.Dive_runtime _) ->
-            (m, [])
+        | Some (Nav.Dive_runtime _) -> (m, [])
         | None -> (
             match m.nav.workspace with
             | Nav.Work
@@ -8079,16 +8073,6 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-            match
-              List.find_opt
-                (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-                (Work_store.goals m.work)
-            with
-            | Some g -> goal_action_on_stop ~now m g
-            | None -> (m, []))
-        | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
-            Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
         | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
             match
               List.find_opt
@@ -8306,14 +8290,6 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-                match
-                  List.find_opt
-                    (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-                    (Work_store.goals m.work)
-                with
-                | Some g -> open_goal_upsert_modal m ~goal:g ()
-                | None -> (m, []))
             | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
                 let skeleton =
                   match
@@ -8334,8 +8310,7 @@ and execute_action ~now (m : Model.t) action =
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) -> (m, [])
-            | Some (Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)) ->
-                (m, [])
+            | Some (Nav.Dive_work (Nav.Verification_dive _)) -> (m, [])
             | None ->
                 if
                   Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -8701,9 +8676,7 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some
-            (Nav.Dive_work
-              (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
+        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now
               m
         | Some (Nav.Dive_runtime _) -> (m, [])
@@ -9119,14 +9092,7 @@ and execute_action ~now (m : Model.t) action =
       else
         let task_opt =
           match Model.active_dive m with
-          | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
-              List.find_opt
-                (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
-                (Work_store.tasks m.work)
-          | Some
-              ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Verification_dive _)
-              | Nav.Dive_runtime _
-              ) ->
+          | Some (Nav.Dive_work (Nav.Verification_dive _) | Nav.Dive_runtime _) ->
               None
           | None ->
               if

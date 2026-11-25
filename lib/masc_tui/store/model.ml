@@ -29,6 +29,7 @@ type workspace_return_frame = {
   dive_stack : Nav.dive list;
   dive_return_stack : (int * bool * Nav.overlay option) list;
   work_tab : Nav.work_tab;
+  work_return_entity_id : string option;
   knowledge_tab : Nav.knowledge_tab;
   runtime_tab : Nav.runtime_tab;
   infra_tab : Nav.infra_tab;
@@ -906,14 +907,6 @@ let body_rect m =
       ~h:body_h
   else Rect.make ~x:margin ~y:top_h ~w:full_w ~h:body_h
 
-let work_pipeline_has_linked_card m =
-  inner_body_width m >= 96 && inner_body_height m >= 15
-
-let work_pipeline_verifs_visible m =
-  work_pipeline_has_linked_card m
-  && Work_store.filtered_verifications m.work <> []
-  && inner_body_height m >= 18
-
 let can_zoom_current_view m =
   if
     is_too_small_viewport m.viewport
@@ -974,6 +967,29 @@ let can_zoom_current_view m =
             | Nav.Infra_code ->
                 true)
         | Nav.Pulse -> false)
+
+let work_pipeline_has_linked_card m =
+  (not (m.nav.zoomed && can_zoom_current_view m))
+  && inner_body_width m >= 96 && inner_body_height m >= 15
+
+let work_pipeline_verifs_visible m =
+  work_pipeline_has_linked_card m
+  && Work_store.filtered_verifications m.work <> []
+  && inner_body_height m >= 18
+
+let is_work_goal_zoomed m =
+  Option.is_none m.nav.overlay
+  && Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Work
+  && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
+  && m.nav.zoomed && can_zoom_current_view m
+
+let is_work_task_zoomed m =
+  Option.is_none m.nav.overlay
+  && Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Work
+  && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
+  && m.nav.zoomed && can_zoom_current_view m
 
 let has_preserved_ask_return (nav : nav_state) =
   let has_ask_in_dive_returns stack =
@@ -1058,15 +1074,21 @@ let dive_work_json_pane_index m =
   if not m.infra.show_raw_json then None
   else
     match active_dive m with
-    | Some (Nav.Dive_work target) ->
-        if inner_body_width m < 88 then Some 0
-        else (
-          match target with
-          | Nav.Goal_dive _ -> Some 2
-          | Nav.Task_dive task_id ->
-              Some (if task_dive_has_two_main_panes m task_id then 2 else 1)
-          | Nav.Verification_dive _ -> Some 1)
-    | Some (Nav.Dive_runtime _) | None -> None
+    | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+        if inner_body_width m < 88 then Some 0 else Some 1
+    | Some (Nav.Dive_runtime _) -> None
+    | None ->
+        if
+          is_work_goal_zoomed m
+          && Option.is_some (Work_store.selected_goal m.work)
+        then if inner_body_width m < 88 then Some 0 else Some 2
+        else if is_work_task_zoomed m then
+          match Work_store.selected_task m.work with
+          | None -> None
+          | Some tk ->
+              if inner_body_width m < 88 then Some 0
+              else Some (if task_dive_has_two_main_panes m tk.id then 2 else 1)
+        else None
 
 let keeper_preview_has_inner_split m =
   match selected_keeper_name m with
@@ -1138,32 +1160,53 @@ let focusable_pane_count m =
         1
     | None -> (
         match active_dive m with
-        | Some (Nav.Dive_work (Nav.Goal_dive _)) ->
-            if m.infra.show_raw_json then
-              if inner_body_width m >= 88 then 3 else 1
-            else 2
-        | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
-            if m.infra.show_raw_json && inner_body_width m < 88 then 1
-            else
-              let main_panes =
-                if task_dive_has_two_main_panes m task_id then 2 else 1
-              in
-              let json_panes =
-                if m.infra.show_raw_json && inner_body_width m >= 88 then 1
-                else 0
-              in
-              main_panes + json_panes
         | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> 2
         | Some (Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) -> 1
         | None ->
             if m.nav.zoomed && can_zoom_current_view m then
-              if
-                Nav.equal_workspace m.nav.workspace Nav.Keepers
-                && keeper_preview_has_inner_split m
-              then 2
-              else 1
+              match m.nav.workspace with
+              | Nav.Keepers when keeper_preview_has_inner_split m -> 2
+              | Nav.Work -> (
+                  match m.work.active_tab with
+                  | Nav.Work_pipeline -> (
+                      match Work_store.selected_goal m.work with
+                      | None -> 1
+                      | Some _ ->
+                          if m.infra.show_raw_json then
+                            if inner_body_width m >= 88 then 3 else 1
+                          else 2)
+                  | Nav.Work_tasks -> (
+                      match Work_store.selected_task m.work with
+                      | None -> 1
+                      | Some tk ->
+                          if m.infra.show_raw_json && inner_body_width m < 88
+                          then 1
+                          else
+                            let main_panes =
+                              if task_dive_has_two_main_panes m tk.id then 2
+                              else 1
+                            in
+                            let json_panes =
+                              if
+                                m.infra.show_raw_json
+                                && inner_body_width m >= 88
+                              then 1
+                              else 0
+                            in
+                            main_panes + json_panes)
+                  | Nav.Work_schedules
+                  | Nav.Work_inbox
+                  | Nav.Work_candle_scorecard
+                  | Nav.Work_harness ->
+                      1)
+              | Nav.Pulse
+              | Nav.Keepers
+              | Nav.Knowledge
+              | Nav.Runtime
+              | Nav.Infra ->
+                  1
             else
           match m.nav.workspace with
           | Nav.Pulse -> List.length (pulse_panes m)
@@ -1316,6 +1359,16 @@ let pane_rects m =
           then
             let l, r = split_keeper_inner m.fleet.keeper_dive_tab br in
             [ l; r ]
+          else if is_work_goal_zoomed m || is_work_task_zoomed m then
+            if m.infra.show_raw_json && inner_body_width m >= 88 then
+              let l, r = split_h_ratio ~gap:gap_h br 0.58 in
+              if n >= 3 then
+                let lt, lb = split_v_ratio ~gap:0 l 0.5 in
+                [ lt; lb; r ]
+              else [ l; r ]
+            else
+              let t, b = split_v_ratio ~gap:0 br 0.5 in
+              [ t; b ]
           else [ br ]
         else
         match m.nav.workspace with
@@ -1599,30 +1652,16 @@ let active_focus_label m =
         Say.make ~ko:"메뉴" ~en:"MENU"
       else
         match active_dive m with
-        | Some (Nav.Dive_work target) -> (
+        | Some (Nav.Dive_work (Nav.Verification_dive _)) -> (
             match dive_work_json_pane_index m with
             | Some j_idx when m.nav.pane_index = j_idx ->
                 if focusable_pane_count m > 1 then
                   pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
                 else Say.make ~ko:"JSON 트리" ~en:"JSON TREE"
-            | Some _ | None -> (
-                match target with
-                | Nav.Goal_dive _ ->
-                    if m.nav.pane_index = 1 then
-                      pane_prefix ~ko:"검증 실행" ~en:"Verifier Runs"
-                    else pane_prefix ~ko:"연결 작업" ~en:"Linked Tasks"
-                | Nav.Task_dive task_id ->
-                    if task_dive_has_two_main_panes m task_id then
-                      if m.nav.pane_index = 1 then
-                        pane_prefix ~ko:"검증 증거" ~en:"Verification"
-                      else pane_prefix ~ko:"작업 설명" ~en:"Description"
-                    else if focusable_pane_count m > 1 then
-                      pane_prefix ~ko:"작업 상세" ~en:"Task Dive"
-                    else Say.make ~ko:"작업 상세" ~en:"TASK DIVE"
-                | Nav.Verification_dive _ ->
-                    if focusable_pane_count m > 1 then
-                      pane_prefix ~ko:"검증 상세" ~en:"Verification"
-                    else Say.make ~ko:"검증 상세" ~en:"VERIF DIVE"))
+            | Some _ | None ->
+                if focusable_pane_count m > 1 then
+                  pane_prefix ~ko:"검증 상세" ~en:"Verification"
+                else Say.make ~ko:"검증 상세" ~en:"VERIF DIVE")
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
             if m.nav.pane_index = 1 then
               pane_prefix ~ko:(name ^ " · 시계열") ~en:(name ^ " · Series")
@@ -1643,15 +1682,45 @@ let active_focus_label m =
                 let zoomed = m.nav.zoomed && can_zoom_current_view m in
                 match m.work.active_tab with
                 | Nav.Work_pipeline -> (
-                    if zoomed then Say.make ~ko:"확대 · 목표 상세" ~en:"ZOOM · Goal Detail"
+                    if zoomed then
+                      match dive_work_json_pane_index m with
+                      | Some j_idx when m.nav.pane_index = j_idx ->
+                          if focusable_pane_count m > 1 then
+                            pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
+                          else Say.make ~ko:"JSON 트리" ~en:"JSON TREE"
+                      | Some _ | None ->
+                          if focusable_pane_count m > 1 then
+                            if m.nav.pane_index = 1 then
+                              pane_prefix ~ko:"검증 실행" ~en:"Verifier Runs"
+                            else pane_prefix ~ko:"연결 작업" ~en:"Linked Tasks"
+                          else
+                            Say.make ~ko:"확대 · 목표 상세"
+                              ~en:"ZOOM · Goal Detail"
                     else
-                    match m.nav.pane_index with
-                    | 0 -> pane_prefix ~ko:"목표" ~en:"Goals"
-                    | 1 when work_pipeline_has_linked_card m ->
-                        pane_prefix ~ko:"검증" ~en:"Verifs"
-                    | _ -> pane_prefix ~ko:"목표 상세" ~en:"Detail")
+                      match m.nav.pane_index with
+                      | 0 -> pane_prefix ~ko:"목표" ~en:"Goals"
+                      | 1 when work_pipeline_has_linked_card m ->
+                          pane_prefix ~ko:"검증" ~en:"Verifs"
+                      | _ -> pane_prefix ~ko:"목표 상세" ~en:"Detail")
                 | Nav.Work_tasks ->
-                    if zoomed then Say.make ~ko:"확대 · 작업 상세" ~en:"ZOOM · Task Detail"
+                    if zoomed then (
+                      match dive_work_json_pane_index m with
+                      | Some j_idx when m.nav.pane_index = j_idx ->
+                          if focusable_pane_count m > 1 then
+                            pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
+                          else Say.make ~ko:"JSON 트리" ~en:"JSON TREE"
+                      | Some _ | None -> (
+                          match Work_store.selected_task m.work with
+                          | Some tk when task_dive_has_two_main_panes m tk.id ->
+                              if m.nav.pane_index = 1 then
+                                pane_prefix ~ko:"검증 증거" ~en:"Verification"
+                              else pane_prefix ~ko:"작업 설명" ~en:"Description"
+                          | Some _ | None ->
+                              if focusable_pane_count m > 1 then
+                                pane_prefix ~ko:"작업 상세" ~en:"Task Detail"
+                              else
+                                Say.make ~ko:"확대 · 작업 상세"
+                                  ~en:"ZOOM · Task Detail"))
                     else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"작업 상세" ~en:"Task Detail"
                     else pane_prefix ~ko:"작업 목록" ~en:"Tasks"

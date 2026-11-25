@@ -2610,38 +2610,50 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | None -> (
                           let replayed = Keymap.replay_ime_event norm in
                           match Model.active_dive m, replayed.key with
-                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                            , Keymap.Input.Char "J" )
+                          | None, Keymap.Input.Char "J"
                             when is_printable_key replayed
+                                 && Model.is_work_goal_zoomed m
                                  && Option.is_none
-                                      (Model.fast_approval_strip_item m) ->
-                              Some
-                                ( Update_nav.scroll_goal_dive_measure ~delta:1
-                                    ~goal_id m
-                                , [] )
-                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                            , Keymap.Input.Char "K" )
-                            when is_printable_key replayed ->
-                              Some
-                                ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
-                                    ~goal_id m
-                                , [] )
-                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                            , Keymap.Input.Down )
+                                      (Model.fast_approval_strip_item m) -> (
+                              match Work_store.selected_goal m.work with
+                              | Some g ->
+                                  Some
+                                    ( Update_nav.scroll_goal_dive_measure
+                                        ~delta:1 ~goal_id:g.id m
+                                    , [] )
+                              | None -> None)
+                          | None, Keymap.Input.Char "K"
+                            when is_printable_key replayed
+                                 && Model.is_work_goal_zoomed m -> (
+                              match Work_store.selected_goal m.work with
+                              | Some g ->
+                                  Some
+                                    ( Update_nav.scroll_goal_dive_measure
+                                        ~delta:(-1) ~goal_id:g.id m
+                                    , [] )
+                              | None -> None)
+                          | None, Keymap.Input.Down
                             when replayed.mods.shift && (not replayed.mods.ctrl)
-                                 && not replayed.mods.alt ->
-                              Some
-                                ( Update_nav.scroll_goal_dive_measure ~delta:1
-                                    ~goal_id m
-                                , [] )
-                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                            , Keymap.Input.Up )
+                                 && (not replayed.mods.alt)
+                                 && Model.is_work_goal_zoomed m -> (
+                              match Work_store.selected_goal m.work with
+                              | Some g ->
+                                  Some
+                                    ( Update_nav.scroll_goal_dive_measure
+                                        ~delta:1 ~goal_id:g.id m
+                                    , [] )
+                              | None -> None)
+                          | None, Keymap.Input.Up
                             when replayed.mods.shift && (not replayed.mods.ctrl)
-                                 && not replayed.mods.alt ->
-                              Some
-                                ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
-                                    ~goal_id m
-                                , [] )
+                                 && (not replayed.mods.alt)
+                                 && Model.is_work_goal_zoomed m -> (
+                              match Work_store.selected_goal m.work with
+                              | Some g ->
+                                  Some
+                                    ( Update_nav.scroll_goal_dive_measure
+                                        ~delta:(-1) ~goal_id:g.id m
+                                    , [] )
+                              | None -> None)
                           | None, Keymap.Input.Char "M"
                             when is_printable_key replayed
                                  && Nav.equal_workspace m.nav.workspace
@@ -2658,10 +2670,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                  && Model.is_memory_diff_pin_surface m ->
                               Some (Update_nav.pin_memory_diff_range m)
                           | ( ( Some
-                                  ( Nav.Dive_work
-                                      ( Nav.Goal_dive _
-                                      | Nav.Task_dive _
-                                      | Nav.Verification_dive _ )
+                                  ( Nav.Dive_work (Nav.Verification_dive _)
                                   | Nav.Dive_runtime _ )
                               | None )
                             , ( Keymap.Input.Char _
@@ -2777,21 +2786,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                    (Model.selected_keeper_name m)))) ->
                                 Some Keymap.Probe_sandbox
                             | Some "g"
-                              when (match Model.active_dive m with
-                                   | Some (Nav.Dive_work (Nav.Task_dive _)) ->
-                                       true
-                                   | Some
-                                       ( Nav.Dive_work
-                                           ( Nav.Goal_dive _
-                                           | Nav.Verification_dive _ )
-                                       | Nav.Dive_runtime _
-                                       ) ->
-                                       false
-                                   | None ->
-                                       Nav.equal_workspace m.nav.workspace
-                                         Nav.Work
-                                       && Nav.equal_work_tab m.work.active_tab
-                                            Nav.Work_tasks) ->
+                              when Option.is_none (Model.active_dive m)
+                                   && Nav.equal_workspace m.nav.workspace
+                                        Nav.Work
+                                   && Nav.equal_work_tab m.work.active_tab
+                                        Nav.Work_tasks ->
                                 Some Keymap.Link_task_goal
                             | Some "R"
                               when Option.is_none (Model.active_dive m)

@@ -856,11 +856,26 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
     | None ->
         None
   in
+  let work_return_entity_id =
+    match m.work.active_tab with
+    | Nav.Work_pipeline ->
+        Option.map (fun (g : Wire_work.goal) -> g.id)
+          (Work_store.selected_goal m.work)
+    | Nav.Work_tasks ->
+        Option.map (fun (t : Wire_work.task) -> t.id)
+          (Work_store.selected_task m.work)
+    | Nav.Work_inbox
+    | Nav.Work_harness
+    | Nav.Work_schedules
+    | Nav.Work_candle_scorecard ->
+        None
+  in
   {
     Model.workspace = m.nav.workspace;
     dive_stack = m.nav.dive_stack;
     dive_return_stack = m.nav.dive_return_stack;
     work_tab = m.work.active_tab;
+    work_return_entity_id;
     knowledge_tab = m.knowledge.active_tab;
     runtime_tab = m.runtime.active_tab;
     infra_tab = m.infra.active_tab;
@@ -1194,6 +1209,164 @@ let jump_to_knowledge_wiki ?zoomed ?return_from (m : Model.t) (slug : string) =
   in
   (next, View_fetches.fetches_for_current_view next)
 
+let jump_to_goal ?zoomed ?return_from (m : Model.t) (goal_id : string) =
+  let origin = Option.value return_from ~default:m in
+  let workspace_return_stack =
+    capture_workspace_return_frame origin :: origin.nav.workspace_return_stack
+  in
+  let nav0 =
+    {
+      m.nav with
+      workspace = Nav.Work;
+      dive_stack = [];
+      dive_return_stack = [];
+      workspace_return_stack;
+      overlay = None;
+      pane_index = 0;
+      pre_zoom_pane_index = None;
+      zoomed = false;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+      dive_scroll_offset = 0;
+      json_scroll_offset = 0;
+    }
+  in
+  let keep_ask = Model.has_preserved_ask_return nav0 in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
+  let config = Config_store.cancel_edit_field m.config in
+  let knowledge =
+    m.knowledge
+    |> Knowledge_store.unpin_memory_diff_revs
+    |> Knowledge_store.close_memory_reading
+    |> Knowledge_store.close_memory_diagram
+    |> Knowledge_store.clear_pending_wiki_edit
+    |> Knowledge_store.clear_armed_vote
+    |> Knowledge_store.clear_pending_artifact_revision
+    |> close_board_recovery
+  in
+  match Work_store.select_goal_by_id ~goal_id m.work with
+  | Error `Not_listed ->
+      (* Zooming whatever stays selected would show, and let [a]/[x] act on,
+         a different goal. *)
+      ( Model.with_toast ~now:m.freshness.last_mono ~level:Model.Toast_warning
+          (Say.make
+             ~ko:(Printf.sprintf "목록에 없는 목표라 열지 않았습니다: %s" goal_id)
+             ~en:(Printf.sprintf "Goal %s is not in the loaded list; not opened" goal_id))
+          m
+      , [] )
+  | Ok work ->
+  let next0 =
+    {
+      m with
+      nav = nav0;
+      drafts;
+      config;
+      knowledge;
+      work;
+      infra = { m.infra with show_raw_json = false };
+      runtime = { m.runtime with pending_addon_decl_path = None };
+      inline_modal = None;
+      ask_modal = (if keep_ask then m.ask_modal else None);
+    }
+    |> Model.sync_sidebar_cursor
+  in
+  let want_zoom = Option.value zoomed ~default:true in
+  let eff_zoomed = want_zoom && Model.can_zoom_current_view next0 in
+  let next =
+    if eff_zoomed then
+      {
+        next0 with
+        nav =
+          {
+            next0.nav with
+            zoomed = true;
+            pre_zoom_pane_index = Some 0;
+            pane_index = 0;
+          };
+      }
+    else next0
+  in
+  (next, View_fetches.fetches_for_current_view next)
+
+let jump_to_task ?zoomed ?return_from (m : Model.t) (task_id : string) =
+  let origin = Option.value return_from ~default:m in
+  let workspace_return_stack =
+    capture_workspace_return_frame origin :: origin.nav.workspace_return_stack
+  in
+  let nav0 =
+    {
+      m.nav with
+      workspace = Nav.Work;
+      dive_stack = [];
+      dive_return_stack = [];
+      workspace_return_stack;
+      overlay = None;
+      pane_index = 0;
+      pre_zoom_pane_index = None;
+      zoomed = false;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+      dive_scroll_offset = 0;
+      json_scroll_offset = 0;
+    }
+  in
+  let keep_ask = Model.has_preserved_ask_return nav0 in
+  let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
+  let config = Config_store.cancel_edit_field m.config in
+  let knowledge =
+    m.knowledge
+    |> Knowledge_store.unpin_memory_diff_revs
+    |> Knowledge_store.close_memory_reading
+    |> Knowledge_store.close_memory_diagram
+    |> Knowledge_store.clear_pending_wiki_edit
+    |> Knowledge_store.clear_armed_vote
+    |> Knowledge_store.clear_pending_artifact_revision
+    |> close_board_recovery
+  in
+  match Work_store.select_task_by_id ~task_id m.work with
+  | Error `Not_listed ->
+      ( Model.with_toast ~now:m.freshness.last_mono ~level:Model.Toast_warning
+          (Say.make
+             ~ko:(Printf.sprintf "목록에 없는 태스크라 열지 않았습니다: %s" task_id)
+             ~en:(Printf.sprintf "Task %s is not in the loaded list; not opened" task_id))
+          m
+      , [] )
+  | Ok work ->
+  let next0 =
+    {
+      m with
+      nav = nav0;
+      drafts;
+      config;
+      knowledge;
+      work;
+      infra = { m.infra with show_raw_json = false };
+      runtime = { m.runtime with pending_addon_decl_path = None };
+      inline_modal = None;
+      ask_modal = (if keep_ask then m.ask_modal else None);
+    }
+    |> Model.sync_sidebar_cursor
+  in
+  let want_zoom = Option.value zoomed ~default:true in
+  let eff_zoomed = want_zoom && Model.can_zoom_current_view next0 in
+  let next =
+    if eff_zoomed then
+      {
+        next0 with
+        nav =
+          {
+            next0.nav with
+            zoomed = true;
+            pre_zoom_pane_index = Some 0;
+            pane_index = 0;
+          };
+      }
+    else next0
+  in
+  (next, View_fetches.fetches_for_current_view next)
+
 let refresh_queue_on_entry (m : Model.t) =
   if Option.equal Nav.equal_overlay m.nav.overlay
        (Some (Nav.Queue_context Nav.Drawer_queue)) then
@@ -1402,8 +1575,6 @@ let push_dive (m : Model.t) dive =
   in
   let work =
     match dive with
-    | Nav.Dive_work (Nav.Goal_dive _) -> Work_store.reset_goal_dive_state m.work
-    | Nav.Dive_work (Nav.Task_dive _) -> Work_store.reset_task_dive_scroll m.work
     | Nav.Dive_work (Nav.Verification_dive _) ->
         Work_store.set_verification_dive_tab Work_store.Verif_tab_evidence m.work
     | Nav.Dive_runtime _ -> m.work
@@ -1830,6 +2001,7 @@ let cycle_sub_tab (m : Model.t) dir =
                   Attention.sync_selection ~query:work.filter_query m.attention
                 else m.attention
               in
+              let infra = { m.infra with show_raw_json = false } in
               let nav =
                 {
                   m.nav with
@@ -1837,10 +2009,12 @@ let cycle_sub_tab (m : Model.t) dir =
                   pre_zoom_pane_index = None;
                   zoomed = false;
                   filter_focused = false;
+                  json_scroll_offset = 0;
                 }
               in
               let next =
-                { m with nav; work; attention } |> Model.sync_sidebar_cursor
+                { m with nav; work; attention; infra }
+                |> Model.sync_sidebar_cursor
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Knowledge ->
@@ -2881,10 +3055,10 @@ let fast_approve_top ~now (m : Model.t) =
       | Attention.Payload_goal_confirmation g ->
           (* Goal completion confirmation requires exact server-issued proof run
              and operator credentials; never fabricate tokens from the strip. *)
-          let next, cmds = push_dive m (Nav.Dive_work (Nav.Goal_dive g.id)) in
+          let next, cmds = jump_to_goal ~zoomed:true m g.id in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:"목표 상세에서 검증 증명을 확인한 뒤 완료 확정하세요"
-                 ~en:"Review verified proof in Goal Dive before confirming completion")
+                 ~en:"Review verified proof in Goal Detail before confirming completion")
               next
           , cmds ))
 
@@ -2917,10 +3091,10 @@ let fast_deny_top ~now (m : Model.t) =
       | Attention.Payload_gate g -> open_inline_modal m (Nav.Gate_reject g.id)
       | Attention.Payload_ask ask -> skip_all_ask_questions ~now ask m
       | Attention.Payload_goal_confirmation g ->
-          let next, cmds = push_dive m (Nav.Dive_work (Nav.Goal_dive g.id)) in
+          let next, cmds = jump_to_goal ~zoomed:true m g.id in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:"목표 상세에서 보류·중단·거절을 진행하세요"
-                 ~en:"Open Goal Dive to pause, block, or reject completion")
+                 ~en:"Open Goal Detail to pause, block, or reject completion")
               next
           , cmds ))
 
@@ -3005,10 +3179,7 @@ let teleport_blocked ~now (m : Model.t) =
             let m0 = focus_attention_entry_in_inbox m entry in
             switch_workspace m0 Nav.Work
         | Attention.Payload_goal_confirmation g ->
-            let work = Work_store.set_tab Nav.Work_pipeline m.work in
-            let m1, cmds1 = switch_workspace { m with work } Nav.Work in
-            let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive g.id)) in
-            (m2, cmds1 @ cmds2))
+            jump_to_goal ~zoomed:true m g.id)
 
 let toggle_voice ~now (m : Model.t) =
   match m.drafts.voice with
@@ -3030,7 +3201,7 @@ let toggle_voice ~now (m : Model.t) =
 let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
   match entry.payload with
   | Attention.Payload_goal_confirmation g ->
-      push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
+      jump_to_goal ~zoomed:true m g.id
   | Attention.Payload_ask ask -> open_ask_modal m ask
   | Attention.Payload_tool_approval ta ->
       jump_to_keeper ~tab:Nav.Keeper_chat m ta.keeper
@@ -3637,6 +3808,8 @@ type enter_plan =
       trace_section : Keeper_context_store.trace_section option;
     }
   | Enter_jump_knowledge_thread of string
+  | Enter_jump_goal of string
+  | Enter_jump_task of string
   | Enter_pin_memory_diff of {
       keeper : string option;
       from_rev : int;
@@ -3801,6 +3974,8 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
   | Enter_toggle_zoom
   | Enter_jump_keeper _
   | Enter_jump_knowledge_thread _
+  | Enter_jump_goal _
+  | Enter_jump_task _
   | Enter_pin_memory_diff _
   | Enter_expand_company _
   | Enter_dispatch _
@@ -3822,36 +3997,6 @@ let enter_plan (m : Model.t) : enter_plan =
   if Option.is_some (Memory_diagram.active_diagram m) then Enter_noop
   else
   match Model.active_dive m with
-  | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) ->
-      if
-        Option.equal Int.equal (Model.dive_work_json_pane_index m)
-          (Some m.nav.pane_index)
-      then Enter_noop
-      else if m.nav.pane_index = 1 then
-        match Work_store.selected_goal_dive_verification ~goal_id m.work with
-        | Some v -> Enter_push (Nav.Dive_work (Nav.Verification_dive v.request_id))
-        | None -> Enter_noop
-      else
-        (match Work_store.selected_goal_dive_task ~goal_id m.work with
-        | Some tk -> Enter_push (Nav.Dive_work (Nav.Task_dive tk.id))
-        | None -> Enter_noop)
-  | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
-      if
-        Option.equal Int.equal (Model.dive_work_json_pane_index m)
-          (Some m.nav.pane_index)
-      then Enter_noop
-      else
-        let on_verif_pane =
-          if Model.task_dive_has_two_main_panes m task_id then
-            m.nav.pane_index = 1
-          else m.nav.pane_index = 0
-        in
-        if on_verif_pane then
-          match Work_store.verification_for_task ~task_id m.work with
-          | Some v ->
-              Enter_push (Nav.Dive_work (Nav.Verification_dive v.request_id))
-          | None -> Enter_noop
-        else Enter_noop
   | Some
       ( Nav.Dive_work (Nav.Verification_dive _)
       | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _) ) ->
@@ -3872,7 +4017,7 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop)
           | Model.Pulse_goals -> (
               match Work_store.selected_pulse_goal m.work with
-              | Some g -> Enter_push (Nav.Dive_work (Nav.Goal_dive g.id))
+              | Some g -> Enter_jump_goal g.id
               | None -> Enter_noop)
           | Model.Pulse_world -> (
               match Knowledge_store.selected_pulse_thread m.knowledge with
@@ -3913,21 +4058,71 @@ let enter_plan (m : Model.t) : enter_plan =
       | Nav.Work -> (
           match m.work.active_tab with
           | Nav.Work_pipeline -> (
-              match m.nav.pane_index with
-              | 1 when Model.work_pipeline_has_linked_card m -> (
-                  match Work_store.selected_verification m.work with
-                  | Some v ->
-                      Enter_push
-                        (Nav.Dive_work (Nav.Verification_dive v.request_id))
-                  | None -> Enter_noop)
-              | _ -> (
+              if Model.is_work_goal_zoomed m then
+                if
+                  Option.equal Int.equal (Model.dive_work_json_pane_index m)
+                    (Some m.nav.pane_index)
+                then Enter_noop
+                else
                   match Work_store.selected_goal m.work with
-                  | Some g -> Enter_push (Nav.Dive_work (Nav.Goal_dive g.id))
-                  | None -> Enter_noop))
+                  | None -> Enter_noop
+                  | Some g ->
+                      if m.nav.pane_index = 1 then
+                        match
+                          Work_store.selected_goal_dive_verification
+                            ~goal_id:g.id m.work
+                        with
+                        | Some v ->
+                            Enter_push
+                              (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                        | None -> Enter_noop
+                      else
+                        match
+                          Work_store.selected_goal_dive_task ~goal_id:g.id
+                            m.work
+                        with
+                        | Some tk -> Enter_jump_task tk.id
+                        | None -> Enter_noop
+              else
+                match m.nav.pane_index with
+                | 1 when Model.work_pipeline_has_linked_card m -> (
+                    match Work_store.selected_verification m.work with
+                    | Some v ->
+                        Enter_push
+                          (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                    | None -> Enter_noop)
+                | _ -> (
+                    match Work_store.selected_goal m.work with
+                    | Some _ -> Enter_toggle_zoom
+                    | None -> Enter_noop))
           | Nav.Work_tasks -> (
-              match Work_store.selected_task m.work with
-              | Some task -> Enter_push (Nav.Dive_work (Nav.Task_dive task.id))
-              | None -> Enter_noop)
+              if Model.is_work_task_zoomed m then
+                if
+                  Option.equal Int.equal (Model.dive_work_json_pane_index m)
+                    (Some m.nav.pane_index)
+                then Enter_noop
+                else
+                  match Work_store.selected_task m.work with
+                  | None -> Enter_noop
+                  | Some tk ->
+                      let on_verif_pane =
+                        if Model.task_dive_has_two_main_panes m tk.id then
+                          m.nav.pane_index = 1
+                        else m.nav.pane_index = 0
+                      in
+                      if on_verif_pane then
+                        match
+                          Work_store.verification_for_task ~task_id:tk.id m.work
+                        with
+                        | Some v ->
+                            Enter_push
+                              (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                        | None -> Enter_noop
+                      else Enter_noop
+              else
+                match Work_store.selected_task m.work with
+                | Some _ -> Enter_toggle_zoom
+                | None -> Enter_noop)
           | Nav.Work_schedules -> Enter_noop
           | Nav.Work_inbox -> (
               if
@@ -4238,16 +4433,30 @@ let dive_selected (m : Model.t) =
             | None -> m.drafts
           else m.drafts
         in
+        let work =
+          if Nav.equal_workspace m.nav.workspace Nav.Work then
+            match m.work.active_tab with
+            | Nav.Work_pipeline -> Work_store.reset_goal_dive_state m.work
+            | Nav.Work_tasks -> Work_store.reset_task_dive_scroll m.work
+            | Nav.Work_schedules
+            | Nav.Work_inbox
+            | Nav.Work_candle_scorecard
+            | Nav.Work_harness ->
+                m.work
+          else m.work
+        in
         let next =
           {
             m with
             drafts;
+            work;
             nav =
               {
                 m.nav with
                 zoomed = true;
                 pre_zoom_pane_index = Some m.nav.pane_index;
                 pane_index = 0;
+                json_scroll_offset = 0;
               };
           }
         in
@@ -4256,6 +4465,10 @@ let dive_selected (m : Model.t) =
       jump_to_keeper ?tab ?trace_section m name
   | Enter_jump_knowledge_thread post_id ->
       jump_to_knowledge_thread ~return_from:m m post_id
+  | Enter_jump_goal goal_id ->
+      jump_to_goal ~zoomed:true ~return_from:m m goal_id
+  | Enter_jump_task task_id ->
+      jump_to_task ~zoomed:true ~return_from:m m task_id
   | Enter_pin_memory_diff { keeper; from_rev; to_rev } ->
       let knowledge =
         Knowledge_store.pin_memory_diff_revs ~keeper ~from_rev ~to_rev
@@ -4399,6 +4612,8 @@ let enter_hint (m : Model.t) =
     | Enter_toggle_zoom
     | Enter_jump_keeper _
     | Enter_jump_knowledge_thread _
+    | Enter_jump_goal _
+    | Enter_jump_task _
     | Enter_pin_memory_diff _
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_fetch_tool_result _ | Enter_dispatch _
@@ -9699,260 +9914,6 @@ let dive_max_scroll (m : Model.t) active =
             in
             max 0 (total - max 1 content.h)
         | None -> 0)
-  | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
-      match
-        List.find_opt
-          (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-          (Work_store.goals m.work)
-      with
-      | None -> 0
-      | Some g ->
-          let main_card_rect, json_card_rect =
-            split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json
-              br
-          in
-          let main_max =
-            let inner = ui_card_inner main_card_rect in
-            if Rect.is_empty inner then 0
-            else
-              let y = ref inner.y in
-              let bot = Rect.bottom inner in
-              if inner.h >= 8 then begin
-                let has_sub =
-                  match g.last_review_note with
-                  | Some n when not (String.equal (String.trim n) "") -> true
-                  | Some _ | None -> Option.is_some g.criterion_revision
-                in
-                let band_h = if has_sub then 2 else 1 in
-                y := !y + band_h + if inner.h >= 14 then 1 else 0
-              end;
-              let content = ops_pad_content inner in
-              let action_h = if bot - !y >= 6 then 1 else 0 in
-              let body_bot = bot - action_h in
-              if !y < body_bot then begin
-                let step_h =
-                  match g.phase with
-                  | Wire_work.Paused _ | Wire_work.Blocked _
-                    when min 2 (body_bot - !y) >= 2 ->
-                      2
-                  | Wire_work.Executing
-                  | Wire_work.Verifying
-                  | Wire_work.Awaiting_confirmation
-                  | Wire_work.Paused _
-                  | Wire_work.Blocked _
-                  | Wire_work.Completed
-                  | Wire_work.Dropped ->
-                      1
-                in
-                y := !y + step_h
-              end;
-              let linked =
-                List.filter
-                  (fun (tk : Wire_work.task) ->
-                    match tk.goal_link with
-                    | Wire_work.Linked gid -> String.equal gid g.id
-                    | Wire_work.Unlinked -> false)
-                  (Work_store.tasks m.work)
-              in
-              let linked_ids =
-                List.map (fun (tk : Wire_work.task) -> tk.id) linked
-              in
-              let verifs =
-                List.filter
-                  (fun (v : Wire_work.verification_request) ->
-                    List.exists (String.equal v.task_id) linked_ids)
-                  (Work_store.verifications_list m.work)
-              in
-              let rem_h = max 0 (body_bot - !y) in
-              let md_h =
-                if rem_h <= 0 then 0
-                else
-                  min 7
-                    (min rem_h (if rem_h >= 2 then max 2 (rem_h / 3) else rem_h))
-              in
-              let md_max =
-                if md_h > 0 then begin
-                  let md_src =
-                    Printf.sprintf "**%s:** %s\n\n**%s:** %s"
-                      (Say.resolve m.lang
-                         (Say.make ~ko:"성공 조건" ~en:"Measure"))
-                      (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
-                      (Say.resolve m.lang
-                         (Say.make ~ko:"측정 절차" ~en:"Procedure"))
-                      (Chat_transcript.rewrite_masc_links_for_markdown
-                         g.procedure)
-                  in
-                  y := !y + md_h;
-                  markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
-                end
-                else 0
-              in
-              let rest_rect =
-                Rect.make ~x:content.x ~y:!y ~w:content.w
-                  ~h:(max 0 (body_bot - !y))
-              in
-              if Rect.is_empty rest_rect then md_max
-              else
-                let tasks_r, verif_r =
-                  match
-                    Masc_tui_ui.Layout.split_v ~gap:0 rest_rect
-                      [ Masc_tui_ui.Layout.Ratio 0.42; Masc_tui_ui.Layout.Flex 1 ]
-                  with
-                  | [ t; b ] -> (t, b)
-                  | _ -> (rest_rect, Rect.empty)
-                in
-                let t_body_h = max 1 (max 0 (tasks_r.h - 1)) in
-                let linked_max = max 0 (List.length linked - t_body_h) in
-                let chk_max, diff_max =
-                  if Rect.is_empty verif_r then (0, 0)
-                  else
-                    let v_body =
-                      Rect.make ~x:verif_r.x ~y:(verif_r.y + 1) ~w:verif_r.w
-                        ~h:(max 0 (verif_r.h - 1))
-                    in
-                    match verifs with
-                    | [] -> (0, 0)
-                    | v :: _ ->
-                        let check_r, diff_r =
-                          match
-                            Masc_tui_ui.Layout.split_v ~gap:0 v_body
-                              [
-                                Masc_tui_ui.Layout.Ratio 0.45;
-                                Masc_tui_ui.Layout.Flex 1;
-                              ]
-                          with
-                          | [ a; b ] -> (a, b)
-                          | _ -> (v_body, Rect.empty)
-                        in
-                        let cm =
-                          if Rect.is_empty check_r then 0
-                          else
-                            max 0
-                              (evidence_checklist_row_count v
-                              - max 1 check_r.h)
-                        in
-                        let dm =
-                          if Rect.is_empty diff_r then 0
-                          else
-                            max 0
-                              (rejection_diff_row_count ~lang:m.lang v
-                              - diff_r.h)
-                        in
-                        (cm, dm)
-                in
-                max (max md_max linked_max) (max chk_max diff_max)
-          in
-          let json_max =
-            if Rect.is_empty json_card_rect then 0
-            else
-              json_card_max_scroll ~max_depth:4 json_card_rect
-                (json_of_goal_store g)
-          in
-          max main_max json_max)
-  | Nav.Dive_work (Nav.Task_dive task_id) -> (
-      match
-        List.find_opt
-          (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
-          (Work_store.tasks m.work)
-      with
-      | None -> 0
-      | Some tk ->
-          let main_card_rect, json_card_rect =
-            split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json
-              br
-          in
-          let main_max =
-            let inner = ui_card_inner main_card_rect in
-            if Rect.is_empty inner then 0
-            else
-              let content = ops_pad_content inner in
-              let y = ref inner.y in
-              let bot = Rect.bottom inner in
-              if inner.h >= 8 then begin
-                let has_who =
-                  match tk.status with
-                  | Wire_work.Todo -> false
-                  | Wire_work.Claimed _
-                  | Wire_work.InProgress _
-                  | Wire_work.AwaitingVerification _
-                  | Wire_work.Done _
-                  | Wire_work.Cancelled _ ->
-                      true
-                in
-                let band_h = if has_who then 2 else 1 in
-                y := !y + band_h + if inner.h >= 14 then 1 else 0
-              end;
-              let action_h = if bot - !y >= 6 then 1 else 0 in
-              let body_bot = bot - action_h in
-              (* stepper + assignee + started_at + goal_link = 4 rows *)
-              y := min body_bot (!y + 4);
-              let v_opt =
-                List.find_opt
-                  (fun (v : Wire_work.verification_request) ->
-                    String.equal v.task_id tk.id)
-                  (Work_store.verifications_list m.work)
-              in
-              let rest_h = max 0 (body_bot - !y) in
-              let desc_h =
-                if rest_h <= 0 then 0
-                else
-                  match tk.description, v_opt with
-                  | Some _, Some _ -> min rest_h (max 1 (rest_h / 2))
-                  | Some _, None -> rest_h
-                  | None, _ -> 0
-              in
-              let md_max =
-                match tk.description with
-                | Some d when desc_h > 0 ->
-                    if desc_h >= 3 then incr y;
-                    let actual_h = max 0 (min desc_h (body_bot - !y)) in
-                    y := !y + actual_h;
-                    markdown_max_scroll ~theme ~width:content.w ~height:actual_h
-                      (Chat_transcript.rewrite_masc_links_for_markdown d)
-                | Some _ | None -> 0
-              in
-              let chk_max, diff_max =
-                match v_opt with
-                | Some v when !y < body_bot ->
-                    incr y;
-                    let vr =
-                      Rect.make ~x:content.x ~y:!y ~w:content.w
-                        ~h:(max 0 (body_bot - !y))
-                    in
-                    let chk_r, diff_r =
-                      match
-                        Masc_tui_ui.Layout.split_v ~gap:0 vr
-                          [
-                            Masc_tui_ui.Layout.Ratio 0.45;
-                            Masc_tui_ui.Layout.Flex 1;
-                          ]
-                      with
-                      | [ a; b ] -> (a, b)
-                      | _ -> (vr, Rect.empty)
-                    in
-                    let cm =
-                      if Rect.is_empty chk_r then 0
-                      else
-                        max 0 (evidence_checklist_row_count v - max 1 chk_r.h)
-                    in
-                    let dm =
-                      if Rect.is_empty diff_r then 0
-                      else
-                        max 0
-                          (rejection_diff_row_count ~lang:m.lang v - diff_r.h)
-                    in
-                    (cm, dm)
-                | Some _ | None -> (0, 0)
-              in
-              max md_max (max chk_max diff_max)
-          in
-          let json_max =
-            if Rect.is_empty json_card_rect then 0
-            else
-              json_card_max_scroll ~max_depth:4 json_card_rect
-                (json_of_task_store tk)
-          in
-          max main_max json_max)
   | Nav.Dive_work (Nav.Verification_dive req_id) -> (
       match
         List.find_opt
@@ -10058,6 +10019,9 @@ let clamp_for_pane (m : Model.t) =
           let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
           match m.nav.workspace with
           | Nav.Work ->
+              if Model.is_work_goal_zoomed m || Model.is_work_task_zoomed m then
+                m
+              else
               let eff_pane =
                 if not zoomed then pane_index
                 else
@@ -10255,9 +10219,39 @@ let pop_workspace_return (m : Model.t) =
             (Some ov, if keep_ask then m.ask_modal else None)
         | None -> (None, if keep_ask then m.ask_modal else None)
       in
-      let work =
+      let work0 =
         if Nav.equal_work_tab m.work.active_tab frame.work_tab then m.work
         else Work_store.set_tab frame.work_tab m.work
+      in
+      (* [entity_listed = false] when the frame's goal or task is no longer
+         listed: the tab is restored but not zoomed onto another entity. *)
+      let work, entity_listed =
+        match frame.work_return_entity_id with
+        | None -> (work0, true)
+        | Some id -> (
+            let reselect selected select =
+              if Option.equal String.equal selected (Some id) then (work0, true)
+              else
+                match select work0 with
+                | Ok w -> (w, true)
+                | Error `Not_listed -> (work0, false)
+            in
+            match frame.work_tab with
+            | Nav.Work_pipeline ->
+                reselect
+                  (Option.map (fun (g : Wire_work.goal) -> g.id)
+                     (Work_store.selected_goal work0))
+                  (Work_store.select_goal_by_id ~goal_id:id)
+            | Nav.Work_tasks ->
+                reselect
+                  (Option.map (fun (t : Wire_work.task) -> t.id)
+                     (Work_store.selected_task work0))
+                  (Work_store.select_task_by_id ~task_id:id)
+            | Nav.Work_inbox
+            | Nav.Work_harness
+            | Nav.Work_schedules
+            | Nav.Work_candle_scorecard ->
+                (work0, true))
       in
       let knowledge0 =
         if Nav.equal_knowledge_tab m.knowledge.active_tab frame.knowledge_tab then
@@ -10343,7 +10337,7 @@ let pop_workspace_return (m : Model.t) =
         }
       in
       let restored_zoom =
-        frame.zoomed && Model.can_zoom_current_view next0
+        frame.zoomed && entity_listed && Model.can_zoom_current_view next0
       in
       let next1 =
         {
@@ -10529,10 +10523,10 @@ let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
             in
             markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
   in
-  let dive_scroll_offset =
-    Store_scroll.clamp_scroll ~max_scroll (m.nav.dive_scroll_offset + delta)
+  let detail_scroll_offset =
+    Store_scroll.clamp_scroll ~max_scroll (m.work.detail_scroll_offset + delta)
   in
-  { m with nav = { m.nav with dive_scroll_offset } }
+  { m with work = { m.work with detail_scroll_offset } }
 
 let incidents_detail_max_scroll (m : Model.t) =
   match Incidents.selected_entry m.incidents with
@@ -10784,27 +10778,6 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
         with
         | Some v -> find_hash_for_task_ids [ v.task_id ]
         | None -> None)
-    | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
-        find_hash_for_task_ids [ task_id ]
-    | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
-        let preferred_ids =
-          if m.nav.pane_index = 1 then
-            match Work_store.selected_goal_dive_verification ~goal_id m.work with
-            | Some v -> [ v.task_id ]
-            | None -> []
-          else
-            match Work_store.selected_goal_dive_task ~goal_id m.work with
-            | Some tk -> [ tk.id ]
-            | None -> []
-        in
-        match find_hash_for_task_ids preferred_ids with
-        | Some _ as hit -> hit
-        | None ->
-            let tids =
-              Work_store.goal_linked_tasks ~goal_id m.work
-              |> List.map (fun (tk : Wire_work.task) -> tk.id)
-            in
-            find_hash_for_task_ids tids)
     | Some (Nav.Dive_runtime _) -> None
     | None -> (
         match m.nav.workspace, m.work.active_tab with
@@ -10813,7 +10786,36 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
             | Some hv -> valid_hash_of hv
             | None -> None)
         | Nav.Work, Nav.Work_pipeline ->
-            if m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m then
+            if Model.is_work_goal_zoomed m then (
+              match Work_store.selected_goal m.work with
+              | None -> None
+              | Some g -> (
+                  let goal_id = g.id in
+                  let preferred_ids =
+                    if m.nav.pane_index = 1 then
+                      match
+                        Work_store.selected_goal_dive_verification ~goal_id
+                          m.work
+                      with
+                      | Some v -> [ v.task_id ]
+                      | None -> []
+                    else
+                      match
+                        Work_store.selected_goal_dive_task ~goal_id m.work
+                      with
+                      | Some tk -> [ tk.id ]
+                      | None -> []
+                  in
+                  match find_hash_for_task_ids preferred_ids with
+                  | Some _ as hit -> hit
+                  | None ->
+                      let tids =
+                        Work_store.goal_linked_tasks ~goal_id m.work
+                        |> List.map (fun (tk : Wire_work.task) -> tk.id)
+                      in
+                      find_hash_for_task_ids tids))
+            else if m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m
+            then
               match Work_store.selected_verification m.work with
               | Some v -> find_hash_for_task_ids [ v.task_id ]
               | None -> None
@@ -11890,7 +11892,7 @@ let apply_move (m : Model.t) dir =
               ({ m with keeper_context }, [])
             in
             match Model.active_dive m with
-            | Some (Nav.Dive_work target as active) -> (
+            | Some (Nav.Dive_work (Nav.Verification_dive _) as active) ->
                 let sd = scroll_delta dir in
                 if
                   Option.equal Int.equal (Model.dive_work_json_pane_index m)
@@ -11903,71 +11905,12 @@ let apply_move (m : Model.t) dir =
                   in
                   ({ m with nav = { m.nav with json_scroll_offset } }, [])
                 else
-                  match target with
-                  | Nav.Goal_dive goal_id ->
-                      let delta = move_delta dir in
-                      let work =
-                        if m.nav.pane_index = 1 then
-                          Work_store.move_goal_dive_verif ~goal_id
-                            ~viewport_rows ~delta m.work
-                        else
-                          Work_store.move_goal_dive_task ~goal_id
-                            ~viewport_rows ~delta m.work
-                      in
-                      ({ m with work }, [])
-                  | Nav.Task_dive task_id -> (
-                      match
-                        List.find_opt
-                          (fun (tk : Wire_work.task) ->
-                            String.equal tk.id task_id)
-                          (Work_store.tasks m.work)
-                      with
-                      | None -> (m, [])
-                      | Some tk ->
-                          let desc_max, verif_max =
-                            task_dive_scroll_bounds m tk
-                          in
-                          let has_verif =
-                            Option.is_some
-                              (Work_store.verification_for_task ~task_id m.work)
-                          in
-                          let two_main =
-                            Model.task_dive_has_two_main_panes m task_id
-                          in
-                          let scroll_verif =
-                            has_verif
-                            && ((two_main && m.nav.pane_index = 1)
-                               || ((not two_main) && m.nav.pane_index = 0))
-                          in
-                          let work =
-                            if scroll_verif then
-                              Work_store.scroll_task_dive_verif
-                                ~max_scroll:verif_max ~delta:sd m.work
-                            else
-                              Work_store.scroll_task_dive_desc
-                                ~max_scroll:desc_max ~delta:sd m.work
-                          in
-                          let nav =
-                            if not scroll_verif then
-                              {
-                                m.nav with
-                                dive_scroll_offset = work.task_dive_desc_scroll;
-                              }
-                            else if not two_main then
-                              {
-                                m.nav with
-                                dive_scroll_offset = work.task_dive_verif_scroll;
-                              }
-                            else m.nav
-                          in
-                          ({ m with work; nav }, []))
-                  | Nav.Verification_dive _ ->
-                      let max_scroll = dive_max_scroll m active in
-                      let dive_scroll_offset =
-                        Store_scroll.clamp_scroll ~max_scroll
-                          (m.nav.dive_scroll_offset + sd)
-                      in
-                      ({ m with nav = { m.nav with dive_scroll_offset } }, []))
+                  let max_scroll = dive_max_scroll m active in
+                  let dive_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.dive_scroll_offset + sd)
+                  in
+                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
             | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name) as active) ->
                 let sd = scroll_delta dir in
                 if m.nav.pane_index = 1 then
@@ -12375,7 +12318,124 @@ let apply_move (m : Model.t) dir =
                                   ~viewport_rows ~delta m.work;
                             }
                           , [] )
-                    | Nav.Work_tasks | Nav.Work_schedules ->
+                    | Nav.Work_tasks ->
+                        if Model.is_work_task_zoomed m then (
+                          let sd = scroll_delta dir in
+                          if
+                            Option.equal Int.equal
+                              (Model.dive_work_json_pane_index m)
+                              (Some pane_index)
+                          then
+                            let max_scroll =
+                              match Work_store.selected_task m.work with
+                              | None -> 0
+                              | Some tk ->
+                                  let _, jr =
+                                    split_dive_with_json_store ~bp:(ui_bp m)
+                                      ~show_raw_json:true (ui_body_rect m)
+                                  in
+                                  if Rect.is_empty jr then 0
+                                  else
+                                    json_card_max_scroll ~max_depth:4 jr
+                                      (json_of_task_store tk)
+                            in
+                            let json_scroll_offset =
+                              Store_scroll.clamp_scroll ~max_scroll
+                                (m.nav.json_scroll_offset + sd)
+                            in
+                            ({ m with nav = { m.nav with json_scroll_offset } }, [])
+                          else
+                            match Work_store.selected_task m.work with
+                            | None -> (m, [])
+                            | Some tk ->
+                                let desc_max, verif_max =
+                                  task_dive_scroll_bounds m tk
+                                in
+                                let has_verif =
+                                  Option.is_some
+                                    (Work_store.verification_for_task
+                                       ~task_id:tk.id m.work)
+                                in
+                                let two_main =
+                                  Model.task_dive_has_two_main_panes m tk.id
+                                in
+                                let scroll_verif =
+                                  has_verif
+                                  && ((two_main && pane_index = 1)
+                                     || ((not two_main) && pane_index = 0))
+                                in
+                                let work =
+                                  if scroll_verif then
+                                    Work_store.scroll_task_dive_verif
+                                      ~max_scroll:verif_max ~delta:sd m.work
+                                  else
+                                    Work_store.scroll_task_dive_desc
+                                      ~max_scroll:desc_max ~delta:sd m.work
+                                in
+                                ({ m with work }, []))
+                        else if m.infra.show_raw_json && pane_index = 1 then
+                          let sd = scroll_delta dir in
+                          let max_scroll =
+                            match Work_store.selected_task m.work with
+                            | None -> 0
+                            | Some tk ->
+                                let bp = ui_bp m in
+                                let br = ui_body_rect m in
+                                let _, body_r = Rect.split_v br ~top_h:1 in
+                                let detail_r =
+                                  if body_r.w >= 96 then
+                                    match
+                                      Masc_tui_ui.Layout.split_h_bp bp body_r
+                                        [
+                                          Masc_tui_ui.Layout.Ratio 0.54;
+                                          Masc_tui_ui.Layout.Flex 1;
+                                        ]
+                                    with
+                                    | [ _; r ] -> r
+                                    | _ -> Rect.empty
+                                  else
+                                    match
+                                      Masc_tui_ui.Layout.split_v_bp bp body_r
+                                        [
+                                          Masc_tui_ui.Layout.Ratio 0.52;
+                                          Masc_tui_ui.Layout.Flex 1;
+                                        ]
+                                    with
+                                    | [ _; b ] -> b
+                                    | _ -> Rect.empty
+                                in
+                                if Rect.is_empty detail_r then 0
+                                else
+                                  json_card_max_scroll ~max_depth:4 detail_r
+                                    (json_of_task_store tk)
+                          in
+                          let json_scroll_offset =
+                            Store_scroll.clamp_scroll ~max_scroll
+                              (m.nav.json_scroll_offset + sd)
+                          in
+                          ({ m with nav = { m.nav with json_scroll_offset } }, [])
+                        else
+                          let eff_delta =
+                            if pane_index = 1 then scroll_delta dir else delta
+                          in
+                          let max_detail_scroll =
+                            if pane_index = 1 then Some (work_detail_max_scroll m)
+                            else None
+                          in
+                          let work =
+                            Work_store.move_selection ~pane_index
+                              ~viewport_rows ?max_detail_scroll ~delta:eff_delta
+                              m.work
+                          in
+                          let nav =
+                            if
+                              pane_index = 0
+                              && not (Int.equal work.selected_index m.work.selected_index)
+                            then { m.nav with json_scroll_offset = 0 }
+                            else m.nav
+                          in
+                          ({ m with work; nav }, [])
+                    | Nav.Work_schedules ->
                         let eff_pane = if zoomed_work then 1 else pane_index in
                         let eff_delta =
                           if eff_pane = 1 then scroll_delta dir else delta
@@ -12391,33 +12451,126 @@ let apply_move (m : Model.t) dir =
                         in
                         ({ m with work }, [])
                     | Nav.Work_pipeline ->
-                        let has_linked_card =
-                          Model.work_pipeline_has_linked_card m
-                        in
-                        let eff_pane =
-                          if zoomed_work then
-                            if has_linked_card then 2 else 1
-                          else pane_index
-                        in
-                        let is_detail =
-                          eff_pane = 2
-                          || (eff_pane = 1 && not has_linked_card)
-                        in
-                        let eff_delta =
-                          if is_detail then scroll_delta dir else delta
-                        in
-                        let max_detail_scroll =
-                          if is_detail then Some (work_detail_max_scroll m)
-                          else None
-                        in
-                        ( {
-                            m with
-                            work =
-                              Work_store.move_selection ~pane_index:eff_pane
+                        if Model.is_work_goal_zoomed m then (
+                          if
+                            Option.equal Int.equal
+                              (Model.dive_work_json_pane_index m)
+                              (Some pane_index)
+                          then
+                            let sd = scroll_delta dir in
+                            let max_scroll =
+                              match Work_store.selected_goal m.work with
+                              | None -> 0
+                              | Some g ->
+                                  let _, jr =
+                                    split_dive_with_json_store ~bp:(ui_bp m)
+                                      ~show_raw_json:true (ui_body_rect m)
+                                  in
+                                  if Rect.is_empty jr then 0
+                                  else
+                                    json_card_max_scroll ~max_depth:4 jr
+                                      (json_of_goal_store g)
+                            in
+                            let json_scroll_offset =
+                              Store_scroll.clamp_scroll ~max_scroll
+                                (m.nav.json_scroll_offset + sd)
+                            in
+                            ({ m with nav = { m.nav with json_scroll_offset } }, [])
+                          else
+                            match Work_store.selected_goal m.work with
+                            | None -> (m, [])
+                            | Some g ->
+                                let work =
+                                  if pane_index = 1 then
+                                    Work_store.move_goal_dive_verif ~goal_id:g.id
+                                      ~viewport_rows ~delta m.work
+                                  else
+                                    Work_store.move_goal_dive_task ~goal_id:g.id
+                                      ~viewport_rows ~delta m.work
+                                in
+                                ({ m with work }, []))
+                        else
+                          let has_linked_card =
+                            Model.work_pipeline_has_linked_card m
+                          in
+                          let is_detail =
+                            pane_index = 2
+                            || (pane_index = 1 && not has_linked_card)
+                          in
+                          if m.infra.show_raw_json && is_detail then
+                            let sd = scroll_delta dir in
+                            let max_scroll =
+                              match Work_store.selected_goal m.work with
+                              | None -> 0
+                              | Some g ->
+                                  let bp = ui_bp m in
+                                  let br = ui_body_rect m in
+                                  let right_r =
+                                    if br.w >= 96 then
+                                      match
+                                        Masc_tui_ui.Layout.split_h_bp bp br
+                                          [
+                                            Masc_tui_ui.Layout.Ratio 0.46;
+                                            Masc_tui_ui.Layout.Flex 1;
+                                          ]
+                                      with
+                                      | [ _; r ] -> r
+                                      | _ -> Rect.empty
+                                    else
+                                      let goals_n =
+                                        List.length
+                                          (Work_store.filtered_goals m.work)
+                                      in
+                                      let top_h =
+                                        min
+                                          (max 5 (br.h / 2))
+                                          (Masc_tui_ui.Layout.adaptive_list_height
+                                             ~items:goals_n ~overhead:4 ~min_h:5
+                                             ~max_h:10 ())
+                                      in
+                                      match
+                                        Masc_tui_ui.Layout.split_v_bp bp br
+                                          [
+                                            Masc_tui_ui.Layout.Fixed top_h;
+                                            Masc_tui_ui.Layout.Flex 1;
+                                          ]
+                                      with
+                                      | [ _; b ] -> b
+                                      | _ -> Rect.empty
+                                  in
+                                  if Rect.is_empty right_r then 0
+                                  else
+                                    json_card_max_scroll ~max_depth:4 right_r
+                                      (json_of_goal_store g)
+                            in
+                            let json_scroll_offset =
+                              Store_scroll.clamp_scroll ~max_scroll
+                                (m.nav.json_scroll_offset + sd)
+                            in
+                            ({ m with nav = { m.nav with json_scroll_offset } }, [])
+                          else
+                            let eff_delta =
+                              if is_detail then scroll_delta dir else delta
+                            in
+                            let max_detail_scroll =
+                              if is_detail then Some (work_detail_max_scroll m)
+                              else None
+                            in
+                            let work =
+                              Work_store.move_selection ~pane_index
                                 ~has_linked_card ~viewport_rows
-                                ?max_detail_scroll ~delta:eff_delta m.work;
-                          }
-                        , [] )
+                                ?max_detail_scroll ~delta:eff_delta m.work
+                            in
+                            let nav =
+                              if
+                                pane_index = 0
+                                && not
+                                     (Int.equal work.selected_index
+                                        m.work.selected_index)
+                              then { m.nav with json_scroll_offset = 0 }
+                              else m.nav
+                            in
+                            ({ m with work; nav }, [])
                     | Nav.Work_candle_scorecard ->
                         let eff_delta =
                           if pane_index = 1 then scroll_delta dir else delta

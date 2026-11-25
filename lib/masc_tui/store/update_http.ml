@@ -203,11 +203,7 @@ let verification_evidence_matches_active (m : Model.t) verification_id =
   match Model.active_dive m with
   | Some (Nav.Dive_work (Nav.Verification_dive vid)) ->
       String.equal vid verification_id
-  | Some
-      ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
-      | Nav.Dive_runtime _ )
-  | None ->
-      true
+  | Some (Nav.Dive_runtime _) | None -> true
 
 let runtime_trace_matches_active (m : Model.t) keeper =
   match Model.active_dive m with

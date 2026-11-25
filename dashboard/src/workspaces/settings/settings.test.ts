@@ -13,6 +13,7 @@ import {
   type ConfigSchemaData,
   type WorkspaceInspectPayload,
 } from './index'
+import { matchCanonicalCategoryId } from './types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -354,5 +355,13 @@ describe('workspaces/settings', () => {
       expect(searchInput?.value).toBe('providers.openai')
       expect(container.querySelector('[data-field-key="providers.openai.api_key"]')).not.toBeNull()
     })
+  })
+
+  it('matches canonical settings categories without bare "ui" substring false positives', () => {
+    expect(matchCanonicalCategoryId({ id: 'general', title: 'General & UI', field_count: 0, fields: [] })).toBe('general')
+    expect(matchCanonicalCategoryId({ id: 'appearance', title: 'UI Preferences', field_count: 0, fields: [] })).toBe('general')
+    expect(matchCanonicalCategoryId({ id: 'build_release', title: 'Build & Quick Guide', field_count: 0, fields: [] })).toBe('build_release')
+    expect(matchCanonicalCategoryId({ id: 'suite_req', title: 'Required Suite Equipment', field_count: 0, fields: [] })).toBe('suite_req')
+    expect(matchCanonicalCategoryId({ id: 'board_memory_candle', title: 'Board, Memory & Candle', field_count: 0, fields: [] })).toBe('board_memory_candle')
   })
 })

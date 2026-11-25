@@ -169,13 +169,16 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     )
     setActBusy(null)
     if (!res.ok) {
-      setActFeedback({ kind: 'err', message: `${keeper} (${kind}) 실패: ${res.error.message}` })
+      const isRefused = res.error.status === 409
+      setActFeedback({
+        kind: isRefused ? 'warn' : 'err',
+        message: `${keeper} (${kind}) ${isRefused ? '거부됨' : '실패'}: ${res.error.message}`,
+      })
       return
     }
     const summary = typeof res.value === 'string' ? res.value : JSON.stringify(res.value)
-    const isRefused = typeof summary === 'string' && summary.includes('refused')
     setActFeedback({
-      kind: isRefused ? 'warn' : 'ok',
+      kind: 'ok',
       message: `${keeper} → ${kind}: ${summary}`,
     })
     resourceCache.invalidateTopic('memory')

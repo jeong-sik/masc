@@ -28,10 +28,13 @@ export const CANONICAL_SETTINGS_CATEGORIES: readonly { readonly id: string; read
   { id: 'board_memory_candle', title: 'Board, Memory & Candle' },
 ]
 
+const CANONICAL_CATEGORY_IDS = new Set(CANONICAL_SETTINGS_CATEGORIES.map((c) => c.id))
+
 export function matchCanonicalCategoryId(cat: ConfigCategory): string {
-  const id = cat.id.toLowerCase()
+  const id = cat.id.trim().toLowerCase()
+  if (CANONICAL_CATEGORY_IDS.has(id)) return id
   const title = cat.title.toLowerCase()
-  if (id.includes('general') || title.includes('general') || title.includes('ui')) return 'general'
+  if (id.includes('general') || title.includes('general') || /\bui\b/.test(title)) return 'general'
   if (id.includes('provider') || title.includes('provider') || title.includes('model')) return 'providers'
   if (id.includes('rout') || id.includes('lane') || id.includes('failover') || title.includes('routing')) return 'routing'
   if (id.includes('keeper') || id.includes('compan') || title.includes('keeper')) return 'keepers'

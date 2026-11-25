@@ -825,8 +825,10 @@ let parse_rfc3339_unix raw =
 let strip_entity_prefix (raw : string) : string =
   let trimmed = String.trim raw in
   if String.starts_with ~prefix:"claim:" trimmed
+     || String.starts_with ~prefix:"claim-" trimmed
   then String.sub trimmed 6 (String.length trimmed - 6)
   else if String.starts_with ~prefix:"conflict:" trimmed
+          || String.starts_with ~prefix:"conflict-" trimmed
   then String.sub trimmed 9 (String.length trimmed - 9)
   else trimmed
 ;;

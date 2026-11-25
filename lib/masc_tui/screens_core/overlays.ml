@@ -7,6 +7,22 @@ open Masc_tui_store
 
 let caps = Presenter.default_capabilities
 
+(* Single-pass O(N) grapheme-cluster-safe suffix slicer keeping display width <= limit. *)
+let suffix_within_width ~limit s =
+  if limit <= 0 then ""
+  else
+    let clean, clusters = Grapheme.segment s in
+    let rec take_rev acc_w start_i = function
+      | [] -> start_i
+      | (c : Grapheme.cluster) :: rest ->
+          if acc_w + c.cell_width <= limit then
+            take_rev (acc_w + c.cell_width) c.start_offset rest
+          else start_i
+    in
+    let clen = String.length clean in
+    let start_i = take_rev 0 clen (List.rev clusters) in
+    String.sub clean start_i (clen - start_i)
+
 (* ---------- Shared Modal Geometry Helpers ---------- *)
 
 let center_rect ~(outer : Rect.t) ~w ~h =
@@ -1208,19 +1224,9 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                   else
                     let budget = Int.max 1 (val_w - 1) in
                     let keep_before = Int.max 1 ((budget * 2) / 3) in
-                    let rec drop_prefix s =
-                      if Grapheme.display_width s <= keep_before then s
-                      else
-                        let sl = String.length s in
-                        if sl <= 0 then ""
-                        else
-                          let d = String.get_utf_8_uchar s 0 in
-                          let step = Int.max 1 (Uchar.utf_decode_length d) in
-                          drop_prefix (String.sub s step (sl - step))
-                    in
                     let head_s =
                       if Grapheme.display_width before > keep_before then
-                        "…" ^ drop_prefix before
+                        "…" ^ suffix_within_width ~limit:keep_before before
                       else before
                     in
                     Grapheme.truncate_to_width ~max_width:val_w
@@ -2364,17 +2370,7 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         if Grapheme.display_width s <= max_w then s
         else
           let keep = Int.max 1 (max_w - 1) in
-          let rec drop s =
-            if Grapheme.display_width s <= keep then s
-            else
-              let sl = String.length s in
-              if sl <= 0 then ""
-              else
-                let d = String.get_utf_8_uchar s 0 in
-                let step = Int.max 1 (Uchar.utf_decode_length d) in
-                drop (String.sub s step (sl - step))
-          in
-          "…" ^ drop s
+          "…" ^ suffix_within_width ~limit:keep s
       in
       let max_q_w = Int.max 8 (hdr_r.w / 2) in
       let filter_pill, filter_st =
@@ -5166,6 +5162,23 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 match detail_opt with Some d -> d.content | None -> ""
               in
               let body_h_est = Int.max 0 (content.h - 3) in
+              let is_json_art = Knowledge_store.is_json_artifact art in
+              let json_pretty_lines =
+                match
+                  ( model.knowledge.artifact_view_mode
+                  , Wire_knowledge.artifact_format_of_entry art )
+                with
+                | `Document, `Markdown
+                  when is_json_art && not (String.equal (String.trim raw_body) "") ->
+                    let pretty =
+                      match Yojson.Safe.from_string raw_body with
+                      | j -> Yojson.Safe.pretty_to_string j
+                      | exception Yojson.Json_error _ -> raw_body
+                    in
+                    Some (String.split_on_char '\n' pretty)
+                | `Document, (`Html | `Markdown) | `Raw_source, (`Html | `Markdown) ->
+                    None
+              in
               let total_lines_est =
                 if String.equal (String.trim raw_body) "" then 0
                 else
@@ -5177,18 +5190,13 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       List.length
                         (Html_doc.render_lines ~theme ~width:content.w ~lang
                            raw_body)
-                  | `Document, `Markdown ->
-                      if Knowledge_store.is_json_artifact art then
-                        let pretty =
-                          match Yojson.Safe.from_string raw_body with
-                          | j -> Yojson.Safe.pretty_to_string j
-                          | exception Yojson.Json_error _ -> raw_body
-                        in
-                        List.length (String.split_on_char '\n' pretty)
-                      else
-                        List.length
-                          (Markdown.render_lines ~theme ~width:content.w
-                             raw_body)
+                  | `Document, `Markdown -> (
+                      match json_pretty_lines with
+                      | Some lines -> List.length lines
+                      | None ->
+                          List.length
+                            (Markdown.render_lines ~theme ~width:content.w
+                               raw_body))
                   | `Raw_source, (`Html | `Markdown) ->
                       List.length (String.split_on_char '\n' raw_body)
               in
@@ -5263,39 +5271,32 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       ignore
                         (Html_doc.draw grid ~rect:body_r ~theme ~lang ~scroll
                            raw_body)
-                  | `Document, `Markdown ->
-                      let is_json = Knowledge_store.is_json_artifact art in
-                      if is_json then begin
-                        let pretty =
-                          match Yojson.Safe.from_string raw_body with
-                          | j -> Yojson.Safe.pretty_to_string j
-                          | exception Yojson.Json_error _ -> raw_body
-                        in
-                        let lines = String.split_on_char '\n' pretty in
-                        let max_s =
-                          Int.max 0 (List.length lines - Int.max 1 body_r.h)
-                        in
-                        let skip = Int.min max_s scroll in
-                        let by = ref body_r.y in
-                        List.iter
-                          (fun ln ->
-                            if !by < Rect.bottom body_r then begin
-                              let rr =
-                                Rect.make ~x:body_r.x ~y:!by ~w:body_r.w ~h:1
-                              in
-                              ignore
-                                (Cell_grid.put_text ~clip:rr grid ~x:body_r.x
-                                   ~y:!by ~style:pri_st
-                                   (Grapheme.truncate_to_width
-                                      ~max_width:body_r.w ln));
-                              incr by
-                            end)
-                          (Store_scroll.drop skip lines)
-                      end
-                      else
-                        ignore
-                          (Markdown.draw grid ~rect:body_r ~theme
-                             ~osc8:caps.osc8_hyperlinks ~scroll raw_body)
+                  | `Document, `Markdown -> (
+                      match json_pretty_lines with
+                      | Some lines ->
+                          let max_s =
+                            Int.max 0 (List.length lines - Int.max 1 body_r.h)
+                          in
+                          let skip = Int.min max_s scroll in
+                          let by = ref body_r.y in
+                          List.iter
+                            (fun ln ->
+                              if !by < Rect.bottom body_r then begin
+                                let rr =
+                                  Rect.make ~x:body_r.x ~y:!by ~w:body_r.w ~h:1
+                                in
+                                ignore
+                                  (Cell_grid.put_text ~clip:rr grid ~x:body_r.x
+                                     ~y:!by ~style:pri_st
+                                     (Grapheme.truncate_to_width
+                                        ~max_width:body_r.w ln));
+                                incr by
+                              end)
+                            (Store_scroll.drop skip lines)
+                      | None ->
+                          ignore
+                            (Markdown.draw grid ~rect:body_r ~theme
+                               ~osc8:caps.osc8_hyperlinks ~scroll raw_body))
                   | `Raw_source, _ ->
                       let lines = String.split_on_char '\n' raw_body in
                       let max_s =

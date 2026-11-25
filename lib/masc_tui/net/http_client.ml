@@ -144,13 +144,18 @@ let build_headers ?(extra = []) ?content_type ep =
   | Some tok -> add_if_missing "Authorization" (Some ("Bearer " ^ tok)));
   !acc
 
+let default_max_body_bytes = 16 * 1024 * 1024
+let max_error_json_parse_bytes = 65_536
+
 let parse_api_error_opt body =
-  match Yojson.Safe.from_string body with
-  | json -> (
-      match Wire_common.decode_api_error json with
-      | Ok err -> Some err
-      | Error _ -> None)
-  | exception Yojson.Json_error _ -> None
+  if String.length body > max_error_json_parse_bytes then None
+  else
+    match Yojson.Safe.from_string body with
+    | json -> (
+        match Wire_common.decode_api_error json with
+        | Ok err -> Some err
+        | Error _ -> None)
+    | exception Yojson.Json_error _ -> None
 
 let classify_response ep ~status ~body =
   if status >= 200 && status <= 299 then Ok body
@@ -307,8 +312,9 @@ let transport_error_of_failure ?path ?(streaming = false) = function
               after_sec = Some after_seconds;
               path = clean_path;
             }
-      | Masc_http_client.Pool.Body_limit_exceeded { status; _ } ->
-          Health.Http_status status
+      | Masc_http_client.Pool.Body_limit_exceeded { limit; _ } ->
+          Health.Protocol_error
+            (Printf.sprintf "response body exceeded %d byte limit" limit)
       | Masc_http_client.Pool.Exchange_failed msg -> Health.Protocol_error msg
       | Masc_http_client.Pool.Invalid_request _ ->
           Health.Protocol_error (Masc_http_client.Pool.request_error_to_string err))
@@ -322,8 +328,8 @@ let send_raw ~io ~clock ?(timeout_sec = 10.0) ?extra_headers ?content_type
   let headers = build_headers ?extra:extra_headers ?content_type ep in
   let result =
     Io_domain.run io (fun () ->
-        Masc_http_client.request ~clock ~timeout_sec ~method_ ~url ~headers
-          ?body ())
+        Masc_http_client.request ~clock ~timeout_sec
+          ~max_body_bytes:default_max_body_bytes ~method_ ~url ~headers ?body ())
   in
   match result with
   | Error failure ->
@@ -346,6 +352,15 @@ let get_raw ~io ~clock ?timeout_sec ?extra_headers ep ~path =
 let post_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~body ep ~path =
   send_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~method_:`POST
     ~body ep ~path
+
+let put_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~body ep ~path =
+  send_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~method_:`PUT
+    ~body ep ~path
+
+let delete_raw ~io ~clock ?timeout_sec ?extra_headers ?content_type ?body ep
+    ~path =
+  send_raw ~io ~clock ?timeout_sec ?extra_headers ?content_type ~method_:`DELETE
+    ?body ep ~path
 
 let post_stream ~io ~clock ?(idle_timeout_sec = 120.0) ?header_timeout_sec
     ?(extra_headers = []) ~content_type ~body ~on_response ~on_chunk ep ~path =

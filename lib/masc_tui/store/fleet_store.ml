@@ -1847,6 +1847,7 @@ let detach_chat_streams t =
     chat_queues = String_map.empty;
     esc_attempted_turn_tokens = String_map.empty;
     esc_attempted_operation_ids = String_map.empty;
+    interrupting_turn_tokens = String_map.empty;
     chat_streams =
       String_map.map
         (fun (b : chat_stream_buffer) ->

@@ -556,9 +556,21 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
         after.ask_modal
     in
     let runtime =
-      if after.runtime.fusion_launch_draft.submitting then
-        Runtime_store.set_fusion_submitting false after.runtime
-      else after.runtime
+      let r0 =
+        if after.runtime.fusion_launch_draft.submitting then
+          Runtime_store.set_fusion_submitting false after.runtime
+        else after.runtime
+      in
+      let mcp_call_result =
+        if Observed.is_loading r0.mcp_call_result then Observed.absent
+        else r0.mcp_call_result
+      in
+      {
+        r0 with
+        mcp_call_form = None;
+        mcp_call_result;
+        pending_addon_decl_path = None;
+      }
     in
     let knowledge =
       let k0 =

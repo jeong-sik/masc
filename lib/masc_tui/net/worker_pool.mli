@@ -1,13 +1,13 @@
 (** Cancellation-relay-safe CPU offload wrapper over {!Domain_pool}.
 
     Offloads heavy JSON decoding, Markdown parsing, temporal memory diffing,
-    and fuzzy search onto the single 4M-minor-heap Worker domain without ever
-    touching raw [Eio.Executor_pool] directly. *)
+    and fuzzy search onto the bounded multi-domain 4M-minor-heap Worker pool
+    without ever touching raw [Eio.Executor_pool] directly. *)
 
 type t
 
 val create : sw:Eio.Switch.t -> _ Eio.Domain_manager.t -> t
-(** Create a 1-domain Worker pool using {!Domains.start_worker_pool}. *)
+(** Create a bounded multi-domain (2..4) Worker pool using {!Domains.start_worker_pool}. *)
 
 val of_domain_pool : Domain_pool.t -> t
 val domain_count : t -> int

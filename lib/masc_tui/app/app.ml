@@ -170,6 +170,16 @@ let composer_popup_open (model : Model.t) =
   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
       true
 
+let cached_png_digest_ref : (string * string) option ref = ref None
+
+let cached_png_digest png =
+  match !cached_png_digest_ref with
+  | Some (prev_png, prev_hex) when prev_png == png -> prev_hex
+  | Some _ | None ->
+      let hex = Digest.to_hex (Digest.string png) in
+      cached_png_digest_ref := Some (png, hex);
+      hex
+
 let desired_memory_graphic ~(probe : Probe.observation) ~term_program ~in_tmux
     ~(model : Model.t) =
   if composer_popup_open model || Model.sidebar_drawer_open model then None
@@ -213,7 +223,7 @@ let desired_memory_graphic ~(probe : Probe.observation) ~term_program ~in_tmux
                 in
                 let key =
                   Printf.sprintf "%s|%s|%s|%dx%d|%s" keeper d.event_identity
-                    kind_s fit_cols fit_rows (Digest.to_hex (Digest.string png))
+                    kind_s fit_cols fit_rows (cached_png_digest png)
                 in
                 Some ({ key; rect; protocol }, png, pixel_size)
               else None
@@ -1039,100 +1049,111 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           Wake_bell.ring bell Wake_bell.Ui_bus
         in
 
-        let io = Io_domain.start ~sw ~env in
-        let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+        (* Inner cancellable work switch: keeps terminal/raw-mode teardown on
+           the outer [sw] strictly isolated from non-daemon HTTP/stream/voice
+           fibers. On normal exit, restart, or ANY uncaught UI-loop exception,
+           failing [work_sw] cancels in-flight fibers immediately instead of
+           blocking root [Switch.run] in [await_idle] while raw mode stays on. *)
+        let module Work_exit = struct
+          exception Shutdown
+        end in
+        let exit_code_ref = ref 1 in
+        (try
+           Eio.Switch.run @@ fun work_sw ->
+           let io = Io_domain.start ~sw:work_sw ~env in
+           let worker = Worker_pool.create ~sw:work_sw (Eio.Stdenv.domain_mgr env) in
 
-        let init_cols, init_rows = measure_terminal_size ~fallback:(80, 24) in
-        let init_wall_unix = Unix.gettimeofday () in
-        let tz_offset_sec = local_tz_offset_sec ~at:init_wall_unix () in
-        let model =
-          ref
-            (Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
-               ~theme_preset:cli.theme ~cli_lang_override:cli.lang_explicit
-               ~cli_theme_override:cli.theme_explicit ~tz_offset_sec
-               ~wall_unix:init_wall_unix ~tui_version:Build_version.current
-               ~tui_commit:Build_commit_generated.commit ())
-        in
-        let presenter =
-          Presenter.create ~cols:init_cols ~rows:init_rows ~capabilities:caps
-        in
-        apply_probe_observation ~presenter initial_obs;
-        let card_cache = Card.Cache.create () in
-        let scheduler = ref (Frame_scheduler.create ()) in
+           let init_cols, init_rows = measure_terminal_size ~fallback:(80, 24) in
+           let init_wall_unix = Unix.gettimeofday () in
+           let tz_offset_sec = local_tz_offset_sec ~at:init_wall_unix () in
+           let model =
+             ref
+               (Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
+                  ~theme_preset:cli.theme ~cli_lang_override:cli.lang_explicit
+                  ~cli_theme_override:cli.theme_explicit ~tz_offset_sec
+                  ~wall_unix:init_wall_unix ~tui_version:Build_version.current
+                  ~tui_commit:Build_commit_generated.commit ())
+           in
+           let presenter =
+             Presenter.create ~cols:init_cols ~rows:init_rows ~capabilities:caps
+           in
+           apply_probe_observation ~presenter initial_obs;
+           let card_cache = Card.Cache.create () in
+           let scheduler = ref (Frame_scheduler.create ()) in
 
-        let input_queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
-        let input_handle : input_reader_handle option ref =
-          ref
-            (Some
-               (start_input_reader ~sw ~clock ~signals ~bell ~input_queue
-                  ~probe_decoder ~on_observation:on_probe_observation ()))
-        in
+           let input_queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+           let input_handle : input_reader_handle option ref =
+             ref
+               (Some
+                  (start_input_reader ~sw:work_sw ~clock ~signals ~bell ~input_queue
+                     ~probe_decoder ~on_observation:on_probe_observation ()))
+           in
 
-        let should_quit = ref false in
-        let on_quit reason =
-          exit_reason := reason;
-          should_quit := true;
-          Wake_bell.ring bell Wake_bell.Terminate
-        in
-        let on_restart () =
-          restart_requested := true;
-          exit_reason := Exit_reason.Quit_key;
-          should_quit := true;
-          Wake_bell.ring bell Wake_bell.Terminate
-        in
+           let should_quit = ref false in
+           let on_quit reason =
+             exit_reason := reason;
+             should_quit := true;
+             Wake_bell.ring bell Wake_bell.Terminate
+           in
+           let on_restart () =
+             restart_requested := true;
+             exit_reason := Exit_reason.Quit_key;
+             should_quit := true;
+             Wake_bell.ring bell Wake_bell.Terminate
+           in
 
-        let editor_handoff : Cmd_executor.editor_handoff =
-          {
-            pause_terminal =
-              (fun () ->
-                clear_active_memory_graphic ();
-                (match !input_handle with
-                | Some h ->
-                    input_handle := None;
-                    stop_input_reader h
-                | None -> ());
-                Terminal_out.write (Terminal_out.leave_screen_seq ~keyboard);
-                ignore
-                  (Terminal_out.drain ~within_s:Terminal_out.handoff_limit_s
-                    : Terminal_out.drained);
-                restore_raw ();
-                Signals.suspend_sigtstp_guard signals);
-            resume_terminal =
-              (fun () ->
-                Signals.clear_interrupts signals;
-                Signals.resume_sigtstp_guard signals;
-                enter_raw ();
-                write_enter_screen ();
-                Presenter.invalidate presenter;
-                Card.Cache.clear card_cache;
-                input_handle :=
-                  Some
-                    (start_input_reader ~sw ~clock ~signals ~bell ~input_queue
-                       ~probe_decoder ~on_observation:on_probe_observation ());
-                scheduler :=
-                  Frame_scheduler.mark_dirty
-                    ~pace:Frame_scheduler.Pace_interactive !scheduler;
-                (* Trigger the main loop's resize path so any terminal geometry
-                   change during $EDITOR runs through Update.step and executes
-                   all resulting commands without dropping them. *)
-                Signals.record_resize signals;
-                Wake_bell.ring bell Wake_bell.Resize);
-          }
-        in
+           let editor_handoff : Cmd_executor.editor_handoff =
+             {
+               pause_terminal =
+                 (fun () ->
+                   clear_active_memory_graphic ();
+                   (match !input_handle with
+                   | Some h ->
+                       input_handle := None;
+                       stop_input_reader h
+                   | None -> ());
+                   Terminal_out.write (Terminal_out.leave_screen_seq ~keyboard);
+                   ignore
+                     (Terminal_out.drain ~within_s:Terminal_out.handoff_limit_s
+                       : Terminal_out.drained);
+                   restore_raw ();
+                   Signals.suspend_sigtstp_guard signals);
+               resume_terminal =
+                 (fun () ->
+                   Signals.clear_interrupts signals;
+                   Signals.resume_sigtstp_guard signals;
+                   enter_raw ();
+                   write_enter_screen ();
+                   Presenter.invalidate presenter;
+                   Card.Cache.clear card_cache;
+                   input_handle :=
+                     Some
+                       (start_input_reader ~sw:work_sw ~clock ~signals ~bell ~input_queue
+                          ~probe_decoder ~on_observation:on_probe_observation ());
+                   scheduler :=
+                     Frame_scheduler.mark_dirty
+                       ~pace:Frame_scheduler.Pace_interactive !scheduler;
+                   (* Trigger the main loop's resize path so any terminal geometry
+                      change during $EDITOR runs through Update.step and executes
+                      all resulting commands without dropping them. *)
+                   Signals.record_resize signals;
+                   Wake_bell.ring bell Wake_bell.Resize);
+             }
+           in
 
-        let bus =
-          Cmd_executor.create_bus
-            ~on_wake:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
-            ()
-        in
-        let executor =
-          Cmd_executor.create ~sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
-            ~on_editor_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
-            ~on_quit ~on_restart ()
-        in
-        Eio.Switch.on_release sw (fun () ->
-            Cmd_executor.shutdown ~preserve_owned_server:!restart_requested
-              executor);
+           let bus =
+             Cmd_executor.create_bus
+               ~on_wake:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
+               ()
+           in
+           let executor =
+             Cmd_executor.create ~sw:work_sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
+               ~on_editor_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
+               ~on_quit ~on_restart ()
+           in
+           Eio.Switch.on_release work_sw (fun () ->
+               Cmd_executor.shutdown ~preserve_owned_server:!restart_requested
+                 executor);
 
         let apply_msg ~now msg =
           let toggle_mouse =
@@ -1480,16 +1501,28 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             end
           done
         in
-        match run_loop () with
-        | () ->
-            if Exit_reason.is_normal !exit_reason then 0 else 1
-        | exception (Eio.Cancel.Cancelled _ as ex) ->
-            if Exit_reason.equal !exit_reason Exit_reason.Unrecorded then
-              exit_reason := Exit_reason.Exception "cancelled";
-            raise ex
-        | exception ex ->
-            exit_reason := Exit_reason.Exception (Printexc.to_string ex);
-            1)
+        let code =
+          match run_loop () with
+          | () ->
+              if Exit_reason.is_normal !exit_reason then 0 else 1
+          | exception (Eio.Cancel.Cancelled _ as ex) ->
+              if Exit_reason.equal !exit_reason Exit_reason.Unrecorded then
+                exit_reason := Exit_reason.Exception "cancelled";
+              raise ex
+          | exception ex ->
+              exit_reason := Exit_reason.Exception (Printexc.to_string ex);
+              1
+        in
+        exit_code_ref := code;
+        (* Fail [work_sw] first so in-flight HTTP/stream/input fibers cancel
+           immediately; [work_sw]'s [on_release] hook runs [Cmd_executor.shutdown]. *)
+        Eio.Switch.fail work_sw Work_exit.Shutdown
+        with
+        | Work_exit.Shutdown -> ()
+        | Eio.Exn.Multiple exns
+          when List.exists (fun (ex, _) -> ex == Work_exit.Shutdown) exns ->
+            ());
+        !exit_code_ref)
       in
       if !restart_requested then begin
         match Unix.execv Sys.executable_name Sys.argv with

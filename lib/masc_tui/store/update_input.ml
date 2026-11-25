@@ -114,13 +114,15 @@ let guard_settings_dirty_leave ~now (m : Model.t) act =
     , [] )
   else (next, commands)
 
+let max_embedded_json_bytes = 262_144
+let max_embedded_json_attempts = 8
 let extract_embedded_json_opt s =
   let trimmed = String.trim s in
   let len = String.length trimmed in
-  if len < 2 then None
+  if len < 2 || len > max_embedded_json_bytes then None
   else
-    let rec try_from i =
-      if i >= len then None
+    let rec try_from attempts i =
+      if i >= len || attempts >= max_embedded_json_attempts then None
       else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
         let rest = String.sub trimmed i (len - i) in
         match Yojson.Safe.from_string rest with
@@ -136,11 +138,11 @@ let extract_embedded_json_opt s =
             in
             Some (prefix, json)
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
-            try_from (i + 1)
-        | exception Yojson.Json_error _ -> try_from (i + 1)
-      else try_from (i + 1)
+            try_from (attempts + 1) (i + 1)
+        | exception Yojson.Json_error _ -> try_from (attempts + 1) (i + 1)
+      else try_from attempts (i + 1)
     in
-    try_from 0
+    try_from 0 0
 
 let patch_response_diff_row_count (resp : Wire_config.patch_response) =
   if resp.diff_hunks <> [] then

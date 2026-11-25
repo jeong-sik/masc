@@ -541,7 +541,18 @@ let first_info_token info =
   in
   String.sub trimmed 0 (stop 0)
 
-let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
+let md_render_cache_mu = Stdlib.Mutex.create ()
+let md_render_cache :
+    (Theme.preset * Theme.rgb * int * bool * string, rendered_line list)
+    Hashtbl.t =
+  Hashtbl.create 128
+
+let md_render_cache_bytes = ref 0
+let max_md_render_cache_entries = 256
+let max_md_render_cache_entry_bytes = 524_288
+let max_md_render_cache_total_bytes = 4 * 1024 * 1024
+
+let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   let width = Int.max 8 width in
   let bg = Color.of_rgb theme.surface_1 in
   let base_style = Typography.primary ~bg theme in
@@ -862,6 +873,32 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   walk raw_lines;
   List.rev !out
 
+let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
+  let width = Int.max 8 width in
+  let raw_bytes = String.length raw in
+  if raw_bytes > max_md_render_cache_entry_bytes then
+    render_lines_uncached ~theme ~width ~osc8 raw
+  else
+    let key = (theme.Theme.preset, theme.Theme.surface_1, width, osc8, raw) in
+    match
+      Stdlib.Mutex.protect md_render_cache_mu (fun () ->
+          Hashtbl.find_opt md_render_cache key)
+    with
+    | Some hit -> hit
+    | None ->
+        let rendered = render_lines_uncached ~theme ~width ~osc8 raw in
+        Stdlib.Mutex.protect md_render_cache_mu (fun () ->
+            if
+              Hashtbl.length md_render_cache >= max_md_render_cache_entries
+              || !md_render_cache_bytes + raw_bytes > max_md_render_cache_total_bytes
+            then begin
+              Hashtbl.clear md_render_cache;
+              md_render_cache_bytes := 0
+            end;
+            if not (Hashtbl.mem md_render_cache key) then
+              md_render_cache_bytes := !md_render_cache_bytes + raw_bytes;
+            Hashtbl.replace md_render_cache key rendered);
+        rendered
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
     raw =
   if Rect.is_empty rect then 0

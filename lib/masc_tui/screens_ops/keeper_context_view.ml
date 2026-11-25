@@ -1981,32 +1981,6 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                           trunc_s));
                   incr ry
                 end;
-                let tree_json =
-                  let output_json =
-                    match Keeper_context_store.tool_result_for_selected_call st with
-                    | Some (Wire_keeper_context.Tool_result_page p) -> (
-                        match Yojson.Safe.from_string p.content with
-                        | j -> Wire_keeper_context.unfold_json_strings j
-                        | exception Yojson.Json_error _ -> `String p.content)
-                    | Some Wire_keeper_context.Tool_result_pending ->
-                        `String "(tool result pending)"
-                    | Some (Wire_keeper_context.Tool_result_unavailable r) ->
-                        `String ("(unavailable: " ^ r ^ ")")
-                    | None -> (
-                        match Yojson.Safe.from_string call.output with
-                        | j -> Wire_keeper_context.unfold_json_strings j
-                        | exception Yojson.Json_error _ -> `String call.output)
-                  in
-                  let unfolded_in =
-                    Wire_keeper_context.unfold_json_strings call.input
-                  in
-                  Ops_common.scrub_json_secrets
-                    (`Assoc
-                      [
-                        ("input", unfolded_in);
-                        ("output", output_json);
-                      ])
-                in
                 let tree_r =
                   Rect.make ~x:right_r.x ~y:!ry ~w:right_r.w
                     ~h:(Int.max 0 (rbot - !ry))
@@ -2017,7 +1991,7 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                       ~endpoint:"/tool-result"
                   else
                     let lines =
-                      Json_tree.flatten ~max_depth:5 ~redact_secrets:true tree_json
+                      Chat_transcript.flattened_tool_call_lines st call
                     in
                     ignore
                       (Json_tree.draw grid ~rect:tree_r ~theme

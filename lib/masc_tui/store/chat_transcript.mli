@@ -217,3 +217,12 @@ val max_scroll_for_model_in :
   embedded:bool -> model:Model.t -> keeper:string -> int
 (** Parameterized {!max_scroll_for_model} for both Dive ([embedded = false])
     and [4 Keepers] Split [pane 1] ([embedded = true]). *)
+
+val flattened_tool_call_lines :
+  Keeper_context_store.keeper_state ->
+  Wire_keeper_context.tool_call_entry ->
+  Masc_tui_ui.Json_tree.line list
+(** Cached unfolded + secret-scrubbed + flattened {!Masc_tui_ui.Json_tree.line}
+    rows for the selected tool call, shared between scroll clamping and frame
+    rendering so large tool payloads are not re-parsed on every keypress or
+    frame. *)

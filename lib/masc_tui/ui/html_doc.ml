@@ -477,7 +477,19 @@ let pad_cell ~width text =
   let w = Grapheme.display_width clipped in
   if w >= width then clipped else clipped ^ String.make (width - w) ' '
 
-let render_lines ~(theme : Theme.t) ~width ~lang ?(search_query = "") source =
+let html_render_cache_mu = Stdlib.Mutex.create ()
+let html_render_cache :
+    (Theme.preset * Theme.rgb * int * Say.lang * string * string, rendered_line list)
+    Hashtbl.t =
+  Hashtbl.create 32
+
+let html_render_cache_bytes = ref 0
+let max_html_render_cache_entries = 64
+let max_html_render_cache_entry_bytes = 524_288
+let max_html_render_cache_total_bytes = 4 * 1024 * 1024
+
+let render_lines_uncached ~(theme : Theme.t) ~width ~lang ?(search_query = "")
+    source =
   let width = max 12 width in
   let bg = Color.of_rgb theme.surface_1 in
   let pre_bg = Color.of_rgb theme.surface_0 in
@@ -610,6 +622,37 @@ let render_lines ~(theme : Theme.t) ~width ~lang ?(search_query = "") source =
       in
       [ mk sep_st empty_msg ]
   | _ -> rendered
+
+let render_lines ~(theme : Theme.t) ~width ~lang ?(search_query = "") source =
+  let width = max 12 width in
+  let src_bytes = String.length source in
+  if src_bytes > max_html_render_cache_entry_bytes then
+    render_lines_uncached ~theme ~width ~lang ~search_query source
+  else
+    let key =
+      (theme.Theme.preset, theme.Theme.surface_1, width, lang, search_query, source)
+    in
+    match
+      Stdlib.Mutex.protect html_render_cache_mu (fun () ->
+          Hashtbl.find_opt html_render_cache key)
+    with
+    | Some hit -> hit
+    | None ->
+        let rendered =
+          render_lines_uncached ~theme ~width ~lang ~search_query source
+        in
+        Stdlib.Mutex.protect html_render_cache_mu (fun () ->
+            if
+              Hashtbl.length html_render_cache >= max_html_render_cache_entries
+              || !html_render_cache_bytes + src_bytes > max_html_render_cache_total_bytes
+            then begin
+              Hashtbl.clear html_render_cache;
+              html_render_cache_bytes := 0
+            end;
+            if not (Hashtbl.mem html_render_cache key) then
+              html_render_cache_bytes := !html_render_cache_bytes + src_bytes;
+            Hashtbl.replace html_render_cache key rendered);
+        rendered
 
 let search_match_lines ~theme ~width ~lang ~query source =
   let lines = render_lines ~theme ~width ~lang ~search_query:query source in

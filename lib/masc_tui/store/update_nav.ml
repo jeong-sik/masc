@@ -11176,36 +11176,8 @@ let apply_move (m : Model.t) dir =
                     match Keeper_context_store.selected_tool_call ks with
                     | None -> 0
                     | Some call ->
-                        let output_json =
-                          match
-                            Keeper_context_store.tool_result_for_selected_call ks
-                          with
-                          | Some (Wire_keeper_context.Tool_result_page p) -> (
-                              match Yojson.Safe.from_string p.content with
-                              | j -> Wire_keeper_context.unfold_json_strings j
-                              | exception Yojson.Json_error _ ->
-                                  `String p.content)
-                          | Some Wire_keeper_context.Tool_result_pending ->
-                              `String "(tool result pending)"
-                          | Some
-                              (Wire_keeper_context.Tool_result_unavailable r) ->
-                              `String ("(unavailable: " ^ r ^ ")")
-                          | None -> (
-                              match Yojson.Safe.from_string call.output with
-                              | j -> Wire_keeper_context.unfold_json_strings j
-                              | exception Yojson.Json_error _ ->
-                                  `String call.output)
-                        in
-                        let unfolded_in =
-                          Wire_keeper_context.unfold_json_strings call.input
-                        in
-                        let tree_json =
-                          `Assoc
-                            [ ("input", unfolded_in); ("output", output_json) ]
-                        in
                         let lines =
-                          Masc_tui_ui.Json_tree.flatten ~max_depth:5
-                            ~redact_secrets:true tree_json
+                          Chat_transcript.flattened_tool_call_lines ks call
                         in
                         let tree_h = max 1 (right_r.h - 2) in
                         max 0 (List.length lines - tree_h)

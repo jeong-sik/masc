@@ -209,13 +209,22 @@ let rec read_waiting_inventory ~name (config : Workspace.config) =
        Option.iter (fun outcome -> ignore (Eio.Promise.await outcome)) previous;
        Eio.Fiber.check ();
        Domain_pool_ref.submit_io_or_inline ~name (fun () ->
-         Mutex.protect waiting_inventory_lock (fun () ->
-           Hashtbl.replace waiting_inventory_reads key (Reading (flight, None)));
-         read_keeper_census_and_waiting config)
+         let owns_slot =
+           Mutex.protect waiting_inventory_lock (fun () ->
+             match Hashtbl.find_opt waiting_inventory_reads key with
+             | Some (Queued queued) when queued == flight ->
+               Hashtbl.replace waiting_inventory_reads key (Reading (flight, None));
+               true
+             | Some (Queued _ | Reading _) | None -> false)
+         in
+         if owns_slot then Some (read_keeper_census_and_waiting config) else None)
      with
-     | snapshot ->
+     | Some snapshot ->
        finish (Observed snapshot);
        snapshot
+     | None ->
+       finish Released;
+       read_waiting_inventory ~name config
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        finish (if Eio.Fiber.is_cancelled () then Released else Failed (exn, backtrace));

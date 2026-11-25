@@ -23538,6 +23538,45 @@ let test_uncached_knowledge_jumps () =
     (detail_id now_listed);
   Alcotest.(check (list string)) "and no thread is refetched" []
     (thread_gets now_listed_cmds);
+  (* List Up on the first row and Down on the last row leave the selection
+     where it is, so they must not swap the target for the list post. *)
+  let press (m : Model.t) k = Update.step ~now:t0 m (Msg.Key_event (key k)) in
+  let on_list = { shown with nav = { shown.nav with pane_index = 0 } } in
+  List.iter
+    (fun (label, k) ->
+      let pressed, pressed_cmds = press on_list k in
+      Alcotest.(check (option string)) (label ^ " at the list edge keeps the target")
+        (Some "post-far") (detail_id pressed);
+      Alcotest.(check (list string)) (label ^ " at the list edge asks for no thread") []
+        (thread_gets pressed_cmds))
+    [ ("Up", Keymap.Input.Up); ("Down", Keymap.Input.Down) ];
+  (* The target's comments scroll in the detail pane. *)
+  let long_comment : Wire_knowledge.board_comment =
+    {
+      Wire_knowledge.id = "c-far";
+      post_id = "post-far";
+      parent_id = None;
+      author = "beta";
+      body = String.concat "\n\n" (List.init 50 (Printf.sprintf "Paragraph %d"));
+      score = 1;
+      created_at_unix = 110.0;
+    }
+  in
+  let with_comments = thread_reply jumped "post-far" (Ok (far, [ long_comment ])) in
+  let on_detail_pane =
+    { with_comments with nav = { with_comments.nav with pane_index = 1 } }
+  in
+  let comments_view, _ =
+    Update.step ~now:t0 on_detail_pane (Msg.Key_event (char_key "v"))
+  in
+  Alcotest.(check bool) "the detail switched to the target's comments" true
+    (comments_view.knowledge.thread_view = Knowledge_store.Thread_comments);
+  let scrolled, _ = press comments_view Keymap.Input.Down in
+  Alcotest.(check bool) "Down scrolls the target's comment" true
+    (scrolled.knowledge.thread_comment_scroll > 0);
+  let back, _ = press scrolled Keymap.Input.Up in
+  Alcotest.(check int) "and Up scrolls it back"
+    comments_view.knowledge.thread_comment_scroll back.knowledge.thread_comment_scroll;
   (* Wiki: the jump lands before the index. *)
   let summary slug : Wire_knowledge.wiki_page_summary =
     {

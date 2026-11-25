@@ -12487,10 +12487,10 @@ let apply_move (m : Model.t) dir =
                           true
                       | Knowledge_store.View_diff -> false
                     in
+                    (* The Board post the detail shows: an uncached jump
+                       target until the list selection moves off its row. *)
                     let prev_post_id =
-                      match Knowledge_store.selected_post m.knowledge with
-                      | Some p -> Some p.id
-                      | None -> None
+                      Knowledge_store.board_detail_post_id m.knowledge
                     in
                     let prev_art_id =
                       match Knowledge_store.selected_artifact m.knowledge with
@@ -12523,10 +12523,10 @@ let apply_move (m : Model.t) dir =
                         && m.knowledge.thread_view
                            = Knowledge_store.Thread_comments
                       then
-                        match Knowledge_store.selected_post m.knowledge with
-                        | Some p -> (
+                        match Knowledge_store.board_detail_post_id m.knowledge with
+                        | Some post_id -> (
                             match Observed.to_option m.knowledge.active_thread with
-                            | Some (tp, _ :: _) when String.equal tp.id p.id ->
+                            | Some (tp, _ :: _) when String.equal tp.id post_id ->
                                 let max_scroll = knowledge_detail_max_scroll m in
                                 let thread_comment_scroll =
                                   Store_scroll.clamp_scroll ~max_scroll
@@ -12597,16 +12597,16 @@ let apply_move (m : Model.t) dir =
                               (next0, cmds)
                           | None -> (next0, []))
                       | Nav.Knowledge_board, 0 -> (
-                          match Knowledge_store.selected_post knowledge with
-                          | Some p ->
+                          match Knowledge_store.board_detail_post_id knowledge with
+                          | Some post_id ->
                               let thread_matches =
                                 match knowledge.active_thread with
                                 | Observed.Value { data = tp, _; stale = false; _ } ->
-                                    String.equal tp.id p.id
+                                    String.equal tp.id post_id
                                 | Observed.Failed { retryable = false; _ }
                                 | Observed.Loading _ ->
                                     Option.equal String.equal
-                                      knowledge.active_thread_target (Some p.id)
+                                      knowledge.active_thread_target (Some post_id)
                                 | Observed.Value { stale = true; _ }
                                 | Observed.Absent
                                 | Observed.Unreported
@@ -12616,12 +12616,12 @@ let apply_move (m : Model.t) dir =
                               if
                                 (not
                                    (Option.equal String.equal prev_post_id
-                                      (Some p.id)))
+                                      (Some post_id)))
                                 || not thread_matches
                               then
                                 let knowledge' =
                                   Knowledge_store.mark_thread_loading
-                                    ~post_id:p.id
+                                    ~post_id
                                     ~since_ns:m.freshness.last_mono knowledge
                                 in
                                 ( { next0 with knowledge = knowledge' }
@@ -12631,7 +12631,7 @@ let apply_move (m : Model.t) dir =
                                         epoch = m.epoch;
                                         req =
                                           Cmd.Get_board_thread
-                                            { post_id = p.id; comment_limit = Some 100 };
+                                            { post_id; comment_limit = Some 100 };
                                       };
                                   ] )
                               else (next0, [])

@@ -491,6 +491,24 @@ let handle_delete ~reader ~tool_name ~start_time args : Tool_result.result =
     | Error e -> refused e)
 ;;
 
+let post_state_change_error ~failure_prefix ~tool_name ~start_time = function
+  | (Board.Unauthorized _ | Board.Post_not_found _) as error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | ( Board.Invalid_id _
+    | Board.Comment_not_found _
+    | Board.Io_error _
+    | Board.Validation_error _
+    | Board.Already_voted _
+    | Board.Already_exists _
+    | Board.Recipient_lookup_failed _ ) as error ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      (Printf.sprintf "%s failed: %s" failure_prefix
+         (Board_tool_format.board_error_to_string error))
+;;
+
 (** Close a post (task-1758/#39356). The author or a configured Board
     moderator uses this agent-facing tool; the operator uses the [CanAdmin]
     dashboard route. The storage boundary requires a non-empty [summary]
@@ -547,14 +565,8 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         ~data:(`String (Printf.sprintf "Closed post %s" post_id))
         ()
-    | Error ((Board.Unauthorized _ | Board.Post_not_found _) as e) ->
-      Board_tool_format.error_of_board_error ~tool_name ~start_time e
-    | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Close failed: %s" (Board_tool_format.board_error_to_string e)))
+    | Error error ->
+      post_state_change_error ~failure_prefix:"Close" ~tool_name ~start_time error)
 ;;
 
 (** Reopen a closed post (task-1758/#39356). The author or a configured
@@ -581,14 +593,8 @@ let handle_reopen ~reader ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         ~data:(`String (Printf.sprintf "Reopened post %s" post_id))
         ()
-    | Error ((Board.Unauthorized _ | Board.Post_not_found _) as e) ->
-      Board_tool_format.error_of_board_error ~tool_name ~start_time e
-    | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Reopen failed: %s" (Board_tool_format.board_error_to_string e)))
+    | Error error ->
+      post_state_change_error ~failure_prefix:"Reopen" ~tool_name ~start_time error)
 ;;
 
 let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.result =

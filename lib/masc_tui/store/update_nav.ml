@@ -8213,7 +8213,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
   in
   match k.active_tab with
   | Nav.Knowledge_board -> (
-      match Knowledge_store.selected_post k with
+      match Knowledge_store.board_detail_post k with
       | None -> 0
       | Some p ->
           let right_rect =

@@ -647,7 +647,9 @@ let selected_post t =
 
 (* A jump to a post the feed does not list leaves the list selection where it
    was and records the post as [active_thread_target]. That target, not the
-   list selection, is what the Board detail shows until the selection moves. *)
+   list selection, is what the Board detail shows until the list selection
+   moves to another row (which clears the target) or a feed that lists the
+   post arrives ([apply_board] then selects its row). *)
 let uncached_thread_target t =
   match t.active_thread_target with
   | Some post_id ->
@@ -1804,10 +1806,17 @@ let project_memory_reading_lines ~theme ~width ~lang ~now_unix entry =
   List.rev !acc
 
 let apply_board ~observed_at feed t =
-  let prev_id =
+  (* Keep the row the reader was on. An uncached jump target comes first, so a
+     feed that now lists it selects its row and the detail keeps showing it;
+     the list selection is the fallback. *)
+  let prev_ids =
     if Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_board then
-      Option.map (fun (p : Wire_knowledge.board_post) -> p.id) (selected_post t)
-    else None
+      List.filter_map Fun.id
+        [
+          uncached_thread_target t;
+          Option.map (fun (p : Wire_knowledge.board_post) -> p.id) (selected_post t);
+        ]
+    else []
   in
   let next = { t with board = Observed.value ~observed_at feed } in
   if not (Nav.equal_knowledge_tab next.active_tab Nav.Knowledge_board) then next
@@ -1815,7 +1824,7 @@ let apply_board ~observed_at feed t =
     let display = board_display_posts next in
     let len = List.length display in
     let selected_index =
-      match Option.bind prev_id (fun id -> index_of_post_id id display) with
+      match List.find_map (fun id -> index_of_post_id id display) prev_ids with
       | Some idx -> idx
       | None -> clamp_index len next.selected_index
     in
@@ -2752,7 +2761,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
               in
               match t.active_tab with
               | Nav.Knowledge_board -> (
-                  match selected_post t with
+                  match board_detail_post t with
                   | Some p ->
                       max 0 (List.length (String.split_on_char '\n' p.body) - vis)
                   | None -> 0)

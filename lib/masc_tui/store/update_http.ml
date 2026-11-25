@@ -1205,17 +1205,20 @@ let apply_http_reply ~now (m : Model.t) reply =
           && Nav.equal_knowledge_tab next0.knowledge.active_tab
                Nav.Knowledge_board
         then
-          match Knowledge_store.selected_post next0.knowledge with
+          (* Settle the post the detail shows, so a feed that still lacks an
+             uncached jump target keeps that target instead of the list
+             selection. *)
+          match Knowledge_store.board_detail_post_id next0.knowledge with
           | None -> (next0, [])
-          | Some p ->
+          | Some post_id ->
               let already_settled =
                 match next0.knowledge.active_thread with
                 | Observed.Value { data = tp, _; stale = false; _ } ->
-                    String.equal tp.id p.id
+                    String.equal tp.id post_id
                 | Observed.Failed { retryable = false; _ }
                 | Observed.Loading _ ->
                     Option.equal String.equal
-                      next0.knowledge.active_thread_target (Some p.id)
+                      next0.knowledge.active_thread_target (Some post_id)
                 | Observed.Value { stale = true; _ }
                 | Observed.Absent
                 | Observed.Unreported
@@ -1225,7 +1228,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               if already_settled then (next0, [])
               else
                 let knowledge =
-                  Knowledge_store.mark_thread_loading ~post_id:p.id
+                  Knowledge_store.mark_thread_loading ~post_id
                     ~since_ns:now next0.knowledge
                 in
                 ( { next0 with knowledge }
@@ -1235,7 +1238,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                         epoch = m.epoch;
                         req =
                           Cmd.Get_board_thread
-                            { post_id = p.id; comment_limit = Some 100 };
+                            { post_id; comment_limit = Some 100 };
                       };
                   ] )
         else (next0, [])

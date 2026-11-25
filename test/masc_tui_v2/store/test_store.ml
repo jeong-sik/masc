@@ -23482,6 +23482,62 @@ let test_uncached_knowledge_jumps () =
   in
   Alcotest.(check (option string)) "moving the selection shows the listed post"
     (Some "post-next") (detail_id moved);
+  (* A feed reply before or after the target thread reply keeps the target:
+     the jump itself and an SSE [Board_changed] both refetch the feed. *)
+  let feed_reply (m : Model.t) posts =
+    Update.step ~now:t0 m
+      (Msg.Http_reply
+         {
+           epoch = m.epoch;
+           reply =
+             Msg.Reply_board_feed
+               (Ok
+                  {
+                    Wire_knowledge.posts;
+                    count = List.length posts;
+                    sort_by = "recent";
+                    signal_only = true;
+                  });
+         })
+  in
+  let fed_first, fed_first_cmds = feed_reply jumped [ listed ] in
+  Alcotest.(check (list string)) "jump, feed: the feed asks for no other thread" []
+    (thread_gets fed_first_cmds);
+  Alcotest.(check (option string)) "jump, feed: the target stays the detail"
+    (Some "post-far")
+    (Knowledge_store.board_detail_post_id fed_first.knowledge);
+  let fed_then_thread = thread_reply fed_first "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "jump, feed, thread: the detail shows the target"
+    (Some "post-far") (detail_id fed_then_thread);
+  Alcotest.(check (option string)) "jump, feed, thread: comment acts on the target"
+    (Some "post-far") (crud_id fed_then_thread);
+  let thread_then_fed, thread_then_fed_cmds = feed_reply shown [ listed ] in
+  Alcotest.(check (list string)) "jump, thread, feed: the feed asks for no other thread"
+    [] (thread_gets thread_then_fed_cmds);
+  Alcotest.(check (option string)) "jump, thread, feed: the detail shows the target"
+    (Some "post-far") (detail_id thread_then_fed);
+  Alcotest.(check (option string)) "jump, thread, feed: comment acts on the target"
+    (Some "post-far") (crud_id thread_then_fed);
+  let armed, _ =
+    Update.step ~now:t0
+      { thread_then_fed with nav = { thread_then_fed.nav with pane_index = 1 } }
+      (Msg.Key_event (char_key "+"))
+  in
+  Alcotest.(check (option string)) "a vote in the detail arms on the target"
+    (Some "post-far")
+    (match armed.knowledge.armed_vote with
+     | Some (Knowledge_store.Vote_post id, _) -> Some id
+     | Some (Knowledge_store.Vote_comment _, _) | None -> None);
+  let now_listed, now_listed_cmds = feed_reply shown [ listed; far ] in
+  Alcotest.(check (option string)) "a feed that lists the target selects its row"
+    (Some "post-far")
+    (Option.map
+       (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post now_listed.knowledge));
+  Alcotest.(check (option string)) "and the detail keeps the target" (Some "post-far")
+    (detail_id now_listed);
+  Alcotest.(check (list string)) "and no thread is refetched" []
+    (thread_gets now_listed_cmds);
   (* Wiki: the jump lands before the index. *)
   let summary slug : Wire_knowledge.wiki_page_summary =
     {

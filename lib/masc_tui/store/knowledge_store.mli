@@ -587,8 +587,10 @@ val selected_post : t -> Wire_knowledge.board_post option
 
 val board_detail_post_id : t -> string option
 (** The post the Board detail shows: an [active_thread_target] the feed does
-    not list (set by a jump to an uncached post) until the selection moves,
-    otherwise the list selection. *)
+    not list (set by a jump to an uncached post) until the list selection moves
+    to another row or a feed that lists it arrives ({!apply_board} then selects
+    its row), otherwise the list selection. Feed and thread replies, the
+    detail scroll bound, comment stepping, votes and Board CRUD all read it. *)
 
 val board_detail_post : t -> Wire_knowledge.board_post option
 (** The post of {!board_detail_post_id}. For an uncached jump target it is the

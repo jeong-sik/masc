@@ -7650,10 +7650,10 @@ and execute_action ~now (m : Model.t) action =
                   when Nav.equal_knowledge_tab m.knowledge.active_tab
                          Nav.Knowledge_board
                        && Model.is_board_detail_active m -> (
-                    match Knowledge_store.selected_post m.knowledge with
-                    | Some p ->
+                    match Knowledge_store.board_detail_post_id m.knowledge with
+                    | Some post_id ->
                         let knowledge =
-                          Knowledge_store.step_thread_comment ~post_id:p.id
+                          Knowledge_store.step_thread_comment ~post_id
                             ~delta m.knowledge
                         in
                         ({ m with knowledge }, [])
@@ -8739,11 +8739,15 @@ and execute_action ~now (m : Model.t) action =
                 && Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_board
               then
-                Option.bind (Knowledge_store.selected_post m.knowledge)
-                  (fun (p : Wire_knowledge.board_post) ->
-                    if Model.is_board_detail_active m then
-                      thread_vote_target ~post_id:p.id m.knowledge
-                    else Some (Knowledge_store.Vote_post p.id))
+                if Model.is_board_detail_active m then
+                  Option.bind
+                    (Knowledge_store.board_detail_post_id m.knowledge)
+                    (fun post_id -> thread_vote_target ~post_id m.knowledge)
+                else
+                  Option.map
+                    (fun (p : Wire_knowledge.board_post) ->
+                      Knowledge_store.Vote_post p.id)
+                    (Knowledge_store.selected_post m.knowledge)
               else None
       in
       match target_opt with

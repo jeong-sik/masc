@@ -540,63 +540,21 @@ let max_render_cache_entries = 512
 
 let tool_output_cache_mu = Stdlib.Mutex.create ()
 let tool_output_cache :
-    (Slash.tools_mode * int * string, string list * int) Hashtbl.t =
+    (string * Theme.preset * Theme.rgb * Theme.rgb * Slash.tools_mode * int,
+     Markdown.rendered_line list * int) Hashtbl.t =
   Hashtbl.create 128
 
-let tool_output_display_lines ~tools_mode ~width raw =
-  let key = (tools_mode, width, raw) in
+let tool_output_display_lines ~(theme : Theme.t) ~tools_mode ~width raw =
+  let key = (raw, theme.preset, theme.surface_0, theme.text_secondary, tools_mode, width) in
   match
     Stdlib.Mutex.protect tool_output_cache_mu (fun () ->
         Hashtbl.find_opt tool_output_cache key)
   with
   | Some hit -> hit
   | None ->
-      let trimmed = String.trim raw in
-      let max_preview, max_depth =
-        match tools_mode with
-        | Slash.Tools_compact -> (0, 2)
-        | Slash.Tools_results -> (8, 2)
-        | Slash.Tools_full -> (48, 4)
-      in
-      let result =
-        if String.equal trimmed "" || max_preview <= 0 then ([], 0)
-        else
-          let body_w = Int.max 12 (width - 6) in
-          let all_lines =
-            match Yojson.Safe.from_string trimmed with
-            | json ->
-                let scrubbed = scrub_json_secrets json in
-                let flat =
-                  Json_tree.flatten ~max_depth ~redact_secrets:true scrubbed
-                in
-                let string_of_val = function
-                  | Json_tree.Object_node { count } -> Printf.sprintf "{%d keys}" count
-                  | Json_tree.Array_node { count } -> Printf.sprintf "[%d items]" count
-                  | Json_tree.String_val s -> s
-                  | Json_tree.Redacted_secret -> "[redacted]"
-                  | Json_tree.Int_val n -> Int.to_string n
-                  | Json_tree.Float_val f -> Printf.sprintf "%g" f
-                  | Json_tree.Bool_val b -> if b then "true" else "false"
-                  | Json_tree.Null_val -> "null"
-                in
-                List.map
-                  (fun (ln : Json_tree.line) ->
-                    let ind = String.make (ln.depth * 2) ' ' in
-                    let vs = string_of_val ln.value in
-                    match ln.key with
-                    | Some k -> Printf.sprintf "%s%s: %s" ind k vs
-                    | None -> ind ^ vs)
-                  flat
-            | exception Yojson.Json_error _ ->
-                let scrubbed = scrub_secrets_in_text trimmed in
-                wrap_plain_lines ~width:body_w scrubbed
-          in
-          let shown = List.take max_preview all_lines in
-          let hidden = List.length all_lines - List.length shown in
-          (shown, hidden)
-      in
+      let result = tool_output_display_lines_uncached ~theme ~tools_mode ~width raw in
       Stdlib.Mutex.protect tool_output_cache_mu (fun () ->
-          if String.length trimmed <= 524_288 then begin
+          if String.length raw <= 524_288 then begin
             if Hashtbl.length tool_output_cache >= max_render_cache_entries then
               Hashtbl.clear tool_output_cache;
             Hashtbl.replace tool_output_cache key result

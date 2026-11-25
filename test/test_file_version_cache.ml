@@ -171,12 +171,26 @@ let test_a_write_seen_only_through_forget_is_read () =
   check string "the next read returns the rewritten file" "two" (load cache path ~decode)
 ;;
 
-(* A writer that never forgets rewrites the file under a new modification
-   time. The next decode reads that, but a forget of another file lands while
-   it runs, so its value is not kept. The file then goes back to its first
-   version with other bytes. The entry kept for that first version must be
-   gone by then, or it answers for the new bytes. *)
-let test_a_declined_keep_drops_an_entry_for_another_version () =
+let test_an_unrelated_write_leaves_a_fill_kept () =
+  with_file (fun path -> with_file (fun other ->
+    write path "one";
+    write other "a";
+    let cache = File_version_cache.create () in
+    let runs = ref 0 in
+    let decode () =
+      incr runs;
+      replace other "b";
+      File_version_cache.forget cache other;
+      Ok (read path)
+    in
+    ignore (load cache path ~decode : string);
+    check string "reuses the unchanged file" "one" (load cache path ~decode);
+    check int "one decode despite a write to the other file" 1 !runs))
+;;
+
+(* After observing a distinct version, the old value is gone even when the
+   newer read fails and the original file stamp later reappears. *)
+let test_a_failed_fill_drops_the_previous_version () =
   with_file
   @@ fun path ->
   write path "one";
@@ -185,14 +199,13 @@ let test_a_declined_keep_drops_an_entry_for_another_version () =
   let runs = ref 0 in
   let decode () =
     incr runs;
-    let seen = read path in
-    if !runs = 2 then File_version_cache.forget cache (path ^ ".other");
-    Ok seen
+    if !runs = 2 then Error () else Ok (read path)
   in
   check string "the first version is kept" "one" (load cache path ~decode);
   write path "two";
   pin_mtime path (pinned_mtime +. 1.0);
-  check string "the rewrite is read" "two" (load cache path ~decode);
+  check bool "the changed file was unreadable" true
+    (Result.is_error (File_version_cache.load cache path ~decode));
   write path "six";
   pin_mtime path pinned_mtime;
   check string "the first version with other bytes is read, not answered from the entry"
@@ -218,6 +231,27 @@ let test_an_error_is_not_kept () =
   check bool "the first read fails" true (failed ());
   check bool "the second read fails" true (failed ());
   check int "decoded every time" 2 !runs
+;;
+
+let test_a_changed_file_drops_a_concurrent_fill () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  pin_mtime path pinned_mtime;
+  let cache = File_version_cache.create () in
+  let decode, runs = counting_decode path in
+  let overlapping_read () =
+    let old = load cache path ~decode in
+    write path "two";
+    pin_mtime path (pinned_mtime +. 1.0);
+    Ok old
+  in
+  check string "the overlapping read returns its own observation" "one"
+    (load cache path ~decode:overlapping_read);
+  write path "six";
+  pin_mtime path pinned_mtime;
+  check string "the earlier stamp does not restore a stale fill" "six" (load cache path ~decode);
+  check int "the restored stamp is decoded" 2 !runs
 ;;
 
 let test_a_missing_file_is_decoded_every_time () =
@@ -311,8 +345,12 @@ let () =
             test_a_write_during_the_decode_is_not_kept
         ; test_case "a write seen only through forget is read" `Quick
             test_a_write_seen_only_through_forget_is_read
-        ; test_case "a declined keep drops an entry for another version" `Quick
-            test_a_declined_keep_drops_an_entry_for_another_version
+        ; test_case "an unrelated write leaves a fill kept" `Quick
+            test_an_unrelated_write_leaves_a_fill_kept
+        ; test_case "a failed fill drops the previous version" `Quick
+            test_a_failed_fill_drops_the_previous_version
+        ; test_case "a changed file drops a concurrent fill" `Quick
+            test_a_changed_file_drops_a_concurrent_fill
         ; test_case "a forget during the decode is not undone" `Quick
             test_a_forget_during_the_decode_is_not_undone
         ; test_case "an error is not kept" `Quick test_an_error_is_not_kept

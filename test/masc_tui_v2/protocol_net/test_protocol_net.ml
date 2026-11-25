@@ -7171,12 +7171,147 @@ let test_layer2_keeper_diagnostics_runtime_standings_and_observer () =
       Alcotest.fail
         "expected Keeper_waiting_inventory_changed for non-chat queue_kind"
 
+let test_layer3_repos_pulls_observation_and_board_meta () =
+  (* 1. Repository open PRs decoder against live Repository_pulls.snapshot_to_yojson *)
+  let pulls_json =
+    parse_json
+      {|{
+        "reader": { "state": "ready", "keeper": "pr-reader" },
+        "repositories_error": null,
+        "keepers": { "state": "listed" },
+        "repositories": [
+          {
+            "repository_id": "repo-masc",
+            "url": "https://github.com/jeong-sik/masc",
+            "slug": "jeong-sik/masc",
+            "pulls": {
+              "state": "read",
+              "observed_at": 1795254000.0,
+              "undecodable": 0,
+              "pulls": [
+                {
+                  "repo_slug": "jeong-sik/masc",
+                  "number": 54666,
+                  "draft": false,
+                  "checks": "passing",
+                  "review": "approved",
+                  "mergeable": "mergeable",
+                  "author": "jeong-sik",
+                  "keeper": "code-reviewer",
+                  "title": "Dashboard visibility wave",
+                  "head_oid": "abc1234",
+                  "head_review": "reviewed_on_head"
+                }
+              ]
+            }
+          }
+        ]
+      }|}
+  in
+  let snap =
+    expect_ok "decode_repository_pulls"
+      (Wire_infra.decode_repository_pulls pulls_json)
+  in
+  Alcotest.(check string) "reader_state = ready" "ready" snap.reader_state;
+  Alcotest.(check int) "1 repo entry" 1 (List.length snap.entries);
+  let e0 = List.hd snap.entries in
+  Alcotest.(check int) "1 open PR" 1 (List.length e0.pulls);
+  Alcotest.(check int) "PR #54666" 54666 (List.hd e0.pulls).number;
+
+  (* 2. Per-repo observation (git_status + sync_currency) *)
+  let obs_json =
+    parse_json
+      {|{
+        "id": "repo-masc",
+        "git_status": {
+          "state": "available",
+          "dirty": true,
+          "changed_files": 3,
+          "conflicted_files": 1
+        },
+        "sync_currency": {
+          "state": "available",
+          "target_ref": "origin/main",
+          "behind": 2,
+          "ahead": 1
+        }
+      }|}
+  in
+  let obs =
+    expect_ok "decode_repository_observation"
+      (Wire_infra.decode_repository_observation obs_json)
+  in
+  Alcotest.(check bool) "git_status dirty & conflicted" true
+    (match obs.git_status with
+     | Some gs -> gs.available && gs.dirty && gs.conflicted_files = 1
+     | None -> false);
+  Alcotest.(check bool) "sync_currency behind=2 ahead=1" true
+    (match obs.sync_currency with
+     | Some sc -> sc.available && sc.behind = 2 && sc.ahead = 1
+     | None -> false);
+
+  (* 3. Board feed & thread sidecar metadata *)
+  let feed_json =
+    parse_json
+      {|{
+        "has_more": true,
+        "filtered_out_count": 7,
+        "signal_scan_truncated": true,
+        "posts": [
+          {
+            "id": "p-1",
+            "audience": { "kind": "targets", "targets": ["alpha", "beta"] },
+            "closed": { "closed_by": "leader", "closed_at": 1795253000.0, "successor_id": "p-2" },
+            "flair": { "name": "decision", "emoji": "📌", "label": "Decision" },
+            "reactions": [{ "emoji": "👍", "count": 3 }, { "emoji": "🚀", "count": 1 }]
+          }
+        ]
+      }|}
+  in
+  let fm =
+    expect_ok "decode_board_feed_meta"
+      (Wire_knowledge.decode_board_feed_meta feed_json)
+  in
+  Alcotest.(check bool) "feed has_more" true fm.has_more;
+  Alcotest.(check int) "feed filtered_out_count" 7 fm.filtered_out_count;
+  Alcotest.(check bool) "feed signal_scan_truncated" true
+    fm.signal_scan_truncated;
+  let ex = List.assoc "p-1" fm.post_extras in
+  Alcotest.(check (option string)) "audience targets" (Some "@alpha, @beta")
+    ex.audience_label;
+  Alcotest.(check (option string)) "closed_by" (Some "leader") ex.closed_by;
+  Alcotest.(check (option string)) "reactions mapped safely without raw wide emojis"
+    (Some "+1:3 ship:1") ex.reaction_summary;
+
+  let thread_json =
+    parse_json
+      {|{
+        "id": "p-1",
+        "comment_page": { "offset": 0, "returned": 40, "total": 95, "next_offset": 40 },
+        "comments": [
+          { "id": "c-1", "audience": { "kind": "broadcast" } }
+        ]
+      }|}
+  in
+  let tm =
+    expect_ok "decode_board_thread_meta"
+      (Wire_knowledge.decode_board_thread_meta thread_json)
+  in
+  Alcotest.(check bool) "comment_page 40/95 next=40" true
+    (match tm.comment_page with
+     | Some cp -> cp.offset = 0 && cp.returned = 40 && cp.total = 95 && cp.next_offset = Some 40
+     | None -> false);
+  Alcotest.(check (option string)) "comment audience = @all" (Some "@all")
+    (List.assoc_opt "c-1" tm.comment_audiences)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
       ( "protocol"
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
+          Alcotest.test_case "layer3_repos_pulls_observation_and_board_meta" `Quick
+            test_layer3_repos_pulls_observation_and_board_meta;
           Alcotest.test_case "layer2_keeper_diagnostics_runtime_standings_and_observer"
             `Quick test_layer2_keeper_diagnostics_runtime_standings_and_observer;
           Alcotest.test_case "unfold_json_strings_bounded" `Quick

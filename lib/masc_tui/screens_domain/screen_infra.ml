@@ -1455,8 +1455,8 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
               id = "branch";
               header = Say.make ~ko:"브랜치" ~en:"Branch";
               priority = 2;
-              min_width = 7;
-              max_width = Some 14;
+              min_width = 10;
+              max_width = Some 20;
               weight = 1;
               align = Table.Left;
             };
@@ -1475,14 +1475,34 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
           List.map
             (fun (r : Wire_infra.repository) ->
               let g, tone, st = repo_status_display ~lang r.status in
+              let pr_suffix =
+                match Infra_store.pulls_entry_for ~repo_id:r.id inf with
+                | Some e when String.equal e.state "read" && e.pulls <> [] ->
+                    Printf.sprintf " · %dPR" (List.length e.pulls)
+                | Some e when String.equal e.state "failed" -> " · PR!"
+                | Some _ | None -> ""
+              in
+              let dirty_suffix =
+                match
+                  Observed.to_option
+                    (Infra_store.repository_detail_for ~repo_id:r.id inf)
+                with
+                | Some obs -> (
+                    match obs.git_status with
+                    | Some gs when gs.available && gs.conflicted_files > 0 ->
+                        " !"
+                    | Some gs when gs.available && gs.dirty -> " *"
+                    | Some _ | None -> "")
+                | None -> ""
+              in
               {
                 Table.id = r.id;
                 cells =
                   [
-                    ("name", Table.text_cell r.name);
+                    ("name", Table.text_cell (r.name ^ dirty_suffix));
                     ( "branch"
                     , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                        r.default_branch );
+                        (r.default_branch ^ pr_suffix) );
                     ("status", Table.Badge { glyph = Some g; text = st; tone });
                   ];
               })
@@ -1649,7 +1669,229 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                   ~y:!y ~max_w:rem ~style:(H.secondary_style ~theme ())
                   ~uri:r.url r.url);
            incr y
-         end
+         end;
+         (* Per-repo git status & sync currency (from GET /api/v1/repositories/:id) *)
+         let obs_rect =
+           Rect.make ~x:(diff_inner.x + pad_x) ~y:!y
+             ~w:(Int.max 0 (diff_inner.w - (2 * pad_x)))
+             ~h:1
+         in
+         (match Infra_store.repository_detail_for ~repo_id:r.id inf with
+          | Observed.Value { data = obs; _ } when !y < bot ->
+              let git_part, git_tone =
+                match obs.git_status with
+                | Some gs when gs.available ->
+                    if gs.conflicted_files > 0 then
+                      ( Say.resolve lang
+                          (Say.make
+                             ~ko:(Printf.sprintf "충돌 %d · 변경 %d" gs.conflicted_files gs.changed_files)
+                             ~en:(Printf.sprintf "%d conflicts · %d changed" gs.conflicted_files gs.changed_files))
+                      , Theme.Status_critical )
+                    else if gs.dirty then
+                      ( Say.resolve lang
+                          (Say.make
+                             ~ko:(Printf.sprintf "작업트리 변경 %d파일" gs.changed_files)
+                             ~en:(Printf.sprintf "dirty (%d files)" gs.changed_files))
+                      , Theme.Status_attention )
+                    else
+                      ( Say.resolve lang (Say.make ~ko:"작업트리 깨끗함" ~en:"clean")
+                      , Theme.Status_ok )
+                | Some gs ->
+                    ( Printf.sprintf "git %s"
+                        (Option.value gs.error ~default:"unavailable")
+                    , Theme.Status_attention )
+                | None -> ("", Theme.Status_historical)
+              in
+              let sync_part, sync_tone =
+                match obs.sync_currency with
+                | Some sc when sc.available ->
+                    let ref_s = Option.value sc.target_ref ~default:r.default_branch in
+                    if sc.behind > 0 || sc.ahead > 0 then
+                      ( Printf.sprintf "%s ↓%d ↑%d" ref_s sc.behind sc.ahead
+                      , if sc.behind > 0 then Theme.Status_attention
+                        else Theme.Status_active )
+                    else
+                      ( Printf.sprintf "%s %s" ref_s
+                          (Say.resolve lang (Say.make ~ko:"최신" ~en:"up to date"))
+                      , Theme.Status_ok )
+                | Some sc ->
+                    ( Printf.sprintf "sync %s"
+                        (Option.value sc.error ~default:"unavailable")
+                    , Theme.Status_attention )
+                | None -> ("", Theme.Status_historical)
+              in
+              let parts =
+                List.filter (fun s -> not (String.equal s "")) [ git_part; sync_part ]
+              in
+              if parts <> [] then begin
+                let tone_rank = function
+                  | Theme.Status_critical -> 4
+                  | Theme.Status_attention -> 3
+                  | Theme.Status_active | Theme.Status_ai -> 2
+                  | Theme.Status_ok -> 1
+                  | Theme.Status_historical -> 0
+                in
+                let line_tone =
+                  if tone_rank git_tone >= tone_rank sync_tone then git_tone
+                  else sync_tone
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:obs_rect ~x:obs_rect.x ~y:!y
+                     ~max_w:obs_rect.w ~style:(H.status_style ~theme line_tone)
+                     ("Git: " ^ String.concat " · " parts));
+                incr y
+              end
+          | Observed.Failed { reason; _ } when !y < bot ->
+              ignore
+                (H.put_clipped ~grid ~clip:obs_rect ~x:obs_rect.x ~y:!y
+                   ~max_w:obs_rect.w
+                   ~style:(H.status_style ~theme Theme.Status_critical)
+                   (Printf.sprintf "%s Git: %s"
+                      (Glyph.to_utf8 Glyph.Live_failing) reason));
+              incr y
+          | Observed.Value _ | Observed.Loading _ | Observed.Absent
+          | Observed.Unreported | Observed.Failed _ ->
+              ());
+         (* Open GitHub Pull Requests (from GET /api/v1/repositories/pulls) *)
+         (match inf.repository_pulls with
+          | Observed.Value { data = snap; _ } when !y < bot ->
+              let pr_clip =
+                Rect.make ~x:(diff_inner.x + pad_x) ~y:!y
+                  ~w:(Int.max 0 (diff_inner.w - (2 * pad_x)))
+                  ~h:(Int.max 0 (bot - !y))
+              in
+              (match snap.repositories_error with
+               | Some err ->
+                   ignore
+                     (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                        ~max_w:pr_clip.w
+                        ~style:(H.status_style ~theme Theme.Status_critical)
+                        (Printf.sprintf "%s PRs: %s"
+                           (Glyph.to_utf8 Glyph.Live_failing) err));
+                   incr y
+               | None -> (
+                   match Infra_store.pulls_entry_for ~repo_id:r.id inf with
+                   | Some entry when String.equal entry.state "failed" ->
+                       let detail =
+                         Option.value entry.failure_summary ~default:"fetch failed"
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                            ~max_w:pr_clip.w
+                            ~style:(H.status_style ~theme Theme.Status_critical)
+                            (Printf.sprintf "%s PRs: %s"
+                               (Glyph.to_utf8 Glyph.Live_failing) detail));
+                       incr y
+                   | Some entry when String.equal entry.state "read" ->
+                       let n_prs = List.length entry.pulls in
+                       let undec_s =
+                         if entry.undecodable > 0 then
+                           Printf.sprintf " (+%d undecodable)" entry.undecodable
+                         else ""
+                       in
+                       let hdr =
+                         Say.resolve lang
+                           (Say.make
+                              ~ko:(Printf.sprintf "GitHub PR (%d건)%s" n_prs undec_s)
+                              ~en:(Printf.sprintf "Open PRs (%d)%s" n_prs undec_s))
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                            ~max_w:pr_clip.w
+                            ~style:(H.secondary_style ~theme ()) hdr);
+                       incr y;
+                       let avail = Int.max 0 (bot - !y - 2) in
+                       let max_pr_rows, show_more =
+                         if avail <= 0 || n_prs = 0 then (0, false)
+                         else if n_prs <= Int.min 3 avail then (n_prs, false)
+                         else if avail = 1 then (0, false)
+                         else (Int.min 3 (avail - 1), true)
+                       in
+                       List.iteri
+                         (fun idx (pr : Wire_infra.repository_pull_row) ->
+                           if idx < max_pr_rows && !y < bot then begin
+                             let tone =
+                               if
+                                 String.equal pr.checks "failing"
+                                 || String.equal pr.mergeable "conflicting"
+                               then Theme.Status_critical
+                               else if
+                                 String.equal pr.review "changes_requested"
+                                 || String.equal pr.checks "running"
+                               then Theme.Status_attention
+                               else if
+                                 String.equal pr.checks "passing"
+                                 && String.equal pr.review "approved"
+                               then Theme.Status_ok
+                               else Theme.Status_active
+                             in
+                             let draft_tag = if pr.draft then "[DRAFT] " else "" in
+                             let author_s =
+                               match pr.keeper, pr.author with
+                               | Some k, _ -> "@" ^ k
+                               | None, Some a -> "@" ^ a
+                               | None, None -> ""
+                             in
+                             let title_s = Option.value pr.title ~default:"" in
+                             let head_rev_s =
+                               if String.equal pr.head_review "not_reviewed_on_head"
+                               then " !head-rev"
+                               else ""
+                             in
+                             let row_txt =
+                               Printf.sprintf "  #%d %s[%s/%s/%s]%s %s %s"
+                                 pr.number draft_tag pr.checks pr.review
+                                 pr.mergeable head_rev_s author_s title_s
+                             in
+                             ignore
+                               (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
+                                  ~y:!y ~max_w:pr_clip.w
+                                  ~style:(H.status_style ~theme tone) row_txt);
+                             incr y
+                           end)
+                         entry.pulls;
+                       let hidden_prs = n_prs - max_pr_rows in
+                       if show_more && hidden_prs > 0 && !y < bot then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                              ~max_w:pr_clip.w ~style:(H.whisper_style ~theme ())
+                              (Say.resolve lang
+                                 (Say.make
+                                    ~ko:(Printf.sprintf "  … 외 PR %d건 더" hidden_prs)
+                                    ~en:(Printf.sprintf "  … +%d more PRs" hidden_prs))));
+                         incr y
+                       end
+                   | Some _ | None ->
+                       if not (String.equal snap.reader_state "ready") then begin
+                         let detail =
+                           match snap.reader_detail with
+                           | Some d -> " (" ^ d ^ ")"
+                           | None -> ""
+                         in
+                         ignore
+                           (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                              ~max_w:pr_clip.w
+                              ~style:(H.whisper_style ~theme ())
+                              (Printf.sprintf "PR reader: %s%s"
+                                 snap.reader_state detail));
+                         incr y
+                       end))
+          | Observed.Failed { reason; _ } when !y < bot ->
+              let pr_clip =
+                Rect.make ~x:(diff_inner.x + pad_x) ~y:!y
+                  ~w:(Int.max 0 (diff_inner.w - (2 * pad_x)))
+                  ~h:1
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                   ~max_w:pr_clip.w
+                   ~style:(H.status_style ~theme Theme.Status_critical)
+                   (Printf.sprintf "%s PRs: %s"
+                      (Glyph.to_utf8 Glyph.Live_failing) reason));
+              incr y
+          | Observed.Value _ | Observed.Loading _ | Observed.Absent
+          | Observed.Unreported | Observed.Failed _ ->
+              ())
      | Some _ | None -> ());
     if !y < bot then begin
       H.draw_divider ~grid ~rect:diff_inner ~y:!y ~theme ~pad_x ();

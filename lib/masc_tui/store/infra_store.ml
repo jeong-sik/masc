@@ -115,6 +115,8 @@ type t = {
   sandboxes_fallback_404 : bool;
   keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
   repositories : Wire_infra.repository list Observed.t;
+  repository_pulls : Wire_infra.repository_pulls_snapshot Observed.t;
+  repository_details : Wire_infra.repository_observation Observed.t String_map.t;
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
@@ -148,6 +150,8 @@ let empty =
     sandboxes_fallback_404 = false;
     keeper_sandboxes = String_map.empty;
     repositories = Observed.unreported;
+    repository_pulls = Observed.unreported;
+    repository_details = String_map.empty;
     repo_activity = None;
     logs = [];
     logs_loaded = false;
@@ -1106,6 +1110,8 @@ let mark_stale_all t =
     sandboxes = Observed.mark_stale t.sandboxes;
     keeper_sandboxes = String_map.map Observed.mark_stale t.keeper_sandboxes;
     repositories = Observed.mark_stale t.repositories;
+    repository_pulls = Observed.mark_stale t.repository_pulls;
+    repository_details = String_map.map Observed.mark_stale t.repository_details;
     repo_activity =
       Option.map
         (fun slot -> { slot with activity = Observed.mark_stale slot.activity })
@@ -1506,3 +1512,35 @@ let apply_git_diff ~observed_at ~scope ~path diff t =
 
 let find_log_by_seq seq t =
   List.find_opt (fun (e : Wire_infra.system_log_entry) -> Int.equal e.seq seq) t.logs
+
+let apply_repository_pulls ~observed_at snap t =
+  { t with repository_pulls = Observed.value ~observed_at snap }
+
+let pulls_entry_for ~repo_id t =
+  match Observed.to_option t.repository_pulls with
+  | None -> None
+  | Some snap ->
+      List.find_opt
+        (fun (e : Wire_infra.repository_pulls_entry) ->
+          String.equal e.repository_id repo_id)
+        snap.entries
+
+let apply_repository_detail ~repo_id ~observed_at obs t =
+  {
+    t with
+    repository_details =
+      String_map.add repo_id (Observed.value ~observed_at obs)
+        t.repository_details;
+  }
+
+let repository_detail_for ~repo_id t =
+  match String_map.find_opt repo_id t.repository_details with
+  | Some slot -> slot
+  | None -> Observed.unreported
+
+let fail_repository_detail ~repo_id fail t =
+  let prev = repository_detail_for ~repo_id t in
+  {
+    t with
+    repository_details = String_map.add repo_id (fail prev) t.repository_details;
+  }

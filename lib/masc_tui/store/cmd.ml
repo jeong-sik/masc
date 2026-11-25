@@ -115,6 +115,8 @@ type get_request =
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
   | Get_repositories
+  | Get_repository_pulls
+  | Get_repository_detail of { repo_id : string }
   | Get_repository_activity of { repo_id : string }
   | Get_system_logs of {
       limit : int option;
@@ -749,6 +751,9 @@ let get_request_path = function
   | Get_keeper_sandbox { keeper } ->
       Wire_infra.infra_sandbox_keeper_path ~keeper
   | Get_repositories -> Wire_infra.repositories_path
+  | Get_repository_pulls -> Wire_infra.repository_pulls_path
+  | Get_repository_detail { repo_id } ->
+      Wire_infra.repository_detail_path ~repo_id
   | Get_repository_activity { repo_id } ->
       Wire_infra.repository_activity_path ~repo_id
   | Get_system_logs { limit; level } ->

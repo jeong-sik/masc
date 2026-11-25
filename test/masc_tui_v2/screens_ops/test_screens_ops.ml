@@ -3862,11 +3862,73 @@ let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
     }
   in
   let m_benign =
-    { m0 with fleet = Fleet_store.apply_roster_extras benign_extras m0.fleet }
+    {
+      m0 with
+      attention = Attention.empty;
+      work = Work_store.empty;
+      fleet = Fleet_store.apply_roster_extras benign_extras m0.fleet;
+    }
   in
   Alcotest.(check int) "benign pass/direct_message emits 0 banner rows" 0
     (List.length
-       (Model.keeper_diagnostic_banner ~name:"e-masc-the-leader" m_benign))
+       (Model.keeper_diagnostic_banner ~name:"e-masc-the-leader" m_benign));
+  let banner_with_hitl =
+    Model.keeper_diagnostic_banner ~name:"e-masc-the-leader" m0
+    |> List.map (fun (r : Model.keeper_banner_row) -> r.text)
+    |> String.concat " | "
+  in
+  Alcotest.(check bool) "unified blocker banner correlates HITL pending for keeper"
+    true (contains_sub ~needle:"HITL pending" banner_with_hitl);
+  (* Layer 3: Empty Work > Inbox renders live server gate_resolved_row 'approve' honestly *)
+  let gate_snap : Wire_work.gate_snapshot =
+    {
+      generated_at = Some "2026-11-25T03:00:00Z";
+      pending = [];
+      retry_meta = [];
+      rules = [];
+      rules_error = None;
+      recent_resolved =
+        [
+          {
+            id = "gr-1";
+            event = "resolved";
+            keeper = "e-masc-the-leader";
+            tool = "masc_board_post";
+            decision = "approve";
+            decision_kind = Some "approve";
+            decision_reason = Some "safe post";
+            decision_source = Some "operator";
+            authorization_source = None;
+            actor = Some "jeong-sik";
+            ts = now_unix -. 60.0;
+          };
+        ];
+      recent_resolved_error = None;
+      hitl = None;
+    }
+  in
+  let m_server_audit =
+    {
+      m0 with
+      attention = Attention.empty;
+      work =
+        {
+          m0.work with
+          active_tab = Nav.Work_inbox;
+          recent_decisions_24h = [];
+          gate_snapshot = Observed.value ~observed_at:now_mono gate_snap;
+        };
+    }
+  in
+  let g_audit =
+    render_to_grid ~cols:140 ~rows:40 (Screen_work.render ~model:m_server_audit)
+  in
+  let txt_audit = grid_all_text g_audit in
+  Alcotest.(check bool) "Empty Work Inbox surfaces Server Gate Decisions with live 'approve'"
+    true
+    (contains_sub ~needle:"Server Gate Decisions" txt_audit
+     && contains_sub ~needle:"approve" txt_audit
+     && contains_sub ~needle:"masc_board_post" txt_audit)
 
 let () =
   Alcotest.run "masc_tui_screens_ops"

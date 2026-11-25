@@ -1690,17 +1690,28 @@ let follow_selected_repository (m : Model.t) =
   in
   match Infra_store.selected_repository m.infra with
   | Some repo when shown && not (slot_answers_for repo.id) ->
+      let detail_cmds =
+        let obs = Infra_store.repository_detail_for ~repo_id:repo.id m.infra in
+        if Observed.is_value obs && not (Observed.is_stale obs) then []
+        else
+          [
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req = Cmd.Get_repository_detail { repo_id = repo.id };
+              };
+          ]
+      in
       ( {
           m with
           infra = Infra_store.request_repo_activity ~repo_id:repo.id m.infra;
         },
-        [
-          Cmd.Http_get
-            {
-              epoch = m.epoch;
-              req = Cmd.Get_repository_activity { repo_id = repo.id };
-            };
-        ] )
+        Cmd.Http_get
+          {
+            epoch = m.epoch;
+            req = Cmd.Get_repository_activity { repo_id = repo.id };
+          }
+        :: detail_cmds )
   | Some _ | None -> (m, [])
 
 let set_active_filter_query q (m : Model.t) =
@@ -7810,20 +7821,29 @@ let knowledge_detail_max_scroll (m : Model.t) =
             | _ -> if after_vote >= 6 then 1 else 0
           in
           let rem = max 0 (after_vote - header_used) in
-          let comments =
-            match Observed.to_option k.active_thread with
-            | Some (tp, cs) when String.equal tp.id p.id -> cs
-            | Some _ | None -> []
-          in
           let body_lines =
             if content.w <= 0 then 0
             else
               List.length
                 (Masc_tui_ui.Markdown.render_lines ~width:content.w ~theme p.body)
           in
-          let threaded = Knowledge_store.order_comments_threaded comments in
           let comment_lines =
-            if threaded = [] then 0 else 1 + (List.length threaded * 2)
+            let target_matches =
+              Option.equal String.equal k.active_thread_target (Some p.id)
+            in
+            match k.active_thread with
+            | Observed.Value { data = tp, cs; _ } when String.equal tp.id p.id ->
+                let threaded = Knowledge_store.order_comments_threaded cs in
+                if threaded = [] then 0
+                else
+                  1
+                  + Knowledge_store.wrapped_comment_lines_count ~theme
+                      ~width:(max 8 (content.w - 2)) ~max_body_lines:12 threaded
+            | Observed.Loading _ when target_matches -> 2
+            | Observed.Failed _ when target_matches -> 2
+            | Observed.Value _ | Observed.Loading _ | Observed.Failed _
+            | Observed.Absent | Observed.Unreported ->
+                0
           in
           let total_lines = body_lines + comment_lines in
           let has_indicator = total_lines > rem && rem >= 2 in
@@ -8088,10 +8108,15 @@ let work_detail_max_scroll (m : Model.t) =
         Attention.current_filtered_item ~query:m.work.filter_query m.attention
       with
       | None ->
-          if
-            Attention.is_empty m.attention
-            && m.work.recent_decisions_24h <> []
-          then
+          let audit_row_count =
+            if m.work.recent_decisions_24h <> [] then
+              List.length m.work.recent_decisions_24h
+            else
+              match Observed.to_option m.work.gate_snapshot with
+              | Some gs -> List.length gs.recent_resolved
+              | None -> 0
+          in
+          if Attention.is_empty m.attention && audit_row_count > 0 then
             let hero_h = if br.h >= 12 then 4 else 3 in
             let split_rect =
               Rect.make ~x:br.x ~y:(br.y + hero_h) ~w:br.w
@@ -8115,7 +8140,7 @@ let work_detail_max_scroll (m : Model.t) =
             in
             let a_inner = ui_card_inner left_rect in
             let vis_rows = max 1 (a_inner.h - 2) in
-            max 0 (List.length m.work.recent_decisions_24h - vis_rows)
+            max 0 (audit_row_count - vis_rows)
           else 0
       | Some entry -> (
           let _, br = Work_store.inbox_subview_rects br in
@@ -8675,12 +8700,60 @@ let infra_detail_max_scroll (m : Model.t) =
               if Rect.is_empty inner then 0
               else
                 let band_h = if inner.h >= 5 then 2 else 1 in
-                let link_h =
-                  if Option.is_some (Infra_store.selected_repository m.infra)
-                  then 1
-                  else 0
+                let link_h, meta_rows =
+                  match Infra_store.selected_repository m.infra with
+                  | None -> (0, 0)
+                  | Some r ->
+                      let git_h =
+                        match
+                          Infra_store.repository_detail_for ~repo_id:r.id
+                            m.infra
+                        with
+                        | Observed.Value { data = obs; _ }
+                          when Option.is_some obs.git_status
+                               || Option.is_some obs.sync_currency ->
+                            1
+                        | Observed.Failed _ -> 1
+                        | Observed.Value _ | Observed.Loading _
+                        | Observed.Absent | Observed.Unreported ->
+                            0
+                      in
+                      let pr_h =
+                        match m.infra.repository_pulls with
+                        | Observed.Value { data = snap; _ } -> (
+                            if Option.is_some snap.repositories_error then 1
+                            else
+                              match
+                                Infra_store.pulls_entry_for ~repo_id:r.id
+                                  m.infra
+                              with
+                              | Some entry when String.equal entry.state "read"
+                                ->
+                                  let pr_n = List.length entry.pulls in
+                                  let avail =
+                                    max 0 (inner.h - band_h - 1 - git_h - 3)
+                                  in
+                                  if avail <= 0 || pr_n = 0 then 1
+                                  else if pr_n <= min 3 avail then 1 + pr_n
+                                  else if avail = 1 then 1
+                                  else 2 + min 3 (avail - 1)
+                              | Some entry
+                                when String.equal entry.state "failed" ->
+                                  1
+                              | Some _ | None ->
+                                  if String.equal snap.reader_state "ready" then
+                                    0
+                                  else 1)
+                        | Observed.Failed _ -> 1
+                        | Observed.Loading _ | Observed.Absent
+                        | Observed.Unreported ->
+                            0
+                      in
+                      (1, git_h + pr_h)
                 in
-                let diff_h = max 1 (inner.h - band_h - link_h - 1) in
+                let diff_h =
+                  max 1 (inner.h - band_h - link_h - meta_rows - 1)
+                in
                 max 0 (List.length rows - diff_h))
       | None -> 0)
   | Nav.Infra_code ->
@@ -11836,7 +11909,10 @@ let apply_move (m : Model.t) dir =
                           ({ m with attention; work }, [])
                         else if
                           Attention.is_empty m.attention
-                          && m.work.recent_decisions_24h <> []
+                          && (m.work.recent_decisions_24h <> []
+                              || match Observed.to_option m.work.gate_snapshot with
+                                 | Some gs -> gs.recent_resolved <> []
+                                 | None -> false)
                         then
                           let sd = scroll_delta dir in
                           let max_detail_scroll = work_detail_max_scroll m in

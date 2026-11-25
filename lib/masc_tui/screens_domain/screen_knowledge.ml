@@ -96,16 +96,46 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           ~lang k.board
     | Some p ->
         let pad_x = Layout.card_pad_x bp in
-        let age = H.format_age ~now_unix p.created_at_unix in
+        let eff_ts =
+          match p.updated_at_unix with
+          | Some u when u > p.created_at_unix -> u
+          | Some _ | None -> p.created_at_unix
+        in
+        let age = H.format_age ~now_unix eff_ts in
         let vis = post_visibility_label ~lang p.visibility in
         let vis_part =
           if String.equal vis "" then "" else Typography.sep_dot ^ vis
         in
+        let extras = Knowledge_store.post_extras_for ~post_id:p.id k in
+        let closed_tag =
+          match extras with
+          | Some ex when Option.is_some ex.closed_by || Option.is_some ex.closed_successor_id -> (
+              match ex.closed_successor_id with
+              | Some sid -> Some (Printf.sprintf "[CLOSED → %s]" sid)
+              | None -> Some "[CLOSED]")
+          | Some _ | None -> None
+        in
+        let extra_tags =
+          match extras with
+          | None -> ""
+          | Some ex ->
+              let items =
+                List.filter_map Fun.id
+                  [
+                    closed_tag;
+                    ex.flair_label;
+                    ex.audience_label;
+                    ex.reaction_summary;
+                  ]
+              in
+              if items = [] then ""
+              else Typography.sep_dot ^ String.concat Typography.sep_dot items
+        in
         let meta =
-          Printf.sprintf "@%s%s%s%s%d %s%s" p.author Typography.sep_dot age
+          Printf.sprintf "@%s%s%s%s%d %s%s%s" p.author Typography.sep_dot age
             Typography.sep_dot p.comment_count
             (Say.resolve lang (Say.make ~ko:"댓글" ~en:"comments"))
-            vis_part
+            vis_part extra_tags
         in
         let band_h = if inner.h >= 7 then 2 else 1 in
         Card.draw_section_band ~pad_x grid
@@ -168,10 +198,22 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                end
            | _ ->
                if bottom - !y >= 6 then incr y);
-          let comments =
-            match Observed.to_option k.active_thread with
-            | Some (tp, cs) when String.equal tp.id p.id -> cs
-            | Some _ | None -> []
+          let thread_status, comments =
+            match k.active_thread with
+            | Observed.Value { data = tp, cs; _ } when String.equal tp.id p.id ->
+                (`Ready, cs)
+            | Observed.Loading _
+              when Option.equal String.equal k.active_thread_target (Some p.id) ->
+                (`Loading, [])
+            | Observed.Failed { reason; _ }
+              when Option.equal String.equal k.active_thread_target (Some p.id) ->
+                (`Failed reason, [])
+            | Observed.Value _ | Observed.Loading _ | Observed.Failed _
+            | Observed.Absent | Observed.Unreported ->
+                (`Empty, [])
+          in
+          let comment_page =
+            Knowledge_store.active_comment_page_for ~post_id:p.id k
           in
           let threaded = Knowledge_store.order_comments_threaded comments in
           let body_lines =
@@ -180,31 +222,94 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           in
           let body_count = List.length body_lines in
           let comment_rows_list =
-            if threaded = [] then []
-            else
-              `Divider
-              :: List.concat
-                   (List.map
-                      (fun (tc : Knowledge_store.threaded_comment) ->
-                        let c = tc.comment in
-                        let indent =
-                          if tc.depth <= 0 then ""
-                          else
-                            String.concat ""
-                              (List.init (tc.depth - 1) (fun _ -> "│ "))
-                            ^ "└─ "
-                        in
-                        let c_age = H.format_age ~now_unix c.created_at_unix in
-                        let hdr =
-                          Printf.sprintf "%s@%s · %s%d" indent c.author
-                            (Glyph.to_utf8 Glyph.Delta_up) c.score
-                        in
-                        let body_indent = String.make (tc.depth * 2) ' ' in
-                        [
-                          `Hdr (hdr, c_age);
-                          `Body (body_indent ^ H.sanitize_single_line c.body);
-                        ])
-                      threaded)
+            match thread_status with
+            | `Loading ->
+                [
+                  `Divider;
+                  `Status
+                    ( Theme.Status_active
+                    , Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+                      ^ Say.resolve lang
+                          (Say.make ~ko:"댓글 불러오는 중..."
+                             ~en:"Loading comments...") );
+                ]
+            | `Failed reason ->
+                [
+                  `Divider;
+                  `Status
+                    ( Theme.Status_critical
+                    , Glyph.to_utf8 Glyph.Live_failing ^ " "
+                      ^ Say.resolve lang
+                          (Say.make ~ko:("댓글 조회 실패: " ^ reason)
+                             ~en:("Failed to load comments: " ^ reason)) );
+                ]
+            | `Ready | `Empty ->
+                if threaded = [] then []
+                else
+                  `Divider
+                  :: List.concat
+                       (List.map
+                          (fun (tc : Knowledge_store.threaded_comment) ->
+                            let c = tc.comment in
+                            let indent =
+                              if tc.depth <= 0 then ""
+                              else
+                                String.concat ""
+                                  (List.init (tc.depth - 1) (fun _ -> "│ "))
+                                ^ "└─ "
+                            in
+                            let c_age = H.format_age ~now_unix c.created_at_unix in
+                            let aud_s =
+                              match
+                                Knowledge_store.comment_audience_for
+                                  ~post_id:p.id ~comment_id:c.id k
+                              with
+                              | Some a -> " · " ^ a
+                              | None -> ""
+                            in
+                            let hdr =
+                              Printf.sprintf "%s@%s%s · %s%d" indent c.author
+                                aud_s (Glyph.to_utf8 Glyph.Delta_up) c.score
+                            in
+                            let body_indent = String.make (tc.depth * 2) ' ' in
+                            let wrap_w =
+                              Int.max 8 (content.w - 2 - (tc.depth * 2))
+                            in
+                            let all_wrapped =
+                              Markdown.render_lines ~width:wrap_w ~theme c.body
+                            in
+                            let total_wrapped = List.length all_wrapped in
+                            let body_rows =
+                              match all_wrapped with
+                              | [] ->
+                                  [
+                                    `Body
+                                      (body_indent ^ H.sanitize_single_line c.body);
+                                  ]
+                              | lines ->
+                                  let render_one (ln : Markdown.rendered_line) =
+                                    let txt =
+                                      String.concat ""
+                                        (List.map
+                                           (fun (sp : Markdown.styled_span) -> sp.text)
+                                           ln.spans)
+                                    in
+                                    `Body (body_indent ^ txt)
+                                  in
+                                  if total_wrapped > 12 then
+                                    let shown_lines = H.safe_take 11 lines in
+                                    let more =
+                                      Say.resolve lang
+                                        (Say.make
+                                           ~ko:(Printf.sprintf "… (+%d줄)" (total_wrapped - 11))
+                                           ~en:(Printf.sprintf "… (+%d lines)" (total_wrapped - 11)))
+                                    in
+                                    List.map render_one shown_lines
+                                    @ [ `Body (body_indent ^ more) ]
+                                  else List.map render_one lines
+                            in
+                            `Hdr (hdr, c_age) :: body_rows)
+                          threaded)
           in
           let comment_count = List.length comment_rows_list in
           let total_lines = body_count + comment_count in
@@ -255,13 +360,38 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                 (function
                   | `Divider ->
                       if !y < bottom then begin
+                        let page_s =
+                          match thread_status with
+                          | `Loading | `Failed _ ->
+                              if p.comment_count > 0 then
+                                Int.to_string p.comment_count
+                              else "?"
+                          | `Ready | `Empty -> (
+                              match comment_page with
+                              | Some cp when cp.total > cp.returned ->
+                                  Printf.sprintf "%d/%d%s" cp.returned cp.total
+                                    (if Option.is_some cp.next_offset || cp.offset > 0
+                                     then "+"
+                                     else "")
+                              | Some _ | None -> Int.to_string (List.length threaded))
+                        in
                         H.draw_divider ~grid ~rect:content ~y:!y ~theme
                           ~label:
-                            (Printf.sprintf "%s (%d) · [c] %s"
+                            (Printf.sprintf "%s (%s) · [c] %s"
                                (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
-                               (List.length threaded)
+                               page_s
                                (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Reply")))
                           ();
+                        incr y
+                      end
+                  | `Status (tone, msg) ->
+                      if !y < bottom then begin
+                        Card.draw_left_rail ~tone grid ~x:content.x ~y:!y ~h:1
+                          ~theme;
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                             ~y:!y ~max_w:(Int.max 6 (content.w - 2))
+                             ~style:(H.status_style ~theme tone) msg);
                         incr y
                       end
                   | `Hdr (hdr, c_age) ->
@@ -442,9 +572,35 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · + / - 투표(2회)"
               ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · + / - Vote(2x)"
     in
+    let feed_meta_sub =
+      match k.board_feed_meta with
+      | None -> None
+      | Some fm ->
+          let parts =
+            List.filter_map Fun.id
+              [
+                (if fm.has_more then
+                   Some (Say.resolve lang (Say.make ~ko:"+더 있음" ~en:"+more"))
+                 else None);
+                (if fm.filtered_out_count > 0 then
+                   Some
+                     (Say.resolve lang
+                        (Say.make
+                           ~ko:(Printf.sprintf "제외 %d" fm.filtered_out_count)
+                           ~en:(Printf.sprintf "%d filtered" fm.filtered_out_count)))
+                 else None);
+                (if fm.signal_scan_truncated then
+                   Some
+                     (Say.resolve lang
+                        (Say.make ~ko:"스캔 절단" ~en:"scan truncated"))
+                 else None);
+              ]
+          in
+          match parts with [] -> None | _ :: _ -> Some (String.concat " · " parts)
+    in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
-        (H.card_spec ~focused:(Model.pane_focused model 0)
+        (H.card_spec ?subtitle:feed_meta_sub ~focused:(Model.pane_focused model 0)
            ~hotkey:(Say.resolve lang space_hint)
            list_title)
     in
@@ -595,7 +751,12 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    if is_sel then
                      H.paint_selected_row_bg ~grid ~clip:feed_rect
                        ~row_rect:r_rect ~theme ~focused:left_focused ();
-                   let age = H.format_age ~now_unix p.created_at_unix in
+                   let p_eff_ts =
+                     match p.updated_at_unix with
+                     | Some u when u > p.created_at_unix -> u
+                     | Some _ | None -> p.created_at_unix
+                   in
+                   let age = H.format_age ~now_unix p_eff_ts in
                    let replies_s = Printf.sprintf "%dc" p.comment_count in
                    let age_w = Grapheme.display_width age in
                    let rep_w = Grapheme.display_width replies_s in
@@ -653,10 +814,18 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      if is_sel then H.anchor_style ~theme ~bg:row_bg ()
                      else H.text_style ~theme ~bg:row_bg ()
                    in
+                   let closed_prefix =
+                     match Knowledge_store.post_extras_for ~post_id:p.id k with
+                     | Some ex
+                       when Option.is_some ex.closed_by
+                            || Option.is_some ex.closed_successor_id ->
+                         "[CLOSED] "
+                     | Some _ | None -> ""
+                   in
                    ignore
                      (H.put_clipped ~grid ~clip:r_rect ~x:!cx ~y:py
                         ~max_w:(Int.max 0 (left_limit - !cx))
-                        ~style:title_style p.title)
+                        ~style:title_style (closed_prefix ^ p.title))
                | `Member (m, is_last, is_sel) ->
                    let left_focused = Model.pane_focused model 0 in
                    let row_bg =
@@ -670,7 +839,12 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    let branch =
                      if is_last then Glyph.Tree_corner else Glyph.Tree_tee
                    in
-                   let age = H.format_age ~now_unix m.created_at_unix in
+                   let m_eff_ts =
+                     match m.updated_at_unix with
+                     | Some u when u > m.created_at_unix -> u
+                     | Some _ | None -> m.created_at_unix
+                   in
+                   let age = H.format_age ~now_unix m_eff_ts in
                    let aw = Grapheme.display_width age in
                    let left_s =
                      Printf.sprintf "  %s @%s  %s" (Glyph.to_utf8 branch)
@@ -2998,11 +3172,42 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Some (p, comments) ->
         let pad_x = Layout.card_pad_x bp in
         let hearth = match p.hearth with Some h -> "#" ^ h | None -> "#general" in
-        let age = H.format_age ~now_unix p.created_at_unix in
+        let eff_ts =
+          match p.updated_at_unix with
+          | Some u when u > p.created_at_unix -> u
+          | Some _ | None -> p.created_at_unix
+        in
+        let age = H.format_age ~now_unix eff_ts in
+        let extras = Knowledge_store.post_extras_for ~post_id:p.id k in
+        let extra_tags =
+          match extras with
+          | None -> ""
+          | Some ex ->
+              let closed_tag =
+                if Option.is_some ex.closed_by || Option.is_some ex.closed_successor_id
+                then
+                  match ex.closed_successor_id with
+                  | Some sid -> Some (Printf.sprintf "[CLOSED → %s]" sid)
+                  | None -> Some "[CLOSED]"
+                else None
+              in
+              let items =
+                List.filter_map Fun.id
+                  [
+                    closed_tag;
+                    ex.flair_label;
+                    ex.audience_label;
+                    ex.reaction_summary;
+                  ]
+              in
+              if items = [] then ""
+              else Typography.sep_dot ^ String.concat Typography.sep_dot items
+        in
         let meta =
-          Printf.sprintf "@%s · %s · %d %s" p.author hearth
+          Printf.sprintf "@%s · %s · %d %s%s" p.author hearth
             (Int.max p.comment_count (List.length comments))
             (Say.resolve lang (Say.make ~ko:"댓글" ~en:"comments"))
+            extra_tags
         in
         let band_h = if inner.h >= 7 then 2 else 1 in
         Card.draw_section_band ~pad_x grid
@@ -3062,9 +3267,27 @@ let render_dive_thread_comment ~post_id ~(model : Model.t) ~cache ~(rect : Rect.
     | Some (index, tc), Some (_, comments) ->
         let c = tc.comment in
         let age = H.format_age ~now_unix:model.freshness.last_wall_unix c.created_at_unix in
+        let aud_s =
+          match
+            Knowledge_store.comment_audience_for ~post_id ~comment_id:c.id
+              knowledge
+          with
+          | Some a -> " · " ^ a
+          | None -> ""
+        in
+        let pos_s =
+          match Knowledge_store.active_comment_page_for ~post_id knowledge with
+          | Some cp when cp.total > cp.returned ->
+              Printf.sprintf "%d/%d (%d/%d%s)" (index + 1) (List.length comments)
+                cp.returned cp.total
+                (if Option.is_some cp.next_offset || cp.offset > 0 then "+"
+                 else "")
+          | Some _ | None ->
+              Printf.sprintf "%d/%d" (index + 1) (List.length comments)
+        in
         let author =
-          Printf.sprintf "%d/%d · %s@%s" (index + 1) (List.length comments)
-            (if Option.is_some c.parent_id then "↳ " else "") c.author
+          Printf.sprintf "%s · %s@%s%s" pos_s
+            (if Option.is_some c.parent_id then "↳ " else "") c.author aud_s
         in
         let meta = Printf.sprintf "%s%d · %s" (Glyph.to_utf8 Glyph.Delta_up) c.score age in
         let header = Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1 in

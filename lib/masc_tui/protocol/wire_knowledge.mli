@@ -120,6 +120,38 @@ val decode_board_thread :
   Yojson.Safe.t ->
   (board_post * board_comment list, string) result
 
+type board_post_extras = {
+  audience_label : string option;
+  closed_by : string option;
+  closed_successor_id : string option;
+  flair_label : string option;
+  reaction_summary : string option;
+}
+
+type board_feed_meta = {
+  has_more : bool;
+  filtered_out_count : int;
+  signal_scan_truncated : bool;
+  post_extras : (string * board_post_extras) list;
+}
+
+type board_comment_page = {
+  offset : int;
+  returned : int;
+  total : int;
+  next_offset : int option;
+}
+
+type board_thread_meta = {
+  post_id : string;
+  post_extras : board_post_extras option;
+  comment_page : board_comment_page option;
+  comment_audiences : (string * string) list;
+}
+
+val decode_board_feed_meta : Yojson.Safe.t -> (board_feed_meta, string) result
+val decode_board_thread_meta : Yojson.Safe.t -> (board_thread_meta, string) result
+
 type board_hearth_entry = {
   name : string;
   count : int;

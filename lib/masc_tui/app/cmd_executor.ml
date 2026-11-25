@@ -197,6 +197,8 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
   | Cmd.Get_repositories
+  | Cmd.Get_repository_pulls
+  | Cmd.Get_repository_detail _
   | Cmd.Get_repository_activity _
   | Cmd.Get_system_logs _
   | Cmd.Get_config_schema _
@@ -1057,6 +1059,8 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
   | Cmd.Get_repositories
+  | Cmd.Get_repository_pulls
+  | Cmd.Get_repository_detail _
   | Cmd.Get_repository_activity _
   | Cmd.Get_system_logs _
   | Cmd.Get_tui_preferences
@@ -1376,10 +1380,30 @@ let rec execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_feed _ ->
+            let feed_res =
+              fetch_and_decode_get t ~path ~decode:(fun json ->
+                  match Wire_knowledge.decode_board_feed ~observed_at json with
+                  | Error _ as err -> err
+                  | Ok feed ->
+                      let meta =
+                        match Wire_knowledge.decode_board_feed_meta json with
+                        | Ok m -> Some m
+                        | Error _ -> None
+                      in
+                      Ok (feed, meta))
+            in
             let reply =
-              Msg.Reply_board_feed
-                (fetch_and_decode_get t ~path
-                   ~decode:(Wire_knowledge.decode_board_feed ~observed_at))
+              match feed_res with
+              | Ok (feed, meta_opt) ->
+                  (match meta_opt with
+                   | Some meta ->
+                       Ui_bus.publish_snapshot t.bus
+                         ~key:(Key_get (path ^ "#meta"))
+                         (Msg.Http_reply
+                            { epoch; reply = Msg.Reply_board_feed_meta meta })
+                   | None -> ());
+                  Msg.Reply_board_feed (Ok feed)
+              | Error _ as err -> Msg.Reply_board_feed err
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_hearths ->
@@ -1390,9 +1414,30 @@ let rec execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_thread { post_id; _ } ->
+            let thread_res =
+              fetch_and_decode_get t ~path ~decode:(fun json ->
+                  match Wire_knowledge.decode_board_thread ~observed_at json with
+                  | Error _ as err -> err
+                  | Ok thread ->
+                      let meta =
+                        match Wire_knowledge.decode_board_thread_meta json with
+                        | Ok m -> Some m
+                        | Error _ -> None
+                      in
+                      Ok (thread, meta))
+            in
             let result =
-              fetch_and_decode_get t ~path
-                ~decode:(Wire_knowledge.decode_board_thread ~observed_at)
+              match thread_res with
+              | Ok (thread, meta_opt) ->
+                  (match meta_opt with
+                   | Some meta ->
+                       Ui_bus.publish_snapshot t.bus
+                         ~key:(Key_get (path ^ "#meta"))
+                         (Msg.Http_reply
+                            { epoch; reply = Msg.Reply_board_thread_meta meta })
+                   | None -> ());
+                  Ok thread
+              | Error _ as err -> err
             in
             Msg.Http_reply
               { epoch; reply = Msg.Reply_board_thread { post_id; result } }
@@ -1819,6 +1864,24 @@ let rec execute_get t ~epoch req =
               Msg.Reply_repositories
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_infra.decode_repositories)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_repository_pulls ->
+            let reply =
+              Msg.Reply_repository_pulls
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_infra.decode_repository_pulls)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_repository_detail { repo_id } ->
+            let reply =
+              Msg.Reply_repository_detail
+                {
+                  repo_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_repository_observation;
+                }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_repository_activity { repo_id } ->

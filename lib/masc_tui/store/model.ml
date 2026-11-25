@@ -4674,7 +4674,122 @@ let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
                inv.row_count head)
       | Some _ | None -> None
     in
-    let parts = List.filter_map Fun.id [ rest_part; wait_part; disp_part ] in
+    let hitl_part =
+      let keeper_attn =
+        List.filter
+          (fun (e : Attention.entry) ->
+            Option.equal String.equal e.keeper (Some name))
+          m.attention.items
+      in
+      match keeper_attn with
+      | [] -> None
+      | first :: _ as xs ->
+          let short_title =
+            Masc_tui_term.Grapheme.truncate_to_width ~max_width:24 first.title
+          in
+          Some
+            (Printf.sprintf "%s %d (%s)"
+               (say ~ko:"운영자 승인 대기" ~en:"HITL pending")
+               (List.length xs) short_title)
+    in
+    let verif_part =
+      let active_tasks =
+        List.filter
+          (fun (tk : Wire_work.task) ->
+            match tk.status with
+            | Wire_work.Claimed { assignee; _ }
+            | Wire_work.InProgress { assignee; _ }
+            | Wire_work.AwaitingVerification { assignee; _ } ->
+                String.equal assignee name
+            | Wire_work.Todo | Wire_work.Done _ | Wire_work.Cancelled _ -> false)
+          (Work_store.tasks m.work)
+      in
+      let awaiting_n =
+        List.fold_left
+          (fun acc (tk : Wire_work.task) ->
+            match tk.status with
+            | Wire_work.AwaitingVerification _ -> acc + 1
+            | Wire_work.Todo | Wire_work.Claimed _ | Wire_work.InProgress _
+            | Wire_work.Done _ | Wire_work.Cancelled _ ->
+                acc)
+          0 active_tasks
+      in
+      let closed_task_ids =
+        List.filter_map
+          (fun (tk : Wire_work.task) ->
+            match tk.status with
+            | Wire_work.Done _ | Wire_work.Cancelled _ -> Some tk.id
+            | Wire_work.Todo | Wire_work.Claimed _ | Wire_work.InProgress _
+            | Wire_work.AwaitingVerification _ ->
+                None)
+          (Work_store.tasks m.work)
+      in
+      let active_task_ids =
+        List.map (fun (tk : Wire_work.task) -> tk.id) active_tasks
+      in
+      let rejected_n =
+        List.fold_left
+          (fun acc (v : Wire_work.verification_request) ->
+            let relevant =
+              (not (List.exists (String.equal v.task_id) closed_task_ids))
+              && (List.exists (String.equal v.task_id) active_task_ids
+                  || String.equal v.submitted_by name)
+            in
+            if not relevant then acc
+            else
+              let is_rej =
+                Option.is_some v.evidence_projection_error
+                ||
+                match v.review_observation with
+                | Some
+                    {
+                      state =
+                        ( Wire_work.Review_rejected
+                        | Wire_work.Review_failed
+                        | Wire_work.Review_commit_failed
+                        | Wire_work.Review_execution_repair_required );
+                      _;
+                    } ->
+                    true
+                | Some
+                    {
+                      state =
+                        ( Wire_work.Review_unobserved
+                        | Wire_work.Review_running
+                        | Wire_work.Review_approved
+                        | Wire_work.Review_unavailable
+                        | Wire_work.Review_not_reviewed
+                        | Wire_work.Review_execution_pending
+                        | Wire_work.Review_cancelled
+                        | Wire_work.Review_superseded );
+                      _;
+                    }
+                | None ->
+                    false
+              in
+              if is_rej then acc + 1 else acc)
+          0 (Work_store.verifications_list m.work)
+      in
+      match (rejected_n, awaiting_n) with
+      | r, a when r > 0 && a > 0 ->
+          Some
+            (say
+               ~ko:(Printf.sprintf "검증 반려 %d · 대기 %d" r a)
+               ~en:(Printf.sprintf "%d verify rejected · %d awaiting" r a))
+      | r, _ when r > 0 ->
+          Some
+            (say ~ko:(Printf.sprintf "검증 반려 %d" r)
+               ~en:(Printf.sprintf "%d verify rejected" r))
+      | _, a when a > 0 ->
+          Some
+            (say ~ko:(Printf.sprintf "검증 대기 %d" a)
+               ~en:(Printf.sprintf "%d awaiting verify" a))
+      | _ -> None
+    in
+    let parts =
+      List.filter_map Fun.id
+        [ hitl_part; verif_part; rest_part; wait_part; disp_part ]
+    in
     match parts with
     | [] -> None
     | _ :: _ ->

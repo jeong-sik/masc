@@ -164,6 +164,8 @@ type t = {
   active_tab : Nav.knowledge_tab;
   board_recovery : Board_recovery.t;
   board : Wire_knowledge.board_feed Observed.t;
+  board_feed_meta : Wire_knowledge.board_feed_meta option;
+  board_thread_meta : Wire_knowledge.board_thread_meta option;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
   board_sort_by : string;
@@ -243,6 +245,8 @@ let empty =
     active_tab = Nav.Knowledge_board;
     board_recovery = Board_recovery.empty;
     board = Observed.unreported;
+    board_feed_meta = None;
+    board_thread_meta = None;
     board_hearths = Observed.unreported;
     board_signal_only = true;
     board_sort_by = "recent";
@@ -1738,11 +1742,17 @@ let apply_board ~observed_at feed t =
 let apply_board_hearths ~observed_at hearths t =
   { t with board_hearths = Observed.value ~observed_at hearths }
 
-let apply_thread ~observed_at ((p, _) as thread) t =
+let apply_thread ~observed_at (((p : Wire_knowledge.board_post), _) as thread) t =
+  let board_thread_meta =
+    match t.board_thread_meta with
+    | Some tm when String.equal tm.post_id p.Wire_knowledge.id -> Some tm
+    | Some _ | None -> None
+  in
   {
     t with
     active_thread = Observed.value ~observed_at thread;
     active_thread_target = Some p.Wire_knowledge.id;
+    board_thread_meta;
     thread_selected_comment = None;
     armed_vote = None;
   }
@@ -1771,6 +1781,8 @@ let mark_thread_loading ?(force = false) ~post_id ~since_ns t =
       t with
       active_thread = Observed.loading ~since_ns;
       active_thread_target = Some post_id;
+      board_thread_meta =
+        (if same_thread then t.board_thread_meta else None);
       thread_selected_comment =
         (if same_thread then thread_comment_id ~post_id t else None);
       thread_comment_scroll = (if same_thread then t.thread_comment_scroll else 0);
@@ -1788,6 +1800,7 @@ let mark_thread_failed ?target ~at ~reason ~retryable t =
     t with
     active_thread = Observed.failed ~reason ~retryable ~at;
     active_thread_target = target;
+    board_thread_meta = None;
     thread_selected_comment;
     thread_comment_scroll =
       (if Option.is_some thread_selected_comment then t.thread_comment_scroll else 0);
@@ -2879,3 +2892,45 @@ let move_memory_subview_scroll ?(max_scroll = 0) ~delta t =
 
 let move_facts_selection ~count ~delta t =
   { t with facts_selected_index = clamp_index count (t.facts_selected_index + delta) }
+
+let apply_board_feed_meta meta t = { t with board_feed_meta = Some meta }
+
+let apply_board_thread_meta meta t = { t with board_thread_meta = Some meta }
+
+let post_extras_for ~post_id t =
+  match t.board_thread_meta with
+  | Some tm when String.equal tm.post_id post_id && Option.is_some tm.post_extras
+    ->
+      tm.post_extras
+  | Some _ | None -> (
+      match t.board_feed_meta with
+      | Some fm -> List.assoc_opt post_id fm.post_extras
+      | None -> None)
+
+let comment_audience_for ~post_id ~comment_id t =
+  match t.board_thread_meta with
+  | Some tm when String.equal tm.post_id post_id ->
+      List.assoc_opt comment_id tm.comment_audiences
+  | Some _ | None -> None
+
+let active_comment_page_for ~post_id t =
+  match t.board_thread_meta with
+  | Some tm when String.equal tm.post_id post_id -> tm.comment_page
+  | Some _ | None -> None
+
+let wrapped_comment_lines_count ~theme ~width ?max_body_lines
+    (threaded : threaded_comment list) =
+  List.fold_left
+    (fun acc (tc : threaded_comment) ->
+      let wrap_w = Int.max 8 (width - (tc.depth * 2)) in
+      let n_raw =
+        List.length
+          (Masc_tui_ui.Markdown.render_lines ~width:wrap_w ~theme
+             tc.comment.body)
+      in
+      let body_n =
+        let base = Int.max 1 n_raw in
+        match max_body_lines with Some cap -> Int.min cap base | None -> base
+      in
+      acc + 1 + body_n)
+    0 threaded

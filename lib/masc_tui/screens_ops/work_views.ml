@@ -2322,41 +2322,96 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
         | [ t; b ] -> (t, b)
         | _ -> (split_rect, Rect.empty)
     in
-    (* Left/Top: Recent Decisions Audit (24h) *)
+    (* Left/Top: Session Decisions + Server Gate Resolved Audit (honest provenance) *)
+    let server_resolved, server_resolved_err, gate_loading =
+      match model.work.gate_snapshot with
+      | Observed.Value { data = gs; _ } ->
+          (gs.recent_resolved, gs.recent_resolved_error, false)
+      | Observed.Failed { reason; _ } -> ([], Some reason, false)
+      | Observed.Loading _ -> ([], None, true)
+      | Observed.Absent | Observed.Unreported -> ([], None, false)
+    in
+    let session_n = List.length model.work.recent_decisions_24h in
+    let server_n = List.length server_resolved in
+    let audit_title =
+      if session_n > 0 then
+        Printf.sprintf "%s (%d)"
+          (Ops_common.say model ~ko:"이번 세션 결정 기록"
+             ~en:"Session Decisions")
+          session_n
+      else if server_n > 0 then
+        Printf.sprintf "%s (%d)"
+          (Ops_common.say model ~ko:"서버 게이트 결정 이력"
+             ~en:"Server Gate Decisions")
+          server_n
+      else
+        Ops_common.say model ~ko:"이번 세션 결정 기록 (0)"
+          ~en:"Session Decisions (0)"
+    in
+    let audit_subtitle =
+      if session_n > 0 then
+        match server_resolved_err with
+        | Some _ ->
+            Some (Ops_common.say model ~ko:"서버 게이트 오류" ~en:"gate err")
+        | None ->
+            if server_n > 0 then
+              Some
+                (Ops_common.say model
+                   ~ko:(Printf.sprintf "서버 %d건" server_n)
+                   ~en:(Printf.sprintf "+%d server" server_n))
+            else None
+      else None
+    in
     let audit_spec : Card.spec =
       {
-        (Card.default_spec
-           ~title:
-             (Printf.sprintf "%s (%d)"
-                (Ops_common.say model ~ko:"최근 24시간 결정 감사"
-                   ~en:"Recent Decisions Audit (24h)")
-                (List.length model.work.recent_decisions_24h)))
-        with
+        (Card.default_spec ~title:audit_title) with
+        subtitle = audit_subtitle;
         focused = Model.body_has_focus model;
       }
     in
     let a_inner = Card.draw ~cache grid ~rect:left_rect ~theme audit_spec in
     if not (Rect.is_empty a_inner) then begin
-      if model.work.recent_decisions_24h = [] then begin
+      if session_n = 0 && server_n = 0 then begin
         let card_bg = Color.of_rgb theme.surface_1 in
         let pad_x = Ops_common.pad_x_for ~model a_inner in
         let content = Card.pad_inner ~pad_x ~pad_y:1 a_inner in
-        ignore
-          (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
-             ~max_w:content.w
-             ~style:(Typography.primary ~bg:card_bg theme)
-             (Glyph.to_utf8 Glyph.Live_healthy ^ " "
-              ^ Ops_common.say model
-                  ~ko:"최근 24시간 내 기록된 운영자 결정이 없습니다."
-                  ~en:"No operator decisions recorded in the last 24h."));
+        (match server_resolved_err with
+         | Some err ->
+             ignore
+               (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
+                  ~max_w:content.w
+                  ~style:(Typography.status ~bg:card_bg theme Theme.Status_critical)
+                  (Glyph.to_utf8 Glyph.Live_failing ^ " "
+                   ^ Ops_common.say model
+                       ~ko:("서버 게이트 이력 조회 실패: " ^ err)
+                       ~en:("Server gate history read failed: " ^ err)))
+         | None ->
+             if gate_loading then
+               ignore
+                 (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
+                    ~max_w:content.w
+                    ~style:(Typography.status ~bg:card_bg theme Theme.Status_active)
+                    (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+                     ^ Ops_common.say model
+                         ~ko:"서버 게이트 이력 불러오는 중..."
+                         ~en:"Loading server gate decision history..."))
+             else
+               ignore
+                 (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
+                    ~max_w:content.w
+                    ~style:(Typography.primary ~bg:card_bg theme)
+                    (Glyph.to_utf8 Glyph.Live_idle ^ " "
+                     ^ Ops_common.say model
+                         ~ko:"이번 TUI 세션에서 기록된 운영자 결정이 없습니다."
+                         ~en:"No operator decisions recorded in this TUI session.")));
         if content.h >= 2 then
           ignore
             (Ops_common.put_line ~clip:content grid ~x:content.x
                ~y:(content.y + 1) ~max_w:content.w
                ~style:(Typography.whisper ~bg:card_bg theme)
                (Ops_common.say model
-                  ~ko:"도구 승인·질문 응답·목표 확정·검증 판정 시 여기에 감사 기록이 남습니다."
-                  ~en:"Tool approvals, Ask answers, Goal confirmations & verdicts appear here."))
+                  ~ko:"도구 승인·질문 응답·목표 확정·검증 판정 시 여기에 세션 기록이 남습니다."
+                  ~en:"Session tool approvals, Ask answers, Goal confirmations & verdicts appear here."))
       end
       else
         let cols : Table.column list =
@@ -2400,34 +2455,75 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
           ]
         in
         let rows =
-          List.map
-            (fun (d : Work_store.decision_audit_entry) ->
-              let g, tok, lbl = decision_kind_label d.kind in
-              {
-                Table.id = d.target_id;
-                cells =
-                  [
-                    ( "time"
-                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                        ~attrs:Attr.italic
-                        (Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
-                           d.at_unix) );
-                    ( "kind"
-                    , Table.Badge
-                        {
-                          glyph = Some g;
-                          text = Say.resolve model.lang lbl;
-                          tone = tok;
-                        } );
-                    ( "keeper"
-                    , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                        (match d.keeper with
-                        | Some k -> k
-                        | None -> Glyph.to_utf8 Glyph.Missing_absent) );
-                    ("summary", Table.text_cell d.summary);
-                  ];
-              })
-            model.work.recent_decisions_24h
+          if session_n > 0 then
+            List.map
+              (fun (d : Work_store.decision_audit_entry) ->
+                let g, tok, lbl = decision_kind_label d.kind in
+                {
+                  Table.id = d.target_id;
+                  cells =
+                    [
+                      ( "time"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic
+                          (Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
+                             d.at_unix) );
+                      ( "kind"
+                      , Table.Badge
+                          {
+                            glyph = Some g;
+                            text = Say.resolve model.lang lbl;
+                            tone = tok;
+                          } );
+                      ( "keeper"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          (match d.keeper with
+                          | Some k -> k
+                          | None -> Glyph.to_utf8 Glyph.Missing_absent) );
+                      ("summary", Table.text_cell d.summary);
+                    ];
+                })
+              model.work.recent_decisions_24h
+          else
+            List.map
+              (fun (r : Wire_work.gate_resolved_row) ->
+                let kind_raw = Option.value r.decision_kind ~default:r.decision in
+                let kind_s = String.lowercase_ascii (String.trim kind_raw) in
+                let approved =
+                  String.equal kind_s "approve"
+                  || String.equal kind_s "approved"
+                  || String.equal kind_s "allow"
+                in
+                let g =
+                  if approved then Glyph.Check_mark else Glyph.Live_failing
+                in
+                let tok =
+                  if approved then Theme.Status_ok else Theme.Status_critical
+                in
+                let summary =
+                  match r.decision_reason with
+                  | Some reason when not (String.equal (String.trim reason) "") ->
+                      r.tool ^ " · " ^ reason
+                  | Some _ | None -> r.tool
+                in
+                {
+                  Table.id = r.id;
+                  cells =
+                    [
+                      ( "time"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic
+                          (Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
+                             r.ts) );
+                      ( "kind"
+                      , Table.Badge { glyph = Some g; text = kind_raw; tone = tok } );
+                      ( "keeper"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          r.keeper );
+                      ("summary", Table.text_cell summary);
+                    ];
+                })
+              server_resolved
         in
         ignore
           (Table.draw grid ~rect:a_inner ~theme ~caps:Ops_common.default_caps

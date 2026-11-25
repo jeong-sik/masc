@@ -23084,7 +23084,7 @@ let test_wire_reads_the_open_work () =
                  "revision", `Int 3; "open_activities", open_json ]
          ])
   in
-  let open_of result =
+  let open_of (result : (Wire_fleet.turn_preview_update, string) result) =
     match result with
     | Error detail -> Alcotest.fail detail
     | Ok update -> update.preview.open_activities

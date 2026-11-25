@@ -2206,7 +2206,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                   <span>추론 (Thinking)</span>
                                   <span class="kp-block-preview">${summarizeCompact(blocks.thinkingText, 80)}</span>
                                 </summary>
-                                <${MarkdownContent} class="kp-block-content" text=${blocks.thinkingText} />
+                                <${MarkdownContent} class="kp-block-content" text=${blocks.thinkingText} streaming=${msg.deliveryState === 'Streaming'} />
                               </details>
                             `}
 

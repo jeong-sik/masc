@@ -520,6 +520,20 @@ candidates = ["safe.model"]
     })).toBe(true)
   })
 
+  it('preserves literal auxiliary tags in fenced assistant examples', () => {
+    const content = [
+      '<thinking>Inspecting the example.</thinking>',
+      '```html',
+      '<thinking>Literal markup</thinking>',
+      '<memory>Literal content</memory>',
+      '```',
+    ].join('\n')
+    const blocks = parseChatMessageBlocks({ id: 'example', role: 'assistant', content, ts: 100 })
+    expect(blocks.thinkingText).toBe('Inspecting the example.')
+    expect(blocks.memoryItems).toEqual([])
+    expect(blocks.bodyText).toBe(content.slice(content.indexOf('```')))
+  })
+
   it('(B) Chat 3-block toggles (Alt+T Thinking, Tools summary/full/hidden, Memory & Autonomous hidden/shown) render structured collapsible cards', async () => {
     const rawToolMsg: ChatTranscriptEntry = {
       id: 'm-tool',

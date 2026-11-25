@@ -786,7 +786,6 @@ let apply_agent_core (m : Model.t) (ev : Wire_observer.agent_core_event) =
       ({ m with infra }, [])
 
 let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
-  let fleet = { m.fleet with turns = Observed.mark_stale m.fleet.turns } in
   let wants_turns =
     (match keeper_queue_target m with
     | Some target -> Option.fold ~none:true ~some:(String.equal target) keeper
@@ -806,8 +805,19 @@ let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
             && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_activity_logs
         | Nav.Work | Nav.Knowledge | Nav.Runtime -> false)
   in
+  (* Keep the watched Keeper's observation when another Keeper changes.
+     The missing row makes that Keeper's next view request a new observation. *)
+  let turns =
+    match keeper with
+    | Some name when not wants_turns ->
+        Observed.map
+          (List.filter (fun (row : Wire_fleet.keeper_turn_row) ->
+               not (String.equal row.keeper_name name)))
+          m.fleet.turns
+    | Some _ | None -> Observed.mark_stale m.fleet.turns
+  in
   let cmds = if wants_turns then [ get_cmd m.epoch Cmd.Get_keeper_turns ] else [] in
-  ({ m with fleet }, cmds)
+  ({ m with fleet = { m.fleet with turns } }, cmds)
 
 let apply_observer_event (m : Model.t) = function
   | Wire_observer.Observation_changed payload ->

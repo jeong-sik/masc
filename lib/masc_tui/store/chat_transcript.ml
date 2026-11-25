@@ -680,7 +680,8 @@ let preview_short_activity (p : Wire_fleet.turn_preview) =
       | Wire_fleet.Preview_preparing ->
           Say.make ~ko:"턴 준비 중" ~en:"Preparing"
       | Wire_fleet.Preview_waiting ->
-          preview_with_last_tool p (Say.make ~ko:"응답 대기 중" ~en:"Waiting")
+          preview_with_last_tool p
+            (Say.make ~ko:"모델 응답 대기" ~en:"Waiting for model")
       | Wire_fleet.Preview_streaming ->
           preview_with_last_tool p
             (Say.make ~ko:"응답 수신" ~en:"Response activity")
@@ -708,6 +709,116 @@ let active_turn_short_activity (turn : Wire_fleet.active_turn) =
           | Some p -> Say.literal p
           | None -> Say.make ~ko:"진행 중" ~en:"Running"))
 
+let fresh_turn_state ~(model : Model.t) ~keeper =
+  match model.fleet.turns with
+  | Observed.Value { data; stale = false; _ } ->
+      List.find_map
+        (fun (row : Wire_fleet.keeper_turn_row) ->
+          if String.equal row.keeper_name keeper then Some row.state else None)
+        data
+  | Observed.Value { stale = true; _ } | Observed.Loading _
+  | Observed.Absent | Observed.Unreported | Observed.Failed _ -> None
+
+let live_turn_observed ~model ~keeper (turn : Wire_fleet.active_turn) =
+  match fresh_turn_state ~model ~keeper with
+  | Some (Wire_fleet.Turn_active observed) ->
+      String.equal observed.interrupt_token turn.interrupt_token
+  | Some (Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _) | None -> false
+
+let active_turn_for_progress ~(model : Model.t) ~keeper =
+  match fresh_turn_state ~model ~keeper with
+  | Some (Wire_fleet.Turn_active turn) -> Some turn
+  | Some Wire_fleet.Turn_idle -> None
+  | Some (Wire_fleet.Turn_unavailable _) | None ->
+      Fleet_store.active_turn_for ~keeper model.fleet
+
+let progress_glyph (model : Model.t) =
+  let reduce_motion =
+    Observed.to_option model.config.preferences
+    |> Option.exists (fun (prefs : Wire_config.tui_preferences) ->
+           Option.value prefs.reduce_motion ~default:false)
+  in
+  let wall = model.freshness.last_wall_unix in
+  let frame =
+    if reduce_motion || not (Float.is_finite wall) then 0
+    else Int.of_float (mod_float wall 1.0 *. 4.0)
+  in
+  Glyph.Live_working_frame frame
+
+let active_turn_duration ~(model : Model.t) (turn : Wire_fleet.active_turn) =
+  let wall = model.freshness.last_wall_unix in
+  if turn.started_at_unix <= 0.0 || wall < turn.started_at_unix
+     || not (Float.is_finite turn.started_at_unix && Float.is_finite wall)
+  then None
+  else
+    let seconds = Int.of_float (wall -. turn.started_at_unix) in
+    let label =
+      if seconds < 60 then Printf.sprintf "%ds" seconds
+      else if seconds < 3600 then Printf.sprintf "%dm %02ds" (seconds / 60) (seconds mod 60)
+      else Printf.sprintf "%dh %02dm" (seconds / 3600) (seconds mod 3600 / 60)
+    in
+    Some (Say.literal label)
+
+let observed_turn_label ~model ~live (turn : Wire_fleet.active_turn) =
+  let lane =
+    if Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_proactive
+    then Say.make ~ko:"자율 실행" ~en:"Background turn"
+    else turn_lane_label turn.lane
+  in
+  let activity = active_turn_short_activity turn in
+  let parts =
+    if live then
+      activity :: lane :: Option.to_list (active_turn_duration ~model turn)
+    else
+      [ Say.make ~ko:"마지막 확인" ~en:"Last observed"; lane; activity ]
+  in
+  Say.concat ~sep:" · " parts
+
+let turn_running_kind_of_turn (turn : Wire_fleet.active_turn) =
+  match turn.tool_in_flight with
+  | Some _ -> Composer.Turn_kind_tool
+  | None -> (
+      match turn.preview with
+      | None -> Composer.Turn_kind_active
+      | Some p -> (
+          match p.preparation with
+          | Some
+              {
+                state =
+                  ( Wire_fleet.Prep_rejected
+                  | Wire_fleet.Prep_raised
+                  | Wire_fleet.Prep_cancelled );
+                _;
+              } ->
+              Composer.Turn_kind_attention
+          | Some { state = Wire_fleet.Prep_active | Wire_fleet.Prep_prepared; _ }
+            ->
+              Composer.Turn_kind_active
+          | None -> (
+              match p.activity with
+              | Wire_fleet.Preview_tool_observed -> Composer.Turn_kind_tool
+              | Wire_fleet.Preview_failed -> Composer.Turn_kind_attention
+              | Wire_fleet.Preview_preparing
+              | Wire_fleet.Preview_waiting
+              | Wire_fleet.Preview_streaming ->
+                  Composer.Turn_kind_active)))
+
+let observed_turn_badge ~model ~keeper (turn : Wire_fleet.active_turn) =
+  let live = live_turn_observed ~model ~keeper turn in
+  let label = observed_turn_label ~model ~live turn in
+  if Fleet_store.is_turn_interrupting ~keeper
+       ~interrupt_token:turn.interrupt_token model.fleet
+  then
+    Glyph.Live_paused, Theme.Status_attention,
+    Say.concat ~sep:" · "
+      [ Say.make ~ko:"중단 요청 중" ~en:"Interrupting"; turn_lane_label turn.lane ]
+  else
+    match turn_running_kind_of_turn turn with
+    | Composer.Turn_kind_attention -> Glyph.Action_required, Theme.Status_attention, label
+    | Composer.Turn_kind_active | Composer.Turn_kind_tool ->
+        if live then progress_glyph model, Theme.Status_active, label
+        else Glyph.Live_idle, Theme.Status_historical, label
+
 let start_reason_label = function
   | "mention_pending" -> Say.make ~ko:"멘션 도착" ~en:"Mention received"
   | "board_event_pending" -> Say.make ~ko:"보드 이벤트" ~en:"Board event"
@@ -731,7 +842,7 @@ let start_reason_label = function
 
 let keeper_work_overview ~(model : Model.t) ~keeper =
   let labeled ~ko ~en text = Say.concat ~sep:"  " [ Say.make ~ko ~en; text ] in
-  let turn = Fleet_store.active_turn_for ~keeper model.fleet in
+  let turn = active_turn_for_progress ~model ~keeper in
   let work_context =
     Option.bind turn (fun (turn : Wire_fleet.active_turn) ->
       Option.bind turn.preview (fun preview -> preview.work_context))
@@ -785,9 +896,8 @@ let keeper_work_overview ~(model : Model.t) ~keeper =
   match turn with
   | None -> task_rows
   | Some turn ->
-      let status = labeled ~ko:"관측한 턴" ~en:"Observed turn"
-          (Say.concat ~sep:Typography.sep_dot
-             [ turn_lane_label turn.lane; active_turn_short_activity turn ]) in
+      let glyph, _, label = observed_turn_badge ~model ~keeper turn in
+      let status = Say.concat ~sep:" " [ Say.literal (Glyph.to_utf8 glyph); label ] in
       let starts =
         match work_context with
         | Some { start_reasons = first :: rest; _ } ->
@@ -902,35 +1012,6 @@ let active_turn_preview_tail (turn : Wire_fleet.active_turn) =
       let clean = normalize_preview_inline p.text_tail in
       if String.equal clean "" then None else Some clean
 
-let turn_running_kind_of_turn (turn : Wire_fleet.active_turn) =
-  match turn.tool_in_flight with
-  | Some _ -> Composer.Turn_kind_tool
-  | None -> (
-      match turn.preview with
-      | None -> Composer.Turn_kind_active
-      | Some p -> (
-          match p.preparation with
-          | Some
-              {
-                state =
-                  ( Wire_fleet.Prep_rejected
-                  | Wire_fleet.Prep_raised
-                  | Wire_fleet.Prep_cancelled );
-                _;
-              } ->
-              Composer.Turn_kind_attention
-          | Some { state = Wire_fleet.Prep_active | Wire_fleet.Prep_prepared; _ }
-            ->
-              Composer.Turn_kind_active
-          | None -> (
-              match p.activity with
-              | Wire_fleet.Preview_tool_observed -> Composer.Turn_kind_tool
-              | Wire_fleet.Preview_failed -> Composer.Turn_kind_attention
-              | Wire_fleet.Preview_preparing
-              | Wire_fleet.Preview_waiting
-              | Wire_fleet.Preview_streaming ->
-                  Composer.Turn_kind_active)))
-
 let turn_running_badge_label ~(turn : Wire_fleet.active_turn) ~queued_count =
   let lane_say = turn_lane_label turn.lane in
   let act_say = active_turn_short_activity turn in
@@ -972,7 +1053,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
   let buf_opt = Fleet_store.String_map.find_opt keeper model.fleet.chat_streams in
   let active_tx_opt = Drafts.active_tx_for_keeper ~keeper model.drafts in
   let queued_count = Drafts.queued_count_for_keeper ~keeper model.drafts in
-  let active_turn_opt = Fleet_store.active_turn_for ~keeper model.fleet in
+  let active_turn_opt = active_turn_for_progress ~model ~keeper in
   let local_interrupting =
     match buf_opt with
     | Some b when b.active -> b.interrupting
@@ -1116,16 +1197,38 @@ let status_strip_phase ~model ~keeper =
   if equal_live_chat_phase phase Phase_awaiting_turn
      && not (Fleet_store.has_active_chat_stream ~keeper model.fleet)
   then
-    match Fleet_store.active_turn_for ~keeper model.fleet with
+    match active_turn_for_progress ~model ~keeper with
     | Some turn ->
         let queued_count = Drafts.queued_count_for_keeper ~keeper model.drafts in
         Phase_turn_running { turn; queued_count }
     | None -> phase
   else phase
 
-let live_chat_phase_badge ~model ~keeper =
-  Composer.pending_tx_badge
-    (composer_pending_tx_of_phase (status_strip_phase ~model ~keeper))
+let live_chat_phase_badge ~(model : Model.t) ~keeper =
+  if Option.equal Nav.equal_overlay model.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue))
+  then
+    Option.map (observed_turn_badge ~model ~keeper) (active_turn_for_progress ~model ~keeper)
+  else
+      let phase = status_strip_phase ~model ~keeper in
+      match phase with
+      | Phase_turn_running { turn; queued_count } ->
+          let glyph, tone, label = observed_turn_badge ~model ~keeper turn in
+          let label =
+            if queued_count = 0 then label
+            else Say.concat ~sep:" · "
+                [ label
+                ; Say.make ~ko:(Printf.sprintf "대기 %d" queued_count)
+                    ~en:(Printf.sprintf "queued %d" queued_count)
+                ]
+          in
+          Some (glyph, tone, label)
+      | Phase_thinking | Phase_tool_running _ | Phase_tool_waiting _ | Phase_streaming ->
+          Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
+          |> Option.map (fun (_, tone, label) -> progress_glyph model, tone, label)
+      | Phase_idle | Phase_sending | Phase_queued _ | Phase_awaiting_turn
+      | Phase_confirming | Phase_interrupting | Phase_failed _ ->
+          Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
 
 let show_active_turn_summary ~(model : Model.t) ~keeper
     (turn : Wire_fleet.active_turn) =
@@ -1702,7 +1805,7 @@ let project_transcript ~(model : Model.t) ~keeper =
     | Section_stream _ ->
         sec :: acc
   in
-  let active_turn_opt = Fleet_store.active_turn_for ~keeper model.fleet in
+  let active_turn_opt = active_turn_for_progress ~model ~keeper in
   let is_waiting_behind_turn (p : pending_tx_projection) =
     match p.tx.state with
     | Drafts.Queued -> true

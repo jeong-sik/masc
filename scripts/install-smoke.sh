@@ -191,8 +191,11 @@ echo "install-smoke: installer seeded the complete browser-lanes Skill package"
 # from an older release's configuration schema.
 runtime_config="$base/.masc/config/runtime.toml"
 operator_file="$base/.masc/config/operator-install-smoke.txt"
-optional_config="$base/.masc/config/themes/tomorrow-night.toml"
-[ -f "$optional_config" ] || { echo "install-smoke: optional theme was not seeded" >&2; exit 1; }
+# The sample is a seeded file that nothing reads from this directory: the DOS
+# pad loader uses the embedded copy and keeps workspace overrides under
+# .masc/dos/pads. Deleting it cannot change what the server does afterwards.
+optional_config="$base/.masc/config/pads/samguk3.toml"
+[ -f "$optional_config" ] || { echo "install-smoke: optional pad layout was not seeded" >&2; exit 1; }
 printf '\n# install-smoke operator setting must survive reinstall\n' >> "$runtime_config"
 printf 'operator-owned install-smoke bytes\n' > "$operator_file"
 cp "$runtime_config" "$work/runtime-before-upgrade.toml"
@@ -217,12 +220,12 @@ base, work = map(pathlib.Path, sys.argv[1:])
 config = base / '.masc/config'
 assert (config / 'runtime.toml').read_bytes() == (work / 'runtime-before-upgrade.toml').read_bytes(), 'operator runtime bytes changed'
 assert (config / 'operator-install-smoke.txt').read_bytes() == (work / 'operator-before-upgrade.txt').read_bytes(), 'operator file changed'
-assert not (config / 'themes/tomorrow-night.toml').exists(), 'upgrade restored deliberately removed optional config'
+assert not (config / 'pads/samguk3.toml').exists(), 'upgrade restored deliberately removed optional config'
 def files(root):
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
 assert files(base / '.masc/skills/browser-lanes') == files(work / 'browser-skill-before-upgrade'), 'installed builtin Skill package changed'
 PYUPGRADE
-echo "install-smoke: actual-artifact force reinstall preserved config, removed optional theme, and builtin Skills"
+echo "install-smoke: actual-artifact force reinstall preserved config, removed optional pad layout, and builtin Skills"
 
 # Explicit reviewed package replacement uses the actual native CLI. The whole
 # package can be diffed even when the installed binary has no source checkout.

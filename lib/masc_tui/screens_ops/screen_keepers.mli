@@ -27,3 +27,25 @@ val render_dive :
   rect:Masc_tui_core.Rect.t ->
   Masc_tui_term.Cell_grid.t ->
   unit
+
+val render_with_history_rows :
+  history_rows:Keeper_dive.History_rows.t option ->
+  model:Masc_tui_store.Model.t ->
+  cache:Masc_tui_ui.Card.Cache.t ->
+  rect:Masc_tui_core.Rect.t ->
+  Masc_tui_term.Cell_grid.t ->
+  unit
+
+val render_dive_with_history_rows :
+  history_rows:Keeper_dive.History_rows.t option ->
+  name:string ->
+  tab:Masc_tui_core.Nav.keeper_tab ->
+  model:Masc_tui_store.Model.t ->
+  cache:Masc_tui_ui.Card.Cache.t ->
+  rect:Masc_tui_core.Rect.t ->
+  Masc_tui_term.Cell_grid.t ->
+  unit
+(** [render] and [render_dive] are [render_with_history_rows] and
+    [render_dive_with_history_rows] with [~history_rows:None]: they lay the
+    chat history of the Keeper out again on every call. The program that runs
+    the TUI passes the rows it keeps; see [Keeper_dive.History_rows]. *)

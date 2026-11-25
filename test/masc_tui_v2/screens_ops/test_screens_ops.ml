@@ -71,6 +71,24 @@ let has_any_hyperlink (grid : Cell_grid.t) =
   done;
   !found
 
+(* Two grids that show the same glyphs in the same styles. *)
+let grids_draw_the_same (a : Cell_grid.t) (b : Cell_grid.t) =
+  Int.equal (Cell_grid.cols a) (Cell_grid.cols b)
+  && Int.equal (Cell_grid.rows a) (Cell_grid.rows b)
+  &&
+  let cells = Cell_grid.cols a * Cell_grid.rows a in
+  let rec loop i =
+    i >= cells
+    ||
+    let ca = Cell_grid.get_linear a i in
+    let cb = Cell_grid.get_linear b i in
+    ( Cell_grid.glyph_equal ca.glyph cb.glyph
+      && Int.equal ca.width cb.width
+      && Style.equal ca.style cb.style )
+    && loop (i + 1)
+  in
+  loop 0
+
 (* --- Rich Deterministic Fixture Model --- *)
 
 let now_mono = Clock.Mono.of_ns 10_000_000_000L
@@ -3739,6 +3757,7 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
   let g_es = render_to_grid ~cols:140 ~rows:40 (Screen_work.render ~model:m_empty_sched) in
   Alcotest.(check bool) "Empty Work_schedules renders honest notice" true
     (non_empty_row_count g_es >= 5)
+
 let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
   let now_unix = 1795254000.0 in
   (* 1. Signed due delta distinguishes future vs overdue *)
@@ -3930,6 +3949,161 @@ let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
      && contains_sub ~needle:"approve" txt_audit
      && contains_sub ~needle:"masc_board_post" txt_audit)
 
+(* --- Chat history rows: laid out once, kept while nothing changed --- *)
+
+let history_msg ~id ~role ~content ~thinking ~seconds_ago :
+    Wire_fleet.chat_message =
+  {
+    id;
+    role;
+    content;
+    ts_unix = now_unix -. seconds_ago;
+    turn_ref = Some "t-history";
+    model_used = None;
+    tool_call_id = None;
+    tool_call_name = None;
+    execution_id = None;
+    provenance = None;
+    failure_kind = None;
+    thinking;
+  }
+
+let apply_history keeper messages fleet =
+  Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper
+    { messages; has_more = false; next_cursor = None }
+    fleet
+
+(* A fleet whose named keepers each store [n] Markdown messages. A reply
+   carries a visible block of its thinking. *)
+let make_history_model ~n keepers =
+  let m = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let message i =
+    history_msg ~id:(Printf.sprintf "h-%d" i)
+      ~role:(if i mod 2 = 0 then Wire_fleet.Role_user else Wire_fleet.Role_assistant)
+      ~content:
+        (Printf.sprintf
+           "메시지 %d번입니다.\n\n- 항목 하나\n- 항목 둘\n\n```ocaml\nlet x = %d\n```"
+           i i)
+      ~thinking:
+        (if i mod 2 = 0 then None
+         else Some (Wire_fleet.Thinking_visible (Printf.sprintf "생각 %d" i)))
+      ~seconds_ago:(float_of_int (600 - i))
+  in
+  let messages = List.init n message in
+  let fleet =
+    Fleet_store.apply_keepers ~observed_at:now_mono sample_keepers m.fleet
+  in
+  let fleet =
+    List.fold_left
+      (fun fleet keeper -> apply_history keeper messages fleet)
+      fleet keepers
+  in
+  { m with fleet }
+
+(* The chat tab of one keeper, drawn with or without kept history rows. *)
+let draw_chat ?history_rows ~cols ~name model =
+  render_to_grid ~cols ~rows:40
+    (Screen_keepers.render_dive_with_history_rows ~name ~tab:Nav.Keeper_chat
+       ~history_rows ~model)
+
+let test_chat_history_rows_kept_draw_a_fresh_layout () =
+  let name = "e-masc-the-leader" in
+  let m = make_history_model ~n:24 [ name ] in
+  let kept = Keeper_dive.History_rows.create () in
+  let fresh = draw_chat ~cols:140 ~name m in
+  Alcotest.(check bool) "the stored history is on screen" true
+    (contains_sub ~needle:"항목 둘" (grid_all_text fresh));
+  let first = draw_chat ~history_rows:kept ~cols:140 ~name m in
+  let second = draw_chat ~history_rows:kept ~cols:140 ~name m in
+  Alcotest.(check bool) "first draw from the kept rows draws the fresh layout"
+    true (grids_draw_the_same fresh first);
+  Alcotest.(check bool) "second draw from the kept rows draws the fresh layout"
+    true (grids_draw_the_same fresh second);
+  let s = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "history laid out once" 1 s.misses;
+  Alcotest.(check int) "second draw reused the rows" 1 s.hits;
+  Alcotest.(check int) "one keeper kept" 1 s.entries
+
+let test_chat_history_rows_are_laid_out_again_when_an_input_changes () =
+  let name = "e-masc-the-leader" in
+  let m = make_history_model ~n:12 [ name ] in
+  let kept = Keeper_dive.History_rows.create () in
+  ignore (draw_chat ~history_rows:kept ~cols:140 ~name m);
+  let page =
+    match Fleet_store.String_map.find_opt name m.fleet.chat_histories with
+    | Some obs -> (
+        match Observed.to_option obs with
+        | Some page -> page
+        | None -> Alcotest.fail "the stored history is not reported")
+    | None -> Alcotest.fail "the keeper has no stored history"
+  in
+  let with_one_more_message =
+    {
+      m with
+      fleet =
+        apply_history name
+          (page.messages
+          @ [
+              history_msg ~id:"h-new" ~role:Wire_fleet.Role_user
+                ~content:"새 메시지" ~thinking:None ~seconds_ago:1.;
+            ])
+          m.fleet;
+    }
+  in
+  (* Each one differs from [m] in a single input of the history rows. *)
+  let changed =
+    [
+      ("a new message", with_one_more_message, 140);
+      ("a narrower pane", m, 100);
+      ("another theme", { m with theme_preset = Theme.Paper_light }, 140);
+      ("another language", { m with lang = Say.Lang_en }, 140);
+      ( "another time zone",
+        { m with tz_offset_sec = m.tz_offset_sec + 3600 },
+        140 );
+      ( "another origin mode",
+        { m with fleet = Fleet_store.cycle_origin_mode m.fleet },
+        140 );
+      ( "another tools mode",
+        { m with fleet = Fleet_store.set_tools_mode Slash.Tools_results m.fleet },
+        140 );
+      ( "expanded turn details",
+        { m with fleet = Fleet_store.toggle_turn_details m.fleet },
+        140 );
+      ( "another thinking mode",
+        { m with fleet = Fleet_store.cycle_thinking_mode m.fleet },
+        140 );
+    ]
+  in
+  List.iter
+    (fun (what, changed_model, cols) ->
+      let fresh = draw_chat ~cols ~name changed_model in
+      let from_kept = draw_chat ~history_rows:kept ~cols ~name changed_model in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s: kept rows draw the fresh layout" what)
+        true (grids_draw_the_same fresh from_kept))
+    changed;
+  let s = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "every changed input laid the history out again" 10
+    s.misses;
+  Alcotest.(check int) "no changed input reused rows laid out for another" 0 s.hits
+
+let test_chat_history_rows_keep_the_keepers_drawn_last () =
+  let names = [ "e-masc-the-leader"; "code-reviewer"; "wkbl-growth" ] in
+  let m = make_history_model ~n:4 names in
+  let kept = Keeper_dive.History_rows.create ~capacity:2 () in
+  let draw name = ignore (draw_chat ~history_rows:kept ~cols:140 ~name m) in
+  List.iter draw
+    [ "e-masc-the-leader"; "code-reviewer"; "e-masc-the-leader"; "wkbl-growth" ];
+  let s = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "two keepers kept" 2 s.entries;
+  Alcotest.(check int) "three histories laid out" 3 s.misses;
+  Alcotest.(check int) "the keeper drawn again reused its rows" 1 s.hits;
+  Alcotest.(check int) "the keeper drawn longest ago was dropped" 1 s.evictions;
+  draw "code-reviewer";
+  let s = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "a dropped keeper is laid out again" 4 s.misses;
+  Alcotest.(check int) "the keeper now drawn longest ago was dropped" 2 s.evictions
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -3969,6 +4143,14 @@ let () =
             `Quick test_p1_chat_transcript_render_parity;
           Alcotest.test_case "Chat rows from another Keeper name their author, not Operator"
             `Quick test_chat_peer_rows_name_their_author;
+          Alcotest.test_case "kept chat history rows draw what a fresh layout draws"
+            `Quick test_chat_history_rows_kept_draw_a_fresh_layout;
+          Alcotest.test_case
+            "kept chat history rows are laid out again when an input changes"
+            `Quick
+            test_chat_history_rows_are_laid_out_again_when_an_input_changes;
+          Alcotest.test_case "kept chat history rows hold the keepers drawn last"
+            `Quick test_chat_history_rows_keep_the_keepers_drawn_last;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
           Alcotest.test_case "Keeper cadence window counts wake causes and notes short windows"

@@ -4226,6 +4226,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   if Rect.is_empty modal_r then ()
   else
     let title = inline_action_title ~lang kind in
+    let loading_note = Option.is_some modal.note_prefill_id in
     let hotkey =
       match kind with
       | Nav.Btw_query -> (
@@ -4253,6 +4254,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             Say.resolve lang (Say.make ~ko:"[Enter] 결과 확인 · [Esc] 닫기" ~en:"[Enter] Delivery status · [Esc] Close")
           else
             Say.resolve lang (Say.make ~ko:"[Enter] Discord에 전송 · [Esc] 닫기" ~en:"[Enter] Send to Discord · [Esc] Close")
+      | Nav.Keeper_operator_note_form _ ->
+          Say.resolve lang
+            (if modal.submitting then Say.make ~ko:"[Esc] 닫기" ~en:"[Esc] Close"
+             else if loading_note then
+               Say.make ~ko:"바로 입력 · [Esc] 닫기" ~en:"Type to edit · [Esc] Close"
+             else Say.make ~ko:"[Enter] 저장 · [Esc] 닫기" ~en:"[Enter] Save · [Esc] Close")
       | Nav.Gate_reject _
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
@@ -4276,7 +4283,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Code_search_form
       | Nav.Keeper_control_confirm _
       | Nav.Keeper_clear_form _
-      | Nav.Keeper_operator_note_form _
       | Nav.Tool_execute_form _
       | Nav.Skill_create_form
       | Nav.Skill_edit_form _
@@ -4488,7 +4494,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Addon_detach_confirm _
       | Nav.Addon_invoke_action _
       | Nav.Setup_login_input_form _ ->
-          let loading_note = Option.is_some modal.note_prefill_id in
           let status_rows =
             if modal.submitting || loading_note || Option.is_some modal.error
                || Option.is_some discord_status then 1

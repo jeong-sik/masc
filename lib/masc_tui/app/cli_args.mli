@@ -46,9 +46,9 @@ val help_text : string
 (** Complete usage text documenting all supported CLI flags. *)
 
 val parse_theme : string -> Theme.preset option
-(** Strict parser accepting [midnight], [arcade] / [arcade_hi] / [arcade-hi],
-    [paper] / [paper_light] / [paper-light], [mono], and [muted]. Returns
-    [None] for any other string. *)
+(** Strict parser accepting every [Theme.preset_name] (underscores may be
+    hyphens) plus the short names [arcade] and [paper]. Returns [None] for any
+    other string. *)
 
 val parse_lang : string -> Say.lang option
 (** Strict parser accepting [ko] and [en]. Returns [None] for any other string. *)

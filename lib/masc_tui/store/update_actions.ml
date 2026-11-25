@@ -57,7 +57,11 @@ let next_theme_preset = function
   | Theme.Arcade_hi -> Theme.Paper_light
   | Theme.Paper_light -> Theme.Mono
   | Theme.Mono -> Theme.Muted
-  | Theme.Muted -> Theme.Midnight
+  | Theme.Muted -> Theme.Muted_warm
+  | Theme.Muted_warm -> Theme.Muted_green
+  | Theme.Muted_green -> Theme.Muted_dusk
+  | Theme.Muted_dusk -> Theme.Muted_graphite
+  | Theme.Muted_graphite -> Theme.Midnight
 
 let extract_first_http_url (text : string) : string option =
   let len = String.length text in

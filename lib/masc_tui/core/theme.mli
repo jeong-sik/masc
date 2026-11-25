@@ -20,6 +20,10 @@ type preset =
   | Paper_light
   | Mono
   | Muted
+  | Muted_warm
+  | Muted_green
+  | Muted_dusk
+  | Muted_graphite
 
 type status_token =
   | Status_ok

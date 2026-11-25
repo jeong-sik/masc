@@ -27,6 +27,17 @@ type parse_outcome =
   | Info of info_action
   | Parse_error of string
 
+(* Short names [--theme] accepts besides [Theme.preset_name]. *)
+let theme_aliases = [ ("arcade", Theme.Arcade_hi); ("paper", Theme.Paper_light) ]
+
+(* The name the help text shows for a preset: its short alias when it has one. *)
+let theme_cli_name preset =
+  match
+    List.find_opt (fun (_, p) -> Theme.equal_preset p preset) theme_aliases
+  with
+  | Some (alias, _) -> alias
+  | None -> Theme.preset_name preset
+
 let help_text =
   String.concat "\n"
     [
@@ -41,7 +52,9 @@ let help_text =
       "  --base-path <path>            Workspace base path (.masc lives below it)";
       "  --base <path>                 Alias for --base-path";
       "  --workspace <name>            Workspace display name (default: basename of base path)";
-      "  --theme <midnight|arcade|paper|mono|muted>";
+      "  --theme <"
+      ^ String.concat "|" (List.map theme_cli_name Theme.all_presets)
+      ^ ">";
       "                                Color theme preset (default: midnight)";
       "  --lang <ko|en>                UI language (default: ko)";
       "  --no-auto-start               Do not auto-start a local masc server when offline";
@@ -51,10 +64,10 @@ let help_text =
     ]
 
 let parse_theme raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "arcade" -> Some Theme.Arcade_hi
-  | "paper" -> Some Theme.Paper_light
-  | other -> Theme.preset_of_name other
+  let name = String.lowercase_ascii (String.trim raw) in
+  match List.assoc_opt name theme_aliases with
+  | Some preset -> Some preset
+  | None -> Theme.preset_of_name name
 
 let parse_lang raw = Say.lang_of_code raw
 

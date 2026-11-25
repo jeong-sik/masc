@@ -72,6 +72,10 @@ let f_content = "content"
 let f_text = "text"
 let f_id = "id"
 let f_source = "source"
+let f_surface = "surface"
+let f_workspace_id = "workspace_id"
+let f_conversation_id = "conversation_id"
+let f_external_message_id = "external_message_id"
 let f_tool_call = "tool_call"
 let f_tool_name = "tool_name"
 let f_actor = "actor"
@@ -242,13 +246,27 @@ let chat_speaker : Chat.speaker option -> Yojson.Safe.t = function
     sender ~authority:speaker_authority ~id:speaker_id ~name:speaker_name
 ;;
 
+let external_chat_coordinates (message : Chat.chat_message) =
+  match message.speaker with
+  | Some { speaker_authority = External; _ } ->
+    [ Option.map (fun surface -> f_surface, Surface_ref.to_json surface) message.surface
+    ; Option.map (fun id -> f_workspace_id, `String id) message.workspace_id
+    ; Option.map (fun id -> f_conversation_id, `String id) message.conversation_id
+    ; Option.map (fun id -> f_external_message_id, `String id) message.external_message_id
+    ]
+    |> List.filter_map Fun.id
+  | Some { speaker_authority = Owner | Keeper; _ } | None -> []
+;;
+
 let chat_fields (line : Keeper_chat_store_line_decode.parsed_line) =
   match line.message with
   | None -> [ f_kind, `String "chat_unreadable" ]
   | Some message ->
     let shown =
       match message.role with
-      | User -> [ f_speaker, chat_speaker message.speaker; f_content, `String message.content ]
+      | User ->
+        [ f_speaker, chat_speaker message.speaker; f_content, `String message.content ]
+        @ external_chat_coordinates message
       | Assistant | System -> [ f_content, `String message.content ]
       | Tool ->
         (* The row a tool call left. Its content is the call's arguments. *)
@@ -271,9 +289,14 @@ let external_fields (item : Keeper_external_attention.item) =
         ~id:item.actor.actor_id
         ~name:item.actor.display_name )
   ; f_source, `String item.source_label
+  ; f_surface, Surface_ref.to_json item.conversation.surface
+  ; f_conversation_id, `String item.conversation.conversation_id
   ; f_urgency, `String (Keeper_external_attention.urgency_to_string item.urgency)
   ; f_content, `String item.content_preview
   ]
+  @ (match item.external_message with
+     | None -> []
+     | Some message -> [ f_external_message_id, `String message.message_id ])
 ;;
 
 let observation_token : Keeper_librarian.tool_observation_outcome -> string = function

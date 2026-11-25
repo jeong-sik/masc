@@ -253,6 +253,7 @@ let discord_message ~message_id =
     ; message_id
     ; author_id = "U123"
     ; author_name = Some "operator"
+    ; guild_nickname = None
     ; attachments = []
     ; raw_content = "wake the keeper"
     ; resolved_mentions = []
@@ -404,7 +405,7 @@ let decoded_mention ~bot_user_id ~channel_id ~message_id =
   | Error detail -> fail detail
 ;;
 
-let with_bound_luna f =
+let with_bound_luna ?thread_id f =
   with_temp_dir @@ fun base_dir ->
   with_env Env_config_core.base_path_env_key base_dir @@ fun () ->
   with_env "MASC_DISCORD_BINDING_STORE_PATH"
@@ -418,6 +419,11 @@ let with_bound_luna f =
    | Ok _ -> ());
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
+  Option.iter
+    (fun thread_id ->
+      State.register_thread ~thread_id ~parent_channel_id:"C123";
+      Eio.Switch.on_release sw (fun () -> State.unregister_thread ~thread_id))
+    thread_id;
   let failures = ref [] in
   let ingress =
     Connector_ingress_lane.create ~sw
@@ -490,6 +496,85 @@ let test_ambient_own_bot_mention_reads_as_the_bound_keeper () =
     in
     check (list string) "the ambient record reads it the same way"
       [ "@luna 안녕 @Bob" ] ambient
+;;
+
+let test_thread_and_guild_nickname_survive_ingress () =
+  let thread_id = "thread-456" in
+  with_bound_luna ~thread_id @@ fun ~base_dir ingress ->
+  let event ~message_id ~author_id ~global_name ~nickname =
+    let payload =
+      `Assoc
+        [ "id", `String message_id
+        ; "channel_id", `String thread_id
+        ; "guild_id", `String "G123"
+        ; "content", `String "A message in the thread"
+        ; "author", `Assoc [ "id", `String author_id; "global_name", `String global_name ]
+        ; "member", `Assoc [ "nick", `String nickname ]
+        ]
+    in
+    match Discord_gateway_state.decode_dispatch ~bot_user_id:None
+            ~event_name:"MESSAGE_CREATE" ~payload with
+    | Ok event -> event
+    | Error detail -> fail detail
+  in
+  let dispatch_for_delivery (delivery : Gate_keeper_backend.connector_delivery)
+      ~channel:_ ~channel_user_id ~channel_user_name ~channel_workspace_id:_
+      ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
+    check string "triggered account" "user-1" channel_user_id;
+    check string "triggered nickname" "New nickname" channel_user_name;
+    (match delivery.surface with
+     | Surface_ref.Discord
+         { guild_id = Some "G123"; parent_channel_id = Some "C123";
+           thread_id = Some id; _ } ->
+       check string "delivery thread" thread_id id
+     | _ -> fail "missing Discord delivery thread coordinates");
+    Gate_protocol.Reply
+      { content = ""; structured = None; stats = None; message_request = None }
+  in
+  let release, resolve_release = Eio.Promise.create () in
+  (match Connector_ingress_lane.submit ingress
+           ~lane:(Connector_ingress_lane.Keeper_lane "luna")
+           ~event_id:{ source = "test"; opaque_id = "hold" }
+           (fun () -> Eio.Promise.await release) with
+   | Ok () -> ()
+   | Error error -> fail (Connector_ingress_lane.submit_error_to_string error));
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~message_id:"m1" ~author_id:"user-1" ~global_name:"First" ~nickname:"Nickname");
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~message_id:"m2" ~author_id:"user-2" ~global_name:"Second" ~nickname:"Nickname");
+  G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
+    ~dispatch_for_delivery ~base_dir
+    (event ~message_id:"m3" ~author_id:"user-1" ~global_name:"First" ~nickname:"New nickname");
+  State.unregister_thread ~thread_id;
+  Eio.Promise.resolve resolve_release ();
+  fun () ->
+    let observations =
+      Keeper_external_attention.load_events ~base_path:base_dir ~keeper_name:"luna"
+      |> List.map (fun (Keeper_external_attention.Recorded item) ->
+        (match item.conversation.surface with
+         | Surface_ref.Discord
+             { guild_id = Some "G123"; parent_channel_id = Some "C123";
+               thread_id = Some id; _ } ->
+           check string "recorded thread" thread_id id
+         | _ -> fail "missing Discord observation thread coordinates");
+        match item.external_message with
+        | Some message ->
+          check bool "message and conversation have the same surface" true
+            (Surface_ref.equal item.conversation.surface message.surface);
+          message.message_id, (item.actor.actor_id, item.actor.display_name)
+        | None -> fail "missing Discord message identity")
+      |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    in
+    check (list (pair string (pair (option string) (option string))))
+      "same nickname never merges accounts and a rename keeps its account"
+      [ "m1", (Some "user-1", Some "Nickname")
+      ; "m2", (Some "user-2", Some "Nickname")
+      ; "m3", (Some "user-1", Some "New nickname")
+      ] observations;
+    check (option string) "guild nickname stays out of the global directory"
+      (Some "First")
+      (Keeper_connector_names.recall ~base_dir ~connector:"discord"
+         ~scope:Keeper_connector_names.Person ~id:"user-1")
 ;;
 
 module Gw = Discord_gateway_state
@@ -663,6 +748,8 @@ let () =
             test_own_bot_mention_reads_as_the_bound_keeper
         ; test_case "ambient own bot mention reads as the bound Keeper" `Quick
             test_ambient_own_bot_mention_reads_as_the_bound_keeper
+        ; test_case "Discord thread and guild nickname survive ingress" `Quick
+            test_thread_and_guild_nickname_survive_ingress
         ] )
     ; ( "directory projection"
       , [ test_case "named channels" `Quick

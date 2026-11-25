@@ -128,6 +128,9 @@ type dispatched_event =
         (** Display name: [author.global_name] when set, else
             [author.username]; [None] only when the payload carries
             neither. *)
+      ; guild_nickname : string option
+        (** Nonblank [member.nick] observed in this guild. It is a label for
+            this message's author in this guild. [author_id] is unchanged. *)
       ; attachments : inbound_attachment list
         (** Files Discord says came with the message. Required fields per the
             Attachment object are [id], [filename], [size], [url] and

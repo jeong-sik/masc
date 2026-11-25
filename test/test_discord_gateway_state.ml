@@ -514,6 +514,7 @@ let test_decode_message_create_with_mention () =
         ; message_reference_channel_id = Some "CH0"
         ; message_reference_message_id = Some "MSG0"
         ; referenced_message_author_id = Some "OTHER"
+        ; _
         }) ->
       ()
   | Ok _ -> fail "decoded wrong MESSAGE_CREATE fields"

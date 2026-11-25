@@ -1235,4 +1235,94 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
     expect(container.textContent).toContain('DeepComment #439')
   })
+
+  it('BoardTab recovers missed comments in the open post detail on observer reconnect and resync without board_comment frames', async () => {
+    const post = { id: 'p-reconnect', title: 'Reconnect Thread', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const comments = [
+      { id: 'rc-1', post_id: post.id, parent_id: null as string | null, author: 'keeper', content: 'Before disconnect #1', created_at: '2026-11-25T01:00:00Z' },
+      { id: 'rc-2', post_id: post.id, parent_id: null as string | null, author: 'keeper', content: 'Before disconnect #2', created_at: '2026-11-25T01:01:00Z' },
+    ]
+    const reconnectListeners = new Set<() => void>()
+    const resyncListeners = new Set<(reason: string) => void>()
+    vi.spyOn(observer, 'subscribeObserverReconnect').mockImplementation((listener) => {
+      reconnectListeners.add(listener)
+      return () => { reconnectListeners.delete(listener) }
+    })
+    vi.spyOn(observer, 'subscribeObserverResync').mockImplementation((listener) => {
+      resyncListeners.add(listener)
+      return () => { resyncListeners.delete(listener) }
+    })
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(JSON.stringify({ error: 'Limit_out_of_bounds' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        const rows = comments.slice(offset, offset + limit)
+        return jsonResponse({
+          post,
+          comments: rows,
+          comment_page: {
+            offset,
+            returned: rows.length,
+            total: comments.length,
+            next_offset: offset + rows.length < comments.length ? offset + rows.length : null,
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    expect(container.textContent).toContain('Before disconnect #2')
+    expect(container.textContent).not.toContain('Added while disconnected')
+
+    // 1. Comment added while disconnected; no board_comment frame arrives, only reconnect
+    comments.push({
+      id: 'rc-3',
+      post_id: post.id,
+      parent_id: null,
+      author: 'keeper',
+      content: 'Added while disconnected',
+      created_at: '2026-11-25T01:02:00Z',
+    })
+    for (const listener of reconnectListeners) listener()
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('Added while disconnected')
+      },
+      { timeout: 2000 },
+    )
+
+    // 2. Another comment added across a stream gap; only observer_resync_required fires
+    comments.push({
+      id: 'rc-4',
+      post_id: post.id,
+      parent_id: null,
+      author: 'keeper',
+      content: 'Recovered via observer resync',
+      created_at: '2026-11-25T01:03:00Z',
+    })
+    for (const listener of resyncListeners) listener('stream_gap')
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('Recovered via observer resync')
+      },
+      { timeout: 2000 },
+    )
+  })
 })

@@ -19,6 +19,7 @@ import {
   markViewSynced,
   subscribeObserverFrames,
   subscribeObserverReconnect,
+  subscribeObserverResync,
 } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
@@ -571,12 +572,27 @@ export function BoardTab(props: WorkspaceViewProps) {
         }
       }, 450)
     })
-    const unsubReconnect = subscribeObserverReconnect(() => {
+    const recoverBoardAndDetail = () => {
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+      }
+      pendingCommentReload = false
       void loadBoard('sse')
-    })
+      const activeId = selectedPostIdRef.current
+      if (activeId && authSession.peek().kind !== 'multi_account_signed_in') {
+        detailAbortRef.current?.abort()
+        const ctrl = new AbortController()
+        detailAbortRef.current = ctrl
+        void loadPostDetail(activeId, ctrl.signal, { preserveOnError: true, resetWindow: false })
+      }
+    }
+    const unsubReconnect = subscribeObserverReconnect(recoverBoardAndDetail)
+    const unsubResync = subscribeObserverResync(recoverBoardAndDetail)
     return () => {
       unsub()
       unsubReconnect()
+      unsubResync()
       if (timer) clearTimeout(timer)
     }
   }, [loadBoard, loadPostDetail])

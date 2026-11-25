@@ -4321,6 +4321,32 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
     (contains_sub ~needle:"#54666" ~haystack:txt_repo
      && contains_sub ~needle:"passing/approved/mergeable" ~haystack:txt_repo);
 
+  let compact = Model.initial ~cols:90 ~rows:20 ~lang:Say.Lang_en () in
+  let compact =
+    { compact with infra = m_repo.infra;
+      nav = { compact.nav with workspace = Nav.Infra; pane_index = 2 } }
+  in
+  let extra_pull (entry : Wire_infra.repository_pulls_entry) =
+    match entry.pulls with
+    | first :: rest -> { entry with pulls = first :: { first with number = 54667 } :: rest }
+    | [] -> entry
+  in
+  let two_pulls =
+    { compact with infra = Infra_store.apply_repository_pulls ~observed_at:now_mono
+        { pulls_snap with entries = List.map extra_pull pulls_snap.entries } compact.infra }
+  in
+  let grid = Cell_grid.create ~cols:90 ~rows:20 in
+  Screen_infra.render ~model:two_pulls ~cache:(Card.Cache.create ())
+    ~rect:(Model.body_rect two_pulls) grid;
+  Alcotest.(check bool) "the available PR row identifies the first of two pulls" true
+    (contains_sub ~needle:"#54666" ~haystack:(grid_all_text grid));
+  let diff_end model =
+    let last, _ = Update_nav.apply_move model Masc_tui_keymap.Keymap.End in
+    last.infra.diff_scroll_offset
+  in
+  Alcotest.(check int) "an undisplayed pull leaves the final diff line reachable"
+    (diff_end compact) (diff_end two_pulls);
+
   (* Board preview & Thread_dive: multi-line comments, closed/audience tags, failed load state *)
   let p_root = Option.get (Knowledge_store.selected_post m_base.knowledge) in
   let multi_c : Wire_knowledge.board_comment =

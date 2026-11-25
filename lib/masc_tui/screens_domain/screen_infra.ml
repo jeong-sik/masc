@@ -1804,7 +1804,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                        let max_pr_rows, show_more =
                          if avail <= 0 || n_prs = 0 then (0, false)
                          else if n_prs <= Int.min 3 avail then (n_prs, false)
-                         else if avail = 1 then (0, false)
+                         else if avail = 1 then (1, false)
                          else (Int.min 3 (avail - 1), true)
                        in
                        List.iteri

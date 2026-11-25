@@ -8735,7 +8735,7 @@ let infra_detail_max_scroll (m : Model.t) =
                                   in
                                   if avail <= 0 || pr_n = 0 then 1
                                   else if pr_n <= min 3 avail then 1 + pr_n
-                                  else if avail = 1 then 1
+                                  else if avail = 1 then 2
                                   else 2 + min 3 (avail - 1)
                               | Some entry
                                 when String.equal entry.state "failed" ->

@@ -31,6 +31,10 @@
   gap: var(--sp-4);
 }
 
+.kn-scroll-body > * {
+  flex-shrink: 0;
+}
+
 .kn-pane-col {
   display: flex;
   flex-direction: column;

@@ -854,7 +854,8 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
                      })
               in
               Some
-                (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed m' Nav.Infra)
+                (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed
+                   ~return_from:m m' Nav.Infra)
           | Health.Source_runtime lane_id ->
               let runtime =
                 m.runtime
@@ -863,7 +864,7 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
               in
               Some
                 (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed:false
-                   { m with runtime } Nav.Runtime)
+                   ~return_from:m { m with runtime } Nav.Runtime)
           | Health.Source_client_http | Health.Source_stream ->
               Some
                 (Update_nav.push_dive m

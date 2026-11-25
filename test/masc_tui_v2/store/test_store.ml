@@ -25436,6 +25436,37 @@ let () =
                 && Option.equal String.equal m_j_sb.infra.pending_sandbox_keeper
                      (Some "alpha")
                 && Int.equal (List.length m_j_sb.nav.workspace_return_stack) 1);
+              (* Round trip from another Infra tab: the return frame must
+                 record the departure tab, not the Sandboxes tab the jump
+                 selects. *)
+              let m_inc_sb_logs =
+                {
+                  m_inc_sb with
+                  nav = { m_inc_sb.nav with workspace = Nav.Infra };
+                  infra =
+                    Infra_store.set_tab Nav.Infra_activity_logs m_inc_sb.infra;
+                }
+              in
+              let m_j_sb_logs, _ = step_k m_inc_sb_logs (char_key "o") in
+              Alcotest.(check bool)
+                "Incidents [o] Source_sandbox from Activity & Logs opens Sandboxes"
+                true
+                (Nav.equal_infra_tab m_j_sb_logs.infra.active_tab
+                   Nav.Infra_sandboxes
+                && Int.equal
+                     (List.length m_j_sb_logs.nav.workspace_return_stack) 1);
+              let m_j_sb_logs_back, _ =
+                step_k m_j_sb_logs (key Keymap.Input.Escape)
+              in
+              Alcotest.(check bool)
+                "Esc after Incidents sandbox jump restores Activity & Logs and Incidents"
+                true
+                (Nav.equal_workspace m_j_sb_logs_back.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m_j_sb_logs_back.infra.active_tab
+                     Nav.Infra_activity_logs
+                && Option.equal Nav.equal_overlay m_j_sb_logs_back.nav.overlay
+                     (Some Nav.Incidents)
+                && m_j_sb_logs_back.nav.workspace_return_stack = []);
               let m_z_unzoom, _ = step_k m_lz_sp (char_key "z") in
               Alcotest.(check bool)
                 "[z] unzoom clears show_raw_json cleanly" true

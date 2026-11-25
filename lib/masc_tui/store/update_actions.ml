@@ -3967,7 +3967,8 @@ and confirm_palette ~now (m : Model.t) =
                          };
                      })
               in
-              Update_nav.jump_to_workspace ~pane_index:1 ~zoomed m' Nav.Infra
+              Update_nav.jump_to_workspace ~pane_index:1 ~zoomed
+                ~return_from:m_closed m' Nav.Infra
           | Update_nav.Pal_open_infra_sandboxes pool ->
               let infra =
                 m_closed.infra

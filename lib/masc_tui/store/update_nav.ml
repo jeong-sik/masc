@@ -10015,9 +10015,14 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
     overlay;
   }
 
-let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) (m : Model.t) ws =
+let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
+    (m : Model.t) ws =
+  (* The return frame records where the user came from. A caller that
+     retargets the destination tab before jumping passes the untouched model
+     as [return_from] so the frame keeps the departure tab. *)
+  let origin = Option.value return_from ~default:m in
   let workspace_return_stack =
-    capture_workspace_return_frame m :: m.nav.workspace_return_stack
+    capture_workspace_return_frame origin :: origin.nav.workspace_return_stack
   in
   let nav0 =
     {

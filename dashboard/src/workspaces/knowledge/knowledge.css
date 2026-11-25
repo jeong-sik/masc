@@ -106,10 +106,6 @@
   font-size: var(--fs-13);
 }
 
-.kn-body-pre {
-  font-size: var(--fs-13);
-  white-space: pre-wrap;
-}
 
 .kn-stack-1 {
   display: flex;

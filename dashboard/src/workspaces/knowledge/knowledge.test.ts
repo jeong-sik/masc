@@ -36,7 +36,6 @@ import {
   foldSuccessionChains,
   isSignalBoardPost,
   partitionReactions,
-  renderSanitizedMarkdown,
   type BoardPostItem,
 } from './index'
 
@@ -493,13 +492,7 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).not.toContain('STALE BODY A')
   })
 
-  it('Librarian Wiki sanitizes Markdown XSS and recovers from PUT 409 conflict_cas with reload-and-diff', async () => {
-    // Sanitizer fails closed: no executable <script> or <img onerror> tags survive
-    const safeHtml = renderSanitizedMarkdown('# Safe\n<script>alert(1)</script><img src="x" onerror="alert(2)">')
-    expect(safeHtml).toContain('Safe')
-    expect(safeHtml).not.toContain('<script>')
-    expect(safeHtml).not.toContain('<img ')
-
+  it('Librarian Wiki recovers from PUT 409 conflict_cas with reload-and-diff', async () => {
     const putBodies: unknown[] = []
     let putCount = 0
     let pageVersion = 1

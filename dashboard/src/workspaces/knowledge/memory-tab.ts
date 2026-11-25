@@ -14,6 +14,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import { markViewSynced } from '../../core/observer'
@@ -428,7 +429,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           </div>
           ${world.briefing.error && html`<div class="kn-notice kn-notice--err">${world.briefing.error}</div>`}
           ${world.briefing.text
-            ? html`<div class="kn-body-pre">${world.briefing.text}</div>`
+            ? html`<${MarkdownContent} class="kn-body-md" text=${world.briefing.text} />`
             : html`<span class="dtable-absent">World Briefing 본문이 아직 생성되지 않았습니다.</span>`}
         </section>
 
@@ -477,7 +478,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                             <${KeeperBadge} id=${cc.keeperId} size="sm" />
                             <span class="kn-badge">${cc.storeKind}</span>
                           </div>
-                          <div class="kn-body-md">${cc.claim ?? '(원문 미해석)'}</div>
+                          <${MarkdownContent} class="kn-body-md" text=${cc.claim ?? '(원문 미해석)'} />
                           <div class="kn-row-meta mono">
                             <span>sha:${cc.claimSha256.slice(0, 10)}</span>
                             ${cc.path && html`<span>${cc.path}</span>`}

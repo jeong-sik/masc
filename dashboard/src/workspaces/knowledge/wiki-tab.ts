@@ -12,6 +12,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
@@ -22,7 +23,6 @@ import {
   WIKI_SOURCES,
   computeMarkdownLineDiff,
   formatRelativeTime,
-  renderSanitizedMarkdown,
   type WikiIndexData,
   type WikiLintData,
   type WikiLogData,
@@ -722,9 +722,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                 </div>
                 <h2 class="kn-heading">${pageDetail.frontmatter.title}</h2>
                 ${pageDetail.frontmatter.summary && html`
-                  <p class="kn-subcopy">
-                    ${pageDetail.frontmatter.summary}
-                  </p>
+                  <${MarkdownContent} class="kn-subcopy" text=${pageDetail.frontmatter.summary} />
                 `}
               </div>
               <div class="kn-actions">
@@ -759,10 +757,9 @@ export function WikiTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            <article
-              class="markdown-content kn-md-panel"
-              dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(pageDetail.body_markdown) }}
-            />
+            <article class="kn-md-panel">
+              <${MarkdownContent} text=${pageDetail.body_markdown} document />
+            </article>
 
             <div class="kn-grid-links">
               <section class="kn-section">

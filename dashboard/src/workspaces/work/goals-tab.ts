@@ -10,6 +10,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, currentSessionEpoch } from '../../core/auth'
 import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
@@ -712,18 +713,16 @@ export function GoalsTab(props: WorkspaceViewProps) {
               ${selectedGoal.criterionVerdict.kind === 'pending' && html`<span class="wk-badge wk-badge--idle">${selectedGoal.criterionVerdict.state}</span>`}
               ${selectedGoal.criterionVerdict.kind === 'unavailable' && html`<span class="wk-badge wk-badge--warn">Unavailable</span>`}
             </div>
-            <div class="wk-body-pre">
-              ${selectedGoal.procedure || '측정 절차 없음'}
-            </div>
-            <div class="wk-muted-sm">
-              ${selectedGoal.criterionVerdict.kind === 'viable' || selectedGoal.criterionVerdict.kind === 'needs_revision'
+            <${MarkdownContent} class="wk-prose" text=${selectedGoal.procedure || '측정 절차 없음'} />
+            <${MarkdownContent} class="wk-muted-sm" text=${
+              selectedGoal.criterionVerdict.kind === 'viable' || selectedGoal.criterionVerdict.kind === 'needs_revision'
                 ? selectedGoal.criterionVerdict.reason
                 : selectedGoal.criterionVerdict.kind === 'unavailable'
                   ? selectedGoal.criterionVerdict.detail
-                  : (selectedGoal.criterionVerdict.detail ?? 'Verifier 기준 심사 대기 중')}
-            </div>
+                  : (selectedGoal.criterionVerdict.detail ?? 'Verifier 기준 심사 대기 중')
+            } />
             ${selectedGoal.lastReviewNote && html`
-              <div class="wk-notice">최근 전환 메모: ${selectedGoal.lastReviewNote}</div>
+              <div class="wk-notice">최근 전환 메모<${MarkdownContent} text=${selectedGoal.lastReviewNote} /></div>
             `}
           </section>
 
@@ -766,7 +765,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
                 <div class="wk-muted-sm">
                   증명 주체: <strong>${confirmation.actor}</strong> (${confirmation.authorityKind}) · 기록: ${formatRelativeTime(confirmation.recordedAt)}
                 </div>
-                <pre class="wk-code-preview">${confirmation.evidence}</pre>
+                <${MarkdownContent} class="wk-prose" text=${confirmation.evidence} />
                 <${TargetLockedAction}
                   target=${{
                     workspaceId: activeWorkspaceId.peek(),
@@ -850,7 +849,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
                       </div>
                       ${req.submittedEvidence.length > 0 && html`
                         <div class="wk-muted-sm">
-                          증거: ${req.submittedEvidence.join(' · ')}
+                          증거
+                          <ul>${req.submittedEvidence.map((evidence, index) => html`
+                            <li key=${index}><${MarkdownContent} text=${evidence} /></li>
+                          `)}</ul>
                         </div>
                       `}
                       <input

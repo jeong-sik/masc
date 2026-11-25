@@ -432,8 +432,32 @@
 
 .markdown-content {
   line-height: 1.55;
-  color: var(--fg-1);
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+.markdown-content > :first-child { margin-block-start: 0; }
+.markdown-content > :last-child { margin-block-end: 0; }
+.markdown-content :where(p, ul, ol, pre, blockquote, hr) {
+  margin-block: var(--sp-2);
+}
+.markdown-content :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: var(--sp-3) var(--sp-1);
+  font-weight: 650;
+}
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.3em; }
+.markdown-content h3 { font-size: 1.15em; }
+.markdown-content ul { list-style-type: disc; }
+.markdown-content ol { list-style-type: decimal; }
+.markdown-content :where(ul, ol) { padding-inline-start: 1.5em; }
+.markdown-content blockquote {
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 3px solid var(--line-2);
+  color: var(--fg-2);
+}
+.markdown-content img {
+  max-inline-size: 100%;
+  block-size: auto;
 }
 .markdown-content pre {
   padding: var(--sp-3);

@@ -12,6 +12,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession } from '../../core/auth'
 import {
@@ -36,7 +37,6 @@ import {
   formatRelativeTime,
   isRecord,
   partitionReactions,
-  renderSanitizedMarkdown,
   type BoardAudience,
   type BoardCommentItem,
   type BoardCommentPageInfo,
@@ -1183,31 +1183,23 @@ export function BoardTab(props: WorkspaceViewProps) {
               ${expandedChainHeads[activePost.id] && html`
                 <div class="kn-stack-1">
                   ${activeEntry.predecessors.map((pred) => html`
-                    <button
-                      key=${pred.id}
-                      type="button"
-                      class="kn-row-btn kn-card-row"
-                      onClick=${() => setSelectedPostId(pred.id)}
-                    >
-                      <div class="kn-row-top">
-                        <span class="kn-row-title">${pred.title}</span>
-                        <span class="kn-badge kn-badge--idle">Superseded</span>
-                      </div>
-                      <div class="kn-row-meta">
-                        <span class="mono">${pred.id}</span>
-                        ${pred.closed?.summary && html`<span>${pred.closed.summary}</span>`}
-                      </div>
-                    </button>
+                    <div key=${pred.id} class="kn-card-row">
+                      <button type="button" class="kn-row-btn" onClick=${() => setSelectedPostId(pred.id)}>
+                        <span class="kn-row-top">
+                          <span class="kn-row-title">${pred.title}</span>
+                          <span class="kn-badge kn-badge--idle">Superseded</span>
+                        </span>
+                        <span class="kn-row-meta mono">${pred.id}</span>
+                      </button>
+                      ${pred.closed?.summary && html`<${MarkdownContent} class="kn-body-sm" text=${pred.closed.summary} />`}
+                    </div>
                   `)}
                 </div>
               `}
             </section>
           `}
 
-          <article
-            class="markdown-content"
-            dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(activePost.body) }}
-          />
+          <article><${MarkdownContent} text=${activePost.body} document /></article>
 
           <${ReactionBar}
             reactions=${activePost.reactions}
@@ -1264,10 +1256,7 @@ export function BoardTab(props: WorkspaceViewProps) {
                       </button>
                     </div>
                   </div>
-                  <div
-                    class="markdown-content kn-body-md"
-                    dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(c.content) }}
-                  />
+                  <${MarkdownContent} class="kn-body-md" text=${c.content} document />
                   <${ReactionBar}
                     reactions=${c.reactions}
                     supportedEmojis=${activePost.supportedReactionEmojis}

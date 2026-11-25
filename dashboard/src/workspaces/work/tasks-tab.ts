@@ -14,6 +14,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, sessionEpoch } from '../../core/auth'
 import {
@@ -947,7 +948,7 @@ export function TasksTab(props: WorkspaceViewProps) {
               ${selectedTask.description && html`
                 <section class="wk-section">
                   <h3 class="wk-section-title">설명</h3>
-                  <div class="wk-body-pre">${selectedTask.description}</div>
+                  <${MarkdownContent} class="wk-prose" text=${selectedTask.description} />
                 </section>
               `}
 

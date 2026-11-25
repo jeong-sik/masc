@@ -1767,7 +1767,7 @@ let run_turn
                           ~config
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                          ~runtime_id)
+                          ~scope:(Keeper_carried_front.For_runtime runtime_id))
                       ~official_client_composed_context:(fun () ->
                         acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly)
                       ~on_request_attribution:

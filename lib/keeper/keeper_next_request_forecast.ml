@@ -469,7 +469,11 @@ let read_range ~config ~keeper_name ~trace_id history =
        shared across fibers. A ledger that holds needs no store scan unless a
        Librarian point weighs the accepted start; candidates share the one
        read when they need it. *)
-    seed = lazy (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed
+    seed =
+      lazy
+        (Keeper_carried_front.read_seed
+           ~config ~keeper_name ~trace_id ~scope:Keeper_carried_front.Seed_only)
+          .seed
   }
 ;;
 

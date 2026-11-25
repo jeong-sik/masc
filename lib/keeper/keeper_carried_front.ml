@@ -408,7 +408,11 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
     Result.map (fun (scan, (_ : int)) -> scan.floor) read
 ;;
 
-let read_seed ~config ~keeper_name ~trace_id ~runtime_id =
+type refusal_scope =
+  | For_runtime of string
+  | Seed_only
+
+let read_seed ~config ~keeper_name ~trace_id ~scope =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   match current_generation_floor ~config ~keeper_name ~trace_id with
   | Error refusal ->
@@ -422,8 +426,9 @@ let read_seed ~config ~keeper_name ~trace_id ~runtime_id =
        turn number, so the last stored response is the latest observation.
        A different trace is the durable generation boundary; a counted reset
        in the turn log is the same-trace boundary after a clear. The scan
-       ends once it holds the seed and [runtime_id]'s own newest response or
-       refusal; another runtime's response may stand between the two. *)
+       ends once it holds the seed and, for [For_runtime], that runtime's own
+       newest response or refusal; another runtime's response may stand
+       between the two. *)
     (try
        ignore
          (Dated_jsonl.collect_matching store 1 ~f:(fun json ->
@@ -436,13 +441,16 @@ let read_seed ~config ~keeper_name ~trace_id ~runtime_id =
                     | None -> false) ->
               raise_notrace Trace_boundary
             | Ok record ->
-              refusal := scan_refusal ~runtime_id !refusal record;
+              (match scope with
+               | For_runtime runtime_id ->
+                 refusal := scan_refusal ~runtime_id !refusal record
+               | Seed_only -> ());
               (match !seed with
                | Some _ -> ()
                | None -> seed := of_records ~trace_id [ record ]);
-              (match !seed, !refusal with
-               | Some _, (Answered | Refused _) -> Some ()
-               | None, _ | Some _, Undecided -> None)
+              (match !seed, scope, !refusal with
+               | Some _, Seed_only, _ | Some _, For_runtime _, (Answered | Refused _) -> Some ()
+               | None, (Seed_only | For_runtime _), _ | Some _, For_runtime _, Undecided -> None)
             | Error first_reason ->
               let count =
                 match !unreadable with

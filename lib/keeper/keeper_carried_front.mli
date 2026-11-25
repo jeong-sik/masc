@@ -243,14 +243,22 @@ val seed_read_of_rows
     that do not counted and [refused_start] decided as {!read_seed} decides
     it, rows oldest first. *)
 
+type refusal_scope =
+  | For_runtime of string
+      (** Also read this runtime's standing refusal ([refused_start]). *)
+  | Seed_only
+      (** Read the seed alone, for a reader that sends nothing itself (the
+          next-request forecast); [refused_start] is [None]. *)
+
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
   -> trace_id:string
-  -> runtime_id:string
+  -> scope:refusal_scope
   -> seed_read
 (** The last stored response observation in the current history generation,
-    and [runtime_id]'s standing refusal ([refused_start]), scanning newest
+    and, for [For_runtime], that runtime's standing refusal
+    ([refused_start]), scanning newest
     first until both are decided, a different trace, or a turn at or
     below the generation boundary the Keeper's turn log states
     (RFC librarian-call-only-proposes §11.2). That boundary is set by the

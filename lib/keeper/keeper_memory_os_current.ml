@@ -58,14 +58,25 @@ type read_classified =
   | Undecodable of { rejection : string }
   | Io_unreadable of { detail : string }
 
-let read_classified ~keepers_dir ~keeper_id =
+let ordinary_projection snapshot =
+  let ordinary = List.filter Keeper_memory_os_types.is_ordinary in
+  let facts = ordinary snapshot.facts in
+  let added = ordinary snapshot.change.added in
+  let removed = ordinary snapshot.change.removed in
+  let invalidated = List.filter
+      (fun row -> Keeper_memory_os_types.is_ordinary row.fact) snapshot.change.invalidated in
+  let change = { added; removed; retained = List.length facts - List.length added; invalidated } in
+  { snapshot with facts; change }
+;;
+
+let read_classified_with ~from_content ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   let classify_bytes = function
-    | None -> No_snapshot
+    | None -> No_snapshot, None
     | Some content ->
       (match parse snapshot_path content with
-       | Ok snapshot -> Readable snapshot
-       | Error rejection -> Undecodable { rejection })
+       | Ok snapshot -> Readable (ordinary_projection snapshot), from_content content
+       | Error rejection -> Undecodable { rejection }, None)
   in
   let max_optimistic_attempts = 4 in
   let rec optimistic attempt =
@@ -73,11 +84,11 @@ let read_classified ~keepers_dir ~keeper_id =
       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         try
           match stat_identity_result snapshot_path with
-          | Error detail -> `Done (Io_unreadable { detail })
+          | Error detail -> `Done (Io_unreadable { detail }, None)
           | Ok snap_before ->
             let bytes = Fs_compat.load_file_opt snapshot_path in
             (match stat_identity_result snapshot_path with
-             | Error detail -> `Done (Io_unreadable { detail })
+             | Error detail -> `Done (Io_unreadable { detail }, None)
              | Ok snap_after ->
                if snap_before = snap_after
                then `Done (classify_bytes bytes)
@@ -92,7 +103,7 @@ let read_classified ~keepers_dir ~keeper_id =
                      "current Memory OS read failed path=%s: %s"
                      snapshot_path
                      message
-               }))
+               }, None))
     in
     match observed with
     | `Done result -> result
@@ -120,9 +131,18 @@ let read_classified ~keepers_dir ~keeper_id =
     | `Bytes bytes ->
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         classify_bytes bytes)
-    | `Error detail -> Io_unreadable { detail }
+    | `Error detail -> Io_unreadable { detail }, None
   in
   optimistic 0
+;;
+
+let read_classified ~keepers_dir ~keeper_id =
+  fst (read_classified_with ~from_content:(Fun.const None) ~keepers_dir ~keeper_id)
+;;
+
+let read_classified_with_fingerprint ~keepers_dir ~keeper_id =
+  read_classified_with ~from_content:(fun content -> Some (String.length content, sha256 content))
+    ~keepers_dir ~keeper_id
 ;;
 
 let read_with_content ~keepers_dir ~keeper_id =
@@ -173,13 +193,20 @@ let read_with_content ~keepers_dir ~keeper_id =
 
 let read_for_keepers_dir ~keepers_dir ~keeper_id =
   read_with_content ~keepers_dir ~keeper_id
-  |> Result.map (Option.map fst)
+  |> Result.map (Option.map (fun (snapshot, _) -> ordinary_projection snapshot))
+;;
+
+let read_personal_facts ~keepers_dir ~keeper_id ~scope =
+  read_with_content ~keepers_dir ~keeper_id
+  |> Result.map (function
+    | None -> []
+    | Some (snapshot, _) -> List.filter (Keeper_memory_os_types.in_personal_scope scope) snapshot.facts)
 ;;
 
 let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
   read_with_content ~keepers_dir ~keeper_id
   |> Result.map
-       (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
+       (Option.map (fun (snapshot, content) -> ordinary_projection snapshot, sha256 content))
 ;;
 
 let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename

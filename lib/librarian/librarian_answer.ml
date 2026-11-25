@@ -311,7 +311,9 @@ let new_fact_of_fields fields =
   let* basis = wire_at (Wire_field field_basis) (basis_of_json basis_json) in
   let* basis =
     match basis with
-    | Observed _ -> Ok basis
+    | Observed (Transcript | Board _) -> Ok basis
+    | Observed (Personal _) ->
+      wire_fail [ Wire_field field_basis; Wire_field wire_field_kind ] (Unknown_token "personal")
     | Derived _ ->
       wire_fail [ Wire_field field_basis; Wire_field wire_field_kind ] (Unknown_token "derived")
   in

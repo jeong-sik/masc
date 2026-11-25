@@ -207,6 +207,7 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
           match line with
           | Ok (Librarian_log.Started _) -> ()
           | Ok (Librarian_log.Committed commit) ->
+            let commit = { commit with effects = Librarian_effects.ordinary_projection commit.effects } in
             List.iter
               (fun f -> Hashtbl.replace known_facts (Memory.memory_id f) f)
               commit.effects.added;

@@ -73,8 +73,9 @@ let read ~keepers_dir ~keeper_id =
            ~f:(fun (commits_rev, last_success_at) ({ line; _ } : Librarian_log_store.scanned) ->
              match line with
              | Ok (Librarian_log.Committed commit) ->
+               let effects = Librarian_effects.ordinary_projection commit.effects in
                let delta =
-                 List.length commit.effects.added - List.length commit.effects.removed
+                 List.length effects.added - List.length effects.removed
                in
                let last_success_at =
                  if is_librarian_cause commit.cause && Float.is_finite commit.at

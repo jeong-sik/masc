@@ -66,7 +66,8 @@ let read ~keepers_dir ~keeper_id ~current =
   | Error error -> Error (Private_jsonl_scan.error_to_string error)
   | Ok { left; unreadable } ->
     let sorted =
-      List.map (fun (entry : Librarian_archive.left) -> entry, sort_removal entry.removal) left
+      List.filter_map (fun (entry : Librarian_archive.left) ->
+        if Types.is_ordinary entry.fact then Some (entry, sort_removal entry.removal) else None) left
     in
     let named =
       List.fold_left

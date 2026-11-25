@@ -33,6 +33,13 @@ module Archive = Librarian_archive
 let includes = Librarian_history_window.includes
 
 let project_rows ~range ~current ~revision ~unsequenced ~changes ~sequence_suffix ~(folded : Archive.folded option) =
+  let current = List.filter Types.is_ordinary current in
+  let unsequenced = List.filter (fun (row : Archive.left) -> Types.is_ordinary row.fact) unsequenced in
+  let changes = List.map (fun (c : Change.t) ->
+    { c with
+      added = List.filter Types.is_ordinary c.added
+    ; removed = List.filter (fun (fact, _) -> Types.is_ordinary fact) c.removed
+    }) changes in
   let id = Types.memory_id in
   let targets = Hashtbl.create 32 in
   let add_target = function

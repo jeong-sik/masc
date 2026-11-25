@@ -574,6 +574,7 @@ let filter_ordinary_snapshot_for_reader
     let fact_basis_directly_readable (fact : fact) =
       match fact.basis with
       | Observed Transcript -> true
+      | Observed (Personal _) -> false
       | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
         can_read_post_id post_id
       | Derived (_ : derivation list) -> true
@@ -596,6 +597,7 @@ let filter_ordinary_snapshot_for_reader
     let fact_history_readable (fact : fact) =
       match fact.basis with
       | Observed Transcript -> true
+      | Observed (Personal _) -> false
       | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
         can_read_post_id post_id
       | Derived derivations ->
@@ -607,6 +609,7 @@ let filter_ordinary_snapshot_for_reader
         (fun (inv : Keeper_memory_os_current.support_invalidation) ->
            match inv.fact.basis with
            | Observed Transcript -> true
+           | Observed (Personal _) -> false
            | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
              can_read_post_id post_id
            | Derived (_ : derivation list) -> false)
@@ -784,7 +787,9 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
      | Ok () ->
        run_blocking_resource_result (fun () ->
          let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-         let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in
+         let ordinary, fingerprint =
+           Keeper_memory_os_current.read_classified_with_fingerprint ~keepers_dir ~keeper_id:keeper
+         in
          let source_bound =
            Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper
          in
@@ -796,21 +801,17 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
              | Keeper_memory_os_current.No_snapshot ->
                `Assoc [ "status", `String "missing" ]
              | Keeper_memory_os_current.Readable snap ->
-               let path =
-                 Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
-               in
-               let bytes_opt = Fs_compat.file_size path in
                `Assoc
                  ([ "status", `String "readable"
                   ; "revision", `Int snap.revision
                   ; "updated_at", `Float snap.updated_at
                   ; "fact_count", `Int (List.length snap.facts)
                   ; "invalidated_count", `Int (List.length snap.change.invalidated)
-                  ; "snapshot_sha256", `String (Keeper_memory_os_current.snapshot_sha256 snap)
                   ]
                   @
-                  match bytes_opt with
-                  | Some n -> [ "snapshot_bytes", `Int n ]
+                  match fingerprint with
+                  | Some (bytes, digest) ->
+                    [ "snapshot_bytes", `Int bytes; "snapshot_sha256", `String digest ]
                   | None -> [])
              | Keeper_memory_os_current.Undecodable _ ->
                `Assoc [ "status", `String "undecodable" ]
@@ -877,7 +878,9 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
                  ~f:(fun () ({ line; _ } : Librarian_log_store.scanned) ->
                    match line with
                    | Ok (Librarian_log.Started _) -> ()
-                   | Ok (Librarian_log.Committed commit) -> push_row (Ok commit)
+                   | Ok (Librarian_log.Committed commit) ->
+                     let effects = Librarian_effects.ordinary_projection commit.effects in
+                     push_row (Ok { commit with effects })
                    | Error err -> push_row (Error err))
              with
              | Error _ -> `Assoc [ "status", `String "unreadable" ]

@@ -161,7 +161,9 @@ let read_commit_lineage_from_log ~keepers_dir ~keeper_id =
   let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let collect (revs, rets) (fact, removal) =
     let id = Keeper_memory_os_types.memory_id fact in
-    match removal with
+    if not (Keeper_memory_os_types.is_ordinary fact)
+    then revs, rets
+    else match removal with
     | Librarian_effects.Revised_into into_id | Superseded_by into_id ->
       { Keeper_memory_os_types.superseded = id; superseded_by = into_id } :: revs, rets
     | Retracted _ -> revs, id :: rets
@@ -211,7 +213,9 @@ let read_memory_log_tail_projection ~keepers_dir ~keeper_id ~limit =
           ~f:(fun () ({ at; line } : Librarian_log_store.scanned) ->
             match line with
             | Ok (Librarian_log.Started _) -> ()
-            | Ok (Librarian_log.Committed commit) -> push_row (at, Ok commit)
+            | Ok (Librarian_log.Committed commit) ->
+              let effects = Librarian_effects.ordinary_projection commit.effects in
+              push_row (at, Ok { commit with effects })
             | Error err -> push_row (at, Error err))
       with
       | Error err -> Error (Private_jsonl_scan.error_to_string err)

@@ -168,6 +168,13 @@ let maintain_supported_facts facts =
    second reading otherwise adds nothing the first did not. *)
 let merge_observation existing incoming =
   match existing, incoming with
+  | Personal left, Personal right when left.scope = right.scope ->
+    let combined =
+      personal_observation ~scope:left.scope ~message_ids:(left.message_ids @ right.message_ids)
+    in
+    Option.fold ~none:existing ~some:(fun evidence -> Personal evidence) combined
+  | Personal _, (Personal _ | Board _ | Transcript) -> existing
+  | (Board _ | Transcript), Personal _ -> incoming
   | Board { post_id; comment_id = None }, Board { post_id = incoming_post; comment_id = Some _ }
     when Board_types.Post_id.to_string post_id
          = Board_types.Post_id.to_string incoming_post ->

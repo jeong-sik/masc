@@ -635,9 +635,14 @@ let open_persistent_db ~keepers_dir ~keeper_id f =
 ;;
 
 let sync_snapshot ~keepers_dir ~keeper_id (snapshot : Keeper_memory_os_current_types.t) =
+  (* The persistent index has no account or conversation scope, so personal
+     facts never enter it. Indexing the ordinary projection also keeps the
+     stored content hash equal to the one [rank_persistent_for_facts] computes
+     from ordinary reads, so its read-only fast path stays valid. *)
+  let facts = List.filter Keeper_memory_os_types.is_ordinary snapshot.facts in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     open_persistent_db ~keepers_dir ~keeper_id (fun db ->
-      sync_facts_on_db db ~revision:snapshot.revision snapshot.facts))
+      sync_facts_on_db db ~revision:snapshot.revision facts))
 ;;
 
 let query_persistent_db db ~query ~limit =

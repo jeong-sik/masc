@@ -48,6 +48,20 @@ let refusal_kind = function
 
 let held id facts = List.find_opt (fun fact -> String.equal (memory_id fact) id) facts
 
+let held_ordinary id facts =
+  match held id facts with
+  | Some fact when is_ordinary fact -> Some fact
+  | Some _ | None -> None
+;;
+
+let remember_personal ~claim ~category (source : Keeper_external_attention.item) =
+  match Keeper_external_attention.original_message_scope source, source.external_message with
+  | Some scope, Some message ->
+    Option.map (fun observation -> Remember { claim; category; basis = Observed (Personal observation) })
+      (personal_observation ~scope ~message_ids:[ message.message_id ])
+  | _ -> None
+;;
+
 (* The fact a write states. The snapshot codec does not write a blank claim,
    so one is refused before it reaches a commit. *)
 let stated ~at ~trace_id ~claim ~category basis =
@@ -116,7 +130,7 @@ let settle ~at ~facts ~states ~removed ~added ~touched =
 let plan_write ~by ~at ~trace_id facts write =
   match write with
   | Retract { id; reason } ->
-    (match held id facts with
+    (match held_ordinary id facts with
      | None -> Already_absent
      | Some fact ->
        settle ~at ~facts ~states:None
@@ -132,16 +146,19 @@ let plan_write ~by ~at ~trace_id facts write =
         | Some existing ->
           if says_the_same existing fact
           then settle ~at ~facts ~states:(Some id) ~removed:[] ~added:[] ~touched:[ id ]
+          else if not (is_ordinary fact) && existing.category = fact.category
+          then settle ~at ~facts ~states:(Some id) ~removed:[] ~added:[ fact ] ~touched:[]
           else Already_held))
   | Supersede { old; claim; category; basis } ->
     (match stated ~at ~trace_id ~claim ~category basis with
      | Error refusal -> Refused refusal
+     | Ok fact when not (is_ordinary fact) -> Refused Unknown_fact
      | Ok fact ->
        let id = memory_id fact in
        if String.equal id old
        then Refused Supersedes_itself
        else (
-         match held old facts, held id facts with
+         match held_ordinary old facts, held_ordinary id facts with
          | None, None -> Refused Unknown_fact
          | None, Some (_ : fact) -> Already_done
          | Some superseded, None ->

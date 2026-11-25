@@ -80,7 +80,8 @@ type persistent_hit =
 val db_suffix : string
 val db_path : keepers_dir:string -> keeper_id:string -> string
 
-(** Synchronize the persistent per-Keeper SQLite WAL FTS5 index with [snapshot].
+(** Synchronize the persistent per-Keeper SQLite WAL FTS5 index with the
+    ordinary facts of [snapshot]; personal facts are never indexed.
     Skips rebuild when the stored [(revision, content_sha256)] already matches.
     Returns the number of indexed facts. *)
 val sync_snapshot

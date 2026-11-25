@@ -57,6 +57,7 @@ let validate_and_redact_promotion ~redact (promo : Lifecycle.world_promotion) =
 type private_provenance =
   | Clean
   | Private_board of observation
+  | Private_personal
   | Unresolved_premise
 
 (* Fail-closed transitive provenance check: a promotion citing ANY fact whose
@@ -76,6 +77,7 @@ let inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids =
         | Some (fact : fact) ->
           (match fact.basis with
            | Observed Transcript -> walk visited unresolved rest
+           | Observed (Personal _) -> Private_personal
            | Observed (Board { post_id; _ } as board_src) ->
              if is_public_board_post post_id
              then walk visited unresolved rest
@@ -89,10 +91,10 @@ let inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids =
   walk Ids.empty false source_ids
 ;;
 
-let has_private_board_provenance ~is_public_board_post ~fact_by_id source_ids =
+let has_private_provenance ~is_public_board_post ~fact_by_id source_ids =
   match inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids with
   | Clean -> false
-  | Private_board _ | Unresolved_premise -> true
+  | Private_board _ | Private_personal | Unresolved_premise -> true
 ;;
 
 type read =
@@ -256,11 +258,12 @@ let screen
         match fact.basis with
         | Observed (Board { post_id; _ }) -> not (is_public_board_post post_id)
         | Observed Transcript -> false
+        | Observed (Personal _) -> true
         | Derived derivations ->
           let premise_ids =
             List.concat_map (fun (d : derivation) -> d.premise_ids) derivations
           in
-          has_private_board_provenance ~is_public_board_post ~fact_by_id:by_id premise_ids
+          has_private_provenance ~is_public_board_post ~fact_by_id:by_id premise_ids
       in
       let* preserved_fact =
         if basis_already_private
@@ -269,7 +272,7 @@ let screen
           match inspect_private_provenance ~is_public_board_post ~fact_by_id:by_id mutating_named with
           | Clean -> Ok fact
           | Private_board board_src -> Ok { fact with basis = Observed board_src }
-          | Unresolved_premise -> Error Effects.Promotion_refused)
+          | Private_personal | Unresolved_premise -> Error Effects.Promotion_refused)
       in
       Ok (Some (New_claim (memory_id_of_claim preserved_fact.claim, preserved_fact, offsets)), None)
     | Synthesize { claim; category; rule_id; from_units; _ } ->
@@ -282,7 +285,7 @@ let screen
     | Promote_to_world { scope; claim; category; facets; _ } ->
       if promotions_accepted >= max_promotions_per_answer
       then Error Effects.Promotion_refused
-      else if has_private_board_provenance ~is_public_board_post ~fact_by_id:by_id readonly_named
+      else if has_private_provenance ~is_public_board_post ~fact_by_id:by_id readonly_named
       then Error Effects.Promotion_refused
       else (
         let raw_promo : Lifecycle.world_promotion =
@@ -510,7 +513,7 @@ let of_answer
                if not (List.for_all (fun id -> Ids.mem id supported_ids) promo.source_fact_ids)
                then Some (op.number, Effects.Successor_unsupported)
                else if
-                 has_private_board_provenance
+                 has_private_provenance
                    ~is_public_board_post
                    ~fact_by_id:supported_by_id
                    promo.source_fact_ids

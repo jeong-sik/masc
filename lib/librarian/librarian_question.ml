@@ -434,13 +434,14 @@ let front ~lane ~schema memory_lines =
 (* Memory as [from] holds it, each fact under its short name, and the
    working state of [from]. *)
 let memory_and_working_state ~from (memory : Current.t) =
-  let table = List.mapi (fun index fact -> memory_name index, Types.memory_id fact) memory.facts in
+  let facts = List.filter Types.is_ordinary memory.facts in
+  let table = List.mapi (fun index fact -> memory_name index, Types.memory_id fact) facts in
   (* The first name of each id: [fold_right] adds the earlier names last. *)
   let names =
     List.fold_right (fun (name, id) names -> Names.add id name names) table Names.empty
   in
   ( table
-  , [ json_line label_memory (`List (List.mapi (fact_json names) memory.facts))
+  , [ json_line label_memory (`List (List.mapi (fact_json names) facts))
     ; json_line label_working_state (text_or_null (working_state from))
     ] )
 ;;

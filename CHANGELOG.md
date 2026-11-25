@@ -1,5 +1,140 @@
 ## [Unreleased]
 
+## [0.83.2] - 2026-11-25
+
+### Upgrade notes
+
+- A `muse_code` session stored by 0.83.0 or 0.83.1 resumes under the new bridge name, while its history names `mcp__masc__<tool>`. The host loads such a session; what a model does with the old names was not measured (#54691).
+
+### Added
+
+- Dashboard Quotas shows each provider's login account email and optional plan labels from the setup inventory `account_emails` (#54654).
+- TUI `Runtime > Failover Lanes` decodes `account_emails` (email + optional plan labels, or the `not_read` cause) and shows the account beside each lane slot (#54655).
+- Show the Keeper's observed start reasons, assigned Task and linked Goal alongside the server queue and running batches. Group related tool calls in compact chat. (#54660)
+- Add Keeper lifecycle controls in `masc-tui`: `[W]` smart wake/online/resume and 2-press armed `[D]` shutdown in `4 Keepers` and Keeper dive, `/wake`, `/up` (`/boot`), `/resume`, `/pause`, and `/down` slash commands, and `Ctrl+K` palette actions unified on `Wire_fleet.keeper_lifecycle_op` and `Cmd.Post_keeper_lifecycle`. (#54661)
+- **Dashboard Global HITL, Speaker Attribution & Parity**: Unify Channel Gate, Goal Confirmation, Verification, and Upcoming Schedule visibility in the global FastApprovalStrip and Quick-Peek overlay; decode structured chat speaker authority and `Surface_ref` pills; surface Keeper `tool-approval-mode` YOLO badges and Memory OS read faults; add Board `signal_only` + audience badges + windowed `comment_offset=0` pagination; and add Tasks `active_only` schedule history toggle + per-task verification verdicts (#54667).
+- TUI `Infra > Repos` visibility for open GitHub Pull Requests (`GET /api/v1/repositories/pulls`) and per-repository git working-tree dirtiness, conflicts, and sync drift (`GET /api/v1/repositories/:id`) (#54673).
+- TUI Board visibility parity with multi-line Markdown wrapped comments and synchronized scroll bounds in both preview and thread dive, `@audience` / `[CLOSED]` / flair / safe reaction badges, `comment_page` truncation indicators, `updated_at` timestamps, and explicit loading/error comment states (#54673).
+- The dashboard Keeper Settings panel edits `keeper.group` as **소속 조직**; clearing it groups the Keeper under `ungrouped` (#54682).
+- The `masc_keeper_up` tool accepts an optional `group` label for dashboard grouping (#54682).
+- TUI Chat decodes persisted `blocks` thinking, renders secret-safe Keeper Delegate cards, and draws delegate-aware tool group histograms on top of `history_tool_groups`/`stream_tool_groups`, keeping `Chat_transcript.count_transcript_rows` 1:1 with Keeper_dive rendering (#54689).
+- A `muse_code` turn records its token counts: the model requests and the approval reviews of the turn, read from the session journal the host writes (`muse acp` reports no counts over ACP). The Keeper logs `Muse turn usage` with the two apart, or `Muse turn usage unreadable` with the reason when the journal cannot be read. When the host sends no context occupancy, the input of the turn's last request stands in for it (#54694).
+- Dashboard 본문에서 Mermaid·Pele 다이어그램과 AlphaTex 기타 악보를 펼쳐 보고 원문을 열 수 있습니다. (#54699)
+- Kitty 그래픽을 지원하는 TUI에서 Markdown의 Mermaid·Pele 다이어그램을 인라인 PNG로 표시합니다. 그래픽을 사용할 수 없는 경우 원문이나 텍스트 다이어그램을 볼 수 있습니다. (#54705)
+- Kitty를 지원하는 TUI에서 Markdown에 내장된 PNG를 Mermaid·Pele 도형과 함께 표시합니다. (#54707)
+- Keeper가 만든 이미지를 Dashboard 채팅과 Kitty 그래픽을 지원하는 TUI의 대화 기록에서 볼 수 있습니다. (#54720)
+- Run the displayed first queued message from the TUI queue drawer with one key (#54737).
+- TUI: a `muted` theme preset with dimmer text than the other presets. `/theme muted`, `--theme muted` and `tui.theme = "muted"` select it, and `/theme` without an argument now goes from `mono` to `muted` and from `muted` back to `midnight`. The four existing presets keep their colors and contrast floors (#54745).
+- TUI: four more down-tone theme presets, `muted_warm`, `muted_green`, `muted_dusk` and `muted_graphite`. They share the text brightness of `muted` and differ in the hue of surfaces, borders and accents. `/theme <name>`, `--theme <name>` and `tui.theme = "<name>"` select them, and `/theme` without an argument now steps through them after `muted` and returns to `midnight`. The display name of `muted` is now "Muted Slate" (다운톤 청회색). Existing presets keep their colors (#54753).
+
+### Changed
+
+- Read provider plan labels alongside the validated account email from the same local credential read in the runtime account-email path, keeping each displayable label and omitting invalid optional labels independently (#54653).
+- The `gemini-3.8-flash` catalog row states its Gemini API Standard tier
+  introductory price (0.75 / 3.75 per 1M tokens, cached input 0.1x), so turns
+  on the Gemini API binding record a cost (#54681).
+- The `muse_code` bridge is named `masc_` and the first eight hex digits of the SHA-256 of its Keeper's name, so no entry in the operator's muse settings, a plugin or a `.mcp.json` has that name by accident. The model sees MASC's tools there as `mcp__masc_<8 hex digits>__<tool>`, and a Keeper keeps the same name when its host restarts. The other drivers keep `masc` (#54691).
+- The TUI Keeper chat tab lays out the stored chat history once and keeps the rows while the messages, the pane width, the theme, the language or the chat modes stay the same. A frame drawn while a Keeper is answering no longer lays out the whole history again (#54696).
+- A `muse_code` turn's token counts include the host's observers: the model calls of the child sessions a plugin starts beside a prompt, read from their own `session.jsonl` under the parent session's directory. An observer that is still running, or that the host links without a journal, adds nothing, and the `Muse turn usage` log line counts them (#54725).
+- Extend `[z]` detail zoom across Work, Runtime, and Infra workspaces with `Model.detail_visible`/`detail_pane_focused` SSOT and a decoupled `workspace_return_stack` (#54726).
+- Remove duplicate `Fusion_dive`, `Lane_dive`, `Log_detail_dive`, and `Sandbox_dive` views in MASC TUI, lifting `[Space]` `Json_tree` and sandbox/lane detail inspection into their owning workspaces (#54727).
+- Remove `Incident_dive` and `Memory_diff_dive` in MASC TUI via inline Incidents zoom expansion and in-place `Window_revs` pinning in Memory views (#54728).
+
+### Removed
+
+- Remove Intel Mac releases and setup support. macOS releases require Apple Silicon and macOS 15 or later. Linux x86-64 and ARM64 remain supported. (#54692)
+
+### Fixed
+
+- Dashboard single-user auth now consumes `?token=` URLs emitted by `masc login` (stripping `token` from URL history), persists valid ASCII bearer tokens in tab-scoped `sessionStorage`, rejects non-ISO-8859-1 clipboard pastes before `fetch()`, verifies candidate tokens with an explicit timeout before committing session state, and fixes `/account` single-column layout and stale-chunk reload messaging (#54649).
+- A `muse_code` session no longer fails at `session/new` when the operator's muse settings, a plugin or a `.mcp.json` the host loads define an MCP server named `masc`. The host refuses a session server that has the name of one it already has (-32030), and MASC named its bridge `masc` too (#54658).
+- Add sticky-bottom auto-scroll, jump-to-bottom control, history-prepend scroll anchor preservation, user `Delivered` state transitions, and `/btw` IME guards to Keeper Chat; hide `Boot` on already-booted Keepers, widen the Portrait & Candle policy callout, decode live OCaml MicroVM/SSH/Docker sandbox rows without `[object Object]`, wrap QuickPeek JSON, and fix cross-dashboard layout, keyboard/IME, modal, live-logs pause, and stale-state UX issues (#54664).
+- **Dashboard Keeper Diagnostics & Freshness Honesty**: Surface Keeper failure diagnostics, failover walk evidence, numeric Unix `runtime_path_rest.release_at`, live turn preview, waiting inventory, 24h turn breakdowns, SSE auto-reconnect with topic aliases, and honest failure/stale rendering across Pulse, Keepers, Board, Debug Companion, and Unified Inbox (#54666).
+- TUI post-API-call UI freezes, stuck spinners/modals, and Ctrl+Q shutdown hangs by isolating in-flight work fibers under a cancellable `work_sw` (preserving non-cancellation teardown errors), delivering mutation/one-shot replies on the non-droppable `Ui_bus.publish_stream_receipt` lane, following all advancing `read_chat_queue` pages with monotonic cursor checks and cooperative yields, eliminating quadratic plain-text redaction and unbounded JSON/render caches, expanding `Worker_pool` to 2–4 domains with 16 MiB body limits and offloaded decoding, re-raising `Eio.Cancel.Cancelled`, and resetting in-flight modal/interrupt state on epoch changes (#54671).
+- TUI operator visibility and health honesty across Pulse, Keepers, Keeper Dive, Work, and Runtime: decode and surface keeper failure diagnostics, failover walk trails, runnable-gated path-rest countdowns, roster truncation, 24h turn outcome breakdowns (`ok / rested / failed`), per-runtime standing alerts (`quota_rest`, `rate_limited`, `credential_refused_at`, `failed_attempt`), `keeper_waiting_inventory_changed` SSE updates, verification `Review_execution_repair_required` / `awaiting` visibility, signed schedule due countdowns, and honest stale/loading/failed/unreported states instead of false-green badges (#54672).
+- TUI `Work > Inbox` empty-state audit honesty (relabeling session-local decisions and surfacing server `gate_snapshot.recent_resolved` decisions and read errors) and unified Keeper Dive blocker correlation with pending HITL items and active/rejected verifications (#54673).
+- Keep Fleet Pulse Candle portraits square in narrow Keeper cards. (#54675)
+- Show the recorded sender's name or ID in Dashboard Keeper chat history. (#54675)
+- The Goal completion confirmation modal in the TUI now fetches the server-issued proof fields (`request_id`, `verification_run_id`, `expected_operator_id`) on open instead of requiring them to be typed manually (#54676).
+- Board posts and comments no longer stay refused with `private JSONL cursor
+  mismatch` after another writer appends to the posts file: the next post,
+  comment or post read re-reads the file once and continues from the observed
+  end. A write whose outcome is unknown still refuses, and its error now says
+  to restart the server (#54677).
+- Dashboard Keeper Chat: fixed the empty tool-card toggle and closed the persisted-history block and live AG-UI tool/thinking streaming gaps in `dashboard/src/workspaces/keepers/` (#54678).
+- TUI forms retain line breaks in text bodies and use the tool or harness
+  verdict already selected on screen (#54679).
+- The TUI Work Inbox displays tool approval questions and reasons as
+  scrollable Markdown (#54679).
+- Refresh the open dashboard Keeper chat as requests from other clients enter the queue, start, and settle. Reconcile missed updates when the shared observer reconnects. (#54683)
+- Keeper chat receives Shift+Enter inside tmux when extended keys are enabled
+  and shows Ctrl+J as the composer newline shortcut (#54686).
+- The TUI Mermaid text renderer draws a line break in a rectangle or rounded node label on its own row. A memory card holding a long fact now fits the pane instead of falling back to its source (#54688).
+- Board thread details switch between full Markdown posts and comments with Tab
+  and keep the reading position when switching tabs or refreshing comments
+  (#54690).
+- Gemini tool declarations carry the tool input schema in `parametersJsonSchema` instead of `parameters`. Gemini rejected every Keeper turn whose tools used `additionalProperties` or `exclusiveMinimum` with 400 "Unknown name" (#54693).
+- Normalized `tui.*` Settings schema fields (`tui.theme`, `tui.language`,
+  `tui.board_sort`, `tui.candle`) to canonical `Field_enum` /
+  `Hot_reload` controls with immediate live apply for theme, language, and
+  board sort, non-teleporting Inspector arrow navigation with preserved row
+  focus, strict zero-POST `Space` toggling, unified `< / >` artifact revision
+  stepping, and clean `[ / ]` / `< / >` / `+ / -` keycap hints across the TUI
+  (#54695).
+- Overlapping Keeper turn requests share census and waiting-inventory reads,
+  and Pulse marks unavailable or stale roster counts (#54697).
+- Dashboard Keeper 채팅과 Work·Knowledge 상세 본문에 굵게, 인용, 코드, 링크, 이미지 등 Markdown 서식을 표시합니다. (#54698)
+- TUI Markdown에서 AlphaTex 기타 탭을 다시 표시하고, Keeper 추론·도구 결과와 기억 전문에서 서식을 읽을 수 있습니다. (#54700)
+- Dashboard 계정 모드에서 AlphaTex 악보와 음악 폰트를 표시합니다. 불러올 수 없는 외부 이미지는 원본 링크를 제공하고, 코드 예제에 포함된 추론·메모리 태그를 보존합니다. (#54701)
+- TUI에서 중첩된 Markdown 강조, 인용 안의 코드·다이어그램, 참조 링크, 괄호가 포함된 이미지 주소와 표 안의 서식을 읽을 수 있습니다. (#54703)
+- Show every page of the Keeper chat queue on the Dashboard. Queue reads can be retried after a failure, and switching workspaces clears the previous queue before actions become available (#54706).
+- Dashboard에서 런타임 질문, 설정·도구 설명, 승인과 Ask 본문, 예약 메시지, 목표 검증 증거에 Markdown 서식을 표시합니다. (#54708)
+- Bounded `Chat_transcript.scrub_secrets_in_text` separator scanning so
+  single-line-break and tab-delimited `Bearer` / secret key evasions redact
+  cleanly without crossing blank-line paragraph breaks, restored startup-only
+  `Restart_required` reload scope for `tui.opening`, locked two-way OCaml
+  exhaustive server-TUI `tui.*` enum parity tests, and brought the full TUI and
+  `test_keeper_toml` suites back to 100% green (#54710).
+- Show available Pulse data and Keeper chat while slower dashboard requests are still pending. (#54712)
+- Gemini requests are counted with `countTokens` before dispatch, so a window over the binding's `max-context` becomes a typed context overflow that the shrink steps handle instead of a prose-only 400 that repeats every turn (#54713).
+- Paginate Keeper `/tool-result` responses past the 16 KB page cap, preserve `<details>` expand state across live tool streaming with bounded `Tools: full` auto-hydration, and hydrate truncated Tool Calls inside `QuickPeekDrawer` from Work & Sandbox and Debug Companion (#54716).
+- ACP error classification reads the `kind` field Muse puts in `error.data`, so a Muse `contextOverflow` becomes a typed context overflow that shrinks the next request instead of an unclassified provider error (#54722).
+- An official-client lane that failed over from a runtime that refused a range, and came back to it, resends the refused range no more: the stored refusal is read per runtime, and another runtime's response no longer hides it (#54733, #54719).
+- Animate the TUI Working display in Keeper chat and the Work & Queue drawer, and show Worked with the elapsed time after a confirmed success (#54735).
+- A `muse_code` turn adds an observer's journal once, however many link records name it. An observer journal that is missing, cannot be read or links observers of its own makes the turn's counts unreadable, as the Muse usage reference now says (#54736).
+- `masc_board_close` called by someone who is neither the post's author nor a
+  configured Board moderator is refused as `Unauthorized` again, before the
+  successor and summary checks; after #54677 it was refused with the successor
+  message instead (#54739).
+- Board votes, comment votes and reactions no longer refuse with `Board data is
+  unavailable.` after another writer appends to the posts file: like posts and
+  comments, they re-read the file once and continue. Every write to an existing
+  post now re-reads through one shared entry, so a new one cannot skip it
+  (#54740).
+- A Gemini Keeper whose response carried a thoughtSignature on a later text part no longer fails its next request before dispatch: the replay checkpoint leaves content bound by an exact-next-block carrier unpatched (#54741).
+- Show keeper error detail (blocker class and lane fallback attempts) in the Attention Queue preview and post-move keeper header (#54743).
+- A running Keeper turn's preview now says what the turn is doing. `tool` means a tool call is open, reasoning and answer are told apart in `open_activities`, and `streaming` ends when the model's response ends. A dashboard that already labelled `tool` as "running" is now right (#54744).
+- A Gemini request whose history the serializer cannot lower (for example a stranded thoughtSignature carrier) now ends as a typed local request refusal instead of an unhandled exception (#54746).
+- Source builds report a missing `cmarkit` dependency before starting Dune (#54751).
+- Preserve Markdown styles, links, and graphics in TUI Board comment previews (#54758).
+- Preserve Discord thread addresses and guild nicknames in Keeper chat and retain connector/account provenance in Librarian observations (#54760).
+
+### Performance
+
+- World Memory diff reuses unchanged Keeper snapshots and retrieval logs when computing heat (#54721).
+- Keeper tool statistics read new trajectory rows after the first scan, reusing compact samples for unchanged logs (#54723).
+- A write now invalidates only its own file's cached projection, retaining useful reads of unchanged files (#54729).
+- Workspace backlog reads share cached decoding and reuse the prepared task index for each unchanged snapshot (#54730).
+
+### Documentation
+
+- Clarified the trunk-based release contract: never freeze `main` for release cuts or publication waits, scope versions by milestones under `0.x` roll-forward, reconcile `RELEASE-FREEZE.md` with `check_tag_ancestor`, and restrict `MASC_RELEASE_FREEZE` to operator-explicit emergency brakes (#54651).
+
+### Internal
+
+- TUI: an unlisted `/music` command hands the terminal to `masc-alphatex` (the music workbench, or `/music midi PATH` to import a MIDI file). The slash menu, completion and help do not list it (#54709).
+- TUI: an unlisted `/score [N]` command opens the N-th newest closed alphaTex code block of the keeper conversation on screen in `masc-alphatex` (Kitty graphics terminal required). The slash menu, completion and help do not list it (#54714).
+
 ## [0.83.1] - 2026-11-25
 
 ### Known issues

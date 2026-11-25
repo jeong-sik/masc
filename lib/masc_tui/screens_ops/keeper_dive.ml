@@ -426,12 +426,14 @@ type history_layout = {
   runtimes : Wire_runtime.runtime_option list;
   cut_replies : string Fleet_store.String_map.t;
   retained_image_height : int;
+  tool_result : (string * Wire_keeper_context.tool_result_response) Observed.t;
   tool_results :
-    (string
-    * Wire_keeper_context.tool_result_response Observed.t
-    * bool
-    * Keeper_context_store.tool_result_page_error option)
-    list;
+    Wire_keeper_context.tool_result_response Observed.t
+    Keeper_context_store.String_map.t;
+  tool_result_inflight : Keeper_context_store.String_set.t;
+  tool_result_page_errors :
+    Keeper_context_store.tool_result_page_error
+    Keeper_context_store.String_map.t;
 }
 
 let history_layout_of ~(model : Model.t) ~keeper_name ~width =
@@ -451,36 +453,11 @@ let history_layout_of ~(model : Model.t) ~keeper_name ~width =
     cut_replies = Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet;
     retained_image_height =
       Chat_transcript.retained_image_height ~model ~keeper:keeper_name ~width;
-    tool_results = Keeper_context_store.tool_results_snapshot ks;
+    tool_result = ks.tool_result;
+    tool_results = ks.tool_results;
+    tool_result_inflight = ks.tool_result_inflight;
+    tool_result_page_errors = ks.tool_result_page_errors;
   }
-
-let keeper_state_of_tool_snapshot
-    (snap :
-      (string
-      * Wire_keeper_context.tool_result_response Observed.t
-      * bool
-      * Keeper_context_store.tool_result_page_error option)
-      list)
-    : Keeper_context_store.keeper_state =
-  List.fold_left
-    (fun (ks : Keeper_context_store.keeper_state) (eid, obs, inflight, page_err) ->
-      let tool_results =
-        Keeper_context_store.String_map.add eid obs ks.tool_results
-      in
-      let tool_result_inflight =
-        if inflight then
-          Keeper_context_store.String_set.add eid ks.tool_result_inflight
-        else ks.tool_result_inflight
-      in
-      let tool_result_page_errors =
-        match page_err with
-        | Some err ->
-            Keeper_context_store.String_map.add eid err
-              ks.tool_result_page_errors
-        | None -> ks.tool_result_page_errors
-      in
-      { ks with tool_results; tool_result_inflight; tool_result_page_errors })
-    Keeper_context_store.empty_keeper_state snap
 
 let build_history_tool_card ~(theme : Theme.t) ~(lang : Say.lang)
     ~(tools_mode : Slash.tools_mode) ~width ~hhmm ~keeper_state ~tname ~args
@@ -589,7 +566,15 @@ let build_history_rows ~(layout : history_layout)
   let user_bg = theme.surface_2 in
   let runtimes = layout.runtimes in
   let cut_replies = layout.cut_replies in
-  let keeper_state = keeper_state_of_tool_snapshot layout.tool_results in
+  let keeper_state =
+    {
+      Keeper_context_store.empty_keeper_state with
+      tool_result = layout.tool_result;
+      tool_results = layout.tool_results;
+      tool_result_inflight = layout.tool_result_inflight;
+      tool_result_page_errors = layout.tool_result_page_errors;
+    }
+  in
   let origin_mode =
     match layout.origin_mode with
     | Fleet_store.Display_origin_inline ->

@@ -169,16 +169,6 @@ val tool_result_page_error :
     already-loaded [Tool_result_page] for [execution_id], or [None] when no
     continuation error is pending. *)
 
-val tool_results_snapshot :
-  keeper_state ->
-  (string
-  * Wire_keeper_context.tool_result_response Observed.t
-  * bool
-  * tool_result_page_error option)
-  list
-(** Canonical key-sorted snapshot of cached, in-flight, and continuation-errored
-    tool results for structural equality checks (e.g. [Keeper_dive.History_rows]). *)
-
 val next_tool_result_params :
   ?allow_non_retryable:bool ->
   allow_next_page:bool ->

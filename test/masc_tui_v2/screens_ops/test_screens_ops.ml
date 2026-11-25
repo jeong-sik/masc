@@ -4193,6 +4193,149 @@ let test_chat_history_rows_keep_one_slot_per_keeper () =
   Alcotest.(check int) "the other keeper still has its rows" 1 s.hits;
   Alcotest.(check int) "a new message dropped no keeper" 0 s.evictions
 
+let test_chat_history_rows_tool_result_refs_cache_and_invalidation () =
+  let keeper = "e-masc-the-leader" in
+  let eid = "ex-layout-ref-1" in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let tool_msg : Wire_fleet.chat_message =
+    {
+      (history_msg ~id:"h-tool-ref" ~role:Wire_fleet.Role_tool
+         ~content:{|{"cmd":"git status"}|} ~thinking:None ~seconds_ago:5.)
+      with
+      tool_call_id = Some "tc-ref-1";
+      tool_call_name = Some "bash";
+      execution_id = Some eid;
+      tool_meta =
+        Some
+          {
+            Wire_fleet.status = Some Wire_fleet.Trace_tool_ok;
+            dur = Some "12ms";
+            result = None;
+          };
+    }
+  in
+  let fleet =
+    Fleet_store.apply_keepers ~observed_at:now_mono sample_keepers m0.fleet
+    |> apply_history keeper [ tool_msg ]
+    |> Fleet_store.set_tools_mode Slash.Tools_full
+  in
+  let base_model =
+    { m0 with fleet; keeper_context = Keeper_context_store.empty }
+  in
+  let kept = Keeper_dive.History_rows.create () in
+  let check_step ~label ~expect_misses ~expect_hits ~prev_grid model =
+    let fresh = draw_chat ~cols:140 ~name:keeper model in
+    let from_kept = draw_chat ~history_rows:kept ~cols:140 ~name:keeper model in
+    Alcotest.(check bool) (label ^ ": kept rows match fresh layout") true
+      (grids_draw_the_same fresh from_kept);
+    (match prev_grid with
+    | Some prev ->
+        Alcotest.(check bool) (label ^ ": layout updated from previous state")
+          false (grids_draw_the_same prev from_kept)
+    | None -> ());
+    let s = Keeper_dive.History_rows.stats kept in
+    Alcotest.(check int) (label ^ ": misses") expect_misses s.misses;
+    Alcotest.(check int) (label ^ ": hits") expect_hits s.hits;
+    (* Repeat unchanged frame: must hit with zero additional misses. *)
+    let repeat = draw_chat ~history_rows:kept ~cols:140 ~name:keeper model in
+    Alcotest.(check bool) (label ^ ": repeated unchanged frame matches") true
+      (grids_draw_the_same from_kept repeat);
+    let s2 = Keeper_dive.History_rows.stats kept in
+    Alcotest.(check int) (label ^ ": repeated unchanged frame adds 0 misses")
+      expect_misses s2.misses;
+    Alcotest.(check int) (label ^ ": repeated unchanged frame records hit")
+      (expect_hits + 1) s2.hits;
+    from_kept
+  in
+  let g0 =
+    check_step ~label:"baseline" ~expect_misses:1 ~expect_hits:0 ~prev_grid:None
+      base_model
+  in
+  (* Additional unchanged frame check on baseline *)
+  let g0_again = draw_chat ~history_rows:kept ~cols:140 ~name:keeper base_model in
+  Alcotest.(check bool) "baseline third unchanged frame matches" true
+    (grids_draw_the_same g0 g0_again);
+  let s0 = Keeper_dive.History_rows.stats kept in
+  Alcotest.(check int) "baseline still 1 miss across repeated unchanged frames"
+    1 s0.misses;
+  Alcotest.(check int) "baseline recorded 2 hits" 2 s0.hits;
+  (* 1. mark_tool_result_inflight invalidates cache *)
+  let kc1 =
+    Keeper_context_store.mark_tool_result_inflight ~keeper ~execution_id:eid
+      base_model.keeper_context
+  in
+  let g1 =
+    check_step ~label:"inflight" ~expect_misses:2 ~expect_hits:2
+      ~prev_grid:(Some g0) { base_model with keeper_context = kc1 }
+  in
+  (* 2. apply_tool_result page 0 invalidates cache *)
+  let kc2 =
+    Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+      ~execution_id:eid
+      (Wire_keeper_context.Tool_result_page
+         {
+           keeper;
+           execution_id = eid;
+           source_id = "src-ref-1";
+           body_sha256 = "sha-ref-1";
+           recorded_bytes = 48;
+           is_error = false;
+           offset = 0;
+           next_offset = 16;
+           total_bytes = 48;
+           eof = false;
+           content = "PAGE0_PAYLOAD_A\n";
+           encoding = "utf-8";
+         })
+      kc1
+  in
+  let g2 =
+    check_step ~label:"page 0" ~expect_misses:3 ~expect_hits:3
+      ~prev_grid:(Some g1) { base_model with keeper_context = kc2 }
+  in
+  (* 3. apply_tool_result page 1 invalidates cache *)
+  let kc3 =
+    Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+      ~execution_id:eid
+      (Wire_keeper_context.Tool_result_page
+         {
+           keeper;
+           execution_id = eid;
+           source_id = "src-ref-1";
+           body_sha256 = "sha-ref-1";
+           recorded_bytes = 48;
+           is_error = false;
+           offset = 16;
+           next_offset = 32;
+           total_bytes = 48;
+           eof = false;
+           content = "PAGE1_PAYLOAD_B\n";
+           encoding = "utf-8";
+         })
+      kc2
+  in
+  let g3 =
+    check_step ~label:"page 1" ~expect_misses:4 ~expect_hits:4
+      ~prev_grid:(Some g2) { base_model with keeper_context = kc3 }
+  in
+  (* 4. mark_tool_result_failed (continuation error) invalidates cache *)
+  let kc4 =
+    Keeper_context_store.mark_tool_result_failed ~at:now_mono ~keeper
+      ~execution_id:eid ~reason:"HTTP 503 timeout" ~retryable:true kc3
+  in
+  let g4 =
+    check_step ~label:"continuation failed" ~expect_misses:5 ~expect_hits:5
+      ~prev_grid:(Some g3) { base_model with keeper_context = kc4 }
+  in
+  (* 5. mark_tool_result_conflict (409) invalidates cache *)
+  let kc5 =
+    Keeper_context_store.mark_tool_result_conflict ~at:now_mono ~keeper
+      ~execution_id:eid ~reason:"source rotated" kc4
+  in
+  ignore
+    (check_step ~label:"409 conflict" ~expect_misses:6 ~expect_hits:6
+       ~prev_grid:(Some g4) { base_model with keeper_context = kc5 })
+
 let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   let keeper = "e-masc-the-leader" in
   let m0 = make_populated_model ~cols:120 ~rows:36 ~lang:Say.Lang_en in
@@ -4970,6 +5113,9 @@ let () =
             `Quick test_chat_history_rows_keep_the_keepers_drawn_last;
           Alcotest.test_case "kept chat history rows keep one slot per keeper"
             `Quick test_chat_history_rows_keep_one_slot_per_keeper;
+          Alcotest.test_case
+            "kept chat history rows reuse unchanged frames and invalidate across tool-result transitions"
+            `Quick test_chat_history_rows_tool_result_refs_cache_and_invalidation;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
           Alcotest.test_case "Keeper cadence window counts wake causes and notes short windows"

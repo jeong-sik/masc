@@ -311,27 +311,6 @@ let tool_result_for_selected_call ks =
       Observed.to_option (tool_result_for_execution ~execution_id:eid ks)
   | Some { execution_id = None; _ } | None -> None
 
-let tool_results_snapshot ks =
-  let keys =
-    String_map.fold (fun k _ acc -> String_set.add k acc) ks.tool_results
-      ks.tool_result_inflight
-  in
-  let keys =
-    String_map.fold (fun k _ acc -> String_set.add k acc)
-      ks.tool_result_page_errors keys
-  in
-  let keys =
-    match Observed.to_option ks.tool_result with
-    | Some (eid, _) -> String_set.add eid keys
-    | None -> keys
-  in
-  String_set.elements keys
-  |> List.map (fun eid ->
-         ( eid
-         , tool_result_for_execution ~execution_id:eid ks
-         , String_set.mem eid ks.tool_result_inflight
-         , tool_result_page_error ~execution_id:eid ks ))
-
 let next_tool_result_params ?(allow_non_retryable = false) ~allow_next_page
     ~refetch_when_eof ~execution_id ks =
   if is_tool_result_inflight ~execution_id ks then None

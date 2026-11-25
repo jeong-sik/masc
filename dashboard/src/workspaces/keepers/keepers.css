@@ -579,7 +579,6 @@
 }
 
 .kp-msg-body {
-  white-space: pre-wrap;
   word-break: keep-all;
   overflow-wrap: anywhere;
   color: var(--fg-1);
@@ -594,7 +593,6 @@
   background: var(--bg-1);
   font-size: var(--fs-12);
   color: var(--fg-3);
-  white-space: pre-wrap;
 }
 
 .kp-toggle-btn {

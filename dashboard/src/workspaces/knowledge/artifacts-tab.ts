@@ -7,6 +7,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
@@ -22,7 +23,6 @@ import {
   formatBytes,
   formatRelativeTime,
   isRecord,
-  renderSanitizedMarkdown,
   type ArtifactDocumentData,
   type PublishedArtifactItem,
   type WorkspaceViewProps,
@@ -279,7 +279,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
               </div>
               <h2 class="kn-heading">${doc.artifact.title}</h2>
               ${doc.artifact.summary && html`
-                <p class="kn-subcopy">${doc.artifact.summary}</p>
+                <${MarkdownContent} class="kn-subcopy" text=${doc.artifact.summary} />
               `}
             </div>
             <div class="kn-actions">
@@ -342,10 +342,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
                 />
               `
             : html`
-                <article
-                  class="markdown-content kn-md-panel"
-                  dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(doc.content) }}
-                />
+                <article class="kn-md-panel">
+                  <${MarkdownContent} text=${doc.content} document />
+                </article>
               `}
         </div>
       `

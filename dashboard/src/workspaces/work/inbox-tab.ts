@@ -10,6 +10,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, currentSessionEpoch } from '../../core/auth'
 import {
@@ -830,7 +831,7 @@ export function InboxTab(props: WorkspaceViewProps) {
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
-            ${selectedEntry.item.context && html`<div class="wk-notice">${selectedEntry.item.context}</div>`}
+            ${selectedEntry.item.context && html`<${MarkdownContent} class="wk-notice" text=${selectedEntry.item.context} />`}
             ${selectedEntry.item.questions.map((q) => {
               const cur = askDrafts[selectedEntry.item.askId]?.[q.questionId]
               const chosenIds = cur?.kind === 'chose' ? cur.choiceIds : []
@@ -841,7 +842,7 @@ export function InboxTab(props: WorkspaceViewProps) {
                     <strong>${q.header}</strong>
                     <span class="wk-badge">${q.mode === 'multi' ? '복수 선택' : '단일 선택'}</span>
                   </div>
-                  <div class="wk-body-pre">${q.prompt}</div>
+                  <${MarkdownContent} class="wk-prose" text=${q.prompt} />
                   ${q.choices.length > 0 && html`
                     <div class="wk-chips">
                       ${q.choices.map((c) => {
@@ -930,7 +931,7 @@ export function InboxTab(props: WorkspaceViewProps) {
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
-            ${selectedEntry.item.summaryText && html`<div class="wk-notice">${selectedEntry.item.summaryText}</div>`}
+            ${selectedEntry.item.summaryText && html`<${MarkdownContent} class="wk-notice" text=${selectedEntry.item.summaryText} />`}
             ${selectedEntry.item.inputPreview && html`<pre class="wk-code-preview">${selectedEntry.item.inputPreview}</pre>`}
             <div class="wk-field">
               <label for="gate-reject-reason">거절 사유 (Reject 시 필수)</label>

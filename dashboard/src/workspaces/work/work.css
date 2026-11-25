@@ -90,8 +90,12 @@
   color: var(--fg-1);
 }
 
+.wk-prose,
 .wk-body-pre {
   font-size: var(--fs-13);
+}
+
+.wk-body-pre {
   white-space: pre-wrap;
 }
 

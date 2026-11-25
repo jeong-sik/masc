@@ -77,6 +77,13 @@ describe('MarkdownContent', () => {
     expect(a?.getAttribute('rel')).toContain('noopener')
   })
 
+  it('keeps nested emphasis and code in link labels', () => {
+    const container = document.createElement('div')
+    render(h(MarkdownContent, { text: '[**검토** `head`](https://example.test/review)' }), container)
+    expect(container.querySelector('a strong')?.textContent).toBe('검토')
+    expect(container.querySelector('a code')?.textContent).toBe('head')
+  })
+
   it('renders blockquote', () => {
     const container = document.createElement('div')
     render(h(MarkdownContent, { text: '> quote' }), container)

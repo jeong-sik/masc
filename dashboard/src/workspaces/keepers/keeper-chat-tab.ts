@@ -12,6 +12,7 @@
 
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
@@ -2187,7 +2188,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                   <span>추론 (Thinking)</span>
                                   <span class="kp-block-preview">${summarizeCompact(blocks.thinkingText, 80)}</span>
                                 </summary>
-                                <div class="kp-block-content">${blocks.thinkingText}</div>
+                                <${MarkdownContent} class="kp-block-content" text=${blocks.thinkingText} />
                               </details>
                             `}
 
@@ -2232,7 +2233,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                   <span class="kp-block-preview">${summarizeCompact(blocks.memoryItems[0], 90)}</span>
                                 </summary>
                                 <ul class="kp-block-list">
-                                  ${blocks.memoryItems.map((item, idx) => html`<li key=${idx}>${item}</li>`)}
+                                  ${blocks.memoryItems.map((item, idx) => html`<li key=${idx}><${MarkdownContent} text=${item} /></li>`)}
                                 </ul>
                               </details>
                             `}
@@ -2252,7 +2253,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                         `}
 
                         ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
-                          <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
+                          ${blocks.bodyText
+                            ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} />`
+                            : html`<div class="kp-msg-body">응답 생성 중…</div>`}
                         `}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
                       </article>
@@ -2428,8 +2431,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             </div>
             ${btw.status !== 'idle' && html`
               <div class="kp-msg-body">
-                <strong>Q:</strong> ${btw.prompt}
-                <div>${btw.reply || (btw.status === 'streaming' ? '응답 수신 중…' : '')}</div>
+                <strong>Q:</strong>
+                <${MarkdownContent} text=${btw.prompt} />
+                ${btw.reply
+                  ? html`<${MarkdownContent} text=${btw.reply} />`
+                  : btw.status === 'streaming' && html`<div>응답 수신 중…</div>`}
                 ${btw.error && html`<div class="ap-error">${btw.error}</div>`}
               </div>
             `}

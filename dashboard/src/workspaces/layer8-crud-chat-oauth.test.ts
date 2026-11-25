@@ -1,4 +1,4 @@
-// @vitest-environment happy-dom
+// @vitest-environment jsdom
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -543,7 +543,18 @@ candidates = ["safe.model"]
             {
               id: 'm-1',
               role: 'assistant',
-              content: '<thinking>Checking OAuth routes carefully</thinking>Done checking routes.',
+              content: [
+                '<thinking>Checking **OAuth** routes carefully</thinking>',
+                '**점검 완료** · `oauth` · [검토 링크](https://example.test/review)',
+                '',
+                '> *검토 근거*',
+                '',
+                '```json',
+                '{"ok":true}',
+                '```',
+                '',
+                '![결과 이미지](https://example.test/result.png)',
+              ].join('\n'),
               tool_calls: [{ id: 'tc-1', name: 'rg_search', args: { pattern: 'oauth' }, result: '3 matches', status: 'ok' }],
               ts: 100,
             },
@@ -583,6 +594,13 @@ candidates = ["safe.model"]
     const thinkingCard = container.querySelector('[data-testid="chat-thinking-card"]') as HTMLDetailsElement
     expect(thinkingCard).not.toBeNull()
     expect(thinkingCard.open).toBe(false)
+    expect(thinkingCard.querySelector('strong')?.textContent).toBe('OAuth')
+    const body = container.querySelector('.kp-msg-body')!
+    expect(body.querySelector('strong')?.textContent).toBe('점검 완료')
+    expect(body.querySelector('a')?.getAttribute('href')).toBe('https://example.test/review')
+    expect(body.querySelector('blockquote em')?.textContent).toBe('검토 근거')
+    expect(body.querySelector('pre code')?.textContent).toContain('{"ok":true}')
+    expect(body.querySelector('img')?.getAttribute('alt')).toBe('결과 이미지')
     expect(container.querySelector('[data-testid="chat-tool-card"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="chat-memory-card"]')).toBeNull()
     expect(container.querySelector('[data-testid="chat-autonomous-card"]')).toBeNull()

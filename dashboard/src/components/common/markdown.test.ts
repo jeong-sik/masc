@@ -174,31 +174,16 @@ describe('Markdown', () => {
     expect(details).not.toBeNull()
   })
 
-  describe('truncated markdown repair', () => {
-    it('repairs trailing orphan backtick from truncated tool output', () => {
-      // Reproduces the ani1999 board post symptom: LLM output cut at
-      // max_tokens mid-bullet, leaving "- `" as the final line.
-      const md = 'first line\n- `keeper_memory_search`\n- `'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      // Body is still rendered; the trailing backtick doesn't swallow it.
-      expect(container.textContent).toContain('first line')
-      expect(container.textContent).toContain('keeper_memory_search')
-      // Repair marker is visible so the operator knows it was cut.
-      expect(container.textContent).toContain('[잘림]')
-    })
+  it('keeps an incomplete reply readable while its fence is still open', () => {
+    const md = 'before\n```ocaml\nlet x = 1'
+    render(html`<${MarkdownRenderer} text=${md} />`, container)
+    expect(container.querySelector('pre code')?.textContent).toBe('let x = 1\n')
+  })
 
-    it('repairs unclosed triple-backtick code fence', () => {
-      const md = 'before\n```ocaml\nlet x = 1'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      expect(container.textContent).toContain('before')
-      expect(container.textContent).toContain('let x = 1')
-      expect(container.textContent).toContain('[잘림]')
-    })
-
-    it('leaves balanced markdown untouched', () => {
-      const md = 'plain `inline` and ```\ncode\n```'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      expect(container.textContent).not.toContain('[잘림]')
-    })
+  it('keeps inner fences and think tags literal in a fenced example', () => {
+    const md = ['````markdown', '```html', '<think>example</think>', '```', '````'].join('\n')
+    render(html`<${MarkdownRenderer} text=${md} />`, container)
+    expect(container.querySelector('pre code')?.textContent).toBe('```html\n<think>example</think>\n```\n')
+    expect(container.querySelector('details')).toBeNull()
   })
 })

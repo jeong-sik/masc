@@ -10,8 +10,6 @@
  */
 
 import type { ComponentChildren } from 'preact'
-import createDOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { diffLines } from 'diff'
 import type { TimeWindow } from '../../core/time-window'
 import { err, ok, type Result } from '../../lib/result'
@@ -92,60 +90,6 @@ export function formatBytes(bytes: number | null | undefined): string {
   if (bytes < 1024) return `${Math.trunc(bytes)} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-}
-
-let cachedPurifier: ReturnType<typeof createDOMPurify> | null = null
-let cachedPurifierDoc: Document | null = null
-let cachedPurifierSafe = false
-
-function escapeHtmlFailClosed(raw: string): string {
-  return raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function getVerifiedPurifier(): ReturnType<typeof createDOMPurify> | null {
-  if (typeof window === 'undefined' || !window.document) return null
-  if (!cachedPurifier || cachedPurifierDoc !== window.document) {
-    const instance = createDOMPurify(window)
-    cachedPurifier = instance
-    cachedPurifierDoc = window.document
-    const probe = instance.isSupported
-      ? instance.sanitize('<p>ok<script>alert(1)</script><img src="x" onerror="alert(2)"></p>', {
-          USE_PROFILES: { html: true },
-          FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
-          FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
-        })
-      : ''
-    const lower = probe.toLowerCase()
-    cachedPurifierSafe = instance.isSupported
-      && lower.includes('<p>')
-      && !lower.includes('<script')
-      && !lower.includes('onerror')
-  }
-  return cachedPurifierSafe ? cachedPurifier : null
-}
-
-/**
- * Renders untrusted Markdown into strictly sanitized HTML via `marked` + `DOMPurify`.
- * Fails closed to escaped plaintext if the host DOM fails the DOMPurify security smoke test
- * (e.g. partial DOM implementations like happy-dom).
- */
-export function renderSanitizedMarkdown(markdown: string): string {
-  const rendered = marked.parse(markdown ?? '', { async: false, gfm: true, breaks: false })
-  const rawHtml = typeof rendered === 'string' ? rendered : ''
-  const purifier = getVerifiedPurifier()
-  if (!purifier) {
-    return `<pre class="markdown-fallback">${escapeHtmlFailClosed(markdown ?? '')}</pre>`
-  }
-  return purifier.sanitize(rawHtml, {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
-  })
 }
 
 // ── 1. Board Types, Signal Classifier, Succession Folding & Emoji Collapse ─

@@ -434,7 +434,12 @@ let resolve_composer_popup (m : Model.t) : composer_popup =
       match String.index_opt prefix_trimmed ' ' with
       | None ->
           let query = String.sub prefix_trimmed 1 (max 0 (pt_len - 1)) in
-          let specs = Slash.filter ~query ~lang:m.lang in
+          (* The cursor can sit inside the word, so the prefix alone may not
+             spell an unlisted command that the whole draft does. *)
+          let specs =
+            if Slash.names_unlisted_command left_trimmed then []
+            else Slash.filter ~query ~lang:m.lang
+          in
           let items =
             List.map
               (fun (s : Slash.spec) ->

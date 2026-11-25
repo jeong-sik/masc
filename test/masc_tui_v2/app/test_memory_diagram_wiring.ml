@@ -309,7 +309,7 @@ let find_render_cmd cmds =
       | Cmd.Export_artifact _
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->
@@ -335,7 +335,7 @@ let has_cancel_diagram_cmd cmds =
       | Cmd.Export_artifact _
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->
@@ -521,7 +521,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
         | Cmd.Export_artifact _
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -1229,7 +1229,7 @@ let test_visibility_enter_refresh_and_resize () =
         | Cmd.Export_artifact _
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->

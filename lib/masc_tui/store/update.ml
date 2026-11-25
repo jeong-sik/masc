@@ -25,6 +25,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->

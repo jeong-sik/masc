@@ -606,6 +606,10 @@ type editor_target =
   | Edit_keeper_toml of string
   | Edit_wiki_page of string
 
+type terminal_program =
+  | Music_workbench
+  | Music_import_midi of string  (* path of a Standard MIDI File *)
+
 type t =
   | Batch of t list
   | Http_get of { epoch : Epoch.t; req : get_request }
@@ -652,6 +656,7 @@ type t =
   | Open_dos_screen of { epoch : Epoch.t }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
+  | Open_terminal_program of terminal_program
   | Start_local_server
   | Restart_tui
   | Quit of Exit_reason.t

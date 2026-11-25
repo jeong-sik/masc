@@ -4202,6 +4202,47 @@ let run_editor_roundtrip t ~suffix initial =
           Eio.Cancel.protect t.editor_handoff.resume_terminal;
           Error (Masc_cli_editor.Form_unreadable (Printexc.to_string ex)))
 
+let run_terminal_program t command =
+  Atomic.set t.editor_active true;
+  Fun.protect
+    ~finally:(fun () -> Atomic.set t.editor_active false)
+    (fun () ->
+      t.editor_handoff.pause_terminal ();
+      match Eio_unix.run_in_systhread (fun () -> Music_launch.run command) with
+      | res ->
+          t.editor_handoff.resume_terminal ();
+          res
+      | exception (Eio.Cancel.Cancelled _ as ex) ->
+          Eio.Cancel.protect t.editor_handoff.resume_terminal;
+          raise ex
+      | exception ex ->
+          Eio.Cancel.protect t.editor_handoff.resume_terminal;
+          Error (Printexc.to_string ex))
+
+let execute_terminal_program t program =
+  if Atomic.get t.editor_active then ()
+  else
+    match
+      Result.bind
+        (Music_launch.command ~base_path:t.cli.base_path program)
+        (run_terminal_program t)
+    with
+    | Ok () -> ()
+    | Error detail ->
+        Ui_bus.publish_stream_receipt t.bus
+          (Msg.Http_reply
+             {
+               epoch = Atomic.get t.stream_epoch;
+               reply =
+                 Msg.Reply_action_ack
+                   {
+                     label = Say.make ~ko:"음악 작업대" ~en:"Music workbench";
+                     ack_scope = Msg.Ack_toast_only;
+                     for_modal = None;
+                     result = Error (Msg.Transport (Health.Other_io detail));
+                   };
+             })
+
 let can_edit_local_toml t =
   is_local_host t.cli.host || Option.is_some (Atomic.get t.owned_server)
 
@@ -5093,6 +5134,7 @@ let rec execute t = function
                            };
                      }))
   | Cmd.Open_editor_escape_hatch target -> execute_editor_escape_hatch t target
+  | Cmd.Open_terminal_program program -> execute_terminal_program t program
   | Cmd.Start_local_server -> execute_start_local_server t
   | Cmd.Restart_tui -> t.on_restart ()
   | Cmd.Quit reason -> t.on_quit reason

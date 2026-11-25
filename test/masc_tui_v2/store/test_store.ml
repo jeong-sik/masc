@@ -277,7 +277,7 @@ let has_get_health cmds =
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->
@@ -297,7 +297,7 @@ let has_sync_streams cmds =
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->
@@ -318,7 +318,7 @@ let has_quit cmds =
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui ->
           false)
@@ -517,7 +517,7 @@ let test_three_channel_separation () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -550,7 +550,7 @@ let test_three_channel_separation () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -1066,7 +1066,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -1466,7 +1466,7 @@ let test_verifier_regressions () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ );
@@ -1738,7 +1738,7 @@ let test_verifier_regressions () =
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-    | Cmd.Open_editor_escape_hatch _
+    | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
     | Cmd.Quit _ ->
@@ -1911,7 +1911,7 @@ let test_verifier_regressions () =
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-    | Cmd.Open_editor_escape_hatch _
+    | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
     | Cmd.Quit _ ->
@@ -2011,7 +2011,7 @@ let test_verifier_regressions () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -2142,7 +2142,7 @@ let test_round1_settings_and_overlay_transitions () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -2246,7 +2246,7 @@ let test_round2_store_regressions () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -2543,7 +2543,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
       pulse_cmds
@@ -2934,7 +2934,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
       cmds
@@ -3655,7 +3655,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)
       (Cmd.flatten cmds)
@@ -6386,7 +6386,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -6439,7 +6439,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -7827,7 +7827,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
@@ -8811,7 +8811,7 @@ let test_failure_is_asked_again_for_a_new_question () =
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
-        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
       (Cmd.flatten (View_fetches.fetches_for_current_view beta))
@@ -9215,7 +9215,7 @@ let sent_get req cmds =
       | Cmd.Export_artifact _
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
-      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
       | Cmd.Quit _ ->
@@ -22604,9 +22604,103 @@ let test_keeper_lifecycle_controls_and_guards () =
     "matching R2 ok=true closes modal cleanly" true
     (Option.is_none m_match_ok.inline_modal
     && Option.is_none m_match_ok.nav.overlay)
+
+let test_hidden_music_command () =
+  let rejected raw =
+    match Slash.parse raw with
+    | Error (Slash.Invalid_argument { command; _ }) ->
+        Alcotest.(check string) (raw ^ " names /music") "/music" command
+    | Ok _ | Error _ -> Alcotest.fail (raw ^ " must be rejected")
+  in
+  (match Slash.parse "/music" with
+   | Ok (Slash.Music Slash.Music_workbench) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "/music opens the workbench");
+  (match Slash.parse "/music midi /tmp/a b.mid" with
+   | Ok (Slash.Music (Slash.Music_import_midi path)) ->
+       Alcotest.(check string) "the path keeps its spaces" "/tmp/a b.mid" path
+   | Ok _ | Error _ -> Alcotest.fail "/music midi PATH imports the file");
+  rejected "/music midi";
+  rejected "/music play";
+  Alcotest.(check bool) "the registry does not list /music" false
+    (List.exists
+       (fun (spec : Slash.spec) -> String.equal spec.name "/music")
+       Slash.all);
+  List.iter
+    (fun query ->
+      Alcotest.(check int) (query ^ " matches no listed command") 0
+        (List.length (Slash.filter ~query ~lang:Say.Lang_en)))
+    [ "/music"; "/music play"; "/music midi /tmp/a.mid" ];
+  Alcotest.(check bool) "a partial word still filters the listed commands" true
+    (Slash.filter ~query:"/mod" ~lang:Say.Lang_en <> []);
+  (* English UI: the description of /model holds the letters of "music" in
+     order. The default Korean UI has no such match, so it would pass even
+     without the Slash.filter guard. *)
+  let m = Model.initial ~lang:Say.Lang_en () in
+  let requested raw =
+    match Slash.parse raw with
+    | Ok parsed -> snd (Update.execute_slash ~now:t0 m parsed)
+    | Error _ -> Alcotest.fail ("failed to parse " ^ raw)
+  in
+  (match requested "/music" with
+   | [ Cmd.Open_terminal_program Cmd.Music_workbench ] -> ()
+   | _ -> Alcotest.fail "/music requests the workbench");
+  (match requested "/music midi /tmp/a.mid" with
+   | [ Cmd.Open_terminal_program (Cmd.Music_import_midi "/tmp/a.mid") ] -> ()
+   | _ -> Alcotest.fail "/music midi PATH requests the import");
+  let focused : Model.t = { m with drafts = Drafts.set_focus true m.drafts } in
+  let typed text =
+    String.fold_left
+      (fun acc ch ->
+        fst (Update.step ~now:t0 acc (Msg.Key_event (char_key (String.make 1 ch)))))
+      focused text
+  in
+  (match Update_nav.resolve_composer_popup (typed "/music") with
+   | Update_nav.Composer_popup_none -> ()
+   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+       Alcotest.fail "a typed /music must not open a popup of listed commands");
+  let _, enter_cmds =
+    Update.step ~now:t0 (typed "/music") (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Enter on a typed /music requests the workbench instead of a listed command"
+    true
+    (List.exists
+       (function
+         | Cmd.Open_terminal_program Cmd.Music_workbench -> true
+         | _ -> false)
+       (Cmd.flatten enter_cmds));
+  (* With the cursor inside the word the text before it reads "/musi", which
+     fuzzy-matches /pulse and /model in the English UI. The whole draft
+     decides, so no popup opens and Enter still submits /music. *)
+  let typed_music = typed "/music" in
+  let mid_word : Model.t =
+    { typed_music with drafts = Drafts.move_cursor `Left typed_music.drafts }
+  in
+  (match Update_nav.resolve_composer_popup mid_word with
+   | Update_nav.Composer_popup_none -> ()
+   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+       Alcotest.fail "a cursor inside /music must not open a popup of listed commands");
+  let _, mid_word_cmds =
+    Update.step ~now:t0 mid_word (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Enter with the cursor inside /music still requests the workbench" true
+    (List.exists
+       (function
+         | Cmd.Open_terminal_program Cmd.Music_workbench -> true
+         | _ -> false)
+       (Cmd.flatten mid_word_cmds));
+  match Update_nav.resolve_composer_popup (typed "/mod") with
+  | Update_nav.Composer_popup_slash _ -> ()
+  | Update_nav.Composer_popup_none | Update_nav.Composer_popup_mention _ ->
+      Alcotest.fail "a partial listed command keeps its popup"
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "hidden_music_command"
+      , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
+            test_hidden_music_command ] );
       ( "runtime_editor_authority",
         [ Alcotest.test_case "exact skill mutation reference" `Quick test_skill_mutation_reference;
           Alcotest.test_case "preset access recheck" `Quick test_preset_denial_refresh ] );

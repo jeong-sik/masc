@@ -79,13 +79,19 @@ type t =
 
 (* The one place that says what the turn is doing. It reads what is open, so
    no writer sets [activity] on its own and two sources cannot disagree. *)
+let activity_of_head = function
+  | Tool_open _ -> Tool_observed
+  | Response_open { channel = No_content; _ } -> Awaiting_response
+  | Response_open { channel = Thinking; _ } | Response_open { channel = Text; _ } ->
+      Receiving_response
+
 let activity_of (preview : t) =
-  match preview.preparation, preview.open_activities with
-  | Some _, _ -> Preparing
-  | None, Tool_open _ :: _ -> Tool_observed
-  | None, Response_open { channel = No_content; _ } :: _ -> Awaiting_response
-  | None, Response_open _ :: _ -> Receiving_response
-  | None, [] -> if preview.attempt_failed then Failed else Awaiting_response
+  match preview.preparation with
+  | Some _ -> Preparing
+  | None -> (
+      match preview.open_activities with
+      | [] -> if preview.attempt_failed then Failed else Awaiting_response
+      | first :: _ -> activity_of_head first)
 
 let open_response ~channel ~now = { channel; started_at = now; since = now }
 
@@ -134,12 +140,15 @@ let same_tool ~tool_use_id ~tool_name (tool : open_tool) =
   | Some _, None | None, Some _ | None, None -> String.equal tool_name tool.tool_name
 
 let open_tool_of ~tool_use_id ~tool_name work =
-  List.find_opt
-    (function
-      | Tool_open tool -> same_tool ~tool_use_id ~tool_name tool
-      | Response_open _ -> false)
-    work
-  |> Option.bind (function Tool_open tool -> Some tool | Response_open _ -> None)
+  match
+    List.find_opt
+      (function
+        | Tool_open tool -> same_tool ~tool_use_id ~tool_name tool
+        | Response_open _ -> false)
+      work
+  with
+  | Some (Tool_open tool) -> Some tool
+  | Some (Response_open _) | None -> None
 
 (* The model started calling the tool. Nothing says it runs yet. *)
 let tool_requested ~now ~tool_use_id ~tool_name work =
@@ -158,7 +167,9 @@ let tool_executing ~now ~tool_use_id ~tool_name work =
           | Tool_open ({ stage = Tool_requested; _ } as current)
             when same_tool ~tool_use_id ~tool_name current ->
               Some (Tool_open { current with stage = Tool_executing; since = now })
-          | Tool_open _ | Response_open _ -> None)
+          | Tool_open { stage = Tool_requested; _ }
+          | Tool_open { stage = Tool_executing; _ }
+          | Response_open _ -> None)
         work
   | None ->
       (* The stream never showed this call, so the hook is the first word of it. *)
@@ -578,18 +589,17 @@ let note_stream ~writer ~now event =
     in
     let open_activities = open_of_event ~now preview event in
     let open_changed = not (open_activities == preview.open_activities) in
-    match open_changed, text_changed with
-    | false, false -> None
-    | true, _ | false, true ->
-        Some
-          { released_entry with tools; preparations = [];
-            preview =
-              { preview with
-                  last_tool
-                ; open_activities
-                ; preparation = None
-                ; text_tail = released_entry.preview.text_tail
-                ; text_position = released_entry.preview.text_position } })
+    if (not open_changed) && (not text_changed) then None
+    else
+      Some
+        { released_entry with tools; preparations = [];
+          preview =
+            { preview with
+                last_tool
+              ; open_activities
+              ; preparation = None
+              ; text_tail = released_entry.preview.text_tail
+              ; text_position = released_entry.preview.text_position } })
 
 let preparation_phase_name = function
   | Task_preparation -> "task"
@@ -711,18 +721,20 @@ let open_activity_text = function
 
 let status_text preview =
   let activity =
-    match preview.preparation, preview.open_activities with
-    | Some preparation, _ ->
-      let phase = preparation_phase_name preparation.phase in
-      (match preparation.state with
-       | Preparation_active -> "preparing " ^ phase
-       | Preparation_finished {outcome=Prepared;_} -> phase ^ " prepared; next activity unobserved"
-       | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
-    | None, _ when preview.activity = Preparing -> "preparing turn"
-    | None, work :: _ -> String.concat " · " (List.map open_activity_text work)
-    | None, [] ->
-      if preview.attempt_failed then "provider attempt failed"
-      else "waiting for provider response"
+    match preview.preparation with
+    | Some preparation ->
+        let phase = preparation_phase_name preparation.phase in
+        (match preparation.state with
+         | Preparation_active -> "preparing " ^ phase
+         | Preparation_finished {outcome=Prepared;_} -> phase ^ " prepared; next activity unobserved"
+         | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
+    | None when preview.activity = Preparing -> "preparing turn"
+    | None -> (
+        match preview.open_activities with
+        | [] ->
+            if preview.attempt_failed then "provider attempt failed"
+            else "waiting for provider response"
+        | first :: rest -> String.concat " · " (List.map open_activity_text (first :: rest)))
   in
   String.concat " · "
     (List.filter_map Fun.id

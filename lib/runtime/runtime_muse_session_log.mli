@@ -16,6 +16,13 @@
     (muse acp 1.4.25), and reports anything else as an {!error}. It never
     substitutes zero for a count it could not read. *)
 
+(* WORKAROUND: muse acp 1.4.25 sends no token counts over ACP, so the counts
+   are read from the host's own journal, a file with no published schema.
+   Root fix: the host reports usage in the session/prompt result, as the other
+   ACP drivers do. Then this module goes, [driver_profile.usage_channel] goes,
+   and the Muse profile uses [Usage_over_acp]. Until then a host version this
+   module was not checked against gives a typed error, never counts. *)
+
 (** What the host counted for a set of model calls. [input_tokens] includes
     [cache_read_tokens] and [output_tokens] includes [reasoning_tokens];
     {!read_turn} rejects a record whose counts contradict that. *)

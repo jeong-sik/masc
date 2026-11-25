@@ -92,8 +92,11 @@ val build_request
 (** {!build_request_artifact} with its refusals as a value. [Error] carries
     the reason when the config cannot be expressed or the history cannot be
     lowered to Gemini parts (for example a [thoughtSignature] carrier whose
-    target block is gone). Nothing is sent in either case, so callers report
-    it as a local request refusal, not as a provider response.
+    adjacent block is a different signable part). A [thoughtSignature] carrier
+    whose target block is gone, or whose adjacent block is not a signable
+    part, is dropped with a warning so the request still dispatches. Nothing
+    is sent in the [Error] case, so callers report it as a local request
+    refusal, not as a provider response.
     @since 0.234.0 *)
 val build_request_artifact_result
   :  ?stream:bool
@@ -125,7 +128,10 @@ val gemini_thought_signature_payload
 
 (** Exact Gemini response-part kind targeted by an adjacent opaque
     [thoughtSignature] carrier. The carrier and target stay adjacent through
-    history replay; a broken adjacency fails closed in the request builder.
+    history replay. A carrier whose adjacent block is a different signable
+    part fails closed in the request builder; a carrier whose target block
+    is gone, or whose adjacent block is not a signable part, is dropped with
+    a warning so the request still dispatches.
     @since 0.211.3 *)
 type gemini_part_signature_target =
   | Gemini_text_part

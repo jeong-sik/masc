@@ -12,11 +12,11 @@ import type { VNode } from 'preact'
 import { useState } from 'preact/hooks'
 import {
   activeWorkspaceId,
-  bootstrapAuthSession,
   registerWorkspaceTargets,
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
+  verifyAndApplySingleUserToken,
   workspaceTargets,
   type AuthSession,
 } from '../../core/auth'
@@ -34,6 +34,7 @@ export function LocalOperatorPanel({
   readonly session: SingleUserSession
 }): VNode {
   const [tokenInput, setTokenInput] = useState('')
+  const [tokenError, setTokenError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
   const [wsLabel, setWsLabel] = useState('')
   const [wsBaseUrl, setWsBaseUrl] = useState('')
@@ -45,17 +46,17 @@ export function LocalOperatorPanel({
 
   const handleApplyToken = async (event: Event) => {
     event.preventDefault()
-    const trimmed = tokenInput.trim()
+    setTokenError(null)
     setVerifying(true)
     try {
-      setSingleUserToken(trimmed || null)
-      setTokenInput('')
-      const next = await bootstrapAuthSession()
-      if (next.kind === 'single_user_local') {
+      const result = await verifyAndApplySingleUserToken(tokenInput)
+      if (result.ok) {
+        setTokenInput('')
         pushShellToast('Local Operator 인증이 확인되었습니다.', 'success')
         void startObserverStream()
-      } else if (next.kind === 'single_user_auth_required') {
-        pushShellToast(`인증 실패: ${next.reason}`, 'error')
+      } else {
+        setTokenError(result.error)
+        pushShellToast(`인증 실패: ${result.error}`, 'error')
       }
     } finally {
       setVerifying(false)
@@ -168,6 +169,7 @@ export function LocalOperatorPanel({
             </button>
           `}
         </form>
+        ${tokenError && html`<div class="ap-inline-alert ap-inline-alert--err" role="alert" data-testid="local-token-error">${tokenError}</div>`}
       </section>
 
       <section class="ap-card">

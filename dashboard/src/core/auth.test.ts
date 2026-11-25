@@ -21,6 +21,7 @@ import {
   installAuthLifecycleGuards,
   isAuthenticated,
   isEpochCurrent,
+  normalizeBearerToken,
   refreshMultiAccountCsrf,
   registerWorkspaceTargets,
   resetAuthStateForTests,
@@ -28,6 +29,7 @@ import {
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
+  verifyAndApplySingleUserToken,
   wipeTransientSecrets,
   workspaceTargets,
 } from './auth'
@@ -565,5 +567,51 @@ describe('core/auth', () => {
     expect(multi.kind).toBe('multi_account_signed_out')
     expect(window.location.search).toBe('')
     expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+  })
+
+  it('rejects non-ASCII Bearer tokens before fetch(), self-heals poisoned sessionStorage, and times out cleanly without poisoning authSession', async () => {
+    expect(normalizeBearerToken('Bearer "abc-123_XYZ"')).toEqual({ ok: true, token: 'abc-123_XYZ' })
+    expect(normalizeBearerToken('한글토큰')).toMatchObject({ ok: false })
+    expect(normalizeBearerToken('tok with space')).toMatchObject({ ok: false })
+
+    // Poisoned sessionStorage value is automatically purged without throwing in fetch()
+    sessionStorage.setItem('masc_bearer_token', '잘못된한글토큰')
+    const cleanFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') {
+        const hdrs = init?.headers as Record<string, string>
+        expect(hdrs.Authorization).toBeUndefined()
+        return jsonResponse({ error: 'missing_token' }, 401)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const healed = await bootstrapAuthSession({ fetchImpl: cleanFetch as unknown as typeof fetch })
+    expect(healed.kind).toBe('single_user_auth_required')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // verifyAndApplySingleUserToken rejects non-ASCII before calling fetch() and keeps session intact
+    const neverFetch = vi.fn()
+    const badRes = await verifyAndApplySingleUserToken('한글복사본', {
+      fetchImpl: neverFetch as unknown as typeof fetch,
+    })
+    expect(badRes.ok).toBe(false)
+    expect(neverFetch).not.toHaveBeenCalled()
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+
+    // Timeout returns clean error without overwriting authSession to unavailable or flipping to Bearer Active
+    const hangingFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      }),
+    )
+    const timedOut = await verifyAndApplySingleUserToken('valid-ascii-token-123', {
+      fetchImpl: hangingFetch as unknown as typeof fetch,
+      timeoutMs: 25,
+    })
+    expect(timedOut.ok).toBe(false)
+    if (!timedOut.ok) expect(timedOut.error).toContain('시간 초과')
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+    expect(getSingleUserToken()).toBeNull()
   })
 })

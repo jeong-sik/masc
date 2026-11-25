@@ -19,9 +19,13 @@ import {
   currentStoredTokenRevision,
   getStoredToken,
   getStoredTokenMeta,
+  normalizeBearerToken,
   setStoredToken,
+  type BearerTokenValidation,
   type StoredTokenMeta,
 } from '../lib/dashboard-bearer'
+
+export { normalizeBearerToken, type BearerTokenValidation }
 
 export type AccountMode = 'single_user' | 'multi_account'
 export type UserRole = 'admin' | 'worker' | 'viewer'
@@ -83,6 +87,7 @@ export type AuthSession =
     }
 
 const ACCOUNT_MARKER_STORAGE_KEY = 'masc.core.account_marker'
+const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 12_000
 const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
   google: false,
   github: false,
@@ -155,7 +160,9 @@ export function getActiveCsrfToken(): string | null {
 }
 
 export function setSingleUserToken(token: string | null): void {
-  const normalized = token && token.trim().length > 0 ? token.trim() : null
+  const parsed = normalizeBearerToken(token)
+  if (!parsed.ok) return
+  const normalized = parsed.token
   const storedSource = getStoredTokenMeta()?.source ?? null
   const nextSource = normalized === null ? null : 'manual'
   if (singleUserBearerToken === normalized && readSessionBearerToken() === normalized
@@ -418,18 +425,137 @@ async function readMultiAccountSession(
 export interface BootstrapAuthOptions {
   readonly fetchImpl?: typeof fetch
   readonly probeShell?: boolean
+  readonly timeoutMs?: number
+}
+
+async function fetchWithBootstrapTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  if (typeof AbortController === 'undefined' || timeoutMs <= 0) {
+    return fetchImpl(url, init)
+  }
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) {
+      const secs = Math.max(1, Math.round(timeoutMs / 1000))
+      throw new Error(`서버 응답 시간 초과 (${secs}초) — 서버가 일시적으로 바쁘거나 read_pool이 포화 상태일 수 있습니다.`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export type VerifySingleUserTokenResult =
+  | { readonly ok: true; readonly session: Extract<AuthSession, { readonly kind: 'single_user_local' }> }
+  | { readonly ok: false; readonly error: string }
+
+/**
+ * Verifies a candidate single-user operator Bearer token against `/health` and
+ * `/api/v1/dashboard/shell` with an explicit timeout BEFORE committing it to
+ * `authSession` or `sessionStorage`, preventing premature green badges,
+ * non-ASCII `fetch()` header crashes, or infinite `Verifying…` locks.
+ */
+export async function verifyAndApplySingleUserToken(
+  rawToken: string,
+  opts: BootstrapAuthOptions = {},
+): Promise<VerifySingleUserTokenResult> {
+  const parsed = normalizeBearerToken(rawToken)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  if (parsed.token === null) {
+    return { ok: false, error: '토큰을 입력한 뒤 적용해 주세요.' }
+  }
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
+  const candidate = parsed.token
+  const epoch = currentSessionEpoch()
+  const bearerRevision = currentStoredTokenRevision()
+
+  try {
+    const healthRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/health',
+      { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } },
+      timeoutMs,
+    )
+    if (!healthRes.ok) {
+      return { ok: false, error: `GET /health 실패 (HTTP ${healthRes.status})` }
+    }
+    const health = (await healthRes.json()) as Record<string, unknown>
+    const mode = parseAccountMode(health.account_mode)
+    if (mode !== 'single_user') {
+      return { ok: false, error: '현재 서버는 싱글유저 Bearer 토큰 모드가 아닙니다.' }
+    }
+    const authMethods = parseAuthMethods(health.auth_methods)
+    const shellRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/api/v1/dashboard/shell',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${candidate}`,
+        },
+      },
+      timeoutMs,
+    )
+    if (!isEpochCurrent(epoch) || currentStoredTokenRevision() !== bearerRevision) {
+      return { ok: false, error: '검증 중 다른 인증 변경이 발생했습니다. 다시 시도하세요.' }
+    }
+    if (shellRes.status === 401 || shellRes.status === 403) {
+      return {
+        ok: false,
+        error: `토큰 인증 실패 (HTTP ${shellRes.status}) — 유효한 오퍼레이터 토큰인지 확인하세요.`,
+      }
+    }
+    if (!shellRes.ok) {
+      return { ok: false, error: `서버 상태 오류 (HTTP ${shellRes.status})` }
+    }
+
+    const next: Extract<AuthSession, { readonly kind: 'single_user_local' }> = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods,
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    batch(() => {
+      singleUserBearerToken = candidate
+      bumpSessionEpoch()
+      authSession.value = next
+      writeSessionBearerToken(candidate, { source: 'manual' })
+    })
+    return { ok: true, session: next }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 /**
  * Capability-gated auth bootstrap:
  * 1. Reads `GET /health` to determine `account_mode` and `auth_methods`.
  * 2. In `single_user`: ONLY calls `/api/v1/dashboard/dev-token` if `auth_methods.dev_token === true`.
- * 3. In `multi_account`: reads `/api/v1/auth/session` with `credentials: 'same-origin'`.
+ * 3. In `multi_account`: reads `/auth/session` + `/api/v1/auth/whoami` with `credentials: 'same-origin'`.
  */
 export async function bootstrapAuthSession(
   opts: BootstrapAuthOptions = {},
 ): Promise<AuthSession> {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
   const prev = authSession.peek()
   const prevAccountId = prev.kind === 'multi_account_signed_in' ? prev.accountId : null
   const epoch = currentSessionEpoch()
@@ -444,11 +570,16 @@ export async function bootstrapAuthSession(
   const urlToken = consumeUrlBearerToken()
 
   try {
-    const healthRes = await fetchImpl('/health', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    })
+    const healthRes = await fetchWithBootstrapTimeout(
+      fetchImpl,
+      '/health',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      },
+      timeoutMs,
+    )
     const health = (healthRes.ok ? await healthRes.json() : {}) as Record<string, unknown>
     if (!ownsCredential()) return authSession.peek()
     if (!healthRes.ok) {
@@ -483,18 +614,29 @@ export async function bootstrapAuthSession(
     } else if (singleUserBearerToken === null) {
       const restored = readSessionBearerToken()
       if (restored !== null) singleUserBearerToken = restored
+    } else {
+      const rechecked = normalizeBearerToken(singleUserBearerToken)
+      if (!rechecked.ok) {
+        persistBearer(null)
+      }
     }
     if (authMethods.dev_token && singleUserBearerToken === null) {
       let devToken: string | null = null
       try {
-        const devRes = await fetchImpl('/api/v1/dashboard/dev-token', {
-          method: 'GET',
-          credentials: 'same-origin',
-          headers: { Accept: 'application/json' },
-        })
+        const devRes = await fetchWithBootstrapTimeout(
+          fetchImpl,
+          '/api/v1/dashboard/dev-token',
+          {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+          },
+          timeoutMs,
+        )
         if (devRes.ok) {
           const payload = (await devRes.json()) as { token?: unknown } | null
-          devToken = nonEmptyString(payload?.token)
+          const parsedDev = typeof payload?.token === 'string' ? normalizeBearerToken(payload.token) : null
+          devToken = parsedDev?.ok ? parsedDev.token : null
         }
       } catch { /* dev token optional */ }
       if (!ownsCredential()) return authSession.peek()
@@ -507,11 +649,16 @@ export async function bootstrapAuthSession(
     if (opts.probeShell !== false) {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (singleUserBearerToken) headers.Authorization = `Bearer ${singleUserBearerToken}`
-      const shellRes = await fetchImpl('/api/v1/dashboard/shell', {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers,
-      })
+      const shellRes = await fetchWithBootstrapTimeout(
+        fetchImpl,
+        '/api/v1/dashboard/shell',
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers,
+        },
+        timeoutMs,
+      )
       if (!ownsCredential()) return authSession.peek()
       if (shellRes.status === 401 || shellRes.status === 403) {
         persistBearer(null)

@@ -121,11 +121,18 @@ class WorkspaceErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   override render() {
     if (this.state.error) {
       const loadFailed = this.state.error instanceof WorkspaceLoadError
+        || /dynamically imported module|Loading chunk|Failed to fetch/i.test(this.state.error.message)
       return html`
         <section class="ap-gate" role="alert">
           <div class="ap-card">
-            <h1 class="ap-card-title">화면을 표시하는 중 오류가 발생했습니다</h1>
-            <p class="ap-muted mono">${this.state.error.message}</p>
+            <h1 class="ap-card-title">
+              ${loadFailed ? '대시보드가 새 버전으로 업데이트되었습니다' : '화면을 표시하는 중 오류가 발생했습니다'}
+            </h1>
+            <p class="ap-muted mono">
+              ${loadFailed
+                ? '이전 번들 청크가 교체되어 새로고침이 필요합니다. 아래 버튼을 눌러 최신 화면을 불러오세요.'
+                : this.state.error.message}
+            </p>
             <div class="ap-placeholder-actions">
               <button type="button" class="btn-primary" onClick=${() => {
                 if (loadFailed) window.location.reload()

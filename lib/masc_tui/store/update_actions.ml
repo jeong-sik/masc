@@ -812,9 +812,29 @@ let resolve_memory_act_keeper (m : Model.t) =
           match Observed.to_option m.knowledge.world_memory with
           | Some wm -> (
               match wm.librarian_writers with
-              | Wire_knowledge.Writers_running { keepers = first :: _; _ } ->
-                  Some first.keeper
-              | Wire_knowledge.Writers_running { keepers = []; _ }
+              | Wire_knowledge.Writers_running { keepers; _ } -> (
+                  match
+                    List.find_opt
+                      (fun (w : Wire_knowledge.librarian_writer_row) ->
+                        match w.state with
+                        | Wire_knowledge.Writer_stopped _
+                        | Wire_knowledge.Writer_refused_at_bottom ->
+                            true
+                        | Wire_knowledge.Writer_open
+                        | Wire_knowledge.Writer_idle
+                        | Wire_knowledge.Writer_asking
+                        | Wire_knowledge.Writer_resting
+                        | Wire_knowledge.Writer_booting
+                        | Wire_knowledge.Writer_retired
+                        | Wire_knowledge.Writer_no_writer ->
+                            w.available_act_tokens <> [])
+                      keepers
+                  with
+                  | Some w -> Some w.keeper
+                  | None -> (
+                      match keepers with
+                      | first :: _ -> Some first.keeper
+                      | [] -> Update_nav.resolve_target_keeper m))
               | Wire_knowledge.Writers_none_in_process ->
                   Update_nav.resolve_target_keeper m)
           | None -> Update_nav.resolve_target_keeper m))

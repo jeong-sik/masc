@@ -9269,6 +9269,93 @@ let test_batch_d_toast_tag_ime_and_keymap_ssot () =
     "[d] on Keepers split Keeper_config pane 1 never opens Keeper_purge_confirm"
     true (Option.is_none m_kcfg_d.nav.overlay)
 
+let test_batch_f2_live_contextual_hotkeys_preserved () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  let m0 = populated_model ~with_attention:false () in
+  let step m kev = Update.step ~now:t0 m (Msg.Key_event kev) in
+
+  (* 1. [A] on Knowledge > Memory and Keepers > Keeper_memory delegates to Open_memory_recovery. *)
+  let m_kmem =
+    {
+      m0 with
+      nav =
+        { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      knowledge = { m0.knowledge with active_tab = Nav.Knowledge_memory };
+    }
+  in
+  let m_kmem_a, _ = step m_kmem (char_key ~shift:true "A") in
+  Alcotest.(check bool)
+    "[A] on Knowledge > Memory opens Nav.Memory_act_form" true
+    (Option.equal Nav.equal_overlay m_kmem_a.nav.overlay
+       (Some (Nav.Inline_action Nav.Memory_act_form)));
+
+  let m_k_mem =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          pane_index = 1;
+          overlay = None;
+          dive_stack = [];
+        };
+      fleet = { m0.fleet with keeper_dive_tab = Nav.Keeper_memory };
+    }
+  in
+  let m_k_mem_a, _ = step m_k_mem (char_key ~shift:true "A") in
+  Alcotest.(check bool)
+    "[A] on Keepers > Keeper_memory pane 1 opens Nav.Memory_act_form" true
+    (Option.equal Nav.equal_overlay m_k_mem_a.nav.overlay
+       (Some (Nav.Inline_action Nav.Memory_act_form)));
+
+  (* 2. Ctrl+E on Wiki_dive and Knowledge > Wiki delegates to Keymap.Open_external_editor. *)
+  let m_wiki, _ =
+    Update_nav.push_dive m0 (Nav.Dive_knowledge (Nav.Wiki_dive "handbook"))
+  in
+  let _, wiki_cmds = step m_wiki (char_key ~ctrl:true "e") in
+  Alcotest.(check bool) "Ctrl+E on Wiki_dive emits Edit_wiki_page" true
+    (List.exists
+       (function
+         | Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "handbook") -> true
+         | _ -> false)
+       (Cmd.flatten wiki_cmds));
+
+  (* 3. [C] on Work > Inbox jumps to Keepers > Keeper_chat. *)
+  let m_inbox =
+    let base = populated_model ~with_attention:true () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; overlay = None; dive_stack = [] };
+      work =
+        {
+          base.work with
+          active_tab = Nav.Work_inbox;
+          inbox_subview = Work_store.Inbox_queue;
+        };
+    }
+  in
+  let m_inbox_c, _ = step m_inbox (char_key ~shift:true "C") in
+  Alcotest.(check bool) "[C] on Work > Inbox jumps to Keepers > Keeper_chat"
+    true
+    (Nav.equal_workspace m_inbox_c.nav.workspace Nav.Keepers
+     && Nav.equal_keeper_tab m_inbox_c.fleet.keeper_dive_tab Nav.Keeper_chat);
+
+  (* 4. [R] on Runtime > Failover Lanes opens Lane_rename_form for the selected named lane. *)
+  let m_lanes =
+    {
+      m0 with
+      nav =
+        { m0.nav with workspace = Nav.Runtime; overlay = None; dive_stack = [] };
+      runtime = { m0.runtime with active_tab = Nav.Runtime_failover_lanes };
+    }
+  in
+  let m_lanes_r, _ = step m_lanes (char_key ~shift:true "R") in
+  Alcotest.(check bool)
+    "[R] on Runtime > Failover Lanes opens Lane_rename_form" true
+    (Option.equal Nav.equal_overlay m_lanes_r.nav.overlay
+       (Some (Nav.Inline_action (Nav.Lane_rename_form { lane = "lane-primary" }))))
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -9338,5 +9425,8 @@ let () =
           Alcotest.test_case
             "Typed toast_tag SSOT, shifted Korean IME replay, and Keeper_config Esc/d guards"
             `Quick test_batch_d_toast_tag_ime_and_keymap_ssot;
+          Alcotest.test_case
+            "Live contextual hotkeys preserved after dead-code cleanup ([A], Ctrl+E, [C], [R])"
+            `Quick test_batch_f2_live_contextual_hotkeys_preserved;
         ] );
     ]

@@ -97,6 +97,14 @@ val resolve_keeper_for_channel_result :
 (** Resolve the keeper for [channel_id]. Exact bindings win. The same
     thread-registry observation supplies the fallback and the returned parent. *)
 
+val resolve_keeper_for_recorded_channel_result :
+  channel_id:string -> parent_channel_id:string option ->
+  (keeper_binding_resolution option, binding_lookup_error) result
+(** Resolve a channel and parent verified by the recorded Discord ingress.
+    Exact current bindings still win. The recorded parent covers archives
+    and gateway restarts, when the live thread registry may be empty. A
+    conflicting live parent refuses the resolution. *)
+
 val bound_channels :
   keeper_name:string ->
   (string list, Channel_gate_binding_store.binding_store_error) result

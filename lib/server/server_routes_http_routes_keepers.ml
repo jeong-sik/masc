@@ -42,6 +42,17 @@ let add_routes ~sw ~clock router =
                reqd
                body_str))
 
+  |> Server_route.post
+       (Server_route.Private_token_permission Masc_domain.CanAdmin)
+       "/api/v1/keepers/discord/reply"
+       (fun state actor request reqd ->
+         Server_discord_operator_reply.handle_send ~sw ~clock ~state ~actor request reqd)
+  |> Server_route.post
+       (Server_route.Private_token_permission Masc_domain.CanAdmin)
+       "/api/v1/keepers/discord/reply/status"
+       (fun state actor request reqd ->
+         Server_discord_operator_reply.handle_status ~state ~actor request reqd)
+
   |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate) }) "/api/v1/keepers/chat/stream" (fun state submitted_by request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let admitted_body =

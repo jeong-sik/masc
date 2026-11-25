@@ -50,6 +50,11 @@ let hook_introspection_json () : Yojson.Safe.t =
       slot
         ~active:true
         ~source:"keeper_hooks_agent_core"
+        ~effects:[ "turn_preview" ]
+        "pre_tool_use";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_agent_core"
         ~effects:
           [
             "sse_broadcast";

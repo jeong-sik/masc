@@ -1728,7 +1728,8 @@ let test_keeper_turns_preview_roundtrip () =
     { task_id = Some "task-42"; start_reasons = [ "scheduled_automation_due"; "task_backlog" ] };
   Preview.note_attempt ~writer:(Some writer) ~now:1795503001.0
     ~runtime_id:"ollama-rt";
-  Preview.note_tool ~writer:(Some writer) ~now:1795503002.0 "Execute";
+  Preview.note_tool_started ~writer:(Some writer) ~now:1795503002.0 ~tool_use_id:None
+    ~tool_name:"Execute";
   Preview.note_request ~writer:(Some writer) ~now:1795503003.0;
   Preview.note_text ~writer:(Some writer) ~now:1795503004.0
     "Streaming summary line";

@@ -4,6 +4,31 @@
     Provider attempts, stream events, and tool hooks write this projection. *)
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
+(** What the turn is doing now, computed from {!open_activities} on every
+    write. [Tool_observed] means a tool call is open, not that one was seen. *)
+
+type response_channel = No_content | Thinking | Text
+(** What the model's open response is emitting. [No_content] until its first
+    content delta. *)
+
+type tool_stage = Tool_requested | Tool_executing
+(** [Tool_requested]: the model is calling the tool and nothing says it runs.
+    [Tool_executing]: the before-tool hook ran, so the host is executing it. *)
+
+type open_response = { channel : response_channel; started_at : float; since : float }
+
+type open_tool =
+  { tool_use_id : string option  (** [None] when the stream showed no id *)
+  ; tool_name : string
+  ; stage : tool_stage
+  ; started_at : float
+  ; since : float
+  }
+
+type open_activity = Response_open of open_response | Tool_open of open_tool
+(** Work that began in the running turn and has not ended. An event is a
+    point; an open activity lasts from its start to its end. [started_at] is
+    when the work began. [since] is when its channel or stage last changed. *)
 
 type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
@@ -67,6 +92,12 @@ type t =
             Wall-clock timestamps can move backwards. *)
   ; runtime_id : string option
   ; activity : activity
+  ; open_activities : open_activity list
+        (** Started and not ended, oldest first. A response, when one is open,
+            is the head. Parallel tool calls stay separate entries. *)
+  ; attempt_failed : bool
+        (** The running attempt's provider request failed and no later request
+            went out. [last_failure] outlives it as text. *)
   ; last_failure : string option
   ; preparation : preparation option
   ; preparation_timeline : preparation_timeline
@@ -101,16 +132,28 @@ val current_for_turn_with_revision :
 
 val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot
-    {!reset} armed. Blank text is ignored — a tool-only turn must not erase
-    the last visible words. A missing writer records nothing. *)
+    {!reset} armed, and end the open response: [after_turn] calls this once
+    the model's turn is over. Blank text is ignored — a tool-only turn must
+    not erase the last visible words. A missing writer records nothing. *)
 
-val note_tool : writer:writer option -> now:float -> string -> unit
+val note_tool_started :
+  writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
+(** The before-tool hook ran, so the host is executing this call. A call the
+    stream already opened moves from requested to executing; one it never
+    showed opens here. Hearing it twice for one call changes nothing. *)
+
+val note_tool_finished :
+  writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
+(** The after-tool hook ran, with a result or with a failure. The oldest open
+    call that fits ends. A call that was not open only becomes the last
+    observed tool. *)
 
 val note_request : writer:writer option -> now:float -> unit
-(** A provider request of the running attempt goes out. The turn waits on
-    the provider until that request's stream says otherwise, so a tool that
-    ran before it stays shown as the last observed tool, not as the turn's
-    activity. *)
+(** A provider request of the running attempt goes out. Every earlier tool
+    call settled before it, so they all end here, and the response opens with
+    no content yet. The turn waits on the provider until that request's
+    stream says otherwise, so a tool that ran before it stays shown as the
+    last observed tool, not as the turn's activity. *)
 
 val with_preparation_result :
   writer:writer option -> turn_ref:Ids.Turn_ref.t option -> phase:preparation_phase ->
@@ -143,16 +186,25 @@ val original_turn_ref : writer -> Ids.Turn_ref.t option
     last activity or found by Keeper name. [None] before an owner establishes it. *)
 
 val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
+(** A new attempt of the running turn: text, tools and every open activity of
+    the earlier attempt end here, and the attempt is not failed. *)
+
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
-(** Store a bounded failure preview after applying the writer's secret snapshot. *)
+(** Store a bounded failure preview after applying the writer's secret snapshot.
+    Every open activity ends with the failed attempt. *)
 
 val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
+(** One provider event. Besides the text it releases, the event says what
+    opened, moved or ended: a message opens the response, a content delta sets
+    its channel to reasoning or text, a tool block opens a tool call as
+    requested, and the message stop ends the response. *)
 val status_text : t -> string
 
 val to_json : ?include_preparation_timeline:bool -> t -> Yojson.Safe.t
-(** The actual turns-route preview payload, including released-source position.
-    The default sends [null] for the unrequested timeline without traversing it;
-    explicit detail selection includes the actual start-ordered records. *)
+(** The actual turns-route preview payload, including released-source position
+    and [open_activities]. The default sends [null] for the unrequested
+    timeline without traversing it; explicit detail selection includes the
+    actual start-ordered records. *)
 
 val preparation_of_json : Yojson.Safe.t -> (preparation, string) result
 (** Strict inverse for the preparation object in [to_json]. Unknown states,

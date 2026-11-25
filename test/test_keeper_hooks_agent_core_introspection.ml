@@ -41,11 +41,12 @@ let slot_active slot_name =
   | Some active -> active
   | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
 
-(* The 8 slots the introspection claims are wired. Retired AGENT_CORE hook slots are
+(* The 9 slots the introspection claims are wired. Retired AGENT_CORE hook slots are
    absent rather than retained as inactive compatibility surface. *)
 let expected_active =
   [ "before_turn"
   ; "before_turn_params"
+  ; "pre_tool_use"
   ; "after_turn"
   ; "post_tool_use"
   ; "post_tool_use_failure"
@@ -57,7 +58,7 @@ let expected_active =
 let test_slot_set () =
   let names = List.map fst (slots_of json) |> List.sort compare in
   let expected = List.sort compare expected_active in
-  check (list string) "introspection exposes exactly the 8 current hook slots" expected names
+  check (list string) "introspection exposes exactly the 9 current hook slots" expected names
 
 let test_active_split () =
   List.iter
@@ -98,6 +99,7 @@ let make_runtime_hooks () : Agent_core.Hooks.hooks =
 let runtime_slots_of (hooks : Agent_core.Hooks.hooks) =
   [
     "before_turn", Option.is_some hooks.before_turn;
+    "pre_tool_use", Option.is_some hooks.pre_tool_use;
     "after_turn", Option.is_some hooks.after_turn;
     "post_tool_use", Option.is_some hooks.post_tool_use;
     "post_tool_use_failure", Option.is_some hooks.post_tool_use_failure;
@@ -125,7 +127,8 @@ let test_before_turn_shows_the_provider_wait () =
     Masc.Keeper_turn_preview.reset ~base_path:"hook-before-turn-test" ~execution_scope:None
       ~turn_ref:None ~keeper_name ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty
   in
-  Masc.Keeper_turn_preview.note_tool ~writer:(Some writer) ~now:2. "Execute";
+  Masc.Keeper_turn_preview.note_tool_started ~writer:(Some writer) ~now:2. ~tool_use_id:None
+    ~tool_name:"Execute";
   let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-hook-before-turn" in
   let hooks =
     Masc.Keeper_hooks_agent_core.make_hooks

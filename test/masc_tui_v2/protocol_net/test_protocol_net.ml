@@ -3347,9 +3347,18 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match tool_res with
-  | Wire_fleet.Chunk_tool_end { tool_use_id = "scope-2-block-1"; ok = None; _ } ->
+  | Wire_fleet.Chunk_tool_end
+      {
+        tool_use_id = "scope-2-block-1";
+        execution_id = Some "ex-1";
+        ok = None;
+        output_preview = None;
+        _;
+      } ->
       ()
-  | _ -> Alcotest.fail "expected Chunk_tool_end from KEEPER_TOOL_RESULT_READY");
+  | _ ->
+      Alcotest.fail
+        "expected Chunk_tool_end with execution_id=Some ex-1 from KEEPER_TOOL_RESULT_READY");
   let native_start =
     expect_ok "CUSTOM KEEPER_NATIVE_TOOL_START"
       (Wire_fleet.decode_chat_stream_chunk
@@ -7322,12 +7331,205 @@ let test_layer3_repos_pulls_observation_and_board_meta () =
   Alcotest.(check (option string)) "comment audience = @all" (Some "@all")
     (List.assoc_opt "c-1" tm.comment_audiences)
 
+let test_tool_result_ready_and_trace_tools_dedup () =
+  (* 1. KEEPER_TOOL_RESULT_READY preserves executionId / execution_id and optional toolCallName *)
+  let ready_snake =
+    expect_ok "KEEPER_TOOL_RESULT_READY snake_case"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.1,
+              "name": "KEEPER_TOOL_RESULT_READY",
+              "value": {
+                "toolStreamScope": 3,
+                "toolCallBlockIndex": 2,
+                "execution_id": "ex-ready-42",
+                "toolCallName": "masc_read_file"
+              }
+            }|}))
+  in
+  (match ready_snake with
+  | Wire_fleet.Chunk_tool_end
+      {
+        tool_use_id = "scope-3-block-2";
+        tool_name = Some "masc_read_file";
+        execution_id = Some "ex-ready-42";
+        ok = None;
+        output_preview = None;
+        _;
+      } ->
+      ()
+  | _ ->
+      Alcotest.fail
+        "KEEPER_TOOL_RESULT_READY must decode execution_id and optional toolCallName without fabricating ok");
+
+  (* 2. blocks[].trace[kind="tool"] decoding + cross-row execution_id dedup/enrichment *)
+  let history_json =
+    parse_json
+      {|{
+        "schema": "masc.keeper_chat_history.page.v2",
+        "messages": [
+          {
+            "id": "m-tool-1",
+            "role": "tool",
+            "content": "",
+            "ts": 1795252010.0,
+            "execution_id": "ex-shared-1"
+          },
+          {
+            "id": "m-asst-1",
+            "role": "assistant",
+            "content": "Checked both files.",
+            "ts": 1795252011.0,
+            "blocks": [
+              {
+                "t": "trace",
+                "trace": [
+                  {
+                    "kind": "thinking",
+                    "text": "planning"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "masc_read_file",
+                    "tool_call_id": "call-shared-1",
+                    "execution_id": "ex-shared-1",
+                    "status": "ok",
+                    "dur": "120ms",
+                    "args": "{\"path\":\"README.md\"}",
+                    "result": "file contents line 1"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "masc_grep",
+                    "tool_call_id": "call-only-trace",
+                    "execution_id": "ex-trace-only",
+                    "status": "err",
+                    "dur": "45ms",
+                    "args": "{\"query\":\"foo\"}",
+                    "result": "pattern not found"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "masc_grep",
+                    "execution_id": "ex-trace-only",
+                    "status": "err",
+                    "args": "{\"query\":\"foo\"}"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "has_more": false
+      }|}
+  in
+  let page =
+    expect_ok "decode_chat_history_page with blocks[].trace[kind=tool]"
+      (Wire_fleet.decode_chat_history_page history_json)
+  in
+  Alcotest.(check int) "2 history messages decoded" 2 (List.length page.messages);
+  let tool_msg = List.nth page.messages 0 in
+  let asst_msg = List.nth page.messages 1 in
+  Alcotest.(check (option string)) "Role_tool enriched tool_call_name from trace"
+    (Some "masc_read_file") tool_msg.tool_call_name;
+  Alcotest.(check (option string)) "Role_tool enriched tool_call_id from trace"
+    (Some "call-shared-1") tool_msg.tool_call_id;
+  Alcotest.(check string) "Role_tool enriched empty args content from trace"
+    {|{"path":"README.md"}|} tool_msg.content;
+  (match tool_msg.tool_meta with
+  | Some { status = Some Wire_fleet.Trace_tool_ok; dur = Some "120ms"; result = Some "file contents line 1" } ->
+      ()
+  | _ ->
+      Alcotest.fail "Role_tool must receive enriched tool_meta (status/dur/result) from matching trace step");
+  Alcotest.(check int) "Role_assistant deduplicates sibling execution_id and duplicate trace step"
+    1 (List.length asst_msg.trace_tools);
+  let trace_only = List.hd asst_msg.trace_tools in
+  Alcotest.(check string) "remaining trace tool name" "masc_grep" trace_only.name;
+  Alcotest.(check (option string)) "remaining trace tool execution_id"
+    (Some "ex-trace-only") trace_only.execution_id;
+  Alcotest.(check (option string)) "remaining trace tool tool_call_id"
+    (Some "call-only-trace") trace_only.tool_call_id;
+  Alcotest.(check bool) "remaining trace tool status = Trace_tool_err" true
+    (trace_only.status = Some Wire_fleet.Trace_tool_err);
+  Alcotest.(check (option string)) "remaining trace tool dur"
+    (Some "45ms") trace_only.dur;
+  Alcotest.(check (option string)) "remaining trace tool args"
+    (Some {|{"query":"foo"}|}) trace_only.args;
+  Alcotest.(check (option string)) "remaining trace tool result"
+    (Some "pattern not found") trace_only.result;
+  (* 3. P2-5: reconcile_history_trace_tools prefers terminal ok/err over earlier pending *)
+  let pending_then_settled =
+    parse_json
+      {|{
+        "schema": "masc.keeper_chat_history.page.v2",
+        "messages": [
+          {
+            "id": "m-asst-pending-settled",
+            "role": "assistant",
+            "content": "Done.",
+            "ts": 1795252020.0,
+            "blocks": [
+              {
+                "t": "trace",
+                "trace": [
+                  {
+                    "kind": "tool",
+                    "name": "bash",
+                    "execution_id": "ex-term-1",
+                    "status": "pending",
+                    "args": "{\"cmd\":\"pwd\"}"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "bash",
+                    "execution_id": "ex-term-1",
+                    "status": "ok",
+                    "dur": "9ms",
+                    "result": "/repo"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "bash",
+                    "execution_id": "ex-term-2",
+                    "status": "pending"
+                  },
+                  {
+                    "kind": "tool",
+                    "name": "bash",
+                    "execution_id": "ex-term-2",
+                    "status": "err",
+                    "dur": "3ms"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "has_more": false
+      }|}
+  in
+  let settled_page =
+    expect_ok "decode_chat_history_page pending->settled merge"
+      (Wire_fleet.decode_chat_history_page pending_then_settled)
+  in
+  let settled_tools = (List.hd settled_page.messages).trace_tools in
+  Alcotest.(check int) "2 merged trace steps" 2 (List.length settled_tools);
+  Alcotest.(check bool) "pending + ok resolves to Trace_tool_ok" true
+    ((List.nth settled_tools 0).status = Some Wire_fleet.Trace_tool_ok);
+  Alcotest.(check bool) "pending + err resolves to Trace_tool_err" true
+    ((List.nth settled_tools 1).status = Some Wire_fleet.Trace_tool_err)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
       ( "protocol"
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
+          Alcotest.test_case "tool_result_ready_and_trace_tools_dedup" `Quick
+            test_tool_result_ready_and_trace_tools_dedup;
           Alcotest.test_case "layer3_repos_pulls_observation_and_board_meta" `Quick
             test_layer3_repos_pulls_observation_and_board_meta;
           Alcotest.test_case "layer2_keeper_diagnostics_runtime_standings_and_observer"

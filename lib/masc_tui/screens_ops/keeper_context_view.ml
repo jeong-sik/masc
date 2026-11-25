@@ -1733,10 +1733,15 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                    Printf.sprintf "%s(%d)" t.name t.call_count)
             |> String.concat " "
           in
+          let hint_s =
+            Ops_common.say model ~ko:"[Enter/Space] 결과 조회/더보기"
+              ~en:"[Enter/Space] Fetch/More"
+          in
           let left_s =
-            Printf.sprintf "%dh: %d calls · %.1f%% fail%s" stats.window_hours
+            Printf.sprintf "%dh: %d calls · %.1f%% fail%s · %s" stats.window_hours
               stats.total_entries fail_pct
               (if String.equal top_str "" then "" else " · " ^ top_str)
+              hint_s
           in
           let spark_w =
             if stats.timeline <> [] && hdr_r.w >= 48 then 16 else 0
@@ -1765,8 +1770,8 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Ops_common.put_line ~clip:hdr_r grid ~x:hdr_r.x ~y:!y
                ~max_w:hdr_r.w ~style:(Typography.whisper ~bg theme)
                (Ops_common.say model
-                  ~ko:"도구 호출 통계 · [Enter] 전체 결과 조회"
-                  ~en:"Tool Calls · [Enter] Fetch Full Result")));
+                  ~ko:"도구 호출 통계 · [Enter/Space] 결과 조회/더보기"
+                  ~en:"Tool Calls · [Enter/Space] Fetch / More")));
       incr y
     end;
     if !y < bot && rect.h >= 6 then begin
@@ -1972,20 +1977,239 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                         Printf.sprintf " · batch [%d/%d]" bi bs
                     | None, _, _ -> ""
                   in
-                  let trunc_s =
-                    match (call.original_bytes, call.truncated_to) with
-                    | Some orig, Some tr ->
-                        Printf.sprintf " · %s (trunc %s, [Enter] full)"
-                          (format_bytes orig) (format_bytes tr)
-                    | Some orig, None -> " · " ^ format_bytes orig
-                    | None, _ -> ""
+                  let inflight, res_obs, page_err =
+                    match call.execution_id with
+                    | Some eid ->
+                        ( Keeper_context_store.is_tool_result_inflight
+                            ~execution_id:eid st
+                        , Keeper_context_store.tool_result_for_execution
+                            ~execution_id:eid st
+                        , Keeper_context_store.tool_result_page_error
+                            ~execution_id:eid st )
+                    | None -> (false, Observed.unreported, None)
+                  in
+                  let result_status_opt =
+                    match (inflight, res_obs) with
+                    | ( true
+                      , Observed.Value
+                          { data = Wire_keeper_context.Tool_result_page p; _ } ) ->
+                        let loaded =
+                          Int.max (String.length p.content) p.next_offset
+                        in
+                        let total = Int.max loaded p.total_bytes in
+                        Some
+                          (Printf.sprintf "%s / %s · %s" (format_bytes loaded)
+                             (format_bytes total)
+                             (Ops_common.say model ~ko:"다음 페이지 불러오는 중…"
+                                ~en:"Loading next page…"))
+                    | ( true
+                      , ( Observed.Value
+                            {
+                              data =
+                                ( Wire_keeper_context.Tool_result_pending
+                                | Wire_keeper_context.Tool_result_unavailable _ );
+                              _;
+                            }
+                        | Observed.Loading _
+                        | Observed.Absent
+                        | Observed.Unreported
+                        | Observed.Failed _ ) )
+                    | false, Observed.Loading _ ->
+                        Some
+                          (Ops_common.say model ~ko:"결과 불러오는 중…"
+                             ~en:"Loading result…")
+                    | ( false
+                      , Observed.Value
+                          { data = Wire_keeper_context.Tool_result_page p; _ } ) -> (
+                        let loaded =
+                          Int.max (String.length p.content) p.next_offset
+                        in
+                        let total = Int.max loaded p.total_bytes in
+                        let is_bin =
+                          Keeper_context_store.is_binary_encoding p.encoding
+                        in
+                        match page_err with
+                        | Some
+                            (Keeper_context_store.Page_continuation_failed
+                               { reason; _ }) ->
+                            let clean =
+                              Chat_transcript.scrub_secrets_in_text reason
+                            in
+                            let detail =
+                              if String.equal (String.trim clean) "" then ""
+                              else " · " ^ clean
+                            in
+                            Some
+                              (Printf.sprintf "%s / %s · %s"
+                                 (format_bytes loaded) (format_bytes total)
+                                 (Ops_common.say model
+                                    ~ko:
+                                      ("다음 페이지 실패 · [Enter/Space] 재시도"
+                                       ^ detail)
+                                    ~en:
+                                      ("Next page failed · [Enter/Space] Retry"
+                                       ^ detail)))
+                        | Some (Keeper_context_store.Page_source_changed _) ->
+                            Some
+                              (Printf.sprintf "%s / %s · %s"
+                                 (format_bytes loaded) (format_bytes total)
+                                 (Ops_common.say model
+                                    ~ko:
+                                      "원본 결과 변경됨 · [Enter/Space] 처음부터 다시 불러오기"
+                                    ~en:
+                                      "Source changed · [Enter/Space] Reload from start"))
+                        | None when is_bin && not p.eof ->
+                            Some
+                              (Printf.sprintf "%s / %s · %s"
+                                 (format_bytes loaded) (format_bytes total)
+                                 (Ops_common.say model
+                                    ~ko:"일부 표시 · 바이너리(base64) 구간"
+                                    ~en:"Partial · binary (base64) slice"))
+                        | None when is_bin ->
+                            Some
+                              (Printf.sprintf "%s · %s" (format_bytes total)
+                                 (Ops_common.say model
+                                    ~ko:"바이너리(base64) · 전체"
+                                    ~en:"Binary (base64) · full"))
+                        | None when not p.eof ->
+                            Some
+                              (Printf.sprintf "%s / %s · %s"
+                                 (format_bytes loaded) (format_bytes total)
+                                 (Ops_common.say model
+                                    ~ko:"[Enter/Space] 다음 페이지"
+                                    ~en:"[Enter/Space] Next page"))
+                        | None ->
+                            Some
+                              (Printf.sprintf "%s · %s" (format_bytes total)
+                                 (Ops_common.say model ~ko:"전체 로드됨"
+                                    ~en:"Loaded all")))
+                    | ( false
+                      , Observed.Value
+                          { data = Wire_keeper_context.Tool_result_pending; _ } ) ->
+                        Some
+                          (Ops_common.say model
+                             ~ko:"결과 대기 · [Enter/Space] 재조회"
+                             ~en:"Pending · [Enter/Space] Retry")
+                    | ( false
+                      , Observed.Value
+                          {
+                            data =
+                              Wire_keeper_context.Tool_result_unavailable reason;
+                            _;
+                          } ) ->
+                        let clean =
+                          Chat_transcript.scrub_secrets_in_text reason
+                        in
+                        let detail =
+                          if String.equal (String.trim clean) "" then ""
+                          else ": " ^ clean
+                        in
+                        Some
+                          (Ops_common.say model
+                             ~ko:("결과 없음" ^ detail)
+                             ~en:("Unavailable" ^ detail))
+                    | false, Observed.Absent ->
+                        Some
+                          (Ops_common.say model
+                             ~ko:"저장된 결과 없음 · [Enter/Space] 재조회"
+                             ~en:"No stored result · [Enter/Space] Retry")
+                    | false, Observed.Failed { reason; _ } ->
+                        let clean =
+                          Chat_transcript.scrub_secrets_in_text reason
+                        in
+                        Some
+                          (Ops_common.say model
+                             ~ko:
+                               ("결과 조회 실패: " ^ clean
+                                ^ " · [Enter/Space] 재시도")
+                             ~en:
+                               ("Fetch failed: " ^ clean
+                                ^ " · [Enter/Space] Retry"))
+                    | false, Observed.Unreported -> (
+                        match (call.original_bytes, call.truncated_to) with
+                        | Some orig, Some tr ->
+                            Some
+                              (Printf.sprintf "%s (trunc %s) · %s"
+                                 (format_bytes orig) (format_bytes tr)
+                                 (Ops_common.say model ~ko:"[Enter/Space] 전체 조회"
+                                    ~en:"[Enter/Space] Fetch full"))
+                        | Some orig, None ->
+                            Some
+                              (Printf.sprintf "%s%s" (format_bytes orig)
+                                 (if Option.is_some call.execution_id then
+                                    " · "
+                                    ^ Ops_common.say model ~ko:"[Enter/Space] 조회"
+                                        ~en:"[Enter/Space] Fetch"
+                                  else ""))
+                        | None, (Some _ | None) ->
+                            if Option.is_some call.execution_id then
+                              Some
+                                (Ops_common.say model ~ko:"[Enter/Space] 결과 조회"
+                                   ~en:"[Enter/Space] Fetch result")
+                            else None)
                   in
                   ignore
                     (Ops_common.put_line ~clip:right_r grid ~x:right_r.x ~y:!ry
                        ~max_w:right_r.w ~style:(Typography.whisper ~bg theme)
-                       (Printf.sprintf "id=%s%s%s" (short_sha eid_s) mode_s
-                          trunc_s));
-                  incr ry
+                       (Printf.sprintf "id=%s%s" (short_sha eid_s) mode_s));
+                  incr ry;
+                  (match result_status_opt with
+                  | Some status_line ->
+                      if !ry < rbot then begin
+                        let status_style =
+                          match (inflight, res_obs) with
+                          | ( true
+                            , ( Observed.Value _
+                              | Observed.Loading _
+                              | Observed.Absent
+                              | Observed.Unreported
+                              | Observed.Failed _ ) )
+                          | false, Observed.Loading _ ->
+                              Typography.ai ~bg theme
+                          | ( false
+                            , Observed.Value
+                                {
+                                  data = Wire_keeper_context.Tool_result_page p;
+                                  _;
+                                } ) -> (
+                              match page_err with
+                              | Some
+                                  (Keeper_context_store.Page_continuation_failed
+                                     _) ->
+                                  Typography.status ~bg theme
+                                    Theme.Status_critical
+                              | Some
+                                  (Keeper_context_store.Page_source_changed _) ->
+                                  Typography.status ~bg theme
+                                    Theme.Status_attention
+                              | None ->
+                                  if not p.eof then
+                                    Typography.status ~bg theme
+                                      Theme.Status_attention
+                                  else
+                                    Typography.status ~bg theme Theme.Status_ok)
+                          | ( false
+                            , ( Observed.Value
+                                  {
+                                    data =
+                                      ( Wire_keeper_context.Tool_result_pending
+                                      | Wire_keeper_context.Tool_result_unavailable _ );
+                                    _;
+                                  }
+                              | Observed.Absent ) ) ->
+                              Typography.status ~bg theme Theme.Status_attention
+                          | false, Observed.Failed _ ->
+                              Typography.status ~bg theme Theme.Status_critical
+                          | false, Observed.Unreported ->
+                              Typography.whisper ~bg theme
+                        in
+                        ignore
+                          (Ops_common.put_line ~clip:right_r grid ~x:right_r.x
+                             ~y:!ry ~max_w:right_r.w ~style:status_style
+                             status_line);
+                        incr ry
+                      end
+                  | None -> ())
                 end;
                 let tree_r =
                   Rect.make ~x:right_r.x ~y:!ry ~w:right_r.w

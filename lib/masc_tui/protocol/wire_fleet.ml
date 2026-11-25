@@ -1915,6 +1915,27 @@ type history_thinking =
 
 type retained_image = { media_path : string; caption : string option }
 
+type trace_tool_status =
+  | Trace_tool_pending
+  | Trace_tool_ok
+  | Trace_tool_err
+
+type trace_tool_step = {
+  name : string;
+  tool_call_id : string option;
+  execution_id : string option;
+  status : trace_tool_status option;
+  dur : string option;
+  args : string option;
+  result : string option;
+}
+
+type tool_step_meta = {
+  status : trace_tool_status option;
+  dur : string option;
+  result : string option;
+}
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -1929,6 +1950,8 @@ type chat_message = {
   failure_kind : string option;
   thinking : history_thinking option;
   retained_images : retained_image list;
+  tool_meta : tool_step_meta option;
+  trace_tools : trace_tool_step list;
 }
 
 type chat_history_page = {
@@ -2054,6 +2077,7 @@ type chat_stream_chunk =
       operation_id : string option;
       tool_use_id : string;
       tool_name : string option;
+      execution_id : string option;
       ok : bool option;
       output_preview : string option;
     }
@@ -2309,6 +2333,198 @@ let decode_retained_images json =
         blocks
   | _ -> []
 
+let trace_tool_status_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "pending" -> Some Trace_tool_pending
+  | "ok" -> Some Trace_tool_ok
+  | "err" | "error" -> Some Trace_tool_err
+  | _ -> None
+
+let extract_trace_tools (json : Yojson.Safe.t) : trace_tool_step list =
+  let nonblank_opt = function
+    | Some (`String s) ->
+        let trimmed = String.trim s in
+        if String.equal trimmed "" then None else Some trimmed
+    | Some _ | None -> None
+  in
+  let payload_opt = function
+    | None | Some `Null -> None
+    | Some (`String s) ->
+        if String.equal (String.trim s) "" then None else Some s
+    | Some other -> Some (Yojson.Safe.to_string other)
+  in
+  let first_some a b = match a with Some _ as x -> x | None -> b in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "blocks" fields with
+      | Some (`List blocks) ->
+          let rev_steps = ref [] in
+          List.iter
+            (function
+              | `Assoc bfields -> (
+                  match List.assoc_opt "t" bfields with
+                  | Some (`String "trace") -> (
+                      match List.assoc_opt "trace" bfields with
+                      | Some (`List steps) ->
+                          List.iter
+                            (function
+                              | `Assoc sfields -> (
+                                  match List.assoc_opt "kind" sfields with
+                                  | Some (`String "tool") -> (
+                                      match nonblank_opt (List.assoc_opt "name" sfields) with
+                                      | None -> ()
+                                      | Some name ->
+                                          let tool_call_id =
+                                            first_some
+                                              (nonblank_opt (List.assoc_opt "tool_call_id" sfields))
+                                              (nonblank_opt (List.assoc_opt "toolCallId" sfields))
+                                          in
+                                          let execution_id =
+                                            first_some
+                                              (nonblank_opt (List.assoc_opt "execution_id" sfields))
+                                              (nonblank_opt (List.assoc_opt "executionId" sfields))
+                                          in
+                                          let status =
+                                            Option.bind
+                                              (nonblank_opt (List.assoc_opt "status" sfields))
+                                              trace_tool_status_of_string
+                                          in
+                                          let dur = nonblank_opt (List.assoc_opt "dur" sfields) in
+                                          let args = payload_opt (List.assoc_opt "args" sfields) in
+                                          let result = payload_opt (List.assoc_opt "result" sfields) in
+                                          rev_steps :=
+                                            {
+                                              name;
+                                              tool_call_id;
+                                              execution_id;
+                                              status;
+                                              dur;
+                                              args;
+                                              result;
+                                            }
+                                            :: !rev_steps)
+                                  | Some _ | None -> ())
+                              | _ -> ())
+                            steps
+                      | Some _ | None -> ())
+                  | Some _ | None -> ())
+              | _ -> ())
+            blocks;
+          List.rev !rev_steps
+      | Some _ | None -> [])
+  | _ -> []
+
+let reconcile_history_trace_tools (messages : chat_message list) : chat_message list =
+  let first_some a b = match a with Some _ as x -> x | None -> b in
+  let merge_status a b =
+    match (a, b) with
+    | ( Some Trace_tool_ok
+      , (Some (Trace_tool_ok | Trace_tool_err | Trace_tool_pending) | None) ) ->
+        Some Trace_tool_ok
+    | ( Some Trace_tool_err
+      , (Some (Trace_tool_ok | Trace_tool_err | Trace_tool_pending) | None) ) ->
+        Some Trace_tool_err
+    | (Some Trace_tool_pending | None), Some Trace_tool_ok ->
+        Some Trace_tool_ok
+    | (Some Trace_tool_pending | None), Some Trace_tool_err ->
+        Some Trace_tool_err
+    | Some Trace_tool_pending, (Some Trace_tool_pending | None)
+    | None, Some Trace_tool_pending ->
+        Some Trace_tool_pending
+    | None, None -> None
+  in
+  let merge_step (a : trace_tool_step) (b : trace_tool_step) : trace_tool_step =
+    {
+      name = if String.equal (String.trim a.name) "" then b.name else a.name;
+      tool_call_id = first_some a.tool_call_id b.tool_call_id;
+      execution_id = first_some a.execution_id b.execution_id;
+      status = merge_status a.status b.status;
+      dur = first_some a.dur b.dur;
+      args = first_some a.args b.args;
+      result = first_some a.result b.result;
+    }
+  in
+  let role_tool_eids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let trace_by_eid : (string, trace_tool_step) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (msg : chat_message) ->
+      (match msg.role, msg.execution_id with
+      | Role_tool, Some eid -> Hashtbl.replace role_tool_eids eid ()
+      | ( Role_tool
+        | Role_user
+        | Role_peer _
+        | Role_assistant
+        | Role_system
+        | Role_request_failure )
+        , (Some _ | None) ->
+          ());
+      List.iter
+        (fun (step : trace_tool_step) ->
+          match step.execution_id with
+          | None -> ()
+          | Some eid ->
+              let merged =
+                match Hashtbl.find_opt trace_by_eid eid with
+                | Some prev -> merge_step prev step
+                | None -> step
+              in
+              Hashtbl.replace trace_by_eid eid merged)
+        msg.trace_tools)
+    messages;
+  let emitted_trace_eids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let filter_trace_steps steps =
+    List.filter_map
+      (fun (step : trace_tool_step) ->
+        match step.execution_id with
+        | None -> Some step
+        | Some eid ->
+            if Hashtbl.mem role_tool_eids eid || Hashtbl.mem emitted_trace_eids eid then
+              None
+            else begin
+              Hashtbl.replace emitted_trace_eids eid ();
+              Some (Option.value ~default:step (Hashtbl.find_opt trace_by_eid eid))
+            end)
+      steps
+  in
+  List.map
+    (fun (msg : chat_message) ->
+      match msg.role with
+      | Role_tool ->
+          let enriched =
+            match Option.bind msg.execution_id (Hashtbl.find_opt trace_by_eid) with
+            | None -> msg
+            | Some step ->
+                let tool_call_name =
+                  first_some msg.tool_call_name
+                    (if String.equal (String.trim step.name) "" then None
+                     else Some step.name)
+                in
+                let tool_call_id = first_some msg.tool_call_id step.tool_call_id in
+                let content =
+                  if String.equal (String.trim msg.content) "" then
+                    Option.value ~default:"" step.args
+                  else msg.content
+                in
+                let tool_meta =
+                  let prev_status, prev_dur, prev_result =
+                    match msg.tool_meta with
+                    | Some m -> (m.status, m.dur, m.result)
+                    | None -> (None, None, None)
+                  in
+                  let status = first_some prev_status step.status in
+                  let dur = first_some prev_dur step.dur in
+                  let result = first_some prev_result step.result in
+                  if Option.is_some status || Option.is_some dur || Option.is_some result
+                  then Some { status; dur; result }
+                  else None
+                in
+                { msg with tool_call_name; tool_call_id; content; tool_meta }
+          in
+          { enriched with trace_tools = filter_trace_steps enriched.trace_tools }
+      | Role_user | Role_peer _ | Role_assistant | Role_system | Role_request_failure ->
+          { msg with trace_tools = filter_trace_steps msg.trace_tools })
+    messages
+
 let decode_chat_message json =
   let* id = required_nonblank_string json "id" in
   let* role = decode_chat_role json in
@@ -2326,6 +2542,7 @@ let decode_chat_message json =
   in
   let* failure_kind = optional_nonblank_string json "failure_kind" in
   let thinking = extract_history_thinking json in
+  let trace_tools = extract_trace_tools json in
   Ok
     {
       id;
@@ -2341,16 +2558,21 @@ let decode_chat_message json =
       failure_kind;
       thinking;
       retained_images = decode_retained_images json;
+      tool_meta = None;
+      trace_tools;
     }
 
 let decode_chat_history = function
-  | `List items -> decode_list "chat_history" decode_chat_message items
+  | `List items ->
+      let* messages = decode_list "chat_history" decode_chat_message items in
+      Ok (reconcile_history_trace_tools messages)
   | bad -> field_type_error "chat_history" "a JSON array" bad
 
 let decode_chat_history_page json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "messages" in
-  let* messages = decode_list "messages" decode_chat_message items in
+  let* raw_messages = decode_list "messages" decode_chat_message items in
+  let messages = reconcile_history_trace_tools raw_messages in
   let* has_more = required_bool_field body "has_more" in
   let* next_cursor = optional_nonblank_string body "next_cursor" in
   Ok { messages; has_more; next_cursor }
@@ -2634,12 +2856,23 @@ let decode_custom_chat_chunk json =
   | "KEEPER_TOOL_RESULT_READY" ->
       let* value = required_object_field json "value" in
       let* tool_use_id = resolve_tool_use_id value in
+      let* exec_camel = optional_nonblank_string value "executionId" in
+      let* exec_snake = optional_nonblank_string value "execution_id" in
+      let execution_id =
+        match exec_camel with Some _ as x -> x | None -> exec_snake
+      in
+      let* name_camel = optional_nonblank_string value "toolCallName" in
+      let* name_snake = optional_nonblank_string value "tool_name" in
+      let tool_name =
+        match name_camel with Some _ as x -> x | None -> name_snake
+      in
       Ok
         (Chunk_tool_end
            {
              operation_id = outer_op_id;
              tool_use_id;
-             tool_name = None;
+             tool_name;
+             execution_id;
              ok = None;
              output_preview = None;
            })
@@ -2661,6 +2894,11 @@ let decode_custom_chat_chunk json =
       let* value = required_object_field json "value" in
       let* tool_use_id = resolve_tool_use_id value in
       let* tool_name = optional_nonblank_string value "toolCallName" in
+      let* exec_camel = optional_nonblank_string value "executionId" in
+      let* exec_snake = optional_nonblank_string value "execution_id" in
+      let execution_id =
+        match exec_camel with Some _ as x -> x | None -> exec_snake
+      in
       let* comp_opt = optional_object_field value "completion" in
       let* ok =
         match comp_opt with
@@ -2673,6 +2911,7 @@ let decode_custom_chat_chunk json =
              operation_id = outer_op_id;
              tool_use_id;
              tool_name;
+             execution_id;
              ok;
              output_preview = None;
            })
@@ -2908,11 +3147,16 @@ let decode_chat_stream_chunk json =
       let tool_name =
         match name_camel with Some _ as x -> x | None -> name_snake
       in
+      let* exec_camel = optional_nonblank_string json "executionId" in
+      let* exec_snake = optional_nonblank_string json "execution_id" in
+      let execution_id =
+        match exec_camel with Some _ as x -> x | None -> exec_snake
+      in
       let* ok = optional_bool_field json "ok" in
       let* output_preview = optional_string_field json "output_preview" in
       Ok
         (Chunk_tool_end
-           { operation_id; tool_use_id; tool_name; ok; output_preview })
+           { operation_id; tool_use_id; tool_name; execution_id; ok; output_preview })
   | "turn_done" | "RUN_FINISHED" ->
       let* operation_id = chunk_operation_id json in
       let* turn_ref = optional_nonblank_string json "turn_ref" in

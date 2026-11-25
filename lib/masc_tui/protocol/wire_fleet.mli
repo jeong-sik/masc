@@ -609,6 +609,27 @@ type history_thinking =
 
 type retained_image = { media_path : string; caption : string option }
 
+type trace_tool_status =
+  | Trace_tool_pending
+  | Trace_tool_ok
+  | Trace_tool_err
+
+type trace_tool_step = {
+  name : string;
+  tool_call_id : string option;
+  execution_id : string option;
+  status : trace_tool_status option;
+  dur : string option;
+  args : string option;
+  result : string option;
+}
+
+type tool_step_meta = {
+  status : trace_tool_status option;
+  dur : string option;
+  result : string option;
+}
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -623,7 +644,15 @@ type chat_message = {
   failure_kind : string option;
   thinking : history_thinking option;
   retained_images : retained_image list;
+  tool_meta : tool_step_meta option;
+  trace_tools : trace_tool_step list;
 }
+
+val reconcile_history_trace_tools : chat_message list -> chat_message list
+(** Deduplicate [blocks[].trace[kind="tool"]] steps against sibling [Role_tool]
+    rows sharing the same [execution_id] (enriching missing name/args/result/
+    status/dur onto the [Role_tool] row) and collapse duplicate trace steps per
+    [execution_id] so each execution renders once. *)
 
 type chat_history_page = {
   messages : chat_message list;
@@ -770,6 +799,7 @@ type chat_stream_chunk =
       operation_id : string option;
       tool_use_id : string;
       tool_name : string option;
+      execution_id : string option;
       ok : bool option;
       output_preview : string option;
     }

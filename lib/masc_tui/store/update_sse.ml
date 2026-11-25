@@ -1393,7 +1393,36 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_tool_block_end _
       | Wire_fleet.Chunk_ignored -> (m.drafts, [])
     in
-    ({ m with fleet; drafts }, cmds)
+    let next = { m with fleet; drafts } in
+    match chunk with
+    | Wire_fleet.Chunk_tool_end { execution_id = Some _; _ } ->
+        let next, tool_cmds =
+          View_fetches.hydrate_chat_tool_results ~keeper next
+        in
+        (next, cmds @ tool_cmds)
+    | Wire_fleet.Chunk_tool_end { execution_id = None; _ }
+    | Wire_fleet.Chunk_accepted _
+    | Wire_fleet.Chunk_run_started _
+    | Wire_fleet.Chunk_runtime_attempt_started _
+    | Wire_fleet.Chunk_provider_retry _
+    | Wire_fleet.Chunk_continuation_checkpoint _
+    | Wire_fleet.Chunk_native_tool_progress _
+    | Wire_fleet.Chunk_stream_protocol_error _
+    | Wire_fleet.Chunk_text_delta _
+    | Wire_fleet.Chunk_thinking_delta _
+    | Wire_fleet.Chunk_thinking_snapshot _
+    | Wire_fleet.Chunk_model_content _
+    | Wire_fleet.Chunk_model_response_start _
+    | Wire_fleet.Chunk_model_response_stop _
+    | Wire_fleet.Chunk_tool_start _
+    | Wire_fleet.Chunk_tool_args _
+    | Wire_fleet.Chunk_tool_block_end _
+    | Wire_fleet.Chunk_tool_quarantined _
+    | Wire_fleet.Chunk_reply_details _
+    | Wire_fleet.Chunk_turn_done _
+    | Wire_fleet.Chunk_error _
+    | Wire_fleet.Chunk_ignored ->
+        (next, cmds)
 
 let apply_chat_stream_decode_warning ~now:_ ~keeper ~request_id ~reason
     (m : Model.t) =

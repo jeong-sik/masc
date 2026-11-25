@@ -308,6 +308,8 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
               failure_kind = None;
               thinking = None;
               retained_images = [];
+              tool_meta = None;
+              trace_tools = [];
             });
       has_more = false;
       next_cursor = None;

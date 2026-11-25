@@ -471,8 +471,12 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let next = { m with fleet; drafts } in
       (* The failure rows of a cut reply are known only once the history has
-         landed, so the reply asks for their journals. *)
-      (next, View_fetches.cut_reply_fetches ~keeper next)
+         landed, so the reply asks for their journals. If tools are already
+         expanded, also hydrate recent visible tool results on demand. *)
+      let next, tool_cmds =
+        View_fetches.hydrate_chat_tool_results ~keeper next
+      in
+      (next, View_fetches.cut_reply_fetches ~keeper next @ tool_cmds)
   | Msg.Reply_chat_history { keeper; result = Error err } ->
       let fleet =
         Fleet_store.mark_chat_history_failed ~at:now ~keeper
@@ -3462,18 +3466,37 @@ let apply_http_reply ~now (m : Model.t) reply =
                   m.keeper_context;
             }
           , [] )
-      | Msg.Http_error { status = 404; _ } -> (m, [])
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_tool_result_absent ~keeper
+                  ~execution_id m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error { status = 409; _ } ->
+          (* Source rotated mid-pagination: preserve any loaded page while
+             recording Page_source_changed so the next retry restarts cleanly
+             from offset=0, source_id=None. *)
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_tool_result_conflict ~at:now ~keeper
+                  ~execution_id ~reason:(Msg.http_error_detail err)
+                  m.keeper_context;
+            }
+          , [] )
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
           err_reply
             ~fail:(fun m ->
-              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
-              let by_keeper =
-                Keeper_context_store.String_map.add keeper
-                  { st with tool_result = failed_slot err st.tool_result }
-                  m.keeper_context.by_keeper
-              in
-              { m with keeper_context = { m.keeper_context with by_keeper } })
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_tool_result_failed ~at:now ~keeper
+                    ~execution_id ~reason:(Msg.http_error_detail err)
+                    ~retryable:(Msg.http_error_retryable err) m.keeper_context;
+              })
             ~source:(Health.Source_keeper keeper) ~ko:"도구 실행 결과 조회"
             ~en:"Tool result fetch" err)
   | Msg.Reply_provider_usage (Ok uw) ->

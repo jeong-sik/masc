@@ -2,6 +2,23 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+type tool_result_fetch_params = {
+  offset : int;
+  max_bytes : int;
+  source_id : string option;
+}
+
+type tool_result_page_error =
+  | Page_continuation_failed of { reason : string; retryable : bool }
+  | Page_source_changed of string
+
+let tool_result_page_size = 16384
+let max_tool_result_cache = 32
+
+let is_binary_encoding enc =
+  String.equal (String.lowercase_ascii (String.trim enc)) "base64"
 
 type context_subtab =
   | Ctx_composition
@@ -68,6 +85,10 @@ type keeper_state = {
   call_scroll_offset : int;
   call_detail_scroll_offset : int;
   tool_result : (string * Wire_keeper_context.tool_result_response) Observed.t;
+  tool_results : Wire_keeper_context.tool_result_response Observed.t String_map.t;
+  tool_result_cache_order : string list;
+  tool_result_inflight : String_set.t;
+  tool_result_page_errors : tool_result_page_error String_map.t;
   tool_result_auth_denied : bool;
   metrics : Wire_keeper_context.keeper_metrics_snapshot Observed.t;
   sandbox_logs : Wire_keeper_context.keeper_sandbox_logs Observed.t;
@@ -129,6 +150,10 @@ let empty_keeper_state =
     call_scroll_offset = 0;
     call_detail_scroll_offset = 0;
     tool_result = Observed.unreported;
+    tool_results = String_map.empty;
+    tool_result_cache_order = [];
+    tool_result_inflight = String_set.empty;
+    tool_result_page_errors = String_map.empty;
     tool_result_auth_denied = false;
     metrics = Observed.unreported;
     sandbox_logs = Observed.unreported;
@@ -256,12 +281,144 @@ let selected_tool_call ks =
       in
       List.nth_opt page.entries idx
 
+let is_tool_result_inflight ~execution_id ks =
+  String_set.mem execution_id ks.tool_result_inflight
+
+let tool_result_page_error ~execution_id ks =
+  String_map.find_opt execution_id ks.tool_result_page_errors
+
+let tool_result_for_execution ~execution_id ks =
+  match String_map.find_opt execution_id ks.tool_results with
+  | Some obs -> obs
+  | None -> (
+      if String_set.mem execution_id ks.tool_result_inflight then
+        Observed.loading ~since_ns:Clock.Mono.zero
+      else
+        match ks.tool_result with
+        | Observed.Value { data = stored_eid, res; observed_at; stale }
+          when String.equal stored_eid execution_id ->
+            Observed.Value { data = res; observed_at; stale }
+        | Observed.Value _
+        | Observed.Loading _
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            Observed.unreported)
+
 let tool_result_for_selected_call ks =
-  match selected_tool_call ks, Observed.to_option ks.tool_result with
-  | Some { execution_id = Some eid; _ }, Some (stored_eid, res)
-    when String.equal eid stored_eid ->
-      Some res
-  | _ -> None
+  match selected_tool_call ks with
+  | Some { execution_id = Some eid; _ } ->
+      Observed.to_option (tool_result_for_execution ~execution_id:eid ks)
+  | Some { execution_id = None; _ } | None -> None
+
+let tool_results_snapshot ks =
+  let keys =
+    String_map.fold (fun k _ acc -> String_set.add k acc) ks.tool_results
+      ks.tool_result_inflight
+  in
+  let keys =
+    String_map.fold (fun k _ acc -> String_set.add k acc)
+      ks.tool_result_page_errors keys
+  in
+  let keys =
+    match Observed.to_option ks.tool_result with
+    | Some (eid, _) -> String_set.add eid keys
+    | None -> keys
+  in
+  String_set.elements keys
+  |> List.map (fun eid ->
+         ( eid
+         , tool_result_for_execution ~execution_id:eid ks
+         , String_set.mem eid ks.tool_result_inflight
+         , tool_result_page_error ~execution_id:eid ks ))
+
+let next_tool_result_params ?(allow_non_retryable = false) ~allow_next_page
+    ~refetch_when_eof ~execution_id ks =
+  if is_tool_result_inflight ~execution_id ks then None
+  else
+    let page0 =
+      Some { offset = 0; max_bytes = tool_result_page_size; source_id = None }
+    in
+    let page_err = tool_result_page_error ~execution_id ks in
+    match page_err with
+    | Some (Page_source_changed _) -> page0
+    | Some (Page_continuation_failed _) | None -> (
+        let cached_opt =
+          match String_map.find_opt execution_id ks.tool_results with
+          | Some obs -> Some obs
+          | None -> (
+              match ks.tool_result with
+              | Observed.Value { data = stored_eid, res; observed_at; stale }
+                when String.equal stored_eid execution_id ->
+                  Some (Observed.Value { data = res; observed_at; stale })
+              | Observed.Value _
+              | Observed.Loading _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  None)
+        in
+        let can_retry_page_err =
+          match page_err with
+          | None -> true
+          | Some (Page_continuation_failed { retryable; _ }) ->
+              retryable || allow_non_retryable
+          | Some (Page_source_changed _) -> true
+        in
+        match cached_opt with
+        | Some
+            (Observed.Value
+               {
+                 data = Wire_keeper_context.Tool_result_page p;
+                 stale = false;
+                 _;
+               }) ->
+            if is_binary_encoding p.encoding then None
+            else if not p.eof then
+              if allow_next_page && can_retry_page_err then
+                Some
+                  {
+                    offset = p.next_offset;
+                    max_bytes = tool_result_page_size;
+                    source_id = Some p.source_id;
+                  }
+              else None
+            else if refetch_when_eof && can_retry_page_err then page0
+            else None
+        | Some
+            (Observed.Value
+               {
+                 data = Wire_keeper_context.Tool_result_unavailable _;
+                 stale = false;
+                 _;
+               })
+        | Some Observed.Absent ->
+            if refetch_when_eof then page0 else None
+        | Some (Observed.Failed { retryable = false; _ }) ->
+            if refetch_when_eof || allow_non_retryable then page0 else None
+        | Some
+            (Observed.Value
+               {
+                 data =
+                   ( Wire_keeper_context.Tool_result_page _
+                   | Wire_keeper_context.Tool_result_pending
+                   | Wire_keeper_context.Tool_result_unavailable _ );
+                 stale = true;
+                 _;
+               }) ->
+            if can_retry_page_err then page0 else None
+        | None
+        | Some Observed.Unreported
+        | Some (Observed.Loading _)
+        | Some
+            (Observed.Value
+               {
+                 data = Wire_keeper_context.Tool_result_pending;
+                 stale = false;
+                 _;
+               })
+        | Some (Observed.Failed { retryable = true; _ }) ->
+            page0)
 
 let cycle_subtab ~keeper t =
   update_keeper ~keeper
@@ -514,15 +671,55 @@ let mark_tool_stats_absent ~keeper t =
     (fun ks -> { ks with tool_stats = Observed.absent; tool_stats_absent = true })
     t
 
+let put_tool_result_cache ~execution_id obs ks =
+  let order =
+    execution_id
+    :: List.filter (fun id -> not (String.equal id execution_id))
+         ks.tool_result_cache_order
+  in
+  let rec split n kept dropped = function
+    | [] -> (List.rev kept, dropped)
+    | x :: xs when n > 0 -> split (n - 1) (x :: kept) dropped xs
+    | x :: xs -> split 0 kept (x :: dropped) xs
+  in
+  let kept_order, evicted = split max_tool_result_cache [] [] order in
+  let map0 = String_map.add execution_id obs ks.tool_results in
+  let tool_results =
+    List.fold_left (fun acc eid -> String_map.remove eid acc) map0 evicted
+  in
+  let tool_result_page_errors =
+    let err0 = String_map.remove execution_id ks.tool_result_page_errors in
+    List.fold_left (fun acc eid -> String_map.remove eid acc) err0 evicted
+  in
+  {
+    ks with
+    tool_results;
+    tool_result_cache_order = kept_order;
+    tool_result_inflight = String_set.remove execution_id ks.tool_result_inflight;
+    tool_result_page_errors;
+  }
+
+(* Route-level authorization gate: [lib/server/server_dashboard_http_keeper_get_route.ml]
+   maps [Tool_result -> Some Masc_domain.CanAdmin]. A 401/403 on [/tool-result]
+   is therefore a keeper-wide [CanAdmin] denial rather than a per-execution
+   restriction, so marking [tool_result_auth_denied = true] on any execution
+   prevents doomed repeat 403s across the keeper's hydration batch. *)
 let mark_tool_result_denied ~at ~keeper ?execution_id ~reason t =
   update_keeper ~keeper
     (fun ks ->
+      let ks =
+        match execution_id with
+        | Some eid ->
+            put_tool_result_cache ~execution_id:eid
+              (Observed.failed ~reason ~retryable:false ~at) ks
+        | None -> ks
+      in
       let matches =
         match (execution_id, selected_tool_call ks) with
         | Some eid, Some { execution_id = Some cur; _ } -> String.equal cur eid
         | _ -> true
       in
-      if not matches then ks
+      if not matches then { ks with tool_result_auth_denied = true }
       else
         {
           ks with
@@ -668,21 +865,272 @@ let mark_tool_calls_denied ~at ~keeper ~reason t =
       })
     t
 
+let mark_tool_result_inflight ~keeper ~execution_id t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        tool_result_inflight =
+          String_set.add execution_id ks.tool_result_inflight;
+      })
+    t
+
+let binary_page_marker ~recorded_bytes ~total_bytes =
+  let bytes = Int.max recorded_bytes total_bytes in
+  Printf.sprintf "[binary/base64 · %dB]" bytes
+
+let has_loaded_tool_result_page ~execution_id ks =
+  match String_map.find_opt execution_id ks.tool_results with
+  | Some
+      (Observed.Value { data = Wire_keeper_context.Tool_result_page _; _ }) ->
+      true
+  | Some
+      ( Observed.Value
+          {
+            data =
+              ( Wire_keeper_context.Tool_result_pending
+              | Wire_keeper_context.Tool_result_unavailable _ );
+            _;
+          }
+      | Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) ->
+      false
+  | None -> (
+      match ks.tool_result with
+      | Observed.Value { data = stored_eid, res; _ } -> (
+          match res with
+          | Wire_keeper_context.Tool_result_page _ ->
+              String.equal stored_eid execution_id
+          | Wire_keeper_context.Tool_result_pending
+          | Wire_keeper_context.Tool_result_unavailable _ ->
+              false)
+      | Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ->
+          false)
+
+let mark_tool_result_absent ~keeper ~execution_id t =
+  update_keeper ~keeper
+    (fun ks ->
+      if has_loaded_tool_result_page ~execution_id ks then
+        {
+          ks with
+          tool_result_inflight =
+            String_set.remove execution_id ks.tool_result_inflight;
+          tool_result_page_errors =
+            String_map.add execution_id
+              (Page_continuation_failed
+                 { reason = "404 Not Found"; retryable = false })
+              ks.tool_result_page_errors;
+        }
+      else
+        let ks = put_tool_result_cache ~execution_id Observed.absent ks in
+        let clear_legacy =
+          match ks.tool_result with
+          | Observed.Value { data = stored_eid, _; _ } ->
+              String.equal stored_eid execution_id
+          | Observed.Loading _ | Observed.Absent | Observed.Unreported
+          | Observed.Failed _ -> (
+              match selected_tool_call ks with
+              | Some { execution_id = Some cur; _ } ->
+                  String.equal cur execution_id
+              | Some { execution_id = None; _ } | None -> false)
+        in
+        if clear_legacy then { ks with tool_result = Observed.absent } else ks)
+    t
+
+let store_initial_tool_result_failure ~at ~execution_id ~reason ~retryable ks =
+  let ks =
+    put_tool_result_cache ~execution_id
+      (Observed.failed ~reason ~retryable ~at)
+      ks
+  in
+  let matches =
+    (match ks.tool_result with
+    | Observed.Value { data = stored_eid, _; _ } ->
+        String.equal stored_eid execution_id
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        false)
+    ||
+    match selected_tool_call ks with
+    | Some { execution_id = Some cur; _ } -> String.equal cur execution_id
+    | Some { execution_id = None; _ } | None -> true
+  in
+  if matches then
+    { ks with tool_result = Observed.failed ~reason ~retryable ~at }
+  else ks
+
+let mark_tool_result_failed ~at ~keeper ~execution_id ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks ->
+      if has_loaded_tool_result_page ~execution_id ks then
+        {
+          ks with
+          tool_result_inflight =
+            String_set.remove execution_id ks.tool_result_inflight;
+          tool_result_page_errors =
+            String_map.add execution_id
+              (Page_continuation_failed { reason; retryable })
+              ks.tool_result_page_errors;
+        }
+      else
+        store_initial_tool_result_failure ~at ~execution_id ~reason ~retryable
+          ks)
+    t
+
+let mark_tool_result_conflict ~at ~keeper ~execution_id ~reason t =
+  update_keeper ~keeper
+    (fun ks ->
+      if has_loaded_tool_result_page ~execution_id ks then
+        {
+          ks with
+          tool_result_inflight =
+            String_set.remove execution_id ks.tool_result_inflight;
+          tool_result_page_errors =
+            String_map.add execution_id (Page_source_changed reason)
+              ks.tool_result_page_errors;
+        }
+      else
+        store_initial_tool_result_failure ~at ~execution_id ~reason
+          ~retryable:true ks)
+    t
+
 let apply_tool_result ~observed_at ~keeper ~execution_id resp t =
   update_keeper ~keeper
     (fun ks ->
-      let matches =
-        match selected_tool_call ks with
-        | Some { execution_id = Some cur; _ } -> String.equal cur execution_id
-        | _ -> true
+      let prev_opt =
+        match String_map.find_opt execution_id ks.tool_results with
+        | Some obs -> Observed.to_option obs
+        | None -> (
+            match Observed.to_option ks.tool_result with
+            | Some (eid, prev) when String.equal eid execution_id -> Some prev
+            | Some _ | None -> None)
       in
-      if not matches then ks
-      else
-        {
-          ks with
-          tool_result = Observed.value ~observed_at (execution_id, resp);
-          tool_result_auth_denied = false;
-        })
+      let merged_opt =
+        match (resp, prev_opt) with
+        | ( Wire_keeper_context.Tool_result_page page
+          , ( Some (Wire_keeper_context.Tool_result_page _)
+            | Some Wire_keeper_context.Tool_result_pending
+            | Some (Wire_keeper_context.Tool_result_unavailable _)
+            | None ) )
+          when page.offset = 0 ->
+            if is_binary_encoding page.encoding then
+              Some
+                (Wire_keeper_context.Tool_result_page
+                   {
+                     page with
+                     content =
+                       binary_page_marker ~recorded_bytes:page.recorded_bytes
+                         ~total_bytes:page.total_bytes;
+                     eof = page.eof;
+                     next_offset = page.next_offset;
+                     encoding = "base64";
+                   })
+            else
+              Some
+                (Wire_keeper_context.Tool_result_page
+                   {
+                     page with
+                     eof = page.eof || page.next_offset <= page.offset;
+                   })
+        | ( Wire_keeper_context.Tool_result_page page
+          , Some (Wire_keeper_context.Tool_result_page prev) )
+          when page.offset > 0
+               && Int.equal page.offset prev.next_offset
+               && String.equal page.source_id prev.source_id ->
+            if is_binary_encoding page.encoding then
+              if is_binary_encoding prev.encoding then
+                Some (Wire_keeper_context.Tool_result_page prev)
+              else
+                Some
+                  (Wire_keeper_context.Tool_result_page
+                     {
+                       page with
+                       offset = prev.offset;
+                       content =
+                         prev.content ^ "\n\n"
+                         ^ binary_page_marker ~recorded_bytes:page.recorded_bytes
+                             ~total_bytes:page.total_bytes;
+                       next_offset = Int.max prev.next_offset page.next_offset;
+                       total_bytes = Int.max prev.total_bytes page.total_bytes;
+                       recorded_bytes =
+                         Int.max prev.recorded_bytes page.recorded_bytes;
+                       eof = page.eof;
+                       encoding = "base64";
+                       is_error = prev.is_error || page.is_error;
+                     })
+            else if page.next_offset > prev.next_offset then
+              Some
+                (Wire_keeper_context.Tool_result_page
+                   {
+                     page with
+                     offset = prev.offset;
+                     content = prev.content ^ page.content;
+                     next_offset = page.next_offset;
+                     total_bytes = Int.max prev.total_bytes page.total_bytes;
+                     recorded_bytes =
+                       Int.max prev.recorded_bytes page.recorded_bytes;
+                     eof = page.eof;
+                     is_error = prev.is_error || page.is_error;
+                   })
+            else if page.eof && Int.equal page.next_offset prev.next_offset then
+              Some
+                (Wire_keeper_context.Tool_result_page
+                   {
+                     prev with
+                     total_bytes = Int.max prev.total_bytes page.total_bytes;
+                     recorded_bytes =
+                       Int.max prev.recorded_bytes page.recorded_bytes;
+                     eof = true;
+                     is_error = prev.is_error || page.is_error;
+                   })
+            else
+              (* Zero-progress or regressed next_offset: keep accumulated page without duplicating. *)
+              Some (Wire_keeper_context.Tool_result_page prev)
+        | ( Wire_keeper_context.Tool_result_page _
+          , ( Some (Wire_keeper_context.Tool_result_page _)
+            | Some Wire_keeper_context.Tool_result_pending
+            | Some (Wire_keeper_context.Tool_result_unavailable _)
+            | None ) ) ->
+            (* Orphan or mismatched offset > 0 slice: never store headless bytes. *)
+            None
+        | ( ( Wire_keeper_context.Tool_result_pending
+            | Wire_keeper_context.Tool_result_unavailable _ )
+          , ( Some (Wire_keeper_context.Tool_result_page _)
+            | Some Wire_keeper_context.Tool_result_pending
+            | Some (Wire_keeper_context.Tool_result_unavailable _)
+            | None ) ) ->
+            Some resp
+      in
+      match merged_opt with
+      | None ->
+          {
+            ks with
+            tool_result_inflight =
+              String_set.remove execution_id ks.tool_result_inflight;
+          }
+      | Some merged_resp ->
+          let ks =
+            put_tool_result_cache ~execution_id
+              (Observed.value ~observed_at merged_resp)
+              ks
+          in
+          let matches =
+            match selected_tool_call ks with
+            | Some { execution_id = Some cur; _ } -> String.equal cur execution_id
+            | Some { execution_id = None; _ } | None -> true
+          in
+          if not matches then { ks with tool_result_auth_denied = false }
+          else
+            {
+              ks with
+              tool_result = Observed.value ~observed_at (execution_id, merged_resp);
+              tool_result_auth_denied = false;
+            })
     t
 
 let mark_stale_all t =
@@ -712,6 +1160,9 @@ let mark_stale_all t =
             tool_calls = Observed.mark_stale ks.tool_calls;
             tool_calls_auth_denied = false;
             tool_result = Observed.mark_stale ks.tool_result;
+            tool_results = String_map.map Observed.mark_stale ks.tool_results;
+            tool_result_inflight = String_set.empty;
+            tool_result_page_errors = String_map.empty;
             tool_result_auth_denied = false;
             metrics = Observed.mark_stale ks.metrics;
             sandbox_logs = Observed.mark_stale ks.sandbox_logs;
@@ -1282,7 +1733,8 @@ let clear_epoch_logins t =
             oauth_last_poll_ns = None;
             oauth_poll_started_ns = None;
             oauth_poll_consecutive_errors = 0;
-            github_login = { ks.github_login with running = false } })
+            github_login = { ks.github_login with running = false };
+            tool_result_inflight = String_set.empty })
         t.by_keeper;
   }
 

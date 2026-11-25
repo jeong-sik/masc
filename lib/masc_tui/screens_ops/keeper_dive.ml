@@ -278,8 +278,8 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(lang : Say.lang)
   let max_preview, show_expand_hint =
     match tools_mode with
     | Slash.Tools_compact -> (0, false)
-    | Slash.Tools_results -> (8, true)
-    | Slash.Tools_full -> (48, false)
+    | Slash.Tools_results -> (12, true)
+    | Slash.Tools_full -> (200, false)
   in
   let shown, hidden =
     Chat_transcript.tool_output_display_lines ~theme ~tools_mode ~width raw
@@ -322,6 +322,39 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(lang : Say.lang)
             ~full_bleed_bg:true ();
         ]
     else body_rows
+
+let render_tool_detail_rows ~(theme : Theme.t) ~(lang : Say.lang) ~width
+    (sections : Chat_transcript.tool_detail_section list) =
+  let inset_bg = theme.surface_0 in
+  List.concat_map
+    (function
+      | Chat_transcript.Tool_section_label { text; tone } ->
+          let fg =
+            match tone with
+            | Some t -> Theme.status_color theme t
+            | None -> theme.text_muted
+          in
+          [
+            single_span_row ~rail_rgb:theme.border_subtle ~prefix:"  "
+              ~prefix_fg:theme.text_muted ~text:(Say.resolve lang text)
+              ~text_fg:fg ~attrs:Attr.bold ~bg_rgb:inset_bg
+              ~full_bleed_bg:true ();
+          ]
+      | Chat_transcript.Tool_section_payload { raw; tools_mode } ->
+          preview_tool_output_rows ~theme ~lang ~tools_mode ~width raw
+      | Chat_transcript.Tool_section_notice { text; tone } ->
+          let fg =
+            match tone with
+            | Some t -> Theme.status_color theme t
+            | None -> theme.text_muted
+          in
+          [
+            single_span_row ~rail_rgb:theme.border_subtle ~prefix:"  "
+              ~prefix_fg:theme.text_muted ~text:(Say.resolve lang text)
+              ~text_fg:fg ~attrs:Attr.italic ~bg_rgb:inset_bg
+              ~full_bleed_bg:true ();
+          ])
+    sections
 
 let markdown_rows ?rail_rgb ~(theme : Theme.t) ~width ~prefix ~cont_prefix
     ~prefix_fg ~bg_rgb ?(full_bleed_bg = false) text =
@@ -393,9 +426,18 @@ type history_layout = {
   runtimes : Wire_runtime.runtime_option list;
   cut_replies : string Fleet_store.String_map.t;
   retained_image_height : int;
+  tool_results :
+    (string
+    * Wire_keeper_context.tool_result_response Observed.t
+    * bool
+    * Keeper_context_store.tool_result_page_error option)
+    list;
 }
 
 let history_layout_of ~(model : Model.t) ~keeper_name ~width =
+  let ks =
+    Keeper_context_store.get_keeper ~keeper:keeper_name model.keeper_context
+  in
   {
     keeper_name;
     width;
@@ -409,7 +451,130 @@ let history_layout_of ~(model : Model.t) ~keeper_name ~width =
     cut_replies = Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet;
     retained_image_height =
       Chat_transcript.retained_image_height ~model ~keeper:keeper_name ~width;
+    tool_results = Keeper_context_store.tool_results_snapshot ks;
   }
+
+let keeper_state_of_tool_snapshot
+    (snap :
+      (string
+      * Wire_keeper_context.tool_result_response Observed.t
+      * bool
+      * Keeper_context_store.tool_result_page_error option)
+      list)
+    : Keeper_context_store.keeper_state =
+  List.fold_left
+    (fun (ks : Keeper_context_store.keeper_state) (eid, obs, inflight, page_err) ->
+      let tool_results =
+        Keeper_context_store.String_map.add eid obs ks.tool_results
+      in
+      let tool_result_inflight =
+        if inflight then
+          Keeper_context_store.String_set.add eid ks.tool_result_inflight
+        else ks.tool_result_inflight
+      in
+      let tool_result_page_errors =
+        match page_err with
+        | Some err ->
+            Keeper_context_store.String_map.add eid err
+              ks.tool_result_page_errors
+        | None -> ks.tool_result_page_errors
+      in
+      { ks with tool_results; tool_result_inflight; tool_result_page_errors })
+    Keeper_context_store.empty_keeper_state snap
+
+let build_history_tool_card ~(theme : Theme.t) ~(lang : Say.lang)
+    ~(tools_mode : Slash.tools_mode) ~width ~hhmm ~keeper_state ~tname ~args
+    ~inline_result ~execution_id ~status ~dur =
+  let tool_running =
+    match status with
+    | Some Wire_fleet.Trace_tool_pending -> true
+    | Some (Wire_fleet.Trace_tool_ok | Wire_fleet.Trace_tool_err) | None ->
+        false
+  in
+  let sections =
+    Chat_transcript.project_tool_details ~tools_mode ~args ~inline_result
+      ~execution_id ~tool_running ~keeper_state
+  in
+  let chevron =
+    if sections <> [] then Glyph.to_utf8 Glyph.Expand_open
+    else Glyph.to_utf8 Glyph.Expand_closed
+  in
+  let bg = Color.of_rgb theme.surface_2 in
+  let raw_for_header =
+    match args with
+    | Some a when not (String.equal (String.trim a) "") -> a
+    | Some _ | None -> Option.value inline_result ~default:""
+  in
+  let del_opt =
+    Chat_transcript.extract_delegate_summary ~tool_name:tname
+      ~raw_json:raw_for_header
+  in
+  let default_rail, spans =
+    match del_opt with
+    | Some del ->
+        (theme.accent, delegate_card_spans ~theme ~lang ~bg ~width del)
+    | None ->
+        let preview =
+          concise_tool_preview ~max_w:(Int.max 10 (width - 28)) raw_for_header
+        in
+        let sp =
+          [
+            {
+              Markdown.text = tname;
+              style = Typography.accent ~bg ~bold:true theme;
+              hyperlink = None;
+            };
+          ]
+          @
+          if String.length preview > 0 then
+            [
+              {
+                Markdown.text = "  " ^ preview;
+                style = Typography.structure ~bg theme;
+                hyperlink = None;
+              };
+            ]
+          else []
+        in
+        (theme.border_inactive, sp)
+  in
+  let rail_rgb, status_part, right_meta_fg, right_meta_attrs =
+    match status with
+    | Some Wire_fleet.Trace_tool_ok ->
+        ( theme.status_ok
+        , Some (Glyph.to_utf8 Glyph.Live_healthy ^ " ok")
+        , theme.status_ok
+        , Attr.bold )
+    | Some Wire_fleet.Trace_tool_err ->
+        ( theme.status_critical
+        , Some (Glyph.to_utf8 Glyph.Delta_up ^ " err")
+        , theme.status_critical
+        , Attr.bold )
+    | Some Wire_fleet.Trace_tool_pending ->
+        ( theme.status_active
+        , Some (Glyph.to_utf8 Glyph.Live_working ^ " run")
+        , theme.status_active
+        , Attr.bold )
+    | None -> (default_rail, None, theme.text_muted, Attr.italic)
+  in
+  let right_meta =
+    let parts =
+      List.filter_map Fun.id [ status_part; dur; Some hhmm ]
+    in
+    String.concat " · " parts
+  in
+  let compact_line =
+    make_row ~rail_rgb
+      ~prefix:(chevron ^ " " ^ Glyph.to_utf8 Glyph.Tool_square ^ " ")
+      ~prefix_fg:
+        (match status with
+        | Some _ -> rail_rgb
+        | None -> theme.text_secondary)
+      ~right_meta ~right_meta_fg ~right_meta_attrs ~bg_rgb:theme.surface_2
+      ~full_bleed_bg:true spans
+  in
+  let detail_rows = render_tool_detail_rows ~theme ~lang ~width sections in
+  compact_line :: detail_rows
 
 let build_history_rows ~(layout : history_layout)
     (messages : Wire_fleet.chat_message list) =
@@ -424,6 +589,7 @@ let build_history_rows ~(layout : history_layout)
   let user_bg = theme.surface_2 in
   let runtimes = layout.runtimes in
   let cut_replies = layout.cut_replies in
+  let keeper_state = keeper_state_of_tool_snapshot layout.tool_results in
   let origin_mode =
     match layout.origin_mode with
     | Fleet_store.Display_origin_inline ->
@@ -587,7 +753,37 @@ let build_history_rows ~(layout : history_layout)
                 build_history_thinking_rows ~theme ~lang ~thinking_mode ~width
                   msg.thinking
               in
-              thinking_rows @ header_row
+              let trace_tool_rows =
+                match msg.trace_tools, tools_mode with
+                | [], _ -> []
+                | [ step ], Slash.Tools_compact ->
+                    build_history_tool_card ~theme ~lang ~tools_mode ~width
+                      ~hhmm ~keeper_state ~tname:step.name ~args:step.args
+                      ~inline_result:step.result ~execution_id:step.execution_id
+                      ~status:step.status ~dur:step.dur
+                | _ :: _ :: _, Slash.Tools_compact ->
+                    let items =
+                      List.map
+                        (fun (step : Wire_fleet.trace_tool_step) ->
+                          (step.name, Option.value step.args ~default:""))
+                        msg.trace_tools
+                    in
+                    [
+                      tool_group_row ~lang ~theme
+                        ~right_meta:(Printf.sprintf "[Ctrl+O] · %s" hhmm)
+                        ~count:(List.length msg.trace_tools) items;
+                    ]
+                | steps, (Slash.Tools_results | Slash.Tools_full) ->
+                    List.concat_map
+                      (fun (step : Wire_fleet.trace_tool_step) ->
+                        build_history_tool_card ~theme ~lang ~tools_mode ~width
+                          ~hhmm ~keeper_state ~tname:step.name ~args:step.args
+                          ~inline_result:step.result
+                          ~execution_id:step.execution_id ~status:step.status
+                          ~dur:step.dur)
+                      steps
+              in
+              thinking_rows @ trace_tool_rows @ header_row
               @ markdown_rows ?rail_rgb:body_rail ~theme ~width ~prefix
                   ~cont_prefix:cont ~prefix_fg:theme.status_ok ~bg_rgb:base_bg
                   msg.content
@@ -615,65 +811,14 @@ let build_history_rows ~(layout : history_layout)
                 | Some n -> n
                 | None -> say_in lang ~ko:"도구" ~en:"tool"
               in
-              let expanded =
-                match tools_mode with
-                | Slash.Tools_compact -> false
-                | Slash.Tools_results | Slash.Tools_full -> true
+              let status, dur, inline_result =
+                match msg.tool_meta with
+                | Some m -> (m.status, m.dur, m.result)
+                | None -> (None, None, None)
               in
-              let chevron =
-                if expanded then Glyph.to_utf8 Glyph.Expand_open
-                else Glyph.to_utf8 Glyph.Expand_closed
-              in
-              let bg = Color.of_rgb theme.surface_2 in
-              let del_opt =
-                Chat_transcript.extract_delegate_summary ~tool_name:tname
-                  ~raw_json:msg.content
-              in
-              let rail_rgb, spans =
-                match del_opt with
-                | Some del ->
-                    ( theme.accent
-                    , delegate_card_spans ~theme ~lang ~bg ~width del )
-                | None ->
-                    let preview =
-                      concise_tool_preview ~max_w:(Int.max 10 (width - 28))
-                        msg.content
-                    in
-                    let sp =
-                      [
-                        {
-                          Markdown.text = tname;
-                          style = Typography.accent ~bg ~bold:true theme;
-                          hyperlink = None;
-                        };
-                      ]
-                      @
-                      if String.length preview > 0 then
-                        [
-                          {
-                            Markdown.text = "  " ^ preview;
-                            style = Typography.structure ~bg theme;
-                            hyperlink = None;
-                          };
-                        ]
-                      else []
-                    in
-                    (theme.border_inactive, sp)
-              in
-              let compact_line =
-                make_row ~rail_rgb
-                  ~prefix:(chevron ^ " " ^ Glyph.to_utf8 Glyph.Tool_square ^ " ")
-                  ~prefix_fg:theme.text_secondary ~right_meta:hhmm
-                  ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
-                  ~bg_rgb:theme.surface_2 ~full_bleed_bg:true spans
-              in
-              let detail_rows =
-                if expanded then
-                  preview_tool_output_rows ~theme ~lang ~tools_mode ~width
-                    msg.content
-                else []
-              in
-              compact_line :: detail_rows
+              build_history_tool_card ~theme ~lang ~tools_mode ~width ~hhmm
+                ~keeper_state ~tname ~args:(Some msg.content) ~inline_result
+                ~execution_id:msg.execution_id ~status ~dur
           | Wire_fleet.Role_request_failure ->
               let meta =
                 match msg.failure_kind with
@@ -913,10 +1058,8 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   end;
   (* 2. Collapsible Elevated Tool Cards (surface_2 header + recessed surface_0 preview) *)
   let tools_mode = Chat_transcript.tools_mode model in
-  let expanded_tools =
-    match tools_mode with
-    | Slash.Tools_compact -> false
-    | Slash.Tools_results | Slash.Tools_full -> true
+  let keeper_state =
+    Keeper_context_store.get_keeper ~keeper:keeper_name model.keeper_context
   in
   if sp.show_tools then
     List.iter
@@ -933,6 +1076,11 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               (tool_group_row ~lang:model.lang ~theme
                  ~count:(List.length calls) items)
         | Chat_transcript.Single (tc : Fleet_store.active_tool_call) ->
+        let tool_running =
+          match tc.tool_state with
+          | Fleet_store.Tool_pending | Fleet_store.Tool_result_pending _ -> true
+          | Fleet_store.Tool_settled | Fleet_store.Tool_unfinished -> false
+        in
         let rail_rgb, pill_txt, pill_fg =
           match tc.tool_state with
           | Fleet_store.Tool_pending ->
@@ -959,13 +1107,18 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 , Glyph.to_utf8 Glyph.Delta_up ^ " err"
                 , theme.status_critical )
             | None ->
+                (* Result receipt is NOT a success verdict (SKILL.md invariant). *)
                 ( theme.border_inactive
                 , Glyph.to_utf8 Glyph.Live_idle
                 , theme.text_secondary ))
         in
+        let sections =
+          Chat_transcript.project_tool_details ~tools_mode ~args:tc.args_preview
+            ~inline_result:tc.output_preview ~execution_id:tc.execution_id
+            ~tool_running ~keeper_state
+        in
         let chevron =
-          if expanded_tools && Option.is_some tc.output_preview then
-            Glyph.to_utf8 Glyph.Expand_open
+          if sections <> [] then Glyph.to_utf8 Glyph.Expand_open
           else Glyph.to_utf8 Glyph.Expand_closed
         in
         let bg = Color.of_rgb theme.surface_2 in
@@ -1007,10 +1160,8 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
              ~prefix_fg:rail_rgb ~right_meta:pill_txt ~right_meta_fg:pill_fg
              ~right_meta_attrs:Attr.bold ~bg_rgb:theme.surface_2
              ~full_bleed_bg:true spans);
-        match expanded_tools, tc.output_preview with
-        | true, Some out ->
-            push_all (preview_tool_output_rows ~theme ~lang:model.lang ~tools_mode ~width out)
-        | false, _ | true, None -> ())
+        push_all
+          (render_tool_detail_rows ~theme ~lang:model.lang ~width sections))
       (Chat_transcript.stream_tool_groups ~tools_mode buf.tools);
   (* 3. Live Assistant Text Delta *)
   if sp.show_text then begin
@@ -3758,8 +3909,29 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
           { Card.glyph = Some g; text = Say.resolve model.lang lbl; tone = Some tok })
         keeper_opt
     in
+    let tools_mode_pill =
+      if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+        match Chat_transcript.tools_mode model with
+        | Slash.Tools_compact -> None
+        | Slash.Tools_results ->
+            Some (Ops_common.say model ~ko:"도구: 결과 펼침" ~en:"Tools: results")
+        | Slash.Tools_full ->
+            Some (Ops_common.say model ~ko:"도구: 전체 펼침" ~en:"Tools: full")
+      else None
+    in
     let company_sub =
-      match keeper_opt with Some k -> Some k.company | None -> None
+      let base =
+        match keeper_opt with
+        | Some k ->
+            let trimmed = String.trim k.company in
+            if String.length trimmed > 0 then Some trimmed else None
+        | None -> None
+      in
+      match (tools_mode_pill, base) with
+      | Some pill, Some c -> Some (pill ^ " · " ^ c)
+      | Some pill, None -> Some pill
+      | None, Some c -> Some c
+      | None, None -> None
     in
     let title =
       if embedded then
@@ -3889,6 +4061,17 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             (Ops_common.say model
                ~ko:"[Enter] 전문 읽기 · [z] 확대 · [Tab] 목록"
                ~en:"[Enter] Read · [z] Zoom · [Tab] Fleet")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+          if rect.w >= 88 then
+            Some
+              (Ops_common.say model
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지(2회) · [Enter] Dive · [c] 채팅 · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop(2x) · [Enter] Dive · [c] Chat · [V] PTT")
+          else
+            Some
+              (Ops_common.say model
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지 · [Enter] Dive · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop · [Enter] Dive · [V] PTT")
         else if rect.w >= 73 then
           Some
             (Ops_common.say model
@@ -3899,6 +4082,17 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             (Ops_common.say model
                ~ko:"[W] 깨우기 · [D] 중지 · [Enter] Dive · [c] 채팅 · [V] PTT"
                ~en:"[W] Wake · [D] Stop · [Enter] Dive · [c] Chat · [V] PTT")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+        if rect.w >= 72 then
+          Some
+            (Ops_common.say model
+               ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기/온라인 · [D] 중지(2회)"
+               ~en:"[Ctrl+O] Expand tools · [W] Wake/Online · [D] Stop(2x)")
+        else
+          Some
+            (Ops_common.say model
+               ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지"
+               ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop")
       else if rect.w >= 54 then
         Some
           (Ops_common.say model

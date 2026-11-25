@@ -1289,6 +1289,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
       detail=${detailPane}
       hasSelection=${selectedGoal !== null}
       selectionKey=${selectedGoalId}
+      linkedKey=${props.entityId ?? null}
       masterLabel="목표 목록"
       detailLabel="목표 상세"
       emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">목표를 선택하면 단계 전환, 기준 심사, 검증 판정 및 연결 태스크를 확인할 수 있습니다.</span></div>`}

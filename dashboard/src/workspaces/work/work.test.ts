@@ -1744,4 +1744,242 @@ describe('workspaces/work', () => {
     expect(refutedSummary).not.toContain('이전')
     expect(refutedDisclosure?.textContent).toContain('Regression in p95 latency (240ms exceeded 200ms threshold)')
   })
+
+  // The status filter of Tasks is a menu: open it if it is shut, then pick.
+  const pickTasksFilter = async (id: string) => {
+    const item = () => container.querySelector<HTMLButtonElement>(`[data-testid="tasks-filter-${id}"]`)
+    if (!item()) {
+      container.querySelector<HTMLButtonElement>('[data-testid="tasks-status-filter"]')!.click()
+      await flushUi()
+    }
+    item()!.click()
+    await flushUi(3)
+  }
+
+  it('Tasks pane switch: a filter keeps the list, and a row shows the detail', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          goals: [],
+          tasks: [{ id: 'task-1', title: 'First task', status: 'awaiting_verification', assignee: 'sangsu', priority: 1, goal_id: null }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/tasks/history/page')) {
+        return jsonResponse({ schema: 'masc.task-history.page/v2', task_id: 'task-1', events: [], next_cursor: null })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return jsonResponse({
+          status: 'ok',
+          schedule_store_known: true,
+          schedule_store_read_error: null,
+          request_count: 1,
+          truncated: false,
+          requests: [{
+            schedule_id: 'sched-1',
+            status: 'pending',
+            payload_keeper_name: 'sangsu',
+            payload_summary: 'Nightly run',
+            due_at: 1795478400,
+            due_at_iso: '2026-11-24T00:00:00Z',
+          }],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+    const paneNames = () => [...container.querySelectorAll('.md-switch-btn')].map((b) => b.textContent)
+    const firstRow = () => container.querySelector<HTMLButtonElement>('.vlist-row .wk-row-btn')!
+
+    // The first task is selected on load, and the list is what a reader gets.
+    expect(paneNames()).toEqual(['태스크 목록', '태스크 상세'])
+    expect(shownPane()).toBe('master')
+
+    // The filter swaps the selected task for the selected schedule: not a pick.
+    await pickTasksFilter('schedules')
+    expect(paneNames()).toEqual(['예약 목록', '예약 상세'])
+    expect(firstRow().textContent).toContain('Nightly run')
+    expect(shownPane()).toBe('master')
+
+    firstRow().click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+  })
+
+  it('Tasks pane switch: with no schedule to select, the detail is out of reach', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          goals: [],
+          tasks: [{ id: 'task-1', title: 'First task', status: 'awaiting_verification', assignee: 'sangsu', priority: 1, goal_id: null }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/tasks/history/page')) {
+        return jsonResponse({ schema: 'masc.task-history.page/v2', task_id: 'task-1', events: [], next_cursor: null })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return jsonResponse({
+          status: 'ok', schedule_store_known: true, schedule_store_read_error: null,
+          request_count: 0, truncated: false, requests: [],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+    const detailSwitch = () => container.querySelectorAll<HTMLButtonElement>('.md-switch-btn')[1]!
+
+    // A task is selected on load: its detail is one press away.
+    expect(detailSwitch().disabled).toBe(false)
+    detailSwitch().click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+
+    // No schedule is there to select: the list, and nothing to switch to.
+    await pickTasksFilter('schedules')
+    expect(shownPane()).toBe('master')
+    expect(detailSwitch().disabled).toBe(true)
+
+    // Back on the tasks, the one selected is not shown unasked.
+    await pickTasksFilter('all')
+    expect(shownPane()).toBe('master')
+    expect(detailSwitch().disabled).toBe(false)
+  })
+
+  it('Tasks keeps the list for a link while its tasks are on their way, and when they cannot be read', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    // Both sources of the task list answer late, and with an error.
+    let answer!: () => void
+    const answered = new Promise<void>((resolve) => { answer = resolve })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning') || url.startsWith('/api/v1/dashboard/execution')) {
+        await answered
+        return jsonResponse({ error: 'task store unavailable' }, 500)
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" entityId="task-2" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+
+    // Still on its way: the pane that says so, not an empty detail.
+    expect(shownPane()).toBe('master')
+    expect(container.querySelector('.md-master [role="status"]')?.textContent).toContain('불러오는 중…')
+
+    answer()
+    await flushUi(4)
+    expect(shownPane()).toBe('master')
+    expect(container.querySelector('.md-master [role="alert"]')).not.toBeNull()
+  })
+
+  it('Tasks opens on the detail for a link to one task', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          goals: [],
+          tasks: [
+            { id: 'task-1', title: 'First task', status: 'awaiting_verification', assignee: 'sangsu', priority: 1, goal_id: null },
+            { id: 'task-2', title: 'Linked task', status: 'awaiting_verification', assignee: 'sangsu', priority: 2, goal_id: null },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/tasks/history/page')) {
+        return jsonResponse({ schema: 'masc.task-history.page/v2', task_id: 'task-2', events: [], next_cursor: null })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" entityId="task-2" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Linked task')
+  })
+
+  it('Goals opens on the detail for a link to one goal', async () => {
+    const goal = (id: string, title: string) => ({
+      id,
+      title,
+      phase: 'Executing',
+      priority: 1,
+      measure: { kind: 'done_when', condition: 'The tests pass' },
+      procedure: 'Run the tests',
+      criterion_revision: 'crev-1',
+      criterion_review: { state: 'viable', reason: 'Concrete' },
+      linked_task_count: 0,
+      tasks: [],
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({ tree: [goal('goal-1', 'First goal'), goal('goal-2', 'Linked goal')] })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="goals" entityId="goal-2" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Linked goal')
+  })
 })

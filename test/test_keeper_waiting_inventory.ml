@@ -340,24 +340,28 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
           : Keeper_event_queue.task_cancellation))
   in
   let rejected =
-    stimulus ~post_id:"completion-authority-rejected:T-2" ~arrived_at:102.0
-      (Keeper_event_queue.Completion_authority_rejected
-         ({ car_task_id = "T-2"
-          ; car_verification_id = "verification-2"
-          ; car_reason = "evidence lacks a test run"
-          ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "run-2" }
-          }
-          : Keeper_event_queue.completion_authority_rejection))
+    { (stimulus ~post_id:"completion-authority-rejected:T-2" ~arrived_at:102.0
+         (Keeper_event_queue.Completion_authority_rejected
+            ({ car_task_id = "T-2"
+             ; car_verification_id = "verification-2"
+             ; car_reason = "evidence lacks a test run"
+             ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "run-2" }
+             }
+             : Keeper_event_queue.completion_authority_rejection)))
+      with urgency = Keeper_event_queue.Immediate
+    }
   in
   let approved =
-    stimulus ~post_id:"task-outcome:T-3" ~arrived_at:103.0
-      (Keeper_event_queue.Task_outcome
-         ({ to_task_id = "T-3"
-          ; to_producer = "polisher"
-          ; to_verification_id = "verification-3"
-          ; to_authority = Masc_domain.System_llm_agent { agent_run_id = "run-3" }
-          }
-          : Keeper_event_queue.task_outcome))
+    { (stimulus ~post_id:"task-outcome:T-3" ~arrived_at:103.0
+         (Keeper_event_queue.Task_outcome
+            ({ to_task_id = "T-3"
+             ; to_producer = "polisher"
+             ; to_verification_id = "verification-3"
+             ; to_authority = Masc_domain.System_llm_agent { agent_run_id = "run-3" }
+             }
+             : Keeper_event_queue.task_outcome)))
+      with urgency = Keeper_event_queue.Immediate
+    }
   in
   let sensitive_content = "private-board-content-must-not-cross-inventory" in
   let board =
@@ -404,14 +408,16 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check string "rejection sentence names the task"
     "작업 T-2 완료 증거 거절됨"
     (what_of rejected.Keeper_event_queue.post_id);
-  check string "approval sentence names the task and verification"
-    "작업 T-3 증거 승인됨 (verification-3)"
+  check string "approval sentence shows the effective low urgency"
+    "작업 T-3 증거 승인됨 (verification-3) (낮은 우선순위)"
     (what_of approved.Keeper_event_queue.post_id);
   let board_row = U.(keeper |> member "waiting_on" |> to_list)
     |> List.find (fun row -> U.member "waiting_on" row = `String "board_signal") in
   check string "public Board sentence carries no author"
     "Board 알림 대기" (json_string_member "what" board_row);
   let message_detail = detail_of message.Keeper_event_queue.post_id in
+  check string "workspace message retains its recorded urgency" "immediate"
+    (json_string_member "urgency" message_detail);
   check string "workspace message sender" "alpha"
     (json_string_member "message_from" message_detail);
   check string "workspace message request id" "wmsg-1"
@@ -423,6 +429,8 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check bool "absent cancellation reason stays absent" true
     (U.member "cancelled_reason" cancelled_detail = `Null);
   let rejected_detail = detail_of rejected.Keeper_event_queue.post_id in
+  check string "system rejection uses the effective normal urgency" "normal"
+    (json_string_member "urgency" rejected_detail);
   check string "rejection reason" "evidence lacks a test run"
     (json_string_member "rejection_reason" rejected_detail);
   check string "rejection task id" "T-2"
@@ -430,12 +438,34 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check bool "rejection row does not serialize the authority payload" true
     (U.member "car_authority" rejected_detail = `Null);
   let approved_detail = detail_of approved.Keeper_event_queue.post_id in
+  check string "task approval uses the effective low urgency" "low"
+    (json_string_member "urgency" approved_detail);
   check string "approval task id" "T-3"
     (json_string_member "outcome_task_id" approved_detail);
   check string "approval verification id" "verification-3"
     (json_string_member "outcome_verification_id" approved_detail);
   check bool "approval row does not serialize the authority payload" true
     (U.member "to_authority" approved_detail = `Null);
+  let state =
+    match
+      Keeper_event_queue_persistence.load_state_result
+        ~base_path:config.Workspace_utils_backend_setup.base_path
+        ~keeper_name
+    with
+    | Ok state -> state
+    | Error detail -> fail ("durable queue state read failed: " ^ detail)
+  in
+  (match
+     Keeper_event_queue_state.resolve_pending_selection
+       ~source_ref:(json_string_member "source_ref" approved_detail)
+       ~source_incarnation:(Int64.of_string (json_string_member "source_incarnation" approved_detail))
+       state
+   with
+   | Ok selection ->
+     check string "approval address resolves to the original stimulus"
+       (Keeper_event_queue_state.source_snapshot_ref approved)
+       (Keeper_event_queue_state.source_snapshot_ref selection.source)
+   | Error detail -> fail ("approval address did not resolve: " ^ detail));
   let board_detail = U.member "detail" board_row in
   check string "public Board control address is opaque"
     (Keeper_event_queue_state.source_snapshot_ref board)

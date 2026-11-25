@@ -284,10 +284,6 @@ let urgency_what_suffix : Keeper_event_queue.urgency -> string = function
   | Low -> " (낮은 우선순위)"
 ;;
 
-let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
-  queue_payload_what stimulus.payload ^ urgency_what_suffix stimulus.urgency
-;;
-
 (* Pending Connector_attention stimuli repeat one row per accepted message
    (the intake invariant keeps every event durable), so a Keeper that cannot
    consume right now — a blocked lane, a stalled cycle — turns the inventory
@@ -376,6 +372,8 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
     | [] -> List.rev acc
     | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
       let stimulus : Keeper_event_queue.stimulus = selection.source in
+      let urgency = Keeper_stimulus_wake_policy.effective_urgency stimulus in
+      let urgency_suffix = urgency_what_suffix urgency in
       (* [source_ref] + [source_incarnation] are the exact-entry address the
          operator boundary
          ([Server_dashboard_http_keeper_event_queue_operator]) resolves
@@ -402,7 +400,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
           , `String source_ref )
         ; ( "source_incarnation"
           , `String (Int64.to_string selection.admitted_revision) )
-        ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+        ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
         ; "arrived_at_unix", `Float stimulus.arrived_at
         ; "payload_kind",
           `String (Keeper_event_queue.payload_kind_label stimulus.payload)
@@ -480,7 +478,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
                    "%s ×%d%s"
                    (queue_payload_what stimulus.payload)
                    count
-                   (urgency_what_suffix stimulus.urgency))
+                   urgency_suffix)
               ~since:(Some oldest_arrived_at)
               ~detail:
                 (`Assoc
@@ -511,7 +509,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
               ~what:
                 (Printf.sprintf
                    "외부 메시지 도착 ×%d" connector_count
-                   ^ urgency_what_suffix stimulus.urgency)
+                   ^ urgency_suffix)
               ~since:(Some oldest_arrived_at)
               ~detail:
                 (`Assoc
@@ -535,7 +533,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Keeper_event_queue.Task_outcome _ | Connector_attention _ -> go
            (queue_index + 1)
            (row
-              ~what:(stimulus_what stimulus)
+              ~what:(queue_payload_what stimulus.payload ^ urgency_suffix)
               ~since:(Some stimulus.arrived_at)
               ~detail:(`Assoc (base_detail (Keeper_event_queue_state.source_snapshot_ref stimulus)))
               :: acc)

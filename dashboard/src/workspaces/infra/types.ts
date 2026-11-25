@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact'
+import type { RepoStatus } from './repos-model'
 
 export interface WorkspaceInspectPayload {
   title: string
@@ -163,13 +164,16 @@ export interface InfraSandboxesData {
 export interface InfraRepository {
   readonly id: string
   readonly name: string
-  readonly url: string
-  readonly codebase?: string | null
-  readonly local_path: string
-  readonly default_branch: string
-  readonly status: string
-  readonly auto_sync: boolean
-  readonly sync_interval: number
+  /** Where the clone is on the server's disk, as the server resolved it;
+   *  null when the server sent no path. */
+  readonly local_path: string | null
+  readonly status: RepoStatus
+  /** Null when the server sent no value; never assumed on or off. */
+  readonly auto_sync: boolean | null
+  /** Seconds between automatic syncs; null when the server sent none. */
+  readonly sync_interval: number | null
+  /** Unix seconds of the last status write; null when the server sent none. */
+  readonly updated_at: number | null
 }
 
 export interface RepoActivityChange {

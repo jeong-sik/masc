@@ -1,168 +1,71 @@
 /**
- * Infra L1 Tab 2: Repos & 24h Changes
+ * Infra L1 Tab 2: Repos
  *
- * - GET/POST /api/v1/repositories (list, add, sync, remove).
- * - GET /api/v1/ide/repository-activity?repo_id=<id>&window_hours=24 (OkData envelope per #36 —
- *   ALWAYS supplies required repo_id!).
- * - Renders Keeper file-write diffs using the `diff` package with 1-click onInspect wide drawer ([⤢]),
- *   cleanly replacing the retired Web IDE!
+ * The registered repositories as a table, and below it the one that is
+ * selected: its clone, its open pull requests, and what Keepers wrote in it.
+ * The reads are in `repos-reads.ts`; the selected repository is `RepoDetail`.
+ *
+ * - POST /api/v1/repositories        register
+ * - POST /api/v1/repositories/<id>/sync
  */
 
 import { html } from 'htm/preact'
-import { UnifiedDiffView } from '../../components/common/unified-diff'
-import { pushShellToast } from '../../shell/shell-state'
-import { createTwoFilesPatch } from 'diff'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { decodeRepositoryAdvance } from '../../api/repositories'
+import { repositoryAdvanceSummary } from '../../components/repo-sidebar'
+import { apiMutate, authSession, currentSessionEpoch, isEpochCurrent, resourceCache } from '../../core'
+import { pushShellToast } from '../../shell/shell-state'
+import { RepoDetail, type UnfinishedSync } from './repos-detail'
+import { RepoAddForm, RepoTable } from './repos-list'
+import { cloneInProgress, firstByName, type Fact } from './repos-model'
+import type { PullsSnapshot } from './repos-pulls-model'
 import {
-  apiGet,
-  apiMutate,
-  apiRequest,
-  authSession,
-  currentSessionEpoch,
-  isEpochCurrent,
-  resourceCache,
-  sessionEpoch,
-} from '../../core'
-import { MasterDetail } from '../../components/primitives'
-import { KeeperBadge } from '../../components/keeper-badge'
-import { isAdminLockedForSession } from '../../routes/router'
-import {
-  describeWireType,
-  expectOptionalArrayField,
-  expectOptionalRecordArrayField,
-  expectRecordElements,
-  expectRequiredStringField,
-  expectWireRecord,
-  isJsonRecord,
-} from '../../lib/wire-decode'
-import {
-  extractChangeBeforeAfter,
-  extractChangePath,
-  formatUnixTs,
-  type InfraRepository,
-  type RepoActivityChange,
-  type RepoActivityData,
-  type WorkspaceViewProps,
-} from './types'
+  PULLS_KEY,
+  REPOS_KEY,
+  activityKey,
+  canAdminRepos,
+  canReadRepos,
+  gitKey,
+  loadActivity,
+  loadGit,
+  loadPulls,
+  loadRepos,
+  useRefetchWhenStale,
+} from './repos-reads'
+import { Ago, FailLine, WaitLine } from './repos-sections'
+import type { InfraRepository, WorkspaceViewProps } from './types'
+import './infra.css'
+import './repos-lists.css'
 
-function decodeRepoList(raw: unknown): readonly InfraRepository[] {
-  const ctx = 'GET /api/v1/repositories'
-  let rows: readonly unknown[]
-  let field = 'repositories'
-  if (Array.isArray(raw)) {
-    rows = raw
-  } else if (isJsonRecord(raw)) {
-    if ('repositories' in raw && raw.repositories !== undefined) {
-      rows = expectOptionalArrayField<unknown>(raw, 'repositories', ctx)
-    } else if (raw.ok === true && 'data' in raw && raw.data !== undefined) {
-      field = 'data'
-      rows = expectOptionalArrayField<unknown>(raw, 'data', ctx)
-    } else {
-      rows = []
-    }
-  } else {
-    throw new Error(`${ctx}: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
+const MS_PER_SECOND = 1000
+/** How often the list is read again while a clone is in progress. The server
+ *  sends no event when one ends, and the list read runs no git subprocess. */
+const CLONING_POLL_MS = 5_000
+
+/** When the oldest reading on screen was taken. One refresh re-reads them all. */
+function OldestRead(props: { readonly keys: readonly string[] }) {
+  let oldestMs: number | null = null
+  for (const key of props.keys) {
+    const observed = resourceCache.observe<unknown>(key).value
+    if (observed.kind === 'value' && (oldestMs === null || observed.updatedAt < oldestMs)) oldestMs = observed.updatedAt
   }
-  const records = expectRecordElements<Record<string, unknown>>(rows, field, ctx)
-  return records.map((r, idx) => {
-    const rowCtx = `${ctx} ${field}[${idx}]`
-    const id = expectRequiredStringField(r, 'id', rowCtx).trim()
-    const name = expectRequiredStringField(r, 'name', rowCtx).trim()
-    if (id === '' || name === '') {
-      throw new Error(`${rowCtx}: "id"와 "name" 필드는 비어 있을 수 없습니다.`)
-    }
-    return {
-      id,
-      name,
-      url: typeof r.url === 'string' ? r.url : '',
-      codebase: typeof r.codebase === 'string' ? r.codebase : null,
-      local_path: typeof r.local_path === 'string' ? r.local_path : '',
-      default_branch: typeof r.default_branch === 'string' ? r.default_branch : 'main',
-      status: typeof r.status === 'string' ? r.status : 'unknown',
-      auto_sync: r.auto_sync === true,
-      sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
-    }
-  })
-}
-
-function decodeRepoActivityData(raw: unknown): RepoActivityData {
-  const ctx = 'GET /api/v1/ide/repository-activity'
-  const rec = expectWireRecord(raw, ctx)
-  const changes = expectOptionalRecordArrayField<RepoActivityChange>(rec, 'changes', ctx)
-  return {
-    ...(rec as unknown as RepoActivityData),
-    repo_id: typeof rec.repo_id === 'string' ? rec.repo_id : '',
-    window_hours: typeof rec.window_hours === 'number' ? rec.window_hours : 24,
-    incomplete: typeof rec.incomplete === 'number' ? rec.incomplete : 0,
-    unattributed: typeof rec.unattributed === 'number' ? rec.unattributed : 0,
-    changes,
-  }
-}
-
-export function buildUnifiedChangeDiff(change: RepoActivityChange): string {
-  const filePath = extractChangePath(change.location)
-  const { before, after, unified } = extractChangeBeforeAfter(change.change)
-  if (unified) return unified
-  return createTwoFilesPatch(`a/${filePath}`, `b/${filePath}`, before, after, 'before', 'after', { context: 3 })
-}
-
-function renderDiffLines(patchText: string, maxLines = 40) {
-  return html`<${UnifiedDiffView} diffText=${patchText} maxLines=${maxLines} padding="var(--sp-2)" />`
+  return oldestMs === null ? null : html`<${Ago} atSec=${oldestMs / MS_PER_SECOND} what="조회" />`
 }
 
 export function ReposTab(props: WorkspaceViewProps) {
   const session = authSession.value
-  const epoch = sessionEpoch.value
-  const isSingleUser = session.kind === 'single_user_local'
-  const canAdminRepos = isSingleUser && !isAdminLockedForSession('admin', session)
-
-  const reposObs = resourceCache.observe<readonly InfraRepository[]>('infra:repositories').value
+  const readable = canReadRepos(session)
+  const admin = canAdminRepos(session)
+  const reposObs = resourceCache.observe<readonly InfraRepository[]>(REPOS_KEY).value
+  const pullsObs = resourceCache.observe<PullsSnapshot>(PULLS_KEY).value
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newUrl, setNewUrl] = useState('')
-  const [newBranch, setNewBranch] = useState('main')
-  const [errorBanner, setErrorBanner] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-
-  const repos = reposObs.kind === 'value' ? reposObs.data : []
-  const effectiveRepoId = selectedRepoId && repos.some((r) => r.id === selectedRepoId)
-    ? selectedRepoId
-    : (repos[0]?.id ?? null)
-
-  const activityKey = effectiveRepoId ? `infra:repo-activity:${effectiveRepoId}` : 'infra:repo-activity:none'
-  const activityObs = resourceCache.observe<RepoActivityData>(activityKey).value
-
-  const hasSingleUserAccess = (): boolean => authSession.peek().kind === 'single_user_local'
-  const hasAdminRepoAccess = (): boolean => {
-    const cur = authSession.peek()
-    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
-  }
-
-  const loadRepos = (reason: 'mount' | 'manual' = 'mount') => {
-    if (!hasSingleUserAccess()) return
-    void resourceCache.fetch<readonly InfraRepository[]>(
-      'infra:repositories',
-      (signal) => apiGet<readonly InfraRepository[]>('/api/v1/repositories', { signal, decode: decodeRepoList }),
-      { ttlMs: 20_000, topics: ['repositories'], reason },
-    )
-  }
-
-  const loadActivity = (repoId: string, reason: 'mount' | 'manual' = 'mount') => {
-    if (!hasAdminRepoAccess()) return
-    void resourceCache.fetch<RepoActivityData>(
-      `infra:repo-activity:${repoId}`,
-      (signal) => apiRequest<RepoActivityData>({
-        method: 'GET',
-        path: `/api/v1/ide/repository-activity?repo_id=${encodeURIComponent(repoId)}&window_hours=24`,
-        envelope: 'ok_data',
-        decode: decodeRepoActivityData,
-        signal,
-      }),
-      { ttlMs: 20_000, topics: ['repository_activity'], reason },
-    )
-  }
-
+  const [refreshing, setRefreshing] = useState(false)
+  const [syncing, setSyncing] = useState<ReadonlySet<string>>(new Set())
+  const [unfinishedSyncs, setUnfinishedSyncs] = useState<Readonly<Record<string, UnfinishedSync>>>({})
+  // The app mounts a workspace anew for each session (`app.ts` keys it on the
+  // session epoch), so an answer that arrives after the tab is gone, or for a
+  // session that ended, has nothing here to tell.
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -171,278 +74,164 @@ export function ReposTab(props: WorkspaceViewProps) {
     }
   }, [])
 
-  useEffect(() => {
-    if (!isSingleUser) return
-    loadRepos('mount')
-  }, [epoch, isSingleUser])
+  const repos = reposObs.kind === 'value' ? reposObs.data : []
+  const selectedRepo = repos.find((repo) => repo.id === selectedRepoId) ?? firstByName(repos)
+  // The default is pinned once it is shown, so a repository that later sorts
+  // ahead of it does not take the detail away.
+  if (selectedRepo !== null && selectedRepo.id !== selectedRepoId) setSelectedRepoId(selectedRepo.id)
 
+  // The loaders send nothing for a session that may not read.
   useEffect(() => {
-    if (!canAdminRepos) {
-      setShowAddForm(false)
-      return
-    }
-    if (effectiveRepoId) {
-      loadActivity(effectiveRepoId, 'mount')
-    }
-  }, [effectiveRepoId, epoch, canAdminRepos])
+    void loadRepos('mount')
+    void loadPulls('mount')
+  }, [readable])
 
-  const handleAddRepo = async (ev: Event) => {
-    ev.preventDefault()
-    if (!hasAdminRepoAccess() || !newName.trim() || !newUrl.trim()) return
+  useRefetchWhenStale(reposObs, () => void loadRepos('mount'))
+  useRefetchWhenStale(pullsObs, () => void loadPulls('mount'))
+
+  // Each poll re-renders the tab, so this is judged again every time.
+  const followingClone = repos.some((repo) => cloneInProgress(repo, Date.now() / MS_PER_SECOND))
+  useEffect(() => {
+    if (!followingClone) return undefined
+    const timer = setInterval(() => void loadRepos('manual'), CLONING_POLL_MS)
+    return () => clearInterval(timer)
+  }, [followingClone])
+
+  const refreshAll = async () => {
+    setRefreshing(true)
+    await Promise.all([
+      loadRepos('manual'),
+      loadPulls('manual'),
+      ...(selectedRepo !== null ? [loadGit(selectedRepo.id, 'manual'), loadActivity(selectedRepo.id, 'manual')] : []),
+    ])
+    setRefreshing(false)
+  }
+
+  const handleAdded = async (name: string) => {
     const startEpoch = currentSessionEpoch()
-    const trimmedName = newName.trim()
-    setBusy('add')
-    setErrorBanner(null)
-    const res = await apiMutate<unknown>('POST', '/api/v1/repositories', {
-      name: trimmedName,
-      url: newUrl.trim(),
-      default_branch: newBranch.trim() || 'main',
-      auto_sync: true,
-      sync_interval: 300,
-    })
-    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
-    setBusy(null)
-    if (!res.ok) {
-      setErrorBanner(`저장소 등록 실패: ${res.error.message}`)
-      return
-    }
-    pushShellToast(`저장소 '${trimmedName}' 등록 완료.`, 'success')
-    setNewName('')
-    setNewUrl('')
+    pushShellToast(`저장소 '${name}' 등록 완료.`, 'success')
     setShowAddForm(false)
-    loadRepos('manual')
-  }
-
-  const handleSyncRepo = async (repoId: string) => {
-    if (!hasAdminRepoAccess()) return
-    const startEpoch = currentSessionEpoch()
-    setBusy(`sync:${repoId}`)
-    setErrorBanner(null)
-    const res = await apiMutate<unknown>('POST', `/api/v1/repositories/${encodeURIComponent(repoId)}/sync`, {})
+    void loadPulls('manual')
+    const list = await loadRepos('manual')
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
-    setBusy((cur) => (cur === `sync:${repoId}` ? null : cur))
+    const created = list.kind === 'value' ? list.data.find((repo) => repo.name === name) : undefined
+    if (created) setSelectedRepoId(created.id)
+  }
+
+  const handleSync = async (repo: InfraRepository) => {
+    if (!canAdminRepos(authSession.peek())) return
+    const startEpoch = currentSessionEpoch()
+    setSyncing((prev) => new Set(prev).add(repo.id))
+    const res = await apiMutate(
+      'POST',
+      `/api/v1/repositories/${encodeURIComponent(repo.id)}/sync`,
+      {},
+      { decode: (raw: unknown) => decodeRepositoryAdvance(raw, repo.id) },
+    )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    const atSec = Date.now() / MS_PER_SECOND
+    // A sync that did what was asked says so in a toast and leaves the page as
+    // it is. One that left the working tree alone, or failed, stays beside the
+    // repository until its next sync answers.
+    let done: string | null = null
+    let unfinished: Fact | null = null
     if (!res.ok) {
-      setErrorBanner(`동기화 실패: ${res.error.message}`)
-      return
+      unfinished = { text: `동기화 실패: ${res.error.message}`, tone: 'bad' }
+    } else {
+      const summary = repositoryAdvanceSummary(res.value)
+      if (summary.tone === 'success') done = `${repo.name} 동기화 완료. ${summary.message}`
+      else unfinished = { text: summary.message, tone: 'warn' }
     }
-    pushShellToast(`${repoId} 동기화 완료.`, 'success')
-    loadActivity(repoId, 'manual')
-  }
-
-  const handleInspectDiff = (change: RepoActivityChange) => {
-    const filePath = extractChangePath(change.location)
-    const patch = buildUnifiedChangeDiff(change)
-    props.onInspect({
-      title: filePath,
-      subtitle: `${change.keeper} · ${formatUnixTs(change.at)}${change.task_id ? ` · ${change.task_id}` : ''}`,
-      kind: 'repo_diff',
-      data: change,
-      render: () => html`
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-            <${KeeperBadge} id=${change.keeper} size="sm" />
-            <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: change.succeeded ? 'var(--ok-fg)' : 'var(--err-fg)' }}>
-              ${change.succeeded ? '적용 성공' : '실패'}
-            </span>
-            ${change.turn !== null && html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>turn #${change.turn}</span>`}
-          </div>
-          ${renderDiffLines(patch, 500)}
-        </div>
-      `,
+    // The row is read before the result shows, so the result and the status
+    // the sync left behind appear together.
+    await loadRepos('manual')
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    setSyncing((prev) => {
+      const next = new Set(prev)
+      next.delete(repo.id)
+      return next
     })
+    setUnfinishedSyncs(({ [repo.id]: _previous, ...rest }) => (
+      unfinished === null ? rest : { ...rest, [repo.id]: { fact: unfinished, atSec } }
+    ))
+    if (done !== null) pushShellToast(done, 'success')
+    // What was read about the clone before the sync is out of date, whether or
+    // not this repository is the one on screen.
+    resourceCache.invalidateKey(gitKey(repo.id))
+    resourceCache.invalidateKey(activityKey(repo.id))
   }
 
-  const activityData = activityObs.kind === 'value' ? activityObs.data : null
-  const activityChanges = activityData ? activityData.changes : []
-  const selectedRepo = repos.find((r) => r.id === effectiveRepoId) ?? null
+  const readKeys = [
+    REPOS_KEY,
+    PULLS_KEY,
+    ...(selectedRepo !== null ? [gitKey(selectedRepo.id)] : []),
+    ...(selectedRepo !== null && admin ? [activityKey(selectedRepo.id)] : []),
+  ]
 
-  const masterPane = html`
-    <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
-      <div class="wka-h">
-        <h3>등록된 저장소 (<span class="tnum">${repos.length}</span>)</h3>
-        ${canAdminRepos && html`
-          <button type="button" class="btn-primary" onClick=${() => setShowAddForm((v) => !v)}>
-            ${showAddForm ? '취소' : '+ 저장소 추가'}
-          </button>
-        `}
-      </div>
-
-      ${canAdminRepos && showAddForm && html`
-        <form onSubmit=${handleAddRepo} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', background: 'var(--bg-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}>
-          <input
-            type="text"
-            placeholder="이름 (예: masc)"
-            value=${newName}
-            onInput=${(e: Event) => setNewName((e.target as HTMLInputElement).value)}
-            required
-            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-          />
-          <input
-            type="text"
-            placeholder="Git URL 또는 로컬 경로"
-            value=${newUrl}
-            onInput=${(e: Event) => setNewUrl((e.target as HTMLInputElement).value)}
-            required
-            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-          />
-          <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-            <input
-              type="text"
-              placeholder="기본 브랜치 (main)"
-              value=${newBranch}
-              onInput=${(e: Event) => setNewBranch((e.target as HTMLInputElement).value)}
-              style=${{ flex: 1, minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-            />
-            <button type="submit" class="btn-primary" disabled=${busy === 'add'}>등록</button>
-          </div>
-        </form>
-      `}
-
-      ${reposObs.kind === 'loading' && html`<div class="dtable-absent">저장소 불러오는 중…</div>`}
-      ${reposObs.kind === 'failed' && html`<div class="ap-error" role="alert">저장소 조회 실패: ${reposObs.error.message}</div>`}
-      ${(reposObs.kind === 'absent' || reposObs.kind === 'unreported') && html`
-        <div class="dtable-absent">저장소 목록을 확인할 수 없습니다.</div>
-      `}
-      ${reposObs.kind === 'value' && repos.length === 0 && html`
-        <div class="dtable-absent">등록된 저장소가 없습니다.</div>
-      `}
-      ${repos.map((repo) => {
-        const isSel = repo.id === effectiveRepoId
-        return html`
-          <div
-            key=${repo.id}
-            style=${{
-              padding: 'var(--sp-2)',
-              borderRadius: 'var(--radius-sm)',
-              border: `1px solid ${isSel ? 'var(--line-3)' : 'var(--line-1)'}`,
-              background: isSel ? 'var(--bg-4)' : 'var(--bg-2)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--sp-1)',
-            }}
-          >
-            <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <button
-                type="button"
-                onClick=${() => setSelectedRepoId(repo.id)}
-                style=${{ background: 'transparent', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}
-              >
-                ${repo.name}
-              </button>
-              ${canAdminRepos && html`
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
-                  disabled=${busy === `sync:${repo.id}`}
-                  onClick=${() => void handleSyncRepo(repo.id)}
-                >
-                  동기화
-                </button>
-              `}
-            </div>
-            <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-              ${repo.default_branch} · ${repo.status}
-            </div>
-          </div>
-        `
-      })}
+  const title = html`
+    <div>
+      <span class="ov-eyebrow">6 INFRA · REPOS</span>
+      <h1>저장소</h1>
     </div>
   `
 
-  const detailPane = html`
-    <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-      <div class="wka-h">
-        <h3>${selectedRepo ? `${selectedRepo.name} · 24시간 Keeper 파일 변경 Diff` : '24시간 파일 변경 내역'}</h3>
-        ${canAdminRepos && selectedRepo && html`
-          <button type="button" class="btn-ghost" onClick=${() => loadActivity(selectedRepo.id, 'manual')}>새로고침</button>
-        `}
+  if (!readable) {
+    return html`
+      <div class="ov" data-testid="infra-repos-tab">
+        <header class="ov-head">${title}</header>
+        <div class="rp-empty" data-testid="infra-repos-mode-notice" role="status">
+          저장소 목록과 Keeper 파일 기록(<span class="mono">/api/v1/repositories</span>, <span class="mono">/api/v1/ide/repository-activity</span>)은 single_user 모드 전용입니다.
+        </div>
       </div>
-
-      ${!canAdminRepos && html`
-        <div class="wka-card dtable-absent" data-testid="infra-repo-activity-admin-locked" role="status">
-          24시간 Keeper 파일 변경 이력(<span class="mono">/api/v1/ide/repository-activity</span>)과 저장소 등록·동기화는 관리자 전용입니다.
-        </div>
-      `}
-
-      ${canAdminRepos && !selectedRepo && html`<div class="dtable-absent">왼쪽에서 저장소를 선택하세요.</div>`}
-
-      ${canAdminRepos && selectedRepo && activityObs.kind === 'loading' && html`<div class="dtable-absent">24시간 파일 변경 이력 불러오는 중…</div>`}
-
-      ${canAdminRepos && selectedRepo && activityObs.kind === 'failed' && html`
-        <div class="ap-error" role="alert">변경 이력 조회 실패: ${activityObs.error.message}</div>
-      `}
-
-      ${canAdminRepos && selectedRepo && activityData && html`
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-          <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            변경 ${activityChanges.length}건 · 미완결 ${activityData.incomplete ?? 0} · 미귀속 ${activityData.unattributed ?? 0} (window=${activityData.window_hours ?? 24}h)
-          </div>
-
-          ${activityChanges.length === 0
-            ? html`<div class="dtable-absent">최근 24시간 동안 기록된 Keeper 파일 쓰기가 없습니다.</div>`
-            : activityChanges.slice(0, 40).map((ch, idx) => {
-                const filePath = extractChangePath(ch.location)
-                const patch = buildUnifiedChangeDiff(ch)
-                return html`
-                  <article key=${`${ch.at}-${idx}`} class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', background: 'var(--bg-2)' }}>
-                    <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minWidth: 0 }}>
-                        <${KeeperBadge} id=${ch.keeper} size="sm" />
-                        <span class="mono" style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-1)' }}>${filePath}</span>
-                      </div>
-                      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                        <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTs(ch.at)}</span>
-                        <button
-                          type="button"
-                          class="btn-ghost"
-                          style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
-                          onClick=${() => handleInspectDiff(ch)}
-                        >
-                          [⤢] 전체 Diff
-                        </button>
-                      </div>
-                    </div>
-                    ${renderDiffLines(patch, 18)}
-                  </article>
-                `
-              })}
-        </div>
-      `}
-    </div>
-  `
+    `
+  }
 
   return html`
-    <div class="ov ov--split" data-testid="infra-repos-tab">
-      <header class="ov-head" style=${{ flexShrink: 0 }}>
-        <div>
-          <span class="ov-eyebrow">6 INFRA · REPOS & 24H CHANGES</span>
-          <h1>저장소 관리 · 24시간 Keeper 파일 Diff</h1>
+    <div class="ov" data-testid="infra-repos-tab">
+      <header class="ov-head">
+        ${title}
+        <div class="rp-head-actions">
+          <${OldestRead} keys=${readKeys} />
+          <button type="button" class="btn-ghost" disabled=${refreshing} onClick=${() => void refreshAll()}>
+            ${refreshing ? '새로고침 중…' : '새로고침'}
+          </button>
+          ${admin && html`
+            <button type="button" class="btn-ghost" aria-expanded=${showAddForm} onClick=${() => setShowAddForm((v) => !v)}>
+              ${showAddForm ? '추가 취소' : '저장소 추가'}
+            </button>
+          `}
         </div>
       </header>
 
-      ${errorBanner && html`
-        <div role="alert" class="ap-error" style=${{ flexShrink: 0 }}>
-          ${errorBanner}
-        </div>
+      ${admin && showAddForm && html`<${RepoAddForm} onAdded=${(name: string) => void handleAdded(name)} />`}
+
+      ${reposObs.kind === 'loading' && html`<${WaitLine} what="저장소 목록" />`}
+      ${reposObs.kind === 'failed' && html`
+        <${FailLine} what="저장소 목록" message=${reposObs.error.message} onRetry=${() => void loadRepos('manual')} />
+      `}
+      ${(reposObs.kind === 'absent' || reposObs.kind === 'unreported') && html`
+        <div class="rp-empty">서버가 저장소 목록을 보내지 않았습니다.</div>
+      `}
+      ${reposObs.kind === 'value' && repos.length === 0 && html`
+        <div class="rp-empty">등록된 저장소가 없습니다.</div>
       `}
 
-      ${!isSingleUser
-        ? html`
-            <div class="wka-card" data-testid="infra-repos-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-              저장소 관리 및 24시간 파일 변경 이력(<span class="mono">/api/v1/repositories</span>, <span class="mono">/api/v1/ide/repository-activity</span>)은 single_user 모드 전용입니다.
-            </div>
-          `
-        : html`
-            <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
-              <${MasterDetail}
-                masterLabel="저장소 목록"
-                detailLabel="24시간 변경 Diff"
-                master=${masterPane}
-                detail=${detailPane}
-              />
-            </div>
-          `}
+      ${repos.length > 0 && html`
+        <${RepoTable} repos=${repos} pulls=${pullsObs} selectedId=${selectedRepo?.id ?? null} onSelect=${setSelectedRepoId} />
+      `}
+
+      ${selectedRepo !== null && html`
+        <${RepoDetail}
+          key=${selectedRepo.id}
+          repo=${selectedRepo}
+          pulls=${pullsObs}
+          canAdmin=${admin}
+          syncing=${syncing.has(selectedRepo.id)}
+          unfinishedSync=${unfinishedSyncs[selectedRepo.id]}
+          onSync=${() => void handleSync(selectedRepo)}
+          onInspect=${props.onInspect}
+        />
+      `}
     </div>
   `
 }

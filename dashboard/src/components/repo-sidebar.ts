@@ -35,12 +35,22 @@ export const repositorySyncResults = signal<ReadonlyMap<string, RepositoryAdvanc
 
 export function repositoryAdvanceSummary(outcome: RepositoryAdvanceOutcome): { message: string; tone: 'success' | 'warning' } {
   switch (outcome.state) {
-    case 'advanced': return { message: `${outcome.behind}개 커밋을 작업 트리에 반영했습니다.`, tone: 'success' }
-    case 'already_current': return { message: '작업 트리가 이미 최신입니다.', tone: 'success' }
-    case 'skipped_dirty': return { message: `원격 갱신 완료. 로컬 변경으로 작업 트리 반영을 건너뛰었습니다. staged ${outcome.staged}, unstaged ${outcome.unstaged}, conflicted ${outcome.conflicted}`, tone: 'warning' }
-    case 'skipped_not_on_default_branch': return { message: `원격 갱신 완료. 현재 브랜치 ${outcome.current_branch}를 유지했습니다.`, tone: 'warning' }
-    case 'fast_forward_refused': return { message: `원격 갱신 완료. fast-forward 거절 (${outcome.behind}개 커밋): ${outcome.reason}`, tone: 'warning' }
-    case 'advance_inspect_failed': return { message: `원격 갱신 완료. 작업 트리 상태 확인 실패: ${outcome.reason}`, tone: 'warning' }
+    case 'advanced': return { message: `원격의 새 커밋 ${outcome.behind}개를 작업 트리에 반영했습니다.`, tone: 'success' }
+    case 'already_current': return { message: '작업 트리가 이미 원격과 같습니다.', tone: 'success' }
+    case 'skipped_dirty': {
+      const parts: string[] = []
+      if (outcome.conflicted > 0) parts.push(`충돌 ${outcome.conflicted}`)
+      if (outcome.unstaged > 0) parts.push(`수정 ${outcome.unstaged}`)
+      if (outcome.staged > 0) parts.push(`staged ${outcome.staged}`)
+      const what = parts.length > 0 ? `커밋 안 된 변경(${parts.join(' · ')})` : '커밋 안 된 변경'
+      return { message: `원격은 가져왔습니다. ${what}이 있어 작업 트리는 그대로 두었습니다.`, tone: 'warning' }
+    }
+    case 'skipped_not_on_default_branch':
+      return { message: `원격은 가져왔습니다. 작업 트리가 기본 브랜치가 아닌 ${outcome.current_branch}에 있어 그대로 두었습니다.`, tone: 'warning' }
+    case 'fast_forward_refused':
+      return { message: `원격은 가져왔습니다. 새 커밋 ${outcome.behind}개를 작업 트리에 반영하지 못했습니다: ${outcome.reason}`, tone: 'warning' }
+    case 'advance_inspect_failed':
+      return { message: `원격은 가져왔습니다. 작업 트리 상태를 확인하지 못했습니다: ${outcome.reason}`, tone: 'warning' }
   }
 }
 

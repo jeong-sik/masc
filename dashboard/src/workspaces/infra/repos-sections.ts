@@ -165,8 +165,9 @@ function gitCells(git: Observed<RepoGitState>, onRetry: () => void, filesToggle:
   `)
 }
 
-function keeperCell(activity: Observed<RepoActivityData>, fileCount: number, onRetry: () => void) {
+function keeperCell(activity: Observed<RepoActivityData> | null, fileCount: number, onRetry: () => void) {
   const label = 'Keeper가 쓴 파일 · 24시간'
+  if (activity === null) return html`<${SummaryCell} label=${label} value="관리자 전용" />`
   if (activity.kind === 'value') {
     const { changes, unattributed } = activity.data
     // Zero here can mean "none" or "written, but the record does not say where".
@@ -194,13 +195,14 @@ function keeperCell(activity: Observed<RepoActivityData>, fileCount: number, onR
 }
 
 /** A value on screen while its replacement is being read. */
-function rereading(observed: Observed<unknown>): boolean {
-  return observed.kind === 'value' && observed.stale
+function rereading(observed: Observed<unknown> | null): boolean {
+  return observed !== null && observed.kind === 'value' && observed.stale
 }
 
 export function SummaryRow(props: {
   readonly git: Observed<RepoGitState>
-  readonly activity: Observed<RepoActivityData>
+  /** Null when this session may not read the Keeper write record. */
+  readonly activity: Observed<RepoActivityData> | null
   /** Distinct files among the activity's writes. */
   readonly fileCount: number
   readonly onRetryGit: () => void

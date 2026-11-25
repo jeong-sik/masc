@@ -148,10 +148,17 @@ function decodeSinglePulseLaneFailure(row: unknown): PulseKeeperLaneFailure | nu
     : isRecord(row.failure) && isRecord(row.failure.cause)
       ? asStr(row.failure.cause.kind)
       : null
+  const failureCause = isRecord(row.failure) && isRecord(row.failure.cause) ? row.failure.cause : null
   return {
     runtime_id: asStr(row.runtime_id),
     summary,
     fault_kind: faultKind,
+    attempt: typeof row.attempt === 'number' && Number.isFinite(row.attempt) ? Math.trunc(row.attempt) : null,
+    dispatch: asStr(row.dispatch),
+    failure_kind: failureCause ? asStr(failureCause.kind) : null,
+    failure_detail: failureCause ? asStr(failureCause.detail) : null,
+    provider: failureCause ? asStr(failureCause.provider) : null,
+    network_kind: failureCause ? asStr(failureCause.network_kind) : null,
   }
 }
 
@@ -214,6 +221,7 @@ export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
       next_action: asStr(item.next_action),
       runtime_blocker_summary: asStr(item.runtime_blocker_summary),
       runtime_blocker_signature: asStr(item.runtime_blocker_signature),
+      runtime_blocker_class: asStr(item.runtime_blocker_class),
       runtime_path_rest: decodePulsePathRest(item.runtime_path_rest),
       operator_disposition: asStr(item.operator_disposition),
       operator_disposition_reason: asStr(item.operator_disposition_reason),

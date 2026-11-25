@@ -330,6 +330,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
             <div class="kp-diag-row">
               <strong>차단 사유</strong>: ${keeper.runtime_blocker_summary}
               ${keeper.runtime_blocker_signature && html` <span class="kp-roster-sub">(${keeper.runtime_blocker_signature})</span>`}
+              ${keeper.runtime_blocker_class && html` <span class="kp-roster-sub">[${keeper.runtime_blocker_class}]</span>`}
             </div>
           `}
           ${resting && keeper.runtime_path_rest && html`
@@ -356,6 +357,17 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           ${laneFailures.length > 0 && html`
             <div class="kp-diag-row">
               <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
+              <div class="kp-diag-lane-detail">
+                ${laneFailures.map((f) => html`
+                  <div class="kp-diag-lane" key=${`${f.runtime_id ?? 'lane'}:${f.summary}`}>
+                    <span>${f.runtime_id ?? 'lane'}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}${f.fault_kind ? ` · ${f.fault_kind}` : ''}</span>
+                    ${f.summary ? html`<div>${f.summary}</div>` : null}
+                    ${(f.failure_kind || f.failure_detail || f.provider || f.network_kind)
+                      ? html`<div class="kp-diag-lane-meta">${f.failure_kind ? html`<span>kind:${f.failure_kind}</span>` : null}${f.provider ? html`<span>provider:${f.provider}</span>` : null}${f.network_kind ? html`<span>network:${f.network_kind}</span>` : null}${f.failure_detail ? html`<span>${f.failure_detail}</span>` : null}</div>`
+                      : null}
+                  </div>
+                `)}
+              </div>
             </div>
           `}
           ${approvalModeRestoreError && html`

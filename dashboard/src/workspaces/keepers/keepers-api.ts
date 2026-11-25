@@ -296,10 +296,17 @@ function decodeSingleLaneFailure(row: unknown): KeeperLaneFailure | null {
     : isRecord(row.failure) && isRecord(row.failure.cause)
       ? asStr(row.failure.cause.kind)
       : null
+  const failureCause = isRecord(row.failure) && isRecord(row.failure.cause) ? row.failure.cause : null
   return {
     runtime_id: asStr(row.runtime_id),
     summary,
     fault_kind: faultKind,
+    attempt: typeof row.attempt === 'number' && Number.isFinite(row.attempt) ? Math.trunc(row.attempt) : null,
+    dispatch: asStr(row.dispatch),
+    failure_kind: failureCause ? asStr(failureCause.kind) : null,
+    failure_detail: failureCause ? asStr(failureCause.detail) : null,
+    provider: failureCause ? asStr(failureCause.provider) : null,
+    network_kind: failureCause ? asStr(failureCause.network_kind) : null,
   }
 }
 
@@ -448,6 +455,7 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
       context_unavailable_reason: asStr(raw.context_metrics_unavailable_reason),
       runtime_blocker_summary: asStr(raw.runtime_blocker_summary),
       runtime_blocker_signature: asStr(raw.runtime_blocker_signature),
+      runtime_blocker_class: asStr(raw.runtime_blocker_class),
       runtime_path_rest: pathRest,
       operator_disposition: asStr(raw.operator_disposition),
       operator_disposition_reason: asStr(raw.operator_disposition_reason),

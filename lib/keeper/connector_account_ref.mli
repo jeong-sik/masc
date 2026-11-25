@@ -14,6 +14,8 @@ val matches_actor : t -> surface:Surface_ref.t -> actor_id:string option -> bool
 
 val to_json : t -> Yojson.Safe.t
 
-val of_json : Yojson.Safe.t -> (t, string) result
-(** Decode the closed, versioned account key. Unknown and malformed keys
-    fail rather than being converted to another identity. *)
+val of_json : Yojson.Safe.t -> (t option, string) result
+(** A supported key is [Ok (Some account)]. An unsupported kind or version in
+    a valid envelope is [Ok None], so a stored observation remains readable
+    without proving an account. Malformed envelopes and malformed supported
+    keys return [Error]. *)

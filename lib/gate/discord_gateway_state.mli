@@ -172,8 +172,8 @@ type dispatched_event =
       ; author_is_user_message : bool
         (** The original payload proves a user-authored default message or
             reply from its original channel. This proof is withheld for
-            crosspost copies, webhooks, bot or system authors, other message
-            kinds and malformed authorship fields. *)
+            forwarded snapshots, crosspost copies, webhooks, bot or system
+            authors, other message kinds and malformed authorship fields. *)
       ; message_reference_channel_id : string option
       ; message_reference_message_id : string option
       ; referenced_message_author_id : string option

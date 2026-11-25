@@ -1664,6 +1664,29 @@ let test_decode_human_author_is_not_bot () =
   | Ok _ -> fail "plain author should have author_is_bot=false"
   | Error msg -> fail msg
 
+let test_forwarded_message_has_no_user_account_evidence () =
+  let check_authorship name expected message_type fields =
+    let payload =
+      `Assoc
+        ([ "id", `String "100"; "channel_id", `String "200"; "type", `Int message_type
+         ; "author", `Assoc [ "id", `String "900000000000000001" ]
+         ] @ fields)
+    in
+    match S.decode_dispatch ~bot_user_id:None ~event_name:"MESSAGE_CREATE" ~payload with
+    | Ok (S.Message_create { author_is_user_message; _ }) ->
+      check bool name expected author_is_user_message
+    | Ok _ -> fail "expected a message event"
+    | Error msg -> fail msg
+  in
+  let reference kind =
+    "message_reference", `Assoc [ "type", `Int kind; "message_id", `String "123" ]
+  in
+  let snapshot = "message_snapshots", `List [ `Assoc [ "message", `Assoc [] ] ] in
+  check_authorship "reply proves the author of the reply" true 19 [ reference 0 ];
+  check_authorship "forward reference with a snapshot" false 0 [ reference 1; snapshot ];
+  check_authorship "forward reference without a snapshot" false 0 [ reference 1 ];
+  check_authorship "snapshot without a reference" false 0 [ snapshot ]
+
 let test_bot_mention_suppressed_under_mention_only () =
   (* The reply-loop scenario: another bot @mentions our bot. Without
      suppression explicit_mentions_bot=true would start a turn. *)
@@ -2723,6 +2746,8 @@ let () =
             test_decode_sets_author_is_bot_from_webhook_id
         ; test_case "decode: plain author => not bot" `Quick
             test_decode_human_author_is_not_bot
+        ; test_case "forwarded content carries no user account evidence" `Quick
+            test_forwarded_message_has_no_user_account_evidence
         ; test_case "bot mention suppressed under Mention_only" `Quick
             test_bot_mention_suppressed_under_mention_only
         ; test_case "webhook mention suppressed under Mention_only" `Quick

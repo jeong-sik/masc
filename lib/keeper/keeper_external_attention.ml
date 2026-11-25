@@ -185,7 +185,7 @@ let account_of_actor_json : Yojson.Safe.t -> (Connector_account_ref.t option, st
   | `Assoc fields ->
     (match List.filter_map (function "account", value -> Some value | _ -> None) fields with
      | [] -> Ok None
-     | [ value ] -> Result.map Option.some (Connector_account_ref.of_json value)
+     | [ value ] -> Connector_account_ref.of_json value
      | _ -> Error "duplicate external attention account")
   | _ -> Error "invalid external attention actor"
 
@@ -586,7 +586,10 @@ let append_with_clock ~now ~base_path (item : item) =
           if String.trim line = "" then None else parse_line ~file_path:path line)
       in
       match recorded_item_by_event_id events item.event_id with
-      | Some existing -> None, `Duplicate existing
+      | Some existing ->
+        (* A replay settles to the first admission. It cannot retroactively
+           turn an observation into account evidence. *)
+        None, `Duplicate existing
       | None ->
         let item = { item with received_at = now () } in
         Some (Yojson.Safe.to_string (event_to_json (Recorded item)) ^ "\n"), `Recorded

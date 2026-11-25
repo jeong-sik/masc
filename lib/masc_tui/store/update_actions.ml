@@ -1483,7 +1483,7 @@ let active_keeper_for_tab target_tab (m : Model.t) =
     | None ->
         if
           Nav.equal_workspace m.nav.workspace Nav.Keepers
-          && (m.nav.pane_index = 1 || m.nav.zoomed)
+          && (m.nav.pane_index >= 1 || m.nav.zoomed)
           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab target_tab
         then
           Option.map
@@ -1689,7 +1689,7 @@ let active_keeper_for_context (m : Model.t) =
           if
             Nav.equal_workspace m.nav.workspace Nav.Keepers
             && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_context
-            && (m.nav.pane_index = 1 || m.nav.zoomed)
+            && (m.nav.pane_index >= 1 || m.nav.zoomed)
           then
             Option.map
               (fun (k : Wire_fleet.keeper_summary) -> k.name)
@@ -4668,10 +4668,27 @@ and execute_action ~now (m : Model.t) action =
                           }
                         , [] )
                       else
-                        let (ret_pane, ret_zoom), ret_rest =
+                        let (ret_pane, ret_zoom, ret_overlay), ret_rest =
                           match m.nav.dive_return_stack with
                           | hd :: tl -> (hd, tl)
-                          | [] -> ((0, false), [])
+                          | [] -> ((0, false, None), [])
+                        in
+                        let restored_overlay, restored_ask_modal =
+                          match ret_overlay with
+                          | Some Nav.Ask_answer ->
+                              if Option.is_some m.ask_modal then
+                                (Some Nav.Ask_answer, m.ask_modal)
+                              else (None, None)
+                          | Some
+                              (( Nav.Incidents
+                               | Nav.Queue_context _
+                               | Nav.Palette
+                               | Nav.Settings _
+                               | Nav.Inline_action _
+                               | Nav.Help
+                               | Nav.System_gate _ ) as ov) ->
+                              (Some ov, None)
+                          | None -> (None, None)
                         in
                         let next0 =
                           {
@@ -4681,11 +4698,13 @@ and execute_action ~now (m : Model.t) action =
                                 m.nav with
                                 dive_stack = rest;
                                 dive_return_stack = ret_rest;
+                                overlay = None;
                                 pane_index = 0;
                                 zoomed = false;
                                 dive_scroll_offset = 0;
                                 json_scroll_offset = 0;
                               };
+                            ask_modal = restored_ask_modal;
                             knowledge =
                               {
                                 (m.knowledge
@@ -4717,12 +4736,18 @@ and execute_action ~now (m : Model.t) action =
                           max 0 (Model.focusable_pane_count next1 - 1)
                         in
                         let clamped_pane = max 0 (min max_pane ret_pane) in
-                        let next =
+                        let next2 =
                           {
                             next1 with
                             nav = { next1.nav with pane_index = clamped_pane };
                           }
                           |> Update_nav.clamp_for_pane
+                        in
+                        let next =
+                          {
+                            next2 with
+                            nav = { next2.nav with overlay = restored_overlay };
+                          }
                           |> Update_nav.sync_config_for_keeper_view
                         in
                         (next, View_fetches.fetches_for_current_view next))
@@ -4801,6 +4826,36 @@ and execute_action ~now (m : Model.t) action =
                                 Work_store.Goal_filter_all m.work;
                           }
                         , [] )
+                      else if
+                        Nav.equal_workspace m.nav.workspace Nav.Infra
+                        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+                        && not
+                             (Infra_store.equal_code_right_mode
+                                m.infra.code.right_mode Infra_store.Code_file)
+                      then
+                        ( {
+                            m with
+                            infra =
+                              Infra_store.set_code_right_mode
+                                Infra_store.Code_file m.infra;
+                          }
+                        , [] )
+                      else if
+                        Nav.equal_workspace m.nav.workspace Nav.Runtime
+                        && Nav.equal_runtime_tab m.runtime.active_tab
+                             Nav.Runtime_addons_browser
+                        && m.runtime.addon_catalog_mode
+                      then
+                        let next =
+                          {
+                            m with
+                            nav = { m.nav with pane_index = 0 };
+                            runtime =
+                              { m.runtime with addon_catalog_mode = false };
+                          }
+                          |> Update_nav.clamp_for_pane
+                        in
+                        (next, [])
                       else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
@@ -6789,7 +6844,9 @@ and execute_action ~now (m : Model.t) action =
               let keeper_context =
                 Keeper_context_store.cycle_subtab ~keeper m.keeper_context
               in
-              let next = { m with keeper_context } in
+              let next =
+                { m with keeper_context } |> Update_nav.clamp_for_pane
+              in
               (next, View_fetches.fetches_for_current_view next)
           | None -> (
               if Option.is_some m.nav.overlay then (m, [])
@@ -7676,9 +7733,7 @@ and execute_action ~now (m : Model.t) action =
                   m.nav.pane_index = 1 && Model.work_pipeline_has_linked_card m
                 then
                   ( Model.with_toast ~now ~level:Model.Toast_warning
-                      (Say.make
-                         ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
-                         ~en:"No verification visible in pane (increase viewport height)")
+                      (Update_nav.hidden_verif_toast_msg m)
                       m
                   , [] )
                 else
@@ -7907,9 +7962,7 @@ and execute_action ~now (m : Model.t) action =
                       && Model.work_pipeline_has_linked_card m
                     then
                       ( Model.with_toast ~now ~level:Model.Toast_warning
-                          (Say.make
-                             ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
-                             ~en:"No verification visible in pane (increase viewport height)")
+                          (Update_nav.hidden_verif_toast_msg m)
                           m
                       , [] )
                     else

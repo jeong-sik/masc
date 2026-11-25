@@ -10321,18 +10321,26 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
     m_sb.nav.sidebar_focused;
   Alcotest.(check bool) "Body yields focus when sidebar focused" false
     (Model.body_has_focus m_sb);
-  (* 2. Down in sidebar live-previews Work > Goals while keeping focus in sidebar *)
-  let m_goals, cmds_goals = press_key m_sb Keymap.Input.Down in
-  Alcotest.(check bool) "Live preview switches to Work workspace" true
-    (Nav.equal_workspace m_goals.nav.workspace Nav.Work);
-  Alcotest.(check bool) "Live preview lands on Goals tab" true
-    (Nav.equal_work_tab m_goals.work.active_tab Nav.Work_pipeline);
-  Alcotest.(check bool) "Focus remains in sidebar during arrow preview" true
-    m_goals.nav.sidebar_focused;
-  Alcotest.(check bool) "Live preview issues view fetches" true
+  (* 2. Down in sidebar moves cursor non-destructively (keeps workspace & dive_stack intact) *)
+  let m_goals_cur, cmds_cur = press_key m_sb Keymap.Input.Down in
+  Alcotest.(check bool)
+    "Arrow browsing in sidebar keeps current Pulse workspace until Enter" true
+    (Nav.equal_workspace m_goals_cur.nav.workspace Nav.Pulse);
+  Alcotest.(check int) "Arrow Down moves sidebar cursor to Work > Goals"
+    (Nav.menu_item_index (Nav.Menu_work Nav.Work_pipeline))
+    m_goals_cur.nav.sidebar_cursor;
+  Alcotest.(check bool) "Focus remains in sidebar during arrow browsing" true
+    m_goals_cur.nav.sidebar_focused;
+  Alcotest.(check int) "Arrow browsing emits 0 premature view fetches" 0
+    (List.length cmds_cur);
+  (* 3. Enter in sidebar commits navigation to Work > Goals and hands focus cleanly into Body pane 0 *)
+  let m_body, cmds_goals = press_key m_goals_cur Keymap.Input.Enter in
+  Alcotest.(check bool) "Enter switches to Work workspace" true
+    (Nav.equal_workspace m_body.nav.workspace Nav.Work);
+  Alcotest.(check bool) "Enter lands on Goals tab" true
+    (Nav.equal_work_tab m_body.work.active_tab Nav.Work_pipeline);
+  Alcotest.(check bool) "Enter issues view fetches" true
     (cmds_goals <> []);
-  (* 3. Enter in sidebar hands focus cleanly into Body pane 0 *)
-  let m_body, _ = press_key m_goals Keymap.Input.Enter in
   Alcotest.(check bool) "Enter transfers focus to body" false
     m_body.nav.sidebar_focused;
   Alcotest.(check bool) "Body has focus after Enter" true
@@ -19881,6 +19889,628 @@ let test_layer1_input_esc_focus_traps () =
   Alcotest.(check bool) "#19c: [/] stays blocked on bare Micro viewport" false
     m_micro_bare_flt.nav.filter_focused
 
+let test_layer2_pane_scroll_nav_wayfinding () =
+  let step m msg = Update.step ~now:t0 m msg in
+  let step_k m k = step m (Msg.Key_event k) in
+
+  (* #4: Pulse pane_rects matches left-column [Attention; Companies; Goals] + right full World *)
+  let m_pulse =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let work =
+      base.work
+      |> Work_store.apply_asks ~observed_at:t0
+           [ sample_ask ~id:"ask-p" ~keeper:"alpha" () ]
+    in
+    let fleet =
+      Fleet_store.apply_roster ~observed_at:t0
+        (roster_of [ sample_keeper "alpha" ])
+        base.fleet
+    in
+    { base with work; fleet } |> Model.rebuild_attention
+  in
+  let p_rects = Model.pane_rects m_pulse in
+  Alcotest.(check int) "#4: Wide Pulse with attention has 4 pane_rects" 4
+    (List.length p_rects);
+  (match p_rects with
+  | [ r_attn; r_comp; r_goals; r_world ] ->
+      Alcotest.(check bool) "#4: World sits in right column beside left stack"
+        true (r_world.x > r_goals.x && r_world.x > r_comp.x && r_world.x > r_attn.x);
+      Alcotest.(check bool) "#4: World spans full main height (taller than Goals)"
+        true (r_world.h > r_goals.h);
+      Alcotest.(check bool) "#4: Left column stacks Attention -> Companies -> Goals"
+        true (r_attn.y < r_comp.y && r_comp.y < r_goals.y);
+      let m_click_world, _ =
+        step m_pulse
+          (Msg.Mouse_event
+             (Keymap.Input.Left_press
+                { col = r_world.x + 2 + 1; row = r_world.y + 2 + 1 }))
+      in
+      Alcotest.(check int) "#4: Clicking right column focuses Pulse World (pane 3)"
+        3 m_click_world.nav.pane_index;
+      let m_click_goals, _ =
+        step m_click_world
+          (Msg.Mouse_event
+             (Keymap.Input.Left_press
+                { col = r_goals.x + 2 + 1; row = r_goals.y + 1 + 1 }))
+      in
+      Alcotest.(check int) "#4: Clicking bottom-left focuses Pulse Goals (pane 2)"
+        2 m_click_goals.nav.pane_index
+  | _ -> Alcotest.fail "expected 4 Pulse pane rects");
+
+  (* #5a & #5b: Tools_usage_calls summary-only scroll + Tool_dive 2-pane series scroll *)
+  let buckets =
+    List.init 40 (fun i ->
+        {
+          Wire_runtime.start_unix = 1_795_200_000.0 +. float_of_int (i * 3600);
+          activity =
+            Wire_runtime.Series_active
+              { calls = i + 1; failures = 0; deferred = 0; p95_ms = 12.0 };
+        })
+  in
+  let summary : Wire_runtime.tool_series_summary =
+    {
+      tool_filter = None;
+      total_calls = 820;
+      total_failures = 0;
+      total_deferred = 0;
+      p50_ms = Some 5.0;
+      p95_ms = Some 12.0;
+      failure_classes =
+        {
+          dependency_unavailable = 0;
+          policy_rejection = 0;
+          runtime_failure = 0;
+          workflow_rejection = 0;
+          operator_cancelled = 0;
+          unclassified = 0;
+        };
+      series =
+        {
+          generated_at_unix = 1_795_254_000.0;
+          bucket_width = `Hour;
+          utc_offset_min = 0;
+          buckets;
+        };
+    }
+  in
+  let m_tools_usage =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    let runtime =
+      base.runtime
+      |> Runtime_store.set_tab Nav.Runtime_tools_usage
+      |> Runtime_store.set_tools_subview Runtime_store.Tools_usage_calls
+      |> Runtime_store.apply_tool_series_summary ~observed_at:t0 summary
+    in
+    { base with nav = { base.nav with workspace = Nav.Runtime }; runtime }
+  in
+  let m_tu_dn, _ = step_k m_tools_usage (key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "#5b: Tools_usage_calls scrolls using tool_series_summary even when tool_series is Unreported"
+    true (m_tu_dn.runtime.scroll_offset > 0);
+  let m_tu_clamped = Update_nav.clamp_for_pane m_tu_dn in
+  Alcotest.(check int)
+    "#5b: clamp_for_pane preserves Tools_usage_calls scroll_offset (no snap to 0)"
+    m_tu_dn.runtime.scroll_offset m_tu_clamped.runtime.scroll_offset;
+
+  let m_tool_dive =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    let runtime =
+      base.runtime
+      |> Runtime_store.apply_tool_detail_series ~observed_at:t0 ~tool:"bash"
+           summary
+    in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Runtime;
+          dive_stack = [ Nav.Dive_runtime (Nav.Tool_dive "bash") ];
+          pane_index = 0;
+        };
+      runtime;
+    }
+  in
+  Alcotest.(check int) "#5a: Tool_dive exposes 2 focusable panes" 2
+    (Model.focusable_pane_count m_tool_dive);
+  let m_td_tab, _ = step_k m_tool_dive (key Keymap.Input.Tab) in
+  Alcotest.(check int) "#5a: Tab in Tool_dive focuses bucket series pane 1" 1
+    m_td_tab.nav.pane_index;
+  let m_td_dn, _ = step_k m_td_tab (key Keymap.Input.Down) in
+  Alcotest.(check bool) "#5a: Down on Tool_dive pane 1 scrolls bucket table" true
+    (m_td_dn.runtime.scroll_offset > 0);
+
+  (* #6: Keepers zoomed & split preview reach right detail pane on Keeper_tool_calls *)
+  let big_fields =
+    List.init 40 (fun i -> (Printf.sprintf "k%02d" i, `String "val"))
+  in
+  let tc_page : Wire_keeper_context.keeper_tool_calls_page =
+    {
+      keeper = "alpha";
+      count = 1;
+      health = Some "healthy";
+      stale_reason = None;
+      coverage_gaps_count = 0;
+      entries =
+        [
+          {
+            ts_unix = 1_795_252_000.0;
+            tool = "bash";
+            execution_id = Some "exec-1";
+            tool_use_id = None;
+            turn_kind = Some "direct";
+            duration_ms = Some 10.0;
+            ok = Some true;
+            disposition = Some "completed";
+            failure_class = None;
+            execution_mode = None;
+            batch_index = None;
+            batch_size = None;
+            definition_source = Some "builtin";
+            input = `Assoc big_fields;
+            output = "{}";
+            original_bytes = Some 512;
+            truncated_to = None;
+            raw = `Null;
+          };
+        ];
+    }
+  in
+  let m_kp_tc_base =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    let fleet =
+      base.fleet
+      |> Fleet_store.apply_roster ~observed_at:t0
+           (roster_of [ sample_keeper "alpha" ])
+      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls
+    in
+    let keeper_context =
+      Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper:"alpha"
+        tc_page base.keeper_context
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Keepers; pane_index = 0 };
+      fleet;
+      keeper_context;
+    }
+  in
+  Alcotest.(check int)
+    "#6: Keepers split with Keeper_tool_calls exposes 3 panes (Fleet/Calls/Detail)"
+    3 (Model.focusable_pane_count m_kp_tc_base);
+  let m_kp_p1, _ = step_k m_kp_tc_base (key Keymap.Input.Tab) in
+  let m_kp_p2, _ = step_k m_kp_p1 (key Keymap.Input.Tab) in
+  Alcotest.(check int) "#6: 2nd Tab focuses right call detail pane (2)" 2
+    m_kp_p2.nav.pane_index;
+  let m_kp_p2_dn, _ = step_k m_kp_p2 (key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "#6: Down on Keepers split pane 2 scrolls tool call detail" true
+    ((Keeper_context_store.get_keeper ~keeper:"alpha" m_kp_p2_dn.keeper_context)
+       .call_detail_scroll_offset
+    > 0);
+  let m_kp_zoomed =
+    {
+      m_kp_tc_base with
+      nav = { m_kp_tc_base.nav with zoomed = true; pane_index = 0 };
+    }
+  in
+  Alcotest.(check int)
+    "#6: Keepers zoomed Keeper_tool_calls exposes 2 inner panes" 2
+    (Model.focusable_pane_count m_kp_zoomed);
+  let m_kp_z_tab, _ = step_k m_kp_zoomed (key Keymap.Input.Tab) in
+  let m_kp_z_dn, _ = step_k m_kp_z_tab (key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "#6: Down on Keepers zoomed pane 1 scrolls tool call detail" true
+    ((Keeper_context_store.get_keeper ~keeper:"alpha" m_kp_z_dn.keeper_context)
+       .call_detail_scroll_offset
+    > 0);
+
+  (* #12: Non-destructive sidebar browsing preserves active dive_stack until Enter *)
+  let m_in_dive =
+    let base = Model.initial ~cols:140 ~rows:36 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-keep") ];
+        };
+    }
+  in
+  let m_sb_open, _ = step_k m_in_dive (char_key "b") in
+  let m_sb_dn, cmds_sb_dn = step_k m_sb_open (key Keymap.Input.Down) in
+  Alcotest.(check bool) "#12: Sidebar Down preserves active dive_stack" true
+    (Option.is_some (Model.active_dive m_sb_dn));
+  Alcotest.(check int) "#12: Sidebar Down emits 0 premature fetches" 0
+    (List.length cmds_sb_dn);
+  let m_sb_esc, _ = step_k m_sb_dn (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Goal_dive"
+    true
+    (match Model.active_dive m_sb_esc with
+    | Some (Nav.Dive_work (Nav.Goal_dive "g-keep")) -> true
+    | _ -> false);
+
+  (* #14a: Goal_dive Measure/Procedure scrolls via J/K *)
+  let long_goal =
+    let base_g = sample_goal ~id:"g-long" ~phase:Wire_work.Executing () in
+    let long_txt =
+      String.concat "\n\n"
+        (List.init 25 (fun i -> Printf.sprintf "Criterion paragraph %02d" i))
+    in
+    { base_g with measure = long_txt; procedure = long_txt }
+  in
+  let m_gd =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-long") ];
+        };
+      work =
+        Work_store.apply_planning ~observed_at:t0
+          { goals = [ long_goal ]; tasks = [] }
+          base.work;
+    }
+  in
+  let m_gd_j, _ = step_k m_gd (char_key "J") in
+  Alcotest.(check bool) "#14a: [J] in Goal_dive scrolls Measure/Procedure down"
+    true (m_gd_j.nav.dive_scroll_offset > 0);
+  let m_gd_k, _ = step_k m_gd_j (char_key "K") in
+  Alcotest.(check int) "#14a: [K] in Goal_dive scrolls Measure/Procedure back to 0"
+    0 m_gd_k.nav.dive_scroll_offset;
+
+  (* #14b: Empty Work > Inbox scrolls Recent Decisions Audit (24h) *)
+  let decisions =
+    List.init 30 (fun i ->
+        {
+          Work_store.at_unix = 1_795_254_000.0 -. float_of_int (i * 60);
+          kind = Work_store.Decision_tool_approved;
+          target_id = Printf.sprintf "dec-%02d" i;
+          keeper = Some "alpha";
+          summary = Printf.sprintf "Approved %02d" i;
+        })
+  in
+  let m_inb_empty =
+    let base = Model.initial ~cols:140 ~rows:26 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work };
+      work =
+        {
+          (Work_store.set_tab Nav.Work_inbox base.work) with
+          recent_decisions_24h = decisions;
+        };
+    }
+    |> Model.rebuild_attention
+  in
+  let m_inb_dn, _ = step_k m_inb_empty (key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "#14b: Down on empty Work_inbox scrolls Recent Decisions Audit table" true
+    (m_inb_dn.work.detail_scroll_offset > 0);
+
+  (* #14c: Body mouse wheel hit-tests hovered pane without stealing keyboard focus *)
+  let td_rects = Model.pane_rects m_tool_dive in
+  (match td_rects with
+  | [ _; r_series ] ->
+      let m_whl, _ =
+        step m_tool_dive
+          (Msg.Mouse_event
+             (Keymap.Input.Wheel
+                {
+                  dir = Keymap.Input.Wheel_down;
+                  col = r_series.x + 2 + 1;
+                  row = r_series.y + 2 + 1;
+                }))
+      in
+      Alcotest.(check bool)
+        "#14c: Wheel over Tool_dive pane 1 scrolls series table while pane 0 is focused"
+        true (m_whl.runtime.scroll_offset > 0);
+      Alcotest.(check int)
+        "#14c: Wheel over hovered pane preserves keyboard focus on pane 0" 0
+        m_whl.nav.pane_index
+  | _ -> Alcotest.fail "expected 2 Tool_dive rects");
+
+  (* #15c: Overlay -> Dive return path restores Incidents and Ask_answer *)
+  let inc_store, inc =
+    Incidents.push ~occurred_at_unix:1_795_254_000.0
+      ~source:Health.Source_client_http
+      ~summary:(Say.literal "Timeout") ~detail:"GET /health timed out"
+      ~status:Health.Resolved Incidents.empty
+  in
+  let m_inc =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with overlay = Some Nav.Incidents };
+      incidents = inc_store;
+    }
+  in
+  let m_inc_dive, _ = step_k m_inc (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "#15c: Enter in Incidents pushes Incident_dive" true
+    (match Model.active_dive m_inc_dive with
+    | Some (Nav.Dive_infra (Nav.Incident_dive id)) -> Int.equal id inc.id
+    | _ -> false);
+  let m_inc_back, _ = step_k m_inc_dive (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "#15c: Esc from Incident_dive restores Incidents overlay"
+    true (Option.equal Nav.equal_overlay m_inc_back.nav.overlay (Some Nav.Incidents));
+
+  let ask = sample_ask ~id:"ask-ret-1" ~keeper:"alpha" () in
+  let m_ask_ov =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with overlay = Some Nav.Ask_answer };
+      ask_modal = Some (Model.ask_modal_for ask);
+    }
+  in
+  let m_ask_chat, _ = step_k m_ask_ov (char_key "C") in
+  let m_ask_back, _ = step_k m_ask_chat (key Keymap.Input.Escape) in
+  Alcotest.(check bool)
+    "#15c: Esc from Ask_answer [C] chat dive restores Ask_answer with modal intact"
+    true
+    (Option.equal Nav.equal_overlay m_ask_back.nav.overlay (Some Nav.Ask_answer)
+    && Option.is_some m_ask_back.ask_modal);
+
+  (* #15e: Infra > Code right_mode & Runtime > Addons catalog_mode exit on Esc *)
+  let m_code_git =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        base.infra
+        |> Infra_store.set_tab Nav.Infra_code
+        |> Infra_store.set_code_right_mode Infra_store.Code_git_status;
+    }
+  in
+  let m_code_esc, _ = step_k m_code_git (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "#15e: Esc in Infra > Code exits Git mode back to Code_file"
+    true
+    (Infra_store.equal_code_right_mode m_code_esc.infra.code.right_mode
+       Infra_store.Code_file);
+
+  let m_addon_cat =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime =
+        {
+          (Runtime_store.set_tab Nav.Runtime_addons_browser base.runtime) with
+          addon_catalog_mode = true;
+        };
+    }
+  in
+  let m_addon_esc, _ = step_k m_addon_cat (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "#15e: Esc in Runtime > Addons exits addon_catalog_mode"
+    false m_addon_esc.runtime.addon_catalog_mode;
+
+  (* #16a & #16c: Media_viewer via [M] on Artifacts, Memory_diff_dive via [D] on Memory *)
+  let art : Wire_knowledge.artifact_entry =
+    {
+      id = "art-mv-1";
+      revision = 1;
+      title = "Media Test";
+      summary = "";
+      author = "alpha";
+      created_at_unix = 1_795_254_000.0;
+      body = { sha256 = "sha-mv-1"; bytes = 32; mime = "text/markdown" };
+    }
+  in
+  let m_art =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art ];
+    }
+  in
+  let m_mv, _ = step_k m_art (char_key "M") in
+  Alcotest.(check bool) "#16a: [M] on Knowledge > Artifacts opens Media_viewer"
+    true
+    (Option.equal Nav.equal_overlay m_mv.nav.overlay
+       (Some (Nav.System_gate Nav.Media_viewer)));
+
+  let mdiff : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_world;
+      range =
+        {
+          window = Some "24h";
+          from_rev = Some 1;
+          to_rev = Some 4;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 0;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 0;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.World_diff
+          {
+            counts =
+              {
+                total_claims_now = 1;
+                added = 1;
+                updated = 0;
+                retracted = 0;
+                incomplete_batches = 0;
+                aborted_batches = 0;
+              };
+            history = None;
+            unparseable_timestamps = 0;
+            revisions = [];
+            added = [];
+            updated = [];
+            retracted = [];
+          };
+    }
+  in
+  let m_mem =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    let k0 =
+      Knowledge_store.empty
+      |> Knowledge_store.set_tab Nav.Knowledge_memory
+      |> Knowledge_store.set_memory_diff ~keeper:None
+           ~window:Knowledge_store.Window_24h
+           (Observed.value ~observed_at:t0 mdiff)
+    in
+    { base with nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 }; knowledge = k0 }
+  in
+  let m_mem_d, _ = step_k m_mem (char_key "D") in
+  Alcotest.(check bool) "#16c: [D] on Knowledge > Memory pushes Memory_diff_dive"
+    true
+    (match Model.active_dive m_mem_d with
+    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { from_rev = 1; to_rev = 4; _ }))
+      ->
+        true
+    | _ -> false);
+
+  (* #17: All 9 keeper tabs map 1:1 in Nav.all_menu_items & Model.active_menu_target *)
+  Alcotest.(check int) "#17: Nav.all_menu_items has 36 items" 36
+    (List.length Nav.all_menu_items);
+  List.iter
+    (fun kt ->
+      let m_k =
+        let base = Model.initial () in
+        {
+          base with
+          nav = { base.nav with workspace = Nav.Keepers };
+          fleet = Fleet_store.set_keeper_dive_tab kt base.fleet;
+        }
+      in
+      Alcotest.(check bool) "#17: active_menu_target maps keeper tab 1:1" true
+        (Nav.equal_menu_target (Model.active_menu_target m_k)
+           (Nav.Menu_keeper_tab kt)))
+    Nav.all_keeper_tabs;
+
+  (* #18b: Work > Pipeline pane 1 empty verifications gives accurate toast (not viewport height) *)
+  let m_wp_empty =
+    let base = Model.initial ~cols:140 ~rows:30 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; pane_index = 1 };
+      work = Work_store.set_tab Nav.Work_pipeline base.work;
+    }
+  in
+  let m_wp_a, _ = step_k m_wp_empty (char_key "a") in
+  (match m_wp_a.toast with
+  | Some toast ->
+      Alcotest.(check string)
+        "#18b: Empty verifications toast does not blame viewport height"
+        "No pending verifications"
+        (Say.resolve Say.Lang_en toast.message)
+  | None -> Alcotest.fail "expected toast on empty verifications pane");
+
+  (* #18d: Tools_keeper_skills pane 0 preserves scroll_offset when pane 1 skills is empty *)
+  let tools_snap : Wire_runtime.tools_dashboard_snapshot =
+    {
+      entries = [];
+      total_calls = 0;
+      distinct_tools_called = 0;
+      registered_count = 35;
+      effective_keeper_surface =
+        Some
+          (Wire_runtime.Keeper_surface_available
+             {
+               keeper_name = "alpha";
+               runtime_id = "rt-1";
+               tool_delivery = "inline";
+               tool_surface_bytes = 1024;
+               skill_tool_surface_bytes = 0;
+               skill_discovery_bytes = 0;
+               skill_body_bytes = 0;
+               tool_surface_sha256 = None;
+               tools =
+                 List.init 35 (fun i ->
+                     {
+                       Wire_runtime.name = Printf.sprintf "tool_%02d" i;
+                       origin = "builtin";
+                     });
+               skills_left_out = [];
+               lane_addon_conflicts = [];
+             });
+      volume_gc_summary = None;
+      keeper_cleanup_summary = None;
+    }
+  in
+  let m_tks =
+    let base = Model.initial ~cols:140 ~rows:26 () in
+    let runtime =
+      {
+        (base.runtime
+        |> Runtime_store.set_tab Nav.Runtime_tools_usage
+        |> Runtime_store.set_tools_subview Runtime_store.Tools_keeper_skills
+        |> Runtime_store.apply_tools_dashboard ~observed_at:t0 tools_snap)
+        with
+        scroll_offset = 3;
+      }
+    in
+    { base with nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 }; runtime }
+  in
+  let m_tks_clamped = Update_nav.clamp_for_pane m_tks in
+  Alcotest.(check int)
+    "#18d: Tools_keeper_skills pane 0 clamp_for_pane keeps scroll_offset=3" 3
+    m_tks_clamped.runtime.scroll_offset;
+
+  (* #20b & #20c: Verification_dive tab resets on push_dive; has_active_memory_reading is scoped *)
+  let m_vtab =
+    let base = Model.initial () in
+    {
+      base with
+      work =
+        Work_store.set_verification_dive_tab Work_store.Verif_tab_tlc base.work;
+    }
+  in
+  let m_vdive, _ =
+    Update_nav.push_dive m_vtab (Nav.Dive_work (Nav.Verification_dive "v-1"))
+  in
+  Alcotest.(check bool)
+    "#20b: push_dive Verification_dive resets tab to Verif_tab_evidence" true
+    (Work_store.equal_verification_dive_tab m_vdive.work.verification_dive_tab
+       Work_store.Verif_tab_evidence);
+  let fake_reading =
+    Knowledge_store.Reading_diff_item
+      {
+        keeper = Some "other-keeper";
+        item =
+          Knowledge_store.World_added
+            {
+              seq = 1;
+              batch_id = "b-1";
+              fact_id = "f-1";
+              summary = "claim";
+              recorded_at = "2026-01-01T00:00:00Z";
+              claim_text = None;
+              payload = `Null;
+            };
+      }
+  in
+  let m_stale_mr =
+    let base = Model.initial () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work };
+      knowledge = Knowledge_store.open_memory_reading fake_reading base.knowledge;
+    }
+  in
+  Alcotest.(check bool)
+    "#20c: has_active_memory_reading is false outside Memory scope" false
+    (Model.has_active_memory_reading m_stale_mr)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -21626,5 +22256,8 @@ let () =
           Alcotest.test_case
             "Layer 1: input, Esc-cascade, focus-trap, modal & key-hijack fixes"
             `Quick test_layer1_input_esc_focus_traps;
+          Alcotest.test_case
+            "Layer 2: pane geometry, scroll, sidebar, wayfinding & orphan fixes"
+            `Quick test_layer2_pane_scroll_nav_wayfinding;
         ] );
     ]

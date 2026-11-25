@@ -847,7 +847,9 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
     part.exhausted_and_credits = []
     && part.active_subscriptions = []
     && part.unreported = []
-  then H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme ~lang obs
+  then
+    H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
+      ~lang ~filter_query:rt.filter_query obs
   else
     let visible = Runtime_store.visible_credit_accounts rt in
     let _ = visible in
@@ -2788,7 +2790,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     match sel_lane with
     | None ->
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp insp_inner)
-          ~theme ~lang rt.runtime_resolved
+          ~theme ~lang ~filter_query:rt.filter_query rt.runtime_resolved
     | Some lane ->
         let slot_quota_st rid =
           match Hashtbl.find_opt runtimes_tbl rid with
@@ -3397,8 +3399,9 @@ let format_bucket_ts ~tz_offset_sec ~bucket_width ts_unix =
       let m = mp + (if mp < 10 then 3 else -9) in
       Printf.sprintf "%02d-%02d" m d
 
-let draw_tool_series_analytics ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp ~(model : Model.t) ~(series : Wire_runtime.tool_series)
+let draw_tool_series_analytics ~table_focused ~grid ~cache
+    ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~(model : Model.t)
+    ~(series : Wire_runtime.tool_series)
     ~(summary : Wire_runtime.tool_series_summary option) ~show_err_classes =
   let lang = model.lang in
   let rt = model.runtime in
@@ -3568,7 +3571,7 @@ let draw_tool_series_analytics ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let tbl_inner =
     Card.draw ~cache grid ~rect:tbl_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 0)
+      (H.card_spec ~focused:table_focused
          (Say.resolve lang
             (Say.make ~ko:"시간대별 도구 호출 버킷 (최신순)"
                ~en:"Bucket Breakdown (Newest First)")))
@@ -3814,7 +3817,7 @@ let render_tools_catalog_tree ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   if not (Rect.is_empty inner) then begin
     if display_entries = [] then
       H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
-        ~lang rt.tools_dashboard
+        ~lang ~filter_query:rt.filter_query rt.tools_dashboard
     else
       let columns : Table.column list =
         [
@@ -4307,11 +4310,13 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
   | Runtime_store.Tools_usage_calls -> (
       match (Observed.to_option rt.tool_series_summary, Observed.to_option rt.tool_series) with
       | Some s, _ ->
-          draw_tool_series_analytics ~grid ~cache ~rect:body_rect ~theme ~bp
-            ~model ~series:s.series ~summary:(Some s) ~show_err_classes:true
+          draw_tool_series_analytics ~table_focused:(Model.body_has_focus model)
+            ~grid ~cache ~rect:body_rect ~theme ~bp ~model ~series:s.series
+            ~summary:(Some s) ~show_err_classes:true
       | None, Some series ->
-          draw_tool_series_analytics ~grid ~cache ~rect:body_rect ~theme ~bp
-            ~model ~series ~summary:None ~show_err_classes:true
+          draw_tool_series_analytics ~table_focused:(Model.body_has_focus model)
+            ~grid ~cache ~rect:body_rect ~theme ~bp ~model ~series ~summary:None
+            ~show_err_classes:true
       | None, None ->
           let inner =
             Card.draw ~cache grid ~rect:body_rect ~theme
@@ -5696,7 +5701,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
             (Printf.sprintf "%s · %s" path message)
       | None ->
           H.draw_observed_placeholder ~grid ~rect:rc ~theme ~lang
-            rt.addon_package_catalog
+            ~filter_query:rt.filter_query rt.addon_package_catalog
     end
   end
   else begin
@@ -6409,11 +6414,11 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
         in
         let meta_inner =
           Card.draw ~cache grid ~rect:meta_rect ~theme
-            (H.card_spec ?badge ~focused:(Model.body_has_focus model)
+            (H.card_spec ?badge ~focused:(Model.pane_focused model 0)
                ~hotkey:
                  (Say.resolve lang
-                    (Say.make ~ko:"[e] MCP 실행 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
-                       ~en:"[e] Execute MCP · [w] Window(24h/7d/14d) · [Esc] Back"))
+                    (Say.make ~ko:"[e] MCP 실행 · [Tab] 시계열 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
+                       ~en:"[e] Execute MCP · [Tab] Series · [w] Window(24h/7d/14d) · [Esc] Back"))
                (Printf.sprintf "%s > %s"
                   (Say.resolve lang (Say.make ~ko:"도구 상세" ~en:"Tool Detail"))
                   tool_name))
@@ -6538,13 +6543,14 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
         if not (Rect.is_empty series_rect) then begin
           match Observed.to_option rt.tool_detail_series with
           | Some (tn, summary) when String.equal tn tool_name ->
-              draw_tool_series_analytics ~grid ~cache ~rect:series_rect ~theme
-                ~bp ~model ~series:summary.series ~summary:(Some summary)
+              draw_tool_series_analytics ~table_focused:(Model.pane_focused model 1)
+                ~grid ~cache ~rect:series_rect ~theme ~bp ~model
+                ~series:summary.series ~summary:(Some summary)
                 ~show_err_classes:true
           | _ ->
               let inner =
                 Card.draw ~cache grid ~rect:series_rect ~theme
-                  (H.card_spec
+                  (H.card_spec ~focused:(Model.pane_focused model 1)
                      (Say.resolve lang
                         (Say.make ~ko:"도구별 시계열 추이"
                            ~en:"Per-Tool Time Series")))

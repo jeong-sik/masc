@@ -3255,8 +3255,10 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  Say.resolve lang
                    (Say.make ~ko:"이력 원장 (Ch3)" ~en:"History Ledger (Ch3)")))
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
-         (Say.resolve lang
-            (Say.make ~ko:"인프라 > 과거 사건 상세" ~en:"Infra > Incident Dive")))
+         (Printf.sprintf "%s > %s"
+            (Say.resolve lang (Nav.workspace_label model.nav.workspace))
+            (Say.resolve lang
+               (Say.make ~ko:"과거 사건 상세" ~en:"Incident Dive"))))
   in
   if Rect.is_empty inner then ()
   else

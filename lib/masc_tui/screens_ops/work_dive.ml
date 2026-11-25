@@ -293,34 +293,34 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     let header_hotkey =
       match g_opt with
       | None ->
-          Ops_common.say model ~ko:"[Space] JSON · [Esc] 뒤로"
-            ~en:"[Space] JSON · [Esc] Back"
+          Ops_common.say model ~ko:"[J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+            ~en:"[J/K] Measure · [Space] JSON · [Esc] Back"
       | Some g -> (
           match g.phase with
           | Wire_work.Awaiting_confirmation ->
               Ops_common.say model
-                ~ko:"[a] 완료 확정 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[a] Confirm · [x] Pause · [Space] JSON · [Esc] Back"
+                ~ko:"[a] 완료 확정 · [x] 일시정지 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Confirm · [x] Pause · [J/K] Measure · [Space] JSON · [Esc] Back"
           | Wire_work.Paused _ ->
               Ops_common.say model
-                ~ko:"[a] 재개 · [x] 중단 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[a] Resume · [x] Drop · [Space] JSON · [Esc] Back"
+                ~ko:"[a] 재개 · [x] 중단 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Resume · [x] Drop · [J/K] Measure · [Space] JSON · [Esc] Back"
           | Wire_work.Blocked _ ->
               Ops_common.say model
-                ~ko:"[a] 차단 해제 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[a] Unblock · [x] Pause · [Space] JSON · [Esc] Back"
+                ~ko:"[a] 차단 해제 · [x] 일시정지 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Unblock · [x] Pause · [J/K] Measure · [Space] JSON · [Esc] Back"
           | Wire_work.Executing ->
               Ops_common.say model
-                ~ko:"[a] 검증 요청 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[a] Verify · [x] Pause · [Space] JSON · [Esc] Back"
+                ~ko:"[a] 검증 요청 · [x] 일시정지 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Verify · [x] Pause · [J/K] Measure · [Space] JSON · [Esc] Back"
           | Wire_work.Verifying ->
               Ops_common.say model
-                ~ko:"[x] 일시정지 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[x] Pause · [Space] JSON · [Esc] Back"
+                ~ko:"[x] 일시정지 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[x] Pause · [J/K] Measure · [Space] JSON · [Esc] Back"
           | Wire_work.Completed | Wire_work.Dropped ->
               Ops_common.say model
-                ~ko:"[a] 다시 열기 · [Space] JSON · [Esc] 뒤로"
-                ~en:"[a] Reopen · [Space] JSON · [Esc] Back")
+                ~ko:"[a] 다시 열기 · [J/K] 본문 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Reopen · [J/K] Measure · [Space] JSON · [Esc] Back")
     in
     let spec : Card.spec =
       {

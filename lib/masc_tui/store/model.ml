@@ -21,7 +21,7 @@ type composer_mode =
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool) list;
+  dive_return_stack : (int * bool * Nav.overlay option) list;
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -632,20 +632,8 @@ let active_menu_target m =
             | None -> Some m.fleet.keeper_dive_tab
           in
           match tab_opt with
-          | Some
-              (( Nav.Keeper_context
-               | Nav.Keeper_tool_calls
-               | Nav.Keeper_logs
-               | Nav.Keeper_identity ) as tab) ->
-              Nav.Menu_keeper_tab tab
-          | Some
-              ( Nav.Keeper_chat
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config )
-          | None ->
-              Nav.Menu_keepers)
+          | Some tab -> Nav.Menu_keeper_tab tab
+          | None -> Nav.Menu_keepers)
       | Nav.Runtime -> Nav.Menu_runtime m.runtime.active_tab
       | Nav.Infra -> Nav.Menu_infra m.infra.active_tab)
 
@@ -832,6 +820,78 @@ let dive_work_json_pane_index m =
     | None ->
         None
 
+let keeper_preview_has_inner_split m =
+  match Fleet_store.selected_keeper_summary m.fleet with
+  | None -> false
+  | Some k -> (
+      match m.fleet.keeper_dive_tab with
+      | Nav.Keeper_tool_calls -> true
+      | Nav.Keeper_context ->
+          let ks =
+            Keeper_context_store.get_keeper ~keeper:k.name m.keeper_context
+          in
+          Keeper_context_store.equal_context_subtab ks.subtab
+            Keeper_context_store.Ctx_exact_input
+      | Nav.Keeper_chat
+      | Nav.Keeper_memory
+      | Nav.Keeper_work_candle
+      | Nav.Keeper_sandbox
+      | Nav.Keeper_config
+      | Nav.Keeper_logs
+      | Nav.Keeper_identity ->
+          false)
+
+let has_active_memory_reading m =
+  let scope_opt =
+    match active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+        Some (Some name)
+    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
+        Some keeper
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_context
+                | Nav.Keeper_tool_calls
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge
+            (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        None
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Knowledge
+          when Nav.equal_knowledge_tab m.knowledge.active_tab
+                 Nav.Knowledge_memory ->
+            Some m.knowledge.memory_diff_keeper
+        | Nav.Keepers
+          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> Some (Some k.name)
+            | None -> None)
+        | Nav.Pulse
+        | Nav.Work
+        | Nav.Keepers
+        | Nav.Knowledge
+        | Nav.Runtime
+        | Nav.Infra ->
+            None)
+  in
+  match scope_opt, m.knowledge.memory_reading with
+  | Some keeper_opt, Some entry ->
+      Knowledge_store.memory_reading_matches_scope ~keeper_opt entry
+  | (Some _ | None), (Some _ | None) -> false
+
 let focusable_pane_count m =
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
     1
@@ -875,6 +935,7 @@ let focusable_pane_count m =
               main_panes + json_panes
         | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
+        | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> 2
         | Some
             ( Nav.Dive_keeper
                 {
@@ -889,11 +950,17 @@ let focusable_pane_count m =
                   _;
                 }
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
+            | Nav.Dive_runtime
+                (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             1
         | None ->
-            if m.nav.zoomed && can_zoom_current_view m then 1
+            if m.nav.zoomed && can_zoom_current_view m then
+              if
+                Nav.equal_workspace m.nav.workspace Nav.Keepers
+                && keeper_preview_has_inner_split m
+              then 2
+              else 1
             else
           match m.nav.workspace with
           | Nav.Pulse -> List.length (pulse_panes m)
@@ -928,7 +995,7 @@ let focusable_pane_count m =
                  || equal_breakpoint m.breakpoint Standard)
                 && inner_body_width m >= 104
                 && has_roster_or_loading
-              then 2
+              then if keeper_preview_has_inner_split m then 3 else 2
               else 1
           | Nav.Runtime -> (
               match m.runtime.active_tab with
@@ -984,15 +1051,38 @@ let pane_rects m =
     if is_compact then split_v_ratio ~gap:gap_v r top_ratio
     else split_h_ratio ~gap:gap_h r left_ratio
   in
+  let split_v_fixed ~(gap : int) (r : Rect.t) (top_h : int) : Rect.t * Rect.t =
+    let th = max 0 (min r.h top_h) in
+    let bh = max 0 (r.h - th - gap) in
+    ( Rect.make ~x:r.x ~y:r.y ~w:r.w ~h:th
+    , Rect.make ~x:r.x ~y:(r.y + th + gap) ~w:r.w ~h:bh )
+  in
+  let split_keeper_inner tab (r : Rect.t) =
+    match tab with
+    | Nav.Keeper_tool_calls ->
+        if r.w >= 76 then split_h_ratio ~gap:2 r 0.50
+        else split_v_ratio ~gap:1 r 0.46
+    | Nav.Keeper_context ->
+        if r.w >= 72 then split_h_ratio ~gap:2 r 0.44
+        else split_v_ratio ~gap:1 r 0.48
+    | Nav.Keeper_chat
+    | Nav.Keeper_memory
+    | Nav.Keeper_work_candle
+    | Nav.Keeper_sandbox
+    | Nav.Keeper_config
+    | Nav.Keeper_logs
+    | Nav.Keeper_identity ->
+        (r, Rect.empty)
+  in
   let n = focusable_pane_count m in
   if n <= 1 || Rect.is_empty br then [ br ]
   else
     match active_dive m with
     | Some (Nav.Dive_keeper { tab = Nav.Keeper_tool_calls; _ }) ->
-        let l, r = split2 ~left_ratio:0.42 ~top_ratio:0.45 br in
+        let l, r = split_keeper_inner Nav.Keeper_tool_calls br in
         [ l; r ]
     | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) ->
-        let l, r = split2 ~left_ratio:0.38 ~top_ratio:0.42 br in
+        let l, r = split_keeper_inner Nav.Keeper_context br in
         [ l; r ]
     | Some (Nav.Dive_work _) ->
         if m.infra.show_raw_json && inner_body_width m >= 88 then
@@ -1004,6 +1094,10 @@ let pane_rects m =
         else
           let t, b = split_v_ratio ~gap:0 br 0.5 in
           [ t; b ]
+    | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
+        let top_h = if br.h >= 20 then 9 else 6 in
+        let t, b = split_v_fixed ~gap:gap_v br top_h in
+        [ t; b ]
     | Some
         ( Nav.Dive_keeper
             {
@@ -1018,44 +1112,82 @@ let pane_rects m =
               _;
             }
         | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
+        | Nav.Dive_runtime
+            (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ ) ->
         [ br ]
     | None -> (
+        if m.nav.zoomed && can_zoom_current_view m then
+          if
+            Nav.equal_workspace m.nav.workspace Nav.Keepers
+            && keeper_preview_has_inner_split m
+          then
+            let l, r = split_keeper_inner m.fleet.keeper_dive_tab br in
+            [ l; r ]
+          else [ br ]
+        else
         match m.nav.workspace with
         | Nav.Pulse ->
-            let hero_h = if br.h >= 24 then 5 else if br.h >= 16 then 4 else 0 in
-            let grid_r =
-              Rect.make ~x:br.x ~y:(br.y + hero_h) ~w:br.w
-                ~h:(max 0 (br.h - hero_h))
+            let work_r =
+              match m.breakpoint with
+              | (Wide | Standard) when br.h >= 24 ->
+                  Rect.make ~x:br.x ~y:(br.y + 1) ~w:br.w ~h:(br.h - 1)
+              | Wide | Standard | Compact | Micro -> br
+            in
+            let hero_h =
+              match m.breakpoint with
+              | Wide | Standard -> min 4 work_r.h
+              | Compact | Micro -> min 3 work_r.h
+            in
+            let below_hero =
+              Rect.make ~x:work_r.x ~y:(work_r.y + hero_h) ~w:work_r.w
+                ~h:(max 0 (work_r.h - hero_h))
+            in
+            let main_r =
+              if gap_v > 0 && below_hero.h > gap_v + 4 then
+                Rect.make ~x:below_hero.x ~y:(below_hero.y + gap_v)
+                  ~w:below_hero.w ~h:(below_hero.h - gap_v)
+              else below_hero
             in
             let panes = pulse_panes m in
             let has_attn =
               List.exists (equal_pulse_pane Pulse_attention) panes
             in
+            let attn_n = Attention.count m.attention in
+            let groups_n =
+              max 1 (List.length (Fleet_store.company_groups m.fleet))
+            in
+            let attn_h_for max_rows =
+              if attn_n = 0 then 1 else min max_rows (max 4 (attn_n + 2))
+            in
             if is_compact then
-              let top, bot = split_v_ratio ~gap:gap_v grid_r 0.5 in
-              if has_attn then
-                let p0, p1 = split_v_ratio ~gap:gap_v top 0.5 in
-                let p2, p3 = split_v_ratio ~gap:gap_v bot 0.5 in
-                [ p0; p1; p2; p3 ]
-              else
-                let p1, p2 = split_v_ratio ~gap:gap_v bot 0.5 in
-                [ top; p1; p2 ]
+              let a_h = attn_h_for 4 in
+              let comp_h = min 9 (max 6 (groups_n + 3)) in
+              let a_r, rem1 = split_v_fixed ~gap:0 main_r a_h in
+              let c_r, rem2 = split_v_fixed ~gap:0 rem1 (min rem1.h comp_h) in
+              let g_h = min (max 0 rem2.h) (if rem2.h >= 8 then 5 else 4) in
+              let g_r, w_r = split_v_fixed ~gap:0 rem2 g_h in
+              if has_attn then [ a_r; c_r; g_r; w_r ] else [ c_r; g_r; w_r ]
             else
-              let left, right = split_h_ratio ~gap:gap_h grid_r 0.54 in
-              let r_top, r_bot = split_v_ratio ~gap:gap_v right 0.52 in
-              if has_attn then
-                let l_top, l_bot = split_v_ratio ~gap:gap_v left 0.44 in
-                [ l_top; l_bot; r_top; r_bot ]
-              else [ left; r_top; r_bot ]
+              let left_col, right_col = split_h_ratio ~gap:gap_h main_r 0.46 in
+              let a_h =
+                attn_h_for (if equal_breakpoint m.breakpoint Wide then 7 else 5)
+              in
+              let comp_h = min 12 (max 8 (groups_n + 4)) in
+              let a_r, rem1 = split_v_fixed ~gap:gap_v left_col a_h in
+              let c_h =
+                min (max 0 (rem1.h - gap_v - 4)) (max 7 comp_h) |> max 0
+              in
+              let c_r, g_r = split_v_fixed ~gap:gap_v rem1 c_h in
+              if has_attn then [ a_r; c_r; g_r; right_col ]
+              else [ c_r; g_r; right_col ]
         | Nav.Work -> (
             match m.work.active_tab with
             | Nav.Work_pipeline ->
                 let body =
                   Rect.make ~x:br.x ~y:(br.y + 1) ~w:br.w ~h:(max 0 (br.h - 1))
                 in
-                let l, r = split2 ~left_ratio:0.55 ~top_ratio:0.52 body in
+                let l, r = split2 ~left_ratio:0.46 ~top_ratio:0.52 body in
                 if work_pipeline_has_linked_card m then
                   let l_top, l_bot = split_v_ratio ~gap:gap_v l 0.54 in
                   [ l_top; l_bot; r ]
@@ -1107,12 +1239,20 @@ let pane_rects m =
               Rect.make ~x:(br.x + lw + gap_h) ~y:br.y
                 ~w:(max 0 (br.w - lw - gap_h)) ~h:br.h
             in
-            [ l; r ]
+            if n = 3 then
+              let rl, rr = split_keeper_inner m.fleet.keeper_dive_tab r in
+              [ l; rl; rr ]
+            else [ l; r ]
         | Nav.Runtime ->
             let a, b = split2 ~left_ratio:0.48 ~top_ratio:0.48 br in
             [ a; b ]
         | Nav.Infra -> (
             match m.infra.active_tab with
+            | Nav.Infra_sandboxes ->
+                let top_h = if br.w >= 100 then 6 else 4 in
+                let _, body = split_v_fixed ~gap:gap_v br top_h in
+                let a, b = split_h_ratio ~gap:gap_h body 0.60 in
+                [ a; b ]
             | Nav.Infra_activity_logs when n = 3 ->
                 let left, rest = split_h_ratio ~gap:gap_h br 0.42 in
                 let mid, right = split_h_ratio ~gap:gap_h rest 0.58 in
@@ -1121,7 +1261,6 @@ let pane_rects m =
                 let left, right = split_h_ratio ~gap:gap_h br 0.42 in
                 let l_top, l_bot = split_v_ratio ~gap:gap_v left 0.52 in
                 [ l_top; l_bot; right ]
-            | Nav.Infra_sandboxes
             | Nav.Infra_code
             | Nav.Infra_activity_logs
             | Nav.Infra_repos_changes ->
@@ -1316,7 +1455,9 @@ let active_focus_label m =
         | Some (Nav.Dive_knowledge _) ->
             Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
-            Say.make ~ko:("도구 · " ^ name) ~en:("TOOL · " ^ name)
+            if m.nav.pane_index = 1 then
+              pane_prefix ~ko:(name ^ " · 시계열") ~en:(name ^ " · Series")
+            else pane_prefix ~ko:("도구 · " ^ name) ~en:("Tool · " ^ name)
         | Some (Nav.Dive_runtime (Nav.Fusion_dive id)) ->
             Say.make ~ko:("퓨전 · " ^ id) ~en:("FUSION · " ^ id)
         | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
@@ -1406,14 +1547,64 @@ let active_focus_label m =
                 if m.nav.zoomed && can_zoom_current_view m then
                   if board_recovery_active then
                     Say.make ~ko:"확대 · 격리 복구" ~en:"ZOOM · Quarantine"
+                  else if keeper_preview_has_inner_split m then
+                    match m.fleet.keeper_dive_tab with
+                    | Nav.Keeper_tool_calls ->
+                        if m.nav.pane_index = 1 then
+                          pane_prefix ~ko:"확대 · 상세" ~en:"ZOOM · Detail"
+                        else pane_prefix ~ko:"확대 · 호출" ~en:"ZOOM · Calls"
+                    | Nav.Keeper_context ->
+                        if m.nav.pane_index = 1 then
+                          pane_prefix ~ko:"확대 · 원문" ~en:"ZOOM · Prompt"
+                        else pane_prefix ~ko:"확대 · 섹션" ~en:"ZOOM · Sections"
+                    | Nav.Keeper_chat
+                    | Nav.Keeper_memory
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity ->
+                        let tab_lbl = Nav.keeper_tab_label m.fleet.keeper_dive_tab in
+                        Say.make
+                          ~ko:("확대 · " ^ Say.resolve Say.Lang_ko tab_lbl)
+                          ~en:("ZOOM · " ^ Say.resolve Say.Lang_en tab_lbl)
                   else
                     let tab_lbl = Nav.keeper_tab_label m.fleet.keeper_dive_tab in
                     Say.make
                       ~ko:("확대 · " ^ Say.resolve Say.Lang_ko tab_lbl)
                       ~en:("ZOOM · " ^ Say.resolve Say.Lang_en tab_lbl)
+                else if m.nav.pane_index = 2 && keeper_preview_has_inner_split m
+                then
+                  match m.fleet.keeper_dive_tab with
+                  | Nav.Keeper_tool_calls ->
+                      pane_prefix ~ko:"도구 상세" ~en:"Call Detail"
+                  | Nav.Keeper_context ->
+                      pane_prefix ~ko:"원문 상세" ~en:"Prompt Detail"
+                  | Nav.Keeper_chat
+                  | Nav.Keeper_memory
+                  | Nav.Keeper_work_candle
+                  | Nav.Keeper_sandbox
+                  | Nav.Keeper_config
+                  | Nav.Keeper_logs
+                  | Nav.Keeper_identity ->
+                      pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else if m.nav.pane_index = 1 then
                   if board_recovery_active then
                     pane_prefix ~ko:"격리 복구" ~en:"Quarantine"
+                  else if keeper_preview_has_inner_split m then
+                    match m.fleet.keeper_dive_tab with
+                    | Nav.Keeper_tool_calls ->
+                        pane_prefix ~ko:"도구 호출" ~en:"Tool Calls"
+                    | Nav.Keeper_context ->
+                        pane_prefix ~ko:"컨텍스트 파트" ~en:"Prompt Parts"
+                    | Nav.Keeper_chat
+                    | Nav.Keeper_memory
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity ->
+                        pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                   else pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
             | Nav.Runtime -> (
@@ -1441,7 +1632,11 @@ let active_focus_label m =
                       pane_prefix ~ko:"MCP·브라우저" ~en:"MCP & Browser"
                     else pane_prefix ~ko:"커넥터" ~en:"Connectors"
                 | Nav.Runtime_addons_browser ->
-                    if m.nav.pane_index = 1 then
+                    if m.runtime.addon_catalog_mode then
+                      if m.nav.pane_index = 1 then
+                        pane_prefix ~ko:"패키지 미리보기" ~en:"Pkg Preview"
+                      else pane_prefix ~ko:"애드온 카탈로그" ~en:"Addon Catalog"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"브라우저·탭" ~en:"Browser"
                     else pane_prefix ~ko:"애드온 레인" ~en:"Addons")
             | Nav.Infra -> (
@@ -1463,7 +1658,12 @@ let active_focus_label m =
                     | _ -> pane_prefix ~ko:"활동·로그" ~en:"Logs")
                 | Nav.Infra_code ->
                     if m.nav.pane_index = 1 then
-                      pane_prefix ~ko:"코드 뷰" ~en:"Code"
+                      let mode_lbl =
+                        Infra_store.code_right_mode_label m.infra.code.right_mode
+                      in
+                      pane_prefix
+                        ~ko:(Say.resolve Say.Lang_ko mode_lbl)
+                        ~en:(Say.resolve Say.Lang_en mode_lbl)
                     else pane_prefix ~ko:"파일 트리" ~en:"Files")))
 
 let is_keeper_config_active m =

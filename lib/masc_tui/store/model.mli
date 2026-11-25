@@ -27,9 +27,9 @@ type composer_mode =
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool) list;
-      (** Parallel return frames [(pane_index, zoomed)] captured on {!Update_nav.push_dive}
-          and restored when [Esc] pops {!dive_stack}. *)
+  dive_return_stack : (int * bool * Nav.overlay option) list;
+      (** Parallel return frames [(pane_index, zoomed, overlay)] captured on
+          {!Update_nav.push_dive} and restored when [Esc] pops {!dive_stack}. *)
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -291,6 +291,9 @@ val focusable_pane_count : t -> int
 (** Single source of truth for the exact number of interactive focusable panes
     currently rendered for [m]'s active view, sub-tab, breakpoint, zoom, and
     data state. Returns [1] when pane cycling is a no-op (never ghost panes). *)
+
+val keeper_preview_has_inner_split : t -> bool
+val has_active_memory_reading : t -> bool
 
 val task_dive_has_two_main_panes : t -> string -> bool
 (** [true] iff [Task_dive task_id] renders both a non-empty Description section

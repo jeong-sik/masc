@@ -653,11 +653,11 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           else
             match Model.active_dive model with
             | Some (Nav.Dive_keeper _) ->
-                if compact then "[←→] [Esc]"
+                if compact then "[[ ]] [Esc]"
                 else
                   Say.resolve lang
-                    (Say.make ~ko:"[←→] 탭  [Esc] 뒤로"
-                       ~en:"[←→] Tabs  [Esc] Back")
+                    (Say.make ~ko:"[[ ]] 탭  [Esc] 뒤로"
+                       ~en:"[[ ]] Tabs  [Esc] Back")
             | Some
                 ( Nav.Dive_work _
                 | Nav.Dive_knowledge _
@@ -677,8 +677,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  ~en:"[z/Esc] Unzoom  [←→] Cycle  [[ ]] Tabs")
           else if Nav.equal_workspace model.nav.workspace Nav.Keepers then
             Say.resolve lang
-              (Say.make ~ko:"[z/Esc] 확대 해제  [←→] 탭"
-                 ~en:"[z/Esc] Unzoom  [←→] Tabs")
+              (Say.make ~ko:"[z/Esc] 확대 해제  [[ ]] 탭"
+                 ~en:"[z/Esc] Unzoom  [[ ]] Tabs")
           else
             Say.resolve lang
               (Say.make ~ko:"[z/Esc] 확대 해제" ~en:"[z/Esc] Unzoom")
@@ -687,7 +687,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       else if
         Option.is_none (Model.active_dive model)
         && Nav.equal_workspace model.nav.workspace Nav.Keepers
-        && model.nav.pane_index = 1
+        && model.nav.pane_index >= 1
         && Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
       then
         let txt =
@@ -834,14 +834,89 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         end
       end
     in
+    let dive_root_label = function
+      | Nav.Dive_keeper _ -> Nav.workspace_label Nav.Keepers
+      | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
+      | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
+      | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
+      | Nav.Dive_infra (Nav.Lane_dive _) -> Nav.workspace_label Nav.Runtime
+      | Nav.Dive_infra (Nav.Incident_dive _) ->
+          Nav.workspace_label model.nav.workspace
+      | Nav.Dive_infra
+          ( Nav.Sandbox_dive _
+          | Nav.Runtime_trace_dive _
+          | Nav.Log_detail_dive _ ) ->
+          Nav.workspace_label Nav.Infra
+    in
+    let dive_segment_label = function
+      | Nav.Dive_keeper { name; _ } ->
+          Grapheme.truncate_to_width ~max_width:20 name
+      | Nav.Dive_work (Nav.Goal_dive id) ->
+          Say.resolve lang (Say.make ~ko:"목표" ~en:"Goal") ^ " " ^ id
+      | Nav.Dive_work (Nav.Task_dive id) ->
+          Say.resolve lang (Say.make ~ko:"작업" ~en:"Task") ^ " " ^ id
+      | Nav.Dive_work (Nav.Verification_dive id) ->
+          let tab_tag =
+            match model.work.verification_dive_tab with
+            | Work_store.Verif_tab_evidence -> ""
+            | Work_store.Verif_tab_summary ->
+                " [" ^ Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary") ^ "]"
+            | Work_store.Verif_tab_specs ->
+                " [" ^ Say.resolve lang (Say.make ~ko:"명세" ~en:"Specs") ^ "]"
+            | Work_store.Verif_tab_tlc -> " [TLC]"
+          in
+          Say.resolve lang (Say.make ~ko:"검증" ~en:"Verify")
+          ^ " " ^ id ^ tab_tag
+      | Nav.Dive_knowledge (Nav.Thread_dive id) ->
+          Say.resolve lang (Say.make ~ko:"타래" ~en:"Thread") ^ " " ^ id
+      | Nav.Dive_knowledge (Nav.Wiki_dive slug) ->
+          Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki") ^ " " ^ slug
+      | Nav.Dive_knowledge (Nav.Artifact_dive id) ->
+          Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact") ^ " " ^ id
+      | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) ->
+          let scope =
+            match keeper with
+            | Some k -> k
+            | None -> Say.resolve lang (Say.make ~ko:"월드" ~en:"World")
+          in
+          Printf.sprintf "%s rev %d..%d" scope from_rev to_rev
+      | Nav.Dive_runtime (Nav.Tool_dive name) ->
+          Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
+      | Nav.Dive_runtime (Nav.Fusion_dive run_id) ->
+          Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion") ^ " " ^ run_id
+      | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
+          Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
+      | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
+          Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
+      | Nav.Dive_infra (Nav.Sandbox_dive name) ->
+          Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandbox") ^ " " ^ name
+      | Nav.Dive_infra (Nav.Lane_dive id) ->
+          Say.resolve lang (Say.make ~ko:"레인" ~en:"Lane") ^ " " ^ id
+      | Nav.Dive_infra (Nav.Incident_dive id) ->
+          Printf.sprintf "%s #%d"
+            (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
+            id
+      | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) ->
+          Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
+          ^ " " ^ keeper
+      | Nav.Dive_infra (Nav.Log_detail_dive seq) ->
+          Printf.sprintf "%s #%d"
+            (Say.resolve lang (Say.make ~ko:"로그" ~en:"Log"))
+            seq
+    in
+    let format_dive_chain () =
+      let chain = List.rev model.nav.dive_stack in
+      match chain with
+      | [] -> ""
+      | first :: _ ->
+          let sep = " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " " in
+          let root = Say.resolve lang (dive_root_label first) in
+          let segs = List.map dive_segment_label chain in
+          String.concat sep (root :: segs)
+    in
     (match Model.active_dive model with
-     | Some (Nav.Dive_keeper { name; tab }) ->
-         let crumb =
-           Printf.sprintf "%s %s %s"
-             (Say.resolve lang (Nav.workspace_label Nav.Keepers))
-             (Glyph.to_utf8 Glyph.Prompt_caret)
-             (Grapheme.truncate_to_width ~max_width:20 name)
-         in
+     | Some (Nav.Dive_keeper { tab; _ }) ->
+         let crumb = format_dive_chain () in
          let adv =
            Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
              ~style:crumb_style crumb
@@ -856,109 +931,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              Nav.all_keeper_tabs
          in
          draw_tab_list ~gap:(if use_compact_kt then 1 else gap) tabs
-     | Some (Nav.Dive_work target) ->
-         let label =
-           match target with
-           | Nav.Goal_dive id ->
-               Say.resolve lang (Say.make ~ko:"목표" ~en:"Goal") ^ " " ^ id
-           | Nav.Task_dive id ->
-               Say.resolve lang (Say.make ~ko:"작업" ~en:"Task") ^ " " ^ id
-           | Nav.Verification_dive id ->
-               Say.resolve lang (Say.make ~ko:"검증" ~en:"Verify") ^ " " ^ id
-         in
-         let crumb =
-           Printf.sprintf "%s %s %s"
-             (Say.resolve lang (Nav.workspace_label Nav.Work))
-             (Glyph.to_utf8 Glyph.Prompt_caret)
-             label
-         in
-         let adv =
-           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
-             ~style:crumb_style crumb
-         in
-         x := !x + adv
-     | Some (Nav.Dive_knowledge target) ->
-         let label =
-           match target with
-           | Nav.Thread_dive id ->
-               Say.resolve lang (Say.make ~ko:"타래" ~en:"Thread") ^ " " ^ id
-           | Nav.Wiki_dive slug ->
-               Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki") ^ " " ^ slug
-           | Nav.Artifact_dive id ->
-               Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact") ^ " " ^ id
-           | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
-               let scope =
-                 match keeper with
-                 | Some k -> k
-                 | None -> Say.resolve lang (Say.make ~ko:"월드" ~en:"World")
-               in
-               Printf.sprintf "%s rev %d..%d" scope from_rev to_rev
-         in
-         let crumb =
-           Printf.sprintf "%s %s %s"
-             (Say.resolve lang (Nav.workspace_label Nav.Knowledge))
-             (Glyph.to_utf8 Glyph.Prompt_caret)
-             label
-         in
-         let adv =
-           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
-             ~style:crumb_style crumb
-         in
-         x := !x + adv
-     | Some (Nav.Dive_runtime target) ->
-         let label =
-           match target with
-           | Nav.Tool_dive name ->
-               Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
-           | Nav.Fusion_dive run_id ->
-               Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion") ^ " " ^ run_id
-           | Nav.Skill_dive ref_s ->
-               Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
-           | Nav.Exact_run_dive run_id ->
-               Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
-         in
-         let crumb =
-           Printf.sprintf "%s %s %s"
-             (Say.resolve lang (Nav.workspace_label Nav.Runtime))
-             (Glyph.to_utf8 Glyph.Prompt_caret)
-             label
-         in
-         let adv =
-           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
-             ~style:crumb_style crumb
-         in
-         x := !x + adv
-     | Some (Nav.Dive_infra target) ->
-         let ws_label, label =
-           match target with
-           | Nav.Sandbox_dive name ->
-               ( Nav.workspace_label Nav.Infra,
-                 Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandbox")
-                 ^ " " ^ name )
-           | Nav.Lane_dive id ->
-               ( Nav.workspace_label Nav.Runtime,
-                 Say.resolve lang (Say.make ~ko:"레인" ~en:"Lane") ^ " " ^ id )
-           | Nav.Incident_dive id ->
-               ( Nav.workspace_label Nav.Infra,
-                 Printf.sprintf "%s #%d"
-                   (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
-                   id )
-           | Nav.Runtime_trace_dive keeper ->
-               ( Nav.workspace_label Nav.Infra,
-                 Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
-                 ^ " " ^ keeper )
-           | Nav.Log_detail_dive seq ->
-               ( Nav.workspace_label Nav.Infra,
-                 Printf.sprintf "%s #%d"
-                   (Say.resolve lang (Say.make ~ko:"로그" ~en:"Log"))
-                   seq )
-         in
-         let crumb =
-           Printf.sprintf "%s %s %s"
-             (Say.resolve lang ws_label)
-             (Glyph.to_utf8 Glyph.Prompt_caret)
-             label
-         in
+     | Some
+         ( Nav.Dive_work _
+         | Nav.Dive_knowledge _
+         | Nav.Dive_runtime _
+         | Nav.Dive_infra _ ) ->
+         let crumb = format_dive_chain () in
          let adv =
            Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
              ~style:crumb_style crumb
@@ -1606,9 +1584,20 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || model.nav.zoomed
           || not (String.equal (String.trim (active_filter_text model)) "")
           || Option.is_some (Memory_diagram.active_diagram model)
-          || Option.is_some model.knowledge.memory_reading
+          || Model.has_active_memory_reading model
           || Option.is_some model.knowledge.armed_vote
           || Option.is_some model.knowledge.pending_wiki_edit_slug
+          || (Option.is_none (Model.active_dive model)
+              && Nav.equal_workspace model.nav.workspace Nav.Infra
+              && Nav.equal_infra_tab model.infra.active_tab Nav.Infra_code
+              && not
+                   (Infra_store.equal_code_right_mode
+                      model.infra.code.right_mode Infra_store.Code_file))
+          || (Option.is_none (Model.active_dive model)
+              && Nav.equal_workspace model.nav.workspace Nav.Runtime
+              && Nav.equal_runtime_tab model.runtime.active_tab
+                   Nav.Runtime_addons_browser
+              && model.runtime.addon_catalog_mode)
           || (Model.is_keeper_config_active model
               && (Config_store.is_editing_field model.config
                   || not (String.equal model.config.search_query "")))

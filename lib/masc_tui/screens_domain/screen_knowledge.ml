@@ -1857,8 +1857,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         (H.card_spec ~focused:(Model.pane_focused model 0)
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[c] 확인 · [P] 공유 · [Enter] 뷰어"
-                   ~en:"[c] Check · [P] Share · [Enter] Viewer"))
+                (Say.make ~ko:"[c] 확인 · [P] 공유 · [M] 뷰어 · [Enter] 상세"
+                   ~en:"[c] Check · [P] Share · [M] Viewer · [Enter] Dive"))
            (Say.resolve lang
               (Say.make ~ko:"발행 아티팩트 / 보고서"
                  ~en:"Published Artifacts & Reports")))
@@ -2072,7 +2072,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세" ~en:"[a] Recover · [A] Act"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세 · [D] Diff 상세" ~en:"[a] Recover · [A] Act · [D] Diff Dive"))
          (Say.resolve lang
             (Say.make ~ko:"월드 MVCC 메모리 · 경합 충돌"
                ~en:"World MVCC Memory & Conflicts")))

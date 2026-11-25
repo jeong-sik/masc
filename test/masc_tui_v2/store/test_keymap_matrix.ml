@@ -5836,7 +5836,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
   (* 2. Left Navigation Sidebar 100% reachability sweep: 'b' + Down*n + Enter for EVERY menu item! *)
   let menu_items = Nav.all_menu_items in
   let n_menu = List.length menu_items in
-  Alcotest.(check int) "Left Navigation Sidebar has all 31 unified targets (Wave 3)" 31
+  Alcotest.(check int) "Left Navigation Sidebar has all 36 unified targets" 36
     n_menu;
   let has_menu_target pred =
     List.exists (fun (it : Nav.menu_item) -> pred it.target) menu_items

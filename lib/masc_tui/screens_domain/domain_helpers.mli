@@ -176,6 +176,8 @@ val draw_observed_placeholder :
   theme:Theme.t ->
   lang:Say.lang ->
   ?bg:Theme.rgb ->
+  ?filter_query:string ->
+  ?empty_msg:Say.t ->
   'a Observed.t ->
   unit
 

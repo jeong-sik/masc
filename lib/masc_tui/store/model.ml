@@ -108,10 +108,21 @@ type server_identity = {
   autostart_attempted : bool;
 }
 
+type discord_source = {
+  target : Wire_discord_reply.target;
+  speaker : string;
+  excerpt : string;
+}
+
 type palette_mode =
   | Palette_commands
   | Palette_keepers
   | Palette_models
+  | Palette_discord_replies of {
+      epoch : Epoch.t;
+      workspace : Wire_work.expected_workspace;
+      sources : discord_source list;
+    }
 
 type palette_state = {
   mode : palette_mode;
@@ -225,6 +236,7 @@ type t = {
   config : Config_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  discord_replies : Discord_reply_store.t;
   ask_modal : ask_modal option;
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;
@@ -365,10 +377,10 @@ let equal_palette_mode a b =
   | Palette_keepers, Palette_keepers
   | Palette_models, Palette_models ->
       true
-  | Palette_commands, (Palette_keepers | Palette_models)
-  | Palette_keepers, (Palette_commands | Palette_models)
-  | Palette_models, (Palette_commands | Palette_keepers) ->
-      false
+  | Palette_discord_replies a, Palette_discord_replies b ->
+      Epoch.is_current ~current:a.epoch ~reply:b.epoch
+      && a.workspace = b.workspace && a.sources = b.sources
+  | (Palette_commands | Palette_keepers | Palette_models | Palette_discord_replies _), _ -> false
 
 let equal_mismatch_state a b =
   match a, b with
@@ -479,6 +491,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     config = Config_store.empty;
     palette = { mode = Palette_commands; query = ""; selected = 0 };
     inline_modal = None;
+    discord_replies = Discord_reply_store.empty;
     ask_modal = None;
     toast = None;
     quit_armed_at = None;
@@ -2588,6 +2601,9 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Discord_reply_form _ ->
+        [ { key = "discord_content"; label = Say.make ~ko:"Discord 답장" ~en:"Discord reply";
+            value = ""; required = false; secret = false } ]
     | Nav.Keeper_operator_note_form _ ->
         [
           {
@@ -2848,6 +2864,7 @@ let inline_modal_for kind =
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Discord_reply_form _
     | Nav.Tool_execute_form _
     | Nav.Skill_create_form
     | Nav.Skill_edit_form _
@@ -2899,6 +2916,7 @@ let modal_field_multiline (field : modal_form_field) =
   | "wiki_summary" | "wiki_body" | "wiki_note"
   | "description" | "source_text" | "value" | "args_json" | "addon_binding_json"
   | "goal_measure_spec"
+  | "discord_content"
   | "addon_action_payload" -> true
   | _ -> false
 

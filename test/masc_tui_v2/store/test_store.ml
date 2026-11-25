@@ -1834,6 +1834,7 @@ let test_verifier_regressions () =
     | Cmd.Http_post { req; _ } -> (
         match req with
         | Cmd.Post_config_patch { dry_run; _ } -> Bool.equal dry_run want_dry_run
+        | Cmd.Post_discord_reply _
         | Cmd.Post_ask_answer _
         | Cmd.Post_tool_approval _
         | Cmd.Post_gate_resolution _
@@ -23285,9 +23286,128 @@ let test_wire_reads_the_open_work () =
        (with_open [ open_tool "Read" Wire_fleet.Tool_executing 4.0 ]))
 ;;
 
+let test_discord_reply_source_and_receipt () =
+  let open Wire_discord_reply in
+  let row =
+    match Wire_fleet.decode_chat_history
+            (Yojson.Safe.from_string
+               {|[{"id":"row","role":"user","content":"question","ts":1.0,
+                   "speaker_name":"nickname","speaker_authority":"external",
+                   "external_message_id":"100003",
+                   "surface":{"kind":"discord","guild_id":"100000",
+                              "channel_id":"100002","parent_channel_id":"100001",
+                              "thread_id":"100002"}}]|})
+    with
+    | Ok [ row ] -> row
+    | _ -> Alcotest.fail "Discord chat source failed decoding"
+  in
+  let keeper = "alpha" in
+  let start = Model.initial () in
+  let start =
+    { start with
+      nav = { start.nav with workspace = Nav.Keepers; zoomed = true };
+      fleet =
+        start.fleet
+        |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper keeper ]
+        |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper
+             { messages = [ row ]; has_more = false; next_cursor = None };
+      server_identity =
+        { start.server_identity with workspace =
+            Some { instance_id = Some "server"; base_path = "/workspace";
+                   masc_root = "/workspace/.masc"; workspace_sha256 = None } };
+      drafts = start.drafts |> Drafts.set_active_keeper keeper
+                            |> Drafts.set_current_text "local Keeper draft" }
+  in
+  let enter m =
+    Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let posted cmds =
+    match List.filter_map
+            (function Cmd.Http_post { req = Cmd.Post_discord_reply { request; workspace }; _ } ->
+                 Some (request, workspace)
+               | _ -> None)
+            (Cmd.flatten cmds)
+    with
+    | [ item ] -> item
+    | _ -> Alcotest.fail "expected exactly one Discord HTTP request"
+  in
+  let received m request workspace result =
+    Update.step ~now:t1 m
+      (Msg.Http_reply { epoch = m.Model.epoch;
+                        reply = Msg.Reply_discord_reply { request; workspace; result } })
+    |> fst
+  in
+  let palette, _ = Update.execute_slash ~now:t0 start Slash.Discord_reply in
+  let form, _ = enter palette in
+  let form =
+    match form.inline_modal with
+    | Some modal ->
+        { form with inline_modal =
+            Some (Model.modal_update_active_field (fun _ -> "  reply  ") modal) }
+    | None -> Alcotest.fail "Discord source did not open its reply form"
+  in
+  let other_workspace =
+    { form with server_identity =
+        { form.server_identity with workspace =
+            Some { instance_id = Some "other"; base_path = "/other";
+                   masc_root = "/other/.masc"; workspace_sha256 = None } } }
+  in
+  Alcotest.(check bool) "a reply form cannot send in a different workspace" false
+    (List.exists
+        (function Cmd.Http_post { req = Cmd.Post_discord_reply _; _ } -> true | _ -> false)
+        (Cmd.flatten (snd (enter other_workspace))));
+  let sending, cmds = enter form in
+  let request, workspace = posted cmds in
+  let target, operation_id = identity request in
+  Alcotest.(check string) "exact original" "100003" target.origin.original_message_id;
+  Alcotest.(check string) "exact thread" "100002" target.origin.channel_id;
+  let content =
+    match request with Send { content; _ } -> content | Status _ -> Alcotest.fail "expected Send"
+  in
+  Alcotest.(check string) "keeps reply whitespace" "  reply  " content;
+  Alcotest.(check string) "keeps the existing Keeper draft"
+    "local Keeper draft" (Drafts.current_draft sending.drafts).text;
+  let reject = Msg.Http_error { status = 400; body = "too long"; api_error = None } in
+  let rejected = received sending request workspace (Error reject) in
+  Alcotest.(check (option string)) "initial rejection restores editable content" (Some content)
+    (Option.map Model.modal_active_field_value rejected.inline_modal);
+  let unobserved = received sending request workspace (Error (Msg.Transport Health.Timeout)) in
+  let checking, cmds = enter unobserved in
+  let status, _ = posted cmds in
+  Alcotest.(check bool) "timeout does a read-only check" true
+    (status = Status { target; operation_id });
+  let missing = Msg.Http_error { status = 404; body = ""; api_error = None } in
+  let absent = received checking status workspace (Error missing) in
+  let retrying, cmds = enter absent in
+  Alcotest.(check bool) "same operation and exact body are replayed" true
+    (fst (posted cmds) = request);
+  let conflicted = received retrying request workspace
+      (Error (Msg.Http_error { status = 409; body = ""; api_error = None })) in
+  Alcotest.(check bool) "a replay conflict still checks the old operation" true
+    (fst (posted (snd (enter conflicted))) = status);
+  let epoch = Epoch.next sending.epoch in
+  let retained = Discord_reply_store.find ~epoch ~workspace target sending.discord_replies in
+  Alcotest.(check bool) "reconnect keeps the original receipt ID" true
+    (Discord_reply_store.next_request ~target ~content:"" retained = Some status);
+  let check = Discord_reply_store.submit ~epoch ~workspace status sending.discord_replies in
+  let absent_after_reconnect =
+    Discord_reply_store.observe ~epoch ~workspace status (Error `Absent) check |> Option.get
+  in
+  let attempt = Discord_reply_store.find ~epoch ~workspace target absent_after_reconnect in
+  Alcotest.(check bool) "reconnect may query but cannot replay the old payload" true
+    (Discord_reply_store.next_request ~target ~content:"" attempt = Some status);
+  let delivered = received checking status workspace (Ok (Delivered "100004")) in
+  let attempt = Update_nav.discord_reply_attempt delivered (Option.get form.inline_modal).kind in
+  Alcotest.(check bool) "server's delivered ID unlocks a fresh compose" true
+    (Discord_reply_store.can_compose attempt)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "discord_reply"
+      , [ Alcotest.test_case "recorded origin and safe receipt recovery" `Quick
+            test_discord_reply_source_and_receipt ] );
+
       ( "hidden_music_command"
       , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
             test_hidden_music_command;

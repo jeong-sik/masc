@@ -247,6 +247,11 @@ type http_reply =
       keeper : string;
       result : (Wire_keeper_context.keeper_operator_note, http_error) result;
     }
+  | Reply_discord_reply of {
+      request : Wire_discord_reply.request;
+      workspace : Wire_work.expected_workspace;
+      result : (Wire_discord_reply.state, http_error) result;
+    }
   | Reply_keeper_operator_note_saved of {
       keeper : string;
       result : (Wire_keeper_context.keeper_operator_note, http_error) result;

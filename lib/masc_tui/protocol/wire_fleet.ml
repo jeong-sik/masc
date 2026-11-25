@@ -1964,7 +1964,7 @@ type chat_surface =
   | Surface_dashboard
   | Surface_agent
   | Surface_broadcast
-  | Surface_discord
+  | Surface_discord of Wire_discord_reply.origin option
   | Surface_slack
   | Surface_webhook
   | Surface_gate of string
@@ -2274,13 +2274,13 @@ let encode_chat_submit_request req =
 
 (* The server's closed [Surface_ref.t] vocabulary; it rejects an unknown kind
    the same way. *)
-let decode_chat_surface json =
+let decode_chat_surface ~message json =
   let* kind = required_nonblank_string json "kind" in
   match kind with
   | "dashboard" -> Ok Surface_dashboard
   | "agent" -> Ok Surface_agent
   | "broadcast" -> Ok Surface_broadcast
-  | "discord" -> Ok Surface_discord
+  | "discord" -> Ok (Surface_discord (Wire_discord_reply.decode_origin ~message ~surface:json))
   | "slack" -> Ok Surface_slack
   | "webhook" -> Ok Surface_webhook
   | "gate" ->
@@ -2317,7 +2317,7 @@ let decode_user_role json =
     let* surface =
       match surface_json with
       | None -> Ok None
-      | Some s -> Result.map Option.some (decode_chat_surface s)
+      | Some s -> Result.map Option.some (decode_chat_surface ~message:json s)
     in
     Ok (Role_peer { peer; surface })
   in

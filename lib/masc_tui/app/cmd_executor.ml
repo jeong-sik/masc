@@ -281,6 +281,7 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_oauth_disconnect _
   | Cmd.Post_board_recovery _
   | Cmd.Post_keeper_directive _
+  | Cmd.Post_discord_reply _
   | Cmd.Post_keeper_operator_note _
   | Cmd.Post_keeper_run_next _
   | Cmd.Post_gate_resolution_policy _
@@ -3287,6 +3288,9 @@ let execute_post t ~epoch req =
                 ~decode:Wire_keeper_context.decode_checkpoint_delete_result
             in
             Some (Msg.Reply_keeper_checkpoint_delete { keeper; result })
+        | Cmd.Post_discord_reply { request; workspace } ->
+            let result = post_and_decode t ~path ~body ~decode:(Wire_discord_reply.decode request) in
+            Some (Msg.Reply_discord_reply { request; workspace; result })
         | Cmd.Post_keeper_operator_note { keeper; _ } ->
             let result =
               post_and_decode t ~path ~body

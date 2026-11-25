@@ -2001,6 +2001,24 @@ let apply_toggle_turn_details ~now (m : Model.t) =
 
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
+  | Slash.Discord_reply ->
+      let warn ~ko ~en =
+        (Model.with_toast ~now ~level:Model.Toast_warning (Say.make ~ko ~en) m, [])
+      in
+      (match (viewed_keeper_name m, Update_nav.expected_workspace_of m) with
+       | Some keeper, Some workspace when Model.is_in_keeper_chat m ->
+           let sources = Update_nav.discord_sources_in_history ~keeper m in
+           if sources = [] then
+             warn ~ko:"불러온 채팅에 답장할 수 있는 Discord 원본이 없습니다"
+               ~en:"No replyable Discord messages in loaded history"
+           else
+             Update_nav.open_palette m
+               (Model.Palette_discord_replies { epoch = m.epoch; workspace; sources })
+       | Some _, None when Model.is_in_keeper_chat m ->
+           warn ~ko:"워크스페이스를 확인하는 중입니다" ~en:"Waiting for workspace identity"
+       | _ ->
+           warn ~ko:"Keeper 채팅에서 /discord-reply를 실행하세요"
+             ~en:"Run /discord-reply in Keeper chat")
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
   | Slash.Work -> Update_nav.switch_workspace m Nav.Work
   | Slash.Knowledge -> Update_nav.switch_workspace m Nav.Knowledge
@@ -3738,6 +3756,7 @@ and submit_composer ~now ~mode (m : Model.t) =
             | Slash.Cmd_jump
             | Slash.Cmd_voice
             | Slash.Cmd_btw
+            | Slash.Cmd_discord_reply
             | Slash.Cmd_queue
             | Slash.Cmd_context
             | Slash.Cmd_ctl
@@ -4080,6 +4099,17 @@ and confirm_palette ~now (m : Model.t) =
                 match Slash.parse spec.name with
                 | Ok parsed -> execute_slash ~now m_closed parsed
                 | Error _ -> (m_closed, [])))
+  | Model.Palette_discord_replies { workspace; _ } ->
+      let sources = Update_nav.palette_discord_sources m in
+      (match List.nth_opt sources m.palette.selected with
+       | Some { target = { keeper; chat_id; origin }; _ } ->
+           Update_nav.open_inline_modal m
+             (Nav.Discord_reply_form
+                { keeper; chat_id; guild_id = origin.guild_id;
+                  channel_id = origin.channel_id; message_id = origin.original_message_id;
+                  workspace_base_path = workspace.base_path;
+                  workspace_masc_root = workspace.masc_root })
+       | None -> (m, []))
   | Model.Palette_keepers -> (
       let items = Update_nav.palette_filtered_keepers m in
       match
@@ -4237,6 +4267,7 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_control_confirm _
                     | Nav.Keeper_clear_form _
                     | Nav.Keeper_operator_note_form _
+                    | Nav.Discord_reply_form _
                     | Nav.Tool_execute_form _
                     | Nav.Skill_create_form
                     | Nav.Skill_edit_form _
@@ -4494,6 +4525,7 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Keeper_control_confirm _
                | Nav.Keeper_clear_form _
                | Nav.Keeper_operator_note_form _
+               | Nav.Discord_reply_form _
                | Nav.Tool_execute_form _
                | Nav.Skill_create_form
                | Nav.Skill_edit_form _
@@ -4811,6 +4843,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Discord_reply_form _
             | Nav.Tool_execute_form _
             | Nav.Skill_create_form
             | Nav.Skill_edit_form _
@@ -6186,6 +6219,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Discord_reply_form _
                 | Nav.Tool_execute_form _
                 | Nav.Skill_create_form
                 | Nav.Skill_edit_form _

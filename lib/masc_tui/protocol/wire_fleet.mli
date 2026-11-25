@@ -559,7 +559,7 @@ type chat_surface =
   | Surface_dashboard
   | Surface_agent  (** [masc_keeper_msg] and workspace @mention delivery *)
   | Surface_broadcast  (** a fleet broadcast copied into every Keeper *)
-  | Surface_discord
+  | Surface_discord of Wire_discord_reply.origin option
   | Surface_slack
   | Surface_webhook
   | Surface_gate of string  (** the gate's channel label *)

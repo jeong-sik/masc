@@ -152,6 +152,15 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
+  | Discord_reply_form of {
+      keeper : string;
+      chat_id : string;
+      guild_id : string option;
+      channel_id : string;
+      message_id : string;
+      workspace_base_path : string;
+      workspace_masc_root : string;
+    }
   | Tool_execute_form of { tool_name : string option; args_json : string }
   | Skill_create_form
   | Skill_edit_form of { reference : string }

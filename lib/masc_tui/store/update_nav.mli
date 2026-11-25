@@ -118,6 +118,10 @@ type palette_entry = {
 val palette_entries : Model.t -> palette_entry list
 val palette_entries_with_overflow :
   Model.t -> palette_entry list * (palette_section * int) list
+val discord_sources_in_history : keeper:string -> Model.t -> Model.discord_source list
+val palette_discord_sources : Model.t -> Model.discord_source list
+val discord_reply_attempt : Model.t -> Nav.inline_action_kind -> Discord_reply_store.attempt option
+val discord_reply_fields : Discord_reply_store.attempt option -> Model.inline_modal_state -> Model.modal_form_field list
 val palette_len : Model.t -> int
 
 val switch_workspace : Model.t -> Nav.workspace -> Model.t * Cmd.t list

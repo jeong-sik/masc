@@ -15,6 +15,7 @@ type command_id =
   | Cmd_jump
   | Cmd_voice
   | Cmd_btw
+  | Cmd_discord_reply
   | Cmd_wake
   | Cmd_up
   | Cmd_resume
@@ -187,6 +188,7 @@ type parsed =
   | Jump
   | Voice
   | Btw of string
+  | Discord_reply
   | Wake of string option
   | Up of string option
   | Resume of string option
@@ -265,6 +267,7 @@ let command_id_rank = function
   | Cmd_help -> 33
   | Cmd_restart -> 34
   | Cmd_quit -> 35
+  | Cmd_discord_reply -> 36
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -620,6 +623,7 @@ let parsed_tag = function
   | Quit -> 35
   | Music _ -> 36
   | Score _ -> 37
+  | Discord_reply -> 38
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -661,6 +665,7 @@ let equal_parsed a b =
     | Incidents, Incidents
     | Jump, Jump
     | Voice, Voice
+    | Discord_reply, Discord_reply
     | Queue, Queue
     | Context, Context
     | Clear, Clear
@@ -681,6 +686,7 @@ let equal_parsed a b =
       | Jump
       | Voice
       | Btw _
+      | Discord_reply
       | Wake _
       | Up _
       | Resume _
@@ -768,6 +774,9 @@ let all : spec list =
       ~en:"Teleport to highest-priority blocked item" Slash_interaction;
     mk Cmd_voice "/voice" ~ko:"음성 입력(PTT) 토글"
       ~en:"Toggle Voice Push-to-Talk" Slash_interaction;
+    mk Cmd_discord_reply "/discord-reply"
+      ~ko:"키퍼 채팅에서 Discord 원본을 골라 답장"
+      ~en:"Select a Discord message in Keeper chat and reply" Slash_interaction;
     mk Cmd_btw "/btw"
       ~arg_hint:(Say.make ~ko:"<질문>" ~en:"<question>")
       ~ko:"현재 대화 흐름을 깨지 않는 일회성 사이드 질문"
@@ -1029,6 +1038,7 @@ let parse raw =
     | "/incidents" -> no_arg cmd Incidents arg
     | "/jump" -> no_arg cmd Jump arg
     | "/voice" -> no_arg cmd Voice arg
+    | "/discord-reply" -> no_arg cmd Discord_reply arg
     | "/btw" -> (
         match arg with
         | Some q -> Ok (Btw q)

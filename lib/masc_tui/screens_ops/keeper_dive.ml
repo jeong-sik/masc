@@ -399,7 +399,7 @@ let peer_label (lang : Say.lang) (peer : Wire_fleet.chat_peer)
     | None | Some (Wire_fleet.Surface_dashboard | Wire_fleet.Surface_agent) -> None
     | Some Wire_fleet.Surface_broadcast ->
         Some (say_in lang ~ko:"방송" ~en:"broadcast")
-    | Some Wire_fleet.Surface_discord -> Some "Discord"
+    | Some (Wire_fleet.Surface_discord _) -> Some "Discord"
     | Some Wire_fleet.Surface_slack -> Some "Slack"
     | Some Wire_fleet.Surface_webhook -> Some "Webhook"
     | Some (Wire_fleet.Surface_gate label) -> Some label

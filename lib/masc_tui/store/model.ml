@@ -4489,3 +4489,207 @@ let focused_artifact m =
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _) )
   | None ->
       Knowledge_store.selected_artifact m.knowledge
+
+type keeper_banner_row = {
+  tone : Theme.status_token;
+  glyph : Glyph.t;
+  text : string;
+}
+
+let format_signed_due ~lang ~now_unix ts =
+  if (not (Float.is_finite ts)) || ts <= 0.0 then
+    Glyph.to_utf8 Glyph.Missing_absent
+  else
+    let delta = ts -. now_unix in
+    if delta >= 0.0 then
+      let dur = Format_val.format_duration_s delta in
+      Say.resolve lang (Say.make ~ko:(dur ^ " 뒤") ~en:("in " ^ dur))
+    else
+      let dur = Format_val.format_duration_s (-.delta) in
+      Say.resolve lang (Say.make ~ko:(dur ^ " 늦음") ~en:(dur ^ " late"))
+
+let format_elapsed_age ~lang ~now_unix ts =
+  if (not (Float.is_finite ts)) || ts <= 0.0 then
+    Glyph.to_utf8 Glyph.Missing_absent
+  else
+    let dur = Format_val.format_duration_s (Float.max 0.0 (now_unix -. ts)) in
+    Say.resolve lang (Say.make ~ko:(dur ^ " 전") ~en:(dur ^ " ago"))
+
+let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
+  let lang = m.lang in
+  let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+  let now_unix = m.freshness.last_wall_unix in
+  let keeper_opt = Fleet_store.find_keeper ~name m.fleet in
+  let is_runnable, is_unhealthy =
+    match keeper_opt with
+    | None -> (true, false)
+    | Some k ->
+        let runnable =
+          (not k.paused)
+          &&
+          match k.health with
+          | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_offline -> false
+          | Wire_fleet.Keeper_healthy
+          | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle
+          | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering
+          | Wire_fleet.Keeper_failing
+          | Wire_fleet.Keeper_booting ->
+              true
+        in
+        let unhealthy =
+          runnable
+          &&
+          match k.health with
+          | Wire_fleet.Keeper_failing
+          | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering ->
+              true
+          | Wire_fleet.Keeper_healthy
+          | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle
+          | Wire_fleet.Keeper_paused
+          | Wire_fleet.Keeper_offline
+          | Wire_fleet.Keeper_booting ->
+              false
+        in
+        (runnable, unhealthy)
+  in
+  let diag = Fleet_store.diagnostics_for ~keeper:name m.fleet in
+  let path_rest =
+    Option.bind keeper_opt (fun k -> Fleet_store.path_rest_for ~keeper:k m.fleet)
+  in
+  let waiting_inv =
+    Runtime_store.keeper_waiting_inventory_for ~keeper:name m.runtime
+  in
+  let line1_opt =
+    match diag with
+    | Some d when is_runnable -> (
+        let blocker_parts =
+          List.filter_map Fun.id
+            [
+              Option.map
+                (fun s ->
+                  let sig_part =
+                    match d.runtime_blocker_signature with
+                    | Some sg -> " [" ^ sg ^ "]"
+                    | None -> ""
+                  in
+                  say ~ko:"차단: " ~en:"Blocker: " ^ s ^ sig_part)
+                d.runtime_blocker_summary;
+              (if is_unhealthy then
+                 Option.map
+                   (fun c ->
+                     let ago =
+                       match d.last_failure_at_unix with
+                       | Some ts ->
+                           " (" ^ format_elapsed_age ~lang ~now_unix ts ^ ")"
+                       | None -> ""
+                     in
+                     say ~ko:"최근 실패: " ~en:"Last fault: " ^ c ^ ago)
+                   d.last_failure_cause
+               else None);
+              (if is_unhealthy then
+                 match d.lane_failures with
+                 | [] -> None
+                 | first :: _ as xs ->
+                     Some
+                       (Printf.sprintf "%s %d (%s: %s)"
+                          (say ~ko:"레인 실패" ~en:"Walk failures")
+                          (List.length xs) first.runtime_id first.summary)
+               else None);
+            ]
+        in
+        match blocker_parts with
+        | _ :: _ ->
+            Some
+              {
+                tone = Theme.Status_critical;
+                glyph = Glyph.Live_failing;
+                text = String.concat " · " blocker_parts;
+              }
+        | [] -> None)
+    | Some _ | None -> None
+  in
+  let line2_opt =
+    let rest_part =
+      match path_rest with
+      | Some r ->
+          let eta =
+            match r.release_at_unix with
+            | Some ts -> " (" ^ format_signed_due ~lang ~now_unix ts ^ ")"
+            | None -> ""
+          in
+          Some
+            (Printf.sprintf "%s %s%s"
+               (say ~ko:"경로 휴식:" ~en:"Path rest:")
+               r.runtime_id eta)
+      | None -> None
+    in
+    let disp_part =
+      match diag with
+      | Some d when is_runnable -> (
+          let actionable_disp =
+            match d.operator_disposition with
+            | Some disp -> (
+                match String.lowercase_ascii (String.trim disp) with
+                | "" | "pass" | "skipped" | "user_cancelled" -> None
+                | _ ->
+                    let reason =
+                      match d.operator_disposition_reason with
+                      | Some r -> ": " ^ r
+                      | None -> ""
+                    in
+                    Some (disp ^ reason))
+            | None -> None
+          in
+          match actionable_disp with
+          | Some _ as a -> a
+          | None -> (
+              match d.next_action with
+              | Some act -> (
+                  match String.lowercase_ascii (String.trim act) with
+                  | "" | "direct_message" | "none" -> None
+                  | _ -> Some act)
+              | None -> None))
+      | Some _ | None -> None
+    in
+    let wait_part =
+      match waiting_inv with
+      | Some inv when inv.row_count > 0 ->
+          let head =
+            match inv.rows with
+            | r :: _ ->
+                let due =
+                  match r.due_at with
+                  | Some ts -> " " ^ format_signed_due ~lang ~now_unix ts
+                  | None -> ""
+                in
+                Printf.sprintf " (%s: %s%s)" r.waiting_on r.what due
+            | [] -> ""
+          in
+          Some
+            (Printf.sprintf "%s %d%s" (say ~ko:"대기 큐" ~en:"Waiting")
+               inv.row_count head)
+      | Some _ | None -> None
+    in
+    let parts = List.filter_map Fun.id [ rest_part; wait_part; disp_part ] in
+    match parts with
+    | [] -> None
+    | _ :: _ ->
+        Some
+          {
+            tone = Theme.Status_attention;
+            glyph = Glyph.Live_paused;
+            text = String.concat " · " parts;
+          }
+  in
+  List.filter_map Fun.id [ line1_opt; line2_opt ]
+
+let keeper_diagnostic_banner_height ~name ~avail_h (m : t) =
+  if avail_h < 6 then 0
+  else
+    match keeper_diagnostic_banner ~name m with
+    | [] -> 0
+    | rows -> Int.min (List.length rows) (Int.max 1 (avail_h - 4))

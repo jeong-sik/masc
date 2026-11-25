@@ -270,11 +270,49 @@ val turns_24h_of_pulse : now_unix:float -> turn_pulse -> int
     the slot holding [now_unix], matching server
     [Keeper_turn_pulse.turns_in_window]. *)
 
+val turn_outcome_breakdown_24h : now_unix:float -> turn_pulse -> int * int * int
+(** [(ok, rested, failed)] sums across the 48 half-hour slots ending at
+    [now_unix]. *)
+
+type runtime_path_rest = {
+  status : string;
+  runtime_id : string;
+  release_at_unix : float option;
+  release_basis : string option;
+}
+
+type lane_walk_failure = {
+  attempt : int;
+  runtime_id : string;
+  dispatch : string;
+  summary : string;
+  api_candidate_fault : string option;
+}
+
+type keeper_diagnostics = {
+  phase : string option;
+  failing_since_unix : float option;
+  next_action : string option;
+  last_failure_cause : string option;
+  last_failure_at_unix : float option;
+  runtime_blocker_summary : string option;
+  runtime_blocker_signature : string option;
+  runtime_path_rest : runtime_path_rest option;
+  lane_failures : lane_walk_failure list;
+  operator_disposition : string option;
+  operator_disposition_reason : string option;
+}
+
+val empty_keeper_diagnostics : keeper_diagnostics
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
   candle_summary : candle_observation option;
   turn_pulses : (string * turn_pulse) list;
+  diagnostics : (string * keeper_diagnostics) list;
+  roster_total : int option;
+  roster_truncated : bool;
 }
 
 type execution_keeper_enrichment = {

@@ -2622,6 +2622,9 @@ let test_v25_data_pipeline_and_settings_2pane () =
                 ];
             } );
         ];
+      diagnostics = [];
+      roster_total = None;
+      roster_truncated = false;
     }
   in
   let m2, _ =
@@ -4746,6 +4749,9 @@ let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
                ("alpha-1", pulse_at ~starts_at:wall_slot 2);
                ("beta-1", pulse_at ~starts_at:wall_slot 8);
              ];
+           diagnostics = [];
+           roster_total = None;
+           roster_truncated = false;
          }
   in
   let names_of ks =
@@ -11575,6 +11581,9 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
            candle_summary = None;
            turn_pulses =
              [ ("stale-keeper", stale_pulse); ("active-keeper", recent_pulse) ];
+           diagnostics = [];
+           roster_total = None;
+           roster_truncated = false;
          }
   in
   (* Stale keeper has only the 48-slots-ago expired boundary slot and a future

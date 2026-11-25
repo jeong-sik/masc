@@ -493,11 +493,35 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       match ver_ratio_opt with
       | Some r ->
           let pct = r *. 100.0 in
-          ( Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%.0f%% 통과" pct)
-                 ~en:(Printf.sprintf "%.0f%% pass" pct)),
-            if pct >= 80.0 then ok_st else attn_st )
+          let txt =
+            if v_await_w > 0 && v_rej > 0 then
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "%.0f%% · %d대기 · %d반려" pct v_await_w v_rej)
+                   ~en:(Printf.sprintf "%.0f%% · %dw · %dr" pct v_await_w v_rej))
+            else if v_await_w > 0 then
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "%.0f%% · %d 대기" pct v_await_w)
+                   ~en:(Printf.sprintf "%.0f%% · %d wait" pct v_await_w))
+            else if v_rej > 0 then
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "%.0f%% · %d 반려" pct v_rej)
+                   ~en:(Printf.sprintf "%.0f%% · %d rej" pct v_rej))
+            else
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "%.0f%% 통과" pct)
+                   ~en:(Printf.sprintf "%.0f%% pass" pct))
+          in
+          let st =
+            if v_rej > 0 && pct < 80.0 then attn_st
+            else if v_await_w > 0 then act_st
+            else if pct >= 80.0 then ok_st
+            else attn_st
+          in
+          (txt, st)
       | None ->
           if v_await_w > 0 then
             ( Say.resolve lang
@@ -879,29 +903,190 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let lang = model.lang in
     let n = Attention.count model.attention in
     if n = 0 then begin
-      (* Sleek 1-line green strip with Left_rail — NEVER steals an empty 8-row box *)
+      (* Sleek 1-line strip with Left_rail — honest about failed/degraded/loading/unreported *)
       let bg = Color.of_rgb theme.surface_1 in
-      let ok_st = Typography.status ~bg ~bold:true theme Theme.Status_ok in
       let whisper_st = Typography.whisper ~bg theme in
-      Cell_grid.fill_rect ~clip:rect grid ~rect ~style:ok_st ();
-      Card.draw_left_rail ~bg ~tone:Theme.Status_ok grid ~x:rect.x ~y:rect.y
-        ~h:1 ~theme;
-      let pill_txt =
-        Say.resolve lang
-          (Say.make
-             ~ko:(Printf.sprintf "%s 확인 대기 없음 %s 0건"
-                    (Glyph.to_utf8 Glyph.Live_healthy)
-                    (Glyph.to_utf8 Glyph.Separator_dot))
-             ~en:(Printf.sprintf "%s All clear %s 0 pending"
-                    (Glyph.to_utf8 Glyph.Live_healthy)
-                    (Glyph.to_utf8 Glyph.Separator_dot)))
+      let any_failed =
+        Observed.is_failed model.work.asks
+        || Observed.is_failed model.work.tool_approvals
+        || Observed.is_failed model.work.gate_pending
+        || Observed.is_failed model.work.planning
+        || Observed.is_failed model.work.schedules
+        || Observed.is_failed model.runtime.lane_addon_asks
+        || Observed.is_failed model.fleet.fleet_reading
       in
+      let any_loading =
+        Observed.is_loading model.work.asks
+        || Observed.is_loading model.work.tool_approvals
+        || Observed.is_loading model.work.gate_pending
+        || Observed.is_loading model.work.planning
+        || Observed.is_loading model.work.schedules
+        || Observed.is_loading model.runtime.lane_addon_asks
+        || Observed.is_loading model.fleet.fleet_reading
+      in
+      let any_stale =
+        Observed.is_stale model.work.asks
+        || Observed.is_stale model.work.tool_approvals
+        || Observed.is_stale model.work.gate_pending
+        || Observed.is_stale model.work.planning
+        || Observed.is_stale model.work.schedules
+        || Observed.is_stale model.runtime.lane_addon_asks
+        || Observed.is_stale model.fleet.fleet_reading
+      in
+      let is_settled obs =
+        match obs with
+        | Observed.Value _ | Observed.Absent -> true
+        | Observed.Loading _ | Observed.Unreported | Observed.Failed _ -> false
+      in
+      let all_observed =
+        is_settled model.work.asks
+        && is_settled model.work.tool_approvals
+        && is_settled model.work.gate_pending
+        && is_settled model.work.planning
+        && is_settled model.work.schedules
+        && is_settled model.runtime.lane_addon_asks
+        && is_settled model.fleet.fleet_reading
+      in
+      let now_unix = model.freshness.last_wall_unix in
+      let overdue_or_failed_scheds =
+        List.fold_left
+          (fun acc (sc : Wire_work.schedule_row) ->
+            match sc.status with
+            | Wire_work.Sched_cancelled | Wire_work.Sched_expired -> acc
+            | Wire_work.Sched_failed | Wire_work.Sched_due -> acc + 1
+            | Wire_work.Sched_scheduled | Wire_work.Sched_running
+            | Wire_work.Sched_succeeded ->
+                let wake_failed =
+                  match sc.last_disposition with
+                  | Wire_work.Wake_failed _ -> true
+                  | Wire_work.Wake_succeeded | Wire_work.Wake_running
+                  | Wire_work.Wake_never -> false
+                in
+                let due_ts =
+                  Option.value sc.next_due_at_unix ~default:sc.due_at_unix
+                in
+                let overdue =
+                  match sc.status with
+                  | Wire_work.Sched_scheduled -> now_unix > 0.0 && due_ts < now_unix
+                  | Wire_work.Sched_running | Wire_work.Sched_succeeded
+                  | Wire_work.Sched_failed | Wire_work.Sched_due
+                  | Wire_work.Sched_cancelled | Wire_work.Sched_expired -> false
+                in
+                if wake_failed || overdue then acc + 1 else acc)
+          0 (Work_store.schedules_list model.work)
+      in
+      let open_addon_asks =
+        match Observed.to_option model.runtime.lane_addon_asks with
+        | None -> 0
+        | Some xs ->
+            List.fold_left
+              (fun acc (a : Wire_runtime.lane_addon_ask_row) ->
+                match a.resolution with
+                | Wire_work.Ask_open -> acc + 1
+                | Wire_work.Ask_answered _ | Wire_work.Ask_withdrawn _ -> acc)
+              0 xs
+      in
+      let fleet_action_required =
+        match Observed.to_option model.fleet.fleet_reading with
+        | Some r -> r.operator_action_required
+        | None -> false
+      in
+      let tone, pill_txt =
+        if any_failed then
+          ( Theme.Status_critical
+          , Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%s 확인 대기 조회 실패"
+                        (Glyph.to_utf8 Glyph.Live_failing))
+                 ~en:(Printf.sprintf "%s Attention fetch failed"
+                        (Glyph.to_utf8 Glyph.Live_failing))) )
+        else
+          match model.fleet.fleet_degradation with
+          | Some deg ->
+              ( Theme.Status_attention
+              , Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "%s 플릿 저하: %s"
+                            (Glyph.to_utf8 Glyph.Action_required) deg.reason)
+                     ~en:(Printf.sprintf "%s Fleet degraded: %s"
+                            (Glyph.to_utf8 Glyph.Action_required) deg.reason)) )
+          | None ->
+              if open_addon_asks > 0 || overdue_or_failed_scheds > 0 then
+                let parts =
+                  List.filter_map Fun.id
+                    [
+                      (if open_addon_asks > 0 then
+                         Some
+                           (Say.resolve lang
+                              (Say.make
+                                 ~ko:(Printf.sprintf "애드온 질문 %d건" open_addon_asks)
+                                 ~en:(Printf.sprintf "%d addon asks" open_addon_asks)))
+                       else None);
+                      (if overdue_or_failed_scheds > 0 then
+                         Some
+                           (Say.resolve lang
+                              (Say.make
+                                 ~ko:(Printf.sprintf "일정 경고 %d건" overdue_or_failed_scheds)
+                                 ~en:(Printf.sprintf "%d schedule alerts" overdue_or_failed_scheds)))
+                       else None);
+                    ]
+                in
+                ( Theme.Status_attention
+                , Printf.sprintf "%s %s"
+                    (Glyph.to_utf8 Glyph.Action_required)
+                    (String.concat Typography.sep_dot parts) )
+              else if fleet_action_required then
+                ( Theme.Status_attention
+                , Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s 운영자 확인 필요 (플릿 신호)"
+                              (Glyph.to_utf8 Glyph.Action_required))
+                       ~en:(Printf.sprintf "%s Operator attention required"
+                              (Glyph.to_utf8 Glyph.Action_required))) )
+              else if any_loading && not all_observed then
+                ( Theme.Status_active
+                , Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s 확인 대기 불러오는 중..."
+                              (Glyph.to_utf8 Glyph.Transport_reconnecting))
+                       ~en:(Printf.sprintf "%s Loading attention queue..."
+                              (Glyph.to_utf8 Glyph.Transport_reconnecting))) )
+              else if not all_observed then
+                ( Theme.Status_historical
+                , Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s 확인 대기 미관측"
+                              (Glyph.to_utf8 Glyph.Missing_unreported))
+                       ~en:(Printf.sprintf "%s Attention not yet loaded"
+                              (Glyph.to_utf8 Glyph.Missing_unreported))) )
+              else if any_stale then
+                ( Theme.Status_attention
+                , Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s 확인 대기 갱신 지연"
+                              (Glyph.to_utf8 Glyph.Transport_stale))
+                       ~en:(Printf.sprintf "%s Attention data stale"
+                              (Glyph.to_utf8 Glyph.Transport_stale))) )
+              else
+                ( Theme.Status_ok
+                , Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s 확인 대기 없음 %s 0건"
+                              (Glyph.to_utf8 Glyph.Live_healthy)
+                              (Glyph.to_utf8 Glyph.Separator_dot))
+                       ~en:(Printf.sprintf "%s All clear %s 0 pending"
+                              (Glyph.to_utf8 Glyph.Live_healthy)
+                              (Glyph.to_utf8 Glyph.Separator_dot))) )
+      in
+      let pill_st = Typography.status ~bg ~bold:true theme tone in
+      Cell_grid.fill_rect ~clip:rect grid ~rect ~style:pill_st ();
+      Card.draw_left_rail ~bg ~tone grid ~x:rect.x ~y:rect.y ~h:1 ~theme;
       let hint =
         Say.resolve lang (Say.make ~ko:"[2] 작업 수신함" ~en:"[2] Work Inbox")
       in
       let content = Rect.inset ~left:2 ~right:1 rect in
       put_left_right grid ~clip:content ~y:rect.y ~left_text:pill_txt
-        ~left_style:ok_st ~right_text:hint ~right_style:whisper_st
+        ~left_style:pill_st ~right_text:hint ~right_style:whisper_st
     end
     else begin
       let title =
@@ -1124,9 +1309,24 @@ let live_failing_keepers_of_groups (groups : Wire_fleet.company_group list) =
         g.keepers)
     groups
 
-let companies_panel_height (groups : Wire_fleet.company_group list) ~bp =
+let resting_keepers_of_groups ~(fleet : Fleet_store.t)
+    (groups : Wire_fleet.company_group list) =
+  List.concat_map
+    (fun (g : Wire_fleet.company_group) ->
+      List.filter
+        (fun (k : Wire_fleet.keeper_summary) ->
+          Option.is_some (Fleet_store.path_rest_for ~keeper:k fleet))
+        g.keepers)
+    groups
+
+let companies_panel_height ~(model : Model.t)
+    (groups : Wire_fleet.company_group list) ~bp =
   let n = Int.max 1 (List.length groups) in
-  let has_fail_banner = live_failing_keepers_of_groups groups <> [] in
+  let has_fail_banner =
+    live_failing_keepers_of_groups groups <> []
+    || resting_keepers_of_groups ~fleet:model.fleet groups <> []
+    || model.fleet.unreadable_keepers <> []
+  in
   let fail_rows = if has_fail_banner then 1 else 0 in
   match bp with
   | Layout.Compact | Layout.Micro ->
@@ -1181,11 +1381,30 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       && Model.equal_pulse_pane (Model.active_pulse_pane model)
            Model.Pulse_companies
     in
+    let comp_badge =
+      if Observed.is_stale model.fleet.keepers then
+        Some
+          {
+            Card.glyph = Some Glyph.Transport_stale;
+            text = Say.resolve lang (Say.make ~ko:"지연" ~en:"Stale");
+            tone = Some Theme.Status_attention;
+          }
+      else if model.fleet.roster_truncated then
+        let tot = Option.value model.fleet.roster_total ~default:total_keepers in
+        Some
+          {
+            Card.glyph = Some Glyph.Warning_triangle;
+            text = Printf.sprintf "%d/%d" total_keepers tot;
+            tone = Some Theme.Status_attention;
+          }
+      else None
+    in
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
           (Card.default_spec ~title) with
           subtitle = Some subtitle;
+          badge = comp_badge;
           hotkey = Some hotkey;
           focused = pane_focused;
         }
@@ -1230,19 +1449,39 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~style:whisper_st msg)
       | Observed.Value _ -> (
           if groups = [] then
-            let msg =
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Glyph.to_utf8 Glyph.Live_idle ^ " 등록된 키퍼 없음")
-                   ~en:(Glyph.to_utf8 Glyph.Live_idle ^ " No keepers registered"))
-            in
-            ignore
-              (Cell_grid.put_text ~clip:inner grid ~x:(inner.x + pad_x)
-                 ~y:inner.y ~style:whisper_st msg)
+            let unreadable_count = List.length model.fleet.unreadable_keepers in
+            if unreadable_count > 0 then
+              let msg =
+                Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "%s 설정을 읽지 못한 키퍼 %d개"
+                            (Glyph.to_utf8 Glyph.Live_failing) unreadable_count)
+                     ~en:(Printf.sprintf "%s %d keepers with unreadable meta"
+                            (Glyph.to_utf8 Glyph.Live_failing) unreadable_count))
+              in
+              ignore
+                (Cell_grid.put_text ~clip:inner grid ~x:(inner.x + pad_x)
+                   ~y:inner.y ~style:crit_st msg)
+            else
+              let msg =
+                Say.resolve lang
+                  (Say.make
+                     ~ko:(Glyph.to_utf8 Glyph.Live_idle ^ " 등록된 키퍼 없음")
+                     ~en:(Glyph.to_utf8 Glyph.Live_idle ^ " No keepers registered"))
+              in
+              ignore
+                (Cell_grid.put_text ~clip:inner grid ~x:(inner.x + pad_x)
+                   ~y:inner.y ~style:whisper_st msg)
           else
             let live_failing_keepers = live_failing_keepers_of_groups groups in
+            let resting_keepers =
+              resting_keepers_of_groups ~fleet:model.fleet groups
+            in
+            let unreadable_count = List.length model.fleet.unreadable_keepers in
             let show_fail_footer =
-              live_failing_keepers <> [] && inner.h >= 4
+              (live_failing_keepers <> [] || resting_keepers <> []
+              || unreadable_count > 0)
+              && inner.h >= 4
             in
             let table_h =
               Int.max 1 (inner.h - (if show_fail_footer then 1 else 0))
@@ -1476,26 +1715,85 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if show_fail_footer then begin
               let fy = Rect.bottom inner - 1 in
               let fail_r = Rect.make ~x:inner.x ~y:fy ~w:inner.w ~h:1 in
-              Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid
-                ~x:inner.x ~y:fy ~h:1 ~theme;
-              let names =
-                live_failing_keepers
-                |> List.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                |> String.concat ", "
+              let is_critical =
+                live_failing_keepers <> [] || unreadable_count > 0
+              in
+              let footer_tone =
+                if is_critical then Theme.Status_critical
+                else Theme.Status_attention
+              in
+              let footer_st =
+                if is_critical then crit_st
+                else Typography.status ~bg ~bold:true theme Theme.Status_attention
+              in
+              Card.draw_left_rail ~bg ~tone:footer_tone grid ~x:inner.x ~y:fy
+                ~h:1 ~theme;
+              let fail_part =
+                match live_failing_keepers with
+                | [] -> None
+                | first :: _ ->
+                    let names =
+                      live_failing_keepers
+                      |> List.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                      |> String.concat ", "
+                    in
+                    let cause =
+                      match
+                        Fleet_store.diagnostics_for ~keeper:first.name
+                          model.fleet
+                      with
+                      | Some d -> (
+                          match
+                            (d.runtime_blocker_summary, d.last_failure_cause)
+                          with
+                          | Some s, _ -> " (" ^ s ^ ")"
+                          | None, Some c -> " (" ^ c ^ ")"
+                          | None, None -> "")
+                      | None -> ""
+                    in
+                    Some
+                      (Say.resolve lang
+                         (Say.make
+                            ~ko:(Printf.sprintf "%s 실시간 오류: %s%s"
+                                   (Glyph.to_utf8 Glyph.Live_failing)
+                                   names cause)
+                            ~en:(Printf.sprintf "%s Live fault: %s%s"
+                                   (Glyph.to_utf8 Glyph.Live_failing)
+                                   names cause)))
+              in
+              let rest_part =
+                match resting_keepers with
+                | [] -> None
+                | _ :: _ ->
+                    let names =
+                      resting_keepers
+                      |> List.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                      |> String.concat ", "
+                    in
+                    Some
+                      (Say.resolve lang
+                         (Say.make
+                            ~ko:(Printf.sprintf "%s 경로 휴식: %s"
+                                   (Glyph.to_utf8 Glyph.Live_paused) names)
+                            ~en:(Printf.sprintf "%s Path rest: %s"
+                                   (Glyph.to_utf8 Glyph.Live_paused) names)))
+              in
+              let unread_part =
+                if unreadable_count > 0 then
+                  Some
+                    (Say.resolve lang
+                       (Say.make
+                          ~ko:(Printf.sprintf "%d 메타 오류" unreadable_count)
+                          ~en:(Printf.sprintf "%d unreadable" unreadable_count)))
+                else None
               in
               let line =
-                Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%s 실시간 오류: %s"
-                            (Glyph.to_utf8 Glyph.Live_failing)
-                            names)
-                     ~en:(Printf.sprintf "%s Live fault: %s"
-                            (Glyph.to_utf8 Glyph.Live_failing)
-                            names))
+                String.concat Typography.sep_dot
+                  (List.filter_map Fun.id [ fail_part; rest_part; unread_part ])
               in
               ignore
                 (Cell_grid.put_text ~clip:fail_r grid ~x:(inner.x + 2) ~y:fy
-                   ~style:crit_st
+                   ~style:footer_st
                    (Grapheme.truncate_to_width
                       ~max_width:(Int.max 0 (inner.w - 3))
                       line))
@@ -2394,7 +2692,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 attention_panel_height model
                   ~max_rows:(if Layout.equal_breakpoint bp Layout.Wide then 7 else 5)
               in
-              let comp_h = companies_panel_height groups ~bp in
+              let comp_h = companies_panel_height ~model groups ~bp in
               let left_rows =
                 Layout.split_v ~gap:gap_y left_col
                   [
@@ -2422,7 +2720,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           | _ -> ())
       | Layout.Compact | Layout.Micro -> (
           let attn_h = attention_panel_height model ~max_rows:4 in
-          let comp_h = companies_panel_height groups ~bp in
+          let comp_h = companies_panel_height ~model groups ~bp in
           let rows_r =
             Layout.split_v ~gap:0 main_r
               [

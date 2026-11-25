@@ -101,6 +101,11 @@ type t = {
   candle_summary_fallback : Wire_fleet.candle_observation option;
   turn_pulses : Wire_fleet.turn_pulse String_map.t;
       (** Each keeper's turn pulse from the last roster read. *)
+  keeper_diagnostics : Wire_fleet.keeper_diagnostics String_map.t;
+      (** Per-keeper failure diagnostics, path rest, and failover walk trail
+          decoded from the last roster read. *)
+  roster_total : int option;
+  roster_truncated : bool;
   wall_unix : float;
       (** Current wall-clock Unix seconds used to anchor 24h pulse windows. *)
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
@@ -223,6 +228,14 @@ val apply_roster :
   observed_at:Clock.Mono.t -> Wire_fleet.keepers_roster -> t -> t
 (** [apply_keepers] for the readable rows; replaces [unreadable_keepers]. *)
 val apply_roster_extras : Wire_fleet.keeper_roster_extras -> t -> t
+
+val diagnostics_for :
+  keeper:string -> t -> Wire_fleet.keeper_diagnostics option
+
+val path_rest_for :
+  keeper:Wire_fleet.keeper_summary -> t -> Wire_fleet.runtime_path_rest option
+(** Return [Some rest] only when [keeper] is runnable (neither paused nor
+    offline) and its walk is actively resting ([rest.status = "resting"]). *)
 
 val turn_pulse : t -> string -> Wire_fleet.turn_pulse option
 (** The named keeper's turn pulse, [None] when the last roster read sent none. *)

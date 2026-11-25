@@ -34,7 +34,7 @@ type fleet_counts = {
   offline : int;
 }
 
-let keeper_row_status ~has_attention (k : Wire_fleet.keeper_summary) =
+let keeper_row_status ~has_attention ?path_rest (k : Wire_fleet.keeper_summary) =
   if has_attention then Ops_common.keeper_live_status ~has_attention k
   else
     match k.health with
@@ -42,15 +42,20 @@ let keeper_row_status ~has_attention (k : Wire_fleet.keeper_summary) =
         ( Glyph.Live_idle
         , Theme.Status_historical
         , Say.make ~ko:"오프라인" ~en:"Offline" )
+    | Wire_fleet.Keeper_failing | Wire_fleet.Keeper_paused ->
+        Ops_common.keeper_live_status ~has_attention:false k
     | Wire_fleet.Keeper_healthy
     | Wire_fleet.Keeper_working
     | Wire_fleet.Keeper_idle
     | Wire_fleet.Keeper_degraded
     | Wire_fleet.Keeper_recovering
-    | Wire_fleet.Keeper_failing
-    | Wire_fleet.Keeper_paused
-    | Wire_fleet.Keeper_booting ->
-        Ops_common.keeper_live_status ~has_attention:false k
+    | Wire_fleet.Keeper_booting -> (
+        match path_rest with
+        | Some _ ->
+            ( Glyph.Live_paused
+            , Theme.Status_attention
+            , Say.make ~ko:"휴식" ~en:"Rest" )
+        | None -> Ops_common.keeper_live_status ~has_attention:false k)
 
 let count_fleet ~(model : Model.t) (ks : Wire_fleet.keeper_summary list) =
   let attn_n, non_attn =
@@ -125,7 +130,9 @@ let company_indent = "  "
 let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
     (k : Wire_fleet.keeper_summary) : Table.row =
   let has_attn = Ops_common.keeper_has_attention model.attention k.name in
-  let glyph, tone, _ = keeper_row_status ~has_attention:has_attn k in
+  let path_rest = Fleet_store.path_rest_for ~keeper:k model.fleet in
+  let diag = Fleet_store.diagnostics_for ~keeper:k.name model.fleet in
+  let glyph, tone, _ = keeper_row_status ~has_attention:has_attn ?path_rest k in
   let infra_txt, infra_tone = Ops_common.keeper_sandbox_tag ~model k.name in
   let trail_n = Ops_common.keeper_incident_count model.incidents k.name in
   let trail_cell =
@@ -141,7 +148,70 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         (Glyph.to_utf8 Glyph.Separator_dot)
   in
   let name_display = if indent_name then company_indent ^ k.name else k.name in
-  let task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
+  let base_task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
+  let is_runnable =
+    (not k.paused)
+    &&
+    match k.health with
+    | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_offline -> false
+    | Wire_fleet.Keeper_healthy
+    | Wire_fleet.Keeper_working
+    | Wire_fleet.Keeper_idle
+    | Wire_fleet.Keeper_degraded
+    | Wire_fleet.Keeper_recovering
+    | Wire_fleet.Keeper_failing
+    | Wire_fleet.Keeper_booting ->
+        true
+  in
+  let diag_task_override =
+    if not is_runnable then None
+    else
+      match diag with
+      | Some d when Option.is_some d.runtime_blocker_summary ->
+          d.runtime_blocker_summary
+      | Some d
+        when Option.is_some d.last_failure_cause
+             && (match k.health with
+                 | Wire_fleet.Keeper_failing | Wire_fleet.Keeper_degraded
+                 | Wire_fleet.Keeper_recovering -> true
+                 | Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_working
+                 | Wire_fleet.Keeper_idle | Wire_fleet.Keeper_paused
+                 | Wire_fleet.Keeper_offline | Wire_fleet.Keeper_booting -> false) ->
+          d.last_failure_cause
+      | Some _ | None -> (
+          match path_rest with
+          | Some r ->
+              let until =
+                match r.release_at_unix with
+                | Some ts ->
+                    " "
+                    ^ Ops_common.format_due_delta
+                        ~now_unix:model.freshness.last_wall_unix ts
+                        ~lang:model.lang
+                | None -> ""
+              in
+              Some
+                (Printf.sprintf "%s%s"
+                   (Ops_common.say model ~ko:"경로 휴식" ~en:"Path rest")
+                   until)
+          | None -> None)
+  in
+  let task_str, task_fg =
+    match diag_task_override with
+    | Some reason ->
+        let fg =
+          match k.health with
+          | Wire_fleet.Keeper_failing ->
+              Color.of_rgb (Theme.status_color theme Theme.Status_critical)
+          | Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering | Wire_fleet.Keeper_paused
+          | Wire_fleet.Keeper_offline | Wire_fleet.Keeper_booting ->
+              Color.of_rgb (Theme.status_color theme Theme.Status_attention)
+        in
+        (reason, fg)
+    | None -> (base_task_str, Color.of_rgb theme.text_secondary)
+  in
   let spark_samples =
     Ops_common.samples_of_floats
       (Fleet_store.sparkline_24h ~now_unix:model.freshness.last_wall_unix
@@ -184,7 +254,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         ("status", Table.Badge { glyph = Some glyph; text = ""; tone });
         ("keeper", Table.text_cell name_display);
         ("company", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) k.company);
-        ("task", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) task_str);
+        ("task", Table.text_cell ~fg:task_fg task_str);
         ("ctx", context_cell ~lang:model.lang k.context);
         ("infra", Table.Badge { glyph = None; text = infra_txt; tone = infra_tone });
         ( "spark"
@@ -700,8 +770,9 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           in
           Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_st ();
           let has_attn = Ops_common.keeper_has_attention model.attention k.name in
+          let path_rest = Fleet_store.path_rest_for ~keeper:k model.fleet in
           let glyph, tone, _ =
-            keeper_row_status ~has_attention:has_attn k
+            keeper_row_status ~has_attention:has_attn ?path_rest k
           in
           (* Calm v2.5 selection: Left_rail (▎) in accent Bold when focused,
              muted border_inactive when focus moved to Preview/Composer. *)
@@ -1154,6 +1225,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       | [ left_rect; right_rect ] ->
           let counts = count_fleet ~model all_ks in
           let groups = company_groups_for_model ~model in
+          let stale_roster = Observed.is_stale model.fleet.keepers in
           let roster_spec : Card.spec =
             {
               (Card.default_spec
@@ -1166,7 +1238,25 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   (Printf.sprintf "%d %s" (List.length groups)
                      (Ops_common.say model ~ko:"조직" ~en:"companies"));
               badge =
-                (if counts.attn + counts.failing > 0 then
+                (if stale_roster then
+                   Some
+                     {
+                       Card.glyph = Some Glyph.Transport_stale;
+                       text = Ops_common.say model ~ko:"지연" ~en:"Stale";
+                       tone = Some Theme.Status_attention;
+                     }
+                 else if model.fleet.roster_truncated then
+                   let tot =
+                     Option.value model.fleet.roster_total
+                       ~default:(List.length all_ks)
+                   in
+                   Some
+                     {
+                       Card.glyph = Some Glyph.Warning_triangle;
+                       text = Printf.sprintf "%d/%d" (List.length all_ks) tot;
+                       tone = Some Theme.Status_attention;
+                     }
+                 else if counts.attn + counts.failing > 0 then
                    Some
                      {
                        Card.glyph = Some Glyph.Action_required;
@@ -1247,6 +1337,17 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     else
       let hc = Fleet_store.fleet_health_counts all_ks in
       let counts = count_fleet ~model all_ks in
+      let stale_roster = Observed.is_stale model.fleet.keepers in
+      let trunc_suffix =
+        if model.fleet.roster_truncated then
+          let tot =
+            Option.value model.fleet.roster_total ~default:(List.length all_ks)
+          in
+          Printf.sprintf " · %s (%d/%d)"
+            (Ops_common.say model ~ko:"일부 표시" ~en:"Truncated")
+            (List.length all_ks) tot
+        else ""
+      in
       let roster_spec : Card.spec =
         {
           (Card.default_spec
@@ -1258,22 +1359,30 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           subtitle =
             Some
               (Say.resolve model.lang
-                 (Nav.keepers_fleet_mode_label model.fleet.fleet_mode));
+                 (Nav.keepers_fleet_mode_label model.fleet.fleet_mode)
+              ^ trunc_suffix);
           badge =
             Some
-              {
-                Card.glyph =
-                  Some
-                    (if counts.attn + counts.failing > 0 then
-                       Glyph.Action_required
-                     else Glyph.Live_healthy);
-                text = Printf.sprintf "%d/%d" hc.active hc.total;
-                tone =
-                  Some
-                    (if counts.attn + counts.failing > 0 then
-                       Theme.Status_attention
-                     else Theme.Status_ok);
-              };
+              (if stale_roster then
+                 {
+                   Card.glyph = Some Glyph.Transport_stale;
+                   text = Printf.sprintf "%d/%d" hc.active hc.total;
+                   tone = Some Theme.Status_attention;
+                 }
+               else
+                 {
+                   Card.glyph =
+                     Some
+                       (if counts.attn + counts.failing > 0 then
+                          Glyph.Action_required
+                        else Glyph.Live_healthy);
+                   text = Printf.sprintf "%d/%d" hc.active hc.total;
+                   tone =
+                     Some
+                       (if counts.attn + counts.failing > 0 then
+                          Theme.Status_attention
+                        else Theme.Status_ok);
+                 });
           hotkey =
             Some
               (Ops_common.say model ~ko:"[Enter] 상세 · [ / ] 모드"

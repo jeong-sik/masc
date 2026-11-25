@@ -3565,6 +3565,19 @@ let apply_http_reply ~now (m : Model.t) reply =
               m.runtime;
         }
       , [] )
+  | Msg.Reply_runtime_standings (Ok standings) ->
+      ( {
+          m with
+          runtime = Runtime_store.apply_runtime_standings standings m.runtime;
+        }
+      , [] )
+  | Msg.Reply_runtime_standings (Error reason) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.mark_runtime_standings_failed reason m.runtime;
+        }
+      , [] )
   | Msg.Reply_runtime_resolved (Error err) ->
       err_reply
         ~fail:

@@ -304,7 +304,7 @@ let chrome_body_rect (m : Model.t) =
     in
     Some (bp, body)
 
-let keeper_memory_content_of_tabs_body ~bp ~embedded ~has_keeper
+let keeper_memory_content_of_tabs_body ~model ~name ~bp ~embedded ~has_keeper
     (target_rect : Rect.t) =
   let inner = Card.inner_rect target_rect in
   if Rect.is_empty inner then Rect.empty
@@ -322,6 +322,16 @@ let keeper_memory_content_of_tabs_body ~bp ~embedded ~has_keeper
             ~h:(body_rect.h - 1)
         else body_rect
       else after_hero
+    in
+    let content_rect =
+      if Rect.is_empty content_rect then content_rect
+      else
+        let banner_h =
+          Model.keeper_diagnostic_banner_height ~name ~avail_h:content_rect.h
+            model
+        in
+        if banner_h <= 0 then content_rect
+        else snd (Rect.split_v content_rect ~top_h:banner_h)
     in
     if Rect.is_empty content_rect then Rect.empty
     else
@@ -349,8 +359,8 @@ let active_memory_content_rect (m : Model.t) =
               Option.is_some (Fleet_store.find_keeper ~name m.fleet)
             in
             let content =
-              keeper_memory_content_of_tabs_body ~bp ~embedded:false ~has_keeper
-                body
+              keeper_memory_content_of_tabs_body ~model:m ~name ~bp
+                ~embedded:false ~has_keeper body
             in
             if Rect.is_empty content then None else Some (name, content)
         | Some
@@ -385,8 +395,8 @@ let active_memory_content_rect (m : Model.t) =
                        compact widths (< 104 cols) and wide panes share the
                        exact same geometry and never drop [.] / [Ctrl+O]. *)
                     let content =
-                      keeper_memory_content_of_tabs_body ~bp ~embedded:false
-                        ~has_keeper:true body
+                      keeper_memory_content_of_tabs_body ~model:m ~name:k.name
+                        ~bp ~embedded:false ~has_keeper:true body
                     in
                     if Rect.is_empty content then None
                     else Some (k.name, content))

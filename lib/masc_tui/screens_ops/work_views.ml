@@ -272,7 +272,15 @@ let is_rejected_verification (v : Wire_work.verification_request) =
   Option.is_some v.evidence_projection_error
   ||
   match v.review_observation with
-  | Some { state = Wire_work.Review_rejected | Wire_work.Review_failed; _ } ->
+  | Some
+      {
+        state =
+          ( Wire_work.Review_rejected
+          | Wire_work.Review_failed
+          | Wire_work.Review_commit_failed
+          | Wire_work.Review_execution_repair_required );
+        _;
+      } ->
       true
   | Some
       {
@@ -282,9 +290,7 @@ let is_rejected_verification (v : Wire_work.verification_request) =
           | Wire_work.Review_approved
           | Wire_work.Review_unavailable
           | Wire_work.Review_not_reviewed
-          | Wire_work.Review_commit_failed
           | Wire_work.Review_execution_pending
-          | Wire_work.Review_execution_repair_required
           | Wire_work.Review_cancelled
           | Wire_work.Review_superseded );
         _;
@@ -311,7 +317,15 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         (fun (p, f) (v : Wire_work.verification_request) ->
           match v.review_observation with
           | Some { state = Wire_work.Review_approved; _ } -> (p + 1, f)
-          | Some { state = Wire_work.Review_rejected | Wire_work.Review_failed; _ } ->
+          | Some
+              {
+                state =
+                  ( Wire_work.Review_rejected
+                  | Wire_work.Review_failed
+                  | Wire_work.Review_commit_failed
+                  | Wire_work.Review_execution_repair_required );
+                _;
+              } ->
               (p, f + 1)
           | Some
               {
@@ -320,9 +334,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                   | Wire_work.Review_running
                   | Wire_work.Review_unavailable
                   | Wire_work.Review_not_reviewed
-                  | Wire_work.Review_commit_failed
                   | Wire_work.Review_execution_pending
-                  | Wire_work.Review_execution_repair_required
                   | Wire_work.Review_cancelled
                   | Wire_work.Review_superseded );
                 _;
@@ -1838,15 +1850,25 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         | [ t; b ] -> (t, b)
         | _ -> (rect, Rect.empty)
     in
+    let has_more_scheds =
+      match Observed.to_option model.work.schedules with
+      | Some (_, Some _) -> true
+      | Some (_, None) | None -> false
+    in
     let s_spec : Card.spec =
       {
         (Card.default_spec
            ~title:
-             (Printf.sprintf "%s (%d)"
+             (Printf.sprintf "%s (%d%s)"
                 (Ops_common.say model ~ko:"예약 일정 · 최근 기상 판정"
                    ~en:"Schedules & Last Wake Disposition")
-                n_scheds))
+                n_scheds
+                (if has_more_scheds then "+" else "")))
         with
+        subtitle =
+          (if has_more_scheds then
+             Some (Ops_common.say model ~ko:"+더 있음" ~en:"+more")
+           else None);
         hotkey =
           Some
             (Ops_common.say model ~ko:"[n] 일정 추가 · [/] 필터"
@@ -1884,6 +1906,15 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               align = Table.Left;
             };
             {
+              id = "due";
+              header = Say.make ~ko:"예정" ~en:"Next Due";
+              priority = 1;
+              min_width = 9;
+              max_width = Some 13;
+              weight = 1;
+              align = Table.Left;
+            };
+            {
               id = "rec";
               header = Say.make ~ko:"주기" ~en:"Recurrence";
               priority = 2;
@@ -1912,6 +1943,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             };
           ]
         in
+        let now_unix = model.freshness.last_wall_unix in
         let rows =
           List.map
             (fun (sc : Wire_work.schedule_row) ->
@@ -1921,6 +1953,45 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 | Some k, _ -> k
                 | None, Some t -> t
                 | None, None -> sc.source
+              in
+              let is_terminal =
+                match sc.status with
+                | Wire_work.Sched_succeeded | Wire_work.Sched_cancelled
+                | Wire_work.Sched_expired ->
+                    true
+                | Wire_work.Sched_scheduled | Wire_work.Sched_due
+                | Wire_work.Sched_running | Wire_work.Sched_failed ->
+                    false
+              in
+              let due_cell =
+                if is_terminal && Option.is_none sc.next_due_at_unix then
+                  Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                    (Glyph.to_utf8 Glyph.Missing_absent)
+                else
+                  let due_ts =
+                    Option.value sc.next_due_at_unix ~default:sc.due_at_unix
+                  in
+                  let due_txt =
+                    Ops_common.format_due_delta ~now_unix due_ts ~lang:model.lang
+                  in
+                  if
+                    match sc.status with
+                    | Wire_work.Sched_due -> true
+                    | Wire_work.Sched_scheduled ->
+                        now_unix > 0.0 && due_ts < now_unix
+                    | Wire_work.Sched_running | Wire_work.Sched_succeeded
+                    | Wire_work.Sched_failed | Wire_work.Sched_cancelled
+                    | Wire_work.Sched_expired ->
+                        false
+                  then
+                    Table.Badge
+                      {
+                        glyph = Some Glyph.Warning_triangle;
+                        text = due_txt;
+                        tone = Theme.Status_attention;
+                      }
+                  else
+                    Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) due_txt
               in
               let wake_txt, wake_tok =
                 Ops_common.wake_disposition_text ~lang:model.lang
@@ -1943,6 +2014,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                           tone = stok;
                         } );
                     ("target", Table.text_cell target);
+                    ("due", due_cell);
                     ( "rec"
                     , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
                         ~attrs:Attr.italic sc.recurrence_summary );
@@ -2032,13 +2104,32 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               incr y
             end;
             if !y < bot then begin
+              let is_terminal =
+                match sc.status with
+                | Wire_work.Sched_succeeded | Wire_work.Sched_cancelled
+                | Wire_work.Sched_expired ->
+                    true
+                | Wire_work.Sched_scheduled | Wire_work.Sched_due
+                | Wire_work.Sched_running | Wire_work.Sched_failed ->
+                    false
+              in
+              let due_str =
+                if is_terminal && Option.is_none sc.next_due_at_unix then
+                  Ops_common.format_age
+                    ~now_unix:model.freshness.last_wall_unix sc.due_at_unix
+                    ~lang:model.lang
+                else
+                  let due_ts =
+                    Option.value sc.next_due_at_unix ~default:sc.due_at_unix
+                  in
+                  Ops_common.format_due_delta
+                    ~now_unix:model.freshness.last_wall_unix due_ts
+                    ~lang:model.lang
+              in
               Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
                 ~label_w:12
                 ~key:(Ops_common.say model ~ko:"예정 시각" ~en:"Due At")
-                ~value:
-                  (Ops_common.format_age
-                     ~now_unix:model.freshness.last_wall_unix sc.due_at_unix
-                     ~lang:model.lang)
+                ~value:due_str
                 ~val_fg:theme.text_muted ~val_attrs:Attr.italic ();
               incr y
             end;
@@ -2119,34 +2210,102 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
     | _ -> Rect.split_v rect ~top_h:1
   in
   let bg = Color.of_rgb theme.surface_2 in
-  let ok_st = Typography.status ~bg ~bold:true theme Theme.Status_ok in
-  Cell_grid.fill_rect ~clip:banner_rect grid ~rect:banner_rect ~style:ok_st ();
-  Card.draw_left_rail ~bg ~tone:Theme.Status_ok grid ~x:banner_rect.x
+  let any_failed =
+    Observed.is_failed model.work.asks
+    || Observed.is_failed model.work.tool_approvals
+    || Observed.is_failed model.work.gate_pending
+    || Observed.is_failed model.work.planning
+  in
+  let any_loading =
+    Observed.is_loading model.work.asks
+    || Observed.is_loading model.work.tool_approvals
+    || Observed.is_loading model.work.gate_pending
+    || Observed.is_loading model.work.planning
+  in
+  let any_stale =
+    Observed.is_stale model.work.asks
+    || Observed.is_stale model.work.tool_approvals
+    || Observed.is_stale model.work.gate_pending
+    || Observed.is_stale model.work.planning
+  in
+  let is_settled obs =
+    match obs with
+    | Observed.Value _ | Observed.Absent -> true
+    | Observed.Loading _ | Observed.Unreported | Observed.Failed _ -> false
+  in
+  let all_observed =
+    is_settled model.work.asks
+    && is_settled model.work.tool_approvals
+    && is_settled model.work.gate_pending
+    && is_settled model.work.planning
+  in
+  let banner_tone, banner_glyph, banner_txt =
+    if any_failed then
+      ( Theme.Status_critical
+      , Glyph.Live_failing
+      , Ops_common.say model
+          ~ko:"수신함 조회 실패 · 일부 대기 항목을 확인하지 못했습니다"
+          ~en:"Inbox fetch failed — pending operator items could not be verified" )
+    else if any_loading && not all_observed then
+      ( Theme.Status_active
+      , Glyph.Transport_reconnecting
+      , Ops_common.say model
+          ~ko:"수신함 불러오는 중..."
+          ~en:"Loading operator inbox..." )
+    else if not all_observed then
+      ( Theme.Status_historical
+      , Glyph.Missing_unreported
+      , Ops_common.say model
+          ~ko:"수신함 미관측 · 서버 응답 대기 중"
+          ~en:"Inbox not yet observed — awaiting server snapshot" )
+    else if any_stale then
+      ( Theme.Status_attention
+      , Glyph.Transport_stale
+      , Ops_common.say model
+          ~ko:"수신함 갱신 지연 · 최신 승인/질문 상태를 재확인 중입니다"
+          ~en:"Inbox data stale — refreshing pending operator items" )
+    else
+      ( Theme.Status_ok
+      , Glyph.Live_healthy
+      , Ops_common.say model
+          ~ko:"수신함 모두 처리됨 · 대기 중인 승인/질문 0건"
+          ~en:"Inbox Clear — 0 items awaiting operator decision" )
+  in
+  let banner_st = Typography.status ~bg ~bold:true theme banner_tone in
+  Cell_grid.fill_rect ~clip:banner_rect grid ~rect:banner_rect ~style:banner_st ();
+  Card.draw_left_rail ~bg ~tone:banner_tone grid ~x:banner_rect.x
     ~y:banner_rect.y ~h:1 ~theme;
+  let vp, vr, vw = Work_store.verification_pass_summary model.work in
+  let verify_summary =
+    if vp + vr + vw > 0 && banner_rect.w >= 72 then
+      let vs =
+        Printf.sprintf "%s %d  ·  %s %d"
+          (Ops_common.say model ~ko:"검증 통과" ~en:"Verify pass") vp
+          (Ops_common.say model ~ko:"반려" ~en:"rej") vr
+      in
+      Some (vs, Grapheme.display_width vs)
+    else None
+  in
+  let left_max_w =
+    match verify_summary with
+    | Some (_, sw) -> Int.max 0 (banner_rect.w - sw - 6)
+    | None -> Int.max 0 (banner_rect.w - 3)
+  in
   ignore
     (Ops_common.put_line ~clip:banner_rect grid ~x:(banner_rect.x + 2)
        ~y:banner_rect.y
-       ~max_w:(Int.max 0 (banner_rect.w - 3))
-       ~style:ok_st
-       (Glyph.to_utf8 Glyph.Live_healthy ^ " "
-        ^ Ops_common.say model
-            ~ko:"수신함 모두 처리됨 · 대기 중인 승인/질문 0건"
-            ~en:"Inbox Clear — 0 items awaiting operator decision"));
-  let vp, vr, vw = Work_store.verification_pass_summary model.work in
-  if vp + vr + vw > 0 && banner_rect.w >= 72 then begin
-    let vs =
-      Printf.sprintf "%s %d  ·  %s %d"
-        (Ops_common.say model ~ko:"검증 통과" ~en:"Verify pass") vp
-        (Ops_common.say model ~ko:"반려" ~en:"rej") vr
-    in
-    let sw = Grapheme.display_width vs in
-    ignore
-      (Ops_common.put_line ~clip:banner_rect grid
-         ~x:(Rect.right banner_rect - sw - 2)
-         ~y:banner_rect.y ~max_w:sw
-         ~style:(Typography.whisper ~bg theme)
-         vs)
-  end;
+       ~max_w:left_max_w
+       ~style:banner_st
+       (Glyph.to_utf8 banner_glyph ^ " " ^ banner_txt));
+  (match verify_summary with
+   | Some (vs, sw) ->
+       ignore
+         (Ops_common.put_line ~clip:banner_rect grid
+            ~x:(Rect.right banner_rect - sw - 2)
+            ~y:banner_rect.y ~max_w:sw
+            ~style:(Typography.whisper ~bg theme)
+            vs)
+   | None -> ());
   if Rect.is_empty split_rect then ()
   else
     let left_rect, right_rect =

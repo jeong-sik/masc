@@ -162,7 +162,7 @@ let empty =
     goal_phase_filter = Goal_filter_all;
     goal_sort_mode = Goal_sort_default;
     task_status_filter = Status_all;
-    verification_view = `Pending;
+    verification_view = `All;
     expanded_ids = String_set.empty;
   }
 
@@ -327,33 +327,36 @@ let verification_pass_summary t =
   | Some vs ->
       List.fold_left
         (fun (passed, rejected, awaiting) (v : Wire_work.verification_request) ->
-          match v.review_observation with
-          | Some { state = Wire_work.Review_approved; _ } ->
-              (passed + 1, rejected, awaiting)
-          | Some
-              {
-                state =
-                  ( Wire_work.Review_rejected
-                  | Wire_work.Review_failed
-                  | Wire_work.Review_commit_failed );
-                _;
-              } ->
-              (passed, rejected + 1, awaiting)
-          | Some
-              {
-                state =
-                  ( Wire_work.Review_unobserved
-                  | Wire_work.Review_running
-                  | Wire_work.Review_unavailable
-                  | Wire_work.Review_not_reviewed
-                  | Wire_work.Review_execution_pending
-                  | Wire_work.Review_execution_repair_required
-                  | Wire_work.Review_cancelled
-                  | Wire_work.Review_superseded );
-                _;
-              }
-          | None ->
-              (passed, rejected, awaiting + 1))
+          if Option.is_some v.evidence_projection_error then
+            (passed, rejected + 1, awaiting)
+          else
+            match v.review_observation with
+            | Some { state = Wire_work.Review_approved; _ } ->
+                (passed + 1, rejected, awaiting)
+            | Some
+                {
+                  state =
+                    ( Wire_work.Review_rejected
+                    | Wire_work.Review_failed
+                    | Wire_work.Review_commit_failed
+                    | Wire_work.Review_execution_repair_required );
+                  _;
+                } ->
+                (passed, rejected + 1, awaiting)
+            | Some
+                {
+                  state =
+                    ( Wire_work.Review_unobserved
+                    | Wire_work.Review_running
+                    | Wire_work.Review_unavailable
+                    | Wire_work.Review_not_reviewed
+                    | Wire_work.Review_execution_pending
+                    | Wire_work.Review_cancelled
+                    | Wire_work.Review_superseded );
+                  _;
+                }
+            | None ->
+                (passed, rejected, awaiting + 1))
         (0, 0, 0) vs
 
 let record_decision ~at_unix ~kind ~target_id ~keeper ~summary t =

@@ -454,7 +454,22 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
 (* Every keeper tab sits under the dive header, whose KPI strip shows the
    keeper's cost and tokens from keeper-costs. *)
 let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
-  add_keeper_costs ~force m (keeper_tab_fetches ~force ~name ~tab m)
+  let waiting_needed =
+    (force || not m.runtime.keeper_waiting_inventory_absent)
+    &&
+    match m.runtime.keeper_waiting_inventory with
+    | Observed.Value { data = prev_k, _; stale = false; _ } ->
+        force || not (String.equal prev_k name)
+    | Observed.Loading _
+    | Observed.Value { stale = true; _ }
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        needs_fetch ~force m.runtime.keeper_waiting_inventory
+  in
+  let base = add_keeper_costs ~force m (keeper_tab_fetches ~force ~name ~tab m) in
+  if waiting_needed then Cmd.Get_keeper_waiting_inventory { keeper = name } :: base
+  else base
 
 let fetches_for_dive ~force (m : Model.t) =
   match Model.active_dive m with
@@ -707,6 +722,12 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if
            (needs_fetch ~force m.work.verifications)
            (Cmd.Get_verifications { view = `All; limit = 50; offset = 0 })
+      |> add_if
+           (needs_fetch ~force m.work.schedules)
+           (Cmd.Get_schedules { cursor = None })
+      |> add_if
+           (needs_fetch ~force m.runtime.lane_addon_asks)
+           (Cmd.Get_lane_addon_asks { include_resolved = false })
       |> candle_ledger_reqs ~force m
       |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
       |> add_if
@@ -1623,6 +1644,8 @@ let bootstrap_fetches (m : Model.t) =
       Cmd.Get_tool_approvals;
       Cmd.Get_gate_pending;
       Cmd.Get_planning;
+      Cmd.Get_schedules { cursor = None };
+      Cmd.Get_lane_addon_asks { include_resolved = false };
     ]
   in
   let view_reqs =

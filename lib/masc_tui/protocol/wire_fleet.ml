@@ -358,11 +358,58 @@ type turn_pulse = { known_since : float; slots : turn_slot list }
 
 let turn_slot_seconds = 1800
 
+type runtime_path_rest = {
+  status : string;
+  runtime_id : string;
+  release_at_unix : float option;
+  release_basis : string option;
+}
+
+type lane_walk_failure = {
+  attempt : int;
+  runtime_id : string;
+  dispatch : string;
+  summary : string;
+  api_candidate_fault : string option;
+}
+
+type keeper_diagnostics = {
+  phase : string option;
+  failing_since_unix : float option;
+  next_action : string option;
+  last_failure_cause : string option;
+  last_failure_at_unix : float option;
+  runtime_blocker_summary : string option;
+  runtime_blocker_signature : string option;
+  runtime_path_rest : runtime_path_rest option;
+  lane_failures : lane_walk_failure list;
+  operator_disposition : string option;
+  operator_disposition_reason : string option;
+}
+
+let empty_keeper_diagnostics =
+  {
+    phase = None;
+    failing_since_unix = None;
+    next_action = None;
+    last_failure_cause = None;
+    last_failure_at_unix = None;
+    runtime_blocker_summary = None;
+    runtime_blocker_signature = None;
+    runtime_path_rest = None;
+    lane_failures = [];
+    operator_disposition = None;
+    operator_disposition_reason = None;
+  }
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
   candle_summary : candle_observation option;
   turn_pulses : (string * turn_pulse) list;
+  diagnostics : (string * keeper_diagnostics) list;
+  roster_total : int option;
+  roster_truncated : bool;
 }
 
 type execution_keeper_enrichment = {
@@ -616,6 +663,15 @@ let sparkline_24h_of_pulse ~now_unix pulse =
 
 let turns_24h_of_pulse ~now_unix pulse =
   Array.fold_left ( + ) 0 (aligned_24h_slot_counts ~now_unix pulse)
+
+let turn_outcome_breakdown_24h ~now_unix { slots; known_since = _ } =
+  let window_start, current_slot = pulse_window_bounds ~now_unix in
+  List.fold_left
+    (fun (ok_n, rest_n, fail_n) (s : turn_slot) ->
+      if s.starts_at >= window_start && s.starts_at <= current_slot then
+        (ok_n + s.ok, rest_n + s.rested, fail_n + s.failed)
+      else (ok_n, rest_n, fail_n))
+    (0, 0, 0) slots
 
 let aggregate_company_sparkline ~now_unix ~pulse_tbl
     (members : keeper_summary list) =
@@ -1189,13 +1245,151 @@ let extract_candle_balance_opt obj =
       | Ok (Some c) -> parse_milli (member "balance_milli" c)
       | Ok None | Error _ -> None)
 
+let opt_str obj field =
+  match optional_nonblank_string obj field with
+  | Ok s -> s
+  | Error _ -> None
+
+let opt_ts obj field =
+  match decode_optional_timestamp_unix obj field with
+  | Ok ts -> ts
+  | Error _ -> None
+
+let extract_runtime_path_rest_opt obj =
+  match optional_object_field obj "runtime_path_rest" with
+  | Ok (Some r) -> (
+      match (opt_str r "status", opt_str r "runtime_id") with
+      | Some status, Some runtime_id ->
+          Some
+            {
+              status;
+              runtime_id;
+              release_at_unix = opt_ts r "release_at";
+              release_basis = opt_str r "release_basis";
+            }
+      | None, _ | _, None -> None)
+  | Ok None | Error _ -> None
+
+let extract_lane_failures obj =
+  let fault_of_json = function
+    | `Assoc _ as f -> (
+        match (opt_str f "kind", opt_str f "fact") with
+        | Some "binding", Some fact -> Some fact
+        | Some kind, _ -> Some kind
+        | None, _ -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  let decode_one fobj =
+    match opt_str fobj "runtime_id" with
+    | None -> None
+    | Some runtime_id ->
+        let attempt =
+          match optional_int_field fobj "attempt" with
+          | Ok (Some n) -> n
+          | Ok None | Error _ -> 0
+        in
+        let dispatch = Option.value (opt_str fobj "dispatch") ~default:"" in
+        let summary =
+          match opt_str fobj "summary" with
+          | Some s -> s
+          | None -> (
+              match optional_object_field fobj "failure" with
+              | Ok (Some fail_obj) ->
+                  Option.value (opt_str fail_obj "summary")
+                    ~default:
+                      (Option.value (opt_str fail_obj "kind")
+                         ~default:"candidate failed")
+              | Ok None | Error _ -> "candidate failed")
+        in
+        let api_candidate_fault =
+          fault_of_json (member "api_candidate_fault" fobj)
+        in
+        Some { attempt; runtime_id; dispatch; summary; api_candidate_fault }
+  in
+  match optional_object_field obj "runtime_lane_observation" with
+  | Ok (Some obs) ->
+      let ev =
+        match optional_object_field obs "evidence" with
+        | Ok (Some ev) -> ev
+        | Ok None | Error _ -> obs
+      in
+      let from_failures =
+        match optional_list_field ev "failures" with
+        | Ok xs -> List.filter_map decode_one xs
+        | Error _ -> []
+      in
+      let from_terminal =
+        match optional_object_field ev "terminal" with
+        | Ok (Some term)
+          when Option.equal String.equal (opt_str term "kind") (Some "candidate") -> (
+            match decode_one term with
+            | Some t ->
+                let dup =
+                  List.exists
+                    (fun (x : lane_walk_failure) ->
+                      String.equal x.runtime_id t.runtime_id
+                      && Int.equal x.attempt t.attempt)
+                    from_failures
+                in
+                if dup then [] else [ t ]
+            | None -> [])
+        | Ok (Some _) | Ok None | Error _ -> []
+      in
+      from_failures @ from_terminal
+  | Ok None | Error _ -> []
+
+let extract_keeper_diagnostics obj =
+  let last_failure_cause, last_failure_at_unix =
+    match optional_object_field obj "last_failure" with
+    | Ok (Some lf) -> (opt_str lf "cause", opt_ts lf "at_unix")
+    | Ok None | Error _ -> (None, None)
+  in
+  let d =
+    {
+      phase = opt_str obj "phase";
+      failing_since_unix = opt_ts obj "failing_since";
+      next_action = opt_str obj "next_action";
+      last_failure_cause;
+      last_failure_at_unix;
+      runtime_blocker_summary = opt_str obj "runtime_blocker_summary";
+      runtime_blocker_signature = opt_str obj "runtime_blocker_signature";
+      runtime_path_rest = extract_runtime_path_rest_opt obj;
+      lane_failures = extract_lane_failures obj;
+      operator_disposition = opt_str obj "operator_disposition";
+      operator_disposition_reason = opt_str obj "operator_disposition_reason";
+    }
+  in
+  if
+    Option.is_some d.phase
+    || Option.is_some d.failing_since_unix
+    || Option.is_some d.next_action
+    || Option.is_some d.last_failure_cause
+    || Option.is_some d.runtime_blocker_summary
+    || Option.is_some d.runtime_path_rest
+    || d.lane_failures <> []
+    || Option.is_some d.operator_disposition
+  then Some d
+  else None
+
 let decode_keepers_roster_extras json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "keepers" in
   let* candle_summary = decode_candle_observation_opt body in
+  let roster_total =
+    match optional_int_field body "total" with
+    | Ok n -> n
+    | Error _ -> None
+  in
+  let roster_truncated =
+    match decode_bool_field_or body "truncated" ~default:false with
+    | Ok b -> b
+    | Error _ -> false
+  in
   let profiles = ref [] in
   let balances = ref [] in
   let pulses = ref [] in
+  let diagnostics = ref [] in
   List.iter
     (fun item ->
       match optional_nonblank_string item "name" with
@@ -1210,7 +1404,10 @@ let decode_keepers_roster_extras json =
              ([decode_keeper_summary]), so it never reaches here. *)
           (match decode_turn_pulse item with
           | Ok (Some pulse) -> pulses := (name, pulse) :: !pulses
-          | Ok None | Error _ -> ())
+          | Ok None | Error _ -> ());
+          (match extract_keeper_diagnostics item with
+          | Some diag -> diagnostics := (name, diag) :: !diagnostics
+          | None -> ())
       | Ok None | Error _ -> ())
     items;
   Ok
@@ -1219,6 +1416,9 @@ let decode_keepers_roster_extras json =
       candle_balances_milli = List.rev !balances;
       candle_summary;
       turn_pulses = List.rev !pulses;
+      diagnostics = List.rev !diagnostics;
+      roster_total;
+      roster_truncated;
     }
 
 let decode_execution_keeper_enrichments json =

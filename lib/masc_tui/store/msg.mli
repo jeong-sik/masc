@@ -268,6 +268,8 @@ type http_reply =
       (Wire_runtime.runtime_metrics_snapshot, http_error) result
   | Reply_runtime_resolved of
       (Wire_runtime.runtime_resolved_snapshot, http_error) result
+  | Reply_runtime_standings of
+      ((string * Wire_runtime.runtime_standing) list, string) result
   | Reply_runtime_config_raw of
       (Wire_runtime.runtime_config_raw_meta, http_error) result
   | Reply_setup_inventory of (Wire_runtime.setup_inventory, http_error) result

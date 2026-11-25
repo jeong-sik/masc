@@ -1672,10 +1672,25 @@ let rec execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_runtime_resolved ->
+            let resolved_res =
+              fetch_and_decode_get t ~path ~decode:(fun json ->
+                  match Wire_runtime.decode_runtime_resolved json with
+                  | Error _ as err -> err
+                  | Ok snap ->
+                      let standings_res =
+                        Wire_runtime.decode_runtime_standings json
+                      in
+                      Ok (snap, standings_res))
+            in
             let reply =
-              Msg.Reply_runtime_resolved
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_runtime.decode_runtime_resolved)
+              match resolved_res with
+              | Ok (snap, standings_res) ->
+                  Ui_bus.publish_snapshot t.bus
+                    ~key:(Key_get (path ^ "#standings"))
+                    (Msg.Http_reply
+                       { epoch; reply = Msg.Reply_runtime_standings standings_res });
+                  Msg.Reply_runtime_resolved (Ok snap)
+              | Error _ as err -> Msg.Reply_runtime_resolved err
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_runtime_config_raw ->

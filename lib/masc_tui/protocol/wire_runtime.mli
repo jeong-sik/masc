@@ -413,8 +413,33 @@ type runtime_resolved_snapshot = {
   usage_windows : provider_usage_windows option;
 }
 
+type runtime_standing = {
+  quota_rest_cause : string option;
+  quota_rest_until_unix : float option;
+  quota_rest_reset_stated : bool;
+  credential_refused_at_unix : float option;
+  rate_limited : bool;
+  rate_limit_resets_at_unix : float option;
+  failed_attempt_failure : string option;
+  failed_attempt_noted_at_unix : float option;
+  failed_attempt_by : string option;
+}
+
+val standing_restricts_readiness : now_unix:float -> runtime_standing -> bool
+(** An active quota or rate-limit window, or an unanswered credential refusal. *)
+
+val standing_is_degraded : now_unix:float -> runtime_standing -> bool
+(** [true] when the runtime is actively resting on quota, rate-limited,
+    credential-refused, or holds an un-cleared failed attempt. *)
+
 val decode_runtime_resolved :
   Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
+
+val decode_runtime_standings :
+  Yojson.Safe.t -> ((string * runtime_standing) list, string) result
+(** Decode live per-runtime standing fields ([quota_rest], [rate_limited],
+    [rate_limit_resets_at], [credential_refused_at], [failed_attempt]) from
+    [/api/v1/runtime/resolved]. *)
 
 (** {1 Human Provider & Runtime Slot Aliases} *)
 

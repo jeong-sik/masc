@@ -2,6 +2,9 @@ open Masc_tui_protocol
 
 type window = {
   turns : int;
+  ok : int;
+  rested : int;
+  failed : int;
   scheduled : int;
   reacted : int;
   chat : int;
@@ -20,6 +23,9 @@ let window ~now_unix ~hours (pulse : Wire_fleet.turn_pulse) =
   let empty =
     {
       turns = 0;
+      ok = 0;
+      rested = 0;
+      failed = 0;
       scheduled = 0;
       reacted = 0;
       chat = 0;
@@ -37,6 +43,9 @@ let window ~now_unix ~hours (pulse : Wire_fleet.turn_pulse) =
         {
           acc with
           turns = acc.turns + s.ok + s.rested + s.failed;
+          ok = acc.ok + s.ok;
+          rested = acc.rested + s.rested;
+          failed = acc.failed + s.failed;
           scheduled = acc.scheduled + s.scheduled;
           reacted = acc.reacted + s.reacted;
           chat = acc.chat + s.chat;

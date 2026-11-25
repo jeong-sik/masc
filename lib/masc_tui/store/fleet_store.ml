@@ -121,6 +121,9 @@ type t = {
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_observation option;
   turn_pulses : Wire_fleet.turn_pulse String_map.t;
+  keeper_diagnostics : Wire_fleet.keeper_diagnostics String_map.t;
+  roster_total : int option;
+  roster_truncated : bool;
   wall_unix : float;
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
@@ -161,6 +164,9 @@ let empty =
     candle_balances_milli = String_map.empty;
     candle_summary_fallback = None;
     turn_pulses = String_map.empty;
+    keeper_diagnostics = String_map.empty;
+    roster_total = None;
+    roster_truncated = false;
     wall_unix = 0.0;
     fleet_reading = Observed.unreported;
     fleet_degradation = None;
@@ -848,7 +854,57 @@ let apply_roster_extras (extras : Wire_fleet.keeper_roster_extras) t =
       (fun acc (name, pulse) -> String_map.add name pulse acc)
       String_map.empty extras.turn_pulses
   in
-  { t with sandbox_profiles; candle_balances_milli; candle_summary_fallback; turn_pulses }
+  let keeper_diagnostics =
+    List.fold_left
+      (fun acc (name, diag) -> String_map.add name diag acc)
+      String_map.empty extras.diagnostics
+  in
+  {
+    t with
+    sandbox_profiles;
+    candle_balances_milli;
+    candle_summary_fallback;
+    turn_pulses;
+    keeper_diagnostics;
+    roster_total = extras.roster_total;
+    roster_truncated = extras.roster_truncated;
+  }
+
+let diagnostics_for ~keeper t = String_map.find_opt keeper t.keeper_diagnostics
+
+let path_rest_for ~(keeper : Wire_fleet.keeper_summary) t =
+  let runnable =
+    (not keeper.paused)
+    && keeper.keepalive_running
+    &&
+    match keeper.health with
+    | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_offline -> false
+    | Wire_fleet.Keeper_healthy
+    | Wire_fleet.Keeper_working
+    | Wire_fleet.Keeper_idle
+    | Wire_fleet.Keeper_degraded
+    | Wire_fleet.Keeper_recovering
+    | Wire_fleet.Keeper_failing
+    | Wire_fleet.Keeper_booting ->
+        true
+  in
+  if not runnable then None
+  else
+    match String_map.find_opt keeper.name t.keeper_diagnostics with
+    | Some { runtime_path_rest = Some r; phase; _ }
+      when String.equal (String.lowercase_ascii r.status) "resting"
+           && (match r.release_at_unix with
+               | Some ts when t.wall_unix > 0.0 && ts <= t.wall_unix -> false
+               | Some _ | None -> true)
+           && not
+                (match phase with
+                | Some p ->
+                    let lp = String.lowercase_ascii p in
+                    String.equal lp "paused" || String.equal lp "stopped"
+                    || String.equal lp "offline"
+                | None -> false) ->
+        Some r
+    | Some _ | None -> None
 
 let turn_pulse t name = String_map.find_opt name t.turn_pulses
 

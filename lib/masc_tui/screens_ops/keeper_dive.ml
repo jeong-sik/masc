@@ -1914,12 +1914,26 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                      (say ~ko:"기록 시작" ~en:"counted since")
                      (Ops_common.format_age ~now_unix since ~lang:model.lang)
              in
-             push_line ~fg:theme.text_primary ~attrs:Attr.none
-               (Printf.sprintf "%s · %d%s%s"
+             let outcome_suffix =
+               if w.failed > 0 || w.rested > 0 then
+                 Printf.sprintf " (%s %d · %s %d · %s %d)"
+                   (say ~ko:"성공" ~en:"ok") w.ok
+                   (say ~ko:"휴식" ~en:"rested") w.rested
+                   (say ~ko:"실패" ~en:"failed") w.failed
+               else ""
+             in
+             let header_fg =
+               if w.failed > 0 then Theme.status_color theme Theme.Status_critical
+               else if w.rested > 0 && w.ok = 0 then
+                 Theme.status_color theme Theme.Status_attention
+               else theme.text_primary
+             in
+             push_line ~fg:header_fg ~attrs:Attr.none
+               (Printf.sprintf "%s · %d%s%s%s"
                   (say
                      ~ko:(Printf.sprintf "최근 %d시간" hours)
                      ~en:(Printf.sprintf "Last %dh" hours))
-                  w.turns (say ~ko:"턴" ~en:" turns") rate);
+                  w.turns (say ~ko:"턴" ~en:" turns") outcome_suffix rate);
              push_line ~fg:theme.text_secondary ~attrs:Attr.none
                (Printf.sprintf "  %s %d · %s %d · %s %d · %s %d · %s %d"
                   (say ~ko:"예약" ~en:"scheduled") w.scheduled
@@ -3788,6 +3802,39 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           body_after_rule
         end
         else after_hero
+      in
+      let content_rect =
+        if Rect.is_empty content_rect then content_rect
+        else
+          let n_rows =
+            Model.keeper_diagnostic_banner_height ~name ~avail_h:content_rect.h
+              model
+          in
+          if n_rows <= 0 then content_rect
+          else
+            let rows = Model.keeper_diagnostic_banner ~name model in
+            let banner_rect, rest_rect = Rect.split_v content_rect ~top_h:n_rows in
+            let bg = Color.of_rgb theme.surface_2 in
+            List.iteri
+              (fun idx (row : Model.keeper_banner_row) ->
+                if idx < n_rows then begin
+                  let ry = banner_rect.y + idx in
+                  let r_line =
+                    Rect.make ~x:banner_rect.x ~y:ry ~w:banner_rect.w ~h:1
+                  in
+                  let st = Typography.status ~bg ~bold:(idx = 0) theme row.tone in
+                  Cell_grid.fill_rect ~clip:r_line grid ~rect:r_line ~style:st ();
+                  Card.draw_left_rail ~bg ~tone:row.tone grid ~x:r_line.x ~y:ry
+                    ~h:1 ~theme;
+                  ignore
+                    (Ops_common.put_line ~clip:r_line grid ~x:(r_line.x + 2)
+                       ~y:ry
+                       ~max_w:(Int.max 0 (r_line.w - 3))
+                       ~style:st
+                       (Glyph.to_utf8 row.glyph ^ " " ^ row.text))
+                end)
+              rows;
+            rest_rect
       in
       if not (Rect.is_empty content_rect) then
         match tab with

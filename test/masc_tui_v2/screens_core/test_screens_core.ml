@@ -1159,16 +1159,64 @@ let test_pulse_populated_and_empty () =
           in
           assert_contains ~label:lbl ~needle:unattrib txt;
 
-          (* Empty Pulse: Panel A collapses to 1-line All clear pill *)
+          (* Unobserved initial Pulse: Panel A honestly shows unreported, NOT false-green All clear *)
           let m_empty = Model.initial ~cols ~rows ~lang () in
           let g_empty, _ = render_full ~model:m_empty ~cols ~rows in
           let lbl_e = Printf.sprintf "pulse_empty_%dx%d" cols rows in
           assert_clean_grid ~label:lbl_e g_empty;
           let txt_e = grid_all_text g_empty in
+          let unobs_str =
+            match lang with
+            | Say.Lang_ko -> "확인 대기 미관측"
+            | Say.Lang_en -> "Attention not yet loaded"
+          in
+          assert_contains ~label:lbl_e ~needle:unobs_str txt_e;
+
+          (* Observed-empty Pulse: Panel A collapses to honest 1-line All clear pill *)
+          let t_obs = Clock.Mono.of_ns 5_000_000_000L in
+          let empty_fleet_reading : Wire_fleet.fleet_stream_reading =
+            {
+              status = "healthy";
+              operator_action_required = false;
+              bootable_count = 0;
+              running_count = 0;
+              executable_count = 0;
+              failing_count = 0;
+              recovering_count = 0;
+              paused_count = 0;
+              proactive_interval_sec = None;
+            }
+          in
+          let m_obs_empty =
+            {
+              m_empty with
+              work =
+                m_empty.work
+                |> Work_store.apply_asks ~observed_at:t_obs []
+                |> Work_store.apply_tool_approvals ~observed_at:t_obs []
+                |> Work_store.apply_gate_pending ~observed_at:t_obs []
+                |> Work_store.apply_planning ~observed_at:t_obs
+                     { Wire_work.goals = []; tasks = [] }
+                |> Work_store.apply_schedules ~observed_at:t_obs ([], None);
+              runtime =
+                Runtime_store.apply_lane_addon_asks ~observed_at:t_obs []
+                  m_empty.runtime;
+              fleet =
+                {
+                  m_empty.fleet with
+                  fleet_reading =
+                    Observed.value ~observed_at:t_obs empty_fleet_reading;
+                };
+            }
+          in
+          let g_obs_empty, _ = render_full ~model:m_obs_empty ~cols ~rows in
+          let lbl_oe = Printf.sprintf "pulse_obs_empty_%dx%d" cols rows in
+          assert_clean_grid ~label:lbl_oe g_obs_empty;
+          let txt_oe = grid_all_text g_obs_empty in
           let clear_str =
             match lang with Say.Lang_ko -> "확인 대기 없음" | Say.Lang_en -> "All clear"
           in
-          assert_contains ~label:lbl_e ~needle:clear_str txt_e)
+          assert_contains ~label:lbl_oe ~needle:clear_str txt_oe)
         viewports)
     [ Say.Lang_ko; Say.Lang_en ]
 
@@ -4098,6 +4146,170 @@ let test_render_util_redaction_linear_and_embedded_cap () =
   Alcotest.(check bool) "small prefixed json still extracts" true
     (Option.is_some (Render_util.extract_embedded_json small_prefixed))
 
+let test_layer2_pulse_honesty_degradation_and_waiting_verifications () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let deg : Wire_fleet.fleet_degradation =
+    { since_unix = 1795253000.0; reason = "store read timeout" }
+  in
+  let m_deg =
+    {
+      m0 with
+      freshness =
+        {
+          m0.freshness with
+          observer = Health.Live { last_event_ns = t0; revision = 1 };
+          fleet = Health.Live { last_event_ns = t0; revision = 1 };
+        };
+      fleet = { m0.fleet with fleet_degradation = Some deg };
+      work =
+        m0.work
+        |> Work_store.apply_asks ~observed_at:t0 []
+        |> Work_store.apply_tool_approvals ~observed_at:t0 []
+        |> Work_store.apply_gate_pending ~observed_at:t0 []
+        |> Work_store.apply_planning ~observed_at:t0
+             { Wire_work.goals = []; tasks = [] };
+    }
+  in
+  let _g, pill_lbl, pill_tone =
+    Render_util.freshness_pill ~model:m_deg ~compact:false
+  in
+  Alcotest.(check string) "freshness_pill shows DEGRADED on fleet_degradation"
+    "DEGRADED" pill_lbl;
+  Alcotest.(check bool) "freshness_pill uses Status_attention on fleet_degradation"
+    true (pill_tone = Theme.Status_attention);
+  let grid_deg, _ = render_full ~model:m_deg ~cols:140 ~rows:40 in
+  let txt_deg = grid_all_text grid_deg in
+  assert_contains ~label:"pulse_degraded" ~needle:"Fleet degraded" txt_deg;
+  assert_not_contains ~label:"pulse_degraded_not_all_clear" ~needle:"All clear"
+    txt_deg;
+
+  let m_failed =
+    {
+      m0 with
+      work =
+        {
+          m0.work with
+          asks = Observed.failed ~reason:"HTTP 503" ~retryable:true ~at:t0;
+        };
+    }
+  in
+  let grid_fail, _ = render_full ~model:m_failed ~cols:140 ~rows:40 in
+  let txt_fail = grid_all_text grid_fail in
+  assert_contains ~label:"pulse_attn_failed" ~needle:"Attention fetch failed"
+    txt_fail;
+
+  let empty_reading : Wire_fleet.fleet_stream_reading =
+    {
+      status = "healthy";
+      operator_action_required = false;
+      bootable_count = 0;
+      running_count = 0;
+      executable_count = 0;
+      failing_count = 0;
+      recovering_count = 0;
+      paused_count = 0;
+      proactive_interval_sec = None;
+    }
+  in
+  let m_all_ok =
+    {
+      m0 with
+      work =
+        m0.work
+        |> Work_store.apply_asks ~observed_at:t0 []
+        |> Work_store.apply_tool_approvals ~observed_at:t0 []
+        |> Work_store.apply_gate_pending ~observed_at:t0 []
+        |> Work_store.apply_planning ~observed_at:t0
+             { Wire_work.goals = []; tasks = [] }
+        |> Work_store.apply_schedules ~observed_at:t0 ([], None);
+      runtime =
+        Runtime_store.apply_lane_addon_asks ~observed_at:t0 [] m0.runtime;
+      fleet =
+        { m0.fleet with fleet_reading = Observed.value ~observed_at:t0 empty_reading };
+    }
+  in
+  let m_sched_fail =
+    {
+      m_all_ok with
+      work =
+        {
+          m_all_ok.work with
+          schedules = Observed.failed ~reason:"HTTP 503" ~retryable:true ~at:t0;
+        };
+    }
+  in
+  let grid_sf, _ = render_full ~model:m_sched_fail ~cols:140 ~rows:40 in
+  let txt_sf = grid_all_text grid_sf in
+  assert_contains ~label:"pulse_sched_failed" ~needle:"Attention fetch failed"
+    txt_sf;
+  assert_not_contains ~label:"pulse_sched_not_all_clear" ~needle:"All clear"
+    txt_sf;
+
+  let m_addon_unrep =
+    {
+      m_all_ok with
+      runtime = { m_all_ok.runtime with lane_addon_asks = Observed.unreported };
+    }
+  in
+  let grid_au, _ = render_full ~model:m_addon_unrep ~cols:140 ~rows:40 in
+  let txt_au = grid_all_text grid_au in
+  assert_contains ~label:"pulse_addon_unreported"
+    ~needle:"Attention not yet loaded" txt_au;
+  assert_not_contains ~label:"pulse_addon_not_all_clear" ~needle:"All clear"
+    txt_au;
+
+  let m_fleet_fail =
+    {
+      m_all_ok with
+      fleet =
+        {
+          m_all_ok.fleet with
+          fleet_reading =
+            Observed.failed ~reason:"stream err" ~retryable:true ~at:t0;
+        };
+    }
+  in
+  let grid_ff, _ = render_full ~model:m_fleet_fail ~cols:140 ~rows:40 in
+  let txt_ff = grid_all_text grid_ff in
+  assert_contains ~label:"pulse_fleet_failed" ~needle:"Attention fetch failed"
+    txt_ff;
+  assert_not_contains ~label:"pulse_fleet_not_all_clear" ~needle:"All clear"
+    txt_ff;
+
+  let degraded_st : Wire_runtime.runtime_standing =
+    {
+      quota_rest_cause = Some "daily_quota";
+      quota_rest_until_unix = Some 1795260000.0;
+      quota_rest_reset_stated = true;
+      credential_refused_at_unix = None;
+      rate_limited = true;
+      rate_limit_resets_at_unix = None;
+      failed_attempt_failure = None;
+      failed_attempt_noted_at_unix = None;
+      failed_attempt_by = None;
+    }
+  in
+  let rt_before =
+    Runtime_store.apply_runtime_standings [ ("rt-a", degraded_st) ] m0.runtime
+  in
+  let m_after_err, _ =
+    Update.step ~now:t0 { m0 with runtime = rt_before }
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply = Msg.Reply_runtime_standings (Error "corrupt standings json");
+         })
+  in
+  Alcotest.(check (option string))
+    "Reply_runtime_standings Error records runtime_standings_error"
+    (Some "corrupt standings json")
+    m_after_err.runtime.runtime_standings_error;
+  Alcotest.(check bool)
+    "Reply_runtime_standings Error preserves prior degraded standings" true
+    (Option.is_some
+       (Runtime_store.standing_for ~runtime_id:"rt-a" m_after_err.runtime))
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -4107,6 +4319,8 @@ let () =
             `Quick test_render_util_timeout_detail_labels;
           Alcotest.test_case "Render_util redaction stays linear on pathological quotes & caps embedded JSON"
             `Quick test_render_util_redaction_linear_and_embedded_cap;
+          Alcotest.test_case "Layer 2: Pulse honesty, fleet_degradation freshness pill & failed attention"
+            `Quick test_layer2_pulse_honesty_degradation_and_waiting_verifications;
           Alcotest.test_case "compact 3-row auto-fold and expand triggers" `Quick
             test_compact_chrome_auto_fold;
           Alcotest.test_case "footer never overflows across 80/90/140/180 KO & EN" `Quick

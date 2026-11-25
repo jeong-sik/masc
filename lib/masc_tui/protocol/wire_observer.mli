@@ -130,6 +130,7 @@ type event =
       at_unix : float;
     }
   | Keeper_chat_queue_changed of string
+  | Keeper_waiting_inventory_changed of { keeper : string; queue_kind : string }
   | Keeper_chat_stream_frame of {
       keeper : string;
       operation_id : string;

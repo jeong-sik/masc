@@ -676,6 +676,20 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     expect(rebased.activation_mode).toBe('autonomous')
   })
 
+  it('diffs and rebases group_text correctly', () => {
+    const c = makeKeeperConfigForSandbox({ group: 'platform' })
+    const draft = initRuntimeDraftFromConfig(c)
+    expect(draft.group_text).toBe('platform')
+
+    expect(buildRuntimePayload({ ...draft, group_text: 'review' }, c)).toEqual({ group: 'review' })
+    expect(buildRuntimePayload({ ...draft, group_text: '  ' }, c)).toEqual({ group: null })
+    expect(buildRuntimePayload(draft, c).group).toBeUndefined()
+
+    const fresh = makeKeeperConfigForSandbox({ group: 'platform' })
+    const editedDraft = { ...draft, group_text: 'review' }
+    expect(rebaseRuntimeDraftOnFreshConfig(editedDraft, c, fresh).group_text).toBe('review')
+  })
+
   it('leaves sandbox_profile unset when config is missing it', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: undefined,

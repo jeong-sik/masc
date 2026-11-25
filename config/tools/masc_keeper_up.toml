@@ -132,6 +132,11 @@ enum = ["manual", "on_demand", "autonomous"]
 description = "Owner activation and initiative: manual never starts the owner by itself, and queued work waits until an operator starts it; on_demand restores an owner without spontaneous cycles; autonomous restores an owner and permits spontaneous cycles. Pause and shutdown still apply."
 
 [[params]]
+name = "group"
+type = "string"
+description = "Optional deployment-neutral group label for dashboard grouping. Blank or null clears it; the keeper then groups under ungrouped."
+
+[[params]]
 name = "max_context_override"
 type = "integer"
 description = """

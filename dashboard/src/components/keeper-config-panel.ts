@@ -322,6 +322,7 @@ export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDra
 export type RuntimeDraft = {
   runtime_id: string
   activation_mode: KeeperActivationMode
+  group_text: string
   max_context_override: string
   sandbox_profile: SandboxProfile | null
   mention_targets_text: string
@@ -450,6 +451,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     activation_mode: activationConfigValue(c),
+    group_text: c.group ?? '',
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: toSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
@@ -488,6 +490,7 @@ function rebaseRuntimeDraft(
   if (draft.activation_mode !== base.activation_mode) {
     rebased.activation_mode = draft.activation_mode
   }
+  if (draft.group_text !== base.group_text) rebased.group_text = draft.group_text
   if (draft.max_context_override !== base.max_context_override) {
     rebased.max_context_override = draft.max_context_override
   }
@@ -1014,6 +1017,10 @@ export function buildRuntimePayloadResult(
   const newBoardInterests = listTextToStrings(draft.board_interests_text).sort()
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.activation_mode !== activationConfigValue(orig)) payload.activation_mode = draft.activation_mode
+  // '' clears the group (server removes the key); null detaches it too.
+  if (draft.group_text.trim() !== (orig.group ?? '').trim()) {
+    payload.group = draft.group_text.trim() === '' ? null : draft.group_text.trim()
+  }
   if (maxContextOverride.ok && maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
@@ -1160,6 +1167,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
   return {
     runtime_id: 'runtime_id' in payload,
     activation_mode: 'activation_mode' in payload,
+    group: 'group' in payload,
     // An unparseable draft ('abc') cannot reach the payload at all, so its
     // marker falls back to comparing the raw text.
     max_context_override:
@@ -2424,6 +2432,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         </select>
       </${SetRow}>
     ` : html`<div>${KEEPER_ACTIVATION_LABELS[c.activation_mode]}</div>`}
+
+    <${SectionHeader} title="소속 조직" />
+    ${rd && runtimeCanEdit ? html`
+      <${SetRow} label="소속 조직" hint="펄스·키퍼·런타임 화면의 묶음 이름 · 비우면 ungrouped" dirty=${dirtyFlags.group}>
+        <input
+          class="kcf-input"
+          value=${rd.group_text}
+          onInput=${(event: Event) => updateRuntimeDraft('group_text', (event.target as HTMLInputElement).value)}
+          aria-label="소속 조직"
+          placeholder="ungrouped"
+        />
+      </${SetRow}>
+    ` : html`<${ConfigRow} label="소속 조직" value=${c.group ?? 'ungrouped'} />`}
 
     <${SectionHeader} title="음성 게이트" />
     ${rd && runtimeCanEdit ? html`

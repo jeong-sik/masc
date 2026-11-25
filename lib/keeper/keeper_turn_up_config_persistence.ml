@@ -385,6 +385,11 @@ let full_fields
     | None -> fields
   in
   let fields =
+    match parsed.group_present, parsed.group_opt with
+    | true, Some group -> ("group", Keeper_toml_loader.Toml_string group) :: fields
+    | _ -> fields
+  in
+  let fields =
     match
       if parsed.skill_names_present
       then parsed.skill_names_opt
@@ -450,6 +455,8 @@ let explicit_edits (parsed : Keeper_turn_up_args.parsed_args) =
      ; microvm_backend = parsed.microvm_backend_patch
      ; remote_endpoint_present = parsed.remote_endpoint_present
      ; remote_endpoint = parsed.remote_endpoint_opt
+     ; group_present = parsed.group_present
+     ; group = parsed.group_opt
      ; max_context_override_present = parsed.max_context_override_present
      ; max_context_override = parsed.max_context_override_opt
      ; skill_names_present = parsed.skill_names_present

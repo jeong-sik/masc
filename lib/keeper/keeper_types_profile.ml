@@ -348,6 +348,8 @@ type toml_field_patch =
   ; mention_targets : string list option
   ; board_interests : string list option
   ; activation_mode : Keeper_activation_mode.t option
+  ; group_present : bool
+  ; group : string option
   ; sandbox_image : string option option
   ; microvm_backend : Keeper_microvm_backend.t option option
   ; remote_endpoint_present : bool
@@ -419,6 +421,13 @@ let toml_edits_of_patch (patch : toml_field_patch) =
    else
      ("remote_endpoint", match patch.remote_endpoint with
       | Some endpoint -> toml_edit_set_string endpoint
+      | None -> Keeper_toml_loader.Remove) :: fields)
+  |> fun fields ->
+  (if not patch.group_present
+   then fields
+   else
+     ("group", match patch.group with
+      | Some group -> toml_edit_set_string group
       | None -> Keeper_toml_loader.Remove) :: fields)
   |> fun fields ->
   (if not patch.max_context_override_present

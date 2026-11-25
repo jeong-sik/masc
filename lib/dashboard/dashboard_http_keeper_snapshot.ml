@@ -493,6 +493,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          ( "remote_endpoint"
          , Json_util.string_opt_to_json
              defaults.Keeper_types_profile.remote_endpoint );
+         (* Same: [group] is a profile-defaults value, never on [keeper_meta]. *)
+         ("group", Json_util.string_opt_to_json defaults.Keeper_types_profile.group);
          ( "remote_ssh_endpoints"
          , remote_ssh_endpoints_json ~base_path:config.base_path );
          ("keeper_last_error", Json_util.string_opt_to_json keeper_last_error);

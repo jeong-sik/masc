@@ -474,6 +474,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     config_transaction_warnings:
       decodeConfigWarnings(data.config_transaction_warnings),
     activation_mode: requireKeeperActivationMode(data.activation_mode),
+    group: asNullableString(data.group),
     max_context_override: maxContextOverride,
     sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
     network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
@@ -574,6 +575,8 @@ export type KeeperConfigUpdatePayload = {
   mention_targets?: string[]
   board_interests?: string[]
   activation_mode?: KeeperActivationMode
+  // null detaches the group. Omitting it leaves the keeper TOML's value alone.
+  group?: string | null
   max_context_override?: number | null
   // Sandbox
   sandbox_profile?: SandboxProfile

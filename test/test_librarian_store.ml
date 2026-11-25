@@ -228,6 +228,22 @@ let test_personal_evidence_survives_replay () =
    | Observed (Personal evidence) ->
      check (list string) "both source messages are retained" [ "400"; "403" ] evidence.message_ids
    | Observed (Transcript | Board _) | Derived _ -> fail "expected personal evidence");
+  (* The persistent FTS5 index has no account or conversation scope: syncing
+     the full stored snapshot indexes only the ordinary fact, and a search for
+     the shared claim never returns a personal ID. *)
+  let module Search_idx = Masc.Keeper_memory_search_index in
+  (match Search_idx.sync_snapshot ~keepers_dir:place.memory_dir ~keeper_id (Store.memory reopened) with
+   | Ok indexed -> check int "only the ordinary fact is indexed" 1 indexed
+   | Error e -> fail (Search_idx.error_to_string e));
+  (match
+     Search_idx.search_persistent ~keepers_dir:place.memory_dir ~keeper_id ~query:"summarize"
+       ~limit:10
+   with
+   | Ok hits ->
+     check (list string) "persistent search returns only the ordinary ID"
+       [ Types.memory_id ordinary ]
+       (List.map (fun (hit : Search_idx.persistent_hit) -> hit.memory_id) hits)
+   | Error e -> fail (Search_idx.error_to_string e));
   let retract = Direct.Retract { id = Types.memory_id first; reason = "unscoped" } in
   check bool "unscoped retraction cannot remove personal Memory" true
     (Direct.plan ~by:Effects.Keeper ~at:170. ~trace_id:"turn" (Store.memory reopened).facts retract

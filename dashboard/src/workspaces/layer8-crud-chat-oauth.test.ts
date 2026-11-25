@@ -565,7 +565,11 @@ candidates = ["safe.model"]
           ],
         })
       }
-      if (url.includes('/chat/operations')) return jsonResponse({ operations: [] })
+      if (url.includes('/chat/operations')) {
+        return jsonResponse({
+          schema: 'masc.keeper_chat_operations.list.v1', state: 'Queued', operations: [],
+        })
+      }
       return jsonResponse({})
     }) as typeof fetch
 

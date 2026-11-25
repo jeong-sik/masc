@@ -88,6 +88,15 @@ const MAX_RENDER_WINDOW = 1000
 
 type ChatRead = 'history' | 'queue' | 'waiting'
 
+type QueueRead = {
+  readonly keeperName: string
+  readonly epoch: number
+  readonly operations: readonly QueuedChatOperation[]
+} & (
+  | { readonly kind: 'loading' | 'ready' }
+  | { readonly kind: 'error'; readonly message: string }
+)
+
 function formatChatTime(ts: number): string | null {
   if (!Number.isFinite(ts) || ts <= 0) return null
   const ms = ts < 1_000_000_000_000 ? ts * 1000 : ts
@@ -157,9 +166,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
-  const [queuedOps, setQueuedOps] = useState<readonly QueuedChatOperation[]>([])
-  const [queueError, setQueueError] = useState<string | null>(null)
-  const [queueRefreshing, setQueueRefreshing] = useState(true)
+  const [queueRead, setQueueRead] = useState<QueueRead | null>(null)
+  const queue = queueRead?.keeperName === keeper.name && isEpochCurrent(queueRead.epoch)
+    ? queueRead
+    : null
+  const queuedOps = queue?.operations ?? []
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
   const [sending, setSending] = useState(false)
@@ -204,6 +215,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const sendingRef = useRef(false)
   const sendingOperationRef = useRef<{ operationId: string; executionId: string } | null>(null)
   const refreshChatRef = useRef<(...reads: ChatRead[]) => void>(() => {})
+  const retryQueueRef = useRef<() => void>(() => {})
   const stickToBottomRef = useRef(true)
   const forceScrollBottomRef = useRef(true)
   const pendingPrependAnchorRef = useRef<{ readonly prevScrollHeight: number; readonly prevScrollTop: number } | null>(null)
@@ -282,7 +294,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setMessages([])
       setHasMore(false)
       setNextCursor(null)
-      setQueuedOps([])
+      setQueueRead(null)
     }
   }, [keeper.name, abortAllToolFetches, invalidateEarlierReads])
 
@@ -363,28 +375,46 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }, [keeper.chat_control_token])
 
   useEffect(() => {
-    let controller = new AbortController()
+    let stopped = false
     let drainScheduled = false
     const pending = new Set<ChatRead>()
-    const running = new Set<ChatRead>()
+    const running = new Map<ChatRead, AbortController>()
+
+    const abortReads = () => {
+      for (const controller of running.values()) controller.abort()
+      running.clear()
+      pending.clear()
+    }
 
     const refresh = (...reads: ChatRead[]) => {
-      if (controller.signal.aborted) return
+      if (stopped) return
       for (const read of reads) pending.add(read)
+      if (reads.includes('queue')) {
+        const epoch = currentSessionEpoch()
+        setQueueRead((previous) => ({
+          keeperName: keeper.name,
+          epoch,
+          kind: 'loading',
+          operations: previous?.keeperName === keeper.name && previous.epoch === epoch
+            ? previous.operations
+            : [],
+        }))
+      }
       if (drainScheduled) return
       drainScheduled = true
       queueMicrotask(() => {
         drainScheduled = false
-        if (controller.signal.aborted) return
+        if (stopped) return
         for (const read of pending) {
           if (running.has(read)) continue
           pending.delete(read)
-          running.add(read)
+          const controller = new AbortController()
+          running.set(read, controller)
           const signal = controller.signal
           const epoch = currentSessionEpoch()
           const current = () => !signal.aborted
             && activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)
-          void readChat(read, signal, current).finally(() => {
+          void readChat(read, signal, epoch, current).finally(() => {
             if (!current()) return
             running.delete(read)
             if (pending.has(read)) refresh()
@@ -393,7 +423,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       })
     }
 
-    const readChat = async (read: ChatRead, signal: AbortSignal, current: () => boolean) => {
+    const readChat = async (read: ChatRead, signal: AbortSignal, epoch: number, current: () => boolean) => {
       switch (read) {
         case 'history': {
           const result = await fetchKeeperChatHistoryPageApi(keeper.name, undefined, 40, signal)
@@ -419,9 +449,25 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         case 'queue': {
           const result = await fetchQueuedChatOperations(keeper.name, signal)
           if (!current()) return
-          setQueueRefreshing(false)
-          setQueueError(result.ok ? null : result.error.message)
-          if (result.ok) setQueuedOps(result.value)
+          const anotherReadPending = pending.has('queue')
+          if (result.ok) {
+            setQueueRead({
+              keeperName: keeper.name,
+              epoch,
+              kind: anotherReadPending ? 'loading' : 'ready',
+              operations: result.value,
+            })
+          } else {
+            const { kind, message } = result.error
+            const clear = kind === 'unauthorized' || kind === 'forbidden' || kind === 'epoch_stale'
+            setQueueRead((previous) => {
+              const operations = !clear && previous?.keeperName === keeper.name && previous.epoch === epoch
+                ? previous.operations
+                : []
+              const scope = { keeperName: keeper.name, epoch, operations }
+              return anotherReadPending ? { ...scope, kind: 'loading' } : { ...scope, kind: 'error', message }
+            })
+          }
           return
         }
         case 'waiting': {
@@ -434,18 +480,19 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
     const recover = () => {
       // The preceding connection's reads cannot settle this observation.
-      controller.abort()
+      abortReads()
       invalidateEarlierReads()
-      controller = new AbortController()
-      running.clear()
-      pending.clear()
-      setQueueRefreshing(true)
       setLivePreview(null)
       setLiveToolPulse(null)
       refresh('history', 'queue', 'waiting')
     }
 
     refreshChatRef.current = refresh
+    retryQueueRef.current = () => {
+      running.get('queue')?.abort()
+      running.delete('queue')
+      refresh('queue')
+    }
     const unsubscribeFrames = subscribeObserverFrames((frame) => {
       const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
       switch (event?.kind) {
@@ -486,32 +533,42 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       if (nextEpoch === epoch) return
       epoch = nextEpoch
       setMessages([])
-      setQueuedOps([])
+      setQueueRead(null)
       setHasMore(false)
       setNextCursor(null)
       setWaitingInventory(null)
       setHistoryError(null)
-      setQueueError(null)
       setLoadingHistory(true)
       recover()
     })
     setLoadingHistory(true)
     setHistoryError(null)
-    setQueueError(null)
-    setQueueRefreshing(true)
     refresh('history', 'queue', 'waiting')
     return () => {
-      controller.abort()
+      stopped = true
+      abortReads()
       invalidateEarlierReads()
       unsubscribeFrames()
       unsubscribeResync()
       unsubscribeConnection()
       unsubscribeEpoch()
       refreshChatRef.current = () => {}
+      retryQueueRef.current = () => {}
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
   }, [keeper.name, invalidateEarlierReads])
+
+  const updateQueueOperation = async (
+    operationId: string,
+    action: typeof moveQueuedChatOperationToEndApi,
+  ) => {
+    if (queue?.kind !== 'ready' || !isEpochCurrent(queue.epoch) || activeKeeperRef.current !== keeper.name) return
+    await action(keeper.name, operationId)
+    if (mountedRef.current && activeKeeperRef.current === keeper.name && isEpochCurrent(queue.epoch)) {
+      refreshChatRef.current('queue', 'waiting')
+    }
+  }
 
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
@@ -1851,54 +1908,36 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `
         })()}
 
-        ${queueError && html`
-          <div class="ap-error" role="status">
-            대기열 조회 실패 · ${queueError}
-            <button type="button" class="btn-ghost" disabled=${queueRefreshing}
-              onClick=${() => {
-                setQueueRefreshing(true)
-                refreshChatRef.current('queue')
-              }}>다시 조회</button>
-          </div>
-        `}
-        ${queuedOps.length > 0 && html`
+        ${(queuedOps.length > 0 || queue?.kind !== 'ready') && html`
           <div class="kp-queue-strip" aria-label="대기 중인 큐 작업">
-            <span class="kp-kv-k">Queued Operations (${queuedOps.length})</span>
-            ${queuedOps.map((op) => html`
-              <div key=${op.operationId} class="kp-queue-row">
-                <span class="kp-roster-name">${op.message || op.operationId}</span>
-                <div class="kp-pill-row">
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    disabled=${queueRefreshing || queueError !== null}
-                    onClick=${async () => {
-                      const epoch = currentSessionEpoch()
-                      await moveQueuedChatOperationToEndApi(keeper.name, op.operationId)
-                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
-                        refreshChatRef.current('queue', 'waiting')
-                      }
-                    }}
-                  >
-                    뒤로
-                  </button>
-                  <button
-                    type="button"
-                    class="kp-btn-danger"
-                    disabled=${queueRefreshing || queueError !== null}
-                    onClick=${async () => {
-                      const epoch = currentSessionEpoch()
-                      await cancelQueuedChatOperation(keeper.name, op.operationId)
-                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
-                        refreshChatRef.current('queue', 'waiting')
-                      }
-                    }}
-                  >
-                    취소
-                  </button>
-                </div>
+            <div class="kp-queue-row">
+              <span class="kp-kv-k">${queuedOps.length ? `대기열 (${queuedOps.length})` : '대기열'}</span>
+              <button type="button" class="btn-ghost" aria-label="대기열 새로고침"
+                onClick=${() => retryQueueRef.current()}>새로고침</button>
+            </div>
+            ${(!queue || queue.kind === 'loading') && html`<div role="status">대기열 조회 중…</div>`}
+            ${queue?.kind === 'error' && html`
+              <div role="status" title=${queue.message}>
+                ${queuedOps.length > 0 ? '이전에 조회한 대기열입니다.' : '대기열을 불러오지 못했습니다.'}
               </div>
-            `)}
+            `}
+            <div class="kp-queue-rows">
+              ${queuedOps.map((op) => html`
+                <div key=${op.operationId} class="kp-queue-row">
+                  <span class="kp-roster-name">${op.message || op.operationId}</span>
+                  <div class="kp-pill-row">
+                    <button type="button" class="btn-ghost" disabled=${queue?.kind !== 'ready'}
+                      onClick=${() => void updateQueueOperation(op.operationId, moveQueuedChatOperationToEndApi)}>
+                      뒤로
+                    </button>
+                    <button type="button" class="kp-btn-danger" disabled=${queue?.kind !== 'ready'}
+                      onClick=${() => void updateQueueOperation(op.operationId, cancelQueuedChatOperation)}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              `)}
+            </div>
           </div>
         `}
 

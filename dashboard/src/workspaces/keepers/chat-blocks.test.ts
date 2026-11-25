@@ -437,7 +437,9 @@ describe('Keepers AG-UI Live Stream & On-Demand Tool Result Hydration', () => {
         )
       }
       if (url.includes('/chat/operations')) {
-        return new Response(JSON.stringify({ operations: [] }), {
+        return new Response(JSON.stringify({
+          schema: 'masc.keeper_chat_operations.list.v1', state: 'Queued', operations: [],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -831,7 +833,9 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
         )
       }
       if (url.includes('/chat/operations')) {
-        return new Response(JSON.stringify({ operations: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        return Response.json({
+          schema: 'masc.keeper_chat_operations.list.v1', state: 'Queued', operations: [],
+        })
       }
       return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
     })

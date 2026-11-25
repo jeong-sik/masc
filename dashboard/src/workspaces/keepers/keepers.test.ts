@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
-import { authSession, resetAuthStateForTests } from '../../core/auth'
+import { authSession, bumpSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
@@ -36,6 +36,29 @@ import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
 import type { KeeperRosterItem, TurnRecordItem } from './types'
+
+const queuedOperations = (
+  sequences: readonly number[] = [],
+  messageFor = (sequence: number) => `Pending request ${sequence}`,
+) => ({
+  schema: 'masc.keeper_chat_operations.list.v1',
+  state: 'Queued',
+  operations: sequences.map((sequence) => ({
+    schema: 'masc.keeper_chat_operation.v1',
+    operation_id: `queued-${sequence}`,
+    sequence: String(sequence),
+    created_at: sequence,
+    state: 'Queued',
+    input: {
+      schema: 'masc.keeper_chat_operation.input.v1',
+      message: messageFor(sequence),
+      user_blocks: [{ type: 'text', text: messageFor(sequence) }],
+      turn_instructions: null,
+      surface_context: null,
+      attachments: [],
+    },
+  })),
+})
 
 function makeRosterKeeper(overrides: Partial<KeeperRosterItem> = {}): KeeperRosterItem {
   return {
@@ -307,7 +330,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const payload = String(input).includes('/chat/history/page')
         ? { messages, has_more: false, next_cursor: null }
-        : { operations: [] }
+        : queuedOperations()
       return new Response(JSON.stringify(payload), {
         headers: { 'Content-Type': 'application/json' },
       })
@@ -323,6 +346,155 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       )
       expect(speakers).toEqual(['Minsu', 'peer-keeper', 'Operator', '사용자'])
     })
+  })
+
+  it('shows requests beyond the first queue page and keeps the previous rows when refresh fails', async () => {
+    let queueUnavailable = false
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/chat/operations')) {
+        const cursor = url.searchParams.get('after_sequence')
+        if (queueUnavailable && cursor === '100') return Response.json({ error: 'queue unavailable' }, { status: 503 })
+        if (cursor === '101') return Response.json(queuedOperations())
+        if (cursor === '100') return Response.json(queuedOperations([101]))
+        return Response.json(queuedOperations(Array.from({ length: 100 }, (_, index) => index + 1)))
+      }
+      return Response.json({ messages: [], has_more: false, next_cursor: null })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+
+    await chat.findByText('Pending request 101')
+    expect(mockFetch.mock.calls.map(([input]) => String(input))).toContain(
+      '/api/v1/keepers/code-reviewer-sister/chat/operations?state=queued&after_sequence=100',
+    )
+
+    queueUnavailable = true
+    fireEvent.click(chat.getByRole('button', { name: '대기열 새로고침' }))
+    await chat.findByText('이전에 조회한 대기열입니다.')
+    expect(chat.getByText('Pending request 101')).toBeTruthy()
+    expect(chat.getAllByRole('button', { name: '취소' }).every(button => button.hasAttribute('disabled'))).toBe(true)
+
+    queueUnavailable = false
+    fireEvent.click(chat.getByRole('button', { name: '대기열 새로고침' }))
+    await waitFor(() => {
+      expect(chat.getAllByRole('button', { name: '취소' }).every(button => !button.hasAttribute('disabled'))).toBe(true)
+    })
+    expect(chat.getByText('Pending request 101')).toBeTruthy()
+  })
+
+  it('offers a queue retry after an initial read fails without hiding chat history', async () => {
+    let queueUnavailable = true
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/chat/operations')) {
+        return queueUnavailable
+          ? Response.json({ error: 'queue unavailable' }, { status: 503 })
+          : Response.json(queuedOperations(url.searchParams.has('after_sequence') ? [] : [7]))
+      }
+      return Response.json({
+        messages: [{ id: 'history', role: 'user', content: 'Saved chat history', ts: 1 }],
+        has_more: false,
+        next_cursor: null,
+      })
+    }))
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await chat.findByText('Saved chat history')
+    await chat.findByText('대기열을 불러오지 못했습니다.')
+
+    queueUnavailable = false
+    fireEvent.click(chat.getByRole('button', { name: '대기열 새로고침' }))
+    await chat.findByText('Pending request 7')
+    expect(chat.getByText('Saved chat history')).toBeTruthy()
+  })
+
+  it('discards queue rows when the workspace session changes with the same Keeper name', async () => {
+    let respondToNewWorkspace!: (response: Response) => void
+    const nextWorkspace = new Promise<Response>((resolve) => {
+      respondToNewWorkspace = resolve
+    })
+    let changed = false
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/chat/operations')) {
+        if (url.searchParams.has('after_sequence')) return Response.json(queuedOperations())
+        return changed ? nextWorkspace : Response.json(queuedOperations([1]))
+      }
+      return Response.json({ messages: [], has_more: false, next_cursor: null })
+    }))
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await chat.findByText('Pending request 1')
+
+    act(() => {
+      changed = true
+      bumpSessionEpoch()
+    })
+    await waitFor(() => expect(chat.queryByText('Pending request 1')).toBeNull())
+    expect(chat.queryByRole('button', { name: '취소' })).toBeNull()
+    respondToNewWorkspace(Response.json(queuedOperations([2])))
+    await chat.findByText('Pending request 2')
+  })
+
+  it('keeps the previous Keeper queue hidden if the next Keeper read fails in the same session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/next-keeper/chat/operations')) {
+        return Response.json({ error: 'queue unavailable' }, { status: 503 })
+      }
+      if (url.pathname.endsWith('/chat/operations')) {
+        return Response.json(queuedOperations(url.searchParams.has('after_sequence') ? [] : [1]))
+      }
+      return Response.json({ messages: [], rows: [] })
+    }))
+    const onInspect = vi.fn()
+    const onMutated = vi.fn()
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${onInspect} onMutated=${onMutated} />`,
+    )
+    await chat.findByText('Pending request 1')
+
+    const keeper = makeRosterKeeper({ name: 'next-keeper' })
+    chat.rerender(html`<${KeeperChatTab} keeper=${keeper} onInspect=${onInspect} onMutated=${onMutated} />`)
+    expect(chat.queryByText('Pending request 1')).toBeNull()
+    await chat.findByText('대기열을 불러오지 못했습니다.')
+    expect(chat.queryByText('Pending request 1')).toBeNull()
+    expect(chat.queryByRole('button', { name: '취소' })).toBeNull()
+  })
+
+  it('replaces a pending queue read while leaving the concurrent history read in flight', async () => {
+    const held = new Map<string, {
+      signal: AbortSignal | null | undefined
+      respond: (response: Response) => void
+    }>()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/chat/operations')) {
+        if (url.searchParams.has('after_sequence')) return Response.json(queuedOperations())
+        if (held.has('queue')) return Response.json(queuedOperations([7]))
+        return new Promise<Response>((respond) => held.set('queue', { signal: init?.signal, respond }))
+      }
+      if (url.pathname.endsWith('/chat/history/page')) {
+        return new Promise<Response>((respond) => held.set('history', { signal: init?.signal, respond }))
+      }
+      return Response.json({ rows: [] })
+    }))
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await waitFor(() => expect(held.size).toBe(2))
+
+    fireEvent.click(chat.getByRole('button', { name: '대기열 새로고침' }))
+    await chat.findByText('Pending request 7')
+    expect(held.get('queue')?.signal?.aborted).toBe(true)
+    expect(held.get('history')?.signal?.aborted).toBe(false)
+
+    await act(async () => {
+      held.get('queue')?.respond(Response.json(queuedOperations([5])))
+      held.get('history')?.respond(Response.json({
+        messages: [{ id: 'history', role: 'user', content: 'Saved chat history', ts: 1 }],
+      }))
+    })
+    await chat.findByText('Saved chat history')
+    expect(chat.queryByText('Pending request 5')).toBeNull()
+    expect(chat.getByText('Pending request 7')).toBeTruthy()
   })
 
   it('follows an external chat through queue, live preview, and stored replies across observer reconnect', async () => {
@@ -341,7 +513,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       new Response(new ReadableStream({ start: ready }), {
         headers: { 'Content-Type': 'text/event-stream' },
       })
-    let operations: object[] = []
+    let queue = queuedOperations()
     const messages: object[] = [{ id: 'before', role: 'assistant', content: 'Stored before opening', ts: 1 }]
     let queueReads = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -356,7 +528,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       }
       if (url.includes('/chat/operations')) {
         queueReads++
-        return json({ operations })
+        return json(url.includes('after_sequence=') ? queuedOperations() : queue)
       }
       if (url.includes('/api/v1/keepers/chat/stream')) {
         browserOperationId = JSON.parse(String(init?.body)).request_id
@@ -372,8 +544,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const waitingChange = (keeperName: string) => frame({
       type: 'keeper_waiting_inventory_changed', keeper_name: keeperName, queue_kind: 'chat_operation',
     })
-    operations = [{ operation_id: 'op-external', state: 'Queued', sequence: '2', created_at: 2,
-      input: { message: 'TUI request' } }]
+    queue = queuedOperations([2], () => 'TUI request')
     observer!.enqueue(waitingChange('other-keeper'))
     observer!.enqueue(frame({ type: 'keeper_turn_preview_changed', name: keeper.name,
       observation: { owner_key: 'owner', preview: {
@@ -391,7 +562,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => expect(browserSend).toBeDefined())
     const beforeQueueChange = queueReads
-    operations = []
+    queue = queuedOperations()
     messages.push({ id: 'external-reply', role: 'assistant', content: 'Reply from the TUI turn', ts: 4 })
     observer!.enqueue(frame({ type: 'keeper_chat_appended', name: keeper.name }))
     observer!.enqueue(waitingChange(keeper.name))
@@ -502,7 +673,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
           next_cursor: 'cur-1',
         })
       }
-      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
       return json({ rows: [] })
     }))
 
@@ -554,7 +725,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         })
       }
       if (url.includes('/chat/operations')) {
-        return new Response(JSON.stringify({ operations: [] }), {
+        return new Response(JSON.stringify(queuedOperations()), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -791,7 +962,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         })
       }
       if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
-      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
       return json({})
     })
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:portrait-${requestedUrls.length}`)
@@ -968,7 +1139,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       const json = (data: unknown) =>
         new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
       if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
-      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
       if (url.includes('/api/v1/keepers/chat/stream')) {
         // Cut mid-stream without RUN_FINISHED!
         const sse = `data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial' })}\n\n`
@@ -1065,7 +1236,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
           next_cursor: 'cur-older',
         })
       }
-      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
       if (url.includes('/api/v1/keepers/chat/stream')) {
         const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
         streamCalls.push(parsed)

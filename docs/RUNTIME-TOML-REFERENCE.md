@@ -194,8 +194,18 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 - Sessions live under `$XDG_DATA_HOME/muse` (default `~/.local/share/muse`), the
   same store as the operator's own `muse` sessions, and the host loads skills
   from `~/.claude/skills`, `~/.agents/skills` and `$CODEX_HOME/skills` into every
-  session. The client reports no per-turn token counts over ACP, only the
-  context window use, so MASC writes no cost-ledger row for its turns.
+  session. The host reports no per-turn token counts over ACP, only the
+  context window use. It writes the counts of every model request and every
+  approval review to
+  `<data root>/muse/sessions/YYYY/MM/DD/<session id>/session.jsonl`, and MASC
+  reads what that file gains during each prompt. The turn's cost-ledger row
+  holds the requests and the reviews added up, the way the ledger holds a turn
+  of the other ACP drivers, and the Keeper log line `Muse turn usage` shows the
+  two apart. When the host reports no occupancy, the input of the turn's last
+  request stands in for it. The file's format is the host's own and
+  unpublished: MASC reads the record versions it was checked against (muse
+  1.4.25) and, for any other, logs `Muse turn usage unreadable` with the
+  reason and leaves the turn without counts instead of writing zeros.
 
 ### `[providers.<id>.credentials]`
 

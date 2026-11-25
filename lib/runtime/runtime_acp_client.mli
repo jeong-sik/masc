@@ -111,6 +111,15 @@ type output_accounting =
   | Exclusive_of_thought
       (** Wire [outputTokens] excludes [thoughtTokens]. *)
 
+type usage_channel =
+  | Usage_over_acp
+      (** The host reports a prompt's token counts in the [session/prompt]
+          result or in [usage_update] frames. *)
+  | Usage_in_muse_session_journal
+      (** The host reports none over ACP. It writes the counts of every model
+          request and approval review to its session journal, which
+          {!prompt} reads ({!Runtime_muse_session_log}). *)
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
       (** Structured [call_mcp_tool] wrapper carrying [ServerName]/[ToolName]
@@ -148,6 +157,7 @@ type driver_profile =
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
+  ; usage_channel : usage_channel
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -444,12 +454,29 @@ val is_read_only_tool_kind : tool_kind option -> bool
     {!Tool_unknown}, and [None] are excluded so [Native_read] cannot bypass
     egress/SSRF or mode-switch boundaries. *)
 
+(** Where [prompt_result.usage] came from. *)
+type usage_source =
+  | Usage_from_acp
+      (** What the host sent over ACP. A host with no token counts there
+          leaves them zero. *)
+  | Usage_from_muse_journal of Runtime_muse_session_log.turn
+      (** The token counts of the host's journal replace the ones in [usage];
+          the context window stays the one the host sent over ACP, except
+          that the input of the last request stands in for an occupancy the
+          host did not send. The turn keeps the split between the model
+          requests and the approval reviews that [usage] adds up. *)
+  | Usage_unreadable of Runtime_muse_session_log.error
+      (** The host's profile says its counts are in its journal and they could
+          not be read. [usage] holds what the host sent over ACP, which for
+          the Muse host is no token count at all. *)
+
 type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
   ; text : string
   ; thought : string
   ; usage : usage
+  ; usage_source : usage_source
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }

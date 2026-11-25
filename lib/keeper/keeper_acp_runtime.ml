@@ -5,6 +5,7 @@ open Result.Syntax
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 module Acp = Runtime_acp_client
+module Muse_log = Runtime_muse_session_log
 
 let config_error = Host.config_error
 let internal_error = Host.internal_error
@@ -373,6 +374,39 @@ let usage_is_nonzero (u : Agent_core.Types.api_usage) =
   || u.output_tokens > 0
   || u.cache_creation_input_tokens > 0
   || u.cache_read_input_tokens > 0
+;;
+
+(* A Muse turn's token counts come from the host's session journal. The ledger
+   and the response hold the sum of the model requests and the approval
+   reviews; this line is where the two can be told apart. A journal that could
+   not be read leaves the turn without counts, and the line says why. *)
+let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
+  match source with
+  | Acp.Usage_from_acp -> ()
+  | Acp.Usage_from_muse_journal turn ->
+    let main = turn.Muse_log.main
+    and review = turn.Muse_log.review in
+    Log.Keeper.info
+      ~keeper_name
+      "Muse turn usage turn_id=%s requests=%d input=%d cache_read=%d output=%d reasoning=%d \
+       reviews=%d review_input=%d review_cache_read=%d review_output=%d review_reasoning=%d"
+      turn_id
+      turn.Muse_log.main_requests
+      main.Muse_log.input_tokens
+      main.Muse_log.cache_read_tokens
+      main.Muse_log.output_tokens
+      main.Muse_log.reasoning_tokens
+      turn.Muse_log.reviews
+      review.Muse_log.input_tokens
+      review.Muse_log.cache_read_tokens
+      review.Muse_log.output_tokens
+      review.Muse_log.reasoning_tokens
+  | Acp.Usage_unreadable err ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Muse turn usage unreadable turn_id=%s: %s"
+      turn_id
+      (Muse_log.error_to_string err)
 ;;
 
 let effective_context_used ~driver (u : Acp.usage) =
@@ -3019,6 +3053,7 @@ let run_without_lifecycle
         in
         let usage = api_usage_of_acp_usage ~driver:config.driver prompt_res.usage in
         let nonzero_usage = usage_is_nonzero usage in
+        log_usage_source ~keeper_name ~turn_id prompt_res.usage_source;
         (match on_usage_report with
          | Some report when nonzero_usage ->
            report

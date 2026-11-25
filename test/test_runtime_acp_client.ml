@@ -41,7 +41,15 @@ let test_driver_profiles () =
   check bool "vibe input includes cached" true
     (vibe.input_accounting = Runtime_acp_client.Inclusive_of_cached);
   check bool "vibe output includes thought" true
-    (vibe.output_accounting = Runtime_acp_client.Inclusive_of_thought)
+    (vibe.output_accounting = Runtime_acp_client.Inclusive_of_thought);
+  check bool "agy, kimi and vibe send their token counts over ACP" true
+    (List.for_all
+       (fun (profile : Runtime_acp_client.driver_profile) ->
+          profile.usage_channel = Runtime_acp_client.Usage_over_acp)
+       [ agy; kimi; vibe ]);
+  check bool "muse writes its token counts to its session journal" true
+    ((Runtime_acp_client.profile_of_driver Muse_code).usage_channel
+     = Runtime_acp_client.Usage_in_muse_session_journal)
 ;;
 
 let find_env key arr =
@@ -5412,6 +5420,210 @@ for line in sys.stdin:
       ())
 ;;
 
+(* ── The Muse host's token counts, read from its session journal ───────────
+
+   The mock host does what muse acp 1.4.25 does. At session/new it creates its
+   session journal under $XDG_DATA_HOME/muse/sessions. While a prompt runs it
+   appends the first run of the fixture to the journal, and it answers the
+   prompt with a stopReason and no token counts. The fixture is a journal
+   muse acp wrote: two model requests and one approval review. *)
+
+let muse_journal_fixture = "fixtures/muse/muse-acp-1.4.25-two-runs.jsonl"
+let muse_journal_session_id = "01a2113e-b6c0-7f71-bab2-c29018711194"
+
+(* Lines of the fixture, counted from 0: the first run is lines 18 to 58. *)
+let muse_journal_first_prompt_line = 18
+let muse_journal_last_prompt_line = 58
+
+let muse_mock_host_script ~writes_journal ~sends_occupancy =
+  let python_bool b = if b then "True" else "False" in
+  Printf.sprintf
+    {|#!/usr/bin/env python3
+import json, os, sys
+
+SESSION = %S
+FIXTURE = %S
+FIRST_PROMPT_LINE = %d
+LAST_PROMPT_LINE = %d
+WRITES_JOURNAL = %s
+SENDS_OCCUPANCY = %s
+
+with open(FIXTURE, encoding="utf-8") as f:
+    records = [line for line in f.read().split("\n") if line]
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+def lines(first, last):
+    return "".join(r + "\n" for r in records[first:last + 1])
+
+journal = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"promptCapabilities": {"image": False}}
+        }})
+    elif method == "session/new":
+        if WRITES_JOURNAL:
+            directory = os.path.join(
+                os.environ["XDG_DATA_HOME"], "muse", "sessions", "2026", "11", "25", SESSION)
+            os.makedirs(directory)
+            journal = os.path.join(directory, "session.jsonl")
+            with open(journal, "w", encoding="utf-8") as f:
+                f.write(lines(0, FIRST_PROMPT_LINE - 1))
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": SESSION}})
+    elif method == "session/prompt":
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": SESSION,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}}
+        }})
+        if WRITES_JOURNAL:
+            with open(journal, "a", encoding="utf-8") as f:
+                f.write(lines(FIRST_PROMPT_LINE, LAST_PROMPT_LINE))
+        if SENDS_OCCUPANCY:
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": SESSION,
+                "update": {"sessionUpdate": "usage_update", "used": 23500, "size": 262144}
+            }})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+|}
+    muse_journal_session_id
+    (Filename.concat (Sys.getcwd ()) muse_journal_fixture)
+    muse_journal_first_prompt_line
+    muse_journal_last_prompt_line
+    (python_bool writes_journal)
+    (python_bool sends_occupancy)
+;;
+
+let with_xdg_data_home dir f =
+  let previous = Sys.getenv_opt "XDG_DATA_HOME" in
+  Unix.putenv "XDG_DATA_HOME" dir;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv "XDG_DATA_HOME" value
+      | None -> Unix.unsetenv "XDG_DATA_HOME")
+    f
+;;
+
+(* One prompt to the mock host. Returns the prompt result and the sessions
+   directory the host was told to use. *)
+let run_muse_prompt ~writes_journal ~sends_occupancy =
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-muse-usage-" "" in
+  let mock_script = Filename.concat tmp "mock_muse.py" in
+  let data_home = Filename.concat tmp "data" in
+  Unix.mkdir data_home 0o700;
+  Out_channel.with_open_text mock_script (fun oc ->
+    output_string oc (muse_mock_host_script ~writes_journal ~sends_occupancy));
+  let sessions_directory = Filename.concat (Filename.concat data_home "muse") "sessions" in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    with_xdg_data_home data_home (fun () ->
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        let proc_mgr =
+          Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+        in
+        let cfg =
+          { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd:tmp) with
+            cli_path = "python3"
+          ; args = [ mock_script ]
+          }
+        in
+        Eio.Switch.run (fun sw ->
+          let client =
+            match
+              Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env)
+                ~config:cfg ()
+            with
+            | Ok c -> c
+            | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+            let session =
+              match Runtime_acp_client.new_session client ~cwd:tmp () with
+              | Ok s -> s
+              | Error err ->
+                failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+            in
+            match
+              Runtime_acp_client.prompt
+                client
+                ~session_id:session.session_id
+                ~blocks:[ Runtime_acp_client.Text_block "ping" ]
+                ()
+            with
+            | Ok result -> result, sessions_directory
+            | Error err ->
+              failf "prompt failed: %s" (Runtime_acp_client.error_to_string err))))))
+;;
+
+let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
+  let result, _ = run_muse_prompt ~writes_journal:true ~sends_occupancy:true in
+  let usage = result.Runtime_acp_client.usage in
+  check string "the reply" "pong" result.Runtime_acp_client.text;
+  check int "input: two requests and one review" (46670 + 12628)
+    usage.Runtime_acp_client.input_tokens;
+  check int "output: two requests and one review" (170 + 244)
+    usage.Runtime_acp_client.output_tokens;
+  check int "cache read" 23156 usage.Runtime_acp_client.cached_read_tokens;
+  check int "cache write" 0 usage.Runtime_acp_client.cached_write_tokens;
+  check int "reasoning" (83 + 112) usage.Runtime_acp_client.thought_tokens;
+  check int "total is input plus output" (46670 + 12628 + 170 + 244)
+    usage.Runtime_acp_client.total_tokens;
+  check (option int) "the occupancy the host sent over ACP" (Some 23500)
+    usage.Runtime_acp_client.context_used;
+  check (option int) "the window the host sent over ACP" (Some 262144)
+    usage.Runtime_acp_client.context_size;
+  (match result.Runtime_acp_client.usage_source with
+   | Runtime_acp_client.Usage_from_muse_journal turn ->
+     check int "requests" 2 turn.Runtime_muse_session_log.main_requests;
+     check int "reviews" 1 turn.Runtime_muse_session_log.reviews;
+     check int "request input" 46670
+       turn.Runtime_muse_session_log.main.Runtime_muse_session_log.input_tokens;
+     check int "review input" 12628
+       turn.Runtime_muse_session_log.review.Runtime_muse_session_log.input_tokens
+   | Runtime_acp_client.Usage_from_acp | Runtime_acp_client.Usage_unreadable _ ->
+     fail "expected the counts of the host's journal");
+  let normalized = Runtime_acp_client.normalize_usage Muse_code usage in
+  check int "normalized input" (46670 + 12628)
+    normalized.Runtime_acp_client.input_tokens;
+  check int "normalized cache read" 23156
+    normalized.Runtime_acp_client.cache_read_input_tokens
+;;
+
+let test_muse_prompt_without_occupancy_takes_the_last_request_input () =
+  let result, _ = run_muse_prompt ~writes_journal:true ~sends_occupancy:false in
+  let usage = result.Runtime_acp_client.usage in
+  check (option int) "the last request's input, not the input of the whole prompt"
+    (Some 23429) usage.Runtime_acp_client.context_used;
+  check (option int) "no window was sent" None usage.Runtime_acp_client.context_size
+;;
+
+let test_muse_prompt_without_a_journal_keeps_the_prompt_and_says_why () =
+  let result, sessions_directory =
+    run_muse_prompt ~writes_journal:false ~sends_occupancy:false
+  in
+  check string "the reply" "pong" result.Runtime_acp_client.text;
+  check int "no token counts are made up" 0
+    result.Runtime_acp_client.usage.Runtime_acp_client.input_tokens;
+  match result.Runtime_acp_client.usage_source with
+  | Runtime_acp_client.Usage_unreadable
+      (Runtime_muse_session_log.Session_log_not_found { searched; session_id }) ->
+    check string "where it looked" sessions_directory searched;
+    check string "for which session" muse_journal_session_id session_id
+  | Runtime_acp_client.Usage_from_acp
+  | Runtime_acp_client.Usage_from_muse_journal _
+  | Runtime_acp_client.Usage_unreadable _ -> fail "expected the journal to be reported missing"
+;;
+
 let () =
   run "runtime_acp_client"
     [ ( "profiles"
@@ -5498,6 +5710,14 @@ let () =
         ; test_case "exhaustive stop_reason mapping" `Quick test_stop_reason_mapping
         ] )
     ; "compaction", [ test_case "structural monotonic drop detection" `Quick test_compaction_detection ]
+    ; ( "muse_usage_journal"
+      , [ test_case "prompt reads its token counts from the host journal" `Quick
+            test_muse_prompt_reads_its_token_counts_from_the_host_journal
+        ; test_case "prompt without occupancy takes the last request input" `Quick
+            test_muse_prompt_without_occupancy_takes_the_last_request_input
+        ; test_case "prompt without a journal keeps the reply and says why" `Quick
+            test_muse_prompt_without_a_journal_keeps_the_prompt_and_says_why
+        ] )
     ; ( "toml"
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
         ; test_case "muse_code row materializes and refuses effort" `Quick

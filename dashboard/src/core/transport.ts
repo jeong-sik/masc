@@ -37,8 +37,6 @@ export type ApiErrorKind =
   | 'server'
   | 'decode'
 
-export const DEFAULT_API_TIMEOUT_MS = 15_000
-
 export interface ApiError {
   readonly kind: ApiErrorKind
   readonly status: number | null
@@ -58,7 +56,7 @@ export interface ApiRequestOptions<T> {
   readonly fetchImpl?: typeof fetch
   readonly decode?: (raw: unknown) => T
   readonly envelope?: 'flat' | 'v2' | 'ok_data'
-  /** Per-attempt total deadline (headers + body). Defaults to 15s; pass 0 to disable. */
+  /** Optional per-attempt total deadline (headers + body). Disabled (0) by default. */
   readonly timeoutMs?: number
 }
 
@@ -209,7 +207,7 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
       return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false })
     }
 
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS
+    const timeoutMs = opts.timeoutMs ?? 0
     const attemptController = new AbortController()
     let timedOut = false
     const onParentAbort = () => attemptController.abort(controller.signal.reason)

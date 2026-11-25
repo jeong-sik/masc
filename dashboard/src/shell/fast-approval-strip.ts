@@ -16,6 +16,7 @@ import { TargetLockedAction, type TargetLockState } from '../components/primitiv
 import { navigate } from '../routes/router'
 import {
   commandPaletteOpen,
+  hitlUncheckedSummary,
   isMobileViewport,
   mobileMoreOpen,
   pendingApprovals,
@@ -24,6 +25,7 @@ import {
   pendingGoalConfirmations,
   refreshPendingHitl,
   submitFastToolApproval,
+  toggleQueueContextOverlay,
 } from './shell-state'
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -37,6 +39,7 @@ export function FastApprovalStrip(): VNode | null {
   const asks = pendingAsks.value
   const gates = pendingGateApprovals.value
   const goalConfirms = pendingGoalConfirmations.value
+  const inboxUnchecked = hitlUncheckedSummary.value.filter((u) => u.key !== 'verification')
   const mobile = isMobileViewport.value
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(() => sessionEpoch.peek())
@@ -93,10 +96,44 @@ export function FastApprovalStrip(): VNode | null {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [headApproval, headAsk, headGate, headGoalConfirm, capturedEpoch, submittingId])
 
-  // 0px when clear!
-  if (!headApproval && !headAsk && !headGate && !headGoalConfirm) return null
-
   const totalPending = approvals.length + asks.length + gates.length + goalConfirms.length
+  const countTag = inboxUnchecked.length > 0 ? `확인된 ${totalPending}건 · 일부 미확인` : String(totalPending)
+
+  // 0px when genuinely clear with all inbox HITL sources observed.
+  if (!headApproval && !headAsk && !headGate && !headGoalConfirm) {
+    if (inboxUnchecked.length === 0) return null
+    const allUnbridged = inboxUnchecked.every((u) => u.state.kind === 'unbridged')
+    const detailText = inboxUnchecked
+      .map((u) => (u.state.kind === 'unbridged' ? `${u.label}(멀티 계정 미지원)` : `${u.label}(조회 실패)`))
+      .join(' · ')
+    return html`
+      <section
+        class=${`ap-fast-strip ap-fast-strip--ask${mobile ? ' is-mobile' : ''}`}
+        role="status"
+        aria-label="HITL 대기열 일부 미확인"
+        data-testid="fast-approval-strip"
+        data-hitl-unchecked="true"
+      >
+        <div class="ap-fast-row">
+          <div class="ap-fast-summary">
+            <span class="ap-fast-pill">HITL · 확인된 0건 · 일부 미확인</span>
+            <span class="ap-fast-question">
+              ${allUnbridged ? '멀티 계정 미지원 소스: ' : '미확인 소스: '}${detailText}
+            </span>
+          </div>
+          <div class="ap-fast-actions">
+            <button
+              type="button"
+              class="btn-ghost ap-fast-btn"
+              onClick=${() => toggleQueueContextOverlay()}
+            >
+              Quick-Peek
+            </button>
+          </div>
+        </div>
+      </section>
+    `
+  }
 
   if (headApproval) {
     const busy = submittingId === headApproval.approvalId
@@ -125,7 +162,7 @@ export function FastApprovalStrip(): VNode | null {
           ${(lockState: TargetLockState) => html`
             <div class="ap-fast-row">
               <div class="ap-fast-summary">
-                <span class="ap-fast-pill">APPROVAL · ${totalPending}</span>
+                <span class="ap-fast-pill">APPROVAL · ${countTag}</span>
                 <strong class="ap-fast-keeper">${headApproval.keeper}</strong>
                 <code class="ap-fast-tool">${headApproval.tool || headApproval.toolCallId}</code>
                 ${!mobile && headApproval.question && html`
@@ -180,7 +217,7 @@ export function FastApprovalStrip(): VNode | null {
       >
         <div class="ap-fast-row">
           <div class="ap-fast-summary">
-            <span class="ap-fast-pill">ASK · ${totalPending}</span>
+            <span class="ap-fast-pill">ASK · ${countTag}</span>
             <strong class="ap-fast-keeper">${headAsk.keeper}</strong>
             <span class="ap-fast-question">${headAsk.prompt}</span>
           </div>
@@ -208,7 +245,7 @@ export function FastApprovalStrip(): VNode | null {
       >
         <div class="ap-fast-row">
           <div class="ap-fast-summary">
-            <span class="ap-fast-pill">GATE · ${totalPending}</span>
+            <span class="ap-fast-pill">GATE · ${countTag}</span>
             <strong class="ap-fast-keeper">${headGate.keeper}</strong>
             <code class="ap-fast-tool">${headGate.toolName}</code>
           </div>
@@ -235,7 +272,7 @@ export function FastApprovalStrip(): VNode | null {
     >
       <div class="ap-fast-row">
         <div class="ap-fast-summary">
-          <span class="ap-fast-pill">GOAL CONFIRM · ${totalPending}</span>
+          <span class="ap-fast-pill">GOAL CONFIRM · ${countTag}</span>
           <strong class="ap-fast-keeper">${headGoalConfirm!.goalId}</strong>
           <span class="ap-fast-question">${headGoalConfirm!.title}</span>
         </div>

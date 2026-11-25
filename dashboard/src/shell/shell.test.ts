@@ -16,6 +16,7 @@ import {
   viewProvenance,
 } from '../core/observer'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
+import { apiMutate } from '../core/transport'
 import { navigate, resetRouterForTests } from '../routes/router'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
@@ -496,5 +497,106 @@ describe('Proposal A+ Shell components', () => {
     // Once the hung request hits timeoutMs, refresh finishes cleanly and records an explicit timeout incident
     await refreshPromise
     expect(historicalIncidents.value.some((inc) => inc.source === 'verification' && inc.summary.includes('timeout'))).toBe(true)
+  })
+
+  it('surfaces multi-account unbridged HITL sources and single-user fetch failures honestly in FastApprovalStrip & Quick-Peek without imposing a default timeout on apiMutate', async () => {
+    // 1. P2-1: apiMutate has NO implicit 15s default timeout (must not abort slow mutations)
+    vi.useFakeTimers()
+    try {
+      let resolveSlow!: (r: Response) => void
+      const slowFetch = vi.fn(() => new Promise<Response>((r) => { resolveSlow = r }))
+      const mutPromise = apiMutate('POST', '/api/v1/tools/slow_op', { ok: true }, { fetchImpl: slowFetch as unknown as typeof fetch })
+      await vi.advanceTimersByTimeAsync(20_000)
+      resolveSlow(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      const mutRes = await mutPromise
+      expect(mutRes.ok).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // 2. P2-2: Multi-account session marks unbridged HITL sources explicitly instead of green/0px/empty
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-1',
+      email: 'op@example.com',
+      displayName: 'Op',
+      role: 'admin',
+      csrfToken: 'csrf-1',
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const requestedUrls: string[] = []
+    const maFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      return json({})
+    })
+    vi.stubGlobal('fetch', maFetch)
+
+    await refreshPendingHitl(maFetch as unknown as typeof fetch)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+
+    await act(async () => {
+      render(h('div', {}, h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+
+    const strip = container.querySelector('[data-testid="fast-approval-strip"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.getAttribute('data-hitl-unchecked')).toBe('true')
+    expect(strip?.textContent).toContain('확인된 0건 · 일부 미확인')
+    expect(strip?.textContent).toContain('멀티 계정 미지원')
+
+    const overlay = container.querySelector('[data-testid="queue-context-overlay"]')!
+    expect(overlay.textContent).toContain('확인된 0건 · 일부 미확인')
+    expect(overlay.textContent).toContain('Pending Tool Approvals (멀티 계정 미지원)')
+    expect(overlay.textContent).toContain('Open Keeper Asks (멀티 계정 미지원)')
+    expect(overlay.textContent).toContain('Channel Gate Approvals (멀티 계정 미지원)')
+    expect(overlay.textContent).not.toContain('대기 중인 도구 승인 요청이 없습니다.')
+    expect(overlay.textContent).not.toContain('대기 중인 Keeper 질문이 없습니다.')
+
+    // 3. Single-user source failure surfaces explicit (조회 실패) in Quick-Peek & FastApprovalStrip
+    resetShellStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const failFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/v1/keepers/tool-approvals')) {
+        return new Response(JSON.stringify({ error: 'approval store offline' }), { status: 503, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [] })
+      return json({})
+    })
+    vi.stubGlobal('fetch', failFetch)
+    await refreshPendingHitl(failFetch as unknown as typeof fetch)
+    await act(async () => {
+      render(h('div', {}, h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+    expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
+    expect(container.textContent).toContain('도구 승인 조회 실패')
+    expect(container.textContent).toContain('확인된 0건 · 일부 미확인')
+    vi.unstubAllGlobals()
   })
 })

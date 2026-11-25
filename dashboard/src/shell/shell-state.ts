@@ -367,6 +367,67 @@ export const pendingGoalConfirmations = signal<readonly PendingGoalConfirmItem[]
 export const pendingVerifications = signal<readonly PendingVerificationItem[]>([])
 export const hitlLoading = signal<boolean>(false)
 
+export type HitlSourceKey = 'approvals' | 'asks' | 'gate' | 'planning' | 'verification'
+
+export type HitlSourceState =
+  | { readonly kind: 'ok' }
+  | { readonly kind: 'unbridged'; readonly reason: 'multi_account_unbridged' }
+  | { readonly kind: 'failed'; readonly message: string }
+
+export type HitlSourceStatusMap = Readonly<Record<HitlSourceKey, HitlSourceState>>
+
+const DEFAULT_HITL_SOURCE_STATUS: HitlSourceStatusMap = {
+  approvals: { kind: 'ok' },
+  asks: { kind: 'ok' },
+  gate: { kind: 'ok' },
+  planning: { kind: 'ok' },
+  verification: { kind: 'ok' },
+}
+
+export const hitlSourceStatus = signal<HitlSourceStatusMap>(DEFAULT_HITL_SOURCE_STATUS)
+
+export const effectiveHitlSourceStatus = computed<HitlSourceStatusMap>(() => {
+  const raw = hitlSourceStatus.value
+  if (authSession.value.kind === 'multi_account_signed_in') {
+    return {
+      approvals: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+      asks: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+      gate: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+      planning: raw.planning,
+      verification: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+    }
+  }
+  return raw
+})
+
+export interface HitlUncheckedSource {
+  readonly key: HitlSourceKey
+  readonly label: string
+  readonly state: Exclude<HitlSourceState, { readonly kind: 'ok' }>
+}
+
+const HITL_SOURCE_LABELS: Readonly<Record<HitlSourceKey, string>> = {
+  approvals: '도구 승인',
+  asks: 'Keeper 질문',
+  gate: 'Channel Gate',
+  planning: 'Goal 확인',
+  verification: '검증 대기',
+}
+
+export const hitlUncheckedSummary = computed<readonly HitlUncheckedSource[]>(() => {
+  const map = effectiveHitlSourceStatus.value
+  const out: HitlUncheckedSource[] = []
+  for (const key of ['approvals', 'asks', 'gate', 'planning', 'verification'] as const) {
+    const st = map[key]
+    if (st.kind !== 'ok') {
+      out.push({ key, label: HITL_SOURCE_LABELS[key], state: st })
+    }
+  }
+  return out
+})
+
+export const HITL_POLL_TIMEOUT_MS = 15_000
+
 export const inboxPendingCount = computed<number>(
   () =>
     pendingApprovals.value.length
@@ -547,14 +608,18 @@ export async function refreshPendingHitl(
     pendingGateApprovals.value = []
     pendingGoalConfirmations.value = []
     pendingVerifications.value = []
+    hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     return
   }
   const ctrl = new AbortController()
   hitlAbortCtrl = ctrl
   const startEpoch = currentSessionEpoch()
   const workspaceId = activeWorkspaceId.peek()
-  const reqOpts = { fetchImpl, signal: ctrl.signal, timeoutMs: opts?.timeoutMs }
+  const reqOpts = { fetchImpl, signal: ctrl.signal, timeoutMs: opts?.timeoutMs ?? HITL_POLL_TIMEOUT_MS }
   const isCurrent = (): boolean => seq === hitlRefreshSeq && isEpochCurrent(startEpoch)
+  const setHitlSourceState = (key: HitlSourceKey, state: HitlSourceState): void => {
+    hitlSourceStatus.value = { ...hitlSourceStatus.peek(), [key]: state }
+  }
   const lastHitlIncidentBySource = hitlIncidentLastSig
   const recordHitlIncidentOnce = (
     source: string,
@@ -577,10 +642,18 @@ export async function refreshPendingHitl(
       pendingAsks.value = []
       pendingGateApprovals.value = []
       pendingVerifications.value = []
+      hitlSourceStatus.value = {
+        approvals: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+        asks: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+        gate: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+        planning: hitlSourceStatus.peek().planning.kind === 'unbridged' ? { kind: 'ok' } : hitlSourceStatus.peek().planning,
+        verification: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+      }
       const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', reqOpts)
       if (!isCurrent()) return
       if (planRes.ok) {
         clearHitlIncident('planning')
+        setHitlSourceState('planning', { kind: 'ok' })
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
       } else if (
         planRes.error.kind !== 'epoch_stale'
@@ -588,6 +661,7 @@ export async function refreshPendingHitl(
         && planRes.error.kind !== 'forbidden'
         && planRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
         recordHitlIncidentOnce(
           'planning',
           `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
@@ -597,18 +671,31 @@ export async function refreshPendingHitl(
       return
     }
 
+    // Clear stale multi-account unbridged markers when entering single-user mode.
+    const prevStatus = hitlSourceStatus.peek()
+    if (
+      prevStatus.approvals.kind === 'unbridged'
+      || prevStatus.asks.kind === 'unbridged'
+      || prevStatus.gate.kind === 'unbridged'
+      || prevStatus.verification.kind === 'unbridged'
+    ) {
+      hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    }
+
     // Apply each HITL source independently as soon as it settles so one slow
     // or hung endpoint never blocks the other 4 sources from updating.
     const approvalsJob = apiGet<unknown>('/api/v1/keepers/tool-approvals', reqOpts).then((approvalsRes) => {
       if (!isCurrent()) return
       if (approvalsRes.ok) {
         clearHitlIncident('approvals')
+        setHitlSourceState('approvals', { kind: 'ok' })
         pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
       } else if (
         approvalsRes.error.kind !== 'epoch_stale'
         && approvalsRes.error.kind !== 'aborted'
         && approvalsRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('approvals', { kind: 'failed', message: approvalsRes.error.message })
         recordHitlIncidentOnce(
           'approvals',
           `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
@@ -621,6 +708,7 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (asksRes.ok) {
         clearHitlIncident('asks')
+        setHitlSourceState('asks', { kind: 'ok' })
         pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
       } else if (
         asksRes.error.kind !== 'epoch_stale'
@@ -628,6 +716,7 @@ export async function refreshPendingHitl(
         && asksRes.error.kind !== 'forbidden'
         && asksRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('asks', { kind: 'failed', message: asksRes.error.message })
         recordHitlIncidentOnce(
           'asks',
           `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
@@ -645,16 +734,20 @@ export async function refreshPendingHitl(
           && gateRes.value.approval_queue_state.state === 'unavailable'
         ) {
           const st = gateRes.value.approval_queue_state
+          const detail =
+            asNonEmptyString(st.operator_detail)
+            ?? asNonEmptyString(st.detail)
+            ?? asNonEmptyString(st.title)
+            ?? 'gate approval queue reported unavailable'
+          setHitlSourceState('gate', { kind: 'failed', message: detail })
           recordHitlIncidentOnce(
             'gate',
             'Channel gate approval queue unavailable',
-            asNonEmptyString(st.operator_detail)
-              ?? asNonEmptyString(st.detail)
-              ?? asNonEmptyString(st.title)
-              ?? 'gate approval queue reported unavailable',
+            detail,
           )
         } else {
           clearHitlIncident('gate')
+          setHitlSourceState('gate', { kind: 'ok' })
         }
         pendingGateApprovals.value = parseGateQueuePayload(gateRes.value, workspaceId)
       } else if (
@@ -663,6 +756,7 @@ export async function refreshPendingHitl(
         && gateRes.error.kind !== 'forbidden'
         && gateRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('gate', { kind: 'failed', message: gateRes.error.message })
         recordHitlIncidentOnce(
           'gate',
           `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
@@ -675,6 +769,7 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (planRes.ok) {
         clearHitlIncident('planning')
+        setHitlSourceState('planning', { kind: 'ok' })
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
       } else if (
         planRes.error.kind !== 'epoch_stale'
@@ -682,6 +777,7 @@ export async function refreshPendingHitl(
         && planRes.error.kind !== 'forbidden'
         && planRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
         recordHitlIncidentOnce(
           'planning',
           `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
@@ -694,13 +790,16 @@ export async function refreshPendingHitl(
       if (!isCurrent()) return
       if (verifRes.ok) {
         if (isRecord(verifRes.value) && asNonEmptyString(verifRes.value.backlog_error)) {
+          const detail = asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error'
+          setHitlSourceState('verification', { kind: 'failed', message: detail })
           recordHitlIncidentOnce(
             'verification',
             'Verification backlog read error',
-            asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error',
+            detail,
           )
         } else {
           clearHitlIncident('verification')
+          setHitlSourceState('verification', { kind: 'ok' })
         }
         pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
       } else if (
@@ -709,6 +808,7 @@ export async function refreshPendingHitl(
         && verifRes.error.kind !== 'forbidden'
         && verifRes.error.kind !== 'not_found'
       ) {
+        setHitlSourceState('verification', { kind: 'failed', message: verifRes.error.message })
         recordHitlIncidentOnce(
           'verification',
           `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
@@ -855,6 +955,7 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
     pendingGateApprovals.value = []
     pendingGoalConfirmations.value = []
     pendingVerifications.value = []
+    hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     const kind = authSession.peek().kind
     if (kind === 'single_user_local' || kind === 'multi_account_signed_in') {
       void refreshPendingHitl(fetchImpl)
@@ -907,6 +1008,7 @@ export function resetShellStateForTests(): void {
   pendingGateApprovals.value = []
   pendingGoalConfirmations.value = []
   pendingVerifications.value = []
+  hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
   hitlLoading.value = false
   toastsSignal.value = []
   buildConnectionInfo.value = {

@@ -14,6 +14,8 @@ import { apiGet } from '../core/transport'
 import { navigate } from '../routes/router'
 import {
   closeActiveOverlay,
+  effectiveHitlSourceStatus,
+  hitlUncheckedSummary,
   inboxPendingCount,
   pendingApprovals,
   pendingAsks,
@@ -21,6 +23,7 @@ import {
   pendingGoalConfirmations,
   pendingVerifications,
   refreshPendingHitl,
+  type HitlSourceState,
 } from './shell-state'
 
 interface ShellQueueSummary {
@@ -129,8 +132,17 @@ export function QueueContextOverlayBody(): VNode {
   const goalConfirms = pendingGoalConfirmations.value
   const verifications = pendingVerifications.value
   const totalHitl = inboxPendingCount.value
+  const sourceStatus = effectiveHitlSourceStatus.value
+  const uncheckedSources = hitlUncheckedSummary.value
+  const inboxUnchecked = uncheckedSources.filter((u) => u.key !== 'verification')
   const observed = resourceCache.observe<ShellQueueSummary>(SHELL_CACHE_KEY).value
   const schedulesObs = resourceCache.observe<QuickPeekScheduleSummary>(SCHEDULES_CACHE_KEY).value
+
+  const sectionCountLabel = (count: number, st: HitlSourceState): string => {
+    if (st.kind === 'unbridged') return '멀티 계정 미지원'
+    if (st.kind === 'failed') return count > 0 ? `${count} · 조회 실패` : '조회 실패'
+    return String(count)
+  }
 
   useEffect(() => {
     if (!authed) return
@@ -178,9 +190,16 @@ export function QueueContextOverlayBody(): VNode {
               </div>
               <div class="ap-mini-kpi">
                 <span class="ap-mini-kpi-k">HITL Queue</span>
-                <strong class="ap-mini-kpi-v tnum">${String(totalHitl)}</strong>
+                <strong class="ap-mini-kpi-v tnum">
+                  ${inboxUnchecked.length > 0 ? `확인된 ${totalHitl}건 · 일부 미확인` : String(totalHitl)}
+                </strong>
                 ${verifications.length > 0 && html`
                   <span class="ap-mini-kpi-sub tnum">+${verifications.length} verif</span>
+                `}
+                ${sourceStatus.verification.kind !== 'ok' && html`
+                  <span class="ap-mini-kpi-sub">
+                    검증 ${sourceStatus.verification.kind === 'unbridged' ? '멀티 계정 미지원' : '조회 실패'}
+                  </span>
                 `}
               </div>
               <div class="ap-mini-kpi">
@@ -193,7 +212,7 @@ export function QueueContextOverlayBody(): VNode {
 
             <section class="ap-qpeek-section">
               <header class="ap-qpeek-section-head">
-                <h3>Pending Tool Approvals (${approvals.length})</h3>
+                <h3>Pending Tool Approvals (${sectionCountLabel(approvals.length, sourceStatus.approvals)})</h3>
                 <button
                   type="button"
                   class="btn-ghost"
@@ -202,32 +221,39 @@ export function QueueContextOverlayBody(): VNode {
                   Open Inbox →
                 </button>
               </header>
-              ${approvals.length === 0
-                ? html`<p class="ap-muted">대기 중인 도구 승인 요청이 없습니다.</p>`
-                : html`
-                    <ul class="ap-qpeek-list">
-                      ${approvals.slice(0, MAX_QPEEK_PREVIEW).map((item) => html`
-                        <li key=${item.approvalId} class="ap-qpeek-card">
-                          <div class="ap-qpeek-card-top">
-                            <strong>${item.keeper}</strong>
-                            <code class="mono">${item.tool || item.toolCallId}</code>
-                          </div>
-                          ${item.question && html`<p class="ap-qpeek-card-text">${item.question}</p>`}
-                          <div class="ap-qpeek-card-meta mono">
-                            req=${item.approvalId} · rev=${item.revision}
-                          </div>
-                        </li>
-                      `)}
-                    </ul>
-                    ${approvals.length > MAX_QPEEK_PREVIEW && html`
-                      <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${approvals.length}건)</p>
+              ${sourceStatus.approvals.kind === 'failed' && html`
+                <p class="ap-error" role="alert">도구 승인 조회 실패: ${sourceStatus.approvals.message}</p>
+              `}
+              ${sourceStatus.approvals.kind === 'unbridged'
+                ? html`<p class="ap-muted" role="note">멀티 계정 세션에서는 도구 승인 대기열을 조회할 수 없어 미확인 상태입니다.</p>`
+                : approvals.length === 0
+                  ? (sourceStatus.approvals.kind === 'ok'
+                      ? html`<p class="ap-muted">대기 중인 도구 승인 요청이 없습니다.</p>`
+                      : null)
+                  : html`
+                      <ul class="ap-qpeek-list">
+                        ${approvals.slice(0, MAX_QPEEK_PREVIEW).map((item) => html`
+                          <li key=${item.approvalId} class="ap-qpeek-card">
+                            <div class="ap-qpeek-card-top">
+                              <strong>${item.keeper}</strong>
+                              <code class="mono">${item.tool || item.toolCallId}</code>
+                            </div>
+                            ${item.question && html`<p class="ap-qpeek-card-text">${item.question}</p>`}
+                            <div class="ap-qpeek-card-meta mono">
+                              req=${item.approvalId} · rev=${item.revision}
+                            </div>
+                          </li>
+                        `)}
+                      </ul>
+                      ${approvals.length > MAX_QPEEK_PREVIEW && html`
+                        <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${approvals.length}건)</p>
+                      `}
                     `}
-                  `}
             </section>
 
             <section class="ap-qpeek-section">
               <header class="ap-qpeek-section-head">
-                <h3>Open Keeper Asks (${asks.length})</h3>
+                <h3>Open Keeper Asks (${sectionCountLabel(asks.length, sourceStatus.asks)})</h3>
                 <button
                   type="button"
                   class="btn-ghost"
@@ -236,30 +262,37 @@ export function QueueContextOverlayBody(): VNode {
                   Open Keepers →
                 </button>
               </header>
-              ${asks.length === 0
-                ? html`<p class="ap-muted">대기 중인 Keeper 질문이 없습니다.</p>`
-                : html`
-                    <ul class="ap-qpeek-list">
-                      ${asks.slice(0, MAX_QPEEK_PREVIEW).map((ask) => html`
-                        <li key=${ask.askId} class="ap-qpeek-card">
-                          <div class="ap-qpeek-card-top">
-                            <strong>${ask.keeper}</strong>
-                            <span class="mono ap-muted">${ask.askId}</span>
-                          </div>
-                          <p class="ap-qpeek-card-text">${ask.prompt}</p>
-                        </li>
-                      `)}
-                    </ul>
-                    ${asks.length > MAX_QPEEK_PREVIEW && html`
-                      <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${asks.length}건)</p>
+              ${sourceStatus.asks.kind === 'failed' && html`
+                <p class="ap-error" role="alert">Keeper 질문 조회 실패: ${sourceStatus.asks.message}</p>
+              `}
+              ${sourceStatus.asks.kind === 'unbridged'
+                ? html`<p class="ap-muted" role="note">멀티 계정 세션에서는 Keeper 질문 대기열을 조회할 수 없어 미확인 상태입니다.</p>`
+                : asks.length === 0
+                  ? (sourceStatus.asks.kind === 'ok'
+                      ? html`<p class="ap-muted">대기 중인 Keeper 질문이 없습니다.</p>`
+                      : null)
+                  : html`
+                      <ul class="ap-qpeek-list">
+                        ${asks.slice(0, MAX_QPEEK_PREVIEW).map((ask) => html`
+                          <li key=${ask.askId} class="ap-qpeek-card">
+                            <div class="ap-qpeek-card-top">
+                              <strong>${ask.keeper}</strong>
+                              <span class="mono ap-muted">${ask.askId}</span>
+                            </div>
+                            <p class="ap-qpeek-card-text">${ask.prompt}</p>
+                          </li>
+                        `)}
+                      </ul>
+                      ${asks.length > MAX_QPEEK_PREVIEW && html`
+                        <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${asks.length}건)</p>
+                      `}
                     `}
-                  `}
             </section>
 
-            ${gates.length > 0 && html`
+            ${(gates.length > 0 || sourceStatus.gate.kind !== 'ok') && html`
               <section class="ap-qpeek-section">
                 <header class="ap-qpeek-section-head">
-                  <h3>Channel Gate Approvals (${gates.length})</h3>
+                  <h3>Channel Gate Approvals (${sectionCountLabel(gates.length, sourceStatus.gate)})</h3>
                   <button
                     type="button"
                     class="btn-ghost"
@@ -268,29 +301,37 @@ export function QueueContextOverlayBody(): VNode {
                     Open Inbox →
                   </button>
                 </header>
-                <ul class="ap-qpeek-list">
-                  ${gates.slice(0, MAX_QPEEK_PREVIEW).map((gate) => html`
-                    <li key=${gate.id} class="ap-qpeek-card">
-                      <div class="ap-qpeek-card-top">
-                        <strong>${gate.keeper}</strong>
-                        <code class="mono">${gate.toolName}</code>
-                      </div>
-                      <div class="ap-qpeek-card-meta mono">
-                        phase=${gate.phase}${gate.waitingSec !== null ? ` · wait ${Math.round(gate.waitingSec)}s` : ''}
-                      </div>
-                    </li>
-                  `)}
-                </ul>
-                ${gates.length > MAX_QPEEK_PREVIEW && html`
-                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${gates.length}건)</p>
+                ${sourceStatus.gate.kind === 'failed' && html`
+                  <p class="ap-error" role="alert">Channel Gate 조회 실패: ${sourceStatus.gate.message}</p>
+                `}
+                ${sourceStatus.gate.kind === 'unbridged' && html`
+                  <p class="ap-muted" role="note">멀티 계정 세션에서는 Channel Gate 대기열을 조회할 수 없어 미확인 상태입니다.</p>
+                `}
+                ${gates.length > 0 && html`
+                  <ul class="ap-qpeek-list">
+                    ${gates.slice(0, MAX_QPEEK_PREVIEW).map((gate) => html`
+                      <li key=${gate.id} class="ap-qpeek-card">
+                        <div class="ap-qpeek-card-top">
+                          <strong>${gate.keeper}</strong>
+                          <code class="mono">${gate.toolName}</code>
+                        </div>
+                        <div class="ap-qpeek-card-meta mono">
+                          phase=${gate.phase}${gate.waitingSec !== null ? ` · wait ${Math.round(gate.waitingSec)}s` : ''}
+                        </div>
+                      </li>
+                    `)}
+                  </ul>
+                  ${gates.length > MAX_QPEEK_PREVIEW && html`
+                    <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${gates.length}건)</p>
+                  `}
                 `}
               </section>
             `}
 
-            ${goalConfirms.length > 0 && html`
+            ${(goalConfirms.length > 0 || sourceStatus.planning.kind !== 'ok') && html`
               <section class="ap-qpeek-section">
                 <header class="ap-qpeek-section-head">
-                  <h3>Goal Confirmations (${goalConfirms.length})</h3>
+                  <h3>Goal Confirmations (${sectionCountLabel(goalConfirms.length, sourceStatus.planning)})</h3>
                   <button
                     type="button"
                     class="btn-ghost"
@@ -299,26 +340,31 @@ export function QueueContextOverlayBody(): VNode {
                     Open Inbox →
                   </button>
                 </header>
-                <ul class="ap-qpeek-list">
-                  ${goalConfirms.slice(0, MAX_QPEEK_PREVIEW).map((goal) => html`
-                    <li key=${goal.goalId} class="ap-qpeek-card">
-                      <div class="ap-qpeek-card-top">
-                        <strong>${goal.title}</strong>
-                        <span class="mono ap-muted">${goal.goalId}</span>
-                      </div>
-                    </li>
-                  `)}
-                </ul>
-                ${goalConfirms.length > MAX_QPEEK_PREVIEW && html`
-                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${goalConfirms.length}건)</p>
+                ${sourceStatus.planning.kind === 'failed' && html`
+                  <p class="ap-error" role="alert">Goal 확인 대기열 조회 실패: ${sourceStatus.planning.message}</p>
+                `}
+                ${goalConfirms.length > 0 && html`
+                  <ul class="ap-qpeek-list">
+                    ${goalConfirms.slice(0, MAX_QPEEK_PREVIEW).map((goal) => html`
+                      <li key=${goal.goalId} class="ap-qpeek-card">
+                        <div class="ap-qpeek-card-top">
+                          <strong>${goal.title}</strong>
+                          <span class="mono ap-muted">${goal.goalId}</span>
+                        </div>
+                      </li>
+                    `)}
+                  </ul>
+                  ${goalConfirms.length > MAX_QPEEK_PREVIEW && html`
+                    <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${goalConfirms.length}건)</p>
+                  `}
                 `}
               </section>
             `}
 
-            ${verifications.length > 0 && html`
+            ${(verifications.length > 0 || sourceStatus.verification.kind !== 'ok') && html`
               <section class="ap-qpeek-section">
                 <header class="ap-qpeek-section-head">
-                  <h3>Awaiting Verifications (${verifications.length})</h3>
+                  <h3>Awaiting Verifications (${sectionCountLabel(verifications.length, sourceStatus.verification)})</h3>
                   <button
                     type="button"
                     class="btn-ghost"
@@ -327,19 +373,27 @@ export function QueueContextOverlayBody(): VNode {
                     Open Tasks →
                   </button>
                 </header>
-                <ul class="ap-qpeek-list">
-                  ${verifications.slice(0, MAX_QPEEK_PREVIEW).map((v) => html`
-                    <li key=${v.requestId} class="ap-qpeek-card">
-                      <div class="ap-qpeek-card-top">
-                        <strong>${v.title}</strong>
-                        <span class="mono ap-muted">${v.taskId}</span>
-                      </div>
-                      ${v.worker && html`<div class="ap-qpeek-card-meta mono">by=${v.worker}</div>`}
-                    </li>
-                  `)}
-                </ul>
-                ${verifications.length > MAX_QPEEK_PREVIEW && html`
-                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${verifications.length}건)</p>
+                ${sourceStatus.verification.kind === 'failed' && html`
+                  <p class="ap-error" role="alert">검증 대기열 조회 실패: ${sourceStatus.verification.message}</p>
+                `}
+                ${sourceStatus.verification.kind === 'unbridged' && html`
+                  <p class="ap-muted" role="note">멀티 계정 세션에서는 검증 대기열을 조회할 수 없어 미확인 상태입니다.</p>
+                `}
+                ${verifications.length > 0 && html`
+                  <ul class="ap-qpeek-list">
+                    ${verifications.slice(0, MAX_QPEEK_PREVIEW).map((v) => html`
+                      <li key=${v.requestId} class="ap-qpeek-card">
+                        <div class="ap-qpeek-card-top">
+                          <strong>${v.title}</strong>
+                          <span class="mono ap-muted">${v.taskId}</span>
+                        </div>
+                        ${v.worker && html`<div class="ap-qpeek-card-meta mono">by=${v.worker}</div>`}
+                      </li>
+                    `)}
+                  </ul>
+                  ${verifications.length > MAX_QPEEK_PREVIEW && html`
+                    <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${verifications.length}건)</p>
+                  `}
                 `}
               </section>
             `}

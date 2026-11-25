@@ -100,11 +100,9 @@ val fetch_planning_with_tasks :
   fetch_tasks:
     (unit ->
     (Masc_tui_protocol.Wire_work.task list, Msg.http_error) result) ->
-  (Masc_tui_protocol.Wire_work.planning_snapshot, Msg.http_error) result
-(** Execute planning snapshot fetch and, when [tasks = []], enrich from
-    [/api/v1/dashboard/execution?light=true]. Propagates any secondary fetch
-    error (including [Workspace_mismatch], [Decode_error], [Http_error], or
-    [Transport]) instead of silently returning an empty task list. *)
+  (Masc_tui_protocol.Wire_work.planning_snapshot, Msg.planning_failure) result
+(** Enrich the planning snapshot from Execution when it has no task rows.
+    The error identifies the source that failed. *)
 
 val chat_reattach_delay :
   acceptance:Keeper_chat_operation.State_name.t option ->

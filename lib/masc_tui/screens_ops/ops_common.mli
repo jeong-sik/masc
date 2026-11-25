@@ -104,6 +104,11 @@ val draw_hrule :
   unit ->
   unit
 
+val observed_read_notice : lang:Say.lang -> 'a Observed.t -> string option
+
+val draw_verification_read_notices :
+  Cell_grid.t -> rect:Rect.t -> theme:Theme.t -> lang:Say.lang -> Work_store.t -> int
+
 val draw_observed_empty :
   Cell_grid.t ->
   rect:Rect.t ->

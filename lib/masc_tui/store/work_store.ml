@@ -22,6 +22,11 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type verification_read_failure = {
+  reason : string;
+  coverage : Wire_work.verification_coverage option;
+}
+
 type task_status_filter =
   | Status_all
   | Status_active
@@ -58,9 +63,10 @@ type t = {
   active_tab : Nav.work_tab;
   inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
-  goal_confirmations : Wire_work.goal list Observed.t;
+  planning_goals : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
-  verifications : Wire_work.verification_request list Observed.t;
+  verifications : Wire_work.verification_snapshot Observed.t;
+  verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
   harness_selected_index : int;
   harness_scroll_offset : int;
@@ -107,6 +113,7 @@ type t = {
   goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
+  verification_generation : int;
   expanded_ids : String_set.t;
 }
 
@@ -117,9 +124,10 @@ let empty =
     active_tab = Nav.Work_pipeline;
     inbox_subview = Inbox_queue;
     planning = Observed.unreported;
-    goal_confirmations = Observed.unreported;
+    planning_goals = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
+    verification_failure = None;
     harness_health = Observed.unreported;
     harness_selected_index = 0;
     harness_scroll_offset = 0;
@@ -165,6 +173,7 @@ let empty =
     goal_sort_mode = Goal_sort_default;
     task_status_filter = Status_all;
     verification_view = `All;
+    verification_generation = 0;
     expanded_ids = String_set.empty;
   }
 
@@ -202,14 +211,29 @@ let cycle_tab dir t =
   in
   set_tab next_tab t
 
-let apply_planning ~observed_at planning t =
-  { t with planning = Observed.value ~observed_at planning }
-
 let apply_backlog_counts counts t =
   { t with backlog_counts = Some counts }
 
-let apply_verifications ~observed_at verifications t =
-  { t with verifications = Observed.value ~observed_at verifications }
+let apply_verifications
+    ?(coverage = { Wire_work.backlog_issue = None; awaiting_unresolved_total = None;
+                   unreadable_total = None; truncated = false })
+    ~observed_at requests t =
+  { t with
+    verifications = Observed.value ~observed_at { Wire_work.requests; coverage };
+    verification_failure = None;
+  }
+
+let fail_verifications ?coverage ~now ~reason ~retryable t =
+  { t with
+    verifications = Observed.fetch_failed ~at:now ~reason ~retryable t.verifications;
+    verification_failure = Some { reason; coverage };
+  }
+
+let invalidate_verifications t =
+  { t with
+    verifications = Observed.mark_stale t.verifications;
+    verification_generation = t.verification_generation + 1;
+  }
 
 let apply_schedules ~observed_at schedules t =
   { t with schedules = Observed.value ~observed_at schedules }
@@ -332,7 +356,7 @@ let effective_task_counts t =
 let verification_pass_summary t =
   match Observed.to_option t.verifications with
   | None -> (0, 0, 0)
-  | Some vs ->
+  | Some { requests = vs; _ } ->
       List.fold_left
         (fun (passed, rejected, awaiting) (v : Wire_work.verification_request) ->
           if Option.is_some v.evidence_projection_error then
@@ -374,14 +398,92 @@ let record_decision ~at_unix ~kind ~target_id ~keeper ~summary t =
   in
   { t with recent_decisions_24h }
 
-let goals t =
-  match Observed.to_option t.planning with Some p -> p.goals | None -> []
+let goals_read t =
+  match t.planning_goals with
+  | Observed.Unreported ->
+      Observed.map (fun (snapshot : Wire_work.planning_snapshot) -> snapshot.goals)
+        t.planning
+  | (Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Failed _) as read -> read
+
+let goals t = Option.value (Observed.to_option (goals_read t)) ~default:[]
 
 let tasks t =
   match Observed.to_option t.planning with Some p -> p.tasks | None -> []
 
 let verifications_list t =
-  match Observed.to_option t.verifications with Some xs -> xs | None -> []
+  match Observed.to_option t.verifications with
+  | Some { requests; _ } -> requests
+  | None -> []
+
+let verification_read_allows_verdict t =
+  match t.verifications with
+  | Observed.Value
+      { stale = false; data = { coverage = { backlog_issue = Some (Backlog_recovered _); _ }; _ }; _ } ->
+      Error (Say.make ~ko:"복구본은 읽기 전용입니다" ~en:"Recovered verification rows are read-only")
+  | Observed.Value { stale = false; data = { coverage = { backlog_issue = None; awaiting_unresolved_total; _ }; _ }; _ } ->
+      (match t.verification_view, awaiting_unresolved_total with
+      | `Pending, Some _ -> Ok ()
+      | `All, _ | `Pending, None ->
+          Error (Say.make ~ko:"대기열에서 현재 검증 요청을 확인한 뒤 판정하세요"
+                   ~en:"Confirm the current request in the awaiting queue before submitting a verdict"))
+  | Observed.Value
+      { data = { coverage = { backlog_issue = Some (Backlog_unreadable _); _ }; _ }; _ }
+  | Observed.Value { stale = true; _ } | Observed.Loading _
+  | Observed.Absent | Observed.Unreported | Observed.Failed _ ->
+      Error (Say.make ~ko:"최신 검증 목록을 읽은 뒤 판정할 수 있습니다"
+               ~en:"Read the current verification list before submitting a verdict")
+
+let verification_read_notices t =
+  let count amount ~ko ~en =
+    match amount with
+    | Some n when n > 0 -> Some (Say.make ~ko:(Printf.sprintf ko n) ~en:(Printf.sprintf en n))
+    | Some _ | None -> None
+  in
+  let status, coverage, failure =
+    match t.verification_failure with
+    | Some { reason; coverage } ->
+        let status =
+          if Observed.is_value t.verifications then
+            Say.make ~ko:"검증 조회 실패 · 마지막 기록 표시" ~en:"Verification read failed · showing last rows"
+          else Say.make ~ko:"검증 조회 실패" ~en:"Verification read failed"
+        in
+        Some status, coverage, Some (Say.literal reason)
+    | None ->
+        (match t.verifications with
+        | Observed.Loading _ ->
+            Some (Say.make ~ko:"검증 목록을 불러오는 중" ~en:"Loading verifications"), None, None
+        | Observed.Failed { reason; _ } ->
+            Some (Say.make ~ko:"검증 조회 실패" ~en:"Verification read failed"), None, Some (Say.literal reason)
+        | Observed.Absent | Observed.Unreported ->
+            Some (Say.make ~ko:"검증 미관측" ~en:"Verifications unobserved"), None, None
+        | Observed.Value { data; stale; _ } ->
+            let status = if stale then
+              Some (Say.make ~ko:"마지막 검증 조회" ~en:"Last verification read") else None in
+            status, Some data.coverage, None)
+  in
+  let recovery, counts =
+    match coverage with
+    | None -> None, None
+    | Some coverage ->
+        let recovery =
+          match coverage.backlog_issue with
+          | Some (Wire_work.Backlog_recovered _) ->
+              Some (Say.make ~ko:"복구본 · 읽기 전용" ~en:"Recovered · read-only")
+          | Some (Wire_work.Backlog_unreadable _) | None -> None
+        in
+        let counts = List.filter_map Fun.id
+          [ count coverage.awaiting_unresolved_total ~ko:"대기 누락 %d" ~en:"%d awaiting missing";
+            count coverage.unreadable_total ~ko:"읽기 불가 %d" ~en:"%d unreadable";
+            (if coverage.truncated then Some (Say.make ~ko:"일부 표시" ~en:"Partial page") else None);
+          ]
+        in
+        recovery, (match counts with [] -> None | counts -> Some (Say.concat ~sep:" · " counts))
+  in
+  List.filter_map Fun.id [ status; recovery; counts; failure ]
+
+let verification_notice_rows ~max_rows t =
+  Int.min (Int.max 0 max_rows) (List.length (verification_read_notices t))
 
 let schedules_list t =
   match Observed.to_option t.schedules with Some (rows, _) -> rows | None -> []
@@ -424,24 +526,7 @@ let select_awaiting_confirmation_goals =
       | Wire_work.Blocked _ ->
           false)
 
-let confirmation_goals_read t =
-  match t.goal_confirmations with
-  | Observed.Unreported ->
-      Observed.map
-        (fun (snapshot : Wire_work.planning_snapshot) ->
-          select_awaiting_confirmation_goals snapshot.goals)
-        t.planning
-  | (Observed.Value _ | Observed.Loading _ | Observed.Absent
-    | Observed.Failed _) as read -> read
-
-let apply_goal_confirmations ~observed_at goals t =
-  let goal_confirmations =
-    Observed.value ~observed_at (select_awaiting_confirmation_goals goals)
-  in
-  { t with goal_confirmations }
-
-let awaiting_confirmation_goals t =
-  Option.value (Observed.to_option (confirmation_goals_read t)) ~default:[]
+let awaiting_confirmation_goals t = select_awaiting_confirmation_goals (goals t)
 
 let default_viewport_rows = Store_scroll.default_viewport_rows
 let adjust_scroll = Store_scroll.adjust_scroll
@@ -537,25 +622,23 @@ let goal_linked_verifications ~goal_id t =
       List.exists (String.equal v.task_id) linked_ids)
     (verifications_list t)
 
-let goal_progress_score t (g : Wire_work.goal) =
-  let linked = goal_linked_tasks ~goal_id:g.id t in
-  let total = List.length linked in
-  if total > 0 then
-    let done_n =
-      List.fold_left
-        (fun acc (tk : Wire_work.task) ->
-          if task_is_done tk.status then acc + 1 else acc)
-        0 linked
-    in
-    Float.of_int done_n /. Float.of_int total
-  else
-    match g.phase with
-    | Wire_work.Completed -> 1.0
-    | Wire_work.Awaiting_confirmation -> 0.85
-    | Wire_work.Verifying -> 0.65
-    | Wire_work.Executing -> 0.25
-    | Wire_work.Paused _ | Wire_work.Blocked _ -> 0.1
-    | Wire_work.Dropped -> 0.0
+let task_completion_counts (linked : Wire_work.task list) =
+  match linked with
+  | _ :: _ ->
+      let done_count =
+        List.fold_left
+          (fun count (task : Wire_work.task) ->
+            if task_is_done task.status then count + 1 else count)
+          0 linked
+      in
+      Some (done_count, List.length linked)
+  | [] -> None
+
+let linked_task_completion t linked =
+  match t.planning with
+  | Observed.Value { stale = false; _ } -> task_completion_counts linked
+  | Observed.Value _ | Observed.Failed _ | Observed.Loading _
+  | Observed.Unreported | Observed.Absent -> None
 
 let goal_recency_key (g : Wire_work.goal) =
   match g.updated_at with
@@ -586,11 +669,21 @@ let filtered_goals t =
           if c <> 0 then c else Int.compare a.priority b.priority)
         matched
   | Goal_sort_progress ->
-      List.stable_sort
-        (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
-          let c = Float.compare (goal_progress_score t b) (goal_progress_score t a) in
-          if c <> 0 then c else Int.compare a.priority b.priority)
-        matched
+      matched
+      |> List.map (fun (goal : Wire_work.goal) ->
+             let linked = goal_linked_tasks ~goal_id:goal.id t in
+             let score =
+               Option.map
+                 (fun (done_count, total) ->
+                   Float.of_int done_count /. Float.of_int total)
+                 (task_completion_counts linked)
+             in
+             goal, score)
+      |> List.stable_sort
+           (fun ((a : Wire_work.goal), score_a) ((b : Wire_work.goal), score_b) ->
+             let c = Option.compare Float.compare score_b score_a in
+             if c <> 0 then c else Int.compare a.priority b.priority)
+      |> List.map fst
   | Goal_sort_recent ->
       List.stable_sort
         (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
@@ -717,6 +810,45 @@ let selected_goal t =
   let gs = filtered_goals t in
   if t.selected_index < 0 then None else List.nth_opt gs t.selected_index
 
+let preserve_pipeline_selection previous next =
+  if not (Nav.equal_work_tab previous.active_tab Nav.Work_pipeline) then next
+  else
+    match selected_goal previous with
+    | None -> next
+    | Some goal ->
+        let index =
+          List.find_index
+            (fun (candidate : Wire_work.goal) -> String.equal candidate.id goal.id)
+            (filtered_goals next)
+        in
+        match index with
+        | Some selected_index -> { next with selected_index }
+        | None -> { next with selected_index = -1; detail_scroll_offset = 0 }
+
+let apply_planning_goals ~observed_at goals t =
+  preserve_pipeline_selection t
+    { t with planning_goals = Observed.value ~observed_at goals }
+
+let start_planning_tasks ~now t =
+  let planning =
+    match t.planning with
+    | Observed.Value _ as read -> Observed.mark_stale read
+    | Observed.Loading _ as read -> read
+    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+        Observed.loading ~since_ns:now
+  in
+  { t with planning }
+
+let apply_planning_tasks ~observed_at planning t =
+  preserve_pipeline_selection t
+    { t with planning = Observed.value ~observed_at planning }
+
+let apply_planning ~observed_at (planning : Wire_work.planning_snapshot) t =
+  preserve_pipeline_selection t
+    { t with
+      planning_goals = Observed.value ~observed_at planning.goals;
+      planning = Observed.value ~observed_at planning }
+
 let selected_task t =
   let ts = filtered_tasks t in
   if t.selected_index < 0 then None else List.nth_opt ts t.selected_index
@@ -778,24 +910,29 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           { t with detail_scroll_offset }
       | _ ->
           let len = List.length (filtered_goals t) in
-          let selected_index = clamp_index len (t.selected_index + delta) in
-          let scroll_offset =
-            adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-          in
-          let changed = not (Int.equal selected_index t.selected_index) in
-          let detail_scroll_offset =
-            if changed then 0 else t.detail_scroll_offset
-          in
-          let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
-          if changed then
-            {
-              base with
-              goal_dive_task_index = 0;
-              goal_dive_task_scroll = 0;
-              goal_dive_verif_index = 0;
-              goal_dive_verif_scroll = 0;
-            }
-          else base)
+          (* A Goal selection cleared by a refresh (selected_index = -1) stays
+             cleared under a zero move such as a pane clamp; only an explicit
+             move may select a row again. *)
+          if len = 0 || (t.selected_index < 0 && delta = 0) then t
+          else
+            let selected_index = clamp_index len (t.selected_index + delta) in
+            let scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+            in
+            let changed = not (Int.equal selected_index t.selected_index) in
+            let detail_scroll_offset =
+              if changed then 0 else t.detail_scroll_offset
+            in
+            let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
+            if changed then
+              {
+                base with
+                goal_dive_task_index = 0;
+                goal_dive_task_scroll = 0;
+                goal_dive_verif_index = 0;
+                goal_dive_verif_scroll = 0;
+              }
+            else base)
   | Nav.Work_tasks ->
       if pane_index = 1 then
         let max_scroll =
@@ -993,11 +1130,13 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           detail_scroll_offset;
         }
 
+let first_row_if_selected t = if t.selected_index < 0 then t.selected_index else 0
+
 let set_filter filter_query t =
   {
     t with
     filter_query;
-    selected_index = 0;
+    selected_index = first_row_if_selected t;
     scroll_offset = 0;
     rule_selected_index = 0;
     rule_scroll_offset = 0;
@@ -1090,7 +1229,7 @@ let set_goal_phase_filter goal_phase_filter t =
   {
     t with
     goal_phase_filter;
-    selected_index = 0;
+    selected_index = first_row_if_selected t;
     scroll_offset = 0;
     detail_scroll_offset = 0;
   }
@@ -1117,7 +1256,8 @@ let equal_goal_sort_mode a b =
       false
 
 let set_goal_sort_mode goal_sort_mode t =
-  { t with goal_sort_mode; selected_index = 0; scroll_offset = 0; detail_scroll_offset = 0 }
+  { t with goal_sort_mode; selected_index = first_row_if_selected t;
+    scroll_offset = 0; detail_scroll_offset = 0 }
 
 let cycle_goal_sort_mode t =
   let next =
@@ -1256,13 +1396,15 @@ let harness_verdicts_list t =
   | Some hh -> hh.recent_verdicts
 
 let toggle_verification_view t =
+  let t = invalidate_verifications t in
   let verification_view =
     match t.verification_view with `Pending -> `All | `All -> `Pending
   in
   {
     t with
     verification_view;
-    verifications = Observed.mark_stale t.verifications;
+    verifications = Observed.unreported;
+    verification_failure = None;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
   }
@@ -1275,11 +1417,11 @@ let toggle_expanded id t =
   { t with expanded_ids }
 
 let mark_stale_all t =
+  let t = invalidate_verifications t in
   {
     t with
     planning = Observed.mark_stale t.planning;
-    goal_confirmations = Observed.mark_stale t.goal_confirmations;
-    verifications = Observed.mark_stale t.verifications;
+    planning_goals = Observed.mark_stale t.planning_goals;
     harness_health = Observed.mark_stale t.harness_health;
     verification_evidence = Observed.mark_stale t.verification_evidence;
     verification_evidence_auth_denied = false;
@@ -1399,7 +1541,7 @@ let inbox_queue_reads t =
     Inbox_approvals, as_unit t.tool_approvals;
     Inbox_asks, as_unit t.asks;
     Inbox_gate, as_unit t.gate_pending;
-    Inbox_goals, as_unit (confirmation_goals_read t);
+    Inbox_goals, as_unit (goals_read t);
   ]
 
 let inbox_queue_rects (rect : Rect.t) t =

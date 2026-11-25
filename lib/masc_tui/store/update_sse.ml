@@ -104,10 +104,21 @@ let reads_schedules (m : Model.t) =
 let apply_dataset_invalidation (m : Model.t) ds =
   let e = m.epoch in
   let ws = m.nav.workspace in
+  let reload_verifications work =
+    let work = Work_store.invalidate_verifications work in
+    let cmds =
+      match ws with
+      | Nav.Work | Nav.Pulse -> [ get_cmd e (View_fetches.verification_requests_read work) ]
+      | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+    in
+    work, cmds
+  in
   match ds with
   | Wire_observer.Dataset_goals | Wire_observer.Dataset_backlog ->
       let work =
-        { m.work with planning = Observed.mark_stale m.work.planning }
+        { m.work with
+          planning = Observed.mark_stale m.work.planning;
+          planning_goals = Observed.mark_stale m.work.planning_goals }
       in
       let wants_planning =
         Option.is_some (keeper_queue_target m)
@@ -118,7 +129,12 @@ let apply_dataset_invalidation (m : Model.t) ds =
       let cmds =
         if wants_planning then [ get_cmd e Cmd.Get_planning ] else []
       in
-      ({ m with work }, cmds)
+      let work, verification_cmds =
+        if ds = Wire_observer.Dataset_backlog && work.verification_view = `Pending
+        then reload_verifications work
+        else work, []
+      in
+      ({ m with work }, cmds @ verification_cmds)
   | Wire_observer.Dataset_board ->
       let knowledge =
         { m.knowledge with board = Observed.mark_stale m.knowledge.board }
@@ -336,19 +352,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
       in
       ({ m with runtime }, cmds)
   | Wire_observer.Dataset_verification_requests ->
-      let work =
-        { m.work with verifications = Observed.mark_stale m.work.verifications }
-      in
-      let cmds =
-        match ws with
-        | Nav.Work | Nav.Pulse ->
-            [
-              get_cmd e
-                (Cmd.Get_verifications
-                   { view = work.verification_view; limit = 50; offset = 0 });
-            ]
-        | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
-      in
+      let work, cmds = reload_verifications m.work in
       ({ m with work }, cmds)
   | Wire_observer.Dataset_scheduled_automation ->
       let work =

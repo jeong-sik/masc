@@ -1137,6 +1137,88 @@ let test_tool_series_readers_each_receive_the_latest_reply () =
   Alcotest.(check (list (pair string (float 0.)))) "both latest replies survive until the first drain"
     ["raw", 3.; "summary", 4.] replies
 
+let test_planning_retains_completed_tasks_across_refresh () =
+  let module W = Masc_tui_protocol.Wire_work in
+  let first_started, start_first = Eio.Promise.create () in
+  let first_released, release_first = Eio.Promise.create () in
+  let second_started, start_second = Eio.Promise.create () in
+  let second_released, release_second = Eio.Promise.create () in
+  let planning_calls = ref 0 in
+  let execution_calls = ref 0 in
+  let respond ~meth ~path =
+    Alcotest.(check string) "request method" "GET" meth;
+    if String.equal path (Cmd.get_request_path Cmd.Get_planning) then begin
+      incr planning_calls;
+      let id = Printf.sprintf "g-%d" !planning_calls in
+      200, Yojson.Safe.from_string
+        (Printf.sprintf {|{"goals":[{"id":"%s","title":"Goal","phase":"executing",
+          "priority":1,"measure":"One task","procedure":"Read the task"}]}|} id)
+    end
+    else if String.equal path W.execution_tasks_path then begin
+      incr execution_calls;
+      if !execution_calls = 1 then begin
+        Eio.Promise.resolve start_first ();
+        Eio.Promise.await first_released;
+        200, Yojson.Safe.from_string
+          {|{"tasks":[{"id":"t-1","title":"Task","priority":1,"status":"todo",
+                       "goal_id":"g-1"}]}|}
+      end
+      else begin
+        Eio.Promise.resolve start_second ();
+        Eio.Promise.await second_released;
+        503, Yojson.Safe.from_string {|{"error":"Execution unavailable"}|}
+      end
+    end
+    else Alcotest.failf "unexpected read %s" path
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let model = ref (Model.initial ()) in
+  let terminal_reads = ref 0 in
+  let get () =
+    Cmd_executor.execute exec (Cmd.Http_get { epoch = Epoch.initial; req = Cmd.Get_planning })
+  in
+  let drain () =
+    let apply msg = model := fst (Update.step ~now:(Clock.Mono.now ()) !model msg) in
+    Ui_bus.drain bus
+    |> List.iter (function
+           | Ui_bus.Snapshot (_, msg) | Ui_bus.Stream_event msg ->
+               (match msg with
+               | Msg.Http_reply { reply = Msg.Reply_planning _; _ } ->
+                   incr terminal_reads
+               | _ -> ()) [@warning "-4"];
+               apply msg
+           | Ui_bus.Stream_gap _ -> ())
+  in
+  let goals () =
+    Work_store.goals (!model).work |> List.map (fun (goal : W.goal) -> goal.id)
+  in
+  let tasks () =
+    Work_store.tasks (!model).work |> List.map (fun (task : W.task) -> task.id)
+  in
+  get ();
+  Eio.Promise.await first_started;
+  drain ();
+  Alcotest.(check (list string)) "Goals arrive before the delayed Execution" ["g-1"] (goals ());
+  get ();
+  Eio.Promise.resolve release_first ();
+  Eio.Promise.await second_started;
+  drain ();
+  Alcotest.(check (list string)) "the next Goals read survives the same drain" ["g-2"] (goals ());
+  Alcotest.(check (list string)) "the previous terminal Task success survives" ["t-1"] (tasks ());
+  Alcotest.(check bool) "the previous Task is marked as the last read" true
+    (Observed.is_stale (!model).work.planning);
+  Eio.Promise.resolve release_second ();
+  let rec await_failure () =
+    drain ();
+    if !terminal_reads < 2 then begin
+      Eio.Time.sleep clock 0.001;
+      await_failure ()
+    end
+  in
+  await_failure ();
+  Alcotest.(check (list string)) "failed refresh retains the last Task read" ["t-1"] (tasks ());
+  Alcotest.(check (list string)) "failed Execution leaves latest Goals intact" ["g-2"] (goals ())
+
 let test_board_replies_survive_epoch_change_and_stream_overflow () =
   let module Q = Board_quarantine in
   let keeper = "alpha" in
@@ -1888,7 +1970,8 @@ let test_exit_line_fd_and_local_tz_offset () =
        ~fetch_planning:(fun () -> Ok empty_snap)
        ~fetch_tasks:(fun () -> Error mismatch_err)
    with
-  | Error (Msg.Workspace_mismatch { observed_instance = Some "srv-b"; _ }) -> ()
+  | Error (Msg.Planning_tasks_failed
+             (Msg.Workspace_mismatch { observed_instance = Some "srv-b"; _ })) -> ()
   | Ok _ | Error _ ->
       Alcotest.fail "expected Workspace_mismatch propagated from execution tasks");
   (match
@@ -1896,7 +1979,7 @@ let test_exit_line_fd_and_local_tz_offset () =
        ~fetch_planning:(fun () -> Ok empty_snap)
        ~fetch_tasks:(fun () -> Error (Msg.Decode_error "drift"))
    with
-  | Error (Msg.Decode_error "drift") -> ()
+  | Error (Msg.Planning_tasks_failed (Msg.Decode_error "drift")) -> ()
   | Ok _ | Error _ ->
       Alcotest.fail "expected Decode_error propagated from execution tasks");
   let task_1 : Masc_tui_protocol.Wire_work.task =
@@ -3272,6 +3355,8 @@ let () =
             `Quick test_bus_key_hash_and_stream_frames;
           Alcotest.test_case "raw and summary tool series each deliver their latest reply before drain"
             `Quick test_tool_series_readers_each_receive_the_latest_reply;
+          Alcotest.test_case "Planning keeps ordered Goal and Task receipts across refreshes"
+            `Quick test_planning_retains_completed_tasks_across_refresh;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"

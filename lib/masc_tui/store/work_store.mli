@@ -26,6 +26,11 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type verification_read_failure = {
+  reason : string;
+  coverage : Wire_work.verification_coverage option;
+}
+
 type task_status_filter =
   | Status_all
   | Status_active
@@ -65,9 +70,10 @@ type t = {
   active_tab : Nav.work_tab;
   inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
-  goal_confirmations : Wire_work.goal list Observed.t;
+  planning_goals : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
-  verifications : Wire_work.verification_request list Observed.t;
+  verifications : Wire_work.verification_snapshot Observed.t;
+  verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
   harness_selected_index : int;
   harness_scroll_offset : int;
@@ -114,6 +120,7 @@ type t = {
   goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
+  verification_generation : int;
   expanded_ids : String_set.t;
 }
 
@@ -124,9 +131,21 @@ val cycle_tab : Keymap.cycle_dir -> t -> t
 
 val apply_planning :
   observed_at:Clock.Mono.t -> Wire_work.planning_snapshot -> t -> t
+
+val start_planning_tasks : now:Clock.Mono.t -> t -> t
+
+val apply_planning_tasks :
+  observed_at:Clock.Mono.t -> Wire_work.planning_snapshot -> t -> t
+(** Apply a Tasks receipt after an independent Goals receipt. *)
+
 val apply_backlog_counts : Wire_work.task_backlog_counts -> t -> t
 val apply_verifications :
+  ?coverage:Wire_work.verification_coverage ->
   observed_at:Clock.Mono.t -> Wire_work.verification_request list -> t -> t
+val invalidate_verifications : t -> t
+val fail_verifications :
+  ?coverage:Wire_work.verification_coverage ->
+  now:Clock.Mono.t -> reason:string -> retryable:bool -> t -> t
 val apply_schedules :
   observed_at:Clock.Mono.t ->
   Wire_work.schedule_row list * string option ->
@@ -168,12 +187,17 @@ val record_decision :
   t ->
   t
 
+val goals_read : t -> Wire_work.goal list Observed.t
 val goals : t -> Wire_work.goal list
 val filtered_goals : t -> Wire_work.goal list
 val tasks : t -> Wire_work.task list
 val filtered_tasks : t -> Wire_work.task list
 (** Tasks in [task_status_filter] whose title or id contains [filter_query]. *)
 val verifications_list : t -> Wire_work.verification_request list
+val verification_read_allows_verdict : t -> (unit, Say.t) result
+(** The current awaiting join must confirm the request from the primary backlog. *)
+val verification_read_notices : t -> Say.t list
+val verification_notice_rows : max_rows:int -> t -> int
 val filtered_verifications : t -> Wire_work.verification_request list
 val schedules_list : t -> Wire_work.schedule_row list
 val filtered_schedules : t -> Wire_work.schedule_row list
@@ -189,7 +213,7 @@ val gate_pending_list : t -> Wire_work.gate_pending list
 val unlinked_task_count : t -> int
 val awaiting_confirmation_goals : t -> Wire_work.goal list
 
-val apply_goal_confirmations :
+val apply_planning_goals :
   observed_at:Clock.Mono.t -> Wire_work.goal list -> t -> t
 
 val selected_goal : t -> Wire_work.goal option
@@ -226,6 +250,10 @@ val set_goal_sort_mode : goal_sort_mode -> t -> t
 val cycle_goal_sort_mode : t -> t
 
 val goal_linked_tasks : goal_id:string -> t -> Wire_work.task list
+val linked_task_completion : t -> Wire_work.task list -> (int * int) option
+(** Completed and total counts among the currently observed linked rows.
+    The Execution snapshot includes only a bounded history of terminal tasks. *)
+
 val goal_linked_verifications :
   goal_id:string -> t -> Wire_work.verification_request list
 val selected_goal_dive_task : goal_id:string -> t -> Wire_work.task option

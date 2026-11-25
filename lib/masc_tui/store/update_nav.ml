@@ -4637,6 +4637,50 @@ let enter_hint (m : Model.t) =
     | Enter_code_jump_match _ ->
         Enter_hint_dive
 
+let check_verification_verdict_precondition (m : Model.t)
+    (v : Wire_work.verification_request) : (unit, Say.t) result =
+  let ( let* ) = Result.bind in
+  let* () = Work_store.verification_read_allows_verdict m.work in
+  let* v =
+    List.find_opt
+      (fun (current : Wire_work.verification_request) ->
+        String.equal current.request_id v.request_id
+        && String.equal current.task_id v.task_id)
+      (Work_store.verifications_list m.work)
+    |> Option.to_result
+         ~none:(Say.make ~ko:"현재 검증 목록에 요청이 없습니다"
+                  ~en:"Verification request is absent from the current list")
+  in
+  let review_check =
+    match v.review_observation with
+    | None -> Ok ()
+    | Some obs -> (
+        match obs.state with
+        | Wire_work.Review_approved ->
+            Error
+              (Say.make ~ko:"이미 승인된 검증 요청입니다"
+                 ~en:"Verification request is already approved")
+        | Wire_work.Review_rejected ->
+            Error
+              (Say.make ~ko:"이미 반려된 검증 요청입니다"
+                 ~en:"Verification request is already rejected")
+        | Wire_work.Review_superseded ->
+            Error
+              (Say.make ~ko:"최신 제출로 대체(superseded)된 검증 요청입니다"
+                 ~en:"Verification request was superseded by a newer submission")
+        | Wire_work.Review_failed
+        | Wire_work.Review_cancelled
+        | Wire_work.Review_unobserved
+        | Wire_work.Review_running
+        | Wire_work.Review_unavailable
+        | Wire_work.Review_not_reviewed
+        | Wire_work.Review_execution_pending
+        | Wire_work.Review_execution_repair_required
+        | Wire_work.Review_commit_failed ->
+            Ok ())
+  in
+  review_check
+
 (* The Schedule form's operator text. A delay is a whole count and one unit,
    [90s], [10m], [2h] or [1d]; anything else is refused rather than read as
    a guess. *)
@@ -4769,27 +4813,30 @@ let submit_inline_modal ~now (m : Model.t) =
                   set_modal_error
                     (Printf.sprintf "Verification request %s not found"
                        verification_id)
-              | Some v ->
-                  ( close_with_inflight_toast
-                      ~msg:
-                        (Say.make
-                           ~ko:("검증 거절 전송 중: " ^ v.task_title)
-                           ~en:("Submitting verification rejection: " ^ v.task_title))
-                      m
-                  , [
-                      Cmd.Http_post
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Post_verification_verdict
-                              {
-                                task_id = v.task_id;
-                                verification_id;
-                                verdict = Wire_work.Verdict_reject { reason };
-                                notes;
-                              };
-                        };
-                    ] ))
+              | Some v -> (
+                  match check_verification_verdict_precondition m v with
+                  | Error reason -> set_modal_error (Say.resolve m.lang reason)
+                  | Ok () ->
+                      ( close_with_inflight_toast
+                          ~msg:
+                            (Say.make
+                               ~ko:("검증 거절 전송 중: " ^ v.task_title)
+                               ~en:("Submitting verification rejection: " ^ v.task_title))
+                          m
+                      , [
+                          Cmd.Http_post
+                            {
+                              epoch = m.epoch;
+                              req =
+                                Cmd.Post_verification_verdict
+                                  {
+                                    task_id = v.task_id;
+                                    verification_id;
+                                    verdict = Wire_work.Verdict_reject { reason };
+                                    notes;
+                                  };
+                            };
+                        ] )))
           | Nav.Harness_overrule notes_hash -> (
               let verdict_raw =
                 String.lowercase_ascii
@@ -8700,6 +8747,14 @@ let work_detail_max_scroll (m : Model.t) =
               | [ _; b ] -> b
               | _ -> Rect.empty
           in
+          let right_rect =
+            if (zoomed || not (Model.work_pipeline_has_linked_card m))
+               && not (Rect.is_empty right_rect) then
+              let notices = Work_store.verification_notice_rows
+                ~max_rows:(Int.min 3 (Int.max 1 (right_rect.h - 3))) m.work in
+              { right_rect with y = right_rect.y + notices; h = right_rect.h - notices }
+            else right_rect
+          in
           let r_inner = ui_card_inner right_rect in
           let content = ops_pad_content r_inner in
           if Rect.is_empty content then 0
@@ -8733,7 +8788,10 @@ let work_detail_max_scroll (m : Model.t) =
               in
               y := !y + step_used + if step_avail >= 12 then 1 else 0
             end;
-            if body_bot - !y >= 5 then y := !y + min 2 (body_bot - !y);
+            let linked = Work_store.goal_linked_tasks ~goal_id:g.id m.work in
+            if body_bot - !y >= 5
+               && Option.is_some (Work_store.linked_task_completion m.work linked)
+            then y := !y + 2;
             (match g.last_review_note with
             | Some note
               when !y < body_bot && not (String.equal (String.trim note) "") ->
@@ -9984,6 +10042,8 @@ let dive_max_scroll (m : Model.t) active =
           in
           let main_max =
             let inner = ui_card_inner main_card_rect in
+            let notices = Work_store.verification_notice_rows ~max_rows:(Int.min 3 inner.h) m.work in
+            let inner = { inner with y = inner.y + notices; h = inner.h - notices } in
             if Rect.is_empty inner then 0
             else
               let content = ops_pad_content inner in
@@ -10560,6 +10620,8 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
     let verif_max =
       match v_opt with
       | Some v when !y < body_bot ->
+          y := !y + Work_store.verification_notice_rows
+            ~max_rows:(Int.min 2 (body_bot - !y - 1)) m.work;
           incr y;
           let vr =
             Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(max 0 (body_bot - !y))
@@ -10589,12 +10651,34 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
     (md_max, verif_max)
 
 let hidden_verif_toast_msg (m : Model.t) =
-  if Work_store.filtered_verifications m.work = [] then
-    Say.make ~ko:"대기 중인 검증 항목이 없습니다" ~en:"No pending verifications"
-  else
-    Say.make
-      ~ko:"검증 목록이 화면 높이 부족으로 숨겨졌습니다 (창 높이를 늘려주세요)"
-      ~en:"Verifications hidden due to short terminal (increase height)"
+  let unavailable =
+    Say.make ~ko:"검증 목록을 읽을 수 없습니다" ~en:"Verifications unavailable"
+  in
+  let no_rows = Work_store.filtered_verifications m.work = [] in
+  match m.work.verification_failure, m.work.verifications with
+  | Some _, _ | None, Observed.Failed _ -> unavailable
+  | None, Observed.Loading _ ->
+      Say.make ~ko:"검증 목록을 불러오는 중입니다" ~en:"Loading verifications"
+  | None, Observed.Unreported ->
+      Say.make ~ko:"아직 검증 목록을 읽지 않았습니다" ~en:"Verifications not yet observed"
+  | None, Observed.Absent -> Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows"
+  | None, Observed.Value { data = { coverage; _ }; stale; _ } ->
+      (match coverage.backlog_issue with
+      | Some (Backlog_recovered _) ->
+          Say.make ~ko:"복구한 검증 기록입니다 · 읽기 전용" ~en:"Recovered verification records · read-only"
+      | Some (Backlog_unreadable _) -> unavailable
+      | None ->
+          if not no_rows then
+            Say.make ~ko:"검증 목록을 보려면 창 높이를 늘려주세요"
+              ~en:"Increase terminal height to view verifications"
+          else if stale then
+            Say.make ~ko:"마지막으로 읽은 검증 목록에 표시할 항목이 없습니다"
+              ~en:"No rows in the last verification read"
+          else if coverage.truncated
+                  || Option.exists (fun count -> count > 0) coverage.awaiting_unresolved_total
+                  || Option.exists (fun count -> count > 0) coverage.unreadable_total then
+            Say.make ~ko:"검증 목록 일부를 확인하지 못했습니다" ~en:"Verification coverage is incomplete"
+          else Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows")
 
 let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
   let max_scroll =
@@ -11073,70 +11157,6 @@ let open_schedule_form_populated (m : Model.t) =
     if Model.has_preserved_ask_return nav then m.ask_modal else None
   in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
-
-let check_verification_verdict_precondition (m : Model.t)
-    (v : Wire_work.verification_request) : (unit, Say.t) result =
-  let review_check =
-    match v.review_observation with
-    | None -> Ok ()
-    | Some obs -> (
-        match obs.state with
-        | Wire_work.Review_approved ->
-            Error
-              (Say.make ~ko:"이미 승인된 검증 요청입니다"
-                 ~en:"Verification request is already approved")
-        | Wire_work.Review_rejected ->
-            Error
-              (Say.make ~ko:"이미 반려된 검증 요청입니다"
-                 ~en:"Verification request is already rejected")
-        | Wire_work.Review_superseded ->
-            Error
-              (Say.make ~ko:"최신 제출로 대체(superseded)된 검증 요청입니다"
-                 ~en:"Verification request was superseded by a newer submission")
-        | Wire_work.Review_failed
-        | Wire_work.Review_cancelled
-        | Wire_work.Review_unobserved
-        | Wire_work.Review_running
-        | Wire_work.Review_unavailable
-        | Wire_work.Review_not_reviewed
-        | Wire_work.Review_execution_pending
-        | Wire_work.Review_execution_repair_required
-        | Wire_work.Review_commit_failed ->
-            Ok ())
-  in
-  match review_check with
-  | Error _ as e -> e
-  | Ok () -> (
-      match
-        List.find_opt
-          (fun (tk : Wire_work.task) -> String.equal tk.id v.task_id)
-          (Work_store.tasks m.work)
-      with
-      | None -> Ok ()
-      | Some tk -> (
-          match tk.status with
-          | Wire_work.AwaitingVerification { verification_id = vid; _ }
-            when not (String.equal vid v.request_id) ->
-              Error
-                (Say.make
-                   ~ko:"작업이 더 최신 검증 요청을 대기 중입니다 (superseded)"
-                   ~en:"Task is awaiting a newer verification request (superseded)")
-          | Wire_work.AwaitingVerification _ -> Ok ()
-          | Wire_work.Done _ ->
-              Error
-                (Say.make
-                   ~ko:"연결된 작업이 이미 완료(Done)되어 판정할 수 없습니다"
-                   ~en:"Linked task is already Done; cannot submit verdict")
-          | Wire_work.Cancelled _ ->
-              Error
-                (Say.make
-                   ~ko:"연결된 작업이 이미 취소(Cancelled)되어 판정할 수 없습니다"
-                   ~en:"Linked task is already Cancelled; cannot submit verdict")
-          | Wire_work.Todo | Wire_work.Claimed _ | Wire_work.InProgress _ ->
-              Error
-                (Say.make
-                   ~ko:"연결된 작업이 검증 대기(AwaitingVerification) 상태가 아닙니다"
-                   ~en:"Linked task is not in AwaitingVerification status")))
 
 let approve_verification_request ~now (m : Model.t)
     (v : Wire_work.verification_request) =

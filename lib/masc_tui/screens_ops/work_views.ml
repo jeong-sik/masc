@@ -507,35 +507,12 @@ let draw_task_stepper grid ~(rect : Rect.t) ~(theme : Theme.t)
         end)
       steps
 
-let goal_linked_tasks (model : Model.t) goal_id =
-  List.filter
-    (fun (tk : Wire_work.task) ->
-      match tk.goal_link with
-      | Wire_work.Linked gid -> String.equal gid goal_id
-      | Wire_work.Unlinked -> false)
-    (Work_store.tasks model.work)
+let work_read_notice (model : Model.t) ~label read =
+  Ops_common.observed_read_notice ~lang:model.lang read
+  |> Option.map (fun notice -> label ^ " " ^ notice)
 
-let goal_progress_ratio (g : Wire_work.goal) (linked : Wire_work.task list) =
-  let total = List.length linked in
-  if total > 0 then
-    let done_n =
-      List.fold_left
-        (fun acc (tk : Wire_work.task) ->
-          if Ops_common.task_is_done tk.status then acc + 1 else acc)
-        0 linked
-    in
-    ( Float.of_int done_n /. Float.of_int total
-    , Printf.sprintf "%d/%d" done_n total )
-  else
-    match g.phase with
-    | Wire_work.Completed -> (1.0, "100%")
-    | Wire_work.Awaiting_confirmation -> (0.85, "85%")
-    | Wire_work.Verifying -> (0.70, "70%")
-    | Wire_work.Executing
-    | Wire_work.Paused _
-    | Wire_work.Blocked _
-    | Wire_work.Dropped ->
-        (0.0, "0L")
+let verification_notice (model : Model.t) =
+  List.nth_opt (Work_store.verification_read_notices model.work) 0
 
 let criterion_badge_text ~lang = function
   | Wire_work.Criterion_valid ->
@@ -559,13 +536,6 @@ let criterion_badge_text ~lang = function
         ^ Say.resolve lang
             (Say.make ~ko:("심사 불가: " ^ reason) ~en:("Unavailable: " ^ reason))
       , Theme.Status_attention )
-
-let find_verifications_for_tasks (model : Model.t) (tasks : Wire_work.task list) =
-  let ids = List.map (fun (tk : Wire_work.task) -> tk.id) tasks in
-  List.filter
-    (fun (v : Wire_work.verification_request) ->
-      List.exists (String.equal v.task_id) ids)
-    (Work_store.verifications_list model.work)
 
 let is_rejected_verification (v : Wire_work.verification_request) =
   Option.is_some v.evidence_projection_error
@@ -600,17 +570,21 @@ let is_rejected_verification (v : Wire_work.verification_request) =
 (* --- Sub-Tab 1: Pipeline (Adaptive Goals + Linked Tasks & Verifications + Rich Goal Inspector) --- *)
 
 let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~cache ~sel_goal ~unlinked_n ~total_tasks ~unattrib_n =
+    ~(model : Model.t) ~cache ~sel_goal ~unlinked_n ~total_tasks ~link_warnings =
   if Rect.is_empty rect then ()
   else
     let linked, related_verifs =
       match sel_goal with
       | Some (g : Wire_work.goal) ->
-          let l = goal_linked_tasks model g.id in
-          let vs = find_verifications_for_tasks model l in
-          (l, vs)
+          ( Work_store.goal_linked_tasks ~goal_id:g.id model.work
+          , Work_store.goal_linked_verifications ~goal_id:g.id model.work )
       | None -> ([], [])
     in
+    let task_notice =
+      work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
+        model.work.planning
+    in
+    let verification_notice = verification_notice model in
     let passed_v, failed_v =
       List.fold_left
         (fun (p, f) (v : Wire_work.verification_request) ->
@@ -644,14 +618,15 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         (0, 0) related_verifs
     in
     let badge =
-      if failed_v > 0 then
+      if Option.is_some task_notice then None
+      else if failed_v > 0 && Option.is_none verification_notice then
         Some
           {
             Card.glyph = Some Glyph.Live_failing;
             text = Printf.sprintf "%d/%d" failed_v (List.length related_verifs);
             tone = Some Theme.Status_critical;
           }
-      else if passed_v > 0 then
+      else if passed_v > 0 && Option.is_none verification_notice then
         Some
           {
             Card.glyph = Some Glyph.Check_mark;
@@ -668,37 +643,38 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
       else
         Some
           {
-            Card.glyph = Some Glyph.Live_healthy;
+            Card.glyph = None;
             text = Int.to_string (List.length linked);
-            tone = Some Theme.Status_active;
+            tone = None;
           }
     in
     let all_filtered_verifs = Work_store.filtered_verifications model.work in
     let verif_focused = Model.pane_focused model 1 in
     let card_title =
-      if verif_focused then
-        Ops_common.say model ~ko:"연결된 작업 · 전체 검증"
-          ~en:"Linked Tasks & All Verifications"
-      else
-        Ops_common.say model ~ko:"연결된 작업 · 검증"
-          ~en:"Linked Tasks & Verifications"
+      match verif_focused, model.work.verification_view with
+      | true, `Pending -> Ops_common.say model ~ko:"검증 대기열" ~en:"Awaiting Verifications"
+      | true, `All -> Ops_common.say model ~ko:"검증 이력" ~en:"Verification History"
+      | false, _ -> Ops_common.say model ~ko:"연결 작업 · 검증" ~en:"Tasks & Verification"
     in
     let card_subtitle =
-      if verif_focused then
-        Some
-          (Ops_common.say model ~ko:"전체 목표 범위" ~en:"All Goals Scope")
-      else
-        match sel_goal with Some g -> Some g.id | None -> None
+      let sources =
+        if verif_focused then [] else [ task_notice ]
+      in
+      match List.filter_map Fun.id sources with
+      | _ :: _ as notices -> Some (String.concat Typography.sep_dot notices)
+      | [] when verif_focused -> None
+      | [] -> Option.map (fun (g : Wire_work.goal) -> g.id) sel_goal
     in
     let card_badge =
-      if verif_focused then
+      if not verif_focused then badge
+      else if Option.is_some verification_notice then None
+      else
         Some
           {
             Card.glyph = Some Glyph.Action_required;
             text = Int.to_string (List.length all_filtered_verifs);
             tone = Some Theme.Status_active;
           }
-      else badge
     in
     let spec : Card.spec =
       {
@@ -707,9 +683,15 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         badge = card_badge;
         hotkey =
           Some
-            (if verif_focused then
+            (if verif_focused && Result.is_ok (Work_store.verification_read_allows_verdict model.work) then
                Ops_common.say model ~ko:"[a] 승인 · [x] 반려 · [v] 전체/대기 · [Enter] 상세"
                  ~en:"[a] Approve · [x] Reject · [v] All/Pending · [Enter] Dive"
+             else if verif_focused then
+               (match model.work.verification_view with
+               | `All -> Ops_common.say model ~ko:"[v] 대기열 · [Enter] 상세"
+                           ~en:"[v] Awaiting · [Enter] Dive"
+               | `Pending -> Ops_common.say model ~ko:"[v] 이력 · [Enter] 상세"
+                               ~en:"[v] History · [Enter] Dive")
              else
                Ops_common.say model ~ko:"[Tab] 검증 선택 · [v] 전체/대기"
                  ~en:"[Tab] Select · [v] All/Pending");
@@ -723,11 +705,23 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
       let pad_x = Ops_common.pad_x_for ~model inner in
       let content = Card.pad_inner ~pad_x inner in
       let show_unlinked_footer =
-        (unlinked_n > 0 || unattrib_n > 0) && content.h >= 5
+        link_warnings <> [] && content.h >= 5
       in
       let footer_h = if show_unlinked_footer then 3 else 0 in
       let body_h = Int.max 0 (content.h - footer_h) in
-      let y = ref content.y in
+      let verifs_to_render =
+        if verif_focused || Option.is_none sel_goal then all_filtered_verifs
+        else related_verifs
+      in
+      let notice_height =
+        if verifs_to_render = [] then body_h else Int.max 1 (body_h - 2)
+      in
+      let notices =
+        Ops_common.draw_verification_read_notices grid
+          ~rect:{ content with h = Int.min body_h notice_height }
+          ~theme ~lang:model.lang model.work
+      in
+      let y = ref (content.y + notices) in
       let body_bot = content.y + body_h in
       let draw_verifs_section verifs =
         if verifs <> [] && !y + 1 < body_bot then begin
@@ -814,20 +808,27 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
           done
         end
       in
-      let verifs_to_render =
-        if verif_focused || Option.is_none sel_goal then all_filtered_verifs
-        else related_verifs
-      in
+      let remaining = { content with y = !y; h = Int.max 0 (body_bot - !y) } in
       (* 1. Linked tasks rows *)
       (match sel_goal with
+      | _ when verif_focused && verifs_to_render = [] ->
+          Ops_common.draw_observed_empty grid ~rect:remaining ~theme
+            ~lang:model.lang model.work.verifications
+            ~empty_msg:
+              (if Option.is_some verification_notice then
+                 Say.make ~ko:"이 조회에서 표시할 수 있는 검증 항목이 없습니다"
+                   ~en:"This read has no displayable verification rows"
+               else Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows")
       | None ->
           if verifs_to_render <> [] then draw_verifs_section verifs_to_render
           else
-            Ops_common.draw_observed_empty grid ~rect:content ~theme
-              ~lang:model.lang model.work.planning
+            Ops_common.draw_observed_empty grid ~rect:remaining ~theme
+              ~lang:model.lang (Work_store.goals_read model.work)
               ~empty_msg:
                 (Say.make ~ko:"목표를 선택하면 연결 작업이 표시됩니다"
                    ~en:"Select a goal to view linked tasks")
+      | Some _ when linked = [] && Option.is_some task_notice ->
+          draw_verifs_section verifs_to_render
       | Some _ ->
           if linked = [] then begin
             let verif_reserve =
@@ -837,16 +838,12 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
               else 0
             in
             if !y < body_bot - verif_reserve then begin
-              Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
-                ~x:content.x ~y:!y ~h:1 ~theme;
-              ignore
-                (Ops_common.put_line ~clip:content grid ~x:(content.x + 2) ~y:!y
-                   ~max_w:(Int.max 0 (content.w - 2))
-                   ~style:(Typography.status ~bg theme Theme.Status_attention)
-                   (Glyph.to_utf8 Glyph.Warning_triangle ^ " "
-                    ^ Ops_common.say model
-                        ~ko:"연결된 작업 0건 — 완료 시 미귀속 캔들 발생"
-                        ~en:"0 linked tasks — completion emits unattributed Candle"));
+              Ops_common.draw_observed_empty grid
+                ~rect:(Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
+                ~theme ~lang:model.lang model.work.planning
+                ~empty_msg:
+                  (Say.make ~ko:"표시할 연결 작업이 없습니다"
+                     ~en:"No linked tasks in this read");
               incr y
             end;
             let candidates =
@@ -1004,18 +1001,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         Card.draw_hairline ~pad_x:0 ~bg grid ~rect:content ~y:fy ~theme;
         Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:content.x
           ~y:(fy + 1) ~h:2 ~theme;
-        let line1 =
-          Ops_common.say model
-            ~ko:
-              (Printf.sprintf
-                 "%s %d/%d 작업 goal_id 미연결 · 미귀속 캔들 %d건 (backlog_fenced)"
-                 (Glyph.to_utf8 Glyph.Warning_triangle)
-                 unlinked_n total_tasks unattrib_n)
-            ~en:
-              (Printf.sprintf
-                 "%s %d/%d tasks lack goal_id · %d unattributed Candles (backlog_fenced)"
-                 (Glyph.to_utf8 Glyph.Warning_triangle)
-                 unlinked_n total_tasks unattrib_n)
+        let line1 = String.concat Typography.sep_dot link_warnings
         in
         ignore
           (Ops_common.put_line ~clip:content grid ~x:(content.x + 2) ~y:(fy + 1)
@@ -1117,7 +1103,7 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
       match sel_goal with
       | None ->
           Ops_common.draw_observed_empty grid ~rect:inner ~theme
-            ~lang:model.lang model.work.planning
+            ~lang:model.lang (Work_store.goals_read model.work)
             ~empty_msg:
               (Say.make ~ko:"목표를 선택하세요" ~en:"Select a goal to inspect")
       | Some (g : Wire_work.goal) ->
@@ -1158,8 +1144,15 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
             in
             y := !y + step_h
           end;
-          let linked = goal_linked_tasks model g.id in
-          let verifs = find_verifications_for_tasks model linked in
+          let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
+          let verifs = Work_store.goal_linked_verifications ~goal_id:g.id model.work in
+          let task_notice =
+            Ops_common.observed_read_notice ~lang:model.lang model.work.planning
+          in
+          let verification_notice =
+            List.nth_opt (Work_store.verification_read_notices model.work) 0
+            |> Option.map (Say.resolve model.lang)
+          in
           let rem_h = Int.max 0 (body_bot - !y) in
           let md_h =
             if rem_h <= 0 then 0
@@ -1220,23 +1213,27 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
             in
             Card.draw_hairline ~pad_x:0 ~bg
               ~label:
-                (Printf.sprintf "%s%s (%d)%s · [Enter] %s"
+                (let status =
+                   match task_notice with
+                   | Some notice -> notice
+                   | None -> Printf.sprintf "%d%s" t_total t_pos_suffix
+                 in
+                 let open_hint =
+                   if t_total = 0 then ""
+                   else
+                     Ops_common.say model ~ko:" · [Enter] 작업 열기"
+                       ~en:" · [Enter] Open Task"
+                 in
+                 Printf.sprintf "%s%s · %s%s"
                    (focus_prefix tasks_focused)
-                   (Ops_common.say model ~ko:"연결 작업" ~en:"Linked Tasks")
-                   t_total t_pos_suffix
-                   (Ops_common.say model ~ko:"작업 열기" ~en:"Open Task"))
+                   (Ops_common.say model ~ko:"표시된 연결 작업" ~en:"Linked Tasks Shown")
+                   status open_hint)
               grid ~rect:tasks_r ~y:tasks_r.y ~theme;
-            if linked = [] && not (Rect.is_empty t_body) then begin
-              Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
-                ~x:t_body.x ~y:t_body.y ~h:1 ~theme;
-              ignore
-                (Ops_common.put_line ~clip:t_body grid ~x:(t_body.x + 2)
-                   ~y:t_body.y ~max_w:(Int.max 0 (t_body.w - 2))
-                   ~style:(Typography.whisper ~bg theme)
-                   (Glyph.to_utf8 Glyph.Warning_triangle ^ " "
-                    ^ Ops_common.say model ~ko:"연결된 작업 없음"
-                        ~en:"No tasks linked to this goal"))
-            end
+            if linked = [] then
+              Ops_common.draw_observed_empty grid ~rect:t_body ~theme
+                ~lang:model.lang model.work.planning
+                ~empty_msg:(Say.make ~ko:"표시할 연결 작업이 없습니다"
+                              ~en:"No linked tasks in this read")
             else
               List.iteri
                 (fun idx (tk : Wire_work.task) ->
@@ -1313,26 +1310,45 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
               in
               Card.draw_hairline ~pad_x:0 ~bg
                 ~label:
-                  (Printf.sprintf "%s%s (%d)%s · [Enter] %s"
+                  (let status =
+                     match verification_notice, task_notice with
+                     | Some notice, _ | None, Some notice -> notice
+                     | None, None -> Printf.sprintf "%d%s" v_total v_pos_suffix
+                   in
+                   let open_hint =
+                     if v_total = 0 then ""
+                     else
+                       Ops_common.say model ~ko:" · [Enter] 검증 상세"
+                         ~en:" · [Enter] Inspect"
+                   in
+                   Printf.sprintf "%s%s · %s%s"
                      (focus_prefix verifs_focused)
                      (Ops_common.say model ~ko:"검증 실행 · 증거"
                         ~en:"Verifier Runs & Evidence")
-                     v_total v_pos_suffix
-                     (Ops_common.say model ~ko:"검증 상세" ~en:"Inspect"))
+                     status open_hint)
                 grid ~rect:verif_r ~y:verif_r.y ~theme;
               let v_body =
                 Rect.make ~x:verif_r.x ~y:(verif_r.y + 1) ~w:verif_r.w
                   ~h:(Int.max 0 (verif_r.h - 1))
               in
+              let notices =
+                Ops_common.draw_verification_read_notices grid
+                  ~rect:{ v_body with h = Int.min 3 v_body.h }
+                  ~theme ~lang:model.lang model.work
+              in
+              let v_body = { v_body with y = v_body.y + notices; h = v_body.h - notices } in
               match verifs with
               | [] ->
-                  if not (Rect.is_empty v_body) then
-                    ignore
-                      (Ops_common.put_line ~clip:v_body grid ~x:v_body.x
-                         ~y:v_body.y ~max_w:v_body.w
-                         ~style:(Typography.whisper ~bg theme)
-                         (Ops_common.say model ~ko:"기록된 검증 실행이 없습니다"
-                            ~en:"No verifier runs recorded yet"))
+                  Ops_common.draw_observed_empty grid ~rect:v_body ~theme
+                    ~lang:model.lang model.work.verifications
+                    ~empty_msg:
+                      (match task_notice with
+                      | Some _ ->
+                          Say.make ~ko:"연결 작업을 읽은 뒤 검증을 대조할 수 있습니다"
+                            ~en:"Linked tasks needed to match verification rows"
+                      | None ->
+                          Say.make ~ko:"조회된 연결 작업의 검증 항목이 없습니다"
+                            ~en:"No verification rows for the linked tasks shown")
               | _ :: _ ->
                   let list_h =
                     if v_body.h <= 3 then v_body.h
@@ -1505,14 +1521,21 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let goals = Work_store.filtered_goals model.work in
-    let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
-    let sel_goal_idx =
-      if goals = [] then None
-      else
-        Some
-          (Int.max 0 (Int.min (List.length goals - 1) model.work.selected_index))
+    let goals_read = Work_store.goals_read model.work in
+    let goal_notice =
+      work_read_notice model ~label:(Ops_common.say model ~ko:"목표" ~en:"Goals")
+        goals_read
     in
-    let sel_goal = Option.bind sel_goal_idx (List.nth_opt goals) in
+    let task_notice =
+      work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
+        model.work.planning
+    in
+    let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+    let sel_goal =
+      let index = model.work.selected_index in
+      if index < 0 then None else List.nth_opt goals index
+    in
+    let sel_goal_idx = Option.map (fun _ -> model.work.selected_index) sel_goal in
     if zoomed then
       render_goal_zoomed ~sel_goal ~model ~cache ~rect ~theme grid
     else
@@ -1535,10 +1558,26 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     in
     let unlinked_n = Work_store.unlinked_task_count model.work in
     let total_tasks = List.length (Work_store.tasks model.work) in
-    let unattrib_n =
-      match Observed.to_option model.work.candle_ledger with
-      | Some l -> l.diagnostics.unattributed_count
-      | None -> 0
+    let link_warnings =
+      let missing_links =
+        if unlinked_n > 0 then
+          Some
+            (Ops_common.say model
+               ~ko:(Printf.sprintf "표시 작업 %d/%d건 목표 미연결" unlinked_n total_tasks)
+               ~en:(Printf.sprintf "%d/%d shown tasks lack goal links" unlinked_n total_tasks))
+        else None
+      in
+      let unattributed =
+        match Observed.to_option model.work.candle_ledger with
+        | Some ledger when ledger.diagnostics.unattributed_count > 0 ->
+            let count = ledger.diagnostics.unattributed_count in
+            Some
+              (Ops_common.say model
+                 ~ko:(Printf.sprintf "미귀속 캔들 %d건" count)
+                 ~en:(Printf.sprintf "%d unattributed Candles" count))
+        | Some _ | None -> None
+      in
+      List.filter_map Fun.id [ missing_links; unattributed ]
     in
     let done_goals =
       List.fold_left
@@ -1588,7 +1627,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       | Work_store.Goal_sort_default -> Ops_common.say model ~ko:"기본순" ~en:"Default"
       | Work_store.Goal_sort_phase -> Ops_common.say model ~ko:"단계순" ~en:"Phase"
       | Work_store.Goal_sort_progress ->
-          Ops_common.say model ~ko:"진행률순" ~en:"Progress"
+          Ops_common.say model ~ko:"표시 작업 완료율순" ~en:"Task completion"
       | Work_store.Goal_sort_recent -> Ops_common.say model ~ko:"최신순" ~en:"Recent"
     in
     let filter_tone =
@@ -1602,10 +1641,13 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       {
         (Card.default_spec
            ~title:
-             (Printf.sprintf "%s (%d/%d)"
-                (Ops_common.say model ~ko:"목표 파이프라인" ~en:"Goals Pipeline")
-                done_goals (List.length goals)))
+             (let title =
+                Ops_common.say model ~ko:"목표 파이프라인" ~en:"Goals Pipeline"
+              in
+              if Option.is_some goal_notice then title
+              else Printf.sprintf "%s (%d/%d)" title done_goals (List.length goals)))
         with
+        subtitle = goal_notice;
         badge =
           Some
             {
@@ -1625,8 +1667,8 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     if not (Rect.is_empty l_inner) then begin
       if goals = [] then
         Ops_common.draw_observed_empty grid ~rect:l_inner ~theme ~lang:model.lang
-          model.work.planning
-          ~empty_msg:(Say.make ~ko:"등록된 목표가 없습니다" ~en:"No goals configured")
+          goals_read
+          ~empty_msg:(Say.make ~ko:"조건에 맞는 목표가 없습니다" ~en:"No matching goals")
       else
         let cols : Table.column list =
           [
@@ -1650,7 +1692,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             };
             {
               id = "prog";
-              header = Say.make ~ko:"진행" ~en:"Progress";
+              header = Say.make ~ko:"완료/표시" ~en:"Done/Shown";
               priority = 1;
               min_width = 11;
               max_width = Some 16;
@@ -1659,7 +1701,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             };
             {
               id = "links";
-              header = Say.make ~ko:"연결" ~en:"Tasks";
+              header = Say.make ~ko:"표시" ~en:"Shown";
               priority = 2;
               min_width = 5;
               max_width = Some 8;
@@ -1672,28 +1714,24 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           List.map
             (fun (g : Wire_work.goal) ->
               let pg, ptok, plbl = Ops_common.goal_phase_badge g.phase in
-              let linked = goal_linked_tasks model g.id in
-              let linked_n =
-                match g.linked_task_count with
-                | Observed.Value { data; _ } -> Int.max data (List.length linked)
-                | Observed.Loading _
-                | Observed.Absent
-                | Observed.Unreported
-                | Observed.Failed _ ->
-                    List.length linked
+              let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
+              let progress_cell =
+                match Work_store.linked_task_completion model.work linked with
+                | None -> Table.text_cell "—"
+                | Some (done_count, total) ->
+                    Table.Gauge
+                      {
+                        ratio = Float.of_int done_count /. Float.of_int total;
+                        gradient = Chart.Gradient.Efficiency;
+                        label = Some (Printf.sprintf "%d/%d" done_count total);
+                      }
               in
-              let ratio, ratio_lbl = goal_progress_ratio g linked in
               let link_cell =
-                if linked_n = 0 then
-                  Table.Badge
-                    {
-                      glyph = Some Glyph.Warning_triangle;
-                      text = "0";
-                      tone = Theme.Status_attention;
-                    }
-                else
-                  Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                    (Int.to_string linked_n)
+                match task_notice with
+                | Some _ -> Table.text_cell "—"
+                | None ->
+                    Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                      (Int.to_string (List.length linked))
               in
               {
                 Table.id = g.id;
@@ -1709,13 +1747,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ( "goal"
                     , Table.text_cell (Printf.sprintf "P%d %s" g.priority g.title)
                     );
-                    ( "prog"
-                    , Table.Gauge
-                        {
-                          ratio;
-                          gradient = Chart.Gradient.Efficiency;
-                          label = Some ratio_lbl;
-                        } );
+                    ("prog", progress_cell);
                     ("links", link_cell);
                   ];
               })
@@ -1730,7 +1762,17 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     (* Bottom-left peer card: Linked Tasks & Verifications for selected goal *)
     if not (Rect.is_empty linked_card_rect) then
       render_linked_tasks_card grid ~rect:linked_card_rect ~theme ~model ~cache
-        ~sel_goal ~unlinked_n ~total_tasks ~unattrib_n;
+        ~sel_goal ~unlinked_n ~total_tasks ~link_warnings;
+    let right_rect =
+      if Rect.is_empty linked_card_rect && not (Rect.is_empty right_rect) then
+        let notices =
+          Ops_common.draw_verification_read_notices grid
+            ~rect:{ right_rect with h = Int.min 3 (Int.max 1 (right_rect.h - 3)) }
+            ~theme ~lang:model.lang model.work
+        in
+        { right_rect with y = right_rect.y + notices; h = right_rect.h - notices }
+      else right_rect
+    in
     (* Right/Bottom: Rich Goal Detail Inspector (54% Wide/Std) *)
     if not (Rect.is_empty right_rect) then
       match sel_goal with
@@ -1750,7 +1792,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
           Ops_common.draw_observed_empty grid ~rect:r_inner ~theme
-            ~lang:model.lang model.work.planning
+            ~lang:model.lang goals_read
             ~empty_msg:
               (Say.make ~ko:"목표를 선택하세요" ~en:"Select a goal to inspect")
       | Some g ->
@@ -1760,7 +1802,11 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               (Card.default_spec
                  ~title:(Ops_common.say model ~ko:"목표 상세" ~en:"Goal Detail"))
               with
-              subtitle = Some g.id;
+              subtitle =
+                Some
+                  (match List.filter_map Fun.id [ task_notice; goal_notice ] with
+                  | [] -> g.id
+                  | notices -> String.concat Typography.sep_dot notices);
               badge =
                 Some
                   {
@@ -1799,8 +1845,10 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             else begin
             let y = ref r_inner.y in
             let bottom = Rect.bottom r_inner in
-            let linked = goal_linked_tasks model g.id in
-            let related_verifs = find_verifications_for_tasks model linked in
+            let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
+            let related_verifs =
+              Work_store.goal_linked_verifications ~goal_id:g.id model.work
+            in
             let rejected_verif =
               List.find_opt is_rejected_verification related_verifs
             in
@@ -1851,59 +1899,35 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               in
               y := !y + step_used + (if body_bot - !y >= 12 then 1 else 0)
             end;
-            (* 3. Large Ratio_gauge Progress Meter *)
-            if body_bot - !y >= 5 then begin
-              let done_n =
+            (match Work_store.linked_task_completion model.work linked,
+                   Observed.observed_at model.work.planning with
+            | Some (done_count, total), Some observed_at when body_bot - !y >= 5 ->
+              let awaiting =
                 List.fold_left
-                  (fun acc (tk : Wire_work.task) ->
-                    if Ops_common.task_is_done tk.status then acc + 1 else acc)
+                  (fun count (task : Wire_work.task) ->
+                    if Ops_common.task_is_awaiting_verification task.status then
+                      count + 1
+                    else count)
                   0 linked
               in
-              let total_l = List.length linked in
-              let ratio, _ = goal_progress_ratio g linked in
-              let gauge_used, gauge_limit, gauge_unit =
-                if total_l > 0 then
-                  ( Observed.value ~observed_at:Clock.Mono.zero (Float.of_int done_n)
-                  , Observed.value ~observed_at:Clock.Mono.zero (Float.of_int total_l)
-                  , Format_val.Count )
-                else
-                  ( Observed.value ~observed_at:Clock.Mono.zero (ratio *. 100.0)
-                  , Observed.value ~observed_at:Clock.Mono.zero 100.0
-                  , Format_val.Percent )
-              in
               let reset_hint =
-                let awaiting_n =
-                  List.fold_left
-                    (fun acc (tk : Wire_work.task) ->
-                      if Ops_common.task_is_awaiting_verification tk.status then
-                        acc + 1
-                      else acc)
-                    0 linked
-                in
-                if total_l > 0 then
-                  Some
-                    (Say.make
-                       ~ko:
-                         (Printf.sprintf "완료 %d · 검증대기 %d · 연결 %d건"
-                            done_n awaiting_n total_l)
-                       ~en:
-                         (Printf.sprintf "%d done · %d verify · %d linked"
-                            done_n awaiting_n total_l))
-                else
-                  Some
-                    (Say.make ~ko:"연결 작업 0건" ~en:"0 linked tasks")
+                Some
+                  (Say.make
+                     ~ko:(Printf.sprintf "표시된 연결 작업 %d건 · 완료 %d · 검증 대기 %d"
+                            total done_count awaiting)
+                     ~en:(Printf.sprintf "%d linked rows shown · %d done · %d awaiting verification"
+                            total done_count awaiting))
               in
-              let g_h = Int.min 2 (body_bot - !y) in
-              let gauge_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:g_h in
+              let gauge_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:2 in
               let gauge_spec : Chart.Spec.t =
                 {
-                  title = Say.make ~ko:"목표 진행률" ~en:"Goal Progress";
+                  title = Say.make ~ko:"표시된 연결 작업" ~en:"Linked Task Rows";
                   kind =
                     Chart.Spec.Ratio_gauge
                       {
-                        used = gauge_used;
-                        limit = gauge_limit;
-                        unit = gauge_unit;
+                        used = Observed.value ~observed_at (Float.of_int done_count);
+                        limit = Observed.value ~observed_at (Float.of_int total);
+                        unit = Format_val.Count;
                         gradient = Chart.Gradient.Efficiency;
                         reset_hint;
                       };
@@ -1914,8 +1938,8 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 (Chart.draw grid ~rect:gauge_rect ~theme
                    ~caps:Ops_common.default_caps ~lang:model.lang
                    ~show_title:false gauge_spec);
-              y := !y + g_h
-            end;
+              y := !y + gauge_rect.h
+            | Some _, (Some _ | None) | None, (Some _ | None) -> ());
             (* 4. Tier-4 italic review note & timestamps *)
             (match g.last_review_note with
             | Some note
@@ -1935,24 +1959,12 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             (* 5. Compact unlinked warning on narrow viewports where bottom-left card isn't shown *)
             if
               Rect.is_empty linked_card_rect
-              && (unlinked_n > 0 || unattrib_n > 0)
+              && link_warnings <> []
               && !y < body_bot
             then begin
               Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
                 ~x:content.x ~y:!y ~h:1 ~theme;
-              let w_line =
-                Ops_common.say model
-                  ~ko:
-                    (Printf.sprintf
-                       "%s %d/%d 작업 goal_id 미연결 (backlog_fenced %d)"
-                       (Glyph.to_utf8 Glyph.Warning_triangle)
-                       unlinked_n total_tasks unattrib_n)
-                  ~en:
-                    (Printf.sprintf
-                       "%s %d/%d tasks lack goal_id (backlog_fenced %d)"
-                       (Glyph.to_utf8 Glyph.Warning_triangle)
-                       unlinked_n total_tasks unattrib_n)
-              in
+              let w_line = String.concat Typography.sep_dot link_warnings in
               ignore
                 (Ops_common.put_line ~clip:content grid ~x:(content.x + 2) ~y:!y
                    ~max_w:(Int.max 0 (content.w - 2))
@@ -2297,6 +2309,12 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
           | Some _ | None -> ());
           (match v_opt with
           | Some v when !y < body_bot ->
+              let notices =
+                Ops_common.draw_verification_read_notices grid
+                  ~rect:{ content with y = !y; h = Int.min 2 (body_bot - !y - 1) }
+                  ~theme ~lang:model.lang model.work
+              in
+              y := !y + notices;
               let v_scroll = Int.max 0 model.work.task_dive_verif_scroll in
               let vr_h = Int.max 0 (body_bot - !y - 1) in
               let diff_rows = build_rejection_diff_rows ~model v in
@@ -2470,7 +2488,8 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       ]
     in
     let pill_adv = Ops_common.draw_pills grid ~rect:pill_rect ~theme ~bg pills in
-    if v_pass + v_rej + v_wait > 0 && pill_rect.w - pill_adv >= 22 then begin
+    if Option.is_none (verification_notice model)
+       && v_pass + v_rej + v_wait > 0 && pill_rect.w - pill_adv >= 22 then begin
       let summary =
         Printf.sprintf "%s%d  %s%d  %s%d"
           (Glyph.to_utf8 Glyph.Check_mark) v_pass
@@ -2737,10 +2756,17 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       Ops_common.say model ~ko:"증거 없음" ~en:"no evidence"
                     else String.concat ", " v.submitted_evidence
                   in
+                  let value, color =
+                    match verification_notice model with
+                    | None -> ev_str, theme.status_active
+                    | Some notice ->
+                        Say.resolve model.lang notice ^ Typography.sep_dot ^ ev_str,
+                        theme.status_attention
+                  in
                   Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
                     ~bg:card_bg ~label_w:12
                     ~key:(Ops_common.say model ~ko:"검증 증거" ~en:"Evidence")
-                    ~value:ev_str ~val_fg:theme.status_active ();
+                    ~value ~val_fg:color ();
                   incr y
               | Some _ | None -> ());
               (match tk.description with
@@ -3311,7 +3337,8 @@ let draw_inbox_queue_status ~(model : Model.t) ~banner_rect
     ~y:banner_rect.y ~h:1 ~theme;
   let vp, vr, vw = Work_store.verification_pass_summary model.work in
   let verify_summary =
-    if show_verifications && vp + vr + vw > 0 && banner_rect.w >= 72 then
+    if show_verifications && Option.is_none (verification_notice model)
+       && vp + vr + vw > 0 && banner_rect.w >= 72 then
       let vs =
         Printf.sprintf "%s %d  ·  %s %d"
           (Ops_common.say model ~ko:"검증 통과" ~en:"Verify pass") vp

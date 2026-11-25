@@ -80,7 +80,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     let spec : Card.spec =
       {
         (Card.default_spec ~title) with
-        subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
+        subtitle = Option.map (fun (v : Wire_work.verification_request) -> v.task_title) v_opt;
         badge;
         hotkey =
           Some
@@ -96,6 +96,12 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
+    let notices =
+      Ops_common.draw_verification_read_notices grid
+        ~rect:{ inner with h = Int.min 3 inner.h }
+        ~theme ~lang:model.lang model.work
+    in
+    let inner = { inner with y = inner.y + notices; h = inner.h - notices } in
     if not (Rect.is_empty inner) then
       match v_opt with
       | None ->

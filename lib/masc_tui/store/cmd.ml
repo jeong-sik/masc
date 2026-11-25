@@ -22,6 +22,7 @@ type get_request =
   | Get_planning
   | Get_verifications of {
       view : [ `Pending | `All ];
+      generation : int;
       limit : int;
       offset : int;
     }
@@ -663,7 +664,7 @@ let get_request_path = function
   | Get_chat_operation_events { keeper; operation_id; from } ->
       Wire_chat_journal.path ~keeper ~operation_id ~from
   | Get_planning -> Wire_work.planning_path
-  | Get_verifications { view; limit; offset } ->
+  | Get_verifications { view; limit; offset; _ } ->
       let view_str = match view with `Pending -> "awaiting" | `All -> "all" in
       Wire_work.verification_requests_path ~view:view_str ~limit ~offset
   | Get_schedules { cursor } -> Wire_work.schedules_path ?cursor ()

@@ -2250,6 +2250,64 @@ let test_journeys_slash_palette_filter () =
   Alcotest.(check int) "J9 Infra Repos filter narrows to masc-docs" 1
     (List.length (Infra_store.filtered_repositories inf_r))
 
+let test_removed_pipeline_goal_requires_selection () =
+  let initial = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let base_path = Filename.get_temp_dir_name () in
+  let workspace : Wire_common.workspace_identity =
+    { instance_id = Some "fixture"; base_path;
+      masc_root = Filename.concat base_path ".masc"; workspace_sha256 = None }
+  in
+  let model =
+    { initial with
+      nav = { initial.nav with workspace = Nav.Work };
+      server_identity = { initial.server_identity with workspace = Some workspace } }
+  in
+  let receive (m : Model.t) goals =
+    let reply = Msg.Reply_planning_goals goals in
+    fst (Update.step ~now:t0 m (Msg.Http_reply { epoch = m.epoch; reply }))
+  in
+  let selected (m : Model.t) =
+    Option.map (fun (g : Wire_work.goal) -> g.id) (Work_store.selected_goal m.work)
+  in
+  let posts m =
+    let _, cmds = step m (char_key "a") in
+    Cmd.flatten cmds
+    |> List.filter_map (function Cmd.Http_post { req; _ } -> Some req | _ -> None)
+  in
+  let a = mk_goal ~id:"a" ~title:"First Goal" ~phase:Wire_work.Executing in
+  let b = mk_goal ~id:"b" ~title:"Remaining Goal" ~phase:Wire_work.Executing in
+  let original = receive model [a; b] in
+  Alcotest.(check (option string)) "first Goal selected" (Some a.id) (selected original);
+  let removed = receive original [b] in
+  Alcotest.(check (option string)) "replacement is unselected" None (selected removed);
+  Alcotest.(check int) "a sends no POST for a replacement" 0 (List.length (posts removed));
+  let clamped = Update_nav.clamp_for_pane removed in
+  Alcotest.(check int) "a pane clamp keeps the cleared selection index" (-1)
+    clamped.work.selected_index;
+  Alcotest.(check (option string)) "a pane clamp leaves the Goal unselected"
+    None (selected clamped);
+  let still_cleared = Work_store.move_selection ~pane_index:0 ~delta:0 removed.work in
+  Alcotest.(check int) "a zero move keeps the cleared selection index" (-1)
+    still_cleared.selected_index;
+  Alcotest.(check int) "a after a pane clamp sends no POST" 0 (List.length (posts clamped));
+  let refiltered =
+    removed.work
+    |> Work_store.set_filter "Remaining"
+    |> Work_store.set_goal_phase_filter Work_store.Goal_filter_active
+    |> Work_store.set_goal_sort_mode Work_store.Goal_sort_recent
+  in
+  Alcotest.(check (option string)) "list options leave the Goal unselected"
+    None (selected { removed with work = refiltered });
+  let empty, _ = step (receive original []) (mk_key Keymap.Input.Down) in
+  Alcotest.(check (option string)) "moving in an empty list never selects a future Goal"
+    None (selected (receive empty [b]));
+  let reselected, _ = step removed (mk_key Keymap.Input.Down) in
+  Alcotest.(check (option string)) "Down selects the remaining Goal" (Some b.id) (selected reselected);
+  match posts reselected with
+  | [Cmd.Post_goal_transition { goal_id; action = Wire_work.Request_complete; _ }] ->
+      Alcotest.(check string) "a targets the explicitly selected Goal" b.id goal_id
+  | _ -> Alcotest.fail "expected one Goal completion request"
+
 let test_journeys_tab_multipane_dives_safety () =
   let base = populated_model () in
   let base_no_attn = populated_model ~with_attention:false () in
@@ -9442,6 +9500,8 @@ let () =
       , [
           Alcotest.test_case "Slash / Palette / Filter journeys" `Quick
             test_journeys_slash_palette_filter;
+          Alcotest.test_case "Selecting an actionable Goal after its predecessor disappears"
+            `Quick test_removed_pipeline_goal_requires_selection;
           Alcotest.test_case
             "Tab / Multi-Pane / Dive / Safety journeys + >=1000 gate" `Quick
             test_journeys_tab_multipane_dives_safety;

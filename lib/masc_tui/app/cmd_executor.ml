@@ -444,13 +444,14 @@ let is_safe_local_export_file path =
 
 let fetch_planning_with_tasks ~observed_at ~fetch_planning ~fetch_tasks =
   match fetch_planning () with
-  | Error _ as err -> err
+  | Error error -> Error (Msg.Planning_goals_failed error)
   | Ok (snap : Wire_work.planning_snapshot) when snap.tasks <> [] -> Ok snap
   | Ok snap -> (
       match fetch_tasks () with
       | Ok tasks ->
           Ok (Wire_work.enrich_planning_with_tasks ~observed_at snap tasks)
-      | Error _ as err -> err)
+      | Error error ->
+          Error (Msg.Planning_tasks_failed error))
 
 let is_health_body_ready body =
   match Yojson.Safe.from_string body with
@@ -1002,15 +1003,14 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_keeper_tool_calls { turn_ref = None; _ } -> scoped "#tool-calls"
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
-  | Cmd.Get_planning | Cmd.Get_asks _ | Cmd.Get_tool_approvals | Cmd.Get_gate_pending ->
-      scoped ""
+  | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _
+  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending -> scoped ""
   | Cmd.Get_health
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
   | Cmd.Get_keeper_turns
   | Cmd.Get_chat_history _
   | Cmd.Get_chat_operation_events _
-  | Cmd.Get_verifications _
   | Cmd.Get_schedules _
   | Cmd.Get_candle_ledger _
   | Cmd.Get_board_feed _
@@ -1302,10 +1302,12 @@ let rec execute_get t ~epoch req =
                           | Ok None | Error _ -> ());
                           Ok snap)
                   in
-                  let goals = Result.map (fun (snap : Wire_work.planning_snapshot) -> snap.goals) result in
-                  Ui_bus.publish_snapshot t.bus
-                    ~key:(Key_get (Printf.sprintf "%d:%s#confirmations" (Epoch.to_int epoch) path))
-                    (Msg.Http_reply { epoch; reply = Msg.Reply_goal_confirmations goals });
+                  (match result with
+                  | Ok (snap : Wire_work.planning_snapshot) ->
+                      Ui_bus.publish_stream_receipt t.bus
+                        (Msg.Http_reply
+                           { epoch; reply = Msg.Reply_planning_goals snap.goals })
+                  | Error _ -> ());
                   result)
                 ~fetch_tasks:(fun () ->
                   fetch_and_decode_get t ~path:Wire_work.execution_tasks_path
@@ -1342,13 +1344,12 @@ let rec execute_get t ~epoch req =
             in
             let reply = Msg.Reply_planning planning_res in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_verifications _ ->
-            let reply =
-              Msg.Reply_verifications
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_work.decode_verification_snapshot)
+        | Cmd.Get_verifications { view; generation; _ } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:Wire_work.decode_verification_snapshot
             in
-            Msg.Http_reply { epoch; reply }
+            Msg.Http_reply { epoch; reply = Msg.Reply_verifications { view; generation; result } }
         | Cmd.Get_schedules _ ->
             let reply =
               Msg.Reply_schedules
@@ -2490,7 +2491,13 @@ let rec execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
       in
-      Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg;
+      (* A later Goals receipt can arrive before the UI drains this terminal
+         result. Keep both in arrival order so a completed Tasks read survives
+         a subsequent Execution failure as the last observation. *)
+      ((match req with
+        | Cmd.Get_planning -> Ui_bus.publish_stream_receipt t.bus msg
+        | _ -> Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg)
+        [@warning "-4"]);
       completed_ok := true);
       match !next_followup with
       | Some (next_epoch, next_req) when not (Atomic.get t.closed) ->

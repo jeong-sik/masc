@@ -934,44 +934,76 @@ let apply_http_reply ~now (m : Model.t) reply =
               next
           , inc_cmds
             @ View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next ))
-  | Msg.Reply_goal_confirmations (Ok goals) ->
-      let work = Work_store.apply_goal_confirmations ~observed_at:now goals m.work in
-      (Model.rebuild_attention { m with work }, [])
-  | Msg.Reply_goal_confirmations (Error (Msg.Workspace_mismatch _)) ->
-      (m, [])
-  | Msg.Reply_goal_confirmations
-      (Error ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err)) ->
+  | Msg.Reply_planning_goals goals ->
       let work =
-        { m.work with goal_confirmations = failed_slot err m.work.goal_confirmations }
+        Work_store.apply_planning_goals ~observed_at:now goals m.work
+        |> Work_store.start_planning_tasks ~now
       in
-      ({ m with work }, [])
+      (Model.rebuild_attention { m with work }, [])
   | Msg.Reply_planning (Ok planning) ->
-      let work = Work_store.apply_planning ~observed_at:now planning m.work in
-      ( { m with work }
-        |> Model.rebuild_attention
-        |> Model.sync_effective_scorecard ~now
-      , [] )
-  | Msg.Reply_planning (Error err) ->
+      let work = Work_store.apply_planning_tasks ~observed_at:now planning m.work in
+      ({ m with work } |> Model.sync_effective_scorecard ~now, [])
+  | Msg.Reply_planning (Error (Msg.Planning_goals_failed error)) ->
       err_reply
         ~fail:
-          (on_work (fun (x : Work_store.t) ->
-               { x with planning = failed_slot err x.planning }))
-        ~source:Health.Source_client_http ~ko:"목표·작업 조회"
-        ~en:"Planning fetch" err
+          (on_work (fun work ->
+               let planning =
+                 match work.planning with
+                 | Observed.Loading _ -> Observed.unreported
+                 | Observed.Value _ as read -> Observed.mark_stale read
+                 | (Observed.Unreported | Observed.Absent | Observed.Failed _) as read ->
+                     read
+               in
+               { work with
+                 planning;
+                 planning_goals = failed_slot error (Work_store.goals_read work) }))
+        ~source:Health.Source_client_http ~ko:"목표 조회" ~en:"Goals fetch" error
+  | Msg.Reply_planning (Error (Msg.Planning_tasks_failed error)) ->
+      err_reply
+        ~fail:
+          (on_work (fun work ->
+               { work with planning = failed_slot error work.planning }))
+        ~source:Health.Source_client_http ~ko:"연결 작업 조회"
+        ~en:"Linked tasks fetch" error
   | Msg.Reply_planning_backlog counts ->
       let work = Work_store.apply_backlog_counts counts m.work in
       ({ m with work } |> Model.sync_effective_scorecard ~now, [])
-  | Msg.Reply_verifications (Ok vs) ->
-      ( { m with work = Work_store.apply_verifications ~observed_at:now vs m.work }
-        |> Model.sync_effective_scorecard ~now
-      , [] )
-  | Msg.Reply_verifications (Error err) ->
-      err_reply
-        ~fail:
-          (on_work (fun (x : Work_store.t) ->
-               { x with verifications = failed_slot err x.verifications }))
-        ~source:Health.Source_client_http ~ko:"검증 목록 조회"
-        ~en:"Verifications fetch" err
+  | Msg.Reply_verifications { view; generation; result } ->
+      let current =
+        view = m.work.verification_view && generation = m.work.verification_generation
+      in
+      (match result with
+      | Error (Msg.Workspace_mismatch _ as err) ->
+          record_http_incident ~now ~source:Health.Source_client_http
+            ~context:(Say.make ~ko:"검증 목록 조회" ~en:"Verifications fetch") err m
+      | Error ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err) ->
+          if not current then (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_work (Work_store.fail_verifications ~now
+                     ~reason:(Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err))
+                     ~retryable:(Msg.http_error_retryable err)))
+              ~source:Health.Source_client_http ~ko:"검증 목록 조회"
+              ~en:"Verifications fetch" err
+      | Ok { requests; coverage } ->
+          if not current then (m, [])
+          else
+            match coverage.backlog_issue with
+            | Some (Backlog_unreadable raw) ->
+                let reason = Chat_transcript.scrub_secrets_in_text raw in
+                let work = Work_store.fail_verifications ~coverage ~now ~reason ~retryable:true m.work in
+                let incidents, _ =
+                  Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+                    ~source:Health.Source_client_http
+                    ~summary:(Say.make ~ko:"검증 대기열 읽기 실패" ~en:"Verification backlog read failed")
+                    ~detail:reason ~status:Health.Resolved m.incidents
+                in
+                ({ m with work; incidents }, [])
+            | Some (Backlog_recovered _) | None ->
+                ( { m with work = Work_store.apply_verifications ~coverage ~observed_at:now requests m.work }
+                  |> Model.sync_effective_scorecard ~now
+                , [] ))
   | Msg.Reply_schedules (Ok scheds) ->
       ( { m with work = Work_store.apply_schedules ~observed_at:now scheds m.work }
       , [] )
@@ -1084,25 +1116,28 @@ let apply_http_reply ~now (m : Model.t) reply =
             (nav, None)
         | Some _, _ | None, _ -> (m.nav, m.ask_modal)
       in
-      let next =
-        { m with nav; ask_modal; attention; work }
-        |> Model.with_toast ~now ~level:Model.Toast_success label
-      in
-      let follow_cmds =
+      let work, follow_cmds =
         match decision_kind with
         | Some
             ( Work_store.Decision_gate_approved
             | Work_store.Decision_gate_rejected ) ->
-            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_gate_pending } ]
+            work, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_gate_pending } ]
+        | Some (Work_store.Decision_verification_approved | Work_store.Decision_verification_rejected) ->
+            let work = Work_store.invalidate_verifications work in
+            work,
+            [ Cmd.Http_get { epoch = m.epoch; req = View_fetches.verification_requests_read work };
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_planning } ]
         | Some
             ( Work_store.Decision_ask_answered
             | Work_store.Decision_tool_approved
             | Work_store.Decision_tool_denied
-            | Work_store.Decision_goal_confirmed
-            | Work_store.Decision_verification_approved
-            | Work_store.Decision_verification_rejected )
+            | Work_store.Decision_goal_confirmed )
         | None ->
-            []
+            work, []
+      in
+      let next =
+        { m with nav; ask_modal; attention; work }
+        |> Model.with_toast ~now ~level:Model.Toast_success label
       in
       (next, follow_cmds)
   | Msg.Reply_work_mutation { label; attention_id; result = Error err; _ } ->

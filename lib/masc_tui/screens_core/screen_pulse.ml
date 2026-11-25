@@ -109,47 +109,6 @@ let latest_velocity_pair (m : Model.t) =
           | Some u, Some d -> Some (u, d)
           | Some _, None | None, Some _ | None, None -> None))
 
-let goal_linked_progress ~(model : Model.t) (g : Wire_work.goal) =
-  let tasks = Work_store.tasks model.work in
-  let linked, done_n =
-    List.fold_left
-      (fun (tot, dn) (t : Wire_work.task) ->
-        match t.goal_link with
-        | Wire_work.Linked gid when String.equal gid g.id ->
-            let dn' =
-              match t.status with
-              | Wire_work.Done _ -> dn + 1
-              | Wire_work.Todo
-              | Wire_work.Claimed _
-              | Wire_work.InProgress _
-              | Wire_work.AwaitingVerification _
-              | Wire_work.Cancelled _ ->
-                  dn
-            in
-            (tot + 1, dn')
-        | Wire_work.Linked _ | Wire_work.Unlinked -> (tot, dn))
-      (0, 0) tasks
-  in
-  let declared =
-    match Observed.to_option g.linked_task_count with
-    | Some n when n > linked -> n
-    | Some _ | None -> linked
-  in
-  let ratio =
-    match g.phase with
-    | Wire_work.Completed -> 1.0
-    | Wire_work.Awaiting_confirmation -> 0.9
-    | Wire_work.Verifying -> 0.75
-    | Wire_work.Executing
-    | Wire_work.Dropped
-    | Wire_work.Paused _
-    | Wire_work.Blocked _ ->
-        if declared > 0 then
-          Float.min 1.0 (float_of_int done_n /. float_of_int declared)
-        else 0.0
-  in
-  (done_n, declared, ratio)
-
 let top_contributors_summary (m : Model.t) =
   match Observed.to_option m.fleet.keepers with
   | None | Some [] -> ""
@@ -244,6 +203,12 @@ let put_left_right grid ~(clip : Rect.t) ~y ~left_text ~left_style ~right_text
 
 (* ---------- Top 4-KPI Hero Band (h=4, surface_1 + v-hairlines, ZERO nested boxes) ---------- *)
 
+let verification_outcome_counts (scorecard : Wire_fleet.daily_scorecard) =
+  match Observed.to_option scorecard.verifications_passed_24h,
+        Observed.to_option scorecard.verifications_rejected_24h with
+  | Some passed, Some rejected -> Some (passed, rejected)
+  | (None, _ | Some _, None) -> None
+
 let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~(groups : Wire_fleet.company_group list) ~bp =
   if Rect.is_empty rect then ()
@@ -253,19 +218,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     let hero = Model.pulse_hero_metrics model in
     let sc = Model.effective_scorecard model in
     let task_counts = Work_store.effective_task_counts model.work in
-    let v_pass_w, v_rej_w, v_await_w =
-      Work_store.verification_pass_summary model.work
-    in
-    let v_pass =
-      match Observed.to_option sc.verifications_passed_24h with
-      | Some n when n > v_pass_w -> n
-      | Some _ | None -> v_pass_w
-    in
-    let v_rej =
-      match Observed.to_option sc.verifications_rejected_24h with
-      | Some n when n > v_rej_w -> n
-      | Some _ | None -> v_rej_w
-    in
+    let verification_counts = verification_outcome_counts sc in
     let anchor_st = Typography.anchor ~bg theme in
     let pri_st = Typography.primary ~bg theme in
     let struct_st = Typography.structure ~bg theme in
@@ -492,62 +445,22 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       | None -> (
           match task_counts with Some c -> Some c.in_progress | None -> None)
     in
-    let ver_total = v_pass + v_rej in
     let ver_ratio_opt =
-      if ver_total > 0 then Some (float_of_int v_pass /. float_of_int ver_total)
-      else None
-    in
-    let ver_observed =
-      Observed.is_value model.work.verifications
-      || Observed.is_value sc.verifications_passed_24h
-      || Observed.is_value sc.verifications_rejected_24h
+      match verification_counts with
+      | Some (passed, rejected) when passed + rejected > 0 ->
+          Some (float_of_int passed /. float_of_int (passed + rejected))
+      | Some _ | None -> None
     in
     let ver_badge_str, ver_badge_st =
       match ver_ratio_opt with
-      | Some r ->
-          let pct = r *. 100.0 in
-          let txt =
-            if v_await_w > 0 && v_rej > 0 then
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%.0f%% · %d대기 · %d반려" pct v_await_w v_rej)
-                   ~en:(Printf.sprintf "%.0f%% · %dw · %dr" pct v_await_w v_rej))
-            else if v_await_w > 0 then
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%.0f%% · %d 대기" pct v_await_w)
-                   ~en:(Printf.sprintf "%.0f%% · %d wait" pct v_await_w))
-            else if v_rej > 0 then
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%.0f%% · %d 반려" pct v_rej)
-                   ~en:(Printf.sprintf "%.0f%% · %d rej" pct v_rej))
-            else
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%.0f%% 통과" pct)
-                   ~en:(Printf.sprintf "%.0f%% pass" pct))
-          in
-          let st =
-            if v_rej > 0 && pct < 80.0 then attn_st
-            else if v_await_w > 0 then act_st
-            else if pct >= 80.0 then ok_st
-            else attn_st
-          in
-          (txt, st)
-      | None ->
-          if v_await_w > 0 then
-            ( Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%d 대기" v_await_w)
-                   ~en:(Printf.sprintf "%d wait" v_await_w)),
-              act_st )
-          else if ver_observed then
-            ( Say.resolve lang (Say.make ~ko:"검증 0건" ~en:"0 checks"),
-              whisper_st )
-          else
-            ( format_observed_marker ~lang model.work.verifications,
-              whisper_st )
+      | Some ratio ->
+          ( Say.resolve lang
+              (Say.make ~ko:(Printf.sprintf "24h 검증 %.0f%%" (ratio *. 100.0))
+                 ~en:(Printf.sprintf "24h verify %.0f%%" (ratio *. 100.0)))
+          , if ratio >= 0.8 then ok_st else attn_st )
+      | None when Option.is_some verification_counts ->
+          (Say.resolve lang (Say.make ~ko:"24h 판정 0건" ~en:"0 verdicts in 24h"), whisper_st)
+      | None -> (format_observed_marker ~lang sc.verifications_passed_24h, whisper_st)
     in
     let candle_str, candle_st =
       candle_hero_display ~lang ~theme ~bg ~model ~hero
@@ -845,13 +758,15 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                     | None -> None
                   in
                   let chk_part =
-                    if ver_total > 0 || ver_observed then
-                      Some
-                        (Say.resolve lang
-                           (Say.make
-                              ~ko:(Printf.sprintf "%d 검증" ver_total)
-                              ~en:(Printf.sprintf "%d chk" ver_total)))
-                    else None
+                    match verification_counts with
+                    | Some (passed, rejected) ->
+                        let total = passed + rejected in
+                        Some
+                          (Say.resolve lang
+                             (Say.make
+                                ~ko:(Printf.sprintf "%d 검증" total)
+                                ~en:(Printf.sprintf "%d chk" total)))
+                    | None -> None
                   in
                   String.concat Typography.sep_dot
                     (List.filter_map Fun.id [ wip_part; chk_part ])
@@ -927,11 +842,12 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       (* Sleek 1-line strip with Left_rail — honest about failed/degraded/loading/unreported *)
       let bg = Color.of_rgb theme.surface_1 in
       let whisper_st = Typography.whisper ~bg theme in
+      let goals_read = Work_store.goals_read model.work in
       let any_failed =
         Observed.is_failed model.work.asks
         || Observed.is_failed model.work.tool_approvals
         || Observed.is_failed model.work.gate_pending
-        || Observed.is_failed model.work.planning
+        || Observed.is_failed goals_read
         || Observed.is_failed model.work.schedules
         || Observed.is_failed model.runtime.lane_addon_asks
         || Observed.is_failed model.fleet.fleet_reading
@@ -940,7 +856,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Observed.is_loading model.work.asks
         || Observed.is_loading model.work.tool_approvals
         || Observed.is_loading model.work.gate_pending
-        || Observed.is_loading model.work.planning
+        || Observed.is_loading goals_read
         || Observed.is_loading model.work.schedules
         || Observed.is_loading model.runtime.lane_addon_asks
         || Observed.is_loading model.fleet.fleet_reading
@@ -949,7 +865,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Observed.is_stale model.work.asks
         || Observed.is_stale model.work.tool_approvals
         || Observed.is_stale model.work.gate_pending
-        || Observed.is_stale model.work.planning
+        || Observed.is_stale goals_read
         || Observed.is_stale model.work.schedules
         || Observed.is_stale model.runtime.lane_addon_asks
         || Observed.is_stale model.fleet.fleet_reading
@@ -963,7 +879,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         is_settled model.work.asks
         && is_settled model.work.tool_approvals
         && is_settled model.work.gate_pending
-        && is_settled model.work.planning
+        && is_settled goals_read
         && is_settled model.work.schedules
         && is_settled model.runtime.lane_addon_asks
         && is_settled model.fleet.fleet_reading
@@ -1832,6 +1748,18 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
   else
     let lang = model.lang in
     let goals = Work_store.pulse_active_goals model.work in
+    let goals_read = Work_store.goals_read model.work in
+    let goals_notice =
+      let text ~ko ~en = Some (Say.resolve lang (Say.make ~ko ~en)) in
+      match goals_read with
+      | Observed.Loading _ -> text ~ko:"목표 불러오는 중" ~en:"Loading goals"
+      | Observed.Failed _ -> text ~ko:"목표 조회 실패" ~en:"Goals unavailable"
+      | Observed.Value { stale = true; _ } ->
+          text ~ko:"목표 마지막 조회" ~en:"Last goal read"
+      | Observed.Unreported | Observed.Absent ->
+          text ~ko:"목표 미관측" ~en:"Goals not observed"
+      | Observed.Value { stale = false; _ } -> None
+    in
     let pane_focused =
       Model.body_has_focus model
       && Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_goals
@@ -1841,7 +1769,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
         (Say.make ~ko:"진행 중인 목표 · 일일 성과" ~en:"Active Goals · 24h Output")
     in
     let badge =
-      if goals <> [] then
+      if goals <> [] && Option.is_none goals_notice then
         Some
           {
             Card.glyph = None;
@@ -1859,6 +1787,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
         {
           (Card.default_spec ~title) with
           badge;
+          subtitle = (if goals = [] then None else goals_notice);
           hotkey =
             Some
               (Say.resolve lang
@@ -1894,10 +1823,13 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
             (Cell_grid.put_text ~clip:content grid ~x:content.x ~y:!y
                ~style:whisper_st
                (Grapheme.truncate_to_width ~max_width:content.w
-                  (Say.resolve lang
-                     (Say.make
-                        ~ko:"진행 중인 목표 없음 · [2] 파이프라인에서 생성"
-                        ~en:"No active goals · create in [2] Pipeline"))));
+                  (match goals_notice with
+                  | Some notice -> notice
+                  | None ->
+                      Say.resolve lang
+                        (Say.make
+                           ~ko:"진행 중인 목표 없음 · [2] 파이프라인에서 생성"
+                           ~en:"No active goals · create in [2] Pipeline"))));
           incr y
         end
         else
@@ -1952,24 +1884,24 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                     ( Glyph.Live_healthy,
                       Typography.status ~bg:rbg ~bold:true theme Theme.Status_ok )
               in
-              let done_n, decl_n, ratio = goal_linked_progress ~model g in
+              let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
+              let completion = Work_store.linked_task_completion model.work linked in
               let cnt_txt =
-                if decl_n > 0 then Printf.sprintf "%d/%d" done_n decl_n
-                else
-                  match g.phase with
-                  | Wire_work.Awaiting_confirmation ->
-                      Say.resolve lang (Say.make ~ko:"확정 대기" ~en:"confirm")
-                  | Wire_work.Verifying ->
-                      Say.resolve lang (Say.make ~ko:"검증 중" ~en:"verify")
-                  | Wire_work.Executing
-                  | Wire_work.Completed
-                  | Wire_work.Dropped
-                  | Wire_work.Paused _
-                  | Wire_work.Blocked _ ->
-                      "0/0"
+                match completion, g.phase with
+                | Some (done_count, total), _ ->
+                    Say.resolve lang
+                      (Say.make ~ko:(Printf.sprintf "표시 %d/%d" done_count total)
+                         ~en:(Printf.sprintf "%d/%d shown" done_count total))
+                | None, Wire_work.Awaiting_confirmation ->
+                    Say.resolve lang (Say.make ~ko:"확정 대기" ~en:"confirm")
+                | None, Wire_work.Verifying ->
+                    Say.resolve lang (Say.make ~ko:"검증 단계" ~en:"verification")
+                | None, (Wire_work.Executing | Wire_work.Completed | Wire_work.Dropped
+                        | Wire_work.Paused _ | Wire_work.Blocked _) ->
+                    Glyph.to_utf8 Glyph.Missing_absent
               in
               let cnt_w = Grapheme.display_width cnt_txt in
-              let bar_w = if content.w >= 42 then 8 else 0 in
+              let bar_w = if content.w >= 42 && Option.is_some completion then 8 else 0 in
               let right_total_w =
                 cnt_w + (if bar_w > 0 then bar_w + 1 else 0)
               in
@@ -1998,11 +1930,14 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                           | Wire_work.Blocked _ ->
                               Typography.primary ~bg:rbg theme)
                      (Grapheme.truncate_to_width ~max_width:title_w g.title));
-              if bar_w > 0 && right_x > tx then
-                ignore
-                  (Chart.draw_ratio_bar_run ~clip:row_r grid ~x:right_x ~y:py
-                     ~width:bar_w ~theme ~bg:rbg ~unicode:caps.unicode_blocks
-                     ~gradient:Chart.Gradient.Efficiency ~ratio);
+              (match completion with
+              | Some (done_count, total) when bar_w > 0 && right_x > tx ->
+                  ignore
+                    (Chart.draw_ratio_bar_run ~clip:row_r grid ~x:right_x ~y:py
+                       ~width:bar_w ~theme ~bg:rbg ~unicode:caps.unicode_blocks
+                       ~gradient:Chart.Gradient.Efficiency
+                       ~ratio:(float_of_int done_count /. float_of_int total))
+              | Some _ | None -> ());
               let cx = Rect.right content - cnt_w in
               if cx > tx then
                 ignore
@@ -2057,45 +1992,18 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                        ~ko:(Printf.sprintf "완료 %s" m)
                        ~en:(Printf.sprintf "Done %s" m)))
         in
-        let v_pass, v_rej, _ = Work_store.verification_pass_summary model.work in
-        let vp =
-          match Observed.to_option sc.verifications_passed_24h with
-          | Some n when n > v_pass -> n
-          | Some _ | None -> v_pass
-        in
-        let vr =
-          match Observed.to_option sc.verifications_rejected_24h with
-          | Some n when n > v_rej -> n
-          | Some _ | None -> v_rej
-        in
-        let ver_observed =
-          Observed.is_value model.work.verifications
-          || Observed.is_value sc.verifications_passed_24h
-          || Observed.is_value sc.verifications_rejected_24h
-        in
         let ver_part =
-          if vp + vr > 0 then
-            let pct_s =
-              if content.w >= 52 then
-                Printf.sprintf "%.0f%%(%d/%d)"
-                  (100.0 *. float_of_int vp /. float_of_int (vp + vr))
-                  vp (vp + vr)
-              else
+          let result =
+            match verification_outcome_counts sc with
+            | Some (passed, rejected) when passed + rejected > 0 ->
                 Printf.sprintf "%.0f%%"
-                  (100.0 *. float_of_int vp /. float_of_int (vp + vr))
-            in
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "검증 %s" pct_s)
-                 ~en:(Printf.sprintf "Ver %s" pct_s))
-          else if ver_observed then
-            Say.resolve lang (Say.make ~ko:"검증 0" ~en:"Ver 0")
-          else
-            let m = format_observed_marker ~lang model.work.verifications in
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "검증 %s" m)
-                 ~en:(Printf.sprintf "Ver %s" m))
+                  (100.0 *. float_of_int passed /. float_of_int (passed + rejected))
+            | Some _ -> "0"
+            | None -> format_observed_marker ~lang sc.verifications_passed_24h
+          in
+          Say.resolve lang
+            (Say.make ~ko:(Printf.sprintf "검증 %s" result)
+               ~en:(Printf.sprintf "Ver %s" result))
         in
         let third_part =
           match Observed.to_option sc.turns_24h with

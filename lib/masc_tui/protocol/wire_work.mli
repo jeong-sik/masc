@@ -348,8 +348,24 @@ type operator_verdict =
 val decode_verification_request :
   Yojson.Safe.t -> (verification_request, string) result
 
+type verification_backlog_issue =
+  | Backlog_recovered of string
+  | Backlog_unreadable of string
+
+type verification_coverage = {
+  backlog_issue : verification_backlog_issue option;
+  awaiting_unresolved_total : int option;
+  unreadable_total : int option;
+  truncated : bool;
+}
+
+type verification_snapshot = {
+  requests : verification_request list;
+  coverage : verification_coverage;
+}
+
 val decode_verification_snapshot :
-  Yojson.Safe.t -> (verification_request list, string) result
+  Yojson.Safe.t -> (verification_snapshot, string) result
 
 val encode_verification_verdict :
   task_id:string ->

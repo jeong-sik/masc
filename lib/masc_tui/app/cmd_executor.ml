@@ -163,7 +163,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_wiki_log _
   | Cmd.Get_wiki_search _
   | Cmd.Get_wiki_lint
-  | Cmd.Get_artifacts
+  | Cmd.Get_artifacts _
   | Cmd.Get_artifact_detail _
   | Cmd.Get_world_memory
   | Cmd.Get_memory_diff _
@@ -1021,7 +1021,8 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
   | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _
-  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending -> scoped ""
+  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending | Cmd.Get_artifacts _ ->
+      scoped ""
   | Cmd.Get_health
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
@@ -1038,7 +1039,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_wiki_log _
   | Cmd.Get_wiki_search _
   | Cmd.Get_wiki_lint
-  | Cmd.Get_artifacts
   | Cmd.Get_artifact_detail _
   | Cmd.Get_artifact_checks
   | Cmd.Get_world_memory
@@ -1496,12 +1496,11 @@ let rec execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_wiki_lint)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_artifacts ->
-            let reply =
-              Msg.Reply_artifacts
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_knowledge.decode_artifacts_list)
+        | Cmd.Get_artifacts { generation } ->
+            let result =
+              fetch_and_decode_get t ~path ~decode:Wire_knowledge.decode_artifacts_list
             in
+            let reply = Msg.Reply_artifacts { generation; result } in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_artifact_detail { id; _ } ->
             let reply =

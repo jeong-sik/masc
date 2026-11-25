@@ -181,6 +181,7 @@ type t = {
       (** Wiki slug whose edit modal should open automatically once its fresh
           page detail arrives (Issue #54490). *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
+  artifact_list_generation : int;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
   pending_artifact_revision : (string * int option) option;
@@ -461,8 +462,11 @@ val apply_wiki_search :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_search_response -> t -> t
 val apply_wiki_lint :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_lint_report -> t -> t
+val invalidate_artifacts : t -> t
+(** Reads admitted before this change can only provide a prior observation. *)
+
 val apply_artifacts :
-  observed_at:Clock.Mono.t -> Wire_knowledge.artifact_entry list -> t -> t
+  ?stale:bool -> observed_at:Clock.Mono.t -> Wire_knowledge.artifact_entry list -> t -> t
 val apply_artifact_detail :
   observed_at:Clock.Mono.t ->
   Wire_knowledge.published_artifact_detail ->

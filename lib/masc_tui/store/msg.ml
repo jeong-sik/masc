@@ -284,7 +284,10 @@ type http_reply =
       page : string;
       result : (Wire_knowledge.wiki_put_result, http_error) result;
     }
-  | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
+  | Reply_artifacts of {
+      generation : int;
+      result : (Wire_knowledge.artifact_entry list, http_error) result;
+    }
   | Reply_artifact_detail of {
       id : string;
       result : (Wire_knowledge.published_artifact_detail, http_error) result;

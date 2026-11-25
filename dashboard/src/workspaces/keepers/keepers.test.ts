@@ -2458,7 +2458,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       })
 
       // Manual schema reload MUST stay on Autonomy (must NOT snap back to sandbox_infra)
-      fireEvent.click(cfg.getByRole('button', { name: '스키마 다시 읽기' }))
+      fireEvent.click(cfg.getByRole('button', { name: '스키마 새로고침' }))
       await waitFor(() => expect(cfg.container.textContent).toContain('sha-2'))
       expect(schemaCalls).toBe(2)
       expect(cfg.getByRole('tab', { name: /Autonomy/ }).getAttribute('aria-selected')).toBe('true')

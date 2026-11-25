@@ -11,6 +11,7 @@ import { html } from 'htm/preact'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
@@ -360,7 +361,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
               <span class="kp-pill" data-tone=${pendingChanges.length > 0 ? 'brass' : 'default'}>
                 변경 ${pendingChanges.length}건
               </span>
-              <button type="button" class="btn-ghost" onClick=${() => void loadSchema()}>스키마 다시 읽기</button>
+              <${RefreshButton} label="스키마 새로고침" onRefresh=${() => loadSchema()} />
             </div>
           `}
         </div>

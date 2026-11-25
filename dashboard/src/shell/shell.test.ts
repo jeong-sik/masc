@@ -27,6 +27,7 @@ import { QueueContextOverlayBody } from './queue-context-overlay'
 import {
   activeOverlay,
   commandPaletteOpen,
+  effectiveHitlSourceStatus,
   historicalIncidents,
   inboxPendingCount,
   openInspectDrawer,
@@ -671,6 +672,90 @@ describe('Proposal A+ Shell components', () => {
     expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
     expect(container.textContent).toContain('도구 승인 조회 실패')
     expect(container.textContent).toContain('일부 미확인')
+    vi.unstubAllGlobals()
+  })
+
+  it('marks verification HITL source as partially failed on positive unreadable_total or awaiting_unresolved_total while retaining readable items', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const json = (d: unknown) =>
+      new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    let verifPayload: Record<string, unknown> = {
+      requests: [],
+      backlog_error: null,
+      unreadable_total: 2,
+      awaiting_unresolved_total: 0,
+    }
+    const verifFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 1, tasks: 2, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      }
+      if (url.includes('/api/v1/verification/requests')) return json(verifPayload)
+      for (const [prefix, body] of Object.entries(EMPTY_HITL)) {
+        if (url.includes(prefix)) return json(body)
+      }
+      return json({})
+    })
+    vi.stubGlobal('fetch', verifFetch)
+
+    // 1. Empty readable list + unreadable_total > 0 -> must surface failure in Quick-Peek instead of hiding as confirmed empty
+    await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    expect(pendingVerifications.value).toHaveLength(0)
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
+      kind: 'failed',
+      message: expect.stringContaining('unreadable verification records: 2'),
+    })
+    expect(historicalIncidents.value.some((i) => i.source === 'verification' && i.detail?.includes('2'))).toBe(true)
+
+    await act(async () => {
+      render(h(QueueContextOverlayBody, {}), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+    expect(container.textContent).toContain('검증 조회 실패')
+    expect(container.textContent).toContain('Awaiting Verifications (조회 실패)')
+    expect(container.textContent).toContain('unreadable verification records: 2')
+
+    // 2. Readable awaiting item + awaiting_unresolved_total > 0 -> keep readable item while flagging partial failure
+    verifPayload = {
+      requests: [{ request_id: 'vr-live', task_id: 't-7', task_title: 'Review patch', submitted_by: 'sangsu' }],
+      backlog_error: null,
+      unreadable_total: 0,
+      awaiting_unresolved_total: 1,
+    }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(pendingVerifications.value.map((v) => v.requestId)).toEqual(['vr-live'])
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
+      kind: 'failed',
+      message: expect.stringContaining('unresolved awaiting verification ids: 1'),
+    })
+    expect(container.textContent).toContain('Awaiting Verifications (1 · 조회 실패)')
+    expect(container.textContent).toContain('Review patch')
+    expect(container.textContent).toContain('unresolved awaiting verification ids: 1')
+
+    // 3. Zero unreadable & zero unresolved -> clears back to ok
+    verifPayload = {
+      requests: [],
+      backlog_error: null,
+      unreadable_total: 0,
+      awaiting_unresolved_total: 0,
+    }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(effectiveHitlSourceStatus.value.verification).toEqual({ kind: 'ok' })
+    expect(container.textContent).not.toContain('Awaiting Verifications')
     vi.unstubAllGlobals()
   })
 })

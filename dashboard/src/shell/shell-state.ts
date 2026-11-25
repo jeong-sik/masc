@@ -798,19 +798,42 @@ export async function refreshPendingHitl(
     const verificationJob = apiGet<unknown>('/api/v1/verification/requests?view=awaiting', reqOpts).then((verifRes) => {
       if (!isCurrent()) return
       if (verifRes.ok) {
-        if (isRecord(verifRes.value) && asNonEmptyString(verifRes.value.backlog_error)) {
-          const detail = asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error'
+        pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
+        const issues: string[] = []
+        let hasBacklogError = false
+        if (isRecord(verifRes.value)) {
+          const backlogErr = asNonEmptyString(verifRes.value.backlog_error)
+          if (backlogErr) {
+            hasBacklogError = true
+            issues.push(backlogErr)
+          }
+          const unreadableTotal =
+            typeof verifRes.value.unreadable_total === 'number' && Number.isFinite(verifRes.value.unreadable_total)
+              ? verifRes.value.unreadable_total
+              : 0
+          if (unreadableTotal > 0) {
+            issues.push(`unreadable verification records: ${unreadableTotal}`)
+          }
+          const unresolvedTotal =
+            typeof verifRes.value.awaiting_unresolved_total === 'number' && Number.isFinite(verifRes.value.awaiting_unresolved_total)
+              ? verifRes.value.awaiting_unresolved_total
+              : 0
+          if (unresolvedTotal > 0) {
+            issues.push(`unresolved awaiting verification ids: ${unresolvedTotal}`)
+          }
+        }
+        if (issues.length > 0) {
+          const detail = issues.join('; ')
           setHitlSourceState('verification', { kind: 'failed', message: detail })
           recordHitlIncidentOnce(
             'verification',
-            'Verification backlog read error',
+            hasBacklogError ? 'Verification backlog read error' : 'Verification backlog partially unreadable',
             detail,
           )
         } else {
           clearHitlIncident('verification')
           setHitlSourceState('verification', { kind: 'ok' })
         }
-        pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
       } else if (
         verifRes.error.kind !== 'epoch_stale'
         && verifRes.error.kind !== 'aborted'

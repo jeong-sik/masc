@@ -489,6 +489,19 @@ type summary =
       ; observer_journals : string option list
       }
 
+(* A journal's counts are added once, however many link records name it. Links
+   without a path name no journal, so each of them stays. *)
+let journals_once journals =
+  List.rev
+    (List.fold_left
+       (fun kept journal ->
+          match journal with
+          | Some _ when List.mem journal kept -> kept
+          | Some _ | None -> journal :: kept)
+       []
+       journals)
+;;
+
 (* The prompt's runs are the ones whose [started] record is in the slice. A
    record of another run in the slice, such as the tail of the previous
    prompt's, is not the prompt's. *)
@@ -553,6 +566,7 @@ let summarize records =
              | Run_started _
              | Run_terminal _ -> None)
            records
+         |> journals_once
        in
        Summarized { turn; observer_journals })
 ;;
@@ -571,9 +585,9 @@ type observer_state =
       ; cache_write_tokens : int
       }
 
-(* A child session is new for each link, so its journal is read from its first
-   byte. A child whose run has not ended may still add requests, so none of its
-   counts is taken. *)
+(* A child's journal is a file of its own, so it is read from its first byte,
+   not from the parent's mark. A child whose run has not ended may still add
+   requests, so none of its counts is taken. *)
 let read_observer path =
   let* records = read_records { path; offset = 0 } in
   match summarize records with

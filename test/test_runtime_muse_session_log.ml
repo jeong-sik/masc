@@ -3,7 +3,9 @@
    one approval review, and the host was restarted between them. Rows of the
    kinds the reader never decodes were thinned out: those that held this
    machine's paths or were large are gone, and at most two of each other kind
-   remain. The rows the reader counts are untouched.
+   remain. The rows the reader counts are untouched. The same journal stands in
+   for a child that ran twice and made approval reviews: the host writes a
+   child's journal in the format of its parent's.
 
    The observers' fixtures come from other real muse acp 1.4.25 journals: a
    parent journal that linked two observers, the journals of those two
@@ -337,6 +339,26 @@ let send_observers_prompt data_home ~parent ~children =
     children;
   append_file path (text_of parent);
   mark
+;;
+
+(* The row that links child A, with the path of its journal set to [path]. *)
+let link_to path =
+  set_field
+    observers_parent.(parent_link_a)
+    [ "payload"; "event"; "child_session_log_path" ]
+    (`String path)
+;;
+
+(* A child that ran twice: its journal is the two-prompt journal, with two
+   requests and one approval review per run. Its counts are the fixture's
+   [both_prompts] requests and reviews. *)
+let two_runs_path = "subagent/01a2113e-b6c0-7f71-bab2-c29018711194/session.jsonl"
+let two_runs_child = Array.to_list fixture_lines
+
+(* Child A's request, 1981 / 255 / 1521 / 197, plus 93851 + 28052 / 264 + 449 /
+   69980 + 0 / 91 + 194 of the two-run child. *)
+let child_a_and_two_runs_counts =
+  counts ~input:123884 ~output:968 ~cache_read:71501 ~reasoning:482
 ;;
 
 (* ── Tests ───────────────────────────────────────────────────────────────── *)
@@ -758,9 +780,11 @@ let test_names_the_journal_of_an_observer_it_cannot_read () =
 ;;
 
 let test_refuses_an_observer_that_links_observers_of_its_own () =
-  with_data_home (fun data_home ->
-    (* A link row of child A's own run, before child A's terminal row. *)
-    let nested =
+  (* A link row of child A's own run, before child A's terminal row. With no
+     path it is the shape the host writes for its bundled [goal-reminder]: it
+     is refused as well. *)
+  let nested_link ~with_path =
+    let link =
       set_field
         (set_field
            observers_parent.(parent_link_a)
@@ -769,25 +793,38 @@ let test_refuses_an_observer_that_links_observers_of_its_own () =
         [ "payload"; "event"; "parent_run_id" ]
         (`String child_a_run_id)
     in
-    let mark =
-      send_observers_prompt
-        data_home
-        ~parent:(parent_rows ())
-        ~children:
-          [ ( child_a_path
-            , [ List.nth child_a 0; List.nth child_a 1; nested; List.nth child_a 2 ] )
-          ; child_b_path, child_b
-          ]
-    in
-    check
-      (result turn_t error_t)
-      "child A links a child of its own"
-      (Error
-         (Log.Observer_journal
-            { path = Filename.concat (observers_session_directory data_home) child_a_path
-            ; cause = Log.Nested_observers
-            }))
-      (Log.read_turn mark))
+    if with_path
+    then link
+    else without_field link [ "payload"; "event"; "child_session_log_path" ]
+  in
+  List.iter
+    (fun with_path ->
+       with_data_home (fun data_home ->
+         let mark =
+           send_observers_prompt
+             data_home
+             ~parent:(parent_rows ())
+             ~children:
+               [ ( child_a_path
+                 , [ List.nth child_a 0
+                   ; List.nth child_a 1
+                   ; nested_link ~with_path
+                   ; List.nth child_a 2
+                   ] )
+               ; child_b_path, child_b
+               ]
+         in
+         check
+           (result turn_t error_t)
+           (Printf.sprintf "child A links a child of its own (with a path: %b)" with_path)
+           (Error
+              (Log.Observer_journal
+                 { path =
+                     Filename.concat (observers_session_directory data_home) child_a_path
+                 ; cause = Log.Nested_observers
+                 }))
+           (Log.read_turn mark)))
+    [ true; false ]
 ;;
 
 let test_ignores_the_observers_of_a_run_the_prompt_did_not_start () =
@@ -876,6 +913,189 @@ let test_sums_cache_write_tokens_from_finished_observers () =
       turn.Log.observers.Log.cache_write_tokens;
     check int "total_cache_write_tokens adds parent and finished observers" 125
       (Log.total_cache_write_tokens turn))
+;;
+
+let test_adds_the_runs_and_reviews_of_a_child_that_ran_twice () =
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_to two_runs_path ] ())
+        ~children:[ child_a_path, child_a; two_runs_path, two_runs_child ]
+    in
+    check
+      turn_t
+      "child A, and both runs of the other child with their reviews"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_and_two_runs_counts
+            ~finished:2
+            ~running:0
+            ~without_journal:0))
+      (read_ok mark));
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_to two_runs_path ] ())
+        ~children:
+          [ child_a_path, child_a; two_runs_path, lines ~first:0 ~last:run_2_review ]
+    in
+    check
+      turn_t
+      "the other child's second run has not ended: none of its counts is added"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:1
+            ~without_journal:0))
+      (read_ok mark))
+;;
+
+let test_counts_a_child_with_an_empty_journal_as_running () =
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:[ child_a_path, child_a; child_b_path, [] ]
+    in
+    check
+      turn_t
+      "child B's journal holds no record yet"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:1
+            ~without_journal:0))
+      (read_ok mark))
+;;
+
+let test_adds_a_journal_named_by_two_links_once () =
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~extra:[ observers_parent.(parent_link_a) ] ())
+        ~children:[ child_a_path, child_a; child_b_path, child_b ]
+    in
+    check
+      turn_t
+      "child A is linked twice and added once"
+      (observers_prompt both_children_finished)
+      (read_ok mark));
+  with_data_home (fun data_home ->
+    (* Links without a path name no journal: each one is counted. *)
+    let link_b =
+      without_field
+        observers_parent.(parent_link_b)
+        [ "payload"; "event"; "child_session_log_path" ]
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_b ] ~extra:[ link_b ] ())
+        ~children:[ child_a_path, child_a ]
+    in
+    check
+      turn_t
+      "two links without a path"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:0
+            ~without_journal:2))
+      (read_ok mark))
+;;
+
+let test_reads_a_null_path_as_no_journal_and_refuses_a_path_that_is_no_string () =
+  with_data_home (fun data_home ->
+    let link_b =
+      set_field
+        observers_parent.(parent_link_b)
+        [ "payload"; "event"; "child_session_log_path" ]
+        `Null
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_b ] ())
+        ~children:[ child_a_path, child_a ]
+    in
+    check
+      turn_t
+      "child B has a null path"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:0
+            ~without_journal:1))
+      (read_ok mark));
+  with_data_home (fun data_home ->
+    let link_b =
+      set_field
+        observers_parent.(parent_link_b)
+        [ "payload"; "event"; "child_session_log_path" ]
+        (`Int 5)
+    in
+    let rows = parent_rows ~edits:[ parent_link_b, link_b ] () in
+    let mark =
+      send_observers_prompt data_home ~parent:rows ~children:[ child_a_path, child_a ]
+    in
+    match Log.read_turn mark with
+    | Error (Log.Malformed_record { byte_offset; _ }) ->
+      check
+        int
+        "the offset of link B"
+        (String.length (text_of (List.filteri (fun index _ -> index < parent_link_b) rows)))
+        byte_offset
+    | other -> failf "expected a malformed record, got %s" (describe other))
+;;
+
+let test_refuses_a_link_row_it_cannot_decode () =
+  with_data_home (fun data_home ->
+    let link_b =
+      set_field observers_parent.(parent_link_b) [ "payload_schema_version" ] (`Int 2)
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_b ] ())
+        ~children:[ child_a_path, child_a; child_b_path, child_b ]
+    in
+    check
+      (result turn_t error_t)
+      "link B at payload version 2"
+      (Error
+         (Log.Unsupported_schema
+            { record = "run/memory_reminder_child_session_linked"; found = 2; supported = 1 }))
+      (Log.read_turn mark));
+  with_data_home (fun data_home ->
+    let link_b = without_field observers_parent.(parent_link_b) [ "payload"; "run_id" ] in
+    let rows = parent_rows ~edits:[ parent_link_b, link_b ] () in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:rows
+        ~children:[ child_a_path, child_a; child_b_path, child_b ]
+    in
+    match Log.read_turn mark with
+    | Error (Log.Malformed_record { byte_offset; _ }) ->
+      check
+        int
+        "the offset of link B"
+        (String.length (text_of (List.filteri (fun index _ -> index < parent_link_b) rows)))
+        byte_offset
+    | other -> failf "expected a malformed record, got %s" (describe other))
 ;;
 
 let () =
@@ -973,6 +1193,26 @@ let () =
             "sums cache write tokens from finished observers"
             `Quick
             test_sums_cache_write_tokens_from_finished_observers
+        ; test_case
+            "adds the runs and reviews of a child that ran twice"
+            `Quick
+            test_adds_the_runs_and_reviews_of_a_child_that_ran_twice
+        ; test_case
+            "counts a child with an empty journal as running"
+            `Quick
+            test_counts_a_child_with_an_empty_journal_as_running
+        ; test_case
+            "adds a journal named by two links once"
+            `Quick
+            test_adds_a_journal_named_by_two_links_once
+        ; test_case
+            "reads a null path as no journal and refuses a path that is no string"
+            `Quick
+            test_reads_a_null_path_as_no_journal_and_refuses_a_path_that_is_no_string
+        ; test_case
+            "refuses a link row it cannot decode"
+            `Quick
+            test_refuses_a_link_row_it_cannot_decode
         ] )
     ]
 ;;

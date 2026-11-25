@@ -70,7 +70,6 @@ type infra_dive_target =
   | Runtime_trace_dive of string
 
 type dive =
-  | Dive_keeper of { name : string; tab : keeper_tab }
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target
@@ -558,17 +557,14 @@ let equal_infra_dive_target a b =
 
 let equal_dive a b =
   match a, b with
-  | Dive_keeper x, Dive_keeper y ->
-      String.equal x.name y.name && equal_keeper_tab x.tab y.tab
   | Dive_work x, Dive_work y -> equal_work_dive_target x y
   | Dive_knowledge x, Dive_knowledge y -> equal_knowledge_dive_target x y
   | Dive_runtime x, Dive_runtime y -> equal_runtime_dive_target x y
   | Dive_infra x, Dive_infra y -> equal_infra_dive_target x y
-  | Dive_keeper _, (Dive_work _ | Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
-  | Dive_work _, (Dive_keeper _ | Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
-  | Dive_knowledge _, (Dive_keeper _ | Dive_work _ | Dive_runtime _ | Dive_infra _)
-  | Dive_runtime _, (Dive_keeper _ | Dive_work _ | Dive_knowledge _ | Dive_infra _)
-  | Dive_infra _, (Dive_keeper _ | Dive_work _ | Dive_knowledge _ | Dive_runtime _) ->
+  | Dive_work _, (Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
+  | Dive_knowledge _, (Dive_work _ | Dive_runtime _ | Dive_infra _)
+  | Dive_runtime _, (Dive_work _ | Dive_knowledge _ | Dive_infra _)
+  | Dive_infra _, (Dive_work _ | Dive_knowledge _ | Dive_runtime _) ->
       false
 
 let settings_tab_index = function

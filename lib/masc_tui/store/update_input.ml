@@ -174,32 +174,15 @@ let settings_dry_run_max_scroll (m : Model.t) =
 let keeper_config_dry_run_max_scroll (m : Model.t) =
   let name_opt, embedded =
     match Model.active_dive m with
-    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) ->
-        (Some name, false)
     | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_chat
-                | Nav.Keeper_context
-                | Nav.Keeper_tool_calls
-                | Nav.Keeper_memory
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
-                | Nav.Keeper_logs
-                | Nav.Keeper_identity );
-              _;
-            }
-        | Nav.Dive_work _
+        ( Nav.Dive_work _
         | Nav.Dive_knowledge _
         | Nav.Dive_runtime _
-        | Nav.Dive_infra _ )
+        | Nav.Dive_infra _ ) ->
+        (None, true)
     | None ->
         let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
-        ( Option.map
-            (fun (k : Wire_fleet.keeper_summary) -> k.name)
-            (Fleet_store.selected_keeper_summary m.fleet)
-        , not zoomed )
+        (Model.selected_keeper_name m, not zoomed)
   in
   match name_opt, m.config.dry_run_preview with
   | Some name, Config_store.Dry_run_ready resp
@@ -624,9 +607,8 @@ let dispatch_ask_answer_overlay_key ~now (m : Model.t)
               | Some _ | None -> Some (m, []))
           | Keymap.Input.Char "C" when is_printable_key norm ->
               Some
-                (Update_nav.push_dive m
-                   (Nav.Dive_keeper
-                      { name = modal.ask.keeper; tab = Nav.Keeper_chat }))
+                (Update_nav.jump_to_keeper ~preserve_return:true
+                   ~tab:Nav.Keeper_chat m modal.ask.keeper)
           | Keymap.Input.Char "[" when is_printable_key norm ->
               Some
                 (Update_actions.execute_action ~now m
@@ -738,8 +720,8 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
           match inc.source with
           | Health.Source_keeper name ->
               Some
-                (Update_nav.push_dive m
-                   (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }))
+                (Update_nav.jump_to_keeper ~preserve_return:true
+                   ~tab:Nav.Keeper_chat m name)
           | Health.Source_sandbox name ->
               let infra =
                 m.infra
@@ -1186,26 +1168,14 @@ let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
       , [] )
 
 let resolve_memory_act_keeper (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
-  | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ )
+  let keeper_tab_active =
+    Option.is_none (Model.active_dive m)
+    && Nav.equal_workspace m.nav.workspace Nav.Keepers
+    && (m.nav.pane_index >= 1 || m.nav.zoomed)
+    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+  in
+  match if keeper_tab_active then Model.selected_keeper_name m else None with
+  | Some name -> Some name
   | None -> (
       match m.knowledge.memory_diff_keeper with
       | Some k when not (String.equal (String.trim k) "") -> Some k
@@ -1506,126 +1476,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
         match printable_char with
         | Some "e" -> open_wiki_edit_modal ~now m ~slug
         | _ -> (m, []))
-  | Some (Nav.Dive_keeper { name; tab }) -> (
-      match tab, printable_char with
-      | Nav.Keeper_sandbox, Some "p" ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("샌드박스 프로브 실행: " ^ name)
-                 ~en:("Probing sandbox: " ^ name))
-              m
-          , [
-              Cmd.Http_post
-                { epoch = m.epoch; req = Cmd.Post_sandbox_probe (`Keeper name) };
-            ] )
-      | Nav.Keeper_memory, Some "e" ->
-          let knowledge =
-            Knowledge_store.set_memory_view_mode Knowledge_store.View_evolution
-              m.knowledge
-          in
-          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
-          (next, View_fetches.fetches_for_current_view next)
-      | Nav.Keeper_memory, Some "f" ->
-          let knowledge =
-            Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
-              m.knowledge
-          in
-          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
-          (next, View_fetches.fetches_for_current_view next)
-      | Nav.Keeper_memory, Some "d" ->
-          let knowledge =
-            Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
-              m.knowledge
-          in
-          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
-          (next, View_fetches.fetches_for_current_view next)
-      | Nav.Keeper_memory, Some "a" ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("사서 라이터 재개 요청: " ^ name)
-                 ~en:("Requesting librarian writer resume: " ^ name))
-              m
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Post_memory_act
-                      { keeper = name; act = Wire_knowledge.Act_resume };
-                };
-            ] )
-      | Nav.Keeper_memory, Some "A" ->
-          open_memory_act_modal m ~keeper_default:name
-      | Nav.Keeper_config, Some "a" ->
-          let runtime_default =
-            match Observed.to_option m.runtime.runtime_config_raw with
-            | Some meta -> Option.value (List.assoc_opt name meta.assignments) ~default:""
-            | None -> ""
-          in
-          open_runtime_assign_modal m ~keeper_default:name ~runtime_default ()
-      | Nav.Keeper_chat, Some "c" ->
-          let drafts =
-            m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
-          in
-          ({ m with drafts }, [])
-      | ( ( Nav.Keeper_context
-          | Nav.Keeper_tool_calls
-          | Nav.Keeper_memory
-          | Nav.Keeper_work_candle
-          | Nav.Keeper_sandbox
-          | Nav.Keeper_config
-          | Nav.Keeper_logs
-          | Nav.Keeper_identity )
-        , Some "c" ) ->
-          let rest =
-            match m.nav.dive_stack with _ :: tl -> tl | [] -> []
-          in
-          let nav =
-            {
-              m.nav with
-              dive_stack =
-                Nav.Dive_keeper { name; tab = Nav.Keeper_chat } :: rest;
-              pane_index = 0;
-              dive_scroll_offset = 0;
-            }
-          in
-          let fleet =
-            m.fleet
-            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
-            |> Fleet_store.mark_chat_history_loading ~keeper:name
-          in
-          let config = Config_store.cancel_edit_field m.config in
-          let knowledge =
-            m.knowledge
-            |> Knowledge_store.close_memory_reading
-            |> Knowledge_store.close_memory_diagram
-          in
-          let drafts =
-            m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
-          in
-          let next = { m with nav; fleet; config; knowledge; drafts } in
-          (next, View_fetches.fetches_for_current_view next)
-      | Nav.Keeper_config, Some "e" ->
-          let config =
-            m.config
-            |> Config_store.set_target (Wire_config.Target_keeper name)
-            |> Config_store.set_tab Nav.Settings_keepers_companies
-          in
-          Update_nav.open_overlay { m with config }
-            (Nav.Settings Nav.Settings_keepers_companies)
-      | Nav.Keeper_chat, Some "X" ->
-          dismiss_keeper_chat_errors ~now ~keeper:name m
-      | ( ( Nav.Keeper_chat
-          | Nav.Keeper_context
-          | Nav.Keeper_tool_calls
-          | Nav.Keeper_memory
-          | Nav.Keeper_work_candle
-          | Nav.Keeper_sandbox
-          | Nav.Keeper_config
-          | Nav.Keeper_logs
-          | Nav.Keeper_identity )
-        , (Some _ | None) ) ->
-          (m, []))
   | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
       let art_opt =
         Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
@@ -1916,12 +1766,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | Nav.Keepers -> (
           let split_keeper_opt =
             if
-              m.nav.pane_index = 1
+              m.nav.pane_index >= 1
               || (m.nav.zoomed && Model.can_zoom_current_view m)
-            then
-              Option.map
-                (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                (Fleet_store.selected_keeper_summary m.fleet)
+            then Model.selected_keeper_name m
             else None
           in
           match split_keeper_opt, m.fleet.keeper_dive_tab, printable_char with
@@ -1982,20 +1829,85 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 ] )
           | Some name, Nav.Keeper_memory, Some "A" ->
               open_memory_act_modal m ~keeper_default:name
+          | Some name, Nav.Keeper_config, Some "a" ->
+              let runtime_default =
+                match Observed.to_option m.runtime.runtime_config_raw with
+                | Some meta ->
+                    Option.value (List.assoc_opt name meta.assignments)
+                      ~default:""
+                | None -> ""
+              in
+              open_runtime_assign_modal m ~keeper_default:name ~runtime_default
+                ()
+          | Some name, Nav.Keeper_config, Some "e" ->
+              let config =
+                m.config
+                |> Config_store.set_target (Wire_config.Target_keeper name)
+                |> Config_store.set_tab Nav.Settings_keepers_companies
+              in
+              Update_nav.open_overlay { m with config }
+                (Nav.Settings Nav.Settings_keepers_companies)
           | _, _, Some "c" -> (
-              match Fleet_store.selected_keeper_summary m.fleet with
-              | Some k ->
-                  let m1, cmds =
-                    Update_nav.push_dive m
-                      (Nav.Dive_keeper
-                         { name = k.name; tab = Nav.Keeper_chat })
+              match Model.selected_keeper_name m with
+              | Some name ->
+                  let already_chat =
+                    Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+                  in
+                  let detail_vis =
+                    Model.detail_visible
+                      { m with nav = { m.nav with zoomed = false } }
+                  in
+                  let zoomed =
+                    (m.nav.zoomed || not detail_vis)
+                    && Model.can_zoom_current_view m
+                  in
+                  let pre_zoom_pane_index =
+                    if zoomed && not m.nav.zoomed then Some m.nav.pane_index
+                    else m.nav.pre_zoom_pane_index
+                  in
+                  let pane_index = if zoomed then 0 else 1 in
+                  let nav =
+                    {
+                      m.nav with
+                      zoomed;
+                      pre_zoom_pane_index;
+                      pane_index;
+                      dive_scroll_offset = 0;
+                      filter_focused = false;
+                    }
+                  in
+                  let fleet =
+                    if already_chat then m.fleet
+                    else
+                      m.fleet
+                      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
+                      |> Fleet_store.mark_chat_history_loading ~keeper:name
+                  in
+                  let config =
+                    if already_chat then m.config
+                    else Config_store.cancel_edit_field m.config
+                  in
+                  let knowledge =
+                    if already_chat then m.knowledge
+                    else
+                      m.knowledge
+                      |> Knowledge_store.close_memory_reading
+                      |> Knowledge_store.close_memory_diagram
                   in
                   let drafts =
-                    m1.drafts
-                    |> Drafts.set_active_keeper k.name
+                    m.drafts
+                    |> Drafts.set_active_keeper name
                     |> Drafts.set_focus true
                   in
-                  ({ m1 with drafts }, cmds)
+                  let next =
+                    { m with nav; fleet; config; knowledge; drafts }
+                  in
+                  let cmds =
+                    if already_chat && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    then []
+                    else View_fetches.fetches_for_current_view next
+                  in
+                  (next, cmds)
               | None ->
                   ( Model.with_toast ~now ~level:Model.Toast_warning
                       (Say.make ~ko:"채팅할 키퍼를 먼저 선택하세요"
@@ -2003,8 +1915,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                       m
                   , [] ))
           | _, Nav.Keeper_chat, Some "X" -> (
-              match Fleet_store.selected_keeper_summary m.fleet with
-              | Some k -> dismiss_keeper_chat_errors ~now ~keeper:k.name m
+              match Model.selected_keeper_name m with
+              | Some name -> dismiss_keeper_chat_errors ~now ~keeper:name m
               | None -> (m, []))
           | ( (Some _ | None)
             , ( Nav.Keeper_chat
@@ -2201,18 +2113,15 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                     | Some (entry : Attention.entry) -> (
                         match entry.payload with
                         | Attention.Payload_ask ask ->
-                            Update_nav.push_dive m
-                              (Nav.Dive_keeper
-                                 { name = ask.keeper; tab = Nav.Keeper_chat })
+                            Update_nav.jump_to_keeper ~preserve_return:true
+                              ~tab:Nav.Keeper_chat m ask.keeper
                         | Attention.Payload_tool_approval ta ->
-                            Update_nav.push_dive m
-                              (Nav.Dive_keeper
-                                 { name = ta.keeper; tab = Nav.Keeper_chat })
+                            Update_nav.jump_to_keeper ~preserve_return:true
+                              ~tab:Nav.Keeper_chat m ta.keeper
                         | Attention.Payload_gate g ->
                             if not (String.equal (String.trim g.keeper) "") then
-                              Update_nav.push_dive m
-                                (Nav.Dive_keeper
-                                   { name = g.keeper; tab = Nav.Keeper_chat })
+                              Update_nav.jump_to_keeper ~preserve_return:true
+                                ~tab:Nav.Keeper_chat m g.keeper
                             else (m, [])
                         | Attention.Payload_goal_confirmation _ -> (m, []))
                     | None -> (m, []))
@@ -2226,31 +2135,14 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
 
 let keeper_config_target_name (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) -> Some name
   | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       None
   | None ->
-      if Model.is_keeper_config_active m then
-        Option.map
-          (fun (k : Wire_fleet.keeper_summary) -> k.name)
-          (Fleet_store.selected_keeper_summary m.fleet)
+      if Model.is_keeper_config_active m then Model.selected_keeper_name m
       else None
 
 let dispatch_keeper_config_key ~now (m : Model.t)
@@ -3454,42 +3346,29 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                     then dispatch_keeper_config_key ~now m norm
                     else if not (Drafts.is_focused m.drafts) then
                       (* Pillar 3: typing Korean while unfocused inside
-                         Dive_keeper { tab = Keeper_chat } auto-focuses the
-                         composer and inserts the character instead of letting
-                         Korean jamo replay trigger centered modals. *)
+                         Keepers > Chat (split focus or Focus Mode) auto-focuses
+                         the composer and inserts the character instead of
+                         letting Korean jamo replay trigger centered modals. *)
                       let keeper_chat_korean =
                         match Model.active_dive m, norm.key with
-                        | ( Some
-                              (Nav.Dive_keeper
-                                 { name; tab = Nav.Keeper_chat })
-                          , Keymap.Input.Char s )
+                        | None, Keymap.Input.Char s
                           when is_printable_key norm && is_korean_char s
+                               && Model.is_in_keeper_chat m
                                && not
                                     (Model.equal_breakpoint m.breakpoint
-                                       Model.Micro) ->
-                            let drafts =
-                              m.drafts
-                              |> Drafts.set_active_keeper name
-                              |> Drafts.set_focus true
-                              |> Drafts.insert_text s
-                            in
-                            Some ({ m with drafts }, [])
+                                       Model.Micro) -> (
+                            match Model.selected_keeper_name m with
+                            | Some name ->
+                                let drafts =
+                                  m.drafts
+                                  |> Drafts.set_active_keeper name
+                                  |> Drafts.set_focus true
+                                  |> Drafts.insert_text s
+                                in
+                                Some ({ m with drafts }, [])
+                            | None -> None)
                         | ( ( Some
-                                ( Nav.Dive_keeper
-                                    {
-                                      tab =
-                                        ( Nav.Keeper_chat
-                                        | Nav.Keeper_context
-                                        | Nav.Keeper_tool_calls
-                                        | Nav.Keeper_memory
-                                        | Nav.Keeper_work_candle
-                                        | Nav.Keeper_sandbox
-                                        | Nav.Keeper_config
-                                        | Nav.Keeper_logs
-                                        | Nav.Keeper_identity );
-                                      _;
-                                    }
-                                | Nav.Dive_work _
+                                ( Nav.Dive_work _
                                 | Nav.Dive_knowledge _
                                 | Nav.Dive_runtime _
                                 | Nav.Dive_infra _ )
@@ -3572,21 +3451,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                  && Model.is_memory_diff_pin_surface m ->
                               Some (Update_nav.pin_memory_diff_range m)
                           | ( ( Some
-                                  ( Nav.Dive_keeper
-                                      {
-                                        tab =
-                                          ( Nav.Keeper_chat
-                                          | Nav.Keeper_context
-                                          | Nav.Keeper_tool_calls
-                                          | Nav.Keeper_memory
-                                          | Nav.Keeper_work_candle
-                                          | Nav.Keeper_sandbox
-                                          | Nav.Keeper_config
-                                          | Nav.Keeper_logs
-                                          | Nav.Keeper_identity );
-                                        _;
-                                      }
-                                  | Nav.Dive_work
+                                  ( Nav.Dive_work
                                       ( Nav.Goal_dive _
                                       | Nav.Task_dive _
                                       | Nav.Verification_dive _ )
@@ -3672,7 +3537,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    | Some
                                        ( Nav.Dive_knowledge
                                            (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                                       | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
                                        | Nav.Dive_infra _ ) ->
@@ -3701,7 +3565,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    | Some
                                        ( Nav.Dive_knowledge
                                            (Nav.Thread_dive _ | Nav.Wiki_dive _)
-                                       | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
                                        | Nav.Dive_infra _ )
@@ -3711,26 +3574,10 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             | Some "p"
                               when (match Model.active_dive m with
                                    | Some
-                                       ( Nav.Dive_keeper
-                                           { tab = Nav.Keeper_sandbox; _ }
-                                       | Nav.Dive_knowledge (Nav.Thread_dive _) )
-                                     ->
+                                       (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
                                        true
                                    | Some
                                        ( Nav.Dive_infra _
-                                       | Nav.Dive_keeper
-                                           {
-                                             tab =
-                                               ( Nav.Keeper_chat
-                                               | Nav.Keeper_context
-                                               | Nav.Keeper_tool_calls
-                                               | Nav.Keeper_memory
-                                               | Nav.Keeper_work_candle
-                                               | Nav.Keeper_config
-                                               | Nav.Keeper_logs
-                                               | Nav.Keeper_identity );
-                                             _;
-                                           }
                                        | Nav.Dive_knowledge
                                            (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                                        | Nav.Dive_work _
@@ -3757,7 +3604,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                Nav.Runtime_addons_browser)
                                        || (Nav.equal_workspace m.nav.workspace
                                              Nav.Keepers
-                                          && (m.nav.pane_index = 1
+                                          && (m.nav.pane_index >= 1
                                              || m.nav.zoomed)
                                           && Nav.equal_keeper_tab
                                                m.fleet.keeper_dive_tab
@@ -3771,7 +3618,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        ( Nav.Dive_work
                                            ( Nav.Goal_dive _
                                            | Nav.Verification_dive _ )
-                                       | Nav.Dive_keeper _
                                        | Nav.Dive_knowledge _
                                        | Nav.Dive_runtime _
                                        | Nav.Dive_infra _ ) ->
@@ -3791,7 +3637,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    | Some
                                        ( Nav.Dive_knowledge
                                            (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                                       | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
                                        | Nav.Dive_infra _ ) ->

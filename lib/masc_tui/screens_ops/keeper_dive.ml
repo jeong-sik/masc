@@ -3963,8 +3963,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
           else
             Some
               (Ops_common.say model
-                 ~ko:"[Tab] 설정 편집 · [Enter] 상세 · [z] 확대"
-                 ~en:"[Tab] Edit Config · [Enter] Dive · [z] Zoom")
+                 ~ko:"[Tab] 설정 편집 · [Enter/z] 확대"
+                 ~en:"[Tab] Edit Config · [Enter/z] Zoom")
         else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
           Some
             (Ops_common.say model
@@ -4050,23 +4050,23 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
           if rect.w >= 88 then
             Some
               (Ops_common.say model
-                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지(2회) · [Enter] Dive · [c] 채팅 · [V] PTT"
-                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop(2x) · [Enter] Dive · [c] Chat · [V] PTT")
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지(2회) · [Enter/z] 확대 · [c] 채팅 · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop(2x) · [Enter/z] Zoom · [c] Chat · [V] PTT")
           else
             Some
               (Ops_common.say model
-                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지 · [Enter] Dive · [V] PTT"
-                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop · [Enter] Dive · [V] PTT")
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지 · [Enter/z] 확대 · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop · [Enter/z] Zoom · [V] PTT")
         else if rect.w >= 73 then
           Some
             (Ops_common.say model
-               ~ko:"[W] 깨우기 · [D] 중지(2회) · [Enter] Dive · [c] 채팅 · [V] 음성 PTT"
-               ~en:"[W] Wake/Online · [D] Stop(2x) · [Enter] Dive · [c] Chat · [V] PTT")
+               ~ko:"[W] 깨우기 · [D] 중지(2회) · [Enter/z] 확대 · [c] 채팅 · [V] 음성 PTT"
+               ~en:"[W] Wake/Online · [D] Stop(2x) · [Enter/z] Zoom · [c] Chat · [V] PTT")
         else
           Some
             (Ops_common.say model
-               ~ko:"[W] 깨우기 · [D] 중지 · [Enter] Dive · [c] 채팅 · [V] PTT"
-               ~en:"[W] Wake · [D] Stop · [Enter] Dive · [c] Chat · [V] PTT")
+               ~ko:"[W] 깨우기 · [D] 중지 · [Enter/z] 확대 · [c] 채팅 · [V] PTT"
+               ~en:"[W] Wake · [D] Stop · [Enter/z] Zoom · [c] Chat · [V] PTT")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat then
         if rect.w >= 72 then
           Some
@@ -4123,7 +4123,7 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         | _ -> inner
       in
       let content_rect =
-        if embedded && after_hero.h >= 3 then begin
+        if embedded && model.nav.pane_index = 0 && after_hero.h >= 3 then begin
           let tab_bar_rect, body_rect = Rect.split_v after_hero ~top_h:1 in
           let bg = Color.of_rgb theme.surface_1 in
           let tab_pills =

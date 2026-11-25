@@ -2180,8 +2180,8 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
     (contains_sub ~needle:"$6.75" txt);
   Alcotest.(check bool) "preview shows Violet Candle balance" true
     (contains_sub ~needle:"4.250 C" txt);
-  Alcotest.(check bool) "preview shows [Enter] Dive footer cue" true
-    (contains_sub ~needle:"[Enter] Dive" txt);
+  Alcotest.(check bool) "preview shows [Enter/z] Zoom footer cue" true
+    (contains_sub ~needle:"[Enter/z] Zoom" txt);
   Alcotest.(check int) "zero nested boxes in Keepers Fleet + Preview" 0
     (count_nested_box_corners grid)
 
@@ -3031,13 +3031,12 @@ let test_p1_chat_transcript_render_parity () =
   let m_chat =
     {
       m0 with
-      fleet;
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat fleet;
       nav =
         {
           m0.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
     }
   in
@@ -3208,13 +3207,12 @@ let test_chat_peer_rows_name_their_author () =
   let m_chat =
     {
       m0 with
-      fleet;
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat fleet;
       nav =
         {
           m0.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
     }
   in
@@ -3339,8 +3337,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
         {
           m0.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha-leader"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
     }
   in
@@ -4843,6 +4840,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
   in
   let fleet_parity =
     live_fleet
+    |> Fleet_store.select_keeper keeper
     |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper
          { messages = parity_msgs; has_more = false; next_cursor = None }
   in
@@ -4878,8 +4876,8 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
             {
               m0.nav with
               workspace = Nav.Keepers;
-              dive_stack =
-                [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+              zoomed = true;
+              pane_index = 0;
             };
         }
       in
@@ -4941,8 +4939,8 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
           {
             m0.nav with
             workspace = Nav.Keepers;
-            dive_stack =
-              [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+            zoomed = true;
+            pane_index = 0;
           };
       }
     in

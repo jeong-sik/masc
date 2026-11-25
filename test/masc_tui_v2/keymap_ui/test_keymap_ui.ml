@@ -71,7 +71,7 @@ let test_keymap_ctrl_k_never_approves () =
       Nav.Global;
       Nav.Workspace_focused Nav.Pulse;
       Nav.Workspace_focused Nav.Work;
-      Nav.Dive_focused (Nav.Dive_keeper { name = "wkbl"; tab = Nav.Keeper_chat });
+      Nav.Dive_focused (Nav.Dive_work (Nav.Goal_dive "g-1"));
       Nav.Composer_focused;
       Nav.Ask_choice_focused;
       Nav.Approval_strip_focused;

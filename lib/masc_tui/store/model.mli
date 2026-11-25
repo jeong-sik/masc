@@ -431,8 +431,13 @@ val target_keeper : t -> string option
 
 val is_keeper_lifecycle_surface : t -> bool
 (** [true] iff no overlay, Micro/too-small viewport gate, text-capture input,
-    or sidebar focus is active and the operator is on [4 Keepers] or inside a
-    [Dive_keeper] view (where bare [W]/[D] lifecycle hotkeys apply). *)
+    or sidebar focus is active and the operator is on [4 Keepers] (where bare
+    [W]/[D] lifecycle hotkeys apply). *)
+
+val selected_keeper_name : t -> string option
+(** Selected keeper name on [4 Keepers]: prefers the loaded roster summary and
+    falls back to [fleet.selected_keeper] during cold-start jumps before the
+    roster snapshot lands. *)
 
 val is_memory_explorer_surface : t -> bool
 (** [true] iff no overlay is open and the active body surface is Memory
@@ -446,16 +451,14 @@ val is_memory_diff_pin_surface : t -> bool
 
 val target_keeper_for_lifecycle : t -> string option
 (** Single-SSOT target keeper for lifecycle actions ([W]/[D], slash commands,
-    and [Ctrl+K] palette): active [Dive_keeper] name first, then on [4 Keepers]
-    yielding [None] when a collapsed company header is focused on unzoomed
-    [pane 0] else the selected roster keeper (including split [pane 1] and
-    zoomed preview), else {!target_keeper}. *)
+    and [Ctrl+K] palette): on [4 Keepers], yields [None] when a collapsed
+    company header is focused on unzoomed [pane 0], else the selected keeper
+    (including split [pane 1] and zoomed preview), else {!target_keeper}. *)
 val is_in_keeper_chat : t -> bool
 val uses_keeper_split : width:int -> t -> bool
 val is_keeper_config_active : t -> bool
-(** [true] when [overlay = None] and either [Dive_keeper { tab = Keeper_config }]
-    is active, or [4 Keepers] Split [pane 1] / zoomed view has
-    [fleet.keeper_dive_tab = Keeper_config]. *)
+(** [true] when [overlay = None], no dive is active, and [4 Keepers] Split
+    [pane 1] or zoomed view has [fleet.keeper_dive_tab = Keeper_config]. *)
 val fast_approval_strip_item : t -> Attention.entry option
 val composer_mode : t -> composer_mode
 (** Compact auto-fold selector: on {!Compact} / {!Micro}, folds to

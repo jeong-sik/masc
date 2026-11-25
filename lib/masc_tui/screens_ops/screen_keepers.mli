@@ -1,12 +1,12 @@
-(** [[4] Keepers] workspace and 5-tab [Keeper Dive] renderer.
+(** [[4] Keepers] unified Master-Detail + Focus Mode workspace renderer.
 
     Adaptive Master-Detail layout:
-    - [Wide] (>= 140x36): Left Company-Grouped Fleet Roster (~44 cols) + Right
-      Live [Keeper Dive] side-by-side (or zoomed full-width Dive when
-      [model.nav.zoomed = true]).
-    - [Standard] (100-139) and [Compact] (80-99): Full-width Fleet Roster across
-      3 grouping modes ([Companies] | [Attention 3-Bucket] | [24h Wall]);
-      [render_dive] paints full-width breadcrumb Dive ([Keepers > <name>]).
+    - [Wide] (>= 104 inner cols): Left Company-Grouped Fleet Roster (~44 cols)
+      + Right live Keeper Detail side-by-side (or zoomed full-width Focus Mode
+      when [model.nav.zoomed = true]).
+    - [Compact] (< 104 inner cols): Full-width Fleet Roster across 3 grouping
+      modes ([Companies] | [Attention 3-Bucket] | [24h Wall]); Focus Mode
+      ([model.nav.zoomed = true]) renders full-width Keeper Detail.
 
     Enforces strict 3-Channel State Honesty: live SSOT glyphs never turn
     yellow/red from historical 12h incidents; past failures appear strictly as

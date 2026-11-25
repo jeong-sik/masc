@@ -2488,8 +2488,8 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
           match sized_model.drafts.active_keeper with
           | Some k when not (String.equal (String.trim k) "") -> String.trim k
           | Some _ | None -> (
-              match Fleet_store.selected_keeper_summary sized_model.fleet with
-              | Some k -> k.name
+              match Model.selected_keeper_name sized_model with
+              | Some name -> name
               | None -> Drafts.target_keeper_key sized_model.drafts)
         in
         let phase = live_chat_phase ~model:sized_model ~keeper in
@@ -2576,29 +2576,12 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
         if has_keeper && card_inner_h >= 16 then card_inner_h - 5
         else card_inner_h
       in
-      if after_hero_h >= 3 then
+      if model.nav.pane_index = 0 && after_hero_h >= 3 then
         let body_h1 = after_hero_h - 1 in
         if body_h1 >= 6 then body_h1 - 1 else body_h1
       else after_hero_h
   in
-  let active_name_opt =
-    if embedded then
-      Option.map
-        (fun (k : Wire_fleet.keeper_summary) -> k.name)
-        (Fleet_store.selected_keeper_summary model.fleet)
-    else
-      match Model.active_dive model with
-      | Some (Nav.Dive_keeper { name; _ }) -> Some name
-      | Some
-          ( Nav.Dive_work _
-          | Nav.Dive_knowledge _
-          | Nav.Dive_runtime _
-          | Nav.Dive_infra _ )
-      | None ->
-          Option.map
-            (fun (k : Wire_fleet.keeper_summary) -> k.name)
-            (Fleet_store.selected_keeper_summary model.fleet)
-  in
+  let active_name_opt = Model.selected_keeper_name model in
   let banner_h =
     match active_name_opt with
     | Some name ->

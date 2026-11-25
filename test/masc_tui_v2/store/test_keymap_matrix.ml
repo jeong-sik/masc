@@ -72,8 +72,6 @@ let render_full ~(model : Model.t) =
   let cache = Card.Cache.create () in
   let render_body rect g =
     match Model.active_dive model with
-    | Some (Nav.Dive_keeper { name; tab }) ->
-        Screen_keepers.render_dive ~name ~tab ~model ~cache ~rect g
     | Some (Nav.Dive_work target) ->
         Screen_work.render_dive ~target ~model ~cache ~rect g
     | Some (Nav.Dive_knowledge target) ->
@@ -1236,26 +1234,56 @@ let test_axis_a_screen_dive_matrix () =
           (with_ws Nav.Infra base) with
           infra = Infra_store.set_tab Nav.Infra_activity_logs base.infra;
         } );
-      ( "Dive/Keeper/Chat"
-      , with_dive
-          (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat })
-          (with_ws Nav.Keepers base) );
-      ( "Dive/Keeper/Memory"
-      , with_dive
-          (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
-          (with_ws Nav.Keepers base) );
-      ( "Dive/Keeper/Work"
-      , with_dive
-          (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle })
-          (with_ws Nav.Keepers base) );
-      ( "Dive/Keeper/Sandbox"
-      , with_dive
-          (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_sandbox })
-          (with_ws Nav.Keepers base) );
-      ( "Dive/Keeper/Config"
-      , with_dive
-          (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config })
-          (with_ws Nav.Keepers base) );
+      ( "Keepers/Zoom/Chat"
+      , let mk = with_ws Nav.Keepers base in
+        {
+          mk with
+          fleet =
+            mk.fleet
+            |> Fleet_store.select_keeper "alpha"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+        } );
+      ( "Keepers/Zoom/Memory"
+      , let mk = with_ws Nav.Keepers base in
+        {
+          mk with
+          fleet =
+            mk.fleet
+            |> Fleet_store.select_keeper "alpha"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+        } );
+      ( "Keepers/Zoom/Work"
+      , let mk = with_ws Nav.Keepers base in
+        {
+          mk with
+          fleet =
+            mk.fleet
+            |> Fleet_store.select_keeper "alpha"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+        } );
+      ( "Keepers/Zoom/Sandbox"
+      , let mk = with_ws Nav.Keepers base in
+        {
+          mk with
+          fleet =
+            mk.fleet
+            |> Fleet_store.select_keeper "alpha"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox;
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+        } );
+      ( "Keepers/Zoom/Config"
+      , let mk = with_ws Nav.Keepers base in
+        {
+          mk with
+          fleet =
+            mk.fleet
+            |> Fleet_store.select_keeper "alpha"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+        } );
       ( "Dive/Work/Goal"
       , with_dive
           (Nav.Dive_work (Nav.Goal_dive "goal-1"))
@@ -1330,7 +1358,6 @@ let test_axis_a_screen_dive_matrix () =
             | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
             | Some
                 ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                | Nav.Dive_keeper _
                 | Nav.Dive_work _
                 | Nav.Dive_runtime _
                 | Nav.Dive_infra _ )
@@ -1421,10 +1448,6 @@ let test_axis_a_screen_dive_matrix () =
                 false m'.nav.filter_focused
             else
               match dive_before with
-              | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-                  Alcotest.(check bool)
-                    (tag ^ " Keeper_config '/' focuses filter")
-                    true m'.nav.filter_focused
               | Some _ ->
                   Alcotest.(check bool)
                     (tag ^ " Non-config dive '/' never traps filter")
@@ -1434,12 +1457,20 @@ let test_axis_a_screen_dive_matrix () =
                     true
                     (Drafts.is_focused m'.drafts
                      && String.equal (Drafts.current_draft m'.drafts).text "/")
-              | None when Nav.equal_workspace m.nav.workspace Nav.Pulse ->
+              | None when Model.is_keeper_config_active m ->
                   Alcotest.(check bool)
-                    (tag ^ " Pulse '/' never traps invisible filter")
+                    (tag ^ " Keeper_config '/' focuses filter")
+                    true m'.nav.filter_focused
+              | None
+                when Nav.equal_workspace m.nav.workspace Nav.Pulse
+                     || Model.is_in_keeper_chat m
+                     || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+                         && m.nav.zoomed && Model.can_zoom_current_view m) ->
+                  Alcotest.(check bool)
+                    (tag ^ " Pulse/Keeper-Chat/Zoomed-Keepers '/' never traps invisible filter")
                     false m'.nav.filter_focused;
                   Alcotest.(check bool)
-                    (tag ^ " Pulse '/' focuses composer with '/'")
+                    (tag ^ " Pulse/Keeper-Chat/Zoomed-Keepers '/' focuses composer with '/'")
                     true
                     (Drafts.is_focused m'.drafts
                      && String.equal (Drafts.current_draft m'.drafts).text "/")
@@ -1978,14 +2009,15 @@ let test_dynamic_rendered_hint_contracts () =
           ( "Dive/Keeper/ChatEmpty"
           , {
               m_base with
+              fleet =
+                m_base.fleet
+                |> Fleet_store.select_keeper "gamma"
+                |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
               nav =
                 {
                   m_base.nav with
                   workspace = Nav.Keepers;
-                  dive_stack =
-                    [
-                      Nav.Dive_keeper { name = "gamma"; tab = Nav.Keeper_chat };
-                    ];
+                  zoomed = true;
                 };
             } );
         ]
@@ -2189,10 +2221,12 @@ let test_journeys_slash_palette_filter () =
     (has_cmd (function Cmd.Restart_tui -> true | _ -> false) cmds_rst);
   let m_pal_kp, _ = type_str m_pal "beta" in
   let m_pal_kp_go, _ = step m_pal_kp (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "J6 Ctrl+K keeper entry dives beta" true
-    (match Model.active_dive m_pal_kp_go with
-     | Some (Nav.Dive_keeper { name = "beta"; _ }) -> true
-     | _ -> false);
+  Alcotest.(check bool) "J6 Ctrl+K keeper entry jumps to Keepers beta" true
+    (Nav.equal_workspace m_pal_kp_go.nav.workspace Nav.Keepers
+     && Option.is_none (Model.active_dive m_pal_kp_go)
+     && Option.equal String.equal (Model.selected_keeper_name m_pal_kp_go)
+          (Some "beta")
+     && Nav.equal_keeper_tab m_pal_kp_go.fleet.keeper_dive_tab Nav.Keeper_chat);
   let m_pal_goal, _ = type_str m_pal "Harden TUI Matrix" in
   let m_pal_goal_go, _ = step m_pal_goal (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "J6 Ctrl+K goal entry dives goal-1" true
@@ -2634,37 +2668,45 @@ let test_journeys_tab_multipane_dives_safety () =
          | _ -> false)
        ir_cmds);
 
-  (* J18: Dive_keeper [c] switches in-place (stack depth 1), Config [e] opens Settings *)
+  (* J18: Keepers Focus Mode [c] switches in-place (dive_stack=[]), Config [e] opens Settings *)
   record_case ();
   let m_dk =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
     }
   in
   let m_dk_c, _ = step m_dk (char_key "c") in
-  Alcotest.(check int) "J18 Dive_keeper [c] keeps dive_stack depth=1" 1
+  Alcotest.(check int) "J18 Keepers Focus Mode [c] keeps dive_stack depth=0" 0
     (List.length m_dk_c.nav.dive_stack);
   Alcotest.(check bool)
-    "J18 Dive_keeper [c] switches to Keeper_chat + focuses composer" true
-    (Model.active_dive m_dk_c
-     = Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat })
+    "J18 Keepers Focus Mode [c] switches to Keeper_chat + focuses composer" true
+    (Nav.equal_workspace m_dk_c.nav.workspace Nav.Keepers
+     && m_dk_c.nav.zoomed
+     && Nav.equal_keeper_tab m_dk_c.fleet.keeper_dive_tab Nav.Keeper_chat
+     && Option.equal String.equal (Model.selected_keeper_name m_dk_c) (Some "alpha")
      && Drafts.is_focused m_dk_c.drafts);
   let m_dk_cfg =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+          zoomed = true;
         };
     }
   in
@@ -2775,20 +2817,26 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_dk_ko =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
     }
   in
   let m_dk_ko_c, _ = step m_dk_ko (char_key "ㅊ") in
   Alcotest.(check bool) "J24 Korean 'ㅊ' replays 'c' -> switches to Keeper_chat"
     true
-    (Model.active_dive m_dk_ko_c
-     = Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat })
+    (Nav.equal_workspace m_dk_ko_c.nav.workspace Nav.Keepers
+     && m_dk_ko_c.nav.zoomed
+     && Nav.equal_keeper_tab m_dk_ko_c.fleet.keeper_dive_tab Nav.Keeper_chat
+     && Option.equal String.equal (Model.selected_keeper_name m_dk_ko_c)
+          (Some "alpha")
      && Drafts.is_focused m_dk_ko_c.drafts);
   let m_rt_ko =
     {
@@ -3085,8 +3133,11 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_p5c_ent, _ = step m_p5c (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "R5c '/keeper alpha' executes exact 'alpha' (not 'alpha-dev')"
     true
-    (Model.active_dive m_p5c_ent
-     = Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }));
+    (Nav.equal_workspace m_p5c_ent.nav.workspace Nav.Keepers
+     && Option.is_none (Model.active_dive m_p5c_ent)
+     && Option.equal String.equal (Model.selected_keeper_name m_p5c_ent)
+          (Some "alpha")
+     && Nav.equal_keeper_tab m_p5c_ent.fleet.keeper_dive_tab Nav.Keeper_chat);
 
   (* R6: z Toggle_zoom scoped to zoomable views & reset on sub-tab/dive/pop; works on Artifacts too! *)
   record_case ();
@@ -3791,17 +3842,20 @@ let test_pillar1_keeper_config_and_settings_lr () =
   let m_dive =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+          zoomed = true;
         };
       config = rich_cfg;
     }
   in
-  verify_keeper_config_context ~label:"Dive_keeper" m_dive;
+  verify_keeper_config_context ~label:"Keepers_zoom" m_dive;
   let m_split =
     (* Move fleet selection from index 0 (ops/gamma) to index 1 (platform/alpha) *)
     let m_kp0 = { base with nav = { base.nav with workspace = Nav.Keepers } } in
@@ -4078,12 +4132,15 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let m_kmem =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
       knowledge =
         base.knowledge
@@ -4133,12 +4190,15 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let m_kwc =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+          zoomed = true;
         };
       work =
         base.work
@@ -4850,12 +4910,15 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let m_kwc_dc =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+          zoomed = true;
         };
       work =
         base.work
@@ -5590,13 +5653,15 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
     in
     {
       base with
-      fleet = empty_fleet;
+      fleet =
+        empty_fleet
+        |> Fleet_store.select_keeper "fresh"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "fresh"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
     }
   in
@@ -5622,16 +5687,19 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
   Alcotest.(check int)
     "Empty Keeper_chat renders cleanly without floating surface_2 rectangle" 0
     (count_surface2_cells g_empty);
-  (* 3. Korean typing while unfocused in Dive_keeper Keeper_chat auto-focuses composer & inserts char (NEVER opens modals!) *)
+  (* 3. Korean typing while unfocused in Keepers > Chat Focus Mode auto-focuses composer & inserts char (NEVER opens modals!) *)
   let m_unfocused =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
       drafts = Drafts.set_focus false base.drafts;
     }
@@ -5661,12 +5729,15 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
     let m0 = populated_model ~cols:70 ~rows:22 ~lang:Say.Lang_ko () in
     {
       m0 with
+      fleet =
+        m0.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
       nav =
         {
           m0.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+          zoomed = true;
         };
       drafts = Drafts.set_focus false m0.drafts;
     }
@@ -5688,13 +5759,15 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
     in
     {
       base with
-      fleet = fresh_fleet;
+      fleet =
+        fresh_fleet
+        |> Fleet_store.select_keeper "fresh"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "fresh"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
     }
   in
@@ -5791,18 +5864,21 @@ let test_enter_hint_follows_enter_plan () =
   Alcotest.(check string) "Keepers: footer offers Enter" "dive"
     (enter_hint_name (Update_nav.enter_hint keepers));
   let dived, _ = Update_nav.dive_selected keepers in
-  Alcotest.(check int) "Keepers: Enter pushes the keeper dive" 1
-    (List.length dived.nav.dive_stack);
+  Alcotest.(check bool) "Keepers: Enter toggles Focus Mode (zoomed=true, dive_stack=[])"
+    true (dived.nav.zoomed && dived.nav.dive_stack = []);
   (* Keeper config takes Enter before the keymap and edits a field, both in
-     the keeper dive and in the Keepers detail pane. *)
+     Focus Mode (zoomed) and in the Keepers detail pane. *)
   let config_dive =
     {
       keepers with
+      fleet =
+        keepers.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
       nav =
         {
           keepers.nav with
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+          zoomed = true;
         };
     }
   in
@@ -5835,7 +5911,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
         - ALL 5 Work tabs via '2' + ']'*n
         - ALL 4 Knowledge tabs via '3' + ']'*n
         - ALL 3 Keepers fleet modes via '4' + ']'*n
-        - ALL 7 Keeper tabs in BOTH Split right pane ('4' + Tab + ']'*n) AND Dive_keeper ('4' + Enter + ']'*n)
+        - ALL Keeper tabs in BOTH Split right pane ('4' + Tab + ']'*n) AND Focus Mode ('4' + Enter + ']'*n)
         - ALL 7 Runtime tabs via '5' + ']'*n
         - ALL 3 Infra tabs via '6' + ']'*n
         - ALL overlays: Settings (all 7 tabs via ',' + ']'*n), Incidents ('I'),
@@ -5888,15 +5964,12 @@ let test_wave2_100pct_menu_reachability_matrix () =
        ~count:(List.length Nav.all_keeper_tabs)
        ~extract:(fun m -> m.fleet.keeper_dive_tab)
        ~equal:Nav.equal_keeper_tab);
-  Alcotest.(check int) "100% of 7 Keeper tabs reachable in full-screen Dive_keeper"
+  Alcotest.(check int) "100% of Keeper tabs reachable in full-screen Keepers Focus Mode"
     (List.length Nav.all_keeper_tabs)
     (reach_subtabs
        ~start_key:[ char_key "4"; mk_key Keymap.Input.Enter ]
        ~count:(List.length Nav.all_keeper_tabs)
-       ~extract:(fun m ->
-         match Model.active_dive m with
-         | Some (Nav.Dive_keeper { tab; _ }) -> tab
-         | _ -> m.fleet.keeper_dive_tab)
+       ~extract:(fun m -> m.fleet.keeper_dive_tab)
        ~equal:Nav.equal_keeper_tab);
   Alcotest.(check int) "100% of 7 Runtime tabs reachable via keyboard"
     (List.length Nav.all_runtime_tabs)
@@ -6367,13 +6440,16 @@ let test_wave2_100pct_menu_reachability_matrix () =
   let m_k_dive =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls;
       keeper_context = kc_big;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_tool_calls } ];
+          zoomed = true;
           pane_index = 0;
         };
     }
@@ -6511,23 +6587,24 @@ let test_wave2_100pct_menu_reachability_matrix () =
         keys)
     sidebar_guarded_surfaces;
 
-  (* 5j. Compact-viewport Menu_keeper_tab activation pushes Dive_keeper (P2) *)
+  (* 5j. Compact-viewport Menu_keeper_tab activation zooms Keepers Focus Mode (P2) *)
   let m_cmp_kp = populated_model ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
   let m_cmp_preview, _ =
     Update_nav.navigate_menu_target ~keep_sidebar_focus:true m_cmp_kp
       (Nav.Menu_keeper_tab Nav.Keeper_context)
   in
-  Alcotest.(check bool) "Compact live preview does NOT push Dive_keeper prematurely"
-    true (Option.is_none (Model.active_dive m_cmp_preview));
+  Alcotest.(check bool) "Compact live preview does NOT zoom prematurely"
+    true ((not m_cmp_preview.nav.zoomed) && Option.is_none (Model.active_dive m_cmp_preview));
   let m_cmp_act, _ =
     Update_nav.navigate_menu_target ~keep_sidebar_focus:false m_cmp_kp
       (Nav.Menu_keeper_tab Nav.Keeper_context)
   in
-  Alcotest.(check bool) "Compact Menu_keeper_tab activation pushes Dive_keeper Keeper_context"
+  Alcotest.(check bool) "Compact Menu_keeper_tab activation enters Keepers Focus Mode Keeper_context"
     true
-    (match Model.active_dive m_cmp_act with
-     | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) -> true
-     | _ -> false)
+    (Nav.equal_workspace m_cmp_act.nav.workspace Nav.Keepers
+     && m_cmp_act.nav.zoomed
+     && Option.is_none (Model.active_dive m_cmp_act)
+     && Nav.equal_keeper_tab m_cmp_act.fleet.keeper_dive_tab Nav.Keeper_context)
 
 (* ---------- Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices & Secret Masking ---------- *)
 
@@ -6824,12 +6901,15 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   let m_kpmem =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
       knowledge =
         Knowledge_store.apply_keeper_memory_facts ~observed_at:t0 ~keeper:"alpha"
@@ -6880,12 +6960,15 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   let m_id =
     {
       base with
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_identity;
       nav =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_identity } ];
+          zoomed = true;
         };
     }
   in
@@ -7810,17 +7893,21 @@ let test_part1_ask_modal_and_honest_surfaces () =
   Alcotest.(check bool) "Work > Inbox Enter on Ask opens Ask_answer modal" true
     (Option.equal Nav.equal_overlay m_inb_enter.nav.overlay (Some Nav.Ask_answer));
   let m_modal_chat, _ = step m_inb_enter (char_key ~shift:true "C") in
-  Alcotest.(check bool) "Ask modal 'C' dives to Keeper_chat" true
+  Alcotest.(check bool) "Ask modal 'C' jumps to Keepers > Chat" true
     (Option.is_none m_modal_chat.nav.overlay
-     &&
-     match Model.active_dive m_modal_chat with
-     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
-     | _ -> false);
+     && Option.is_none (Model.active_dive m_modal_chat)
+     && Nav.equal_workspace m_modal_chat.nav.workspace Nav.Keepers
+     && Option.equal String.equal (Model.selected_keeper_name m_modal_chat)
+          (Some "alpha")
+     && Nav.equal_keeper_tab m_modal_chat.fleet.keeper_dive_tab Nav.Keeper_chat
+     && Option.is_some m_modal_chat.ask_modal);
   let m_inb_chat, _ = step m_j_esc (char_key ~shift:true "C") in
-  Alcotest.(check bool) "Work > Inbox 'C' on Ask dives to Keeper_chat" true
-    (match Model.active_dive m_inb_chat with
-     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
-     | _ -> false);
+  Alcotest.(check bool) "Work > Inbox 'C' on Ask jumps to Keepers > Chat" true
+    (Option.is_none (Model.active_dive m_inb_chat)
+     && Nav.equal_workspace m_inb_chat.nav.workspace Nav.Keepers
+     && Option.equal String.equal (Model.selected_keeper_name m_inb_chat)
+          (Some "alpha")
+     && Nav.equal_keeper_tab m_inb_chat.fleet.keeper_dive_tab Nav.Keeper_chat);
 
   (* 5. Quick-pick letter + Enter inside Ask modal sets submitting=true until HTTP Ok ack *)
   let m_pick_b, cmds_b = step m_y (char_key "b") in
@@ -8320,7 +8407,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
         | _ -> false))
     [ ("unfocused", base); ("sidebar", m_sb) ];
 
-  (* 2b. Dive & zoomed <- -> round-trip preserves dive_stack, zoomed, and emits 0 refetches *)
+  (* 2b. Split & zoomed <- -> round-trip preserves workspace/dive_stack/zoomed and emits 0 refetches *)
   let m_dive_kp =
     {
       base with
@@ -8329,26 +8416,28 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           base.nav with
           workspace = Nav.Keepers;
           pane_index = 0;
+          zoomed = false;
           sidebar_focused = false;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
         };
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat base.fleet;
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
     }
   in
   let m_dk_l, _ = step m_dive_kp (mk_key Keymap.Input.Left) in
-  Alcotest.(check bool) "Dive_keeper Left enters docked sidebar" true
+  Alcotest.(check bool) "Keepers Split pane 0 Left enters docked sidebar" true
     (Model.sidebar_has_focus m_dk_l);
   let m_dk_rt, cmds_dk_rt = step m_dk_l (mk_key Keymap.Input.Right) in
   Alcotest.(check bool)
-    "Dive_keeper Left -> Right preserves dive_stack and exits sidebar" true
+    "Keepers Split Left -> Right preserves Keepers and exits sidebar" true
     ((not (Model.sidebar_has_focus m_dk_rt))
      && m_dk_rt.nav.pane_index = 0
-     &&
-     match Model.active_dive m_dk_rt with
-     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
-     | _ -> false);
-  Alcotest.(check int) "Dive_keeper Left -> Right emits 0 spurious refetches" 0
+     && Nav.equal_workspace m_dk_rt.nav.workspace Nav.Keepers
+     && Option.equal String.equal (Model.selected_keeper_name m_dk_rt)
+          (Some "alpha")
+     && Nav.equal_keeper_tab m_dk_rt.fleet.keeper_dive_tab Nav.Keeper_chat);
+  Alcotest.(check int) "Keepers Split Left -> Right emits 0 spurious refetches" 0
     (List.length (Cmd.flatten cmds_dk_rt));
 
   let m_dive_goal =
@@ -8560,10 +8649,12 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+          zoomed = true;
         };
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_config base.fleet;
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
       config =
         {
           base.config with
@@ -8637,10 +8728,12 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_identity } ];
+          zoomed = true;
         };
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_identity;
       keeper_context =
         Keeper_context_store.apply_oauth_attached_tools ~observed_at:t0
           ~keeper:"alpha" sample_oauth_snap base.keeper_context;
@@ -8718,10 +8811,12 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
         {
           base.nav with
           workspace = Nav.Keepers;
-          dive_stack =
-            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+          zoomed = true;
         };
-      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_memory base.fleet;
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
     }
   in
   let _, cmds_mem_space = step m_mem_dive (char_key " ") in
@@ -8812,8 +8907,8 @@ let test_keeper_lifecycle_keymap_matrix () =
   in
   let m_kcfg_edit =
     let m_dive, _ =
-      Update_nav.push_dive m_k
-        (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config })
+      Update_nav.jump_to_keeper ~preserve_return:false ~zoomed:true
+        ~tab:Nav.Keeper_config m_k "alpha"
     in
     {
       m_dive with
@@ -8856,8 +8951,7 @@ let test_p1_shortcut_and_classifier_regressions () =
 
   (* 1. [d] on Keeper_memory & Knowledge_memory switches to View_diff (never Keeper_purge_confirm). *)
   let m_kmem, _ =
-    Update_nav.push_dive m0
-      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+    Update_nav.jump_to_keeper ~zoomed:true ~tab:Nav.Keeper_memory m0 "alpha"
   in
   let m_kmem_d, _ = step m_kmem (char_key "d") in
   Alcotest.(check bool) "[d] on Keeper_memory switches to View_diff" true
@@ -9130,8 +9224,7 @@ let test_batch_d_toast_tag_ime_and_keymap_ssot () =
        (Some (Nav.System_gate Nav.Media_viewer)));
 
   let m_kmem, _ =
-    Update_nav.push_dive m0
-      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+    Update_nav.jump_to_keeper ~zoomed:true ~tab:Nav.Keeper_memory m0 "alpha"
   in
   let m_kmem_diff =
     {
@@ -9150,8 +9243,7 @@ let test_batch_d_toast_tag_ime_and_keymap_ssot () =
     true (Option.is_none m_kmem_pin.keeper_stop_armed);
 
   let m_chat, _ =
-    Update_nav.push_dive m0
-      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat })
+    Update_nav.jump_to_keeper ~zoomed:true ~tab:Nav.Keeper_chat m0 "alpha"
   in
   let m_chat_unfocused =
     { m_chat with drafts = Drafts.set_focus false m_chat.drafts }

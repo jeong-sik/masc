@@ -14,9 +14,6 @@ open Masc_tui_app
 
 let render_body ~(model : Model.t) ~cache ~history_rows rect grid =
   match Model.active_dive model with
-  | Some (Nav.Dive_keeper { name; tab }) ->
-      Screen_keepers.render_dive_with_history_rows ~name ~tab ~model ~cache
-        ~history_rows:(Some history_rows) ~rect grid
   | Some (Nav.Dive_work target) ->
       Screen_work.render_dive ~target ~model ~cache ~rect grid
   | Some (Nav.Dive_knowledge target) ->

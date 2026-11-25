@@ -2115,15 +2115,16 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
   let m_chat_dive =
     {
       m_norm with
+      fleet =
+        m_norm.fleet
+        |> Masc_tui_store.Fleet_store.select_keeper "alpha"
+        |> Masc_tui_store.Fleet_store.set_keeper_dive_tab
+             Masc_tui_core.Nav.Keeper_chat;
       nav =
         {
           m_norm.nav with
           workspace = Masc_tui_core.Nav.Keepers;
-          dive_stack =
-            [
-              Masc_tui_core.Nav.Dive_keeper
-                { name = "alpha"; tab = Masc_tui_core.Nav.Keeper_chat };
-            ];
+          zoomed = true;
         };
     }
   in

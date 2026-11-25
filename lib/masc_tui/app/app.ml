@@ -489,30 +489,7 @@ let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
     && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
   in
   let korean_in_keeper_chat =
-    is_korean_jamo_mouse_key kev
-    &&
-    match Model.active_dive m with
-    | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) -> true
-    | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_context
-                | Nav.Keeper_tool_calls
-                | Nav.Keeper_memory
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
-                | Nav.Keeper_config
-                | Nav.Keeper_logs
-                | Nav.Keeper_identity );
-              _;
-            }
-        | Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        | Nav.Dive_infra _ )
-    | None ->
-        false
+    is_korean_jamo_mouse_key kev && Model.is_in_keeper_chat m
   in
   is_mouse_toggle_key kev
   && (not (Model.is_too_small_viewport m.viewport))
@@ -614,16 +591,11 @@ let visible_keeper_progress_interval (m : Model.t) =
     else if Option.is_some m.nav.overlay then None
     else
       match Model.active_dive m with
-      | Some (Nav.Dive_keeper { name; tab }) ->
-          if Nav.equal_keeper_tab tab Nav.Keeper_chat then Some name else None
       | None ->
           if Nav.equal_workspace m.nav.workspace Nav.Keepers
              && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
              && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
-          then
-            Option.map
-              (fun (keeper : Masc_tui_protocol.Wire_fleet.keeper_summary) -> keeper.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
+          then Model.selected_keeper_name m
           else None
       | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
           None
@@ -916,7 +888,6 @@ let can_launch_pending_wiki_editor (m : Model.t) =
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) -> true
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_keeper _
       | Nav.Dive_work _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->

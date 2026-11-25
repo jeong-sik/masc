@@ -75,7 +75,6 @@ type infra_dive_target =
   | Runtime_trace_dive of string
 
 type dive =
-  | Dive_keeper of { name : string; tab : keeper_tab }
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target

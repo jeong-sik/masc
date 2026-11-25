@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
-import { formatObserved, resourceCache } from '../../core/resource-cache'
+import { formatObserved, observedFailed, observedValue, resourceCache } from '../../core/resource-cache'
 import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { setStoredToken } from '../../lib/dashboard-bearer'
@@ -22,6 +22,8 @@ import {
   formatCandleMilli,
   formatContextDetail,
   isKeeperPathResting,
+  loadKeeperRoster,
+  readKeeperRosterSources,
   observeRosterContextPct,
   parseOrdinaryMemoryBranch,
   parseSourceBoundMemoryBranch,
@@ -804,6 +806,70 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await recoveredObserver
   })
 
+  it('retains an owner preview as historical after a lifecycle edge, failed read and stream gap', async () => {
+    const keeper = makeRosterKeeper()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    let rows: readonly object[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (controller) => { observer = controller } }),
+          { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (String(input).endsWith('/api/v1/keepers/turns')) return Response.json({ keepers: rows })
+      return Response.json({ operations: [], messages: [], rows: [] })
+    }))
+    const stream = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const read = observedValue(new Map(), Date.now() - 1000)
+    const props = { keeper, onInspect: vi.fn(), onMutated: vi.fn() }
+    const view = render(html`<${KeeperChatTab} ...${props} turnSnapshot=${read} />`)
+    const readRows = async (next: readonly object[]) => {
+      rows = next
+      await loadKeeperRoster('manual')
+      view.rerender(html`<${KeeperChatTab} ...${props} turnSnapshot=${readKeeperRosterSources().turns} />`)
+    }
+    const send = (event: object) =>
+      observer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ name: keeper.name, ...event })}\n\n`))
+    const preview = (revision: number) => ({
+      type: 'keeper_turn_preview_changed', observation: {
+        owner_key: 'A', preview: { revision, status_text: 'seen ' + revision, activity: 'waiting', updated_at_unix: 123 },
+      },
+    })
+    const live = () => view.container.querySelector('.kp-turn-progress-active')?.getAttribute('data-live')
+    const receipt = () => view.container.querySelector('.kp-turn-worked time')?.getAttribute('datetime')
+    send(preview(1))
+    await waitFor(() => expect(live()).toBe('true'))
+    const atUnix = 1_700_000_502
+    send({ type: 'keeper_turn_succeeded', elapsed_ms: 3000, ts_unix: atUnix })
+    await waitFor(() => expect(receipt()).toBe(new Date(atUnix * 1000).toISOString()))
+    send({ type: 'keeper_turn_changed' })
+    await waitFor(() => expect(live()).toBe('false'))
+    const failed = observedFailed({ kind: 'server', status: 503, code: 'read_unavailable', message: 'unavailable', retryable: true })
+    view.rerender(html`<${KeeperChatTab} ...${props} turnSnapshot=${failed} />`)
+    expect(view.queryByText('seen 1')).toBeTruthy()
+    send(preview(1))
+    send({ type: 'keeper_turn_succeeded', elapsed_ms: 1000, ts_unix: atUnix - 30 })
+    send(preview(2))
+    await waitFor(() => expect(live()).toBe('true'))
+    await readRows([{ keeper_name: keeper.name, status: 'ok', turn: {
+      owner_key: 'A', lane: 'chat', started_at_unix: Date.now() / 1000 - 15, preview_observed_through: 1,
+    } }])
+    expect(view.getByRole('timer')).toBeTruthy()
+    await readRows([{ keeper_name: keeper.name, status: 'unavailable', turn: null }])
+    expect(live()).toBe('false')
+    expect(view.queryByText('seen 2')).toBeTruthy()
+    await readRows([])
+    expect(view.getByRole('timer')).toBeTruthy()
+    expect(live()).toBe('false')
+    observer.close()
+    await stream
+    await waitFor(() => expect(live()).toBe('false'))
+    expect(view.queryByText('seen 2')).toBeTruthy()
+    await readRows([{ keeper_name: keeper.name, status: 'ok', turn: null }])
+    expect(live()).toBeUndefined()
+    expect(receipt()).toBe(new Date(atUnix * 1000).toISOString())
+  })
+
   it('invalidates in-flight earlier-page prepend and resets pagination when reconnect observes an authoritative empty history', async () => {
     const keeper = makeRosterKeeper()
     let observer: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -1156,7 +1222,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       }
       if (url.includes('/api/v1/keepers/turns')) {
         await waitForTurns
-        return json({ keepers: [{ keeper_name: 'code-reviewer-sister', turn: { lane: 'chat_operation' } }] })
+        return json({ keepers: [{ keeper_name: 'code-reviewer-sister', status: 'ok', turn: { lane: 'chat_operation' } }] })
       }
       if (url.includes('/portrait.png')) {
         return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {

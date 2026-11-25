@@ -37,8 +37,8 @@ import {
   recoverCutReplyFromJournal,
   streamKeeperChat,
   transcribeVoiceAudio,
-  type KeeperLiveToolPulse,
   type KeeperObserverChatSignal,
+  type readKeeperRosterSources,
 } from './keepers-api'
 import {
   dedupeHistoryToolRows,
@@ -68,6 +68,7 @@ import {
   upsertStreamToolCall,
   type ChatBlockPrefs,
 } from './chat-blocks'
+import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
@@ -86,7 +87,7 @@ import type {
   ChatDeliveryState,
   ChatToolBlock,
   ChatTranscriptEntry,
-  KeeperActiveTurnPreview,
+  KeeperActiveTurn,
   KeeperRosterItem,
   KeeperWaitingInventoryData,
   QueuedChatOperation,
@@ -96,9 +97,11 @@ const LazyKeeperDebugCompanion = lazy(async () => ({
   default: (await import('./keeper-debug-companion')).KeeperDebugCompanion,
 }))
 
+type TurnSnapshot = ReturnType<typeof readKeeperRosterSources>['turns']
+
 export interface KeeperChatTabProps {
   readonly keeper: KeeperRosterItem
-  readonly turnSnapshot?: { readonly updatedAt: number; readonly stale: boolean }
+  readonly turnSnapshot?: TurnSnapshot
   readonly onInspect: (payload: WorkspaceInspectPayload) => void
   readonly onSelectKeeper?: (name: string) => void
   readonly onMutated: () => void
@@ -115,13 +118,16 @@ function KeeperTurnElapsed({ startedAt, observedAt, live }: {
   readonly live: boolean
 }) {
   const [now, setNow] = useState(Date.now)
+  const heldSeconds = useRef<number | null>(null)
+  if (live) heldSeconds.current = null
+  else heldSeconds.current ??= (observedAt - startedAt) / 1000
   useEffect(() => {
     if (!live) return
     setNow(Date.now())
     const interval = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(interval)
   }, [live, startedAt])
-  const seconds = ((live ? now : observedAt) - startedAt) / 1000
+  const seconds = heldSeconds.current ?? (now - startedAt) / 1000
   return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`
 }
 
@@ -293,12 +299,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [expandedPreKeys, setExpandedPreKeys] = useState<Record<string, boolean>>({})
   const [copiedPreKey, setCopiedPreKey] = useState<string | null>(null)
   const [waitingInventory, setWaitingInventory] = useState<KeeperWaitingInventoryData | null>(null)
-  const [livePreview, setLivePreview] = useState<{
-    readonly ownerKey: string | null
-    readonly preview: KeeperActiveTurnPreview
-    readonly receivedAt: number
-  } | null>(null)
-  const [liveToolPulse, setLiveToolPulse] = useState<KeeperLiveToolPulse | null>(null)
+  const [turnPreviews, setTurnPreviews] = useState<readonly ReceivedTurnPreview[]>([])
+  const [invalidatedSnapshot, setInvalidatedSnapshot] = useState<TurnSnapshot | undefined>()
   const [lastWorked, setLastWorked] = useState<Extract<KeeperObserverChatSignal, { kind: 'turn_succeeded' }> | null>(null)
 
   const chatListRef = useRef<HTMLDivElement>(null)
@@ -318,8 +320,38 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const prevTailSigRef = useRef('')
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeper.name)
-  const turnOwnerRef = useRef(keeper.active_turn?.owner_key)
-  turnOwnerRef.current = keeper.active_turn?.owner_key
+  const turnRead = props.turnSnapshot
+  const turnReadRef = useRef(turnRead)
+  turnReadRef.current = turnRead
+  const lastTurn = useRef<{
+    readonly keeper: string
+    readonly epoch: number
+    readonly active: KeeperActiveTurn | null
+    readonly updatedAt: number
+  } | null>(null)
+  const row = turnRead?.kind === 'value' ? turnRead.data.get(keeper.name) : undefined
+  let snapshot = lastTurn.current?.keeper === keeper.name && isEpochCurrent(lastTurn.current.epoch)
+    ? lastTurn.current : null
+  if (turnRead?.kind === 'value' && row?.status === 'ok' && (!turnRead.stale || !snapshot)) {
+    snapshot = {
+      keeper: keeper.name, epoch: currentSessionEpoch(),
+      active: row.active, updatedAt: turnRead.updatedAt,
+    }
+    lastTurn.current = snapshot
+  }
+  const activeTurn = turnRead ? snapshot?.active ?? null : keeper.active_turn
+  const turnOwnerRef = useRef(activeTurn?.owner_key)
+  turnOwnerRef.current = activeTurn?.owner_key
+  const invalidateTurn = useCallback(() => {
+    setInvalidatedSnapshot(turnReadRef.current)
+    setTurnPreviews((previous) => previous.some((sample) => sample.live)
+      ? previous.map((sample) => ({ ...sample, live: false }))
+      : previous)
+  }, [])
+  useLayoutEffect(() => {
+    if (turnRead?.kind === 'failed' || turnRead?.kind === 'absent'
+      || (turnRead?.kind === 'value' && row?.status !== 'ok')) invalidateTurn()
+  }, [turnRead, row, invalidateTurn])
   const hasLoadedEarlierRef = useRef(false)
   const earlierAbortRef = useRef<AbortController | null>(null)
   const earlierGenRef = useRef(0)
@@ -472,8 +504,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     resetToolResultCache()
     resetExpandUiState()
     setWaitingInventory(null)
-    setLivePreview(null)
-    setLiveToolPulse(null)
+    setTurnPreviews([])
+    setInvalidatedSnapshot(undefined)
     setLastWorked(null)
     if (switchedKeeper) {
       setMessagesState({ keeperName: keeper.name, entries: [] })
@@ -499,13 +531,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       }
     })
   }, [abortAllToolFetches, invalidateEarlierReads, resetToolResultCache, resetExpandUiState])
-
-  useEffect(() => {
-    if (!keeper.active_turn) {
-      setLivePreview(null)
-      setLiveToolPulse(null)
-    }
-  }, [keeper.active_turn])
 
   const requestToolResult = useCallback(async (executionId: string, force = false) => {
     const trimmed = executionId.trim()
@@ -707,8 +732,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       // The preceding connection's reads cannot settle this observation.
       abortReads()
       invalidateEarlierReads()
-      setLivePreview(null)
-      setLiveToolPulse(null)
+      invalidateTurn()
       refresh('history', 'queue', 'waiting')
     }
 
@@ -721,24 +745,18 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const unsubscribeFrames = subscribeObserverFrames((frame) => {
       const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
       switch (event?.kind) {
-        case 'turn_preview':
-          if (turnOwnerRef.current && event.ownerKey !== turnOwnerRef.current) break
-          setLivePreview((prev) => {
-            if (prev !== null && prev.ownerKey === event.ownerKey
-                && prev.preview.revision !== null && event.preview.revision !== null
-                && event.preview.revision < prev.preview.revision) return prev
-            return { ownerKey: event.ownerKey, preview: event.preview, receivedAt: Date.now() }
-          })
+        case 'turn_preview': {
+          if (!event.ownerKey) break
+          const sample = { ownerKey: event.ownerKey, preview: event.preview, receivedAt: Date.now(), live: true }
+          const owner = turnOwnerRef.current
+          setTurnPreviews((previous) => retainTurnPreview(previous, owner, sample))
           break
-        case 'turn_ended':
-          setLivePreview(null)
-          setLiveToolPulse(null)
+        }
+        case 'turn_changed':
+          invalidateTurn()
           break
         case 'turn_succeeded':
           setLastWorked((previous) => previous && previous.atUnix >= event.atUnix ? previous : event)
-          break
-        case 'tool_pulse':
-          setLiveToolPulse(event.pulse)
           break
         case 'chat_appended':
           refresh('history')
@@ -767,6 +785,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setNextCursor(null)
       setWaitingInventory(null)
       setLastWorked(null)
+      setTurnPreviews([])
       setHistoryError(null)
       setLoadingHistory(true)
       recover()
@@ -787,7 +806,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
-  }, [keeper.name, invalidateEarlierReads])
+  }, [keeper.name, invalidateEarlierReads, invalidateTurn])
 
   const updateQueueOperation = async (
     operationId: string,
@@ -1626,19 +1645,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
   }, [autoHydrateKey, keeper.name, blockPrefs.tools, requestToolResult])
 
-  // Live autonomous / delegated / external turn status from roster + SSE preview override
-  const activeTurn = keeper.active_turn
-  const previewForSnapshot = activeTurn?.owner_key && livePreview?.ownerKey === activeTurn.owner_key
-    && (livePreview.preview.revision ?? 0) > (activeTurn.preview_observed_through ?? activeTurn.preview?.revision ?? 0)
-    ? livePreview.preview
-    : null
-  // An Owner preview can arrive before the next turn-list snapshot. Present
-  // that observation by itself, with no borrowed lane or start time.
-  const previewBeforeSnapshot = !activeTurn && livePreview?.ownerKey
-    && (props.turnSnapshot === undefined || livePreview.receivedAt > props.turnSnapshot.updatedAt)
-    ? livePreview.preview
-    : null
-  const effectivePreview = previewBeforeSnapshot ?? previewForSnapshot ?? activeTurn?.preview ?? null
+  const matchedPreview = previewForObservedTurn(turnPreviews, activeTurn, snapshot?.updatedAt)
+  const effectivePreview = matchedPreview?.preview ?? activeTurn?.preview ?? null
   const hasTurnObservation = activeTurn !== null || effectivePreview !== null
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
@@ -1646,22 +1654,27 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
   const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
   const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
-  const turnLive = observerConnected.value
-    && (previewBeforeSnapshot !== null || props.turnSnapshot?.stale === false)
+  const snapshotLive = activeTurn !== null && row?.status === 'ok' && turnRead?.kind === 'value'
+    && !turnRead.stale && turnRead !== invalidatedSnapshot
+  const turnLive = observerConnected.value && (snapshotLive || matchedPreview?.live === true)
   const turnAnimating = turnLive && liveTurnActivity.tone !== 'bad'
   const progressLabel = turnLive
     ? (turnAnimating ? 'Working' : liveTurnActivity.label)
     : '마지막 확인'
-  const turnObservedAt = props.turnSnapshot?.updatedAt
-  const turnStartedAt = activeTurn && turnObservedAt !== undefined
+  const snapshotAt = snapshot?.updatedAt
+  const turnObservedAt = snapshotAt === undefined
+    ? undefined : Math.max(snapshotAt, matchedPreview?.receivedAt ?? snapshotAt)
+  const turnStartedAt = activeTurn && snapshotAt !== undefined
     ? (activeTurn.elapsed_ms != null && activeTurn.elapsed_ms >= 0
-        ? turnObservedAt - activeTurn.elapsed_ms
+        ? snapshotAt - activeTurn.elapsed_ms
         : activeTurn.started_at_unix > 0 ? activeTurn.started_at_unix * 1000 : null)
     : null
   const activeTool = activeTurn?.tool_in_flight
     ?? (effectivePreview?.activity === 'tool' ? effectivePreview.last_tool : null)
-  const liveToolName = activeTool ?? effectivePreview?.last_tool ?? liveToolPulse?.toolName ?? null
-  const isLiveToolInFlight = turnLive && activeTool !== null
+  const liveToolName = activeTool ?? effectivePreview?.last_tool ?? null
+  const isLiveToolInFlight = turnAnimating && activeTool !== null
+    && (snapshotLive || matchedPreview?.preview.activity === 'tool')
+  const workedAt = lastWorked ? new Date(lastWorked.atUnix * 1000) : null
 
   const renderToolPreSection = (
     label: string,
@@ -2425,11 +2438,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       <span class="kp-pill" data-tone="info">
                         ${isLiveToolInFlight ? '실행 중' : '최근 도구'} · ${liveToolName}
                       </span>
-                      ${liveToolPulse?.executionMode === 'concurrent' && html`
-                        <span class="kp-pill" data-tone="brass">
-                          병렬${liveToolPulse.batchSize ? ` ${liveToolPulse.batchSize}건` : ''}
-                        </span>
-                      `}
                     </div>
                   `}
                   ${effectivePreview?.status_text && html`
@@ -2615,14 +2623,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                     ${effectivePreview && (!turnLive || turnAnimating) && html`<span> · ${liveTurnActivity.label}</span>`}
                   </span>
                   ${turnStartedAt !== null && turnObservedAt !== undefined && html`
-                    <${KeeperTurnElapsed} startedAt=${turnStartedAt} observedAt=${turnObservedAt} live=${turnAnimating} />
+                    <${KeeperTurnElapsed} key=${activeTurn?.owner_key ?? activeTurn?.turn_ref ?? activeTurn?.started_at_unix} startedAt=${turnStartedAt} observedAt=${turnObservedAt} live=${turnAnimating} />
                   `}
                 </div>
               `}
-              ${lastWorked && html`
+              ${lastWorked && workedAt && html`
                 <span class="kp-turn-worked" role="status">
                   <span aria-hidden="true">✓ </span><strong>Worked</strong>
-                  ${` · ${formatElapsedCompact(lastWorked.elapsedMs / 1000)}${hasTurnObservation ? ' · 최근 성공' : ''}`}
+                  ${` · ${formatElapsedCompact(lastWorked.elapsedMs / 1000)} · 최근 성공 `}
+                  <time datetime=${workedAt.toISOString()} title=${workedAt.toLocaleString()}>${formatChatTime(lastWorked.atUnix)}</time>
                 </span>
               `}
             </div>

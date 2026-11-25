@@ -31,7 +31,40 @@ import {
   streamKeeperChat,
 } from './keepers-api'
 import { KeeperChatTab } from './keeper-chat-tab'
-import type { KeeperRosterItem } from './types'
+import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
+import type { KeeperActiveTurn, KeeperRosterItem } from './types'
+
+describe('owner-scoped turn progress', () => {
+  const sample = (ownerKey: string, revision: number, receivedAt: number): ReceivedTurnPreview => ({
+    ownerKey, receivedAt, live: true,
+    preview: { status_text: ownerKey, activity: 'streaming', text_tail: '', last_tool: null,
+      revision, updated_at_unix: receivedAt / 1000 },
+  })
+  const turn = (ownerKey: string, through: number): KeeperActiveTurn => ({
+    lane: 'chat', owner_key: ownerKey, preview_observed_through: through,
+    started_at_unix: 5, tool_in_flight: null,
+  })
+  it('keeps both the displayed preview and the next owner received ahead of its HTTP snapshot', () => {
+    const a = sample('A', 3, 10)
+    const b = sample('B', 11, 20)
+    let seen = retainTurnPreview([], 'A', a)
+    seen = retainTurnPreview(seen, 'A', b)
+    expect(previewForObservedTurn(seen, turn('A', 1), 30)).toBe(a)
+    expect(previewForObservedTurn(seen, turn('B', 10), 30)).toBe(b)
+    seen = retainTurnPreview(seen, 'B', sample('A', 4, 40))
+    expect(previewForObservedTurn(seen, turn('B', 10), 30)).toBe(b)
+    expect(previewForObservedTurn(seen, turn('B', 11), 30)).toBeUndefined()
+    expect(previewForObservedTurn(seen, null, 41)).toBeUndefined()
+  })
+  it('does not renew stale evidence from a duplicate or retired revision', () => {
+    const stale = { ...sample('A', 3, 10), live: false }
+    const seen = [stale]
+    expect(retainTurnPreview(seen, 'A', sample('A', 3, 15))).toBe(seen)
+    expect(retainTurnPreview(seen, 'A', sample('A', 2, 30))).toBe(seen)
+    expect(previewForObservedTurn(seen, null, 9)).toBe(stale)
+    expect(retainTurnPreview(seen, 'A', sample('A', 4, 40))[0]?.live).toBe(true)
+  })
+})
 
 function makeRosterKeeper(overrides: Partial<KeeperRosterItem> = {}): KeeperRosterItem {
   return {
@@ -774,11 +807,10 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       },
       'code-reviewer-sister',
     )
-    expect(pulseSig?.kind).toBe('tool_pulse')
-    if (pulseSig?.kind === 'tool_pulse') {
-      expect(pulseSig.pulse.executionMode).toBe('concurrent')
-      expect(pulseSig.pulse.batchSize).toBe(4)
-    }
+    expect(pulseSig).toBeNull()
+    expect(parseKeeperLiveObserverEvent('message',
+      { type: 'keeper_turn_changed', name: 'code-reviewer-sister' }, 'code-reviewer-sister'))
+      .toEqual({ kind: 'turn_changed' })
 
     expect(
       parseKeeperLiveObserverEvent('keeper_chat_appended', { keeper_name: 'code-reviewer-sister' }, 'code-reviewer-sister'),

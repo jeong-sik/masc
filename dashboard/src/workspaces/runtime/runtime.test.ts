@@ -522,7 +522,7 @@ describe('workspaces/runtime', () => {
     ) as HTMLButtonElement
     exactTabBtn.click()
     const rowEl = await vi.waitFor(() => {
-      const exactRow = Array.from(container.querySelectorAll('tbody tr')).find(
+      const exactRow = Array.from(container.querySelectorAll<HTMLTableRowElement>('tbody tr')).find(
         (row) => row.textContent?.includes('run-exact-1'),
       )
       expect(exactRow).toBeDefined()

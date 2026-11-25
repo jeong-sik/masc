@@ -533,6 +533,21 @@ let step_raw ~now (m : Model.t) = function
         in
         ({ m with runtime }, [])
 
+let clear_inbox_reads (work : Work_store.t) =
+  let clear = function
+    | Observed.Loading _ -> Observed.unreported
+    | (Observed.Value _ | Observed.Absent | Observed.Unreported
+      | Observed.Failed _) as read -> read
+  in
+  {
+    work with
+    asks = clear work.asks;
+    tool_approvals = clear work.tool_approvals;
+    gate_pending = clear work.gate_pending;
+    gate_snapshot = clear work.gate_snapshot;
+    goal_confirmations = clear work.goal_confirmations;
+  }
+
 (* A new epoch is a new handshake, and the server behind it may be another
    process. Every path that moves the epoch returns through [step], so what
    only the previous process could answer is dropped here once.
@@ -594,6 +609,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
         |> Fleet_store.clear_turn_preview_updates;
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;
+      work = clear_inbox_reads after.work;
       inline_modal;
       ask_modal;
       config = Config_store.clear_in_flight after.config;
@@ -619,6 +635,33 @@ let reserve_board_view_read ~now (m : Model.t) cmds =
         let board_recovery, _ = Board_recovery.read ~keeper ~now recovery in
         { m with knowledge = { m.knowledge with board_recovery } }
       else m
+
+let reserve_inbox_reads ~now (m : Model.t) cmds =
+  let start = function
+    | Observed.Value _ as read -> Observed.mark_stale read
+    | Observed.Loading _ as read -> read
+    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+        Observed.loading ~since_ns:now
+  in
+  let reserve (work : Work_store.t) cmd =
+    (match cmd with
+    | Cmd.Http_get { epoch; req } when Epoch.equal epoch m.epoch ->
+        (match req with
+         | Cmd.Get_asks { keeper = None; include_resolved = false } ->
+             { work with asks = start work.asks }
+         | Cmd.Get_tool_approvals ->
+             { work with tool_approvals = start work.tool_approvals }
+         | Cmd.Get_gate_pending ->
+             { work with
+               gate_pending = start work.gate_pending;
+               gate_snapshot = start work.gate_snapshot }
+         | Cmd.Get_planning ->
+             { work with goal_confirmations = start work.goal_confirmations }
+         | _ -> work)
+    | _ -> work) [@warning "-4"]
+  in
+  let work = List.fold_left reserve m.work (Cmd.flatten cmds) in
+  if work == m.work then m else { m with work }
 
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
@@ -663,4 +706,5 @@ let step ~now m msg =
     |> reconcile_streams ~before:m ~after:next
     |> reconcile_memory_diagram ~before:m ~after:next
   in
-  (reserve_board_view_read ~now next cmds, final_cmds)
+  let next = reserve_board_view_read ~now next cmds in
+  (reserve_inbox_reads ~now next cmds, final_cmds)

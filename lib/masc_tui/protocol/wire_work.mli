@@ -841,11 +841,13 @@ type gate_resolved_row = {
 type gate_snapshot = {
   generated_at : string option;
   pending : gate_pending list;
+  pending_error : string option;
   retry_meta : gate_retry_meta list;
   rules : gate_rule list;
   rules_error : string option;
   recent_resolved : gate_resolved_row list;
   recent_resolved_error : string option;
+  recent_resolved_partial : bool;
   hitl : hitl_status option;
 }
 

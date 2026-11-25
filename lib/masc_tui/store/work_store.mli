@@ -65,6 +65,7 @@ type t = {
   active_tab : Nav.work_tab;
   inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
+  goal_confirmations : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
   harness_health : Wire_work.harness_health Observed.t;
@@ -188,6 +189,9 @@ val gate_pending_list : t -> Wire_work.gate_pending list
 val unlinked_task_count : t -> int
 val awaiting_confirmation_goals : t -> Wire_work.goal list
 
+val apply_goal_confirmations :
+  observed_at:Clock.Mono.t -> Wire_work.goal list -> t -> t
+
 val selected_goal : t -> Wire_work.goal option
 val selected_task : t -> Wire_work.task option
 val selected_verification : t -> Wire_work.verification_request option
@@ -280,6 +284,11 @@ val apply_verification_tlc_results :
 
 val equal_inbox_subview : inbox_subview -> inbox_subview -> bool
 val inbox_subview_rects : Rect.t -> Rect.t * Rect.t
+
+type inbox_source = Inbox_approvals | Inbox_asks | Inbox_gate | Inbox_goals
+
+val inbox_queue_reads : t -> (inbox_source * unit Observed.t) list
+val inbox_queue_rects : Rect.t -> t -> Rect.t * Rect.t
 (** The Queue/Rules/History tab bar and the content viewport beneath it. *)
 
 val set_inbox_subview : inbox_subview -> t -> t

@@ -58,6 +58,7 @@ type t = {
   active_tab : Nav.work_tab;
   inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
+  goal_confirmations : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
   harness_health : Wire_work.harness_health Observed.t;
@@ -116,6 +117,7 @@ let empty =
     active_tab = Nav.Work_pipeline;
     inbox_subview = Inbox_queue;
     planning = Observed.unreported;
+    goal_confirmations = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
     harness_health = Observed.unreported;
@@ -409,7 +411,7 @@ let unlinked_task_count t =
       | Wire_work.Linked _ -> acc)
     0 (tasks t)
 
-let awaiting_confirmation_goals t =
+let select_awaiting_confirmation_goals =
   List.filter
     (fun (g : Wire_work.goal) ->
       match g.phase with
@@ -421,7 +423,25 @@ let awaiting_confirmation_goals t =
       | Wire_work.Paused _
       | Wire_work.Blocked _ ->
           false)
-    (goals t)
+
+let confirmation_goals_read t =
+  match t.goal_confirmations with
+  | Observed.Unreported ->
+      Observed.map
+        (fun (snapshot : Wire_work.planning_snapshot) ->
+          select_awaiting_confirmation_goals snapshot.goals)
+        t.planning
+  | (Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Failed _) as read -> read
+
+let apply_goal_confirmations ~observed_at goals t =
+  let goal_confirmations =
+    Observed.value ~observed_at (select_awaiting_confirmation_goals goals)
+  in
+  { t with goal_confirmations }
+
+let awaiting_confirmation_goals t =
+  Option.value (Observed.to_option (confirmation_goals_read t)) ~default:[]
 
 let default_viewport_rows = Store_scroll.default_viewport_rows
 let adjust_scroll = Store_scroll.adjust_scroll
@@ -1258,6 +1278,7 @@ let mark_stale_all t =
   {
     t with
     planning = Observed.mark_stale t.planning;
+    goal_confirmations = Observed.mark_stale t.goal_confirmations;
     verifications = Observed.mark_stale t.verifications;
     harness_health = Observed.mark_stale t.harness_health;
     verification_evidence = Observed.mark_stale t.verification_evidence;
@@ -1370,6 +1391,27 @@ let equal_inbox_subview a b =
 let inbox_subview_rects (rect : Rect.t) =
   Rect.split_v rect ~top_h:(if rect.h >= 4 then 1 else 0)
 
+type inbox_source = Inbox_approvals | Inbox_asks | Inbox_gate | Inbox_goals
+
+let inbox_queue_reads t =
+  let as_unit obs = Observed.map (fun _ -> ()) obs in
+  [
+    Inbox_approvals, as_unit t.tool_approvals;
+    Inbox_asks, as_unit t.asks;
+    Inbox_gate, as_unit t.gate_pending;
+    Inbox_goals, as_unit (confirmation_goals_read t);
+  ]
+
+let inbox_queue_rects (rect : Rect.t) t =
+  let current (_, observed) =
+    match observed with
+    | Observed.Value { stale = false; _ } | Observed.Absent -> true
+    | Observed.Loading _ | Observed.Value _ | Observed.Unreported
+    | Observed.Failed _ -> false
+  in
+  if List.for_all current (inbox_queue_reads t) then (Rect.empty, rect)
+  else Rect.split_v rect ~top_h:1
+
 let set_inbox_subview inbox_subview t =
   { t with inbox_subview; detail_scroll_offset = 0 }
 
@@ -1383,11 +1425,26 @@ let cycle_inbox_subview t =
   set_inbox_subview next t
 
 let apply_gate_snapshot ~observed_at (snap : Wire_work.gate_snapshot) t =
+  let snap =
+    match snap.recent_resolved_error, Observed.to_option t.gate_snapshot with
+    | Some _, Some last ->
+        { snap with
+          recent_resolved = last.recent_resolved;
+          recent_resolved_partial = last.recent_resolved_partial }
+    | Some _, None | None, _ -> snap
+  in
+  let gate_pending =
+    match snap.pending_error with
+    | None -> Observed.value ~observed_at snap.pending
+    | Some reason ->
+        Observed.fetch_failed ~reason ~retryable:true ~at:observed_at
+          t.gate_pending
+  in
   let base =
     {
       t with
       gate_snapshot = Observed.value ~observed_at snap;
-      gate_pending = Observed.value ~observed_at snap.pending;
+      gate_pending;
     }
   in
   let q = String.trim base.filter_query in

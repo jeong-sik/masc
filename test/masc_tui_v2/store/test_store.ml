@@ -24130,6 +24130,42 @@ let () =
                 (Keeper_context_store.get_keeper ~keeper:"alpha"
                    m_denied.keeper_context)
                   .checkpoints_auth_denied);
+          Alcotest.test_case "Inbox publishes confirmed goals before Execution"
+            `Quick (fun () ->
+              let initial = Model.initial () in
+              let loading, _ =
+                Update.step ~now:t0 initial
+                  (Msg.Server_health_result
+                     { epoch = initial.epoch; result = Ok (sample_health ()) })
+              in
+              Alcotest.(check bool) "Inbox reads are pending after bootstrap"
+                true
+                (List.for_all
+                   (fun (_, read) -> Observed.is_loading read)
+                   (Work_store.inbox_queue_reads loading.work));
+              let reply model reply =
+                Update.step ~now:t0 model
+                  (Msg.Http_reply { epoch = loading.epoch; reply })
+                |> fst
+              in
+              let goal = sample_goal () in
+              let ready = reply loading (Msg.Reply_goal_confirmations (Ok [ goal ])) in
+              let failed =
+                reply ready
+                  (Msg.Reply_planning
+                     (Error (Msg.Http_error { status = 503; body = "Execution unavailable"; api_error = None })))
+              in
+              Alcotest.(check bool) "Execution failure remains visible" true
+                (Observed.is_failed failed.work.planning);
+              Alcotest.(check bool) "Goal confirmation retains its current read"
+                true
+                (match failed.work.goal_confirmations with
+                 | Observed.Value { data = [ received ]; stale = false; _ } ->
+                     String.equal received.id goal.id
+                 | Observed.Value _ | Observed.Failed _ | Observed.Loading _
+                 | Observed.Absent | Observed.Unreported -> false);
+              Alcotest.(check bool) "Attention received the Goal confirmation"
+                false (Attention.is_empty failed.attention));
           Alcotest.test_case
             "Wave 4 Layer 2: HITL Gate CRUD/modes/retry, Tools quality & MCP executor"
             `Quick (fun () ->
@@ -24152,6 +24188,7 @@ let () =
               let gate_snap : Wire_work.gate_snapshot =
                 {
                   generated_at = Some "2026-11-24T09:00:00Z";
+                  pending_error = None;
                   pending =
                     [
                       {
@@ -24197,6 +24234,7 @@ let () =
                   rules_error = None;
                   recent_resolved = [];
                   recent_resolved_error = None;
+                  recent_resolved_partial = false;
                   hitl = None;
                 }
               in

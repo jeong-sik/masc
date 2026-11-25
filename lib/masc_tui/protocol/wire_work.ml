@@ -2444,11 +2444,13 @@ type gate_resolved_row = {
 type gate_snapshot = {
   generated_at : string option;
   pending : gate_pending list;
+  pending_error : string option;
   retry_meta : gate_retry_meta list;
   rules : gate_rule list;
   rules_error : string option;
   recent_resolved : gate_resolved_row list;
   recent_resolved_error : string option;
+  recent_resolved_partial : bool;
   hitl : hitl_status option;
 }
 
@@ -2614,17 +2616,17 @@ let decode_gate_snapshot json =
   let* generated_at = optional_nonblank_string body "generated_at" in
   let* queue_state = required_object_field body "approval_queue_state" in
   let* qstate = required_nonblank_string queue_state "state" in
-  let* pending, retry_meta =
+  let* pending, retry_meta, pending_error =
     match qstate with
     | "ready" ->
         let* items = required_list_field body "approval_queue" in
         let* pend = decode_list "approval_queue" decode_gate_pending items in
         let meta = List.filter_map decode_gate_retry_meta_opt items in
-        Ok (pend, meta)
+        Ok (pend, meta, None)
     | "unavailable" ->
         let* title = required_nonblank_string queue_state "title" in
         let* detail = required_nonblank_string queue_state "operator_detail" in
-        Error (title ^ ": " ^ detail)
+        Ok ([], [], Some (title ^ ": " ^ detail))
     | other -> Error (Printf.sprintf "unknown approval_queue_state %S" other)
   in
   let* rules, rules_error =
@@ -2669,15 +2671,26 @@ let decode_gate_snapshot json =
         let* decoded = decode_hitl_status h in
         Ok (Some decoded)
   in
+  let* recent_resolved_partial =
+    match optional_object_field body "recent_resolved_page" with
+    | Error _ as err -> err
+    | Ok None -> Ok false
+    | Ok (Some page) ->
+        let* truncated = optional_bool_field page "truncated" in
+        let* scan_exhausted = optional_bool_field page "scan_exhausted" in
+        Ok (truncated = Some true || scan_exhausted = Some true)
+  in
   Ok
     {
       generated_at;
       pending;
+      pending_error;
       retry_meta;
       rules;
       rules_error;
       recent_resolved;
       recent_resolved_error;
+      recent_resolved_partial;
       hitl;
     }
 

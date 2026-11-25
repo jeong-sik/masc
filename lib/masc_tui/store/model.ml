@@ -3797,7 +3797,7 @@ let rebuild_attention m =
       ~asks:(Work_store.asks_list m.work)
       ~tool_approvals:(Work_store.tool_approvals_list m.work)
       ~gate_pending:(Work_store.gate_pending_list m.work)
-      ~goals:(Work_store.goals m.work)
+      ~goals:(Work_store.awaiting_confirmation_goals m.work)
       m.attention
   in
   let attention =

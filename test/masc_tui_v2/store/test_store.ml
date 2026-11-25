@@ -23053,17 +23053,17 @@ let test_chat_status_uses_the_same_words_for_every_turn () =
            (running_turn_with ~activity:Wire_fleet.Preview_tool_observed None (Some "Read"))));
   Alcotest.(check string) "the operator's own turn names the tool the same way"
     "도구 실행 중 · gh_pr_view"
-    (ko (Option.get (Composer.pending_tx_label (Composer.Tx_tool_running "gh_pr_view"))));
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label (Masc_tui_ui.Composer.Tx_tool_running "gh_pr_view"))));
   Alcotest.(check string) "and its answer" "답변 중"
-    (ko (Option.get (Composer.pending_tx_label Composer.Tx_streaming)));
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label Masc_tui_ui.Composer.Tx_streaming)));
   Alcotest.(check string) "and its reasoning" "추론 중"
-    (ko (Option.get (Composer.pending_tx_label Composer.Tx_thinking)));
+    (ko (Option.get (Masc_tui_ui.Composer.pending_tx_label Masc_tui_ui.Composer.Tx_thinking)));
   let queued =
     Chat_transcript.composer_pending_tx_of_phase
       (Chat_transcript.Phase_turn_running
          { turn = running_turn_with (Some [ open_tool "Execute" Wire_fleet.Tool_executing 10.0 ]) None;
            queued_count = 1 })
-    |> Composer.pending_tx_label |> Option.get |> ko
+    |> Masc_tui_ui.Composer.pending_tx_label |> Option.get |> ko
   in
   Alcotest.(check bool) "a waiting message says why it waits, before what the turn is doing"
     true

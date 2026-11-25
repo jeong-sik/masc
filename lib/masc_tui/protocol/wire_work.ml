@@ -8,6 +8,9 @@ let planning_path = "/api/v1/dashboard/planning"
 let execution_tasks_path = "/api/v1/dashboard/execution?light=true"
 let goals_path = "/api/v1/dashboard/goals"
 let goal_confirmation_path = "/api/v1/goals/confirmation"
+
+let goal_confirmation_get_path ~goal_id =
+  goal_confirmation_path ^ "?goal_id=" ^ percent_encode (String.trim goal_id)
 let mcp_path = "/mcp"
 let mcp_protocol_version = "2026-07-28"
 
@@ -127,6 +130,15 @@ type goal_confirmation_request = {
   expected_workspace : expected_workspace;
   expected_operator_id : string;
   expected_runtime_instance_id : string;
+}
+
+type goal_confirmation_proof = {
+  goal_id : string;
+  criterion_revision : string;
+  request_id : string option;
+  verification_run_id : string option;
+  inspection_operator_id : string;
+  state : string;
 }
 
 let goal_phase_to_string = function
@@ -353,6 +365,66 @@ let encode_goal_confirmation (req : goal_confirmation_request) =
       ("expected_operator_id", `String req.expected_operator_id);
       ("expected_runtime_instance_id", `String req.expected_runtime_instance_id);
     ]
+
+(* Decode [GET /api/v1/goals/confirmation?goal_id=...], which returns
+   [inspection_operator_id], the full [goal], and the authoritative
+   [verification] record. Only the proof fields the confirmation modal
+   needs are extracted; anything else is ignored. *)
+let decode_goal_confirmation json =
+  let* inspection_operator_id =
+    required_nonblank_string json "inspection_operator_id"
+  in
+  let* (goal_json, verification_json) =
+    match (member "goal" json, member "verification" json) with
+    | (`Assoc _ as g, v) -> Ok (g, v)
+    | _ -> Error "goal confirmation requires goal and verification fields"
+  in
+  let* goal_id = required_nonblank_string goal_json "id" in
+  let* criterion_revision =
+    match optional_nonblank_string goal_json "criterion_revision" with
+    | Ok (Some r) -> Ok r
+    | Ok None ->
+        (* A Goal without a criterion revision has no proof to name; surface
+           it as a decode error rather than prefilling a bogus revision. *)
+        Error "goal confirmation requires goal.criterion_revision"
+    | Error _ as err -> err
+  in
+  let state, request_id, verification_run_id =
+    match verification_json with
+    | `Null -> ("no_record", None, None)
+    | `Assoc _ as v -> (
+        let completion =
+          match member "completion" v with `Assoc _ as c -> c | _ -> v
+        in
+        match optional_nonblank_string completion "state" with
+        | Ok (Some (("proof_proven" | "human_confirmed") as raw_state)) -> (
+            match member "verdict" completion with
+            | `Assoc _ as verdict ->
+                let rid = optional_nonblank_string verdict "request_id" in
+                let run =
+                  optional_nonblank_string verdict "verification_run_id"
+                in
+                ( raw_state
+                , (match rid with Ok r -> r | Error _ -> None)
+                , (match run with Ok r -> r | Error _ -> None) )
+            | _ -> (raw_state, None, None))
+        | Ok (Some "proof_pending") ->
+            let rid = optional_nonblank_string completion "request_id" in
+            ("proof_pending", (match rid with Ok r -> r | Error _ -> None), None)
+        | Ok (Some state) -> (state, None, None)
+        | Ok None -> ("unknown", None, None)
+        | Error _ -> ("unknown", None, None))
+    | _ -> ("unknown", None, None)
+  in
+  Ok
+    {
+      goal_id;
+      criterion_revision;
+      request_id;
+      verification_run_id;
+      inspection_operator_id;
+      state;
+    }
 
 type goal_measure_direction =
   | At_least

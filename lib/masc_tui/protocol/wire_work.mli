@@ -8,6 +8,7 @@ val planning_path : string
 val execution_tasks_path : string
 val goals_path : string
 val goal_confirmation_path : string
+val goal_confirmation_get_path : goal_id:string -> string
 val mcp_path : string
 val mcp_protocol_version : string
 val task_link_goal_path : task_id:string -> string
@@ -104,6 +105,15 @@ type goal_confirmation_request = {
   expected_runtime_instance_id : string;
 }
 
+type goal_confirmation_proof = {
+  goal_id : string;
+  criterion_revision : string;
+  request_id : string option;
+  verification_run_id : string option;
+  inspection_operator_id : string;
+  state : string;
+}
+
 val goal_phase_to_string : goal_phase -> string
 val goal_action_to_string : goal_action -> string
 val decode_goal_phase : Yojson.Safe.t -> (goal_phase, string) result
@@ -124,6 +134,10 @@ val encode_goal_transition :
 
 val encode_goal_confirmation : goal_confirmation_request -> Yojson.Safe.t
 (** Encode strict allowlist request body for [POST /api/v1/goals/confirmation]. *)
+
+val decode_goal_confirmation :
+  Yojson.Safe.t -> (goal_confirmation_proof, string) result
+(** Decode [GET /api/v1/goals/confirmation] proof fields for modal prefill. *)
 
 type goal_measure_direction =
   | At_least

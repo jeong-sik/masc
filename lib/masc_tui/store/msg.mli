@@ -590,6 +590,10 @@ type http_reply =
       (Wire_runtime.verifier_runs_snapshot, http_error) result
   | Reply_goal_verification_runs of
       (Wire_runtime.verifier_runs_snapshot, http_error) result
+  | Reply_goal_confirmation of {
+      goal_id : string;
+      result : (Wire_work.goal_confirmation_proof, http_error) result;
+    }
   | Reply_keeper_board_attention_quarantines of {
       keeper : string;
       result :

@@ -589,7 +589,8 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
 
 let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
     ~(criterion_revision : string) =
-  open_custom_inline_modal m
+  let m, cmds =
+    open_custom_inline_modal m
     [
       {
         key = "confirm_goal_id";
@@ -633,6 +634,14 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
         secret = false;
       };
     ]
+  in
+  (* The manual fields stay for operators who prefer typing the proof, but
+     the authoritative values already live on the server: fetch them and let
+     the reply fill the blanks, so the common path is Enter-to-confirm. *)
+  let fetch =
+    Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_goal_confirmation { goal_id } }
+  in
+  (m, cmds @ [ fetch ])
 
 (* The route refuses a Goal transition that does not name the workspace the
    operator saw. Until [/health] has named it there is nothing true to name,

@@ -138,6 +138,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_exact_lane_run_detail _
   | Cmd.Get_verification_runs
   | Cmd.Get_goal_verification_runs
+  | Cmd.Get_goal_confirmation _
   | Cmd.Get_keeper_board_attention_quarantines _
   | Cmd.Get_lane_addon_declaration _
   | Cmd.Get_lane_addon_action_status _
@@ -1077,6 +1078,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_exact_lane_run_detail _
   | Cmd.Get_verification_runs
   | Cmd.Get_goal_verification_runs
+  | Cmd.Get_goal_confirmation _
   | Cmd.Get_keeper_board_attention_quarantines _
   | Cmd.Get_lane_addon_declaration _
   | Cmd.Get_lane_addon_action_status _
@@ -2313,6 +2315,17 @@ let rec execute_get t ~epoch req =
               Msg.Reply_goal_verification_runs
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_goal_verification_runs)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_goal_confirmation { goal_id } ->
+            let reply =
+              Msg.Reply_goal_confirmation
+                {
+                  goal_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_work.decode_goal_confirmation;
+                }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_keeper_board_attention_quarantines { keeper } ->

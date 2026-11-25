@@ -1117,48 +1117,11 @@ let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
     , [] )
   else (m, [])
 
+(* Single implementation lives in Update_actions; both input paths share it
+   so the confirmation fields cannot drift apart. *)
 let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
     ~(criterion_revision : string) =
-  (* Never fabricate request_id, verification_run_id, or operator_id: ask the
-     operator to supply exact server-issued confirmation proof fields. *)
-  open_custom_inline_modal m
-    [
-      {
-        key = "confirm_goal_id";
-        label = Say.make ~ko:"목표 ID" ~en:"Goal ID";
-        value = goal_id;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "confirm_criterion_revision";
-        label = Say.make ~ko:"기준 리비전" ~en:"Criterion revision";
-        value = criterion_revision;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "confirm_request_id";
-        label = Say.make ~ko:"Request ID" ~en:"Request ID";
-        value = "";
-        required = true;
-        secret = false;
-      };
-      {
-        key = "confirm_verification_run_id";
-        label = Say.make ~ko:"검증 실행 ID" ~en:"Verification run ID";
-        value = "";
-        required = true;
-        secret = false;
-      };
-      {
-        key = "confirm_operator_id";
-        label = Say.make ~ko:"운영자 ID" ~en:"Operator ID";
-        value = "";
-        required = true;
-        secret = false;
-      };
-    ]
+  Update_actions.open_goal_confirmation_proof_modal m ~goal_id ~criterion_revision
 
 (* The route refuses a Goal transition that does not name the workspace the
    operator saw. Until [/health] has named it there is nothing true to name,

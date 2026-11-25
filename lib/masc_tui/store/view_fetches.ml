@@ -37,6 +37,29 @@ let verification_requests_read (work : Work_store.t) =
 
 let add_if cond req acc = if cond then req :: acc else acc
 
+let sandbox_detail_fetch ?keeper (m : Model.t) =
+  let target =
+    match Model.active_inspector m with
+    | Some _ -> None
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Keepers
+          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_work_sandbox ->
+            Option.map
+              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+              (Fleet_store.selected_keeper_summary m.fleet)
+        | Nav.Infra when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes ->
+            Infra_store.selected_sandbox_keeper m.infra
+        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra ->
+            None)
+  in
+  match target with
+  | Some target
+    when Option.fold ~none:true ~some:(String.equal target) keeper
+         && Infra_store.keeper_sandbox_needed ~force:false ~keeper:target m.infra ->
+      [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper = target } } ]
+  | Some _ | None -> []
+
 let needs_keeper_turn ~force ~keeper (m : Model.t) =
   needs_fetch ~force m.fleet.turns
   || Option.exists
@@ -460,7 +483,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
       else []
   | Nav.Keeper_work_sandbox ->
       let sandbox_needed =
-        needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
+        Infra_store.keeper_sandbox_needed ~force ~keeper:name m.infra
       in
       []
       |> add_if (needs_planning ~force m.work) Cmd.Get_planning
@@ -1248,8 +1271,7 @@ let fetches_for_workspace ~force (m : Model.t) =
           let keeper_req =
             match Infra_store.selected_sandbox_keeper m.infra with
             | Some keeper
-              when needs_fetch ~force
-                     (Infra_store.keeper_sandbox_for ~keeper m.infra) ->
+              when Infra_store.keeper_sandbox_needed ~force ~keeper m.infra ->
                 [ Cmd.Get_keeper_sandbox { keeper } ]
             | Some _ | None -> []
           in

@@ -604,7 +604,10 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
     in
     {
       after with
-      infra = Infra_store.forget_log_cursor after.infra;
+      infra =
+        after.infra
+        |> Infra_store.forget_log_cursor
+        |> Infra_store.detach_keeper_sandbox_reads;
       fleet =
         Fleet_store.detach_chat_streams
           { after.fleet with worked = Fleet_store.String_map.empty }
@@ -673,6 +676,31 @@ let reserve_work_reads ~now (m : Model.t) cmds =
   let work = List.fold_left reserve m.work (Cmd.flatten cmds) in
   if work == m.work then m else { m with work }
 
+(* The Keepers Work·Sandbox tab and the Infra Sandboxes tab each name one Keeper. *)
+let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
+  match cmds with
+  | [] -> m
+  | _ :: _ ->
+      let workspace_keeper =
+        if Nav.equal_workspace m.nav.workspace Nav.Keepers
+           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_work_sandbox then
+          Option.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+        else if Nav.equal_workspace m.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes then
+          Infra_store.selected_sandbox_keeper m.infra
+        else None
+      in
+      let emitted = Cmd.flatten cmds in
+      let reserve infra = function
+        | Some keeper when List.mem
+            (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper } }) emitted ->
+            Infra_store.request_keeper_sandbox ~keeper ~now infra
+        | Some _ | None -> infra
+      in
+      let infra = reserve m.infra workspace_keeper in
+      if infra == m.infra then m else { m with infra }
+
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
@@ -717,4 +745,5 @@ let step ~now m msg =
     |> reconcile_memory_diagram ~before:m ~after:next
   in
   let next = reserve_board_view_read ~now next cmds in
+  let next = reserve_sandbox_view_reads ~now next cmds in
   (reserve_work_reads ~now next cmds, final_cmds)

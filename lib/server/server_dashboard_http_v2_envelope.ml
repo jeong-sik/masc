@@ -13,6 +13,7 @@ type error_code =
   | Invalid_param
   | Unauthorized
   | Not_found
+  | Sandbox_telemetry_missing
   | Conflict_cas
   | Workspace_mismatch
   | Validation_failed
@@ -22,6 +23,7 @@ let error_code_to_string = function
   | Invalid_param -> "invalid_param"
   | Unauthorized -> "unauthorized"
   | Not_found -> "not_found"
+  | Sandbox_telemetry_missing -> "sandbox_telemetry_missing"
   | Conflict_cas -> "conflict_cas"
   | Workspace_mismatch -> "workspace_mismatch"
   | Validation_failed -> "validation_failed"
@@ -31,7 +33,7 @@ let error_code_to_string = function
 let error_status : error_code -> Httpun.Status.t = function
   | Invalid_param -> `Bad_request
   | Unauthorized -> `Forbidden
-  | Not_found -> `Not_found
+  | Not_found | Sandbox_telemetry_missing -> `Not_found
   | Conflict_cas -> `Conflict
   | Workspace_mismatch -> `Conflict
   | Validation_failed -> `Code 422

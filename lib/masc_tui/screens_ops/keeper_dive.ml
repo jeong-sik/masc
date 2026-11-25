@@ -2151,11 +2151,10 @@ let find_ssh_pool_for_keeper (model : Model.t) ~name =
             p.keeper_sessions)
         snap.ssh_pools
 
-let resolve_keeper_sandbox (model : Model.t) ~name =
-  match
-    Observed.to_option (Infra_store.keeper_sandbox_for ~keeper:name model.infra)
-  with
-  | Some resp ->
+let resolve_keeper_sandbox (model : Model.t) ~name
+    ~(detail : Wire_infra.keeper_sandbox_response option) =
+  match detail with
+  | Some (resp : Wire_infra.keeper_sandbox_response) ->
       let pool_opt =
         match resp.sandbox with
         | Wire_infra.Sandbox_ssh_keeper { pool = Some p; _ } -> Some p
@@ -2233,44 +2232,32 @@ let render_sandbox_summary grid ~(rect : Rect.t) ~(theme : Theme.t)
            ~en:"Sandbox · [p] Probe · [o] Infra")
       grid ~rect ~y:!y ~theme;
     incr y;
+    let read = Infra_store.keeper_sandbox_read_for ~keeper:name model.infra in
+    let detail = Option.map fst (Infra_store.keeper_sandbox_detail read) in
+    let resolved = resolve_keeper_sandbox model ~name ~detail in
+    let module U = Masc_tui_screens_core.Render_util in
+    let fallback =
+      if Option.is_none detail && Option.is_some resolved then
+        Some (if model.infra.sandboxes_fallback_404 then U.Keeper_roster else U.Fleet_snapshot)
+      else None
+    in
     if !y < bot then
-      match resolve_keeper_sandbox model ~name with
+      y :=
+        !y
+        + U.draw_sandbox_detail_notice grid
+            ~rect:(Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(bot - !y))
+            ~theme ~lang:model.lang ~read ~fallback;
+    if !y < bot then
+      match resolved with
       | None -> (
-          let sandbox_obs =
-            Infra_store.keeper_sandbox_for ~keeper:name model.infra
-          in
           match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
           | Some _ ->
               let lbl, tone = Ops_common.keeper_sandbox_label ~model name in
               Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
-                ~key:(Ops_common.say model ~ko:"프로필" ~en:"Profile")
+                ~key:(Ops_common.say model ~ko:"목록 프로필" ~en:"Roster profile")
                 ~value:lbl ~val_fg:(Theme.status_color theme tone)
-                ~val_attrs:Attr.bold ();
-              incr y;
-              if !y < bot then
-                let st, msg =
-                  match sandbox_obs with
-                  | Observed.Failed { reason; _ } ->
-                      ( Typography.status ~bg theme Theme.Status_critical
-                      , Ops_common.say model ~ko:("조회 실패: " ^ reason)
-                          ~en:("Fetch failed: " ^ reason) )
-                  | Observed.Loading _ | Observed.Unreported | Observed.Absent
-                  | Observed.Value _ ->
-                      ( Typography.whisper ~bg theme
-                      , Ops_common.say model
-                          ~ko:"상세 프로브 대기 중 ([p] 프로브 · [o] Infra > Sandboxes)"
-                          ~en:"Telemetry pending ([p] Probe · [o] Infra > Sandboxes)" )
-                in
-                ignore
-                  (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y
-                     ~max_w:rect.w ~style:st msg)
-          | None ->
-              Ops_common.draw_observed_empty grid
-                ~rect:(Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(bot - !y))
-                ~theme ~lang:model.lang sandbox_obs
-                ~empty_msg:
-                  (Say.make ~ko:"샌드박스 정보 없음"
-                     ~en:"No sandbox telemetry"))
+                ~val_attrs:Attr.bold ()
+          | None -> ())
       | Some (Wire_infra.Sandbox_microvm g, _) ->
           Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
             ~key:(Ops_common.say model ~ko:"백엔드" ~en:"Backend")

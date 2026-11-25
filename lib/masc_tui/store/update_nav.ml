@@ -7010,9 +7010,9 @@ let sandbox_entry_info_for_keeper ~use_keeper_detail ~keeper
     if not use_keeper_detail then None
     else
       Option.map
-        (fun (resp : Wire_infra.keeper_sandbox_response) ->
+        (fun ((resp : Wire_infra.keeper_sandbox_response), _) ->
           sandbox_entry_info_of_detail ~sandboxes resp.sandbox)
-        (Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf))
+        (Infra_store.keeper_sandbox_detail (Infra_store.keeper_sandbox_read_for ~keeper inf))
   in
   match from_detail with
   | Some _ as found -> found
@@ -9520,6 +9520,15 @@ let infra_detail_max_scroll (m : Model.t) =
             with
             | None -> 0
             | Some info ->
+                let read = Infra_store.keeper_sandbox_read_for ~keeper:kp m.infra in
+                let content = ui_pad_content ~bp inner in
+                let notice_h =
+                  if Rect.is_empty content then 0
+                  else
+                    min content.h
+                      (Infra_store.keeper_sandbox_notice_rows ~has_displayed_rows:true read)
+                in
+                let _, inner = Rect.split_v inner ~top_h:notice_h in
                 if m.infra.show_raw_json then
                   let content = ui_pad_content ~bp inner in
                   if Rect.is_empty content then 0

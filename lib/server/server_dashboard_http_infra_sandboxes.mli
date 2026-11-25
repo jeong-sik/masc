@@ -69,7 +69,9 @@ val get_keeper_json :
   keeper:string ->
   unit ->
   (Yojson.Safe.t, Httpun.Status.t * Yojson.Safe.t) result
-(** Non-blocking deep sandbox telemetry for [GET /api/v1/infra/sandboxes/:keeper]. *)
+(** Deep sandbox telemetry for [GET /api/v1/infra/sandboxes/:keeper].
+    A valid lookup with no matching row in the served snapshot returns HTTP
+    404 with [sandbox_telemetry_missing]. *)
 
 val trigger_probe :
   sw:Eio.Switch.t ->

@@ -2,6 +2,13 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
+  let m =
+    {
+      m with
+      infra = Infra_store.clear_sandbox_observations m.infra;
+      fleet = { m.fleet with sandbox_profiles = Fleet_store.String_map.empty };
+    }
+  in
   let exp_s = match expected with Some s -> s | None -> "?" in
   let obs_s = match observed with Some s -> s | None -> "?" in
   let summary =
@@ -170,15 +177,7 @@ let confirm_pending_txs_from_history ~now ~keeper
 
 let refresh_404_fallbacks ~now (m : Model.t) =
   let infra =
-    if m.infra.sandboxes_fallback_404 then
-      let keepers =
-        match Observed.to_option m.fleet.keepers with Some ks -> ks | None -> []
-      in
-      Infra_store.apply_sandboxes_fallback ~observed_at:now
-        ~wall_unix:m.freshness.last_wall_unix ~keepers
-        ~sandbox_profiles:(Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-        ~tool_series_totals:(Runtime_store.tool_series_totals m.runtime)
-        m.infra
+    if m.infra.sandboxes_fallback_404 then Model.sandboxes_from_roster ~now m
     else m.infra
   in
   let work =
@@ -375,6 +374,21 @@ let apply_operator_note_save ~now ~keeper ~modal_submission_id result (m : Model
       in
       let m, read_cmds = followup m in
       m, read_cmds @ cmds
+
+let sandbox_read_can_retain = function
+  | Msg.Http_error { status = (401 | 403); _ } | Msg.Workspace_mismatch _ ->
+      false
+  | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> true
+
+let finish_fleet_sandboxes infra (m : Model.t) =
+  let next = { m with infra } in
+  let cmds =
+    if Option.is_none (Model.active_inspector next)
+       && Nav.equal_workspace next.nav.workspace Nav.Infra
+    then View_fetches.sandbox_detail_fetch next
+    else []
+  in
+  (next, cmds)
 
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
@@ -4759,76 +4773,64 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_runtime "clients") ~ko:"클라이언트 조회"
         ~en:"MCP clients fetch" err
   | Msg.Reply_sandboxes (Ok sb) ->
-      let infra = Infra_store.apply_sandboxes ~observed_at:now sb m.infra in
-      let next = { m with infra } in
-      let cmds =
-        if
-          Option.is_none (Model.active_inspector next)
-          && Nav.equal_workspace next.nav.workspace Nav.Infra
-          && Nav.equal_infra_tab next.infra.active_tab Nav.Infra_sandboxes
-        then
-          match Infra_store.selected_sandbox_keeper next.infra with
-          | Some keeper -> (
-              match Infra_store.keeper_sandbox_for ~keeper next.infra with
-              | Observed.Value { stale = false; _ } | Observed.Loading _ -> []
-              | Observed.Value { stale = true; _ }
-              | Observed.Absent
-              | Observed.Unreported
-              | Observed.Failed _ ->
-                  [
-                    Cmd.Http_get
-                      {
-                        epoch = next.epoch;
-                        req = Cmd.Get_keeper_sandbox { keeper };
-                      };
-                  ])
-          | None -> []
-        else []
-      in
-      (next, cmds)
+      finish_fleet_sandboxes (Infra_store.apply_sandboxes ~observed_at:now sb m.infra) m
   | Msg.Reply_sandboxes (Error err) -> (
       match err with
       | Msg.Http_error { status = 404; _ } ->
-          let keepers =
-            match Observed.to_option m.fleet.keepers with
-            | Some ks -> ks
-            | None -> []
-          in
-          let infra =
-            Infra_store.apply_sandboxes_fallback ~observed_at:now
-              ~wall_unix:m.freshness.last_wall_unix ~keepers
-              ~sandbox_profiles:
-                (Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-              ~tool_series_totals:(Runtime_store.tool_series_totals m.runtime)
-              m.infra
-          in
-          ({ m with infra }, [])
+          finish_fleet_sandboxes (Model.sandboxes_from_roster ~now m) m
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
           err_reply
             ~fail:
               (on_infra (fun (x : Infra_store.t) ->
-                   { x with sandboxes = failed_slot err x.sandboxes }))
+                   let retain = sandbox_read_can_retain err in
+                   let last = if retain then x.sandboxes else Observed.unreported in
+                   { x with
+                     sandboxes = failed_slot err last;
+                     sandboxes_fallback_404 = retain && x.sandboxes_fallback_404 }))
             ~source:(Health.Source_sandbox "fleet") ~ko:"샌드박스 조회"
             ~en:"Sandboxes fetch" err)
-  | Msg.Reply_keeper_sandbox { keeper; result = Ok ks } ->
-      ( {
-          m with
-          infra =
-            Infra_store.set_keeper_sandbox ~keeper
-              (Observed.value ~observed_at:now ks)
-              m.infra;
-        }
-      , [] )
-  | Msg.Reply_keeper_sandbox { keeper; result = Error err } ->
-      err_reply
-        ~fail:
-          (on_infra (fun (x : Infra_store.t) ->
-               Infra_store.set_keeper_sandbox ~keeper
-                 (failed_slot err (Infra_store.keeper_sandbox_for ~keeper x))
-                 x))
-        ~source:(Health.Source_sandbox keeper) ~ko:"키퍼 샌드박스 조회"
-        ~en:"Keeper sandbox fetch" err
+  | Msg.Reply_keeper_sandbox { keeper; result } ->
+      let read = Infra_store.keeper_sandbox_read_for ~keeper m.infra in
+      let settled, cmds =
+        match result with
+        | Ok ks ->
+            let infra =
+              Infra_store.set_keeper_sandbox ~keeper
+                (Observed.value ~observed_at:now ks) m.infra
+            in
+            ({ m with infra }, [])
+        | Error err ->
+            let missing =
+              match err with
+              | Msg.Http_error { status = 404; api_error; _ } ->
+                  Option.exists
+                    (fun (api : Wire_common.api_error) ->
+                      api.code = Wire_common.Sandbox_telemetry_missing)
+                    api_error
+              | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+              | Msg.Decode_error _ ->
+                  false
+            in
+            if missing then
+              let infra = Infra_store.set_keeper_sandbox ~keeper Observed.absent m.infra in
+              ({ m with infra }, [])
+            else
+              err_reply
+                ~fail:
+                  (on_infra (fun x ->
+                       Infra_store.set_keeper_sandbox ~keeper
+                         ~retain_detail:(sandbox_read_can_retain err)
+                         (failed_slot err Observed.unreported) x))
+                ~source:(Health.Source_sandbox keeper) ~ko:"키퍼 샌드박스 조회"
+                ~en:"Keeper sandbox fetch" err
+      in
+      let followup =
+        if read.invalidated_during_read && Epoch.equal m.epoch settled.epoch then
+          View_fetches.sandbox_detail_fetch ~keeper settled
+        else []
+      in
+      (settled, cmds @ followup)
   | Msg.Reply_repositories (Ok repos) ->
       let infra =
         Infra_store.apply_repositories ~observed_at:now repos m.infra

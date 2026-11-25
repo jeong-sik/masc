@@ -990,7 +990,28 @@ let test_chat_stream_409_from_another_instance () =
 
 (* 4. 409 workspace_mismatch recovery without loop *)
 let test_workspace_mismatch_recovery () =
-  let m0 = Model.initial () in
+  let initial = Model.initial () in
+  let infra =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None initial.infra
+  in
+  let fleet = Option.get (Observed.to_option infra.sandboxes) in
+  let prior : Wire_infra.keeper_sandbox_response =
+    { keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers) }
+  in
+  let m0 =
+    { initial with
+      fleet =
+        { initial.fleet with
+          sandbox_profiles =
+            Fleet_store.String_map.singleton "alpha" Wire_fleet.Profile_docker };
+      infra =
+        Infra_store.set_keeper_sandbox ~keeper:"alpha"
+          (Observed.value ~observed_at:t0 prior) infra }
+  in
   let e1 = m0.epoch in
   let mismatch =
     Msg.Workspace_mismatch
@@ -1013,6 +1034,14 @@ let test_workspace_mismatch_recovery () =
        Model.Mismatch_recovering);
   Alcotest.(check bool) "re-handshake Get_health emitted" true
     (has_get_health cmds1);
+  Alcotest.(check bool) "workspace mismatch clears previous Sandbox observations"
+    true
+    (Option.is_none (Observed.to_option m1.infra.sandboxes)
+     && not m1.infra.sandboxes_fallback_404
+     && Option.is_none (Fleet_store.sandbox_profile_of ~keeper:"alpha" m1.fleet)
+     && Option.is_none
+          (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m1.infra
+           |> Infra_store.keeper_sandbox_detail));
   (* Parallel stale 409 from old epoch e1 is ignored cleanly *)
   let m2, cmds2 =
     Update.step ~now:t0 m1
@@ -1078,7 +1107,30 @@ let test_workspace_mismatch_recovery () =
             false)
       cmds3
   in
-  Alcotest.(check bool) "workspace guard updated" true guard_updated
+  Alcotest.(check bool) "workspace guard updated" true guard_updated;
+  let reply =
+    Msg.Reply_keeper_sandbox
+      { keeper = "alpha";
+        result = Error (Msg.Http_error { status = 503; body = ""; api_error = None }) }
+  in
+  let after_failure, _ =
+    Update.step ~now:t2 m3 (Msg.Http_reply { epoch = m3.epoch; reply })
+  in
+  Alcotest.(check bool) "transient failure in the new workspace keeps no old detail"
+    true
+    (Option.is_none
+       (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" after_failure.infra
+        |> Infra_store.keeper_sandbox_detail));
+  let unavailable =
+    Msg.Reply_sandboxes
+      (Error (Msg.Http_error { status = 404; body = ""; api_error = None }))
+  in
+  let fallback, _ =
+    Update.step ~now:t2 after_failure
+      (Msg.Http_reply { epoch = after_failure.epoch; reply = unavailable })
+  in
+  Alcotest.(check (option string)) "roster fallback cannot reconstruct a previous workspace's Keeper"
+    None (Infra_store.selected_sandbox_keeper fallback.infra)
 
 (* 5. Subscriptions.plan bounded across all 6 workspaces + zero idle polling *)
 let test_subscriptions_bounded_and_zero_polling () =
@@ -2446,12 +2498,20 @@ let test_round2_store_regressions () =
           m_k.infra;
     }
   in
-  let _, cmds_ksb_beta =
+  let m_ksb_beta, cmds_ksb_beta =
     Update.step ~now:t2 m_ksb_alpha (Msg.Key_event (char_key "j"))
   in
   Alcotest.(check bool)
     "Keeper_work_sandbox move alpha->beta fetches Get_keeper_sandbox(beta)" true
     (has_get (is_sandbox_for "beta") cmds_ksb_beta);
+  let beta_read = Infra_store.keeper_sandbox_read_for ~keeper:"beta" m_ksb_beta.infra in
+  Alcotest.(check bool) "beta detail dispatch has an outstanding read" true
+    (Option.equal Clock.Mono.equal beta_read.requested_at (Some t2));
+  Alcotest.(check bool) "alpha detail stays settled" true
+    (Option.is_none (Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m_ksb_beta.infra).requested_at);
+  Alcotest.(check bool) "pending beta read coalesces a refresh" false
+    (has_get (is_sandbox_for "beta")
+       (View_fetches.fetches_for_current_view ~force:true m_ksb_beta));
 
   (* 3. Keeper_config: switching to Keepers + moving alpha->beta syncs config.target
      and accepts Reply_config_schema into model.config.schema *)
@@ -2713,6 +2773,28 @@ let test_v25_data_pipeline_and_settings_2pane () =
       Alcotest.(check int) "fallback fleet_metrics_24h.calls = 120" 120
         sb.fleet_metrics_24h.calls
   | None -> Alcotest.fail "expected fallback sandboxes snapshot");
+  let stale = Model.mark_all_domains_stale m6 in
+  let ssh_extras =
+    { extras with sandbox_profiles = [ ("alpha-builder", Wire_fleet.Profile_remote_ssh) ] }
+  in
+  let rebuilt, _ =
+    Update.step ~now:t1 stale
+      (Msg.Http_reply
+         { epoch = stale.epoch; reply = Msg.Reply_keepers_roster_extras ssh_extras })
+  in
+  let check_fallback_activity (m : Model.t) expected_calls =
+    let snapshot = Option.get (Observed.to_option m.infra.sandboxes) in
+    Alcotest.(check int) "fallback uses fresh tool activity" expected_calls
+      snapshot.fleet_metrics_24h.calls;
+    Alcotest.(check string) "profile without current roster has unobserved binding"
+      "unobserved" (List.hd snapshot.ssh_unbound_keepers).binding_state
+  in
+  check_fallback_activity rebuilt 0;
+  let series_seen, _ =
+    Update.step ~now:t2 rebuilt
+      (Msg.Sse_event { epoch = rebuilt.epoch; event = Msg.Sse_tool_series ts })
+  in
+  check_fallback_activity series_seen 120;
   (match Observed.to_option m6.work.candle_ledger with
   | Some cl ->
       Alcotest.(check string) "fallback candle circulating" "7500"
@@ -8926,6 +9008,26 @@ let test_answers_land_on_their_own_target () =
        (Infra_store.keeper_sandbox_for ~keeper:"alpha" m1.infra));
   Alcotest.(check (option bool)) "beta's 400 lands on beta" (Some false)
     (retryable_failure (Infra_store.keeper_sandbox_for ~keeper:"beta" m1.infra));
+  let missing =
+    Wire_common.decode_api_error
+      (`Assoc [ "error", `Assoc [
+         "code", `String "sandbox_telemetry_missing";
+         "message", `String "keeper has no telemetry in the served snapshot";
+       ] ])
+    |> Result.to_option
+  in
+  let absent =
+    reply m1
+      (Msg.Reply_keeper_sandbox {
+         keeper = "alpha";
+         result = Error (Msg.Http_error { status = 404; body = ""; api_error = missing });
+       })
+  in
+  Alcotest.(check bool) "the named missing receipt settles as an empty observation"
+    true (Infra_store.keeper_sandbox_for ~keeper:"alpha" absent.infra = Observed.Absent);
+  let fault = reply m1 (sandbox_error "alpha" 404) in
+  Alcotest.(check (option bool)) "generic 404 stays a read failure" (Some false)
+    (retryable_failure (Infra_store.keeper_sandbox_for ~keeper:"alpha" fault.infra));
   let on_beta_sandbox =
     {
       m1 with
@@ -8969,6 +9071,225 @@ let test_answers_land_on_their_own_target () =
      | Observed.Value _ | Observed.Loading _ | Observed.Unreported
      | Observed.Failed _ ->
          false)
+
+let test_sandbox_fleet_denial_clears_selected_rows () =
+  let m = Model.initial () in
+  let roster_fallback =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None m.infra
+  in
+  let fleet = Option.get (Observed.to_option roster_fallback.sandboxes) in
+  let reply (m : Model.t) reply =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply }))
+  in
+  let http status = Msg.Http_error { status; body = ""; api_error = None } in
+  let detail : Wire_infra.keeper_sandbox_response =
+    {
+      keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers);
+    }
+  in
+  let authorized =
+    reply (reply m (Msg.Reply_sandboxes (Ok fleet)))
+      (Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Ok detail })
+  in
+  let named_denied =
+    reply authorized
+      (Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Error (http 403) })
+  in
+  let has_detail (m : Model.t) =
+    Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m.infra
+    |> Infra_store.keeper_sandbox_detail |> Option.is_some
+  in
+  Alcotest.(check (option string)) "named denial keeps the authorized fleet row"
+    (Some "alpha") (Infra_store.selected_sandbox_keeper named_denied.infra);
+  Alcotest.(check bool) "named denial clears its cached detail" false
+    (has_detail named_denied);
+  let check_fleet_denial m status =
+    let denied = reply m (Msg.Reply_sandboxes (Error (http status))) in
+    Alcotest.(check (option string)) "fleet denial clears the selected row" None
+      (Infra_store.selected_sandbox_keeper denied.infra);
+    Alcotest.(check bool) "fleet denial disables roster reconstruction" false
+      denied.infra.sandboxes_fallback_404;
+    Alcotest.(check bool) "fleet denial is a terminal failure" true
+      (match denied.infra.sandboxes with
+      | Observed.Failed { retryable = false; _ } -> true
+      | Observed.Failed { retryable = true; _ } | Observed.Value _
+      | Observed.Unreported | Observed.Loading _ | Observed.Absent -> false);
+    denied
+  in
+  let fleet_denied = check_fleet_denial authorized 401 in
+  Alcotest.(check bool) "fleet denial keeps independently authorized detail" true
+    (has_detail fleet_denied);
+  let both_denied = check_fleet_denial named_denied 403 in
+  Alcotest.(check bool) "both denied sources leave no detail" false
+    (has_detail both_denied);
+  ignore (check_fleet_denial { m with infra = roster_fallback } 403 : Model.t)
+
+let test_sandbox_probe_reopens_named_absence () =
+  let initial = Model.initial () in
+  let m =
+    { initial with
+      fleet =
+        initial.fleet
+        |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha" ]
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
+      nav = { initial.nav with workspace = Nav.Keepers; zoomed = true } }
+  in
+  let settle_missing now (m : Model.t) =
+    let api_error =
+      Wire_common.decode_api_error
+        (`Assoc [ "error", `Assoc [
+           "code", `String "sandbox_telemetry_missing";
+           "message", `String "keeper has no telemetry in the served snapshot";
+         ] ])
+      |> Result.to_option
+    in
+    let reply =
+      Msg.Reply_keeper_sandbox
+        { keeper = "alpha";
+          result = Error (Msg.Http_error { status = 404; body = ""; api_error }) }
+    in
+    Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
+  in
+  let observe now (m : Model.t) event =
+    let event =
+      Msg.Sse_observer_delivery { cursor = None; decoded = Wire_observer.Event event }
+    in
+    Update.step ~now m (Msg.Sse_event { epoch = m.epoch; event })
+  in
+  let named_requests cmds =
+    Cmd.flatten cmds
+    |> List.filter_map
+         (function
+           | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper }; _ } -> Some keeper
+           | _ -> None)
+  in
+  let absent, _ = settle_missing t0 m in
+  let scoped_other =
+    Wire_observer.Observation_changed
+      { topic = `Keeper_sandbox; scope = `Keeper "beta" }
+  in
+  let unchanged, unrelated_cmds = observe t0 absent scoped_other in
+  Alcotest.(check (list string)) "another keeper leaves the stopped read alone" []
+    (named_requests unrelated_cmds);
+  Alcotest.(check bool) "another keeper leaves alpha's absence intact" true
+    (Infra_store.keeper_sandbox_for ~keeper:"alpha" unchanged.infra = Observed.Absent);
+  let probe = Wire_observer.Dataset_changed Wire_observer.Dataset_infra_sandboxes in
+  let pending, first = observe t1 unchanged probe in
+  Alcotest.(check (list string)) "sandbox probe rereads the visible keeper" [ "alpha" ]
+    (named_requests first);
+  let pending, during_read = observe t1 pending probe in
+  Alcotest.(check (list string)) "probe during a pending read waits for settlement" []
+    (named_requests during_read);
+  let followup, after_old_reply = settle_missing t2 pending in
+  Alcotest.(check (list string)) "pre-probe absence starts exactly one follow-up"
+    [ "alpha" ] (named_requests after_old_reply);
+  let settled, quiet = settle_missing t2 followup in
+  Alcotest.(check (list string)) "current absence sends no more requests" []
+    (named_requests quiet);
+  Alcotest.(check bool) "current absence settles again" true
+    (Infra_store.keeper_sandbox_for ~keeper:"alpha" settled.infra = Observed.Absent);
+  let pending, _ = observe t1 settled probe in
+  let event =
+    Msg.Sse_observer_handshake
+      { handshake = None; identity = None; needs_cold_resync = true }
+  in
+  let resync, cmds =
+    Update.step ~now:t1 pending (Msg.Sse_event { epoch = pending.epoch; event })
+  in
+  Alcotest.(check (list string)) "cold resync coalesces the pending Sandbox read"
+    [] (named_requests cmds);
+  let rereading, cmds = settle_missing t2 resync in
+  Alcotest.(check (list string)) "absence from before the replay gap starts a new read"
+    [ "alpha" ] (named_requests cmds);
+  let _, cmds = settle_missing t2 rereading in
+  Alcotest.(check (list string)) "absence observed after the gap settles"
+    [] (named_requests cmds)
+
+let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
+  let base = Model.initial () in
+  let initial =
+    { base with
+      nav = { base.nav with workspace = Nav.Infra };
+      infra = { base.infra with active_tab = Nav.Infra_sandboxes } }
+  in
+  let roster =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None initial.infra
+  in
+  let fleet = Option.get (Observed.to_option roster.sandboxes) in
+  let detail : Wire_infra.keeper_sandbox_response =
+    { keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers) }
+  in
+  let reply ~now (m : Model.t) reply =
+    Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
+  in
+  let settled_fleet = Msg.Reply_sandboxes (Ok fleet) in
+  let settled_detail =
+    Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Ok detail }
+  in
+  let fleet_error status =
+    Msg.Reply_sandboxes (Error (Msg.Http_error { status; body = ""; api_error = None }))
+  in
+  let observe now (m : Model.t) =
+    let event =
+      Msg.Sse_observer_delivery
+        { cursor = None;
+          decoded =
+            Wire_observer.Event
+              (Wire_observer.Dataset_changed Wire_observer.Dataset_infra_sandboxes) }
+    in
+    Update.step ~now m (Msg.Sse_event { epoch = m.epoch; event })
+  in
+  let named_requests cmds =
+    Cmd.flatten cmds
+    |> List.filter_map
+         (function
+           | Cmd.Http_get { epoch; req = Cmd.Get_keeper_sandbox { keeper } } ->
+               Alcotest.(check bool) "named request carries the current epoch" true
+                 (Epoch.equal initial.epoch epoch);
+               Some keeper
+           | _ -> None)
+  in
+  let identified, _ = reply ~now:t0 initial settled_fleet in
+  let observed, _ = reply ~now:t0 identified settled_detail in
+  let pending, reads = observe t1 observed in
+  let get_fleet = Cmd.Http_get { epoch = initial.epoch; req = Cmd.Get_sandboxes } in
+  Alcotest.(check bool) "current Fleet read is requested" true
+    (List.mem get_fleet (Cmd.flatten reads));
+  Alcotest.(check (list string)) "selected detail is already requested with Fleet"
+    [ "alpha" ] (named_requests reads);
+  let _, after_fleet = reply ~now:t2 pending settled_fleet in
+  Alcotest.(check (list string)) "Fleet success coalesces the pending detail read" []
+    (named_requests after_fleet);
+  let failed, after_503 = reply ~now:t2 pending (fleet_error 503) in
+  Alcotest.(check (option string)) "Fleet 503 keeps the previously authorized selection"
+    (Some "alpha") (Infra_store.selected_sandbox_keeper failed.infra);
+  Alcotest.(check (list string)) "Fleet 503 leaves the existing detail read in flight" []
+    (named_requests after_503);
+  let refreshed, _ = reply ~now:t2 failed settled_detail in
+  Alcotest.(check bool) "detail settles fresh despite Fleet 503" true
+    (match Infra_store.keeper_sandbox_for ~keeper:"alpha" refreshed.infra with
+    | Observed.Value { stale = false; observed_at; _ } -> Clock.Mono.equal t2 observed_at
+    | Observed.Value { stale = true; _ } | Observed.Loading _ | Observed.Absent
+    | Observed.Unreported | Observed.Failed _ -> false);
+  let cold, cold_reads = observe t1 initial in
+  Alcotest.(check (list string)) "cold Fleet read has no selected detail" []
+    (named_requests cold_reads);
+  let _, after_first_fleet = reply ~now:t2 cold settled_fleet in
+  Alcotest.(check (list string)) "first Fleet success reads its newly selected detail"
+    [ "alpha" ] (named_requests after_first_fleet);
+  let denied, after_403 = reply ~now:t2 cold (fleet_error 403) in
+  let _, denied_reads = observe t2 denied in
+  Alcotest.(check (list string)) "denied Fleet with no selection emits no detail read" []
+    (named_requests (after_403 @ denied_reads))
 
 (* On a first visit to the Wiki tab the fetch list is built before the index
    lands, so it names no page. The index reply asks for the page it selects. *)
@@ -23875,6 +24196,12 @@ let () =
             `Quick test_failure_is_asked_again_for_a_new_question;
           Alcotest.test_case "An answer lands on its own target's slot"
             `Quick test_answers_land_on_their_own_target;
+          Alcotest.test_case "Sandbox fleet denial clears cached selection"
+            `Quick test_sandbox_fleet_denial_clears_selected_rows;
+          Alcotest.test_case "A Sandbox probe reopens visible named absence once"
+            `Quick test_sandbox_probe_reopens_named_absence;
+          Alcotest.test_case "Infra Sandbox probe reads selected detail independently of Fleet"
+            `Quick test_sandbox_infra_probe_reads_selected_detail_with_fleet;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"

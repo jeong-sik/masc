@@ -20,6 +20,19 @@ val display_target_keeper_of_model : Model.t -> string
 
 val composer_state_of_model : Model.t -> Composer.state
 
+type sandbox_fallback_source = Fleet_snapshot | Keeper_roster
+
+val draw_sandbox_detail_notice :
+  Cell_grid.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  lang:Say.lang ->
+  read:Infra_store.keeper_sandbox_read ->
+  fallback:sandbox_fallback_source option ->
+  int
+(** Draw the named read's status and the provenance of the displayed rows at
+    the top of [rect]. Returns the number of body rows consumed. *)
+
 val freshness_pill :
   model:Model.t ->
   compact:bool ->

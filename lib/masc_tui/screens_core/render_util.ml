@@ -21,6 +21,65 @@ let display_target_keeper_of_model (m : Model.t) =
   | Some k -> k
   | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none")
 
+type sandbox_fallback_source = Fleet_snapshot | Keeper_roster
+
+let draw_sandbox_detail_notice grid ~(rect : Rect.t) ~theme ~lang
+    ~(read : Infra_store.keeper_sandbox_read) ~fallback =
+  let source =
+    match fallback with
+    | Some Fleet_snapshot -> [ Say.make ~ko:"플릿 스냅샷" ~en:"Fleet snapshot" ]
+    | Some Keeper_roster -> [ Say.make ~ko:"키퍼 목록 기반" ~en:"From Keeper roster" ]
+    | None ->
+        if Option.is_some (Infra_store.keeper_sandbox_detail read) then
+          [ Say.make ~ko:"마지막 상세 관측" ~en:"Last detail observed" ]
+        else []
+  in
+  let notice tone label details =
+    let body =
+      match source @ details with
+      | [] -> []
+      | items -> [ (Say.concat ~sep:" · " items, tone) ]
+    in
+    (label, tone) :: body
+  in
+  let retry label =
+    Say.concat ~sep:" · " [ label; Say.make ~ko:"[r] 재시도" ~en:"[r] Retry" ]
+  in
+  let rows =
+    match read.requested_at, read.observation with
+    | Some _, _ | None, Observed.Loading _ ->
+        notice Theme.Status_active
+          (Say.make ~ko:"상세 조회 중…" ~en:"Reading detail…") []
+    | None, Observed.Absent ->
+        notice Theme.Status_historical
+          (retry (Say.make ~ko:"상세 없음" ~en:"No detail")) []
+    | None, Observed.Unreported ->
+        notice Theme.Status_historical
+          (Say.make ~ko:"상세 조회 전" ~en:"Detail awaits a read") []
+    | None, Observed.Failed { reason; _ } ->
+        notice Theme.Status_critical
+          (retry (Say.make ~ko:"상세 조회 실패" ~en:"Detail read failed"))
+          [ Say.literal reason ]
+    | None, Observed.Value { stale = true; _ } ->
+        [ (Say.make ~ko:"마지막 상세 관측" ~en:"Last detail observed", Theme.Status_historical) ]
+    | None, Observed.Value { stale = false; _ } -> []
+  in
+  if Rect.is_empty rect then 0
+  else
+    let height =
+      Int.min rect.h
+        (Infra_store.keeper_sandbox_notice_rows ~has_displayed_rows:(source <> []) read)
+    in
+    let bg = Color.of_rgb theme.Theme.surface_1 in
+    List.iteri
+      (fun i (label, tone) ->
+        if i < height then
+          ignore
+            (Cell_grid.put_text ~clip:rect grid ~x:rect.x ~y:(rect.y + i)
+               ~style:(Typography.status ~bg theme tone) (Say.resolve lang label)))
+      rows;
+    height
+
 let voice_state_of_drafts (drafts : Drafts.t) =
   match drafts.voice with
   | Drafts.Voice_off | Drafts.Voice_error _ ->

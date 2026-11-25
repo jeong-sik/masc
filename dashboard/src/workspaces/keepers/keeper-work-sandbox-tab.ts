@@ -66,7 +66,7 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
   ))
   const sandboxRead = useKeeperRead(useCallback(
     (signal: AbortSignal) => fetchKeeperSandboxApi(keeperName, signal), [keeperName],
-  ), true)
+  ))
   const { data: tasks } = tasksRead
   const { data: sandbox } = sandboxRead
   const scope = tasks?.workspaceScope
@@ -136,6 +136,10 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
                 >
                   샌드박스 원시 상태 보기
                 </button>
+                ${sandboxRead.received && html`<button
+                  type="button" class="btn-ghost"
+                  onClick=${() => void sandboxRead.refresh()}
+                >샌드박스 다시 읽기</button>`}
               `
             : sandboxRead.received && html`<div class="kp-lifecycle-bar">
                 <span>현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.</span>

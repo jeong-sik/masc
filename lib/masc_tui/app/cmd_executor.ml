@@ -997,6 +997,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_board_quarantines { generation; _ } ->
       Some (Printf.sprintf "%s#quarantines=%d" base generation),
       board_snapshot_key ~epoch ~path [string_of_int generation]
+  | Cmd.Get_sandboxes | Cmd.Get_keeper_sandbox _ -> scoped ""
   | Cmd.Get_keeper_turn_records _ -> scoped "#fleet-turns"
   | Cmd.Get_keeper_context_turn_records _ -> scoped "#context-turns"
   | Cmd.Get_keeper_tool_calls { turn_ref = Some tr; _ } -> scoped ("#turn_ref=" ^ tr)
@@ -1061,8 +1062,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
   | Cmd.Get_mcp_clients
-  | Cmd.Get_sandboxes
-  | Cmd.Get_keeper_sandbox _
   | Cmd.Get_repositories
   | Cmd.Get_repository_pulls
   | Cmd.Get_repository_detail _
@@ -1866,7 +1865,11 @@ let rec execute_get t ~epoch req =
         | Cmd.Get_keeper_sandbox { keeper } ->
             let result =
               fetch_and_decode_get t ~path
-                ~decode:(Wire_infra.decode_keeper_sandbox ~observed_at)
+                ~decode:(fun json ->
+                  Result.bind (Wire_infra.decode_keeper_sandbox ~observed_at json)
+                    (fun (detail : Wire_infra.keeper_sandbox_response) ->
+                      if String.equal detail.keeper keeper then Ok detail
+                      else Error "sandbox telemetry belongs to another Keeper"))
             in
             Msg.Http_reply
               { epoch; reply = Msg.Reply_keeper_sandbox { keeper; result } }

@@ -856,9 +856,9 @@ let get_keeper_json ?sw ?clock ?(now = Time_compat.now ()) ~base_path ~keeper ()
     match found with
     | None ->
       Error
-        ( Env.error_status Env.Not_found
+        ( Env.error_status Env.Sandbox_telemetry_missing
         , Env.error_json
-            ~code:Env.Not_found
+            ~code:Env.Sandbox_telemetry_missing
             (Printf.sprintf "sandbox telemetry for keeper %S not found" keeper) )
     | Some row ->
       Ok

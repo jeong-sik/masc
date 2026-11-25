@@ -12,6 +12,7 @@ type error_code =
   | Invalid_param
   | Unauthorized
   | Not_found
+  | Sandbox_telemetry_missing
   | Conflict_cas
   | Workspace_mismatch
   | Validation_failed

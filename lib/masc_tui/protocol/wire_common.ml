@@ -561,6 +561,7 @@ type api_error_code =
   | Invalid_param
   | Unauthorized
   | Not_found
+  | Sandbox_telemetry_missing
   | Conflict_cas
   | Workspace_mismatch
   | Validation_failed
@@ -580,6 +581,7 @@ let api_error_code_of_string = function
   | "invalid_param" | "invalid_request" -> Invalid_param
   | "unauthorized" | "forbidden" -> Unauthorized
   | "not_found" -> Not_found
+  | "sandbox_telemetry_missing" -> Sandbox_telemetry_missing
   | "conflict_cas" -> Conflict_cas
   | "workspace_mismatch" | "workspace_changed" -> Workspace_mismatch
   | "validation_failed" -> Validation_failed
@@ -590,6 +592,7 @@ let api_error_code_to_string = function
   | Invalid_param -> "invalid_param"
   | Unauthorized -> "unauthorized"
   | Not_found -> "not_found"
+  | Sandbox_telemetry_missing -> "sandbox_telemetry_missing"
   | Conflict_cas -> "conflict_cas"
   | Workspace_mismatch -> "workspace_mismatch"
   | Validation_failed -> "validation_failed"

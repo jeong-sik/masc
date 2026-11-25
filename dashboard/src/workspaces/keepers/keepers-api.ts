@@ -2639,17 +2639,19 @@ export function saveKeeperOperatorNoteApi(keeper: string, text: string, signal?:
   )
 }
 
-export function fetchKeeperSandboxApi(keeper: string, signal?: AbortSignal): Promise<Result<KeeperSandboxData, ApiError>> {
-  return apiGetV2<KeeperSandboxData>(
+export async function fetchKeeperSandboxApi(keeper: string, signal?: AbortSignal): Promise<Result<KeeperSandboxData | null, ApiError>> {
+  const result = await apiGetV2<KeeperSandboxData>(
     `/api/v1/infra/sandboxes/${encodeURIComponent(keeper)}`,
     {
       signal,
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const probe = isRecord(rec.probe_state) ? rec.probe_state : {}
-        const sb = isRecord(rec.sandbox) ? rec.sandbox : {}
+        if (!isRecord(raw) || raw.keeper !== keeper || !isRecord(raw.sandbox)) {
+          throw new Error('Invalid sandbox observation for this Keeper')
+        }
+        const probe = isRecord(raw.probe_state) ? raw.probe_state : {}
+        const sb = raw.sandbox
         return {
-          keeper: asStr(rec.keeper) ?? keeper,
+          keeper,
           probe_kind: asStr(probe.kind) ?? 'unknown',
           backend: asStr(sb.backend) ?? asStr(sb.kind) ?? asStr(sb.sandbox_profile) ?? 'observed',
           summary: sb,
@@ -2657,6 +2659,9 @@ export function fetchKeeperSandboxApi(keeper: string, signal?: AbortSignal): Pro
       },
     },
   )
+  return !result.ok && result.error.status === 404 && result.error.code === 'sandbox_telemetry_missing'
+    ? ok(null)
+    : result
 }
 
 // ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────

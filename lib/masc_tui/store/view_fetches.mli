@@ -8,6 +8,10 @@ val fetches_for_current_view : ?force:bool -> Model.t -> Cmd.t list
 
 val verification_requests_read : Work_store.t -> Cmd.get_request
 
+val sandbox_detail_fetch : ?keeper:string -> Model.t -> Cmd.t list
+(** The named read due for the Sandbox view. When [keeper] is supplied, only
+    that Keeper can be refreshed, even if selection moved during its read. *)
+
 val overlay_fetches : Model.t -> Cmd.t list
 (** The open overlay's GETs that are not held fresh. An overlay opens over any
     workspace or dive, so a reply that leaves its slots stale asks for these

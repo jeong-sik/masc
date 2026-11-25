@@ -695,21 +695,35 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp ~lang ~(model : Model.t)
     (entry_opt : fleet_sandbox_entry option)
     (obs : Wire_infra.sandboxes_snapshot Observed.t) ~focused =
+  let module U = Masc_tui_screens_core.Render_util in
   let inf = model.infra in
   let resolved_entry_opt =
     match entry_opt with
     | None -> None
     | Some fallback -> (
         let keeper = entry_keeper_name fallback in
-        match Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf) with
-        | Some resp ->
-            Some
-              (entry_of_keeper_detail
-                 ~sandboxes:(Observed.to_option inf.sandboxes)
-                 resp.sandbox)
-        | None -> Some fallback)
+        let read = Infra_store.keeper_sandbox_read_for ~keeper inf in
+        let detail = Infra_store.keeper_sandbox_detail read in
+        let entry =
+          match detail with
+          | Some (resp, _) ->
+              entry_of_keeper_detail ~sandboxes:(Observed.to_option inf.sandboxes)
+                resp.sandbox
+          | None -> fallback
+        in
+        let source =
+          match detail with
+          | Some _ -> None
+          | None ->
+              Some (if inf.sandboxes_fallback_404 then U.Keeper_roster else U.Fleet_snapshot)
+        in
+        Some (entry, read, source))
   in
-  let subtitle = Option.map entry_keeper_name resolved_entry_opt in
+  let subtitle =
+    Option.map
+      (fun (entry, _, _) -> entry_keeper_name entry)
+      resolved_entry_opt
+  in
   let badge =
     if focused || inf.show_raw_json then
       Some
@@ -736,7 +750,12 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
     | None ->
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
           ~lang obs
-    | Some entry ->
+    | Some (entry, read, fallback) ->
+        let notice_h =
+          U.draw_sandbox_detail_notice grid ~rect:(H.pad_content ~bp inner)
+            ~theme ~lang ~read ~fallback
+        in
+        let _, inner = Rect.split_v inner ~top_h:notice_h in
         if inf.show_raw_json then
           let lines =
             Json_tree.flatten ~max_depth:5 ~redact_secrets:true

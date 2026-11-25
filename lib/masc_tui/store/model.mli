@@ -625,6 +625,9 @@ val rebuild_attention : t -> t
 
 val mark_all_domains_stale : t -> t
 
+val sandboxes_from_roster : now:Clock.Mono.t -> t -> Infra_store.t
+(** Rebuild the Sandbox fallback from roster profiles and fresh activity reads. *)
+
 type pulse_hero_metrics = {
   running_keepers : int;
   total_keepers : int;

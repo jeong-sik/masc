@@ -109,11 +109,18 @@ let empty_code_state =
     git_scroll_offset = 0;
   }
 
+type keeper_sandbox_read = {
+  observation : Wire_infra.keeper_sandbox_response Observed.t;
+  retained : (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option;
+  requested_at : Clock.Mono.t option;
+  invalidated_during_read : bool;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
   sandboxes_fallback_404 : bool;
-  keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
+  keeper_sandboxes : keeper_sandbox_read String_map.t;
   repositories : Wire_infra.repository list Observed.t;
   repository_pulls : Wire_infra.repository_pulls_snapshot Observed.t;
   repository_details : Wire_infra.repository_observation Observed.t String_map.t;
@@ -285,9 +292,6 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
   let dockers = ref [] in
   List.iter
     (fun (keeper, prof) ->
-      let is_running =
-        Option.value ~default:false (Hashtbl.find_opt running_tbl keeper)
-      in
       match prof with
       | Wire_fleet.Profile_microvm ->
           (* Without /api/v1/infra/sandboxes we have no live agent socket
@@ -310,11 +314,17 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
           in
           microvms := guest :: !microvms
       | Wire_fleet.Profile_remote_ssh ->
+          let binding_state =
+            match Hashtbl.find_opt running_tbl keeper with
+            | Some true -> "active"
+            | Some false -> "idle"
+            | None -> "unobserved"
+          in
           let row : Wire_infra.ssh_unbound_keeper =
             {
               keeper;
               backend = "remote_ssh";
-              binding_state = (if is_running then "active" else "idle");
+              binding_state;
               remote_endpoint = None;
               metrics_24h = empty_tool_metrics_24h;
             }
@@ -400,13 +410,95 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
     sandboxes_fallback_404 = true;
   }
 
-let keeper_sandbox_for ~keeper t =
+let keeper_sandbox_read_for ~keeper t =
   match String_map.find_opt keeper t.keeper_sandboxes with
-  | Some obs -> obs
-  | None -> Observed.unreported
+  | Some read -> read
+  | None ->
+      { observation = Observed.unreported; retained = None; requested_at = None;
+        invalidated_during_read = false }
 
-let set_keeper_sandbox ~keeper obs t =
-  { t with keeper_sandboxes = String_map.add keeper obs t.keeper_sandboxes }
+let keeper_sandbox_for ~keeper t = (keeper_sandbox_read_for ~keeper t).observation
+
+let keeper_sandbox_detail read =
+  match read.observation with
+  | Observed.Value { data; observed_at; _ } -> Some (data, observed_at)
+  | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
+      read.retained
+
+let keeper_sandbox_notice_rows ~has_displayed_rows read =
+  match read.requested_at, read.observation with
+  | None, Observed.Value { stale = false; _ } -> 0
+  | None, Observed.Value { stale = true; _ } -> 1
+  | None, Observed.Failed _ -> 2
+  | Some _, _ | None, (Observed.Loading _ | Observed.Absent | Observed.Unreported) ->
+      if has_displayed_rows then 2 else 1
+
+let update_keeper_sandbox_read ~keeper read t =
+  { t with keeper_sandboxes = String_map.add keeper read t.keeper_sandboxes }
+
+let invalidate_sandbox_observation = function
+  | Observed.Absent -> Observed.unreported
+  | Observed.Value _ as observation -> Observed.mark_stale observation
+  | (Observed.Unreported | Observed.Loading _ | Observed.Failed _) as observation ->
+      observation
+
+let invalidate_sandboxes ?keeper t =
+  let invalidate read =
+    { read with
+      observation = invalidate_sandbox_observation read.observation;
+      invalidated_during_read = Option.is_some read.requested_at }
+  in
+  let keeper_sandboxes =
+    match keeper with
+    | None -> String_map.map invalidate t.keeper_sandboxes
+    | Some keeper ->
+        String_map.update keeper (Option.map invalidate) t.keeper_sandboxes
+  in
+  { t with sandboxes = invalidate_sandbox_observation t.sandboxes; keeper_sandboxes }
+
+let set_keeper_sandbox ~keeper ?(retain_detail = false) observation t =
+  let read = keeper_sandbox_read_for ~keeper t in
+  let retained = if retain_detail then keeper_sandbox_detail read else None in
+  let observation =
+    if read.invalidated_during_read then invalidate_sandbox_observation observation
+    else observation
+  in
+  update_keeper_sandbox_read ~keeper
+    { observation; retained; requested_at = None; invalidated_during_read = false }
+    t
+
+let request_keeper_sandbox ~keeper ~now t =
+  let read = keeper_sandbox_read_for ~keeper t in
+  if Option.is_some read.requested_at then t
+  else update_keeper_sandbox_read ~keeper { read with requested_at = Some now } t
+
+let detach_keeper_sandbox_reads t =
+  let keeper_sandboxes =
+    String_map.map
+      (fun read -> { read with requested_at = None; invalidated_during_read = false })
+      t.keeper_sandboxes
+  in
+  { t with keeper_sandboxes }
+
+let clear_sandbox_observations t =
+  {
+    t with
+    sandboxes = Observed.unreported;
+    sandboxes_fallback_404 = false;
+    keeper_sandboxes = String_map.empty;
+    pending_sandbox_keeper = None;
+  }
+
+let keeper_sandbox_needed ~force ~keeper t =
+  let read = keeper_sandbox_read_for ~keeper t in
+  Option.is_none read.requested_at
+  &&
+  match read.observation with
+  | Observed.Loading _ -> false
+  | Observed.Value { stale = false; _ } | Observed.Absent
+  | Observed.Failed { retryable = false; _ } -> force
+  | Observed.Value { stale = true; _ } | Observed.Unreported
+  | Observed.Failed { retryable = true; _ } -> true
 
 let apply_repositories ~observed_at repositories t =
   { t with repositories = Observed.value ~observed_at repositories }
@@ -1177,10 +1269,9 @@ let set_filter filter_query t =
   }
 
 let mark_stale_all t =
+  let t = invalidate_sandboxes t in
   {
     t with
-    sandboxes = Observed.mark_stale t.sandboxes;
-    keeper_sandboxes = String_map.map Observed.mark_stale t.keeper_sandboxes;
     repositories = Observed.mark_stale t.repositories;
     repository_pulls = Observed.mark_stale t.repository_pulls;
     repository_details = String_map.map Observed.mark_stale t.repository_details;

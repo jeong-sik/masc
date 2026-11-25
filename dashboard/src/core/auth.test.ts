@@ -419,4 +419,59 @@ describe('core/auth', () => {
       fetchSpy.mockRestore()
     }
   })
+
+  it('consumes ?token= from masc login URL, strips URL history, persists in sessionStorage across reload, and clears on 401 or multi_account', async () => {
+    window.history.replaceState(null, '', '/dashboard/?agent=local-admin&token=url-bearer-123#/keepers')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') {
+        const hdrs = init?.headers as Record<string, string>
+        if (hdrs.Authorization === 'Bearer url-bearer-123') return jsonResponse({ ok: true })
+        return jsonResponse({ error: 'unauthorized' }, 401)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    const session = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(session.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('url-bearer-123')
+    expect(window.location.search).toBe('?agent=local-admin')
+    expect(window.location.hash).toBe('#/keepers')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBe('url-bearer-123')
+    expect(localStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // Simulate reload: in-memory secrets wiped on pagehide, sessionStorage hydrates cleanly
+    wipeTransientSecrets()
+    expect(getSingleUserToken()).toBeNull()
+    const reloaded = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(reloaded.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('url-bearer-123')
+
+    // Revoked token (401) clears stale sessionStorage bearer
+    const revokedFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ error: 'revoked' }, 401)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const revoked = await bootstrapAuthSession({ fetchImpl: revokedFetch as unknown as typeof fetch })
+    expect(revoked.kind).toBe('single_user_auth_required')
+    expect(getSingleUserToken()).toBeNull()
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+
+    // Multi-account mode strips stray ?token= and clears sessionStorage
+    window.history.replaceState(null, '', '/dashboard/?token=stray-token#/pulse')
+    sessionStorage.setItem('masc_bearer_token', 'old-single-token')
+    const multiFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') return jsonResponse({ error: 'signed_out' }, 401)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const multi = await bootstrapAuthSession({ fetchImpl: multiFetch as unknown as typeof fetch })
+    expect(multi.kind).toBe('multi_account_signed_out')
+    expect(window.location.search).toBe('')
+    expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+  })
 })

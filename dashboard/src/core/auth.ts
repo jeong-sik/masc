@@ -74,15 +74,61 @@ export type AuthSession =
     }
 
 const ACCOUNT_MARKER_STORAGE_KEY = 'masc.core.account_marker'
+const BEARER_SESSION_STORAGE_KEY = 'masc_bearer_token'
 const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
   google: false,
   github: false,
   dev_token: false,
 })
 
-// Volatile in-memory secrets — wiped on pagehide / sign-out / epoch change
+// Volatile in-memory secrets — wiped on pagehide / sign-out / epoch change.
+// Single-user operator bearers are mirrored into tab-scoped sessionStorage
+// (never localStorage) so `masc login` ?token= URLs and page reloads survive
+// without leaking across tabs or surviving tab close.
 let singleUserBearerToken: string | null = null
 let activeCsrfToken: string | null = null
+
+function readSessionBearerToken(): string | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null
+    const raw = sessionStorage.getItem(BEARER_SESSION_STORAGE_KEY)
+    return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+  } catch {
+    return null
+  }
+}
+
+function writeSessionBearerToken(token: string | null): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    if (token === null) sessionStorage.removeItem(BEARER_SESSION_STORAGE_KEY)
+    else sessionStorage.setItem(BEARER_SESSION_STORAGE_KEY, token)
+  } catch { /* storage unavailable */ }
+}
+
+/**
+ * Extracts `?token=<bearer>` emitted by `masc login` (`MASC_DASHBOARD_URL`),
+ * strips `token` from the URL bar/history via `history.replaceState`, and
+ * returns the trimmed token (or null if absent/empty).
+ */
+function consumeUrlBearerToken(): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.location) return null
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has('token')) return null
+    const raw = params.get('token')
+    const normalized = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+    params.delete('token')
+    const cleaned = params.toString()
+    const nextUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
+    if (typeof window.history?.replaceState === 'function') {
+      window.history.replaceState(null, '', nextUrl)
+    }
+    return normalized
+  } catch {
+    return null
+  }
+}
 
 export const authSession = signal<AuthSession>({ kind: 'probing' })
 export const sessionEpoch = signal<number>(1)
@@ -130,8 +176,10 @@ export function getActiveCsrfToken(): string | null {
 
 export function setSingleUserToken(token: string | null): void {
   const normalized = token && token.trim().length > 0 ? token.trim() : null
-  if (singleUserBearerToken === normalized) return
+  const stored = readSessionBearerToken()
+  if (singleUserBearerToken === normalized && stored === normalized) return
   singleUserBearerToken = normalized
+  writeSessionBearerToken(normalized)
   bumpSessionEpoch()
   const cur = authSession.peek()
   if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
@@ -400,6 +448,7 @@ export async function bootstrapAuthSession(
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
   const prev = authSession.peek()
   const prevAccountId = prev.kind === 'multi_account_signed_in' ? prev.accountId : null
+  const urlToken = consumeUrlBearerToken()
 
   try {
     const healthRes = await fetchImpl('/health', {
@@ -426,14 +475,23 @@ export async function bootstrapAuthSession(
 
     if (mode === 'multi_account') {
       singleUserBearerToken = null
+      writeSessionBearerToken(null)
       const next = await readMultiAccountSession(fetchImpl, authMethods, prevAccountId)
       if (next.kind === 'account_changed') bumpSessionEpoch()
       authSession.value = next
       return next
     }
 
-    // Single-user mode: ONLY probe /api/v1/dashboard/dev-token if explicitly advertised
+    // Single-user mode: hydrate from `?token=` (`masc login` URL) or tab-scoped
+    // sessionStorage, and ONLY probe /api/v1/dashboard/dev-token if explicitly advertised.
     activeCsrfToken = null
+    if (urlToken !== null) {
+      singleUserBearerToken = urlToken
+      writeSessionBearerToken(urlToken)
+    } else if (singleUserBearerToken === null) {
+      const restored = readSessionBearerToken()
+      if (restored !== null) singleUserBearerToken = restored
+    }
     if (authMethods.dev_token && singleUserBearerToken === null) {
       try {
         const devRes = await fetchImpl('/api/v1/dashboard/dev-token', {
@@ -445,6 +503,7 @@ export async function bootstrapAuthSession(
           const payload = (await devRes.json()) as { token?: unknown }
           if (typeof payload.token === 'string' && payload.token.trim().length > 0) {
             singleUserBearerToken = payload.token.trim()
+            writeSessionBearerToken(singleUserBearerToken)
           }
         }
       } catch { /* dev token optional */ }
@@ -459,6 +518,8 @@ export async function bootstrapAuthSession(
         headers,
       })
       if (shellRes.status === 401 || shellRes.status === 403) {
+        singleUserBearerToken = null
+        writeSessionBearerToken(null)
         const next: AuthSession = {
           kind: 'single_user_auth_required',
           mode: 'single_user',
@@ -578,6 +639,7 @@ export function installAuthLifecycleGuards(
 
 export function resetAuthStateForTests(): void {
   wipeTransientSecrets()
+  writeSessionBearerToken(null)
   authSession.value = { kind: 'probing' }
   sessionEpoch.value = 1
   activeWorkspaceId.value = 'default'

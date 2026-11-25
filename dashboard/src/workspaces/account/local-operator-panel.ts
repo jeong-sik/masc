@@ -117,7 +117,7 @@ export function LocalOperatorPanel({
           <div>
             <h2 class="ap-card-title">Local Operator & Bearer Access</h2>
             <p class="ap-card-sub">
-              Single-user server mode. Credentials live strictly in volatile memory (wiped on pagehide) and never touch localStorage.
+              Single-user server mode. Accepts <code>?token=</code> from <code>masc login</code> (stripped from URL history) and keeps the bearer in tab-scoped sessionStorage (never localStorage).
             </p>
           </div>
           <span class=${`ap-badge ap-badge--${session.kind === 'single_user_local' ? 'ok' : 'warn'}`}>
@@ -129,7 +129,8 @@ export function LocalOperatorPanel({
 
         ${session.kind === 'single_user_auth_required' && html`
           <div class="ap-inline-alert ap-inline-alert--warn" role="alert">
-            ${session.reason} — Enter a valid operator Bearer token below to connect.
+            <div>${session.reason} — Paste an operator Bearer token below, or run in terminal:</div>
+            <code class="mono">eval "$(masc login --agent local-dashboard-admin --role admin --client-env MASC_ADMIN_TOKEN --no-expiry --shell)" && open "$MASC_DASHBOARD_URL"</code>
           </div>
         `}
 

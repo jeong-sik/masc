@@ -353,12 +353,23 @@ describe('core/observer & core/time-window', () => {
     markViewSynced()
     expect(viewProvenance.value).toBe('STREAM_GAP')
 
-    // 2. extractObserverTopics extracts server dataset + maps aliases
+    // 2. extractObserverTopics extracts server dataset, topic, payload.topic + maps aliases
     const dsFrame = parseSseBlock(
-      'event: workspace_dataset_changed\ndata: {"dataset":"provider_standing","type":"keeper_row_changed"}\n',
+      'event: workspace_dataset_changed\ndata: {"dataset":"provider_standing","type":"keeper_row_changed","topic":"scheduled_automation","payload":{"topic":"keeper_tool_approval_mode_changed"}}\n',
     )!
     expect(extractObserverTopics(dsFrame)).toEqual(
-      expect.arrayContaining(['workspace_dataset_changed', 'provider_standing', 'keeper_row_changed', 'keeper', 'provider', 'quota']),
+      expect.arrayContaining([
+        'workspace_dataset_changed',
+        'provider_standing',
+        'keeper_row_changed',
+        'scheduled_automation',
+        'schedules',
+        'keeper_tool_approval_mode_changed',
+        'keeper',
+        'provider',
+        'quota',
+        'tool_approval',
+      ]),
     )
 
     // 3. Auto-reconnect schedules a retry after transient drop and restores LIVE SSE

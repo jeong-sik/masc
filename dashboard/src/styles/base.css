@@ -49,7 +49,7 @@
   }
 
   /* Flex & Grid min-width: 0 safety — prevents long paths/code from blowing layouts */
-  main, section, article, aside, header, nav, footer {
+  main, section, article, aside, header, nav, footer, fieldset {
     min-width: 0;
   }
 

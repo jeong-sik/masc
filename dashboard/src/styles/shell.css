@@ -505,10 +505,12 @@
 
 .ap-fast-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
   flex: 1 1 240px;
+  overflow: hidden;
   font-size: var(--fs-12);
 }
 
@@ -525,7 +527,12 @@
 }
 
 .ap-fast-keeper {
-  flex: none;
+  flex: 0 1 auto;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .ap-fast-tool {
@@ -533,7 +540,12 @@
   border-radius: var(--radius-xs);
   background: var(--bg-2);
   font-size: var(--fs-11);
-  flex: none;
+  flex: 0 1 auto;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .ap-fast-question {
@@ -1061,6 +1073,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  min-width: 0;
 }
 
 .ap-mini-kpi-k {
@@ -1072,25 +1085,39 @@
   font-family: var(--font-mono);
   font-size: var(--fs-20);
   color: var(--fg-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-mini-kpi-sub {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
 }
 
 .ap-qpeek-section {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
 .ap-qpeek-section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
 .ap-qpeek-section-head h3 {
   margin: 0;
   font-size: var(--fs-13);
   font-weight: 600;
+  min-width: 0;
 }
 
 .ap-qpeek-list {
@@ -1100,6 +1127,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
 .ap-qpeek-card {
@@ -1110,14 +1138,22 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  min-width: 0;
 }
 
 .ap-qpeek-card-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   font-size: var(--fs-12);
+  min-width: 0;
+}
+
+.ap-qpeek-card-top > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ap-qpeek-card-text {

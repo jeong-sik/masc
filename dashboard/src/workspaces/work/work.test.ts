@@ -915,4 +915,102 @@ describe('workspaces/work', () => {
       },
     ])
   })
+
+  it('Tasks tab supports active_only=false schedules history toggle, truncation banner, and unlinked task verification verdicts', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          goals: [],
+          tasks: [
+            { id: 'task-unlinked-1', title: 'Standalone fix', status: 'awaiting_verification', assignee: 'sangsu', priority: 1, goal_id: null },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/tasks/history/page')) {
+        return jsonResponse({ schema: 'masc.task-history.page/v2', task_id: 'task-unlinked-1', events: [], next_cursor: null })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) {
+        return jsonResponse({
+          requests: [
+            {
+              request_id: 'vr-standalone-1',
+              task_id: 'task-unlinked-1',
+              task_title: 'Standalone fix',
+              submitted_by: 'sangsu',
+              created_at: '2026-11-25T01:00:00Z',
+              review_observation: { state: 'rejected', detail: 'Missing regression test', actor: 'code-reviewer' },
+            },
+          ],
+        })
+      }
+      if (url.includes('/api/v1/dashboard/scheduled-automation?active_only=false')) {
+        return jsonResponse({
+          status: 'ok',
+          schedule_store_known: true,
+          schedule_store_read_error: null,
+          request_count: 50,
+          truncated: true,
+          requests: [
+            {
+              schedule_id: 'sched-hist-1',
+              status: 'completed',
+              payload_keeper_name: 'sangsu',
+              payload_summary: 'Completed run',
+              due_at: 1795478400,
+              due_at_iso: '2026-11-24T00:00:00Z',
+            },
+          ],
+        })
+      }
+      if (url.includes('/api/v1/dashboard/scheduled-automation?active_only=true')) {
+        return jsonResponse({
+          status: 'ok',
+          schedule_store_known: true,
+          schedule_store_read_error: null,
+          request_count: 0,
+          truncated: false,
+          requests: [],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.textContent).toContain('Verification Verdicts (1)')
+    expect(container.textContent).toContain('rejected')
+    expect(container.textContent).toContain('Missing regression test')
+
+    const schedChip = [...container.querySelectorAll('button.wk-chip')].find((b) =>
+      b.textContent?.startsWith('Schedules'),
+    ) as HTMLButtonElement
+    schedChip.click()
+    await flushUi(3)
+
+    const allHistBtn = [...container.querySelectorAll('button.wk-chip')].find((b) =>
+      b.textContent?.trim() === '전체 이력',
+    ) as HTMLButtonElement
+    expect(allHistBtn).toBeDefined()
+    allHistBtn.click()
+    await flushUi(4)
+
+    expect(requestedUrls.some((u) => u.includes('active_only=false'))).toBe(true)
+    expect(container.textContent).toContain('Completed run')
+    expect(container.textContent).toContain('표시 제한으로 일부만 표시됩니다 (1 / 50건)')
+  })
 })

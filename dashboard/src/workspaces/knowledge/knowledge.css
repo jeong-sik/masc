@@ -404,6 +404,7 @@
   gap: var(--sp-2);
   font-size: var(--fs-11);
   color: var(--fg-3);
+  min-width: 0;
 }
 
 .kn-input,
@@ -618,6 +619,11 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-1);
   background: var(--bg-1);
+  min-width: 0;
+}
+
+.kn-comment .kn-row-top {
+  flex-wrap: wrap;
 }
 
 .kn-comment--nested {

@@ -163,6 +163,19 @@ export interface BoardPostCloseState {
   readonly summary: string | null
 }
 
+export type BoardAudience =
+  | { readonly kind: 'targets'; readonly targets: readonly string[] }
+  | { readonly kind: 'broadcast' }
+  | { readonly kind: 'thread_participants' }
+  | { readonly kind: 'discoverable' }
+
+export interface BoardCommentPageInfo {
+  readonly offset: number
+  readonly returned: number
+  readonly total: number
+  readonly nextOffset: number | null
+}
+
 export interface BoardPostItem {
   readonly id: string
   readonly title: string
@@ -171,6 +184,7 @@ export interface BoardPostItem {
   readonly hearth: string | null
   readonly postKind: 'direct' | 'automation' | 'system' | null
   readonly visibility: string | null
+  readonly audience?: BoardAudience | null
   readonly pinned: boolean
   readonly votes: number
   readonly currentVote: 'up' | 'down' | null
@@ -194,6 +208,7 @@ export interface BoardCommentItem {
   readonly votes: number
   readonly currentVote: 'up' | 'down' | null
   readonly reactions: readonly BoardReactionSummary[]
+  readonly audience?: BoardAudience | null
 }
 
 export interface BoardHearthItem {
@@ -322,6 +337,19 @@ export function foldSuccessionChains(posts: readonly BoardPostItem[]): readonly 
   return out
 }
 
+export function decodeBoardAudience(raw: unknown): BoardAudience | null {
+  if (!isRecord(raw)) return null
+  const kind = asNonEmptyString(raw.kind)?.toLowerCase()
+  if (kind === 'targets') {
+    const targets = asStringArray(raw.targets)
+    return { kind: 'targets', targets }
+  }
+  if (kind === 'broadcast') return { kind: 'broadcast' }
+  if (kind === 'thread_participants') return { kind: 'thread_participants' }
+  if (kind === 'discoverable') return { kind: 'discoverable' }
+  return null
+}
+
 export function decodeBoardPost(raw: unknown): BoardPostItem | null {
   if (!isRecord(raw)) return null
   const id = asNonEmptyString(raw.id)
@@ -384,6 +412,7 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
     hearth,
     postKind,
     visibility: asNonEmptyString(raw.visibility),
+    audience: decodeBoardAudience(raw.audience),
     pinned: raw.pinned === true,
     votes,
     currentVote,
@@ -441,6 +470,7 @@ export function decodeBoardComment(raw: unknown): BoardCommentItem | null {
     votes,
     currentVote: raw.current_vote === 'up' || raw.current_vote === 'down' ? raw.current_vote : null,
     reactions,
+    audience: decodeBoardAudience(raw.audience),
   }
 }
 

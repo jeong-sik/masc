@@ -9,7 +9,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId } from '../../core/auth'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -33,6 +33,26 @@ export interface KeeperMemoryTabProps {
   readonly keeperName: string
 }
 
+function summarizeMemoryValue(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'string') return v.trim() || null
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    const rec = v as Record<string, unknown>
+    const parts: string[] = []
+    for (const key of ['state', 'kind', 'status', 'stop', 'reason', 'error']) {
+      if (typeof rec[key] === 'string' && (rec[key] as string).trim()) {
+        parts.push(`${key}=${(rec[key] as string).trim()}`)
+      }
+    }
+    if (parts.length > 0) return parts.join(' · ')
+    const keys = Object.keys(rec)
+    return keys.length > 0 ? `{${keys.slice(0, 3).join(', ')}}` : null
+  }
+  if (Array.isArray(v)) return v.length > 0 ? `${v.length}건` : null
+  return null
+}
+
 export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
   const { keeperName } = props
   const [facts, setFacts] = useState<KeeperMemoryFactsData | null>(null)
@@ -41,6 +61,8 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [showAllJournal, setShowAllJournal] = useState(false)
+  const [showAllActivity, setShowAllActivity] = useState(false)
 
   // memory/act controls
   const [actKind, setActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
@@ -53,24 +75,51 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
   const [retractReason, setRetractReason] = useState('')
   const [retractFeedback, setRetractFeedback] = useState<string | null>(null)
 
+  const loadSeqRef = useRef(0)
+  const loadAbortRef = useRef<AbortController | null>(null)
+
   const loadAll = useCallback(async () => {
+    loadAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    loadAbortRef.current = ctrl
+    const seq = ++loadSeqRef.current
     setLoading(true)
     setError(null)
     const [fRes, iRes, jRes] = await Promise.all([
-      fetchKeeperMemoryFactsApi(keeperName),
-      fetchKeeperMemoryOsInternalsApi(keeperName),
-      fetchKeeperMemoryJournalApi(keeperName, 50),
+      fetchKeeperMemoryFactsApi(keeperName, ctrl.signal),
+      fetchKeeperMemoryOsInternalsApi(keeperName, ctrl.signal),
+      fetchKeeperMemoryJournalApi(keeperName, 50, ctrl.signal),
     ])
+    if (ctrl.signal.aborted || seq !== loadSeqRef.current) return
     setLoading(false)
+    const errs: string[] = []
     if (fRes.ok) setFacts(fRes.value)
-    else setError(fRes.error.message)
+    else if (fRes.error.kind !== 'aborted' && fRes.error.kind !== 'epoch_stale') {
+      errs.push(`memory-facts: ${fRes.error.message}`)
+    }
     if (iRes.ok) setInternals(iRes.value)
+    else if (iRes.error.kind !== 'aborted' && iRes.error.kind !== 'epoch_stale') {
+      errs.push(`memory-os-internals: ${iRes.error.message}`)
+    }
     if (jRes.ok) setJournal(jRes.value)
+    else if (jRes.error.kind !== 'aborted' && jRes.error.kind !== 'epoch_stale') {
+      errs.push(`memory-journal: ${jRes.error.message}`)
+    }
+    if (errs.length > 0) setError(errs.join(' · '))
   }, [keeperName])
 
   useEffect(() => {
+    setFacts(null)
+    setInternals(null)
+    setJournal(null)
+    setShowAllJournal(false)
+    setShowAllActivity(false)
+    setError(null)
     void loadAll()
-  }, [loadAll])
+    return () => {
+      loadAbortRef.current?.abort()
+    }
+  }, [keeperName, loadAll])
 
   const filteredOrdinary = useMemo<readonly OrdinaryMemoryFact[]>(() => {
     if (!facts || facts.ordinary.state !== 'present') return []
@@ -174,10 +223,10 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
     <div class="kp-scroll-pane" data-keeper-tab="memory">
       <div class="kp-card-head">
         <h3>Memory OS · ${keeperName}</h3>
-        <div class="kp-pill-row">
+        <div class="kp-pill-row kp-mem-toolbar">
           <input
             type="search"
-            class="kp-input"
+            class="kp-input kp-mem-search"
             placeholder="Claim / Category / Path 필터…"
             aria-label="메모리 검색"
             value=${search}
@@ -191,39 +240,84 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
 
       ${error && html`<div class="ap-error" role="alert">${error}</div>`}
 
-      <!-- Memory OS Internals (4 Sections) -->
-      ${internals && html`
-        <section class="kp-grid-4" aria-label="Memory OS 내부 상태">
-          <div class="kp-kv-box">
-            <span class="kp-kv-k">Compaction</span>
-            <span class="kp-kv-v">${internals.compaction.present ? `${internals.compaction.epoch_count} epochs` : '없음'}</span>
-            <span class="kp-roster-sub">
-              archived ${internals.compaction.archived_turns_count} · verified ${internals.compaction.verified_facts_count}
-            </span>
-          </div>
-          <div class="kp-kv-box">
-            <span class="kp-kv-k">Canonical Turns</span>
-            <span class="kp-kv-v">${internals.canonical_turns.present ? internals.canonical_turns.turn_count : '없음'}</span>
-            <span class="kp-roster-sub">
-              watermark ${internals.canonical_turns.compaction_watermark_seq ?? '없음'} · resets ${internals.canonical_turns.history_resets_count}
-            </span>
-          </div>
-          <div class="kp-kv-box">
-            <span class="kp-kv-k">Memory Digest</span>
-            <span class="kp-kv-v">${internals.memory_digest.present ? `${internals.memory_digest.fact_count} facts` : '없음'}</span>
-            <span class="kp-roster-sub">
-              rev ${internals.memory_digest.revision ?? '없음'} · ${internals.memory_digest.bytes} B
-            </span>
-          </div>
-          <div class="kp-kv-box">
-            <span class="kp-kv-k">Librarian Molt</span>
-            <span class="kp-kv-v">${internals.librarian_molt.writer_kind}</span>
-            <span class="kp-roster-sub">
-              acts: ${internals.librarian_molt.available_acts.length > 0 ? internals.librarian_molt.available_acts.join(', ') : '없음'}
-            </span>
-          </div>
-        </section>
+      ${facts && (facts.events_read_error || facts.events_unreadable_lines > 0) && html`
+        <div class="ap-error sev-warn" role="alert">
+          ${facts.events_read_error
+            ? `메모리 이벤트 로그 읽기 오류: ${facts.events_read_error}`
+            : `메모리 이벤트 로그 해독 불가 줄 ${facts.events_unreadable_lines}건 감지`}
+          ${facts.events_read_error && facts.events_unreadable_lines > 0
+            ? ` (해독 불가 ${facts.events_unreadable_lines}줄)`
+            : ''}
+        </div>
       `}
+
+      <!-- Memory OS Internals (4 Sections) -->
+      ${internals && (() => {
+        const writerStateLabel = summarizeMemoryValue(internals.librarian_molt.writer_state)
+        const pendingMoltLabel = summarizeMemoryValue(internals.librarian_molt.pending_molt)
+        return html`
+          <section class="kp-grid-4" aria-label="Memory OS 내부 상태">
+            <div class="kp-kv-box">
+              <span class="kp-kv-k">Compaction</span>
+              <span class="kp-kv-v">
+                ${internals.compaction.read_error
+                  ? '⚠ 읽기 오류'
+                  : internals.compaction.present
+                    ? `${internals.compaction.epoch_count} epochs`
+                    : '없음'}
+              </span>
+              <span
+                class=${internals.compaction.read_error ? 'kp-roster-sub kp-wrap-text' : 'kp-roster-sub'}
+                title=${internals.compaction.read_error ?? `archived ${internals.compaction.archived_turns_count} · verified ${internals.compaction.verified_facts_count}`}
+              >
+                ${internals.compaction.read_error
+                  ? internals.compaction.read_error
+                  : `archived ${internals.compaction.archived_turns_count} · verified ${internals.compaction.verified_facts_count}`}
+              </span>
+            </div>
+            <div class="kp-kv-box">
+              <span class="kp-kv-k">Canonical Turns</span>
+              <span class="kp-kv-v">
+                ${internals.canonical_turns.read_error
+                  ? '⚠ 읽기 오류'
+                  : internals.canonical_turns.present
+                    ? internals.canonical_turns.turn_count
+                    : '없음'}
+              </span>
+              <span
+                class=${internals.canonical_turns.read_error ? 'kp-roster-sub kp-wrap-text' : 'kp-roster-sub'}
+                title=${internals.canonical_turns.read_error ?? `watermark ${internals.canonical_turns.compaction_watermark_seq ?? '없음'} · resets ${internals.canonical_turns.history_resets_count}`}
+              >
+                ${internals.canonical_turns.read_error
+                  ? internals.canonical_turns.read_error
+                  : `watermark ${internals.canonical_turns.compaction_watermark_seq ?? '없음'} · resets ${internals.canonical_turns.history_resets_count}`}
+              </span>
+            </div>
+            <div class="kp-kv-box">
+              <span class="kp-kv-k">Memory Digest</span>
+              <span class="kp-kv-v">${internals.memory_digest.present ? `${internals.memory_digest.fact_count} facts` : '없음'}</span>
+              <span class="kp-roster-sub">
+                rev ${internals.memory_digest.revision ?? '없음'} · ${internals.memory_digest.bytes} B
+              </span>
+            </div>
+            <div class="kp-kv-box">
+              <span class="kp-kv-k">Librarian Molt</span>
+              <span
+                class="kp-kv-v"
+                title=${`${internals.librarian_molt.writer_kind}${writerStateLabel ? ` · ${writerStateLabel}` : ''}`}
+              >
+                ${internals.librarian_molt.writer_kind}${writerStateLabel ? ` · ${writerStateLabel}` : ''}
+              </span>
+              <span
+                class="kp-roster-sub kp-wrap-text"
+                title=${`${pendingMoltLabel ? `대기 molt: ${pendingMoltLabel} · ` : ''}acts: ${internals.librarian_molt.available_acts.length > 0 ? internals.librarian_molt.available_acts.join(', ') : '없음'}`}
+              >
+                ${pendingMoltLabel ? `대기 molt: ${pendingMoltLabel} · ` : ''}acts: ${internals.librarian_molt.available_acts.length > 0 ? internals.librarian_molt.available_acts.join(', ') : '없음'}
+              </span>
+            </div>
+          </section>
+        `
+      })()}
 
       <!-- Ordinary Memory Facts (3-way discriminated) -->
       <section class="kp-card" aria-label="Ordinary Memory Facts">
@@ -236,7 +330,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
           `}
         </div>
         ${!facts
-          ? html`<div class="kp-empty">불러오는 중…</div>`
+          ? html`<div class="kp-empty">${loading ? '불러오는 중…' : error ? '조회 실패로 표시할 수 없습니다.' : '데이터 없음'}</div>`
           : facts.ordinary.state === 'absent'
             ? html`<div class="kp-empty" data-branch="absent">스냅샷 없음 (present: false)</div>`
             : facts.ordinary.state === 'read_error'
@@ -269,7 +363,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
           `}
         </div>
         ${!facts
-          ? html`<div class="kp-empty">불러오는 중…</div>`
+          ? html`<div class="kp-empty">${loading ? '불러오는 중…' : error ? '조회 실패로 표시할 수 없습니다.' : '데이터 없음'}</div>`
           : facts.source_bound.state === 'absent'
             ? html`<div class="kp-empty" data-branch="absent">Source-bound 스냅샷 없음 (present: false)</div>`
             : facts.source_bound.state === 'read_error'
@@ -379,11 +473,29 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
             </span>
           `}
         </div>
-        ${!journal || journal.entries.length === 0
-          ? html`<div class="kp-empty">메모리 저널 기록 없음</div>`
+        ${!journal
+          ? html`<div class="kp-empty">${loading ? '메모리 저널 불러오는 중…' : error ? '메모리 저널 조회 실패' : '메모리 저널 기록 없음'}</div>`
+          : journal.entries.length === 0
+            ? html`<div class="kp-empty">메모리 저널 기록 없음</div>`
           : html`
+              ${journal.entries.length > 12 && html`
+                <div class="kp-card-head">
+                  <span class="kp-roster-sub">
+                    ${showAllJournal
+                      ? `전체 ${journal.entries.length}건 표시`
+                      : `상위 12건 표시 (전체 ${journal.entries.length}건)`}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => setShowAllJournal((v) => !v)}
+                  >
+                    ${showAllJournal ? '12건만 보기' : `전체 ${journal.entries.length}건 보기`}
+                  </button>
+                </div>
+              `}
               <div class="kp-grid-2">
-                ${journal.entries.slice(0, 12).map((entry, idx) => html`
+                ${(showAllJournal ? journal.entries : journal.entries.slice(0, 12)).map((entry, idx) => html`
                   <div key=${entry.structural_id || idx} class="kp-kv-box">
                     <div class="kp-card-head">
                       <span class="kp-roster-name">
@@ -393,7 +505,10 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
                         ${entry.ok ? `+${entry.added ?? 0} / -${entry.removed ?? 0}` : 'error'}
                       </span>
                     </div>
-                    <span class="kp-roster-sub">
+                    <span
+                      class=${entry.ok ? 'kp-roster-sub' : 'kp-roster-sub kp-wrap-text'}
+                      title=${entry.ok ? `retained ${entry.retained ?? 0} · invalidated ${entry.invalidated ?? 0}` : (entry.error ?? undefined)}
+                    >
                       ${entry.ok ? `retained ${entry.retained ?? 0} · invalidated ${entry.invalidated ?? 0}` : entry.error}
                     </span>
                   </div>
@@ -402,9 +517,22 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
             `}
         ${journal?.activity && journal.activity.events.length > 0 && html`
           <div>
-            <span class="kp-kv-k">Recent Activity Events (${journal.activity.events.length})</span>
+            <div class="kp-card-head">
+              <span class="kp-kv-k">
+                Recent Activity Events (${showAllActivity ? journal.activity.events.length : Math.min(10, journal.activity.events.length)} / ${journal.activity.events.length})
+              </span>
+              ${journal.activity.events.length > 10 && html`
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => setShowAllActivity((v) => !v)}
+                >
+                  ${showAllActivity ? '접기' : '전체 보기'}
+                </button>
+              `}
+            </div>
             <div class="kp-pill-row">
-              ${journal.activity.events.slice(0, 10).map((ev, i) => html`
+              ${(showAllActivity ? journal.activity.events : journal.activity.events.slice(0, 10)).map((ev, i) => html`
                 <span key=${i} class="kp-pill" data-tone="info">
                   ${ev.kind} · r${ev.revision}
                 </span>

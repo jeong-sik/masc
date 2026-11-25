@@ -15,7 +15,14 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { markViewSynced } from '../../core/observer'
+import { authSession, sessionEpoch } from '../../core/auth'
+import {
+  extractObserverTopics,
+  markViewSynced,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+} from '../../core/observer'
+import { currentRoute } from '../../routes/router'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
@@ -25,6 +32,7 @@ import {
   asNonEmptyString,
   asSafeInt,
   asString,
+  asStringArray,
   callMcpToolViaCore,
   checkTaskGoalLinkable,
   computeTaskFilterCounts,
@@ -42,6 +50,7 @@ import {
   type TaskHistoryPageData,
   type TaskItem,
   type TaskStatus,
+  type VerificationRequestItem,
   type WorkspaceViewProps,
 } from './types'
 
@@ -49,6 +58,59 @@ interface TasksBundle {
   readonly tasks: readonly TaskItem[]
   readonly goals: readonly GoalItem[]
   readonly schedules: ScheduleProjection
+}
+
+function decodeTaskVerifications(raw: unknown): VerificationRequestItem[] {
+  if (!isRecord(raw) || !Array.isArray(raw.requests)) return []
+  const items: VerificationRequestItem[] = []
+  for (const r of raw.requests) {
+    if (!isRecord(r)) continue
+    const requestId = asNonEmptyString(r.request_id)
+    const taskId = asNonEmptyString(r.task_id)
+    if (!requestId || !taskId) continue
+    const obs = isRecord(r.review_observation) ? r.review_observation : null
+    items.push({
+      requestId,
+      taskId,
+      taskTitle: asString(r.task_title, taskId),
+      submittedBy: asString(r.submitted_by, 'unknown'),
+      createdAt: typeof r.created_at === 'string' || typeof r.created_at === 'number' ? r.created_at : null,
+      completionContract: asStringArray(r.completion_contract),
+      submittedEvidence: asStringArray(r.submitted_evidence),
+      reviewState: obs ? asNonEmptyString(obs.state) : null,
+      reviewDetail: obs ? asNonEmptyString(obs.detail) : null,
+    })
+  }
+  return items
+}
+
+function reviewStateTone(state: string | null): 'ok' | 'err' | 'warn' | 'info' | 'idle' {
+  switch (state) {
+    case 'approved': return 'ok'
+    case 'rejected':
+    case 'failed':
+    case 'commit_failed':
+    case 'execution_repair_required': return 'err'
+    case 'running':
+    case 'execution_pending': return 'info'
+    case 'unavailable':
+    case 'not_reviewed':
+    case 'cancelled': return 'warn'
+    default: return 'idle'
+  }
+}
+
+function decodeScheduleTimestamp(isoRaw: unknown, unixRaw: unknown): string | null {
+  const iso = asNonEmptyString(isoRaw)
+  if (iso) return iso
+  if (typeof unixRaw === 'number' && Number.isFinite(unixRaw) && unixRaw > 0) {
+    try {
+      return new Date(unixRaw * 1000).toISOString()
+    } catch {
+      return null
+    }
+  }
+  return asNonEmptyString(unixRaw)
 }
 
 function decodeSchedulesResponse(raw: unknown): ScheduleProjection {
@@ -72,8 +134,8 @@ function decodeSchedulesResponse(raw: unknown): ScheduleProjection {
       scheduleInstanceId: asString(r.schedule_instance_id, scheduleId),
       status: asString(r.status, 'scheduled'),
       source: asString(r.source, 'operator'),
-      dueAt: asNonEmptyString(r.due_at),
-      nextDueAt: asNonEmptyString(r.next_due_at),
+      dueAt: decodeScheduleTimestamp(r.due_at_iso, r.due_at),
+      nextDueAt: decodeScheduleTimestamp(r.next_due_at_iso, r.next_due_at),
       recurrenceKind: asString(r.recurrence_kind, 'one_shot'),
       recurrenceSummary: asString(r.recurrence_summary, ''),
       keeperName: asNonEmptyString(r.payload_keeper_name) ?? asNonEmptyString(r.payload_target),
@@ -105,7 +167,15 @@ export function TasksTab(props: WorkspaceViewProps) {
   })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [chip, setChip] = useState<TaskFilterChip>('all')
+  const routeViewParam = currentRoute.value.query.view
+  const [chip, setChip] = useState<TaskFilterChip>(() => (routeViewParam === 'schedules' ? 'schedules' : 'all'))
+  const [schedulesActiveOnly, setSchedulesActiveOnly] = useState(true)
+
+  useEffect(() => {
+    if (routeViewParam === 'schedules') {
+      setChip('schedules')
+    }
+  }, [routeViewParam])
   const [query, setQuery] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(props.entityId ?? null)
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -131,6 +201,11 @@ export function TasksTab(props: WorkspaceViewProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err' | 'warn'; message: string } | null>(null)
 
+  // Per-task verification history (surfaces verdicts even for unlinked/goalless tasks)
+  const [taskVerifications, setTaskVerifications] = useState<readonly VerificationRequestItem[]>([])
+  const [taskVerifError, setTaskVerifError] = useState<string | null>(null)
+  const [verifRefreshTick, setVerifRefreshTick] = useState(0)
+
   // Cursor-paginated Task History Timeline (`#36`) with AbortController race guard
   const [historyEvents, setHistoryEvents] = useState<TaskHistoryPageData['events']>([])
   const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null)
@@ -138,17 +213,20 @@ export function TasksTab(props: WorkspaceViewProps) {
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historySourceChanged, setHistorySourceChanged] = useState(false)
   const historyAbortRef = useRef<AbortController | null>(null)
+  const bundleSeqRef = useRef(0)
 
-  const loadTasksAndSchedules = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
-    setLoading(true)
+  const loadTasksAndSchedules = useCallback(async (reason: 'mount' | 'manual' | 'sse' = 'mount') => {
+    const seq = ++bundleSeqRef.current
+    if (reason !== 'sse') setLoading(true)
     setLoadError(null)
+    const activeParam = schedulesActiveOnly ? 'true' : 'false'
     const obs = await resourceCache.fetch<TasksBundle>(
-      'work:tasks:bundle',
+      `work:tasks:bundle:sched-${activeParam}`,
       async (signal) => {
         const [planRes, execRes, schedRes] = await Promise.all([
           apiGet<unknown>('/api/v1/dashboard/planning', { signal }),
           apiGet<unknown>('/api/v1/dashboard/execution?light=true', { signal }),
-          apiGet<unknown>('/api/v1/dashboard/scheduled-automation?active_only=true', { signal }),
+          apiGet<unknown>(`/api/v1/dashboard/scheduled-automation?active_only=${activeParam}`, { signal }),
         ])
         if (!planRes.ok && !execRes.ok) return planRes
 
@@ -181,8 +259,9 @@ export function TasksTab(props: WorkspaceViewProps) {
 
         return ok({ tasks: [...taskMap.values()], goals, schedules })
       },
-      { ttlMs: 10_000, topics: ['tasks', 'task_updated', 'planning', 'schedules'], reason },
+      { ttlMs: 10_000, topics: ['tasks', 'task_updated', 'planning', 'schedules', 'schedule_store_changed'], reason },
     )
+    if (seq !== bundleSeqRef.current) return
     setLoading(false)
     if (obs.kind === 'value') {
       setBundle(obs.data)
@@ -193,16 +272,60 @@ export function TasksTab(props: WorkspaceViewProps) {
         return obs.data.tasks[0]?.id ?? null
       })
       if (obs.data.schedules.state === 'available') {
-        const firstSchedId = obs.data.schedules.rows[0]?.scheduleId ?? null
-        setSelectedScheduleId((prev) => prev ?? firstSchedId)
+        const rows = obs.data.schedules.rows
+        const firstSchedId = rows[0]?.scheduleId ?? null
+        setSelectedScheduleId((prev) => (prev && rows.some((s) => s.scheduleId === prev) ? prev : firstSchedId))
       }
     } else if (obs.kind === 'failed') {
       setLoadError(obs.error.message)
     }
-  }, [props.entityId])
+  }, [props.entityId, schedulesActiveOnly])
 
   useEffect(() => {
     void loadTasksAndSchedules('mount')
+  }, [loadTasksAndSchedules])
+
+  useEffect(() => {
+    const taskTopics = new Set([
+      'task',
+      'tasks',
+      'task_updated',
+      'planning',
+      'backlog',
+      'schedules',
+      'schedule_store_changed',
+      'scheduled_automation_changed',
+      'scheduled_automation',
+      'verification',
+      'verification_requests',
+      'goal_projection_changed',
+    ])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let pendingVerifReload = false
+    const unsub = subscribeObserverFrames((frame) => {
+      const topics = extractObserverTopics(frame)
+      if (!topics.some((t) => taskTopics.has(t))) return
+      if (topics.includes('verification') || topics.includes('verification_requests')) {
+        pendingVerifReload = true
+      }
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        const reloadVerif = pendingVerifReload
+        pendingVerifReload = false
+        void loadTasksAndSchedules('sse')
+        if (reloadVerif) setVerifRefreshTick((t) => t + 1)
+      }, 450)
+    })
+    const unsubReconnect = subscribeObserverReconnect(() => {
+      void loadTasksAndSchedules('sse')
+      setVerifRefreshTick((t) => t + 1)
+    })
+    return () => {
+      unsub()
+      unsubReconnect()
+      if (timer) clearTimeout(timer)
+    }
   }, [loadTasksAndSchedules])
 
   const counts = useMemo(() => computeTaskFilterCounts(bundle.tasks), [bundle.tasks])
@@ -265,24 +388,58 @@ export function TasksTab(props: WorkspaceViewProps) {
     setHistoryNextCursor(res.value.next_cursor ?? null)
   }, [])
 
+  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const epoch = sessionEpoch.value
+  const isSchedulesView = chip === 'schedules'
+  const selectedTaskKey = selectedTask?.id ?? null
+
   useEffect(() => {
     setCancelReason('')
     setLinkGoalId('')
   }, [selectedTaskId, selectedScheduleId, chip])
 
   useEffect(() => {
-    if (chip !== 'schedules' && selectedTask) {
+    if (!isSchedulesView && selectedTaskKey) {
       const controller = new AbortController()
       setHistoryEvents([])
       setHistoryNextCursor(null)
-      void loadHistoryPage(selectedTask.id, null, false, controller.signal)
+      void loadHistoryPage(selectedTaskKey, null, false, controller.signal)
       return () => {
         controller.abort()
       }
     }
     historyAbortRef.current?.abort()
     return undefined
-  }, [chip, selectedTask?.id, loadHistoryPage])
+  }, [isSchedulesView, selectedTaskKey, loadHistoryPage, epoch])
+
+  useEffect(() => {
+    setTaskVerifications([])
+    setTaskVerifError(null)
+  }, [selectedTaskKey, isSchedulesView, isSingleUser, epoch])
+
+  useEffect(() => {
+    if (isSchedulesView || !selectedTaskKey || !isSingleUser) return undefined
+    const controller = new AbortController()
+    void apiGet<unknown>(
+      `/api/v1/verification/requests?view=all&task_id=${encodeURIComponent(selectedTaskKey)}&limit=10`,
+      { signal: controller.signal },
+    ).then((res) => {
+      if (controller.signal.aborted) return
+      if (res.ok) {
+        setTaskVerifError(null)
+        setTaskVerifications(decodeTaskVerifications(res.value))
+      } else if (
+        res.error.kind !== 'not_found'
+        && res.error.kind !== 'aborted'
+        && res.error.kind !== 'epoch_stale'
+      ) {
+        setTaskVerifError(res.error.message)
+      }
+    })
+    return () => {
+      controller.abort()
+    }
+  }, [isSchedulesView, selectedTaskKey, verifRefreshTick, isSingleUser, epoch])
 
   const handleCreateTask = async (e: Event) => {
     e.preventDefault()
@@ -497,6 +654,26 @@ export function TasksTab(props: WorkspaceViewProps) {
             </button>
           `)}
         </div>
+        ${chip === 'schedules' && html`
+          <div class="wk-chips" role="group" aria-label="예약 범위 필터">
+            <button
+              type="button"
+              class="wk-chip"
+              aria-pressed=${schedulesActiveOnly}
+              onClick=${() => setSchedulesActiveOnly(true)}
+            >
+              활성만
+            </button>
+            <button
+              type="button"
+              class="wk-chip"
+              aria-pressed=${!schedulesActiveOnly}
+              onClick=${() => setSchedulesActiveOnly(false)}
+            >
+              전체 이력
+            </button>
+          </div>
+        `}
         ${chip !== 'schedules' && html`
           <input
             type="search"
@@ -610,13 +787,18 @@ export function TasksTab(props: WorkspaceViewProps) {
         ? bundle.schedules.state === 'unavailable'
           ? html`<div class="wk-detail-pad"><div class="wk-notice wk-notice--warn">예약 저장소 조회 불가: ${bundle.schedules.reason}</div></div>`
           : html`
+              ${bundle.schedules.truncated && html`
+                <div class="wk-notice wk-notice--warn wk-inset" role="note">
+                  예약 목록이 표시 제한으로 일부만 표시됩니다 (${bundle.schedules.rows.length} / ${bundle.schedules.totalCount}건).
+                </div>
+              `}
               <${VirtualList}
                 items=${bundle.schedules.rows}
                 estimateSize=${74}
                 height="100%"
                 ariaLabel="예약 자동화 목록"
                 getItemKey=${(s: ScheduleRow) => s.scheduleId}
-                empty=${html`<div class="wk-detail-pad"><span class="dtable-absent">활성 예약이 없습니다 (0).</span></div>`}
+                empty=${html`<div class="wk-detail-pad"><span class="dtable-absent">${schedulesActiveOnly ? '활성 예약이 없습니다 (0).' : '기록된 예약 이력이 없습니다 (0).'}</span></div>`}
                 renderItem=${(s: ScheduleRow) => html`
                   <button
                     type="button"
@@ -830,6 +1012,29 @@ export function TasksTab(props: WorkspaceViewProps) {
                   </div>
                 `}
               </section>
+
+              ${(taskVerifications.length > 0 || taskVerifError) && html`
+                <section class="wk-section" aria-label="태스크 검증 판정">
+                  <h3 class="wk-section-title">Verification Verdicts (${taskVerifications.length})</h3>
+                  ${taskVerifError && html`<div class="wk-notice wk-notice--err" role="alert">검증 이력 조회 실패: ${taskVerifError}</div>`}
+                  <div class="wk-stack-1">
+                    ${taskVerifications.map((vr) => html`
+                      <div key=${vr.requestId} class="wk-kv">
+                        <div class="wk-row-top">
+                          <span class="mono wk-sub-id" title=${vr.requestId}>${vr.requestId}</span>
+                          <span class=${`wk-badge wk-badge--${reviewStateTone(vr.reviewState)}`}>
+                            ${vr.reviewState ?? 'unobserved'}
+                          </span>
+                        </div>
+                        <div class="wk-muted-sm">
+                          제출: ${vr.submittedBy}${vr.createdAt ? ` · ${formatRelativeTime(vr.createdAt)}` : ''}
+                        </div>
+                        ${vr.reviewDetail && html`<div class="wk-body-pre">${vr.reviewDetail}</div>`}
+                      </div>
+                    `)}
+                  </div>
+                </section>
+              `}
 
               <section class="wk-section" aria-label="Goal 연결">
                 <h3 class="wk-section-title">Goal 연결 (set_task_goal — goalless 태스크 전용)</h3>

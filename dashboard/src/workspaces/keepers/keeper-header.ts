@@ -4,8 +4,9 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { activeWorkspaceId } from '../../core/auth'
-import { formatObserved, type Observed } from '../../core/resource-cache'
+import { activeWorkspaceId, authSession, sessionEpoch } from '../../core/auth'
+import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconnect } from '../../core/observer'
+import { formatObserved, resourceCache, type Observed } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
 import { keeperPortraitUrl, kSigil } from '../../components/keeper-badge'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -15,6 +16,7 @@ import {
   formatContextDetail,
   interruptKeeperTurnAction,
   isKeeperPathResting,
+  loadKeeperToolApprovalModes,
   needsRosterAttention,
   observeRosterContextPct,
   pauseKeeperAction,
@@ -25,7 +27,7 @@ import {
   KEEPER_ENTITY_TABS,
   type KeeperEntityTab,
 } from '../../routes/router'
-import type { KeeperRosterItem } from './types'
+import type { KeeperRosterItem, KeeperToolApprovalModesData } from './types'
 
 export interface KeeperHeaderProps {
   readonly keeper: KeeperRosterItem
@@ -94,6 +96,35 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [deleteOpen])
 
+  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const epoch = sessionEpoch.value
+  const approvalModesObs = resourceCache.observe<KeeperToolApprovalModesData>('keepers:tool-approval-modes').value
+
+  useEffect(() => {
+    if (!isSingleUser) return
+    void loadKeeperToolApprovalModes('mount')
+    const unsub = subscribeObserverFrames((frame) => {
+      const topics = extractObserverTopics(frame)
+      if (topics.includes('keeper_tool_approval_mode_changed')) {
+        void loadKeeperToolApprovalModes('sse')
+      }
+    })
+    const unsubReconnect = subscribeObserverReconnect(() => {
+      void loadKeeperToolApprovalModes('sse')
+    })
+    return () => {
+      unsub()
+      unsubReconnect()
+    }
+  }, [isSingleUser, epoch])
+
+  const approvalMode = isSingleUser && approvalModesObs.kind === 'value'
+    ? (approvalModesObs.data.overrides[keeper.name] ?? approvalModesObs.data.defaultMode)
+    : null
+  const approvalModeRestoreError = isSingleUser && approvalModesObs.kind === 'value'
+    ? approvalModesObs.data.restoreError
+    : null
+
   const ctxObs = observeRosterContextPct(keeper)
   const ctxDetail = formatContextDetail(keeper)
   const ctxText = ctxObs.kind === 'value' ? ctxDetail.label : formatObserved(ctxObs, (v) => `${v}%`)
@@ -126,6 +157,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     || resting
     || keeper.last_failure
     || actionableDisposition
+    || approvalModeRestoreError
     || laneFailures.length > 0
     || (keeper.waiting_summary && keeper.waiting_summary.count > 0)
     || (turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0)),
@@ -218,6 +250,15 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               `}
               ${props.turnStatus === 'loading' && html`<span class="kp-pill">턴 상태 조회 중…</span>`}
               ${props.turnStatus === 'failed' && html`<span class="kp-pill" data-tone="warn">턴 상태 조회 실패</span>`}
+              ${approvalMode === 'yolo' && html`
+                <span
+                  class="kp-pill"
+                  data-tone="bad"
+                  title="도구 승인 자동 통과 모드(yolo) 활성화됨"
+                >
+                  ⚠ YOLO
+                </span>
+              `}
             </div>
           </div>
         </div>
@@ -278,7 +319,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       ${hasDiagnostics && html`
         <div
           class="kp-diag-banner"
-          data-tone=${failing ? 'bad' : resting ? 'warn' : 'info'}
+          data-tone=${failing ? 'bad' : resting || Boolean(approvalModeRestoreError) ? 'warn' : 'info'}
           role="status"
           aria-label="Keeper 런타임 진단"
         >
@@ -316,6 +357,9 @@ export function KeeperHeader(props: KeeperHeaderProps) {
             <div class="kp-diag-row">
               <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
             </div>
+          `}
+          ${approvalModeRestoreError && html`
+            <div class="kp-diag-row"><strong>승인 모드 복구 오류</strong>: ${approvalModeRestoreError}</div>
           `}
           ${turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0) && html`
             <div class="kp-diag-row">

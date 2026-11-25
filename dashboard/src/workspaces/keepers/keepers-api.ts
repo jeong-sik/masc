@@ -57,6 +57,7 @@ import type {
   ChatJournalEvent,
   ChatJournalPage,
   ChatJournalTextOwner,
+  ChatSpeakerAuthority,
   ChatToolBlock,
   ChatTranscriptEntry,
   CheckpointInventoryData,
@@ -80,6 +81,7 @@ import type {
   KeeperPathRest,
   KeeperRosterItem,
   KeeperSandboxData,
+  KeeperToolApprovalModesData,
   KeeperToolCallEntry,
   KeeperToolCallsData,
   KeeperToolStatsData,
@@ -565,6 +567,44 @@ export async function fetchKeeperControlToken(keeperName: string): Promise<strin
   return turns.kind === 'value' ? turns.data.get(keeperName)?.chat_control_token ?? null : null
 }
 
+export function decodeToolApprovalModes(raw: unknown): KeeperToolApprovalModesData {
+  const overrides: Record<string, string> = {}
+  if (isRecord(raw) && Array.isArray(raw.overrides)) {
+    for (const row of raw.overrides) {
+      if (!isRecord(row)) continue
+      const k = asStr(row.keeper) ?? asStr(row.name)
+      const m = asStr(row.mode)
+      if (k && m) overrides[k] = m
+    }
+  }
+  return {
+    defaultMode: (isRecord(raw) ? asStr(raw.default) : null) ?? 'auto',
+    overrides,
+    restoreError: isRecord(raw) ? asStr(raw.restore_error) : null,
+  }
+}
+
+export async function loadKeeperToolApprovalModes(
+  reason: FetchReason = 'mount',
+): Promise<Observed<KeeperToolApprovalModesData>> {
+  if (authSession.peek().kind !== 'single_user_local') {
+    return observedAbsent('multi_account_unsupported')
+  }
+  return resourceCache.fetch<KeeperToolApprovalModesData>(
+    'keepers:tool-approval-modes',
+    (signal) =>
+      apiGet<KeeperToolApprovalModesData>('/api/v1/keepers/tool-approval-mode', {
+        signal,
+        decode: decodeToolApprovalModes,
+      }),
+    {
+      ttlMs: 15_000,
+      topics: ['keeper_tool_approval_mode_changed', 'keeper_tool_approval_waits_changed', 'tool_approval'],
+      reason,
+    },
+  )
+}
+
 // ── Lifecycle Mutations ──────────────────────────────────────────────────
 
 export function bootKeeperAction(name: string) {
@@ -714,6 +754,24 @@ function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[
   return out.length > 0 ? out : undefined
 }
 
+function decodeSurfaceRef(raw: unknown): string | null {
+  const direct = asStr(raw)
+  if (direct) return direct
+  if (!isRecord(raw)) return null
+  const kind = asStr(raw.kind)
+  if (!kind) return null
+  if (kind === 'gate') return asStr(raw.label) ?? 'gate'
+  if (kind === 'slack' || kind === 'discord') {
+    const channel = asStr(raw.channel_name)
+    return channel ? `${kind} #${channel}` : kind
+  }
+  if (kind === 'webhook') {
+    const source = asStr(raw.source)
+    return source ? `webhook:${source}` : 'webhook'
+  }
+  return kind
+}
+
 export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
   if (!isRecord(raw)) return null
   const id = asStr(raw.id)
@@ -723,9 +781,6 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system' || roleRaw === 'tool' || roleRaw === 'request_failure'
       ? roleRaw
       : 'assistant'
-  const speakerLabel = role === 'user'
-    ? asStr(raw.speaker_name) ?? asStr(raw.speaker_id) ?? (raw.speaker_authority === 'owner' ? 'Operator' : undefined)
-    : undefined
   const content = typeof raw.content === 'string' ? raw.content : ''
   const ts = asNum(raw.ts) ?? Date.now() / 1000
   const decodedBlocks = decodeHistoryBlocks(raw.blocks)
@@ -782,6 +837,17 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
           : role === 'tool'
             ? 'tool_result'
             : undefined
+  const speakerAuthorityRaw = asStr(raw.speaker_authority)?.toLowerCase()
+  const speakerAuthority: ChatSpeakerAuthority | null =
+    speakerAuthorityRaw === 'owner' || speakerAuthorityRaw === 'keeper' || speakerAuthorityRaw === 'external'
+      ? speakerAuthorityRaw
+      : null
+  const speakerName = asStr(raw.speaker_name)
+  const speakerId = asStr(raw.speaker_id)
+  const speakerLabel = role === 'user'
+    ? speakerName ?? speakerId ?? (speakerAuthority === 'owner' ? 'Operator' : undefined)
+    : undefined
+  const surface = decodeSurfaceRef(raw.surface)
   return {
     id,
     role,
@@ -798,6 +864,10 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     memoryItems: memoryItems && memoryItems.length > 0 ? memoryItems : undefined,
     autonomousTurn: autonomousTurn || undefined,
     deliveryState: 'Delivered',
+    speakerAuthority,
+    speakerName,
+    speakerId,
+    surface,
   }
 }
 
@@ -2148,17 +2218,24 @@ export function decodeKeeperMemoryFacts(raw: unknown, keeper: string): KeeperMem
   }
 }
 
-export function fetchKeeperMemoryFactsApi(keeper: string): Promise<Result<KeeperMemoryFactsData, ApiError>> {
+export function fetchKeeperMemoryFactsApi(
+  keeper: string,
+  signal?: AbortSignal,
+): Promise<Result<KeeperMemoryFactsData, ApiError>> {
   return apiGet<KeeperMemoryFactsData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-facts`,
-    { decode: (raw) => decodeKeeperMemoryFacts(raw, keeper) },
+    { signal, decode: (raw) => decodeKeeperMemoryFacts(raw, keeper) },
   )
 }
 
-export function fetchKeeperMemoryOsInternalsApi(keeper: string): Promise<Result<KeeperMemoryOsInternalsData, ApiError>> {
+export function fetchKeeperMemoryOsInternalsApi(
+  keeper: string,
+  signal?: AbortSignal,
+): Promise<Result<KeeperMemoryOsInternalsData, ApiError>> {
   return apiGet<KeeperMemoryOsInternalsData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-os-internals`,
     {
+      signal,
       decode: (raw) => {
         const rec = isRecord(raw) ? raw : {}
         const comp = isRecord(rec.compaction) ? rec.compaction : {}
@@ -2210,16 +2287,23 @@ export function fetchKeeperMemoryOsInternalsApi(keeper: string): Promise<Result<
   )
 }
 
-export function fetchKeeperMemoryJournalApi(keeper: string, limit = 50): Promise<Result<KeeperMemoryJournalData, ApiError>> {
+export function fetchKeeperMemoryJournalApi(
+  keeper: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<Result<KeeperMemoryJournalData, ApiError>> {
   return apiGet<KeeperMemoryJournalData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-journal?activity=1&limit=${limit}`,
     {
+      signal,
       decode: (raw) => {
         const rec = isRecord(raw) ? raw : {}
         const entries: KeeperMemoryJournalEntry[] = Array.isArray(rec.entries)
           ? rec.entries.filter(isRecord).map((e) => {
               const source = isRecord(e.source) ? e.source : null
               const change = isRecord(e.change) ? e.change : null
+              const asCount = (v: unknown): number =>
+                Array.isArray(v) ? v.length : (asNum(v) ?? 0)
               return {
                 structural_id: asStr(e.structural_id) ?? '',
                 ok: e.ok === true,
@@ -2227,10 +2311,10 @@ export function fetchKeeperMemoryJournalApi(keeper: string, limit = 50): Promise
                 recorded_at: asNum(e.recorded_at) ?? undefined,
                 revision: asNum(e.revision) ?? undefined,
                 source_kind: source ? (asStr(source.kind) ?? undefined) : undefined,
-                added: change ? (asNum(change.added) ?? 0) : undefined,
-                removed: change ? (asNum(change.removed) ?? 0) : undefined,
+                added: change ? asCount(change.added) : undefined,
+                removed: change ? asCount(change.removed) : undefined,
                 retained: change ? (asNum(change.retained) ?? 0) : undefined,
-                invalidated: change ? (asNum(change.invalidated) ?? 0) : undefined,
+                invalidated: change ? asCount(change.invalidated) : undefined,
               }
             })
           : []

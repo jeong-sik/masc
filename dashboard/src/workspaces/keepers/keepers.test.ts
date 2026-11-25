@@ -328,7 +328,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       { id: 'external', role: 'user', content: 'External message', ts: 1, speaker_name: ' Minsu ', speaker_id: 'U123', speaker_authority: 'external' },
       { id: 'peer', role: 'user', content: 'Keeper request', ts: 2, speaker_id: 'peer-keeper', speaker_authority: 'keeper' },
       { id: 'owner', role: 'user', content: 'Operator message', ts: 3, speaker_authority: 'owner' },
-      { id: 'unattributed', role: 'user', content: 'Older message', ts: 4 },
+      { id: 'named', role: 'user', content: 'Named legacy message', ts: 4, speaker_name: 'Mina', speaker_id: 'stable-id' },
+      { id: 'unattributed', role: 'user', content: 'Older message', ts: 5 },
     ]
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const payload = String(input).includes('/chat/history/page')
@@ -347,7 +348,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         container.querySelectorAll('.kp-msg[data-role="user"] .kp-msg-head > span'),
         (heading) => heading.textContent?.trim(),
       )
-      expect(speakers).toEqual(['Minsu', 'peer-keeper', 'Operator', '사용자'])
+      expect(speakers).toEqual(['Minsu (외부)', 'Keeper · peer-keeper', 'Operator', 'Mina', '사용자'])
     })
   })
 
@@ -1438,5 +1439,139 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(hdr.container.textContent).toContain('성공 2 · 휴식 1 · 실패 4')
     expect(hdr.container.textContent).toContain('Ctx ~61%')
     hdr.unmount()
+  })
+
+  it('attributes non-operator chat speakers honestly, renders YOLO pill + restore_error, decodes array journal changes, suppresses healthy pass disposition, and surfaces Memory OS faults', async () => {
+    const journalEntries = Array.from({ length: 15 }, (_, i) => ({
+      structural_id: `j-${i}`,
+      ok: true,
+      revision: i + 1,
+      source: { kind: 'commit' },
+      change: {
+        added: [{ claim: 'a' }, { claim: 'b' }],
+        removed: [{ claim: 'old' }],
+        retained: i,
+        invalidated: [{ support_id: 's1' }],
+      },
+    }))
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/keepers/tool-approval-mode')) {
+        return json({
+          default: 'auto',
+          overrides: [{ keeper: 'code-reviewer-sister', mode: 'yolo' }],
+          restore_error: 'corrupt tool-approval-modes.json line 2',
+        })
+      }
+      if (url.includes('/chat/history/page')) {
+        return json({
+          has_more: false,
+          next_cursor: null,
+          messages: [
+            { id: 'm-1', role: 'user', content: 'DM from peer', ts: 100, speaker_authority: 'keeper', speaker_name: 'sangsu', surface: { kind: 'agent' } },
+            { id: 'm-2', role: 'user', content: 'Slack ping', ts: 101, speaker_authority: 'external', speaker_name: 'alice', surface: { kind: 'slack', channel_name: 'ops' } },
+          ],
+        })
+      }
+      if (url.includes('/chat/operations')) return json({ operations: [] })
+      if (url.includes('/memory-facts')) {
+        return json({
+          keeper: 'code-reviewer-sister',
+          ordinary: { present: false },
+          source_bound: { present: false },
+          events_unreadable_lines: 3,
+          events_read_error: 'permission denied on events.jsonl',
+        })
+      }
+      if (url.includes('/memory-os-internals')) {
+        return json({
+          keeper: 'code-reviewer-sister',
+          compaction: { present: false, epoch_count: 0, archived_turns_count: 0, anchor_bytes: 0, latest_epoch_id: null, verified_facts_count: 0, decisions_count: 0, open_threads_count: 0, read_error: 'compaction crc mismatch' },
+          canonical_turns: { present: false, turn_count: 0, latest_turn_id: null, compaction_watermark_seq: null, compaction_watermark_epoch: null, history_resets_count: 0, read_error: 'canonical log truncated' },
+          memory_digest: { present: true, revision: 4, digest_sha256: 'abc', bytes: 120, fact_count: 2, derived_count: 1 },
+          librarian_molt: { writer_kind: 'in_process', writer_state: { state: 'stopped', stop: 'snapshot_mismatch' }, pending_molt: { kind: 'compaction' }, available_acts: ['resume'] },
+        })
+      }
+      if (url.includes('/memory-journal')) {
+        return json({
+          keeper: 'code-reviewer-sister',
+          returned: 15,
+          undecodable_lines: 0,
+          entries: journalEntries,
+          activity: { events: [], notes: [] },
+        })
+      }
+      return json({})
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const hdr = render(
+      html`<${KeeperHeader}
+        keeper=${makeRosterKeeper()}
+        activeTab="chat"
+        onSelectTab=${vi.fn()}
+        onLifecycleMutated=${vi.fn()}
+        onDeleted=${vi.fn()}
+      />`,
+    )
+    await waitFor(() => {
+      expect(hdr.container.textContent).toContain('⚠ YOLO')
+      expect(hdr.container.textContent).toContain('corrupt tool-approval-modes.json line 2')
+    })
+    hdr.unmount()
+
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Keeper · sangsu')
+      expect(chat.container.textContent).toContain('alice (외부)')
+      expect(chat.container.textContent).toContain('slack #ops')
+      expect(chat.container.textContent).toContain('agent')
+      expect(chat.container.textContent).not.toContain('Operator')
+    })
+    chat.unmount()
+
+    const mem = render(html`<${KeeperMemoryTab} keeperName="code-reviewer-sister" />`)
+    await waitFor(() => {
+      expect(mem.container.textContent).toContain('permission denied on events.jsonl')
+      expect(mem.container.textContent).toContain('compaction crc mismatch')
+      expect(mem.container.textContent).toContain('canonical log truncated')
+      expect(mem.container.textContent).toContain('snapshot_mismatch')
+      expect(mem.container.textContent).toContain('대기 molt: kind=compaction')
+      expect(mem.container.textContent).toContain('상위 12건 표시 (전체 15건)')
+      expect(mem.container.textContent).toContain('+2 / -1')
+      expect(mem.container.textContent).toContain('invalidated 1')
+    })
+    mem.unmount()
+
+    // Healthy keeper with operator_disposition: "pass" must NOT render .kp-diag-banner
+    const healthyKeeper = {
+      ...makeRosterKeeper(),
+      name: 'healthy-keeper',
+      operator_disposition: 'pass',
+      operator_disposition_reason: 'healthy',
+    }
+    const cleanFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ default: 'auto', overrides: [], restore_error: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', cleanFetch)
+    resourceCache.clearAll()
+    const cleanHdr = render(
+      html`<${KeeperHeader}
+        keeper=${healthyKeeper}
+        activeTab="chat"
+        onSelectTab=${vi.fn()}
+        onLifecycleMutated=${vi.fn()}
+        onDeleted=${vi.fn()}
+      />`,
+    )
+    expect(cleanHdr.container.querySelector('.kp-diag-banner')).toBeNull()
+    cleanHdr.unmount()
   })
 })

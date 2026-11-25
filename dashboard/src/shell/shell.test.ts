@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
-import { act, fireEvent } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 import {
   activeWorkspaceId,
   authSession,
@@ -16,21 +16,32 @@ import {
   viewProvenance,
 } from '../core/observer'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
+import { apiMutate } from '../core/transport'
 import { navigate, resetRouterForTests } from '../routes/router'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
 import { IncidentsOverlayBody } from './incidents-overlay'
 import { MobileNav } from './mobile-nav'
 import { NavRail } from './nav-rail'
+import { QueueContextOverlayBody } from './queue-context-overlay'
 import {
   activeOverlay,
   commandPaletteOpen,
+  effectiveHitlSourceStatus,
   historicalIncidents,
+  inboxPendingCount,
   openInspectDrawer,
+  parseAwaitingGoalsPayload,
+  parseGateQueuePayload,
   parseKeeperAsksPayload,
+  parsePendingVerificationsPayload,
   pendingApprovals,
+  pendingGateApprovals,
+  pendingGoalConfirmations,
+  pendingVerifications,
   railExpanded,
   recordIncident,
+  refreshPendingHitl,
   resetShellStateForTests,
   toggleRail,
   unreadIncidentCount,
@@ -39,6 +50,18 @@ import {
 import { TopBar } from './top-bar'
 
 const AUTH_METHODS = { google: true, github: true, dev_token: false } as const
+
+const EMPTY_HITL: Readonly<Record<string, object>> = {
+  '/api/v1/keepers/tool-approvals': { pending: [] },
+  '/api/v1/keepers/asks': { asks: [] },
+  '/api/v1/dashboard/gate': { approval_queue: [] },
+  '/api/v1/dashboard/planning': { goals: [] },
+  '/api/v1/verification/requests': { requests: [] },
+}
+
+function hitlJson(payload: object, status = 200): Response {
+  return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
+}
 
 describe('Proposal A+ Shell components', () => {
   let container: HTMLDivElement
@@ -162,6 +185,66 @@ describe('Proposal A+ Shell components', () => {
     expect(sessionEpoch.value).toBeGreaterThan(beforeEpoch)
   })
 
+  it('reports unread and inaccessible HITL sources until a successful empty read', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+
+    let release!: () => void
+    const firstRead = new Promise<void>((resolve) => { release = resolve })
+    let recovered = false
+    const blockedStatuses: Readonly<Record<string, number>> = {
+      '/api/v1/keepers/tool-approvals': 404,
+      '/api/v1/keepers/asks': 403,
+      '/api/v1/dashboard/gate': 404,
+      '/api/v1/dashboard/planning': 403,
+      '/api/v1/verification/requests': 404,
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path = new URL(String(input), location.href).pathname
+      const status = blockedStatuses[path]
+      if (status && !recovered) {
+        await firstRead
+        return hitlJson({ error: 'HITL source unavailable' }, status)
+      }
+      return hitlJson(EMPTY_HITL[path] ?? {})
+    })
+
+    await act(async () => {
+      render(h('div', {}, h(TopBar, {}), h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    const askEmpty = '대기 중인 Keeper 질문이 없습니다.'
+    const strip = () => container.querySelector('[data-testid="fast-approval-strip"]')
+    const inboxBadge = () => container.querySelector('[data-testid="inbox-pill"] .ap-pill-count')?.textContent
+    expect(container.textContent).toContain('Pending Tool Approvals (조회 대기)')
+    expect(container.textContent).toContain('Open Keeper Asks (조회 대기)')
+    expect(container.textContent).not.toContain(askEmpty)
+    expect(strip()?.textContent).toContain('일부 미확인')
+    expect(inboxBadge()).toBe('?')
+
+    release()
+    await waitFor(() => {
+      expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
+      expect(container.textContent).toContain('Open Keeper Asks (조회 실패)')
+      expect(container.textContent).toContain('Channel Gate Approvals (조회 실패)')
+      expect(container.textContent).toContain('Goal Confirmations (조회 실패)')
+      expect(container.textContent).toContain('Awaiting Verifications (조회 실패)')
+    })
+    expect(container.textContent).not.toContain(askEmpty)
+    expect(strip()?.textContent).toContain('일부 미확인')
+    expect(inboxBadge()).toBe('?')
+
+    recovered = true
+    await act(async () => { await refreshPendingHitl() })
+    expect(container.textContent).toContain(askEmpty)
+    expect(strip()).toBeNull()
+    expect(inboxBadge()).toBe('0')
+  })
+
   it('FastApprovalStrip renders 0px when clear, wraps mutations in TargetLockedAction, and locks on sessionEpoch drift', async () => {
     authSession.value = {
       kind: 'single_user_local',
@@ -171,6 +254,8 @@ describe('Proposal A+ Shell components', () => {
       workspaceId: 'default',
     }
 
+    const fetchEmpty: typeof fetch = async (input) => hitlJson(EMPTY_HITL[new URL(String(input), location.href).pathname] ?? {})
+    await refreshPendingHitl(fetchEmpty)
     await act(async () => {
       render(h(FastApprovalStrip, {}), container)
     })
@@ -327,5 +412,350 @@ describe('Proposal A+ Shell components', () => {
       fireEvent.keyDown(window, { key: 'y' })
     })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('unifies Gate, Goal Confirmation, Verification, and Schedules across inboxPendingCount, FastApprovalStrip, and QueueContextOverlayBody', async () => {
+    const gates = parseGateQueuePayload(
+      { approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] },
+      'default',
+    )
+    const goals = parseAwaitingGoalsPayload(
+      { goals: [{ id: 'goal-1', title: 'Release v0.83', phase: 'awaiting_confirmation', updated_at: '2026-11-25T00:00:00Z' }] },
+      'default',
+    )
+    const verifs = parsePendingVerificationsPayload(
+      { requests: [{ request_id: 'vr-1', task_id: 't-1', task_title: 'Verify fix', submitted_by: 'dreamer' }] },
+      'default',
+    )
+    expect(gates).toHaveLength(1)
+    expect(goals).toHaveLength(1)
+    expect(verifs[0]?.worker).toBe('dreamer')
+
+    pendingGateApprovals.value = gates
+    pendingGoalConfirmations.value = goals
+    pendingVerifications.value = verifs
+    expect(inboxPendingCount.value).toBe(2)
+
+    await act(async () => {
+      render(h(FastApprovalStrip, {}), container)
+    })
+    expect(container.textContent).toContain('GATE · 2')
+    expect(container.textContent).toContain('masc_git_push')
+
+    pendingGateApprovals.value = []
+    await act(async () => {
+      render(h(FastApprovalStrip, {}), container)
+    })
+    expect(container.textContent).toContain('GOAL CONFIRM · 1')
+    expect(container.textContent).toContain('Release v0.83')
+
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 3, tasks: 7, agents: 2 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return json({
+          status: 'ok',
+          schedule_store_known: true,
+          request_count: 1,
+          truncated: true,
+          requests: [
+            {
+              schedule_id: 'sc-1',
+              status: 'scheduled',
+              payload_keeper_name: 'sangsu',
+              payload_summary: 'Nightly patrol',
+              next_due_at: 1795651200,
+              next_due_at_iso: '2026-11-26T00:00:00Z',
+            },
+          ],
+        })
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [{ id: 'goal-1', title: 'Release v0.83', phase: 'awaiting_confirmation' }] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [{ request_id: 'vr-1', task_id: 't-1', task_title: 'Verify fix', submitted_by: 'dreamer' }] })
+      return json({})
+    }))
+
+    await act(async () => {
+      render(h(QueueContextOverlayBody, {}), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+    expect(container.textContent).toContain('Channel Gate Approvals (1)')
+    expect(container.textContent).toContain('Goal Confirmations (1)')
+    expect(container.textContent).toContain('Awaiting Verifications (1)')
+    expect(container.textContent).toContain('Nightly patrol')
+    expect(container.textContent).toContain('due=2026-11-26T00:00:00Z')
+    expect(container.textContent).toContain('표시 제한으로 일부 예약만 표시됩니다')
+
+    // Gate unavailable reads operator_detail and deduplicates consecutive identical incidents
+    const unavailFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/gate')) {
+        return json({
+          approval_queue: null,
+          approval_queue_state: { state: 'unavailable', operator_detail: 'gate store locked' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [] })
+      return json({})
+    })
+    resetShellStateForTests()
+    await refreshPendingHitl(unavailFetch as unknown as typeof fetch)
+    await refreshPendingHitl(unavailFetch as unknown as typeof fetch)
+    expect(historicalIncidents.value).toHaveLength(1)
+    expect(historicalIncidents.value[0]?.detail).toBe('gate store locked')
+    vi.unstubAllGlobals()
+  })
+
+  it('refreshPendingHitl applies healthy sources immediately while another source hangs, then times out the hung source into an incident', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const json = (d: unknown) =>
+      new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    const hangingFetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/verification/requests')) {
+        // Simulate a hung endpoint that never responds (even ignores AbortSignal)
+        return new Promise<Response>(() => {})
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) {
+        return Promise.resolve(json({
+          pending: [{
+            approval_id: 'apr-fast-1',
+            keeper: 'sangsu',
+            tool_call_id: 'tc-1',
+            tool: 'git_push',
+            args: '{}',
+            question: 'Allow push?',
+            because: 'guard',
+          }],
+        }))
+      }
+      if (url.includes('/api/v1/keepers/asks')) {
+        return Promise.resolve(json({
+          asks: [{ ask_id: 'ask-fast-1', keeper: 'sangsu', resolution: { state: 'open' }, question: 'Proceed?' }],
+        }))
+      }
+      if (url.includes('/api/v1/dashboard/gate')) return Promise.resolve(json({ approval_queue: [] }))
+      if (url.includes('/api/v1/dashboard/planning')) return Promise.resolve(json({ goals: [] }))
+      return Promise.resolve(json({}))
+    })
+
+    const refreshPromise = refreshPendingHitl(hangingFetch as unknown as typeof fetch, { timeoutMs: 60 })
+    // Even BEFORE the 60ms timeout fires on /verification/requests, approvals & asks must already be applied!
+    await new Promise((r) => setTimeout(r, 15))
+    expect(pendingApprovals.value.map((a) => a.approvalId)).toEqual(['apr-fast-1'])
+    expect(inboxPendingCount.value).toBe(2)
+
+    // Once the hung request hits timeoutMs, refresh finishes cleanly and records an explicit timeout incident
+    await refreshPromise
+    expect(historicalIncidents.value.some((inc) => inc.source === 'verification' && inc.summary.includes('timeout'))).toBe(true)
+  })
+
+  it('surfaces multi-account unbridged HITL sources and single-user fetch failures honestly in FastApprovalStrip & Quick-Peek without imposing a default timeout on apiMutate', async () => {
+    // 1. P2-1: apiMutate has NO implicit 15s default timeout (must not abort slow mutations)
+    vi.useFakeTimers()
+    try {
+      let resolveSlow!: (r: Response) => void
+      const slowFetch = vi.fn(() => new Promise<Response>((r) => { resolveSlow = r }))
+      const mutPromise = apiMutate('POST', '/api/v1/tools/slow_op', { ok: true }, { fetchImpl: slowFetch as unknown as typeof fetch })
+      await vi.advanceTimersByTimeAsync(20_000)
+      resolveSlow(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      const mutRes = await mutPromise
+      expect(mutRes.ok).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // 2. P2-2: Multi-account session marks unbridged HITL sources explicitly instead of green/0px/empty
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-1',
+      email: 'op@example.com',
+      displayName: 'Op',
+      role: 'admin',
+      csrfToken: 'csrf-1',
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const requestedUrls: string[] = []
+    const maFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      return json({})
+    })
+    vi.stubGlobal('fetch', maFetch)
+
+    await refreshPendingHitl(maFetch as unknown as typeof fetch)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+
+    await act(async () => {
+      render(h('div', {}, h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+
+    const strip = container.querySelector('[data-testid="fast-approval-strip"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.getAttribute('data-hitl-unchecked')).toBe('true')
+    expect(strip?.textContent).toContain('일부 미확인')
+    expect(strip?.textContent).toContain('멀티 계정 미지원')
+
+    const overlay = container.querySelector('[data-testid="queue-context-overlay"]')!
+    expect(overlay.textContent).toContain('일부 미확인')
+    expect(overlay.textContent).toContain('Pending Tool Approvals (멀티 계정 미지원)')
+    expect(overlay.textContent).toContain('Open Keeper Asks (멀티 계정 미지원)')
+    expect(overlay.textContent).toContain('Channel Gate Approvals (멀티 계정 미지원)')
+    expect(overlay.textContent).not.toContain('대기 중인 도구 승인 요청이 없습니다.')
+    expect(overlay.textContent).not.toContain('대기 중인 Keeper 질문이 없습니다.')
+
+    // 3. Single-user source failure surfaces explicit (조회 실패) in Quick-Peek & FastApprovalStrip
+    resetShellStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const failFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/v1/keepers/tool-approvals')) {
+        return new Response(JSON.stringify({ error: 'approval store offline' }), { status: 503, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [] })
+      return json({})
+    })
+    vi.stubGlobal('fetch', failFetch)
+    await refreshPendingHitl(failFetch as unknown as typeof fetch)
+    await act(async () => {
+      render(h('div', {}, h(FastApprovalStrip, {}), h(QueueContextOverlayBody, {})), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+    expect(container.textContent).toContain('Pending Tool Approvals (조회 실패)')
+    expect(container.textContent).toContain('도구 승인 조회 실패')
+    expect(container.textContent).toContain('일부 미확인')
+    vi.unstubAllGlobals()
+  })
+
+  it('marks verification HITL source as partially failed on positive unreadable_total or awaiting_unresolved_total while retaining readable items', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const json = (d: unknown) =>
+      new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    let verifPayload: Record<string, unknown> = {
+      requests: [],
+      backlog_error: null,
+      unreadable_total: 2,
+      awaiting_unresolved_total: 0,
+    }
+    const verifFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 1, tasks: 2, agents: 1 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      }
+      if (url.includes('/api/v1/verification/requests')) return json(verifPayload)
+      for (const [prefix, body] of Object.entries(EMPTY_HITL)) {
+        if (url.includes(prefix)) return json(body)
+      }
+      return json({})
+    })
+    vi.stubGlobal('fetch', verifFetch)
+
+    // 1. Empty readable list + unreadable_total > 0 -> must surface failure in Quick-Peek instead of hiding as confirmed empty
+    await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    expect(pendingVerifications.value).toHaveLength(0)
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
+      kind: 'failed',
+      message: expect.stringContaining('unreadable verification records: 2'),
+    })
+    expect(historicalIncidents.value.some((i) => i.source === 'verification' && i.detail?.includes('2'))).toBe(true)
+
+    await act(async () => {
+      render(h(QueueContextOverlayBody, {}), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+    expect(container.textContent).toContain('검증 조회 실패')
+    expect(container.textContent).toContain('Awaiting Verifications (조회 실패)')
+    expect(container.textContent).toContain('unreadable verification records: 2')
+
+    // 2. Readable awaiting item + awaiting_unresolved_total > 0 -> keep readable item while flagging partial failure
+    verifPayload = {
+      requests: [{ request_id: 'vr-live', task_id: 't-7', task_title: 'Review patch', submitted_by: 'sangsu' }],
+      backlog_error: null,
+      unreadable_total: 0,
+      awaiting_unresolved_total: 1,
+    }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(pendingVerifications.value.map((v) => v.requestId)).toEqual(['vr-live'])
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
+      kind: 'failed',
+      message: expect.stringContaining('unresolved awaiting verification ids: 1'),
+    })
+    expect(container.textContent).toContain('Awaiting Verifications (1 · 조회 실패)')
+    expect(container.textContent).toContain('Review patch')
+    expect(container.textContent).toContain('unresolved awaiting verification ids: 1')
+
+    // 3. Zero unreadable & zero unresolved -> clears back to ok
+    verifPayload = {
+      requests: [],
+      backlog_error: null,
+      unreadable_total: 0,
+      awaiting_unresolved_total: 0,
+    }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(effectiveHitlSourceStatus.value.verification).toEqual({ kind: 'ok' })
+    expect(container.textContent).not.toContain('Awaiting Verifications')
+    vi.unstubAllGlobals()
   })
 })

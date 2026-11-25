@@ -22,6 +22,7 @@ vi.mock('uplot', () => {
   return { default: MockUPlot }
 })
 import { authSession, resetAuthStateForTests } from '../../core/auth'
+import * as observer from '../../core/observer'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { resetTimeWindowForTests, setTimeWindow } from '../../core/time-window'
@@ -237,6 +238,9 @@ describe('workspaces/knowledge', () => {
 
   it('Board resets reply draft and parent reply target when switching posts and supports Cmd+Enter reply submit', async () => {
     const commentPosts: unknown[] = []
+    const detailReads: string[] = []
+    let settleReply!: (response: Response) => void
+    const pendingReply = new Promise<Response>((resolve) => { settleReply = resolve })
     const postA = { id: 'post-a', title: 'Post A', body: 'Body A', author: 'sangsu', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 1, created_at: '2026-11-24T05:00:00Z' }
     const postB = { id: 'post-b', title: 'Post B', body: 'Body B', author: 'dreamer', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 0, created_at: '2026-11-24T05:01:00Z' }
 
@@ -244,7 +248,7 @@ describe('workspaces/knowledge', () => {
       const url = String(input)
       if (url === '/api/v1/tools/masc_board_comment' && init?.method === 'POST') {
         commentPosts.push(JSON.parse(String(init.body)))
-        return jsonResponse({ ok: true })
+        return pendingReply
       }
       if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [] })
       if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
@@ -295,6 +299,19 @@ describe('workspaces/knowledge', () => {
     textareaAfter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
     await flushUi()
     expect(commentPosts).toEqual([{ post_id: 'post-b', author: 'operator', content: 'Reply on Post B' }])
+
+    const postARow = [...container.querySelectorAll<HTMLButtonElement>('button.kn-board-row')].find((btn) => btn.textContent?.includes('Post A'))!
+    postARow.click()
+    await flushUi()
+    const newDraft = container.querySelector<HTMLTextAreaElement>('textarea.kn-textarea--reply')!
+    newDraft.value = 'Keep this new draft'
+    newDraft.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    const readsBeforeReceipt = detailReads.length
+    settleReply(jsonResponse({ ok: true, message: JSON.stringify({ id: 'c-b', post_id: 'post-b' }) }, 201))
+    await flushUi()
+    expect(newDraft.value).toBe('Keep this new draft')
+    expect(detailReads).toHaveLength(readsBeforeReceipt)
   })
 
   it('Board routes to GET /api/v1/dashboard/board in multi_account_signed_in mode with 0 calls to single-user /api/v1/board*', async () => {
@@ -841,5 +858,471 @@ describe('workspaces/knowledge', () => {
       url: '/api/v1/keepers/sangsu/memory/act',
       body: { action: 'adopt', observed: 'snapsha999' },
     })
+  })
+
+  it('keeps the submitted reply visible after a paginated refresh and its Board observer echo', async () => {
+    const post = { id: 'p-thread', title: 'Paged thread', body: 'Thread body', author: 'keeper', post_kind: 'direct' }
+    const comments = Array.from({ length: 40 }, (_, i) => ({
+      id: `c-${i + 1}`, post_id: post.id, parent_id: null as string | null,
+      author: 'keeper', content: `existing row ${i + 1}`, created_at: '2026-11-25T01:00:00Z',
+    }))
+    const newest = { ...comments[0]!, id: 'c-new', parent_id: 'c-1', content: 'New nested reply' }
+    const reads: URLSearchParams[] = []
+    const scrolled: HTMLElement[] = []
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+      scrolled.push(this)
+    })
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/tools/masc_board_comment') {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          post_id: post.id, content: newest.content, parent_id: newest.parent_id,
+        })
+        comments.push(newest)
+        return jsonResponse({ ok: true, message: JSON.stringify({
+          id: newest.id, post_id: post.id, comment_offset: 40, comments_total: 41,
+        }) }, 201)
+      }
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        reads.push(url.searchParams)
+        const offset = Number(url.searchParams.get('comment_offset'))
+        const rows = comments.slice(offset, offset + 40)
+        const focused = comments.find((c) => c.id === url.searchParams.get('comment_focus'))
+        return jsonResponse({
+          post, comments: rows,
+          comment_context: focused && !rows.includes(focused) ? [...rows, focused] : rows,
+          comment_page: { offset, returned: rows.length, total: comments.length,
+            next_offset: offset + rows.length < comments.length ? offset + rows.length : null },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    expect(container.querySelectorAll('.kn-comment')).toHaveLength(40)
+    const replyButton = [...container.querySelectorAll<HTMLButtonElement>('.kn-comment button')].find((button) => button.textContent?.trim() === '답글')
+    replyButton!.click()
+    await flushUi()
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.kn-textarea--reply')!
+    textarea.value = newest.content
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
+    await flushUi()
+    const visibleReply = () => [...container.querySelectorAll('.kn-comment')].filter((row) => row.textContent?.includes(newest.content))
+    expect(visibleReply()).toHaveLength(1)
+    expect(scrolled).toContain(visibleReply()[0])
+    const readCount = reads.length
+    for (const listener of listeners) listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    await vi.waitFor(() => { expect(reads.length).toBeGreaterThan(readCount) }, { timeout: 2000 })
+    await flushUi()
+    expect(reads.at(-1)?.get('comment_focus')).toBe(newest.id)
+    expect(visibleReply()).toHaveLength(1)
+    const more = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('댓글 더 불러오기'))
+    more!.click()
+    await flushUi()
+    expect(reads.at(-1)?.get('comment_offset')).toBe('40')
+    expect(visibleReply()).toHaveLength(1)
+  })
+
+  it('BoardTab renders @audience targets, feed truncation/filtered notice, and comment_page load-more pagination', async () => {
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [{ name: 'ops', count: 1 }] })
+      if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
+      if (url.startsWith('/api/v1/board/post-aud')) {
+        if (url.includes('comment_offset=1')) {
+          return jsonResponse({
+            id: 'post-aud',
+            title: 'Audience Thread',
+            body: 'Body',
+            author: 'sangsu',
+            hearth: 'ops',
+            post_kind: 'direct',
+            audience: { kind: 'targets', targets: ['code-reviewer'] },
+            created_at: '2026-11-25T00:00:00Z',
+            updated_at: '2026-11-25T01:00:00Z',
+            comment_count: 2,
+            comments: [
+              { id: 'c-2', post_id: 'post-aud', author: 'code-reviewer', content: 'Second page comment', created_at: '2026-11-25T01:00:00Z', audience: { kind: 'targets', targets: ['sangsu'] } },
+            ],
+            comment_page: { offset: 1, returned: 1, total: 2, next_offset: null },
+          })
+        }
+        expect(url).toContain('comment_offset=0')
+        return jsonResponse({
+          id: 'post-aud',
+          title: 'Audience Thread',
+          body: 'Body',
+          author: 'sangsu',
+          hearth: 'ops',
+          post_kind: 'direct',
+          audience: { kind: 'targets', targets: ['code-reviewer'] },
+          created_at: '2026-11-25T00:00:00Z',
+          updated_at: '2026-11-25T01:00:00Z',
+          comment_count: 2,
+          comments: [
+            { id: 'c-1', post_id: 'post-aud', author: 'dreamer', content: 'First page comment', created_at: '2026-11-25T00:30:00Z' },
+          ],
+          comment_page: { offset: 0, returned: 1, total: 2, next_offset: 1 },
+        })
+      }
+      if (url.startsWith('/api/v1/board?')) {
+        expect(url).toContain('signal_only=true')
+        return jsonResponse({
+          posts: [
+            {
+              id: 'post-aud',
+              title: 'Audience Thread',
+              body: 'Body',
+              author: 'sangsu',
+              hearth: 'ops',
+              post_kind: 'direct',
+              audience: { kind: 'targets', targets: ['code-reviewer'] },
+              created_at: '2026-11-25T00:00:00Z',
+              updated_at: '2026-11-25T01:00:00Z',
+              comment_count: 2,
+            },
+          ],
+          has_more: true,
+          filtered_out_count: 14,
+          signal_scan_truncated: true,
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.textContent).toContain('@code-reviewer')
+    expect(container.textContent).toContain('신호 스캔 상한에 도달')
+    expect(container.textContent).toContain('시스템/비신호 글 14건 숨김')
+    expect(container.textContent).toContain('First page comment')
+
+    const loadMoreBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (1 / 2)'),
+    ) as HTMLButtonElement | undefined
+    expect(loadMoreBtn).toBeDefined()
+    loadMoreBtn!.click()
+    await flushUi(4)
+
+    expect(requestedUrls.some((u) => u.includes('comment_offset=1'))).toBe(true)
+    expect(container.textContent).toContain('Second page comment')
+    expect(container.textContent).toContain('@sangsu')
+  })
+
+  it('BoardTab preserves loaded comment range 0-79 across SSE refresh and prevents gapped load-more cursor skips', async () => {
+    const post = { id: 'p-paged-race', title: 'Race Post', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const allComments = Array.from({ length: 120 }, (_, i) => ({
+      id: `cm-${i}`,
+      post_id: post.id,
+      parent_id: null as string | null,
+      author: 'keeper',
+      content: `Comment #${i}`,
+      created_at: '2026-11-25T01:00:00Z',
+    }))
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+
+    // Enforce the real OCaml server contract (Board_types.Limits.max_comment_page_limit = 100):
+    // reject comment_limit outside 1..100 with HTTP 400 and slice by the requested limit.
+    // Also hold an offset=80 load-more response across an overlapping SSE refresh.
+    let holdOffset80 = false
+    let releaseOffset80!: () => void
+    const requestedOffsets: number[] = []
+    const requestedLimits: number[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(
+            JSON.stringify({ error: `comment_limit must be between 1 and 100 (got ${limitRaw})` }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        requestedOffsets.push(offset)
+        requestedLimits.push(limit)
+        const respond = () => {
+          const rows = allComments.slice(offset, offset + limit)
+          return jsonResponse({
+            post,
+            comments: rows,
+            comment_page: {
+              offset,
+              returned: rows.length,
+              total: allComments.length,
+              next_offset: offset + rows.length < allComments.length ? offset + rows.length : null,
+            },
+          })
+        }
+        if (offset === 80 && holdOffset80) {
+          holdOffset80 = false
+          return new Promise<Response>((resolve) => {
+            releaseOffset80 = () => resolve(respond())
+          })
+        }
+        return respond()
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (40 / 120)')
+
+    // Load page 2 (40..79) -> now 80 comments loaded
+    const moreBtn1 = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (40 / 120)'),
+    )!
+    moreBtn1.click()
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+
+    // Start loading page 3 (80..119) AND fire an overlapping board_comment SSE refresh
+    holdOffset80 = true
+    const moreBtn2 = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (80 / 120)'),
+    )!
+    moreBtn2.click()
+    await flushUi(2)
+    expect(requestedOffsets).toContain(80)
+
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    // Wait for the 450ms SSE debounce + multi-page refresh (0..39 + 40..79) to complete
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+      },
+      { timeout: 2500 },
+    )
+    // Now release the stale overlapping offset=80 response (it was aborted / stale seq):
+    // loaded range MUST stay contiguous at 80 / 120 (never drop 40-79 or jump to 120 with a gap!).
+    releaseOffset80()
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+    expect(container.textContent).toContain('Comment #79')
+    expect(requestedLimits.length).toBeGreaterThan(0)
+    expect(requestedLimits.every((l) => l >= 1 && l <= 100)).toBe(true)
+  })
+
+  it('BoardTab preserves >400 loaded comments across SSE refresh within server comment_limit <= 100 and retains existing comments on continuation failure', async () => {
+    const post = { id: 'p-deep-thread', title: 'Deep Thread', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const allComments = Array.from({ length: 480 }, (_, i) => ({
+      id: `deep-${i}`,
+      post_id: post.id,
+      parent_id: null as string | null,
+      author: 'keeper',
+      content: `DeepComment #${i}`,
+      created_at: '2026-11-25T01:00:00Z',
+    }))
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+
+    let failOffset40 = false
+    const requestedLimits: number[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(
+            JSON.stringify({ error: `comment_limit must be between 1 and 100 (got ${limitRaw})` }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        requestedLimits.push(limit)
+        if (offset === 40 && failOffset40) {
+          return new Response(JSON.stringify({ error: 'temporary 503 on page 2' }), {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        const rows = allComments.slice(offset, offset + limit)
+        return jsonResponse({
+          post,
+          comments: rows,
+          comment_page: {
+            offset,
+            returned: rows.length,
+            total: allComments.length,
+            next_offset: offset + rows.length < allComments.length ? offset + rows.length : null,
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    // Load 10 extra pages (total 440 / 480 comments > server 100 limit and > previous 400 cap!)
+    for (let loaded = 40; loaded < 440; loaded += 40) {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes(`댓글 더 불러오기 (${loaded} / 480)`),
+      )!
+      btn.click()
+      await flushUi(3)
+    }
+    expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+    expect(container.textContent).toContain('DeepComment #439')
+
+    // 1. SSE refresh succeeds across all 11 pages with every request comment_limit <= 100 -> preserves all 440 comments & reading window!
+    const requestsBeforeRefresh = requestedLimits.length
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    await vi.waitFor(
+      () => {
+        expect(requestedLimits.length).toBeGreaterThanOrEqual(requestsBeforeRefresh + 11)
+        expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+        expect(container.textContent).toContain('DeepComment #439')
+      },
+      { timeout: 3000 },
+    )
+    const refreshLimits = requestedLimits.slice(requestsBeforeRefresh)
+    expect(refreshLimits).toHaveLength(11)
+    expect(refreshLimits.every((l) => l >= 1 && l <= 100)).toBe(true)
+
+    // 2. SSE refresh encounters 503 on continuation page (offset=40) -> preserves 440 comments & surfaces error alert!
+    failOffset40 = true
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('게시글 상세/댓글 조회 실패')
+      },
+      { timeout: 3000 },
+    )
+    expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+    expect(container.textContent).toContain('DeepComment #439')
+  })
+
+  it('BoardTab recovers missed comments in the open post detail on observer reconnect and resync without board_comment frames', async () => {
+    const post = { id: 'p-reconnect', title: 'Reconnect Thread', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const comments = [
+      { id: 'rc-1', post_id: post.id, parent_id: null as string | null, author: 'keeper', content: 'Before disconnect #1', created_at: '2026-11-25T01:00:00Z' },
+      { id: 'rc-2', post_id: post.id, parent_id: null as string | null, author: 'keeper', content: 'Before disconnect #2', created_at: '2026-11-25T01:01:00Z' },
+    ]
+    const reconnectListeners = new Set<() => void>()
+    const resyncListeners = new Set<(reason: string) => void>()
+    vi.spyOn(observer, 'subscribeObserverReconnect').mockImplementation((listener) => {
+      reconnectListeners.add(listener)
+      return () => { reconnectListeners.delete(listener) }
+    })
+    vi.spyOn(observer, 'subscribeObserverResync').mockImplementation((listener) => {
+      resyncListeners.add(listener)
+      return () => { resyncListeners.delete(listener) }
+    })
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        const limitRaw = url.searchParams.get('comment_limit')
+        const limit = limitRaw === null ? 20 : Number(limitRaw)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+          return new Response(JSON.stringify({ error: 'Limit_out_of_bounds' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        const rows = comments.slice(offset, offset + limit)
+        return jsonResponse({
+          post,
+          comments: rows,
+          comment_page: {
+            offset,
+            returned: rows.length,
+            total: comments.length,
+            next_offset: offset + rows.length < comments.length ? offset + rows.length : null,
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    expect(container.textContent).toContain('Before disconnect #2')
+    expect(container.textContent).not.toContain('Added while disconnected')
+
+    // 1. Comment added while disconnected; no board_comment frame arrives, only reconnect
+    comments.push({
+      id: 'rc-3',
+      post_id: post.id,
+      parent_id: null,
+      author: 'keeper',
+      content: 'Added while disconnected',
+      created_at: '2026-11-25T01:02:00Z',
+    })
+    for (const listener of reconnectListeners) listener()
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('Added while disconnected')
+      },
+      { timeout: 2000 },
+    )
+
+    // 2. Another comment added across a stream gap; only observer_resync_required fires
+    comments.push({
+      id: 'rc-4',
+      post_id: post.id,
+      parent_id: null,
+      author: 'keeper',
+      content: 'Recovered via observer resync',
+      created_at: '2026-11-25T01:03:00Z',
+    })
+    for (const listener of resyncListeners) listener('stream_gap')
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('Recovered via observer resync')
+      },
+      { timeout: 2000 },
+    )
   })
 })

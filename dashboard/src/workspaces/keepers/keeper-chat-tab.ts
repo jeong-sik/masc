@@ -24,6 +24,7 @@ import {
   fetchKeeperToolResultApi,
   fetchKeeperWaitingInventoryApi,
   fetchQueuedChatOperations,
+  formatContextDetail,
   moveQueuedChatOperationToEndApi,
   observeRosterContextPct,
   parseKeeperLiveObserverEvent,
@@ -105,6 +106,26 @@ function formatChatTime(ts: number): string | null {
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+function formatChatSpeakerLabel(msg: ChatTranscriptEntry, keeperName: string, autonomousSummary: string | null, memoryOnly: boolean): string {
+  if (msg.role === 'user') {
+    const actor = msg.speakerName ?? msg.speakerId ?? null
+    if (msg.speakerAuthority === 'keeper') {
+      return `Keeper · ${actor ?? 'keeper'}`
+    }
+    if (msg.speakerAuthority === 'external') {
+      return actor ? `${actor} (외부)` : '외부 발신자'
+    }
+    if (msg.speakerAuthority === 'owner') {
+      return actor && actor.toLowerCase() !== 'operator' ? `Operator (${actor})` : 'Operator'
+    }
+    return actor ?? msg.speakerLabel ?? '사용자'
+  }
+  if (autonomousSummary !== null) return `${keeperName} · Autonomous Turn`
+  if (memoryOnly) return `${keeperName} · Memory Recall`
+  if (msg.toolName) return `Tool · ${msg.toolName}`
+  return keeperName
 }
 
 function deliveryBadgeTone(state: ChatDeliveryState | undefined): 'ok' | 'warn' | 'bad' | 'info' | 'brass' | undefined {
@@ -1703,18 +1724,18 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
                         <div class="kp-msg-head">
                           <span>
-                            ${msg.role === 'user'
-                              ? (msg.speakerLabel ?? '사용자')
-                              : blocks.autonomousSummary !== null
-                                ? `${keeper.name} · Autonomous Turn`
-                                : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
-                                  ? `${keeper.name} · Memory Recall`
-                                  : msg.toolName
-                                    ? `Tool · ${msg.toolName}`
-                                    : keeper.name}
+                            ${formatChatSpeakerLabel(
+                              msg,
+                              keeper.name,
+                              blocks.autonomousSummary,
+                              blocks.memoryItems.length > 0 && blocks.bodyText.length === 0,
+                            )}
                           </span>
                           <div class="kp-pill-row">
                             ${timeLabel && html`<time class="kp-msg-time tnum">${timeLabel}</time>`}
+                            ${msg.surface && msg.surface !== 'chat' && msg.surface !== 'dashboard' && html`
+                              <span class="kp-pill" data-tone="info">${msg.surface}</span>
+                            `}
                             ${msg.deliveryState && html`
                               <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
                                 ${msg.deliveryState}
@@ -2047,7 +2068,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               </span>
 
               <!-- Circular SVG Context Ring % (zero inline HTML style) -->
-              <span class="kp-ctx-ring" title="컨텍스트 점유율">
+              <span class="kp-ctx-ring" title=${formatContextDetail(keeper).tooltip}>
                 <svg class="kp-ring-svg" viewBox="0 0 22 22" aria-hidden="true">
                   <circle class="kp-ring-track" cx="11" cy="11" r="8.5" />
                   <circle
@@ -2060,7 +2081,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                     stroke-dashoffset=${ringOffset.toFixed(2)}
                   />
                 </svg>
-                <span>Ctx ${formatObserved(ctxObs, (v) => `${v}%`)}</span>
+                <span>Ctx ${ctxObs.kind === 'value' ? formatContextDetail(keeper).label : formatObserved(ctxObs, (v) => `${v}%`)}</span>
               </span>
 
               <button

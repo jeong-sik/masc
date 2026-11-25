@@ -97,17 +97,18 @@ val create :
   io:Io_domain.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   endpoint:Http_client.endpoint ->
-  on_event:(hub_event -> unit) ->
   t
 
 val update_endpoint : t -> Http_client.endpoint -> unit
 (** Update the target endpoint / workspace guard headers for subsequent stream
     connections. *)
 
-val sync_streams : t -> Stream_spec.t list -> (sync_diff, string) result
+val sync_streams :
+  t -> on_event:(hub_event -> unit) -> Stream_spec.t list -> (sync_diff, string) result
 (** Declaratively reconcile active streams against [desired]. Validates stream
     caps, fences and cancels removed streams, and spawns newly requested streams
-    on {!Io_domain}. *)
+    on {!Io_domain}. Each new stream keeps its own [on_event] through reconnect
+    and unsubscribe so callers can capture the stream's workspace epoch. *)
 
 val active_streams : t -> Stream_spec.t list
 val shutdown : t -> unit

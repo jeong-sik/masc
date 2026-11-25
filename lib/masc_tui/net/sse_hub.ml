@@ -168,24 +168,23 @@ type active_entry = {
   cancelled : bool Atomic.t;
   spec : Stream_spec.t;
   handle : Io_domain.stream_handle;
+  on_event : hub_event -> unit;
 }
 
 type t = {
   io : Io_domain.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   endpoint : Http_client.endpoint Atomic.t;
-  on_event : hub_event -> unit;
   next_gen : int Atomic.t;
   mu : Eio.Mutex.t;
   mutable active : active_entry list;
 }
 
-let create ~io ~clock ~endpoint ~on_event =
+let create ~io ~clock ~endpoint =
   {
     io;
     clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t);
     endpoint = Atomic.make endpoint;
-    on_event;
     next_gen = Atomic.make 0;
     mu = Eio.Mutex.create ();
     active = [];
@@ -195,18 +194,12 @@ let update_endpoint t ep = Atomic.set t.endpoint ep
 
 exception Handshake_rejected of handshake_outcome
 
-let emit_if_active t ~cancelled ev =
-  if not (Atomic.get cancelled) then t.on_event ev
-
-let emit_freshness_if_active t ~cancelled stream freshness =
-  emit_if_active t ~cancelled (Freshness { stream; freshness })
-
 let remove_active_generation t ~generation =
   Eio.Mutex.use_rw ~protect:true t.mu (fun () ->
       t.active <-
         List.filter (fun e -> not (Int.equal e.generation generation)) t.active)
 
-let dispatch_frame t ~cancelled (spec : Stream_spec.t)
+let dispatch_frame ~emit (spec : Stream_spec.t)
     ~(revision_ref : int Atomic.t)
     ~(cursor_ref : Sse_wire.observer_cursor option Atomic.t)
     ~(instance_id_ref : string option Atomic.t) (frame : Sse_wire.frame) =
@@ -219,7 +212,7 @@ let dispatch_frame t ~cancelled (spec : Stream_spec.t)
           Atomic.set cursor_ref (Some { Sse_wire.instance_id; event_id })
       | Some event_id, None -> Atomic.set revision_ref event_id
       | None, _ -> ());
-      emit_if_active t ~cancelled (Observer_delivery delivery)
+      emit (Observer_delivery delivery)
   | Stream_spec.Fleet -> (
       match Yojson.Safe.from_string frame.data with
       | json -> (
@@ -234,17 +227,19 @@ let dispatch_frame t ~cancelled (spec : Stream_spec.t)
                     revision
               in
               Atomic.set revision_ref rev;
-              emit_if_active t ~cancelled (Fleet_event ev)
+              emit (Fleet_event ev)
           | Error _ ->
-              emit_if_active t ~cancelled (Raw_frame { stream = spec.kind; frame }))
+              emit (Raw_frame { stream = spec.kind; frame }))
       | exception Yojson.Json_error _ ->
-          emit_if_active t ~cancelled (Raw_frame { stream = spec.kind; frame }))
+          emit (Raw_frame { stream = spec.kind; frame }))
   | Stream_spec.Model_metrics | Stream_spec.Tool_metrics_series
   | Stream_spec.Logs _ ->
-      emit_if_active t ~cancelled (Raw_frame { stream = spec.kind; frame })
+      emit (Raw_frame { stream = spec.kind; frame })
 
-let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
+let run_stream_loop t ~generation ~cancelled ~on_event (spec : Stream_spec.t) ~sw =
   Eio.Switch.check sw;
+  let emit event = if not (Atomic.get cancelled) then on_event event in
+  let emit_freshness freshness = emit (Freshness { stream = spec.kind; freshness }) in
   let rng = Random.State.make_self_init () in
   let last_live_ns = Atomic.make (-1L) in
   let is_connected = Atomic.make false in
@@ -270,7 +265,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
               in
               if age_sec >= spec.stale_after_s then begin
                 Atomic.set reported_stale true;
-                emit_freshness_if_active t ~cancelled spec.kind
+                emit_freshness
                   (Health.Stale { last_live_ns = last_mono; age_sec })
               end
             end
@@ -287,7 +282,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
     if Atomic.get cancelled then ()
     else begin
       if attempt = 0 then
-        emit_freshness_if_active t ~cancelled spec.kind Health.Connecting;
+        emit_freshness Health.Connecting;
       let reached_live = Atomic.make false in
       let mark_live () =
         let now = Clock.Mono.now () in
@@ -299,7 +294,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
         let prev_rev = Atomic.get last_emitted_rev in
         if (not was_connected) || was_stale || rev <> prev_rev then begin
           Atomic.set last_emitted_rev rev;
-          emit_freshness_if_active t ~cancelled spec.kind
+          emit_freshness
             (Health.Live { last_event_ns = now; revision = rev })
         end
       in
@@ -333,7 +328,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
                   (match res.handshake with
                   | Some hs -> Atomic.set instance_id_ref (Some hs.instance_id)
                   | None -> ());
-                  emit_if_active t ~cancelled (Observer_handshake res)
+                  emit (Observer_handshake res)
               | (Handshake_retry_without_cursor _ | Handshake_invalid _) as bad
                 ->
                   raise (Handshake_rejected bad))
@@ -346,7 +341,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
       let on_chunk chunk =
         let frames = Sse_wire.feed decoder chunk in
         List.iter
-          (dispatch_frame t ~cancelled spec ~revision_ref ~cursor_ref
+          (dispatch_frame ~emit spec ~revision_ref ~cursor_ref
              ~instance_id_ref)
           frames;
         mark_live ()
@@ -369,7 +364,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
           next_reconnect_attempt ~prev_attempt:attempt
             ~reached_live:(Atomic.get reached_live)
         in
-        emit_freshness_if_active t ~cancelled spec.kind
+        emit_freshness
           (Health.Reconnecting
              { last_live_ns = last_live_opt (); attempt = next_attempt; reason });
         Eio.Switch.check sw;
@@ -401,7 +396,7 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
           | Error
               (Http_client.Workspace_mismatch
                 { expected_instance; observed_instance; _ }) ->
-              emit_freshness_if_active t ~cancelled spec.kind
+              emit_freshness
                 (Health.Workspace_mismatch
                    {
                      expected_instance = Option.value ~default:"" expected_instance;
@@ -426,11 +421,19 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
   in
   loop ~attempt:0
 
-let sync_streams t desired =
+let emit_disconnected ~now entry =
+  entry.on_event
+    (Freshness
+       {
+         stream = entry.spec.kind;
+         freshness = Health.Disconnected { since_ns = now; reason = Health.Stream_eof };
+       })
+
+let sync_streams t ~on_event desired =
   match validate_desired desired with
   | Error _ as err -> err
   | Ok valid_desired ->
-      let diff, unsubscribed_kinds =
+      let diff, unsubscribed_entries =
         Eio.Mutex.use_rw ~protect:true t.mu (fun () ->
             let active_specs = List.map (fun e -> e.spec) t.active in
             let diff = diff_streams ~active:active_specs ~desired:valid_desired in
@@ -452,37 +455,25 @@ let sync_streams t desired =
                   let cancelled = Atomic.make false in
                   let handle =
                     Io_domain.spawn_stream t.io (fun ~sw ->
-                        run_stream_loop t ~generation ~cancelled spec ~sw)
+                        run_stream_loop t ~generation ~cancelled ~on_event spec ~sw)
                   in
-                  { generation; cancelled; spec; handle })
+                  { generation; cancelled; spec; handle; on_event })
                 diff.to_start
             in
             t.active <- keep_entries @ started_entries;
             let unsubscribed =
-              List.filter_map
+              List.filter
                 (fun e ->
-                  if
-                    List.exists
+                  not (List.exists
                       (fun (s : Stream_spec.t) ->
                         Stream_spec.equal_kind s.kind e.spec.kind)
-                      diff.to_start
-                  then None
-                  else Some e.spec.kind)
+                      diff.to_start))
                 stop_entries
             in
             (diff, unsubscribed))
       in
       let now = Clock.Mono.now () in
-      List.iter
-        (fun kind ->
-          t.on_event
-            (Freshness
-               {
-                 stream = kind;
-                 freshness =
-                   Health.Disconnected { since_ns = now; reason = Health.Stream_eof };
-               }))
-        unsubscribed_kinds;
+      List.iter (emit_disconnected ~now) unsubscribed_entries;
       Ok diff
 
 let active_streams t =
@@ -501,13 +492,4 @@ let shutdown t =
         old)
   in
   let now = Clock.Mono.now () in
-  List.iter
-    (fun e ->
-      t.on_event
-        (Freshness
-           {
-             stream = e.spec.kind;
-             freshness =
-               Health.Disconnected { since_ns = now; reason = Health.Stream_eof };
-           }))
-    entries
+  List.iter (emit_disconnected ~now) entries

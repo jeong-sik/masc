@@ -12,9 +12,11 @@ open Masc_tui_net
 open Masc_tui_store
 
 type bus_key =
-  | Key_get of string
-  | Key_read of string * Clock.Mono.t
-  | Key_freshness of Subscriptions.stream_id
+  | Key_get of Epoch.t * string
+  | Key_read of Epoch.t * string * Clock.Mono.t
+  | Key_freshness of Epoch.t * Subscriptions.stream_id
+(** Coalesce snapshots for the same workspace and reconnect generation.
+    The store rejects stale epochs only after the bus has been drained. *)
 
 val equal_bus_key : bus_key -> bus_key -> bool
 val hash_bus_key : bus_key -> int
@@ -131,16 +133,20 @@ val run_chat_stream_result :
     are emitted as [Msg.Chat_stream_done] instead of leaking into [fork_safe]'s
     [Reply_action_ack] and leaving the stream buffer open. *)
 
+type hub_delivery = Hub_snapshot of bus_key | Hub_event | Hub_receipt
+
 val decode_hub_event_msgs :
   epoch:Epoch.t ->
   observed_at:Clock.Mono.t ->
   Sse_hub.hub_event ->
-  (bus_key option * Msg.t) list
-(** Pure projection from a {!Sse_hub.hub_event} into zero or more bus items
-    [(Some snapshot_key, msg)] or [(None, stream_msg)]. A
+  (hub_delivery * Msg.t) list
+(** Pure projection from a {!Sse_hub.hub_event} into zero or more bus items.
+    A workspace mismatch is a retained receipt and triggers a re-handshake. A
     [/api/v1/dashboard/logs/stream] frame ([{"reset": ..., "entries": [...]}])
     becomes one [Sse_log_frame]. A view-stream frame that cannot be applied
     becomes an undecodable observer delivery. *)
+
+val publish_hub_messages : bus -> (hub_delivery * Msg.t) list -> unit
 
 val run_setup_login_stream :
   ?on_output:

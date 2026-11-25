@@ -1772,7 +1772,7 @@ let test_round1_local_clock_pills_and_compact_fit () =
   let sub_w90 = grid_row_text g_w90 1 in
   assert_contains ~label:"work_90_symmetric_pill" ~needle:" 목표 " sub_w90;
   assert_contains ~label:"work_90_candle_not_clipped" ~needle:"캔들·성과" sub_w90;
-  assert_contains ~label:"work_90_compact_hint" ~needle:"[[ ]]" sub_w90;
+  assert_contains ~label:"work_90_compact_hint" ~needle:"[ / ]" sub_w90;
   assert_not_contains ~label:"work_90_no_long_hint" ~needle:"탭 전환" sub_w90;
 
   let m_set_90 =
@@ -3779,6 +3779,277 @@ let test_render_util_timeout_detail_labels () =
   Alcotest.(check string) "legacy Timeout EN" "Request timed out"
     (Render_util.string_of_transport_error ~lang:Say.Lang_en Health.Timeout)
 
+let test_settings_tui_enum_rendering_and_zero_double_brackets () =
+  let base_ko = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko in
+  let base_en = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  (* 1. Settings renders normalized tui.theme & tui.language with localized labels
+        (both synced and staged) and pane-honest Tree vs Inspector footer hints. *)
+  let raw_server_tui_schema : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha-raw-tui";
+      sections =
+        [
+          {
+            id = "general_ui";
+            category = Wire_config.Cat_general_ui;
+            title = "General & UI";
+            fields =
+              [
+                {
+                  table = "tui";
+                  key = "theme";
+                  full_key = "tui.theme";
+                  label = "tui.theme";
+                  env = None;
+                  description = Some "Declared runtime.toml key tui.theme";
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "midnight";
+                  default_value = None;
+                  provenance = Wire_config.Prov_project;
+                  reload_scope = Wire_config.Restart_required;
+                  secret = false;
+                  writable = true;
+                };
+                {
+                  table = "tui";
+                  key = "language";
+                  full_key = "tui.language";
+                  label = "tui.language";
+                  env = None;
+                  description = Some "Declared runtime.toml key tui.language";
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "ko";
+                  default_value = None;
+                  provenance = Wire_config.Prov_project;
+                  reload_scope = Wire_config.Restart_required;
+                  secret = false;
+                  writable = true;
+                };
+                {
+                  table = "tui";
+                  key = "board_sort";
+                  full_key = "tui.board_sort";
+                  label = "tui.board_sort";
+                  env = None;
+                  description = Some "Declared runtime.toml key tui.board_sort";
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "recent";
+                  default_value = None;
+                  provenance = Wire_config.Prov_project;
+                  reload_scope = Wire_config.Restart_required;
+                  secret = false;
+                  writable = true;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let cfg_norm =
+    Config_store.empty
+    |> Config_store.set_tab Nav.Settings_general_ui
+    |> Config_store.apply_schema ~observed_at:Clock.Mono.zero
+         raw_server_tui_schema
+    |> Config_store.set_pane Config_store.Pane_inspector
+  in
+  let m_set_insp =
+    {
+      base_ko with
+      theme_preset = Theme.Arcade_hi;
+      knowledge =
+        Knowledge_store.set_board_sort "trending" base_ko.knowledge;
+      nav =
+        {
+          base_ko.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+      config = cfg_norm;
+    }
+  in
+  let g_insp, _ = render_full ~model:m_set_insp ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"settings_tui_enum_insp" g_insp;
+  let txt_insp = grid_all_text g_insp in
+  assert_contains ~label:"settings_tui_theme_localized_label" ~needle:"아케이드 하이"
+    txt_insp;
+  assert_contains ~label:"settings_tui_lang_localized_label" ~needle:"한국어"
+    txt_insp;
+  assert_contains ~label:"settings_tui_board_sort_live_value" ~needle:"trending"
+    txt_insp;
+  assert_not_contains ~label:"settings_tui_no_raw_declared_desc"
+    ~needle:"Declared runtime.toml key" txt_insp;
+  assert_contains ~label:"settings_insp_footer_hint" ~needle:"[←→] 값 변경"
+    txt_insp;
+  (* Even when tui.theme is staged in dirty_fields, localized preset label renders *)
+  let m_set_staged =
+    {
+      m_set_insp with
+      config =
+        Config_store.stage_patch ~full_key:"tui.theme"
+          (Wire_config.Set_scalar
+             { table = "tui"; key = "theme"; value = "paper_light" })
+          m_set_insp.config;
+    }
+  in
+  let g_staged, _ = render_full ~model:m_set_staged ~cols:140 ~rows:40 in
+  assert_contains ~label:"settings_tui_theme_staged_localized" ~needle:"페이퍼 라이트"
+    (grid_all_text g_staged);
+  let m_set_tree =
+    { m_set_insp with config = Config_store.toggle_pane m_set_insp.config }
+  in
+  let g_tree, _ = render_full ~model:m_set_tree ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"settings_tui_enum_tree" g_tree;
+  assert_contains ~label:"settings_tree_footer_hint" ~needle:"[←→] 접기/펼치기"
+    (grid_all_text g_tree);
+  (* 2. Regression guard: ZERO "[[ ]]" or "[[ ]/Tab]" artifacts across chrome,
+        keepers, dive, and overlays at 80x24, 90x28, and 140x40 in KO & EN. *)
+  let ask_multi : Wire_work.ask_row =
+    {
+      ask_id = "ask-multi-guard";
+      keeper = "alpha-builder";
+      asked_at = 1_795_254_000.0;
+      context = Some "Multi-question guard";
+      resolution = Wire_work.Ask_open;
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Q1";
+            prompt = "First question?";
+            mode = Wire_work.Ask_single;
+            allow_free_text = true;
+            free_text_hint = None;
+            choices =
+              [
+                {
+                  choice_id = "a";
+                  label = "Alpha";
+                  description = None;
+                };
+              ];
+          };
+          {
+            question_id = "q2";
+            header = "Q2";
+            prompt = "Second question?";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              [
+                {
+                  choice_id = "b";
+                  label = "Beta";
+                  description = None;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let mk_cases (base : Model.t) tag =
+    [
+      ( tag ^ "_work_140",
+        140,
+        40,
+        { base with nav = { base.nav with workspace = Nav.Work } } );
+      ( tag ^ "_work_90",
+        90,
+        28,
+        {
+          base with
+          viewport = { cols = 90; rows = 28 };
+          breakpoint = Model.Compact;
+          nav = { base.nav with workspace = Nav.Work };
+        } );
+      ( tag ^ "_keepers_80",
+        80,
+        24,
+        {
+          base with
+          viewport = { cols = 80; rows = 24 };
+          breakpoint = Model.Compact;
+          nav = { base.nav with workspace = Nav.Keepers };
+        } );
+      ( tag ^ "_dive_chat_140",
+        140,
+        40,
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              workspace = Nav.Keepers;
+              dive_stack =
+                [
+                  Nav.Dive_keeper
+                    { name = "alpha-builder"; tab = Nav.Keeper_chat };
+                ];
+            };
+        } );
+      ( tag ^ "_dive_config_140",
+        140,
+        40,
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              workspace = Nav.Keepers;
+              dive_stack =
+                [
+                  Nav.Dive_keeper
+                    { name = "alpha-builder"; tab = Nav.Keeper_config };
+                ];
+            };
+        } );
+      ( tag ^ "_queue_ctx_140",
+        140,
+        40,
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              overlay = Some (Nav.Queue_context Nav.Drawer_context);
+            };
+        } );
+      ( tag ^ "_ask_modal_140",
+        140,
+        40,
+        {
+          base with
+          nav = { base.nav with overlay = Some Nav.Ask_answer };
+          ask_modal = Some (Model.ask_modal_for ask_multi);
+        } );
+      ( tag ^ "_settings_140",
+        140,
+        40,
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              overlay = Some (Nav.Settings Nav.Settings_general_ui);
+            };
+        } );
+    ]
+  in
+  List.iter
+    (fun (label, cols, rows, model) ->
+      let g, _ = render_full ~model ~cols ~rows in
+      assert_clean_grid ~label g;
+      let txt = grid_all_text g in
+      assert_not_contains ~label:(label ^ "_no_double_brackets") ~needle:"[[ ]]"
+        txt;
+      assert_not_contains ~label:(label ^ "_no_double_bracket_tab")
+        ~needle:"[[ ]/Tab]" txt;
+      assert_not_contains ~label:(label ^ "_no_bracketed_angle") ~needle:"[< >]"
+        txt)
+    (mk_cases base_ko "ko" @ mk_cases base_en "en")
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3804,6 +4075,8 @@ let () =
             `Quick test_feature_wave1_honest_ssot_chrome_transitions;
           Alcotest.test_case "Feature Wave 2: Left Navigation Sidebar, Top Chrome badges, Keepers sub-tab sync & Drawer_context"
             `Quick test_wave2_sidebar_keepers_sync_and_overlays;
+          Alcotest.test_case "Settings tui.* enum localization & zero [[ ]] double-bracket guard"
+            `Quick test_settings_tui_enum_rendering_and_zero_double_brackets;
         ] );
       ( "pulse",
         [

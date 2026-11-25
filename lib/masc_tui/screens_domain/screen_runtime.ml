@@ -4007,7 +4007,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0) ~subtitle:k_sub
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[< >] 키퍼 전환" ~en:"[< >] Keeper"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"< / > 키퍼 전환" ~en:"< / > Keeper"))
          (Say.resolve lang
             (Say.make ~ko:"키퍼 유효 도구 표면" ~en:"Effective Keeper Surface")))
   in
@@ -4022,8 +4022,8 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
          | None ->
              H.draw_empty_notice ~grid ~rect:lc ~theme
                (Say.resolve lang
-                  (Say.make ~ko:"[< >] 키퍼를 선택하면 유효 도구 표면이 조회됩니다"
-                     ~en:"Use [< >] to select a keeper for effective tool surface"))
+                  (Say.make ~ko:"< / > 키퍼를 선택하면 유효 도구 표면이 조회됩니다"
+                     ~en:"Use < / > to select a keeper for effective tool surface"))
          | Some (Wire_runtime.Keeper_surface_unavailable { keeper_name; reason; detail }) ->
              Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:lc.x ~y:!y
                ~h:(Int.min 2 (bot - !y)) ~theme;
@@ -4303,8 +4303,8 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · [< >] 키퍼 · /exec"
-               ~en:"[v] View · [w] Window · [< >] Keeper · /exec"))
+            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · < / > 키퍼 · /exec"
+               ~en:"[v] View · [w] Window · < / > Keeper · /exec"))
        pills);
   match rt.tools_subview with
   | Runtime_store.Tools_usage_calls -> (
@@ -4430,8 +4430,8 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           (H.card_spec ?subtitle:right_sub ~focused:(Model.pane_focused model 1)
              ~hotkey:
                (Say.resolve lang
-                  (Say.make ~ko:"[< >] 키퍼 · [j/k] 스크롤"
-                     ~en:"[< >] Keeper · [j/k] Scroll"))
+                  (Say.make ~ko:"< / > 키퍼 · [j/k] 스크롤"
+                     ~en:"< / > Keeper · [j/k] Scroll"))
              (Say.resolve lang
                 (Say.make ~ko:"게이트 거부 · 키퍼 대기 인벤토리"
                    ~en:"Gate Rejections · Keeper Waiting")))
@@ -4607,20 +4607,20 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         match rt.pp_section with
         | Runtime_store.Sec_prompts ->
             Say.resolve lang
-              (Say.make ~ko:"[< >] 섹션 · [e] 오버라이드 · [x] 해제"
-                 ~en:"[< >] Section · [e] Override · [x] Clear")
+              (Say.make ~ko:"< / > 섹션 · [e] 오버라이드 · [x] 해제"
+                 ~en:"< / > Section · [e] Override · [x] Clear")
         | Runtime_store.Sec_presets ->
             Say.resolve lang
-              (Say.make ~ko:"[< >] 섹션 · [n] 생성 · [a] 복원 · [x] 삭제"
-                 ~en:"[< >] Section · [n] New · [a] Restore · [x] Del")
+              (Say.make ~ko:"< / > 섹션 · [n] 생성 · [a] 복원 · [x] 삭제"
+                 ~en:"< / > Section · [n] New · [a] Restore · [x] Del")
         | Runtime_store.Sec_params ->
             Say.resolve lang
-              (Say.make ~ko:"[< >] 섹션 · [e] 설정 · [x] 기본값"
-                 ~en:"[< >] Section · [e] Set · [x] Clear")
+              (Say.make ~ko:"< / > 섹션 · [e] 설정 · [x] 기본값"
+                 ~en:"< / > Section · [e] Set · [x] Clear")
         | Runtime_store.Sec_async_requests ->
             Say.resolve lang
-              (Say.make ~ko:"[< >] 섹션 · [r] 새로고침"
-                 ~en:"[< >] Section · [r] Refresh")
+              (Say.make ~ko:"< / > 섹션 · [r] 새로고침"
+                 ~en:"< / > Section · [r] Refresh")
       in
       let left_inner =
         Card.draw ~cache grid ~rect:left_rect ~theme

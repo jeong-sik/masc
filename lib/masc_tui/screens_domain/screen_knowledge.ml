@@ -84,8 +84,8 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[→/Tab] 댓글 스크롤 · [Enter] 스레드 상세 · [c] 댓글 · [+][-] 투표(2회 확정)"
-                 ~en:"[→/Tab] Scroll Comments · [Enter] Open Thread · [c] Reply · [+][-] Vote (2x)"))
+                 ~ko:"[→/Tab] 댓글 스크롤 · [Enter] 스레드 상세 · [c] 댓글 · + / - 투표(2회 확정)"
+                 ~en:"[→/Tab] Scroll Comments · [Enter] Open Thread · [c] Reply · + / - Vote (2x)"))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -432,15 +432,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let space_hint =
       match Knowledge_store.board_space_effect k with
       | Knowledge_store.Board_space_toggle_chain _ ->
-          Say.make ~ko:"[→/Tab] 댓글 · [Space] 계승 · [c] 댓글 · [+][-] 투표(2회)"
-            ~en:"[→/Tab] Comments · [Space] Chain · [c] Reply · [+][-] Vote(2x)"
+          Say.make ~ko:"[→/Tab] 댓글 · [Space] 계승 · [c] 댓글 · + / - 투표(2회)"
+            ~en:"[→/Tab] Comments · [Space] Chain · [c] Reply · + / - Vote(2x)"
       | Knowledge_store.Board_space_toggle_signal_only ->
           if k.board_signal_only then
-            Say.make ~ko:"[→/Tab] 댓글 · [s] 전체 · [c] 댓글 · [+][-] 투표(2회)"
-              ~en:"[→/Tab] Comments · [s] All · [c] Reply · [+][-] Vote(2x)"
+            Say.make ~ko:"[→/Tab] 댓글 · [s] 전체 · [c] 댓글 · + / - 투표(2회)"
+              ~en:"[→/Tab] Comments · [s] All · [c] Reply · + / - Vote(2x)"
           else
-            Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · [+][-] 투표(2회)"
-              ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · [+][-] Vote(2x)"
+            Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · + / - 투표(2회)"
+              ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · + / - Vote(2x)"
     in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
@@ -1456,11 +1456,11 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         (Say.make
            ~ko:
              (Printf.sprintf
-                "[v] 뷰 · [y] %s · [e] %s · [{ }] 리비전 · [c] 확인 · [P] 공유 · [/] 검색"
+                "[v] 뷰 · [y] %s · [e] %s · < / > 리비전 · [c] 확인 · [P] 공유 · [/] 검색"
                 fmt_s ext_s)
            ~en:
              (Printf.sprintf
-                "[v] View · [y] %s · [e] %s · [{ }] Rev · [c] Check · [P] Share · [/] Search"
+                "[v] View · [y] %s · [e] %s · < / > Rev · [c] Check · [P] Share · [/] Search"
                 fmt_s ext_s))
     else
       Say.resolve lang
@@ -1657,8 +1657,8 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                 | Some d when d.revisions <> [] ->
                     ("── "
                     ^ Say.resolve lang
-                        (Say.make ~ko:"리비전 이력 ([{] / [}])"
-                           ~en:"Revision History ([{] / [}])"))
+                        (Say.make ~ko:"리비전 이력 (< / >)"
+                           ~en:"Revision History (< / >)"))
                     :: List.map
                          (fun (r : Wire_knowledge.artifact_revision_summary) ->
                            let cur =
@@ -1840,8 +1840,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[{ }] 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
-               ~en:"[{ }] Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
+            (Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
+               ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
        pills);
   let sel_art = Knowledge_store.selected_artifact k in
   if model.nav.zoomed then
@@ -2935,7 +2935,7 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
       {
         H.label =
           Say.resolve lang
-            (Say.make ~ko:"[+][-] 투표(2회 확정)" ~en:"[+][-] Vote (2x)");
+            (Say.make ~ko:"+ / - 투표(2회 확정)" ~en:"+ / - Vote (2x)");
         active = Option.is_some k.armed_vote;
         tone =
           Some
@@ -3047,8 +3047,8 @@ let render_dive_thread_comment ~post_id ~(model : Model.t) ~cache ~(rect : Rect.
   let hotkey =
     match selected with
     | Some _ ->
-        Say.make ~ko:"[Tab] 본문 · [< >] 댓글 이동 · [c] 답글"
-          ~en:"[Tab] Post · [< >] Next/prev comment · [c] Reply"
+        Say.make ~ko:"[Tab] 본문 · < / > 댓글 이동 · [c] 답글"
+          ~en:"[Tab] Post · < / > Next/prev comment · [c] Reply"
     | None -> Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Post"
   in
   let inner =

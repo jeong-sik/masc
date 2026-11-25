@@ -83,8 +83,10 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `b` / `Ctrl+B` / `Alt+B` | Unfocused / Global | Toggle or focus the **Collapsible Left Navigation Sidebar** (auto-docked when `cols >= 132`, floating drawer overlay when `cols < 132`): lists all 6 workspaces, every 1st-class sub-tab (including `Work → Harness` and `Infra → Code`), Fleet + specialized Keeper tabs (`Context & Turns`, `Tool Calls`, `Logs`, `Identity`; all 9 Keeper tabs via `[` / `]` in Keepers pane 1 / Dive), and System overlays (31 targets; `↑`/`↓`/`j`/`k` live-preview, `Enter`/`→`/`l` focus body, `Tab`/`Shift+Tab` unified focus ring, `Esc` return to main pane) |
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
 | `7` / `8` / `9` / `0` | Unfocused | Quick utility overlays: `7` Settings (`,`), `8` Incidents (`I`), `9` Queue/Context (`Ctrl+T`), `0` Help (`?`) — never hijack focused text inputs |
-| `←` / `→` | Unfocused | Spatial pane movement ONLY: move between Left Navigation Sidebar ↔ Pane 0 ↔ Pane 1 across every workspace and dive (never cycles sub-tabs; inside text inputs moves cursor; in Settings Tree collapses/expands categories; in Settings Inspector / Keeper Config cycles enum/bool/numeric values) |
-| `[` / `]` (or `Alt+[` / `Alt+]`) | Unfocused / Overlay / Global | Cycle sub-tabs ONLY (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Settings tabs, Queue/Context drawer, and multi-question Ask modal) |
+| `←` / `→` | Unfocused | Spatial pane movement ONLY: move between Left Navigation Sidebar ↔ Pane 0 ↔ Pane 1 across every workspace and dive (never cycles sub-tabs; inside text inputs moves cursor; in Settings Tree collapses/expands categories; in Settings Inspector / Keeper Config ONLY adjusts enum/bool/numeric values — never teleports focus back to the Tree) |
+| `[ / ]` (or `Alt+[` / `Alt+]`) | Unfocused / Overlay / Global | Cycle sub-tabs / modes / questions ONLY (Workspaces, Keepers fleet modes, 9-tab Keeper Dive or Keepers split right pane, Settings tabs, Queue/Context drawer, and multi-question Ask modal) |
+| `< / >` (`{` / `}` alias on Artifacts) | Unfocused / Overlay | Step secondary items, history, and revisions (Context Inspector turns, Tools Surface keepers, Prompts & Presets sections, Board Thread comments, and Published Artifact revisions) |
+| `+ / -` | Unfocused (Board / Thread) | Two-press armed upvote / downvote on Board posts and comments |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay / Composer (`PgUp`/`PgDn`) | Scroll by page or jump to the top or bottom. With the composer focused, `PgUp`/`PgDn` scroll the active view while preserving the draft. In `Infra → Code`, `g` cycles Git views and `Home` jumps to the top. |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (including `Goal_dive` Linked Tasks ↔ Verifier Runs and `Task_dive` Description ↔ Verification; omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, questions in multi-question Ask modal, selection in Palette, or Tree / Inspector in Settings) |
@@ -338,7 +340,7 @@ Pending operator decisions appear in two places:
 Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Board**: workspace posts with Signal-only vs All filtering (`s`), Sort
-   cycle (`S`: `recent` / `active` / `top`), live Hearth picker (`h` via
+   cycle (`S`: `recent` / `hot` / `trending` / `updated` / `discussed`), live Hearth picker (`h` via
    `GET /api/v1/board/hearths`), and Succession Chain folding (`Space` strictly
    expands/collapses chains). Press `Enter` to open the thread. Use `Tab` to go
    between the post and the full comment reader. In the reader, `<`/`>` selects
@@ -356,7 +358,7 @@ Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
    rendering (`Html_doc`: strips `<script>`/`<style>`/`hidden`/`aria-hidden`,
    renders headings, CJK-wrapped paragraphs, aligned tables, links, image
    badges), rich Markdown (`Markdown`), and pretty-printed JSON. Press `v` to
-   toggle Rendered Document vs Raw Source, `{` / `}` to step revisions, `c` to
+   toggle Rendered Document vs Raw Source, `< / >` (`{` / `}` alias) to step revisions, `c` to
    toggle confirmation check (`/api/v1/published-artifact-checks`), `P` to
    toggle CAS external share (`/api/v1/published-artifact-shares`), `Y` to copy
    Public URL, `y` to copy raw body, `e` to export locally, `o` to export and
@@ -501,7 +503,7 @@ Seven 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
    - **Quality & Gate**: tool-quality success/latency/failure telemetry
      (`/api/v1/dashboard/tool-quality`), gate tool events
      (`/api/v1/gate/tool-events`), and per-keeper waiting inventory.
-   - **Prompts & Presets**: 4-section manager (`Tab`/`[`/`]`) for system
+   - **Prompts & Presets**: 4-section manager (`< / >`) for system
      **Prompts** (`e` override, `x` reset), **Presets** (`n` create, `a`
      restore, `x` delete), **Runtime Params** (`e` set, `x` clear), and live
      **Async Requests** (`/api/v1/async-requests`).
@@ -574,14 +576,17 @@ categorized TOML editor backed by `GET /api/v1/config/schema` and
   Models, `3` Routing & Failover, `4` Keepers & Companies, `5` Sandbox & SSH,
   `6` Voice & Integrations, `7` Board, Memory & Candle). Navigate with `↑`/`↓`,
   expand/collapse with `←`/`→` (`h`/`l`), or jump directly with `1`–`7` /
-  `[` / `]`.
-- **Right Pane (Inspector)**: press `Tab` to focus fields; `←`/`→` (`h`/`l`)
-  cycle enum, boolean, and numeric values directly (applying `tui.*` theme and
-  language preferences live); `Enter` edits a field inline and stages the
-  change; `Delete` or `Ctrl+D` toggles key removal; **`d`** runs a
-  server-side **dry-run diff** preview; **`Ctrl+S`** saves atomically and
-  reports the effective reload scope (`hot_reload`, `next_turn`, or
-  `restart_required`).
+  `[ / ]`.
+- **Right Pane (Inspector)**: press `Tab` to switch between Tree and Inspector
+  (preserving your selected row in the current section); `←`/`→` (`h`/`l`) ONLY
+  adjust the selected field's value (enum, boolean, or numeric — never
+  teleporting back to the Tree); `Enter` cycles enums/toggles booleans
+  immediately or opens inline text editing for string/numeric/list fields;
+  `tui.theme`, `tui.language`, and `tui.board_sort` apply live and persist via
+  `/api/v1/tui/preferences` without leaving false unsaved-change warnings on
+  `Esc`; `Delete` or `Ctrl+D` toggles key removal; **`d`** runs a server-side
+  **dry-run diff** preview; **`Ctrl+S`** saves atomically and reports the
+  effective reload scope (`hot_reload`, `next_turn`, or `restart_required`).
 - **`Ctrl+E` or `o`**: escape hatch to edit local `runtime.toml` or an
   existing `<keeper>.toml` in `$EDITOR` (pauses and restores the terminal
   cleanly; unavailable for new-keeper creation, which must be submitted in
@@ -639,7 +644,7 @@ you can set `keeper.group` directly in the creation form.
     Press `Tab` to switch panes, `Space` to switch Clients/Tabs focus, `t` to
     refresh open tabs on demand, `y` to copy the selected addon ID or tab URL,
     and `o` to open the selected tab's `http(s)` URL.
-- **Exact-Output Runs**: open **`5` Runtime → Failover Lanes** (`[ ]`) to view
+- **Exact-Output Runs**: open **`5` Runtime → Failover Lanes** (`[ / ]`) to view
   deduplicated recent **`exact_lane_runs`** alongside failover lane cascades.
   Fusion runs live on **`5` Runtime → Fusion**, and a 2-line Browser & Addons
   status summary also appears on **`5` Runtime → Connectors**.
@@ -657,7 +662,7 @@ you can set `keeper.group` directly in the creation form.
   (recovery modal for `adopt`, `restart_reading`, `skip_item`, `skip_line`)
   when a writer is stopped.
 - **Per-Keeper**: open **`4` Keepers → select Keeper → `Enter` → Memory** tab
-  (`[ ]`, or focus the right split pane with `Tab` and switch to **Memory**).
+  (`[ / ]`, or focus the right split pane with `Tab` and switch to **Memory**).
   Browse changes and facts in the explorer, and press `Enter` to read the
   selected record. Period Diff shows the **Memory Flow** chart (`M` switches
   between Flow and Net Total) and **Retrieval Heat**. Press `v` to reach
@@ -710,7 +715,7 @@ right pane (`Tab` to scroll). Across the Artifacts list, **Artifact Dive**
 (`Enter`), and **Media Viewer**:
 
 - **`v`** — Toggle rendered view vs raw source.
-- **`{` / `}`** — Step artifact revisions (older / newer).
+- **`< / >`** (`{` / `}` alias) — Step artifact revisions (older / newer).
 - **`/`** — Search within **Artifact Dive** (`Enter` to dive, then `n` / `N` jump to next / previous match).
 - **`c`** — Toggle verification check (`POST /api/v1/published-artifact-checks`).
 - **`P`** — Toggle CAS share status (`POST /api/v1/published-artifact-shares`); **`Y`** copies the share URL via OSC 52.

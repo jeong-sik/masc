@@ -811,8 +811,9 @@ let bindings : binding list =
         ~action:Cycle_sort_or_speak ~key_display:"S"
         ~hint_label:(Say.make ~ko:"정렬" ~en:"Sort")
         ~help_desc:
-          (Say.make ~ko:"목표 정렬(단계/진행률/최신) / 보드 정렬(recent|active|top)"
-             ~en:"Cycle Goals sort (phase/progress/recent) or Board sort (recent|active|top)")
+          (Say.make
+             ~ko:"목표 정렬(단계/진행률/최신) / 보드 정렬(recent|hot|trending|updated|discussed)"
+             ~en:"Cycle Goals sort (phase/progress/recent) or Board sort (recent|hot|trending|updated|discussed)")
         ~footer_priority:0 (bare_char 'S');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_hearth_or_overrule ~key_display:"h"
@@ -842,22 +843,32 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_revision Prev) ~key_display:"{"
         ~hint_label:(Say.make ~ko:"이전 리비전" ~en:"Prev Rev")
-        ~help_desc:(Say.make ~ko:"산출물 이전 리비전으로 이동" ~en:"Step to older artifact revision")
+        ~help_desc:
+          (Say.make ~ko:"산출물 이전 리비전으로 이동 (< 별칭)"
+             ~en:"Step to older artifact revision (alias of <)")
         ~footer_priority:0 (bare_char '{');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_revision Next) ~key_display:"}"
         ~hint_label:(Say.make ~ko:"다음 리비전" ~en:"Next Rev")
-        ~help_desc:(Say.make ~ko:"산출물 다음 리비전으로 이동" ~en:"Step to newer artifact revision")
+        ~help_desc:
+          (Say.make ~ko:"산출물 다음 리비전으로 이동 (> 별칭)"
+             ~en:"Step to newer artifact revision (alias of >)")
         ~footer_priority:0 (bare_char '}');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Prev) ~key_display:"<"
-        ~hint_label:(Say.make ~ko:"이전 턴/키퍼" ~en:"Prev Turn")
-        ~help_desc:(Say.make ~ko:"컨텍스트 이전 턴 / 도구 표면 이전 키퍼" ~en:"Older turn in Context Inspector / Previous keeper in Tools Surface")
+        ~hint_label:(Say.make ~ko:"이전 항목/이력" ~en:"Prev Item")
+        ~help_desc:
+          (Say.make
+             ~ko:"이전 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전)"
+             ~en:"Step older/previous item (turn / keeper / section / comment / artifact rev)")
         ~footer_priority:0 (bare_char '<');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Next) ~key_display:">"
-        ~hint_label:(Say.make ~ko:"다음 턴/키퍼" ~en:"Next Turn")
-        ~help_desc:(Say.make ~ko:"컨텍스트 다음 턴 / 도구 표면 다음 키퍼" ~en:"Newer turn in Context Inspector / Next keeper in Tools Surface")
+        ~hint_label:(Say.make ~ko:"다음 항목/이력" ~en:"Next Item")
+        ~help_desc:
+          (Say.make
+             ~ko:"다음 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전)"
+             ~en:"Step newer/next item (turn / keeper / section / comment / artifact rev)")
         ~footer_priority:0 (bare_char '>');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Launch_fusion ~key_display:"f"

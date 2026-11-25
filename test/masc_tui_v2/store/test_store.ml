@@ -9976,13 +9976,13 @@ let test_feature_wave1_store_and_polish_nits () =
               [
                 {
                   table = "tui";
-                  key = "theme";
-                  full_key = "tui.theme";
-                  label = "Theme";
+                  key = "audio_input_device";
+                  full_key = "tui.audio_input_device";
+                  label = "Audio Input Device";
                   env = None;
                   description = None;
                   kind = Wire_config.Field_string;
-                  value = Wire_config.Val_string "midnight";
+                  value = Wire_config.Val_string "default";
                   default_value = None;
                   provenance = Wire_config.Prov_project;
                   reload_scope = Wire_config.Hot_reload;
@@ -24355,5 +24355,626 @@ let () =
           Alcotest.test_case
             "Layer 2: pane geometry, scroll, sidebar, wayfinding & orphan fixes"
             `Quick test_layer2_pane_scroll_nav_wayfinding;
+          Alcotest.test_case
+            "Settings tui.* enum SSOT, no-teleport arrows, preserved row & unified < / > artifact revisions"
+            `Quick (fun () ->
+              let m0 =
+                let base = Model.initial () in
+                {
+                  base with
+                  viewport = { cols = 140; rows = 40 };
+                  breakpoint = Model.Wide;
+                }
+              in
+              let raw_tui_field ?(kind = Wire_config.Field_string)
+                  ?(writable = true) ?(secret = false) ~key value :
+                  Wire_config.schema_field =
+                {
+                  table = "tui";
+                  key;
+                  full_key = "tui." ^ key;
+                  label = "tui." ^ key;
+                  env = None;
+                  description = Some ("Declared runtime.toml key tui." ^ key);
+                  kind;
+                  value;
+                  default_value = None;
+                  provenance = Wire_config.Prov_project;
+                  reload_scope = Wire_config.Restart_required;
+                  secret;
+                  writable;
+                }
+              in
+              let server_schema : Wire_config.config_schema =
+                {
+                  target = Wire_config.Target_runtime;
+                  keeper = None;
+                  file_exists = true;
+                  file_sha256 = "sha-tui-ssot";
+                  sections =
+                    [
+                      {
+                        id = "general_ui";
+                        category = Wire_config.Cat_general_ui;
+                        title = "General & UI";
+                        fields =
+                          [
+                            raw_tui_field ~key:"theme"
+                              (Wire_config.Val_string "midnight");
+                            raw_tui_field ~key:"language"
+                              (Wire_config.Val_string "ko");
+                            raw_tui_field ~key:"board_sort"
+                              (Wire_config.Val_string "recent");
+                            raw_tui_field ~key:"candle"
+                              (Wire_config.Val_string "painted");
+                            raw_tui_field ~key:"opening"
+                              (Wire_config.Val_string "overview");
+                            raw_tui_field ~key:"hints_visible"
+                              ~kind:Wire_config.Field_bool
+                              (Wire_config.Val_bool true);
+                            raw_tui_field ~key:"reduce_motion"
+                              ~kind:Wire_config.Field_bool
+                              (Wire_config.Val_bool false);
+                            raw_tui_field ~key:"voice_send_on_stop"
+                              ~kind:Wire_config.Field_bool
+                              (Wire_config.Val_bool false);
+                            raw_tui_field ~key:"help_hint_shown"
+                              ~kind:Wire_config.Field_bool
+                              (Wire_config.Val_bool false);
+                            raw_tui_field ~key:"audio_input_device"
+                              (Wire_config.Val_string "default");
+                            raw_tui_field ~key:"readonly_probe" ~writable:false
+                              (Wire_config.Val_string "locked");
+                            raw_tui_field ~key:"secret_token"
+                              ~kind:Wire_config.Field_secret ~secret:true
+                              (Wire_config.Val_secret
+                                 {
+                                   configured = true;
+                                   source = Wire_config.Secret_inline_redacted;
+                                 });
+                          ];
+                      };
+                      {
+                        id = "providers_models";
+                        category = Wire_config.Cat_providers_models;
+                        title = "Providers";
+                        fields =
+                          [
+                            {
+                              table = "providers.demo";
+                              key = "endpoint";
+                              full_key = "providers.demo.endpoint";
+                              label = "Endpoint";
+                              env = None;
+                              description = None;
+                              kind = Wire_config.Field_string;
+                              value =
+                                Wire_config.Val_string "https://example.test";
+                              default_value = None;
+                              provenance = Wire_config.Prov_project;
+                              reload_scope = Wire_config.Hot_reload;
+                              secret = false;
+                              writable = true;
+                            };
+                          ];
+                      };
+                    ];
+                }
+              in
+              let cfg =
+                Config_store.empty
+                |> Config_store.set_tab Nav.Settings_general_ui
+                |> Config_store.apply_schema ~observed_at:t0 server_schema
+              in
+              let fields = Config_store.inspector_fields cfg in
+              let find_f fk =
+                List.find
+                  (fun (f : Wire_config.schema_field) ->
+                    String.equal f.full_key fk)
+                  fields
+              in
+              (* 1. SSOT normalization checks *)
+              let f_theme = find_f "tui.theme" in
+              Alcotest.(check bool) "tui.theme normalized to Field_enum + Hot_reload"
+                true
+                (f_theme.kind
+                 = Wire_config.Field_enum
+                     (List.map Theme.preset_name Theme.all_presets)
+                 && f_theme.reload_scope = Wire_config.Hot_reload
+                 && f_theme.description
+                    <> Some "Declared runtime.toml key tui.theme");
+              let f_lang = find_f "tui.language" in
+              Alcotest.(check bool) "tui.language normalized to Field_enum + Hot_reload"
+                true
+                (f_lang.kind = Wire_config.Field_enum [ "ko"; "en" ]
+                 && f_lang.reload_scope = Wire_config.Hot_reload);
+              let f_bs = find_f "tui.board_sort" in
+              Alcotest.(check bool) "tui.board_sort normalized to canonical Field_enum + Hot_reload"
+                true
+                (f_bs.kind
+                 = Wire_config.Field_enum Config_store.valid_board_sort_values
+                 && f_bs.reload_scope = Wire_config.Hot_reload);
+              let f_candle = find_f "tui.candle" in
+              Alcotest.(check bool) "tui.candle normalized to painted/dotted Field_enum + Hot_reload"
+                true
+                (f_candle.kind = Wire_config.Field_enum [ "painted"; "dotted" ]
+                 && f_candle.reload_scope = Wire_config.Hot_reload);
+              let f_opening = find_f "tui.opening" in
+              Alcotest.(check bool) "tui.opening normalized to overview/last/keeper Field_enum + Hot_reload"
+                true
+                (f_opening.kind
+                 = Wire_config.Field_enum Config_store.valid_opening_values
+                 && f_opening.reload_scope = Wire_config.Hot_reload
+                 && f_opening.description
+                    <> Some "Declared runtime.toml key tui.opening");
+              let f_retired = find_f "tui.voice_send_on_stop" in
+              Alcotest.(check bool) "retired tui.voice_send_on_stop is NOT normalized"
+                true
+                (f_retired.reload_scope = Wire_config.Restart_required
+                 && f_retired.description
+                    = Some "Declared runtime.toml key tui.voice_send_on_stop");
+              List.iter
+                (fun fk ->
+                  let f = find_f fk in
+                  Alcotest.(check bool)
+                    (fk ^ " normalized to Hot_reload")
+                    true (f.reload_scope = Wire_config.Hot_reload))
+                [
+                  "tui.hints_visible";
+                  "tui.reduce_motion";
+                  "tui.help_hint_shown";
+                ];
+              (* 2. Live apply via Right / Left / Enter on tui.theme, tui.language, tui.board_sort *)
+              let m_set =
+                {
+                  m0 with
+                  nav =
+                    {
+                      m0.nav with
+                      overlay = Some (Nav.Settings Nav.Settings_general_ui);
+                    };
+                  config = cfg;
+                }
+              in
+              let is_pref_post pred cmds =
+                List.exists
+                  (function
+                    | Cmd.Http_post { req = Cmd.Post_tui_preference ch; _ } ->
+                        pred ch
+                    | _ -> false)
+                  (Cmd.flatten cmds)
+              in
+              let m_r, cmds_r =
+                Update.step ~now:t1 m_set
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check bool) "Right cycles tui.theme Midnight -> Arcade_hi"
+                true (Theme.equal_preset m_r.theme_preset Theme.Arcade_hi);
+              Alcotest.(check int) "Right on tui.theme leaves dirty_count = 0" 0
+                (Config_store.dirty_count m_r.config);
+              Alcotest.(check bool) "Right emits Pref_theme arcade_hi" true
+                (is_pref_post
+                   (function
+                     | Wire_config.Pref_theme (Some "arcade_hi") -> true
+                     | _ -> false)
+                   cmds_r);
+              let m_ent, cmds_ent =
+                Update.step ~now:t1 m_r (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check bool) "Enter cycles tui.theme Arcade_hi -> Paper_light"
+                true (Theme.equal_preset m_ent.theme_preset Theme.Paper_light);
+              Alcotest.(check int) "Enter on tui.theme leaves dirty_count = 0" 0
+                (Config_store.dirty_count m_ent.config);
+              Alcotest.(check bool) "Enter emits Pref_theme paper_light" true
+                (is_pref_post
+                   (function
+                     | Wire_config.Pref_theme (Some "paper_light") -> true
+                     | _ -> false)
+                   cmds_ent);
+              let m_l, cmds_l =
+                Update.step ~now:t1 m_ent
+                  (Msg.Key_event (key Keymap.Input.Left))
+              in
+              Alcotest.(check bool) "Left reverts tui.theme Paper_light -> Arcade_hi"
+                true (Theme.equal_preset m_l.theme_preset Theme.Arcade_hi);
+              Alcotest.(check bool) "Left emits Pref_theme arcade_hi" true
+                (is_pref_post
+                   (function
+                     | Wire_config.Pref_theme (Some "arcade_hi") -> true
+                     | _ -> false)
+                   cmds_l);
+              (* Esc closes immediately with zero discard warning because dirty_count = 0 *)
+              let m_esc, _ =
+                Update.step ~now:t1 m_l
+                  (Msg.Key_event (key Keymap.Input.Escape))
+              in
+              Alcotest.(check bool) "Esc closes Settings immediately without false discard trap"
+                true (Option.is_none m_esc.nav.overlay);
+              (* Stepping starts from live theme even if schema had older value *)
+              let m_stale_schema =
+                {
+                  m_set with
+                  theme_preset = Theme.Paper_light;
+                  config = cfg;
+                }
+              in
+              let m_from_live, _ =
+                Update.step ~now:t1 m_stale_schema
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check bool) "Right steps from live Paper_light -> Mono (ignoring stale schema midnight)"
+                true (Theme.equal_preset m_from_live.theme_preset Theme.Mono);
+              (* tui.language live apply *)
+              let m_lang0 =
+                { m_set with config = { m_set.config with selected_field_index = 1 } }
+              in
+              let m_lang1, cmds_lang =
+                Update.step ~now:t1 m_lang0
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check bool) "Right switches tui.language ko -> en" true
+                (Say.equal_lang m_lang1.lang Say.Lang_en);
+              Alcotest.(check int) "tui.language leaves dirty_count = 0" 0
+                (Config_store.dirty_count m_lang1.config);
+              Alcotest.(check bool) "tui.language emits Pref_language Lang_en" true
+                (is_pref_post
+                   (function
+                     | Wire_config.Pref_language Say.Lang_en -> true
+                     | _ -> false)
+                   cmds_lang);
+              (* tui.board_sort live apply *)
+              let m_bs0 =
+                { m_set with config = { m_set.config with selected_field_index = 2 } }
+              in
+              let m_bs1, cmds_bs =
+                Update.step ~now:t1 m_bs0
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check string) "Right updates board_sort recent -> hot"
+                "hot" m_bs1.knowledge.board_sort_by;
+              Alcotest.(check int) "tui.board_sort leaves dirty_count = 0" 0
+                (Config_store.dirty_count m_bs1.config);
+              Alcotest.(check bool) "tui.board_sort emits Pref_board_sort hot"
+                true
+                (is_pref_post
+                   (function
+                     | Wire_config.Pref_board_sort "hot" -> true
+                     | _ -> false)
+                   cmds_bs);
+              (* Space on tui.theme emits 0 HTTP POSTs (strict local-only invariant) *)
+              let has_any_http_post cmds =
+                List.exists
+                  (function Cmd.Http_post _ -> true | _ -> false)
+                  (Cmd.flatten cmds)
+              in
+              let m_sp_theme, cmds_sp_theme =
+                Update.step ~now:t1 m_set (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check bool) "Space on tui.theme emits 0 HTTP POSTs"
+                false (has_any_http_post cmds_sp_theme);
+              Alcotest.(check bool) "Space on tui.theme does not mutate theme"
+                true (Theme.equal_preset m_sp_theme.theme_preset m_set.theme_preset);
+              (* tui.opening steps cleanly and stages dirty=1 (no Post_tui_preference) *)
+              let m_open0 =
+                { m_set with config = { m_set.config with selected_field_index = 4 } }
+              in
+              let m_open1, cmds_open1 =
+                Update.step ~now:t1 m_open0
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check int) "Right on tui.opening stages dirty_count = 1"
+                1 (Config_store.dirty_count m_open1.config);
+              Alcotest.(check bool) "Right on tui.opening emits 0 HTTP POSTs"
+                false (has_any_http_post cmds_open1);
+              Alcotest.(check bool) "Right on tui.opening stages value 'last'"
+                true
+                (match
+                   Config_store.String_map.find_opt "tui.opening"
+                     m_open1.config.dirty_fields
+                 with
+                 | Some (Wire_config.Set_scalar { value = "last"; _ }) -> true
+                 | _ -> false);
+              (* Non-Post_tui_preference key (tui.hints_visible) stays dirty=1 for Ctrl+S,
+                 and Space toggles Field_bool locally with 0 HTTP POSTs *)
+              let m_hints0 =
+                { m_set with config = { m_set.config with selected_field_index = 5 } }
+              in
+              let m_hints_sp, cmds_hints_sp =
+                Update.step ~now:t1 m_hints0 (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check int) "Space on tui.hints_visible stages local bool dirty=1"
+                1 (Config_store.dirty_count m_hints_sp.config);
+              Alcotest.(check bool) "Space on tui.hints_visible emits 0 HTTP POSTs"
+                false (has_any_http_post cmds_hints_sp);
+              let m_hints1, cmds_hints =
+                Update.step ~now:t1 m_hints0
+                  (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check int) "tui.hints_visible stays dirty=1 for Ctrl+S save"
+                1 (Config_store.dirty_count m_hints1.config);
+              Alcotest.(check bool) "tui.hints_visible emits 0 Post_tui_preference"
+                false (is_pref_post (fun _ -> true) cmds_hints);
+              (* Board [S] cycle matches Settings valid_board_sort_values 1:1 *)
+              let m_board0 =
+                {
+                  m0 with
+                  nav = { m0.nav with workspace = Nav.Knowledge };
+                  knowledge =
+                    Knowledge_store.set_tab Nav.Knowledge_board m0.knowledge;
+                }
+              in
+              let rec collect_sorts n acc m =
+                if n <= 0 then List.rev acc
+                else
+                  let m_next, _ =
+                    Update.step ~now:t1 m (Msg.Key_event (char_key "S"))
+                  in
+                  collect_sorts (n - 1)
+                    (m_next.knowledge.board_sort_by :: acc)
+                    m_next
+              in
+              let cycled = collect_sorts 5 [] m_board0 in
+              Alcotest.(check (list string))
+                "Board [S] cycles canonical 5-value board_sort SSOT"
+                [ "hot"; "trending"; "updated"; "discussed"; "recent" ] cycled;
+              (* Fallback mode: CLI --theme / --lang with Unreported schema & preferences
+                 preserves Unreported preferences on sync and steps from live CLI values;
+                 non-canonical hyphenated prefs.theme canonicalizes cleanly. *)
+              let m_cli_fb =
+                {
+                  m0 with
+                  theme_preset = Theme.Paper_light;
+                  cli_theme_override = true;
+                  lang = Say.Lang_en;
+                  cli_lang_override = true;
+                  nav =
+                    {
+                      m0.nav with
+                      overlay = Some (Nav.Settings Nav.Settings_general_ui);
+                    };
+                  config = Config_store.empty;
+                }
+              in
+              let cfg_synced =
+                Config_store.sync_live_tui_values
+                  ~theme_preset:Theme.Paper_light ~lang:Say.Lang_en
+                  Config_store.empty
+              in
+              Alcotest.(check bool)
+                "sync_live_tui_values keeps Unreported preferences Unreported"
+                false (Observed.is_value cfg_synced.preferences);
+              let m_fb_theme, _ =
+                Update.step ~now:t1 m_cli_fb
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check bool)
+                "Fallback mode Right steps CLI Paper_light -> Mono" true
+                (Theme.equal_preset m_fb_theme.theme_preset Theme.Mono);
+              let m_fb_lang0 =
+                {
+                  m_fb_theme with
+                  config = { m_fb_theme.config with selected_field_index = 1 };
+                }
+              in
+              let m_fb_lang1, _ =
+                Update.step ~now:t1 m_fb_lang0
+                  (Msg.Key_event (key Keymap.Input.Right))
+              in
+              Alcotest.(check bool)
+                "Fallback mode Right steps CLI Lang_en -> Lang_ko" true
+                (Say.equal_lang m_fb_lang1.lang Say.Lang_ko);
+              let cfg_hyphen =
+                Config_store.apply_preferences ~observed_at:t0
+                  {
+                    Wire_config.theme = Some "paper-light";
+                    language = Some Say.Lang_ko;
+                    board_sort = None;
+                    reduce_motion = Some false;
+                    hints_visible = Some true;
+                    coalesce_queued_input = None;
+                    send_on_stop = None;
+                    audio_input_device = None;
+                  }
+                  Config_store.empty
+              in
+              let fb_theme_val =
+                match Config_store.selected_field cfg_hyphen with
+                | Some { value = Wire_config.Val_string s; _ } -> s
+                | _ -> ""
+              in
+              Alcotest.(check string)
+                "Fallback mode canonicalizes hyphenated 'paper-light' -> 'paper_light'"
+                "paper_light" fb_theme_val;
+              (* 3. Pane_inspector Left NEVER teleports to Pane_tree on string / read-only / secret *)
+              List.iter
+                (fun (lbl, idx) ->
+                  let m_i =
+                    {
+                      m_set with
+                      config =
+                        {
+                          m_set.config with
+                          settings_pane = Config_store.Pane_inspector;
+                          selected_field_index = idx;
+                        };
+                    }
+                  in
+                  let m_after, _ =
+                    Update.step ~now:t1 m_i
+                      (Msg.Key_event (key Keymap.Input.Left))
+                  in
+                  Alcotest.(check bool)
+                    (lbl ^ ": Left stays in Pane_inspector")
+                    true
+                    (Config_store.equal_settings_pane
+                       m_after.config.settings_pane Config_store.Pane_inspector))
+                [
+                  ("Field_string", 9);
+                  ("read-only", 10);
+                  ("secret", 11);
+                ];
+              (* 4. Tab Tree<->Inspector & enter_inspector on same section preserve row index;
+                    switching to a DIFFERENT section resets to 0. *)
+              let m_row2 =
+                {
+                  m_set with
+                  config = { m_set.config with selected_field_index = 2 };
+                }
+              in
+              let m_t1, _ =
+                Update.step ~now:t1 m_row2
+                  (Msg.Key_event (key Keymap.Input.Tab))
+              in
+              Alcotest.(check bool) "Tab moves to Pane_tree" true
+                (Config_store.equal_settings_pane m_t1.config.settings_pane
+                   Config_store.Pane_tree);
+              let m_t2, _ =
+                Update.step ~now:t1 m_t1
+                  (Msg.Key_event (key Keymap.Input.Tab))
+              in
+              Alcotest.(check int) "Tab back preserves selected_field_index = 2"
+                2 m_t2.config.selected_field_index;
+              let m_t3, _ =
+                Update.step ~now:t1 m_t2
+                  (Msg.Key_event (key Keymap.Input.Tab))
+              in
+              let m_reenter, _ =
+                Update.step ~now:t1 m_t3
+                  (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check bool) "Enter on same tree section enters Pane_inspector"
+                true
+                (Config_store.equal_settings_pane
+                   m_reenter.config.settings_pane Config_store.Pane_inspector);
+              Alcotest.(check int) "enter_inspector on same section preserves row 2"
+                2 m_reenter.config.selected_field_index;
+              let m_tree_again, _ =
+                Update.step ~now:t1 m_reenter
+                  (Msg.Key_event (key Keymap.Input.Tab))
+              in
+              let m_diff_sec, _ =
+                Update.step ~now:t1 m_tree_again
+                  (Msg.Key_event (key Keymap.Input.Down))
+              in
+              Alcotest.(check int) "moving to a different tree row resets selected_field_index to 0"
+                0 m_diff_sec.config.selected_field_index;
+              (* 5. Unified < / > (Step_context_item) steps Published Artifact revisions
+                    on Knowledge > Artifacts AND Artifact_dive (with { / } alias preserved) *)
+              let art_entry : Wire_knowledge.artifact_entry =
+                {
+                  id = "art-rev-1";
+                  revision = 2;
+                  title = "Rev Test Artifact";
+                  summary = "Artifact revision summary";
+                  author = "alpha-builder";
+                  created_at_unix = 1_795_254_000.0;
+                  body =
+                    {
+                      sha256 = String.make 64 'a';
+                      bytes = 128;
+                      mime = "text/markdown";
+                    };
+                }
+              in
+              let mk_rev revision title sha_ch bytes created_at_unix :
+                  Wire_knowledge.artifact_revision_summary =
+                {
+                  revision;
+                  title;
+                  summary = title;
+                  format = `Markdown;
+                  author = "alpha-builder";
+                  created_at_unix = Some created_at_unix;
+                  sha256 = String.make 64 sha_ch;
+                  bytes;
+                  mime_type = "text/markdown";
+                  preview = None;
+                  task_id = None;
+                  goal_id = None;
+                }
+              in
+              let art_detail : Wire_knowledge.published_artifact_detail =
+                {
+                  artifact = art_entry;
+                  content = "# Rev 2";
+                  shared = false;
+                  share_version = 0;
+                  revisions =
+                    [
+                      mk_rev 1 "Rev 1" '1' 64 1_795_253_900.0;
+                      mk_rev 2 "Rev 2" 'a' 128 1_795_254_000.0;
+                      mk_rev 3 "Rev 3" '3' 192 1_795_254_200.0;
+                    ];
+                }
+              in
+              let k_art =
+                Knowledge_store.empty
+                |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+                |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_entry ]
+                |> Knowledge_store.apply_artifact_detail ~observed_at:t0
+                     art_detail
+              in
+              let has_rev_get want_rev cmds =
+                List.exists
+                  (function
+                    | Cmd.Http_get
+                        {
+                          req =
+                            Cmd.Get_artifact_detail
+                              { id = "art-rev-1"; revision = Some r };
+                          _;
+                        } ->
+                        Int.equal r want_rev
+                    | _ -> false)
+                  (Cmd.flatten cmds)
+              in
+              let m_art =
+                {
+                  m0 with
+                  nav = { m0.nav with workspace = Nav.Knowledge };
+                  knowledge = k_art;
+                }
+              in
+              let _, cmds_lt =
+                Update.step ~now:t1 m_art (Msg.Key_event (char_key "<"))
+              in
+              Alcotest.(check bool) "Knowledge > Artifacts '<' steps to revision 1"
+                true (has_rev_get 1 cmds_lt);
+              let _, cmds_gt =
+                Update.step ~now:t1 m_art (Msg.Key_event (char_key ">"))
+              in
+              Alcotest.(check bool) "Knowledge > Artifacts '>' steps to revision 3"
+                true (has_rev_get 3 cmds_gt);
+              let _, cmds_lbrace =
+                Update.step ~now:t1 m_art (Msg.Key_event (char_key "{"))
+              in
+              Alcotest.(check bool) "Knowledge > Artifacts '{' alias still steps to revision 1"
+                true (has_rev_get 1 cmds_lbrace);
+              let _, cmds_rbrace =
+                Update.step ~now:t1 m_art (Msg.Key_event (char_key "}"))
+              in
+              Alcotest.(check bool) "Knowledge > Artifacts '}' alias still steps to revision 3"
+                true (has_rev_get 3 cmds_rbrace);
+              let m_dive =
+                {
+                  m_art with
+                  nav =
+                    {
+                      m_art.nav with
+                      dive_stack =
+                        [ Nav.Dive_knowledge (Nav.Artifact_dive "art-rev-1") ];
+                    };
+                }
+              in
+              let _, cmds_dive_lt =
+                Update.step ~now:t1 m_dive (Msg.Key_event (char_key "<"))
+              in
+              Alcotest.(check bool) "Artifact_dive '<' steps to revision 1" true
+                (has_rev_get 1 cmds_dive_lt);
+              let _, cmds_dive_gt =
+                Update.step ~now:t1 m_dive (Msg.Key_event (char_key ">"))
+              in
+              Alcotest.(check bool) "Artifact_dive '>' steps to revision 3" true
+                (has_rev_get 3 cmds_dive_gt));
         ] );
     ]

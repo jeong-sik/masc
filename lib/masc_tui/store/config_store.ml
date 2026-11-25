@@ -77,6 +77,8 @@ type t = {
   editing_field_key : string option;
   editing_buffer : string;
   editing_cursor : int;
+  live_theme_fallback : string option;
+  live_lang_fallback : Say.lang option;
 }
 
 let all_categories_ordered =
@@ -127,6 +129,8 @@ let empty =
     editing_field_key = None;
     editing_buffer = "";
     editing_cursor = 0;
+    live_theme_fallback = None;
+    live_lang_fallback = None;
   }
 
 let contains_ci = Store_scroll.contains_ci
@@ -177,13 +181,227 @@ let field_label ~lang (f : Wire_config.schema_field) =
   match f.full_key with
   | "tui.theme" -> Say.resolve lang (Say.make ~ko:"테마 프리셋" ~en:"Theme Preset")
   | "tui.language" -> Say.resolve lang (Say.make ~ko:"UI 언어" ~en:"UI Language")
+  | "tui.board_sort" ->
+      Say.resolve lang (Say.make ~ko:"보드 기본 정렬" ~en:"Default Board Sort")
+  | "tui.candle" -> Say.resolve lang (Say.make ~ko:"캔들 스타일" ~en:"Candle Style")
   | "tui.hints_visible" ->
       Say.resolve lang (Say.make ~ko:"하단 단축키 힌트" ~en:"Footer Key Hints")
   | "tui.reduce_motion" ->
       Say.resolve lang (Say.make ~ko:"모션 줄이기" ~en:"Reduce Motion")
+  | "tui.opening" ->
+      Say.resolve lang (Say.make ~ko:"시작 화면" ~en:"Startup View")
+  | "tui.help_hint_shown" ->
+      Say.resolve lang (Say.make ~ko:"도움말 힌트 표시 완료" ~en:"Help Hint Shown")
   | "tui.audio_input_device" ->
       Say.resolve lang (Say.make ~ko:"음성 입력 장치" ~en:"Audio Input Device")
   | _ -> Wire_config.field_leaf_label ~lang f
+
+let valid_board_sort_values =
+  [ "recent"; "hot"; "trending"; "updated"; "discussed" ]
+
+let valid_candle_values = [ "painted"; "dotted" ]
+
+let valid_opening_values = [ "overview"; "last"; "keeper" ]
+
+let canonical_theme_name_opt (s : string) =
+  let trimmed = String.trim s in
+  if String.equal trimmed "" then None
+  else
+    match Theme.preset_of_name trimmed with
+    | Some p -> Some (Theme.preset_name p)
+    | None -> None
+
+let tui_friendly_description ~(full_key : string) ~(default : string)
+    (existing : string option) =
+  let placeholder = "Declared runtime.toml key " ^ full_key in
+  match existing with
+  | None -> Some default
+  | Some d ->
+      let trimmed = String.trim d in
+      if String.equal trimmed "" || String.equal trimmed placeholder then
+        Some default
+      else existing
+
+let normalize_enum_field_value ~allowed (v : Wire_config.field_value) :
+    Wire_config.field_value =
+  match v with
+  | Wire_config.Val_string s ->
+      let norm = String.lowercase_ascii (String.trim s) in
+      if List.exists (String.equal norm) allowed then Wire_config.Val_string norm
+      else v
+  | Wire_config.Val_bool _
+  | Wire_config.Val_int _
+  | Wire_config.Val_float _
+  | Wire_config.Val_string_list _
+  | Wire_config.Val_structured _
+  | Wire_config.Val_secret _
+  | Wire_config.Val_null ->
+      v
+
+let normalize_tui_schema_field ~(prefs : Wire_config.tui_preferences option)
+    (f : Wire_config.schema_field) : Wire_config.schema_field =
+  match f.full_key with
+  | "tui.theme" ->
+      let canonical_val = function
+        | Wire_config.Val_string s -> (
+            match canonical_theme_name_opt s with
+            | Some name -> Wire_config.Val_string name
+            | None -> Wire_config.Val_string s)
+        | ( Wire_config.Val_bool _
+          | Wire_config.Val_int _
+          | Wire_config.Val_float _
+          | Wire_config.Val_string_list _
+          | Wire_config.Val_structured _
+          | Wire_config.Val_secret _
+          | Wire_config.Val_null ) as v ->
+            v
+      in
+      let value =
+        match Option.bind prefs (fun p -> Option.bind p.theme canonical_theme_name_opt) with
+        | Some name -> Wire_config.Val_string name
+        | None -> canonical_val f.value
+      in
+      {
+        f with
+        kind =
+          Wire_config.Field_enum (List.map Theme.preset_name Theme.all_presets);
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"WCAG >= 4.5:1 Oklab 4-surface contrast theme preset"
+            f.description;
+        value;
+      }
+  | "tui.language" ->
+      let value =
+        match Option.bind prefs (fun p -> p.language) with
+        | Some l -> Wire_config.Val_string (Say.lang_code l)
+        | None -> f.value
+      in
+      {
+        f with
+        kind = Wire_config.Field_enum [ "ko"; "en" ];
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Atomic KO / EN switch across all screens" f.description;
+        value;
+      }
+  | "tui.board_sort" ->
+      let value =
+        match Option.bind prefs (fun p -> p.board_sort) with
+        | Some s ->
+            let norm = String.lowercase_ascii (String.trim s) in
+            if List.exists (String.equal norm) valid_board_sort_values then
+              Wire_config.Val_string norm
+            else f.value
+        | None -> f.value
+      in
+      {
+        f with
+        kind = Wire_config.Field_enum valid_board_sort_values;
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:
+              "Default Board feed sort order (recent, hot, trending, updated, \
+               discussed)"
+            f.description;
+        value;
+      }
+  | "tui.candle" ->
+      let value =
+        normalize_enum_field_value ~allowed:valid_candle_values f.value
+      in
+      {
+        f with
+        kind = Wire_config.Field_enum valid_candle_values;
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Candle illustration style (painted or dotted)"
+            f.description;
+        value;
+      }
+  | "tui.opening" ->
+      let value =
+        normalize_enum_field_value ~allowed:valid_opening_values f.value
+      in
+      {
+        f with
+        kind = Wire_config.Field_enum valid_opening_values;
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:
+              "Initial screen opened on launch (overview, last, or keeper)"
+            f.description;
+        value;
+      }
+  | "tui.hints_visible" ->
+      {
+        f with
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Show quiet keycap hints in the bottom chrome bar"
+            f.description;
+      }
+  | "tui.reduce_motion" ->
+      {
+        f with
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Reduce spinner and animation frame cadence" f.description;
+      }
+  | "tui.help_hint_shown" ->
+      {
+        f with
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Whether the initial help key hint has been retired"
+            f.description;
+      }
+  | "tui.audio_input_device" ->
+      {
+        f with
+        reload_scope = Wire_config.Hot_reload;
+        description =
+          tui_friendly_description ~full_key:f.full_key
+            ~default:"Audio input device used for Voice PTT recording"
+            f.description;
+      }
+  | _ -> f
+
+let map_schema_fields fn (schema : Wire_config.config_schema) :
+    Wire_config.config_schema =
+  {
+    schema with
+    sections =
+      List.map
+        (fun (s : Wire_config.schema_section) ->
+          { s with fields = List.map fn s.fields })
+        schema.sections;
+  }
+
+let normalize_config_schema ~prefs schema =
+  map_schema_fields (normalize_tui_schema_field ~prefs) schema
+
+let update_schema_field_value ~full_key ~value t =
+  match t.schema with
+  | Observed.Value v ->
+      let updated_data =
+        map_schema_fields
+          (fun (f : Wire_config.schema_field) ->
+            if String.equal f.full_key full_key then { f with value } else f)
+          v.data
+      in
+      { t with schema = Observed.Value { v with data = updated_data } }
+  | Observed.Loading _ | Observed.Absent | Observed.Unreported
+  | Observed.Failed _ ->
+      t
 
 let field_sub_group t (f : Wire_config.schema_field) =
   match String_map.find_opt f.full_key t.field_meta with
@@ -767,25 +985,13 @@ let set_search_query search_query t =
 
 let set_pane settings_pane t = { t with settings_pane }
 
-let toggle_pane t =
-  let settings_pane =
-    match t.settings_pane with
-    | Pane_tree -> Pane_inspector
-    | Pane_inspector -> Pane_tree
-  in
-  { t with settings_pane }
-
-let enter_inspector t =
-  { t with settings_pane = Pane_inspector; selected_field_index = 0; scroll_offset = 0 }
-
-let leave_inspector t = { t with settings_pane = Pane_tree }
-
 let adjust_scroll = Store_scroll.adjust_scroll
 
 let move_tree_selection ?viewport_rows ~delta t =
   let rows = visible_tree_rows t in
   let len = List.length rows in
   let selected_section_idx = clamp_index len (t.selected_section_idx + delta) in
+  let section_changed = not (Int.equal selected_section_idx t.selected_section_idx) in
   let tree_scroll_offset =
     adjust_scroll ?viewport_rows ~scroll:t.tree_scroll_offset
       selected_section_idx
@@ -802,88 +1008,98 @@ let move_tree_selection ?viewport_rows ~delta t =
     active_tab;
     selected_section_idx;
     tree_scroll_offset;
-    selected_field_index = 0;
-    scroll_offset = 0;
+    selected_field_index =
+      (if section_changed then 0 else t.selected_field_index);
+    scroll_offset = (if section_changed then 0 else t.scroll_offset);
   }
 
-let toggle_tree_node t =
-  match selected_tree_row t with
-  | None -> t
-  | Some (Tree_category { category; collapsed; _ }) ->
-      let cid = Wire_config.config_category_to_string category in
-      let collapsed_categories =
-        if collapsed then String_set.remove cid t.collapsed_categories
-        else String_set.add cid t.collapsed_categories
-      in
-      { t with collapsed_categories }
-  | Some (Tree_models_catalog_toggle { expanded; _ }) ->
-      { t with models_catalog_expanded = not expanded }
-  | Some (Tree_section _) -> enter_inspector t
-
-let collapse_or_leave t =
-  match t.settings_pane with
-  | Pane_inspector -> leave_inspector t
-  | Pane_tree -> (
-      match selected_tree_row t with
-      | Some (Tree_category { category; collapsed = false; _ }) ->
-          let cid = Wire_config.config_category_to_string category in
-          {
-            t with
-            collapsed_categories = String_set.add cid t.collapsed_categories;
-          }
-      | Some (Tree_models_catalog_toggle { expanded = true; _ }) ->
-          { t with models_catalog_expanded = false }
-      | Some (Tree_section s) ->
-          let cid = Wire_config.config_category_to_string s.category in
-          let rows = visible_tree_rows t in
-          let cat_idx =
-            let rec find i = function
-              | [] -> 0
-              | Tree_category { category; _ } :: _
-                when equal_config_category category s.category ->
-                  i
-              | (Tree_category _ | Tree_section _ | Tree_models_catalog_toggle _)
-                :: rest ->
-                  find (i + 1) rest
-            in
-            find 0 rows
-          in
-          let tree_scroll_offset =
-            if cat_idx < t.tree_scroll_offset then cat_idx
-            else t.tree_scroll_offset
-          in
-          {
-            t with
-            collapsed_categories = String_set.add cid t.collapsed_categories;
-            selected_section_idx = cat_idx;
-            tree_scroll_offset;
-          }
-      | Some (Tree_category { collapsed = true; _ })
-      | Some (Tree_models_catalog_toggle { expanded = false; _ })
-      | None ->
-          t)
-
-let expand_or_enter t =
-  match t.settings_pane with
-  | Pane_inspector -> t
-  | Pane_tree -> (
-      match selected_tree_row t with
-      | Some (Tree_category { category; collapsed = true; _ }) ->
-          let cid = Wire_config.config_category_to_string category in
-          {
-            t with
-            collapsed_categories = String_set.remove cid t.collapsed_categories;
-          }
-      | Some (Tree_models_catalog_toggle { expanded = false; _ }) ->
-          { t with models_catalog_expanded = true }
-      | Some (Tree_category { collapsed = false; _ })
-      | Some (Tree_models_catalog_toggle { expanded = true; _ })
-      | Some (Tree_section _) ->
-          enter_inspector t
-      | None -> t)
-
 let apply_preferences ~observed_at preferences t =
-  { t with preferences = Observed.value ~observed_at preferences }
+  let schema =
+    match t.schema with
+    | Observed.Value v ->
+        let updated =
+          map_schema_fields
+            (fun (f : Wire_config.schema_field) ->
+              if String_map.mem f.full_key t.dirty_fields then f
+              else normalize_tui_schema_field ~prefs:(Some preferences) f)
+            v.data
+        in
+        Observed.Value { v with data = updated }
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        t.schema
+  in
+  { t with preferences = Observed.value ~observed_at preferences; schema }
+
+let sync_live_tui_values ?theme_preset ?lang ?board_sort t =
+  let theme_str = Option.map Theme.preset_name theme_preset in
+  let lang_str = Option.map Say.lang_code lang in
+  let board_sort_str =
+    Option.bind board_sort (fun s ->
+        let norm = String.lowercase_ascii (String.trim s) in
+        if List.exists (String.equal norm) valid_board_sort_values then
+          Some norm
+        else None)
+  in
+  let t1 =
+    match theme_str with
+    | Some v when not (String_map.mem "tui.theme" t.dirty_fields) ->
+        update_schema_field_value ~full_key:"tui.theme"
+          ~value:(Wire_config.Val_string v) t
+    | Some _ | None -> t
+  in
+  let t2 =
+    match lang_str with
+    | Some v when not (String_map.mem "tui.language" t1.dirty_fields) ->
+        update_schema_field_value ~full_key:"tui.language"
+          ~value:(Wire_config.Val_string v) t1
+    | Some _ | None -> t1
+  in
+  let t3 =
+    match board_sort_str with
+    | Some v when not (String_map.mem "tui.board_sort" t2.dirty_fields) ->
+        update_schema_field_value ~full_key:"tui.board_sort"
+          ~value:(Wire_config.Val_string v) t2
+    | Some _ | None -> t2
+  in
+  let preferences =
+    match t3.preferences with
+    | Observed.Value v ->
+        let p = v.data in
+        let p =
+          match theme_str with
+          | Some s when not (String_map.mem "tui.theme" t3.dirty_fields) ->
+              { p with theme = Some s }
+          | Some _ | None -> p
+        in
+        let p =
+          match lang with
+          | Some l when not (String_map.mem "tui.language" t3.dirty_fields) ->
+              { p with language = Some l }
+          | Some _ | None -> p
+        in
+        let p =
+          match board_sort_str with
+          | Some s when not (String_map.mem "tui.board_sort" t3.dirty_fields) ->
+              { p with board_sort = Some s }
+          | Some _ | None -> p
+        in
+        Observed.Value { v with data = p }
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        t3.preferences
+  in
+  let live_theme_fallback =
+    match theme_str with
+    | Some _ as s when not (String_map.mem "tui.theme" t3.dirty_fields) -> s
+    | Some _ | None -> t3.live_theme_fallback
+  in
+  let live_lang_fallback =
+    match lang with
+    | Some _ as l when not (String_map.mem "tui.language" t3.dirty_fields) -> l
+    | Some _ | None -> t3.live_lang_fallback
+  in
+  { t3 with preferences; live_theme_fallback; live_lang_fallback }
 
 let field_meta_map_of_list pairs =
   List.fold_left
@@ -965,8 +1181,15 @@ let apply_schema ?field_meta ~observed_at (schema : Wire_config.config_schema) t
       | Some pairs -> field_meta_map_of_list pairs
       | None -> t.field_meta
     in
+    let normalized_schema =
+      normalize_config_schema ~prefs:(Observed.to_option t.preferences) schema
+    in
     let next =
-      { t with schema = Observed.value ~observed_at schema; field_meta }
+      {
+        t with
+        schema = Observed.value ~observed_at normalized_schema;
+        field_meta;
+      }
     in
     preserve_selection_after_schema_update ~prev_sec_id ~prev_field_key next
   else t
@@ -1062,6 +1285,7 @@ let keeper_selected_field ?lang t =
 let is_tui_pref_key = function
   | "tui.theme"
   | "tui.language"
+  | "tui.board_sort"
   | "tui.hints_visible"
   | "tui.reduce_motion"
   | "tui.audio_input_device" ->
@@ -1081,18 +1305,26 @@ let default_tui_preferences : Wire_config.tui_preferences =
   }
 
 let general_ui_fallback_schema_fields t : Wire_config.schema_field list =
-  let prefs =
-    match Observed.to_option t.preferences with
-    | Some p -> p
-    | None -> default_tui_preferences
-  in
+  let obs_prefs = Observed.to_option t.preferences in
+  let prefs = Option.value obs_prefs ~default:default_tui_preferences in
   let theme_val =
-    match prefs.theme with
-    | Some s when not (String.equal (String.trim s) "") -> s
-    | Some _ | None -> Theme.preset_name Theme.Midnight
+    match
+      Option.bind obs_prefs (fun p ->
+          Option.bind p.theme canonical_theme_name_opt)
+    with
+    | Some name -> name
+    | None -> (
+        match Option.bind t.live_theme_fallback canonical_theme_name_opt with
+        | Some name -> name
+        | None -> Theme.preset_name Theme.Midnight)
   in
   let lang_val =
-    match prefs.language with
+    let live_lang =
+      match Option.bind obs_prefs (fun p -> p.language) with
+      | Some _ as l -> l
+      | None -> t.live_lang_fallback
+    in
+    match live_lang with
     | Some Say.Lang_en -> "en"
     | Some Say.Lang_ko | None -> "ko"
   in
@@ -1149,6 +1381,100 @@ let inspector_fields t =
   then general_ui_fallback_schema_fields t
   else []
 
+let clamp_inspector_selection t =
+  let len = List.length (inspector_fields t) in
+  let selected_field_index = clamp_index len t.selected_field_index in
+  let scroll_offset =
+    if len <= 0 then 0 else Int.min t.scroll_offset selected_field_index
+  in
+  { t with selected_field_index; scroll_offset }
+
+let enter_inspector t =
+  clamp_inspector_selection { t with settings_pane = Pane_inspector }
+
+let leave_inspector t = { t with settings_pane = Pane_tree }
+
+let toggle_pane t =
+  match t.settings_pane with
+  | Pane_tree -> enter_inspector t
+  | Pane_inspector -> leave_inspector t
+
+let toggle_tree_node t =
+  match selected_tree_row t with
+  | None -> t
+  | Some (Tree_category { category; collapsed; _ }) ->
+      let cid = Wire_config.config_category_to_string category in
+      let collapsed_categories =
+        if collapsed then String_set.remove cid t.collapsed_categories
+        else String_set.add cid t.collapsed_categories
+      in
+      { t with collapsed_categories }
+  | Some (Tree_models_catalog_toggle { expanded; _ }) ->
+      { t with models_catalog_expanded = not expanded }
+  | Some (Tree_section _) -> enter_inspector t
+
+let collapse_or_leave t =
+  match t.settings_pane with
+  | Pane_inspector -> leave_inspector t
+  | Pane_tree -> (
+      match selected_tree_row t with
+      | Some (Tree_category { category; collapsed = false; _ }) ->
+          let cid = Wire_config.config_category_to_string category in
+          {
+            t with
+            collapsed_categories = String_set.add cid t.collapsed_categories;
+          }
+      | Some (Tree_models_catalog_toggle { expanded = true; _ }) ->
+          { t with models_catalog_expanded = false }
+      | Some (Tree_section s) ->
+          let cid = Wire_config.config_category_to_string s.category in
+          let rows = visible_tree_rows t in
+          let cat_idx =
+            let rec find i = function
+              | [] -> 0
+              | Tree_category { category; _ } :: _
+                when equal_config_category category s.category ->
+                  i
+              | (Tree_category _ | Tree_section _ | Tree_models_catalog_toggle _)
+                :: rest ->
+                  find (i + 1) rest
+            in
+            find 0 rows
+          in
+          let tree_scroll_offset =
+            if cat_idx < t.tree_scroll_offset then cat_idx
+            else t.tree_scroll_offset
+          in
+          {
+            t with
+            collapsed_categories = String_set.add cid t.collapsed_categories;
+            selected_section_idx = cat_idx;
+            tree_scroll_offset;
+          }
+      | Some (Tree_category { collapsed = true; _ })
+      | Some (Tree_models_catalog_toggle { expanded = false; _ })
+      | None ->
+          t)
+
+let expand_or_enter t =
+  match t.settings_pane with
+  | Pane_inspector -> t
+  | Pane_tree -> (
+      match selected_tree_row t with
+      | Some (Tree_category { category; collapsed = true; _ }) ->
+          let cid = Wire_config.config_category_to_string category in
+          {
+            t with
+            collapsed_categories = String_set.remove cid t.collapsed_categories;
+          }
+      | Some (Tree_models_catalog_toggle { expanded = false; _ }) ->
+          { t with models_catalog_expanded = true }
+      | Some (Tree_category { collapsed = false; _ })
+      | Some (Tree_models_catalog_toggle { expanded = true; _ })
+      | Some (Tree_section _) ->
+          enter_inspector t
+      | None -> t)
+
 let selected_field t =
   let fs = inspector_fields t in
   List.nth_opt fs (clamp_index (List.length fs) t.selected_field_index)
@@ -1157,36 +1483,78 @@ let apply_tui_pref_op ~observed_at ~full_key op t =
   let prefs0 =
     match Observed.to_option t.preferences with
     | Some p -> p
-    | None -> default_tui_preferences
+    | None ->
+        {
+          default_tui_preferences with
+          theme =
+            (match t.live_theme_fallback with
+            | Some _ as s -> s
+            | None -> default_tui_preferences.theme);
+          language =
+            (match t.live_lang_fallback with
+            | Some _ as l -> l
+            | None -> default_tui_preferences.language);
+        }
   in
-  let prefs =
+  let prefs, schema_sync_opt =
     match op with
     | Wire_config.Set_scalar { value; _ } ->
         if String.equal full_key "tui.theme" then
-          { prefs0 with theme = Some value }
+          let canonical =
+            match Theme.preset_of_name value with
+            | Some p -> Theme.preset_name p
+            | None -> value
+          in
+          ( { prefs0 with theme = Some canonical }
+          , Some ("tui.theme", Wire_config.Val_string canonical) )
         else if String.equal full_key "tui.language" then
           let lang =
             if String.equal (String.lowercase_ascii (String.trim value)) "en"
             then Say.Lang_en
             else Say.Lang_ko
           in
-          { prefs0 with language = Some lang }
+          ( { prefs0 with language = Some lang }
+          , Some ("tui.language", Wire_config.Val_string (Say.lang_code lang)) )
+        else if String.equal full_key "tui.board_sort" then
+          let norm = String.lowercase_ascii (String.trim value) in
+          if List.exists (String.equal norm) valid_board_sort_values then
+            ( { prefs0 with board_sort = Some norm }
+            , Some ("tui.board_sort", Wire_config.Val_string norm) )
+          else (prefs0, None)
         else if String.equal full_key "tui.audio_input_device" then
-          { prefs0 with audio_input_device = Some value }
-        else prefs0
+          ({ prefs0 with audio_input_device = Some value }, None)
+        else (prefs0, None)
     | Wire_config.Set_bool { value; _ } ->
         if String.equal full_key "tui.hints_visible" then
-          { prefs0 with hints_visible = Some value }
+          ({ prefs0 with hints_visible = Some value }, None)
         else if String.equal full_key "tui.reduce_motion" then
-          { prefs0 with reduce_motion = Some value }
-        else prefs0
+          ({ prefs0 with reduce_motion = Some value }, None)
+        else (prefs0, None)
     | Wire_config.Set_int _
     | Wire_config.Set_float _
     | Wire_config.Set_string_array _
     | Wire_config.Remove_key _ ->
-        prefs0
+        (prefs0, None)
   in
-  { t with preferences = Observed.value ~observed_at prefs }
+  let live_theme_fallback =
+    if String.equal full_key "tui.theme" then prefs.theme
+    else t.live_theme_fallback
+  in
+  let live_lang_fallback =
+    if String.equal full_key "tui.language" then prefs.language
+    else t.live_lang_fallback
+  in
+  let next =
+    {
+      t with
+      preferences = Observed.value ~observed_at prefs;
+      live_theme_fallback;
+      live_lang_fallback;
+    }
+  in
+  match schema_sync_opt with
+  | Some (fk, v) -> update_schema_field_value ~full_key:fk ~value:v next
+  | None -> next
 
 let stage_patch ~full_key op t =
   let dirty_fields = String_map.add full_key op t.dirty_fields in
@@ -1605,7 +1973,7 @@ let begin_edit_field ?(step_enum = true) (f : Wire_config.schema_field) t =
 let begin_edit_selected t =
   match selected_field t with
   | None -> Error "No configuration field selected"
-  | Some f -> begin_edit_field ~step_enum:false f t
+  | Some f -> begin_edit_field ~step_enum:true f t
 
 let begin_edit_keeper_selected ?lang t =
   match keeper_selected_field ?lang t with

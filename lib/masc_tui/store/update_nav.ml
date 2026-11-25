@@ -10519,11 +10519,19 @@ let apply_move (m : Model.t) dir =
         let config =
           match dir with
           | Keymap.Left ->
-              if not two_pane then cfg0
-              else Config_store.collapse_or_leave cfg0
+              if
+                two_pane
+                && Config_store.equal_settings_pane cfg0.settings_pane
+                     Config_store.Pane_tree
+              then Config_store.collapse_or_leave cfg0
+              else cfg0
           | Keymap.Right ->
-              if not two_pane then cfg0
-              else Config_store.expand_or_enter cfg0
+              if
+                two_pane
+                && Config_store.equal_settings_pane cfg0.settings_pane
+                     Config_store.Pane_tree
+              then Config_store.expand_or_enter cfg0
+              else cfg0
           | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
           | Keymap.Home | Keymap.End ->
               let delta = move_delta dir in

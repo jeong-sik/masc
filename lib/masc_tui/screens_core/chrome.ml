@@ -645,19 +645,19 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       else if Option.is_some (Model.active_dive model) then
         let txt =
           if Model.is_keeper_config_active model then
-            if compact then "[[ ]] [Esc]"
+            if compact then "[ / ] [Esc]"
             else
               Say.resolve lang
-                (Say.make ~ko:"[←→] 값  [[ ]] 탭  [Esc] 뒤로"
-                   ~en:"[←→] Cycle  [[ ]] Tabs  [Esc] Back")
+                (Say.make ~ko:"[←→] 값  [ / ] 탭  [Esc] 뒤로"
+                   ~en:"[←→] Cycle  [ / ] Tabs  [Esc] Back")
           else
             match Model.active_dive model with
             | Some (Nav.Dive_keeper _) ->
-                if compact then "[[ ]] [Esc]"
+                if compact then "[ / ] [Esc]"
                 else
                   Say.resolve lang
-                    (Say.make ~ko:"[[ ]] 탭  [Esc] 뒤로"
-                       ~en:"[[ ]] Tabs  [Esc] Back")
+                    (Say.make ~ko:"[ / ] 탭  [Esc] 뒤로"
+                       ~en:"[ / ] Tabs  [Esc] Back")
             | Some
                 ( Nav.Dive_work _
                 | Nav.Dive_knowledge _
@@ -673,12 +673,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           if compact then "[z/Esc]"
           else if Model.is_keeper_config_active model then
             Say.resolve lang
-              (Say.make ~ko:"[z/Esc] 확대 해제  [←→] 값  [[ ]] 탭"
-                 ~en:"[z/Esc] Unzoom  [←→] Cycle  [[ ]] Tabs")
+              (Say.make ~ko:"[z/Esc] 확대 해제  [←→] 값  [ / ] 탭"
+                 ~en:"[z/Esc] Unzoom  [←→] Cycle  [ / ] Tabs")
           else if Nav.equal_workspace model.nav.workspace Nav.Keepers then
             Say.resolve lang
-              (Say.make ~ko:"[z/Esc] 확대 해제  [[ ]] 탭"
-                 ~en:"[z/Esc] Unzoom  [[ ]] Tabs")
+              (Say.make ~ko:"[z/Esc] 확대 해제  [ / ] 탭"
+                 ~en:"[z/Esc] Unzoom  [ / ] Tabs")
           else
             Say.resolve lang
               (Say.make ~ko:"[z/Esc] 확대 해제" ~en:"[z/Esc] Unzoom")
@@ -691,32 +691,32 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         && Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
       then
         let txt =
-          if compact then "[Tab] [[ ]]"
+          if compact then "[Tab] [ / ]"
           else if Model.is_keeper_config_active model then
             Say.resolve lang
-              (Say.make ~ko:"[Tab] 목록  [←→] 값  [[ ]] 탭"
-                 ~en:"[Tab] Fleet  [←→] Cycle  [[ ]] Tabs")
+              (Say.make ~ko:"[Tab] 목록  [←→] 값  [ / ] 탭"
+                 ~en:"[Tab] Fleet  [←→] Cycle  [ / ] Tabs")
           else
             Say.resolve lang
-              (Say.make ~ko:"[←→] 패널  [[ ]] 탭"
-                 ~en:"[←→] Panes  [[ ]] Tabs")
+              (Say.make ~ko:"[←→] 패널  [ / ] 탭"
+                 ~en:"[←→] Panes  [ / ] Tabs")
         in
         (txt, whisper_style)
       else if Model.is_keeper_config_active model then
         let txt =
-          if compact then "[[ ]]"
+          if compact then "[ / ]"
           else
             Say.resolve lang
-              (Say.make ~ko:"[/] 검색  [←→] 값  [[ ]] 탭"
-                 ~en:"[/] Filter  [←→] Cycle  [[ ]] Tabs")
+              (Say.make ~ko:"[/] 검색  [←→] 값  [ / ] 탭"
+                 ~en:"[/] Filter  [←→] Cycle  [ / ] Tabs")
         in
         (txt, whisper_style)
       else
         let txt =
-          if compact then "[[ ]]"
+          if compact then "[ / ]"
           else
             Say.resolve lang
-              (Say.make ~ko:"[/] 검색  [[ ]] 탭" ~en:"[/] Filter  [[ ]] Tabs")
+              (Say.make ~ko:"[/] 검색  [ / ] 탭" ~en:"[/] Filter  [ / ] Tabs")
         in
         (txt, whisper_style)
     in

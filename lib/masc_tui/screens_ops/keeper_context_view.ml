@@ -1643,7 +1643,7 @@ let draw_context_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               ~en:"Loading turn records..."
       in
       let right_s =
-        Ops_common.say model ~ko:"[< >] 턴 · [v] 하위탭" ~en:"[< >] Turn · [v] View"
+        Ops_common.say model ~ko:"< / > 턴 · [v] 하위탭" ~en:"< / > Turn · [v] View"
       in
       let rw = Grapheme.display_width right_s in
       let lw = Int.max 8 (hdr_r.w - rw - 2) in

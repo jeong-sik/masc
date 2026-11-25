@@ -84,6 +84,8 @@ type t = {
   editing_field_key : string option;
   editing_buffer : string;
   editing_cursor : int;
+  live_theme_fallback : string option;
+  live_lang_fallback : Say.lang option;
 }
 
 val empty : t
@@ -102,12 +104,27 @@ val set_search_query : string -> t -> t
 
 val set_pane : settings_pane -> t -> t
 val toggle_pane : t -> t
+(** Switch between [Pane_tree] and [Pane_inspector], preserving the inspector's
+    selected row (clamped to the current section's field count). *)
 val enter_inspector : t -> t
+(** Focus [Pane_inspector] while preserving [selected_field_index] (clamped to
+    the current section's field count). *)
 val leave_inspector : t -> t
 val move_tree_selection : ?viewport_rows:int -> delta:int -> t -> t
 val toggle_tree_node : t -> t
 val collapse_or_leave : t -> t
 val expand_or_enter : t -> t
+
+val valid_board_sort_values : string list
+(** Canonical Board sort orders accepted by [/api/v1/tui/preferences] and
+    [Board_dispatch.sort_order_of_string_opt]. *)
+
+val valid_candle_values : string list
+(** Canonical Candle illustration styles accepted by [lib/tui_preference.ml]. *)
+
+val valid_opening_values : string list
+(** Canonical startup landing views accepted by [lib/tui_preference.ml] for
+    [[tui].opening]. *)
 
 val apply_preferences :
   observed_at:Clock.Mono.t -> Wire_config.tui_preferences -> t -> t
@@ -117,11 +134,24 @@ val apply_schema :
   Wire_config.config_schema ->
   t ->
   t
+(** Store the decoded schema, normalizing known [tui.*] fields into their
+    canonical {!Wire_config.Field_enum} / {!Wire_config.Hot_reload} SSOT forms
+    and syncing live preference values. *)
 val apply_schema_meta :
   target:Wire_config.config_target ->
   (string * Wire_config.field_entity_meta) list ->
   t ->
   t
+
+val sync_live_tui_values :
+  ?theme_preset:Theme.preset ->
+  ?lang:Say.lang ->
+  ?board_sort:string ->
+  t ->
+  t
+(** Sync the current live TUI theme/language/board-sort values into the
+    in-memory schema fields (for non-dirty keys) so stepping starts from the
+    live state even if [runtime.toml] held an older value. *)
 
 val mark_dry_run_loading : t -> t
 val mark_save_in_flight : t -> t

@@ -401,7 +401,7 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
       | None -> (
           (* Stepping a tui.* field back to its original schema value calls
              unstage_patch, so synthesize the original value op to live-revert
-             theme/language/preferences and persist via Post_tui_preference. *)
+             theme/language/board_sort and persist via Post_tui_preference. *)
           match schema_field_by_key config key with
           | Some f -> (op_of_schema_field_original f, false)
           | None -> (None, false))
@@ -412,11 +412,7 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
         let config1 =
           Config_store.apply_tui_pref_op ~observed_at:now ~full_key:key op config
         in
-        let config2 =
-          if (not was_staged) || schema_has_field_key config1 key then config1
-          else Config_store.unstage_patch ~full_key:key config1
-        in
-        let m1 = { m with config = config2 } in
+        let m1 = { m with config = config1 } in
         let m2, cmds =
           match op with
           | Wire_config.Set_scalar { value; _ } when String.equal key "tui.theme"
@@ -451,6 +447,28 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
                         Cmd.Post_tui_preference (Wire_config.Pref_language lang);
                     };
                 ] )
+          | Wire_config.Set_scalar { value; _ }
+            when String.equal key "tui.board_sort" ->
+              let norm = String.lowercase_ascii (String.trim value) in
+              if
+                List.exists (String.equal norm)
+                  Config_store.valid_board_sort_values
+              then
+                ( {
+                    m1 with
+                    knowledge =
+                      Knowledge_store.set_board_sort norm m1.knowledge;
+                  }
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_tui_preference
+                            (Wire_config.Pref_board_sort norm);
+                      };
+                  ] )
+              else (m1, [])
           | Wire_config.Set_scalar _
           | Wire_config.Set_bool _
           | Wire_config.Set_int _
@@ -459,11 +477,23 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
           | Wire_config.Remove_key _ ->
               (m1, [])
         in
+        let persisted_live = cmds <> [] in
+        let config2 =
+          if persisted_live then
+            (* Live Post_tui_preference updates are already persisted (and their
+               in-memory schema value was updated by apply_tui_pref_op), so
+               unstage them to prevent a false Esc discard trap. *)
+            if was_staged then Config_store.unstage_patch ~full_key:key m2.config
+            else m2.config
+          else if (not was_staged) || schema_has_field_key m2.config key then
+            m2.config
+          else Config_store.unstage_patch ~full_key:key m2.config
+        in
         Some
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:"TUI 환경설정이 적용되었습니다"
                  ~en:"TUI preference updated")
-              m2
+              { m2 with config = config2 }
           , cmds )
 
 let save_settings_config ~now (m : Model.t) =
@@ -485,6 +515,32 @@ let dry_run_settings_config ~now (m : Model.t) =
   | Error reason ->
       ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason) m
       , [] )
+
+let step_artifact_revision ~now ~delta (m : Model.t) =
+  match Knowledge_store.artifact_revision_step ~delta m.knowledge with
+  | Some (id, rev) ->
+      let knowledge =
+        Knowledge_store.set_pending_artifact_revision (Some (id, Some rev))
+          m.knowledge
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:(Printf.sprintf "산출물 리비전 r%d 불러오는 중..." rev)
+             ~en:(Printf.sprintf "Loading artifact revision r%d..." rev))
+          { m with knowledge }
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req = Cmd.Get_artifact_detail { id; revision = Some rev };
+            };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_artifact_checks };
+        ] )
+  | None -> (m, [])
+
+let sync_settings_live_tui (m : Model.t) (cfg : Config_store.t) =
+  Config_store.sync_live_tui_values ~theme_preset:m.theme_preset ~lang:m.lang
+    ~board_sort:m.knowledge.board_sort_by cfg
 
 let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
   let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
@@ -510,6 +566,7 @@ let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
       let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
       ({ m with nav; config }, [])
   | Config_store.Pane_inspector -> (
+      let cfg0 = sync_settings_live_tui m cfg0 in
       let delta =
         match dir with
         | Keymap.Left -> -1
@@ -536,29 +593,16 @@ let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
           | Some res -> res
           | None -> ({ m with config }, []))
       | Ok (_, false) ->
-          if Keymap.equal_move_dir dir Keymap.Left && two_pane then
-            let config = Config_store.collapse_or_leave cfg0 in
-            let nav =
-              { m.nav with overlay = Some (Nav.Settings config.active_tab) }
-            in
-            ({ m with nav; config }, [])
-          else
-            ( Model.with_toast ~now ~level:Model.Toast_info
-                (Say.make ~ko:"[Enter] 키로 텍스트 값을 편집하세요"
-                   ~en:"Press [Enter] to edit text value")
-                m
-            , [] )
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:"[Enter] 키로 텍스트 편집 · [Tab] 트리로 이동"
+                 ~en:"Press [Enter] to edit text · [Tab] for tree")
+              { m with config = cfg0 }
+          , [] )
       | Error reason ->
-          if Keymap.equal_move_dir dir Keymap.Left && two_pane then
-            let config = Config_store.collapse_or_leave cfg0 in
-            let nav =
-              { m.nav with overlay = Some (Nav.Settings config.active_tab) }
-            in
-            ({ m with nav; config }, [])
-          else
-            ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
-                m
-            , [] ))
+          ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
+              { m with config = cfg0 }
+          , [] ))
 
 let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list) =
   let modal : Model.inline_modal_state =
@@ -3518,10 +3562,11 @@ let rec execute_slash ~now (m : Model.t) cmd =
         match opt with Some p -> p | None -> next_theme_preset m.theme_preset
       in
       let config =
-        Config_store.apply_tui_pref_op ~observed_at:now ~full_key:"tui.theme"
-          (Wire_config.Set_scalar
-             { table = "tui"; key = "theme"; value = Theme.preset_name preset })
-          m.config
+        m.config
+        |> Config_store.apply_tui_pref_op ~observed_at:now ~full_key:"tui.theme"
+             (Wire_config.Set_scalar
+                { table = "tui"; key = "theme"; value = Theme.preset_name preset })
+        |> Config_store.unstage_patch ~full_key:"tui.theme"
       in
       let next =
         { m with theme_preset = preset; cli_theme_override = false; config }
@@ -3553,10 +3598,12 @@ let rec execute_slash ~now (m : Model.t) cmd =
       in
       let lang_s = match lang with Say.Lang_ko -> "ko" | Say.Lang_en -> "en" in
       let config =
-        Config_store.apply_tui_pref_op ~observed_at:now ~full_key:"tui.language"
-          (Wire_config.Set_scalar
-             { table = "tui"; key = "language"; value = lang_s })
-          m.config
+        m.config
+        |> Config_store.apply_tui_pref_op ~observed_at:now
+             ~full_key:"tui.language"
+             (Wire_config.Set_scalar
+                { table = "tui"; key = "language"; value = lang_s })
+        |> Config_store.unstage_patch ~full_key:"tui.language"
       in
       let next =
         { m with lang; cli_lang_override = false; config }
@@ -4497,6 +4544,7 @@ and execute_action ~now (m : Model.t) action =
                   in
                   ({ m with nav; config }, [])
               | Config_store.Pane_inspector -> (
+                  let cfg0 = sync_settings_live_tui m cfg0 in
                   let sel_key_opt =
                     Option.map
                       (fun (f : Wire_config.schema_field) -> f.full_key)
@@ -4514,7 +4562,7 @@ and execute_action ~now (m : Model.t) action =
                       else ({ m with config }, []))
                   | Error reason ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.literal reason) m
+                          (Say.literal reason) { m with config = cfg0 }
                       , [] )))
         | Some Nav.Incidents -> (
             match Incidents.selected_entry m.incidents with
@@ -5186,9 +5234,11 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_expand -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) -> (
-          (* Space in Settings is strictly local-only (ZERO HTTP POSTs):
-             expands/collapses tree groups in Pane_tree, or toggles local
-             boolean draft value in Pane_inspector. Dry-run diff is explicit [d]. *)
+          (* Space in Settings is strictly local-only and never emits any HTTP
+             POST (no Post_config_patch, no Post_tui_preference). In Pane_tree
+             it expands/collapses tree groups; in Pane_inspector it toggles
+             local Field_bool values (staged for [Ctrl+S]). Enum values such as
+             tui.theme/tui.language/tui.board_sort use [←→] or [Enter]. *)
           let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
           let cfg0 =
             if not two_pane then
@@ -5204,15 +5254,9 @@ and execute_action ~now (m : Model.t) action =
               ({ m with nav; config }, [])
           | Config_store.Pane_inspector -> (
               match Config_store.selected_field cfg0 with
-              | Some ({ writable = true; kind = Wire_config.Field_bool; _ } as f) -> (
+              | Some { writable = true; kind = Wire_config.Field_bool; _ } -> (
                   match Config_store.step_selected_field ~delta:1 cfg0 with
-                  | Ok (config, true) -> (
-                      match
-                        apply_staged_tui_pref_if_needed ~now ~key:f.full_key m
-                          config
-                      with
-                      | Some res -> res
-                      | None -> ({ m with config }, []))
+                  | Ok (config, true) -> ({ m with config }, [])
                   | Ok _ | Error _ -> (m, []))
               | Some
                   {
@@ -7478,28 +7522,9 @@ and execute_action ~now (m : Model.t) action =
                           { id = art.id; revision = Some art.revision };
                     };
                 ] )))
-  | Keymap.Step_revision dir -> (
+  | Keymap.Step_revision dir ->
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in
-      match Knowledge_store.artifact_revision_step ~delta m.knowledge with
-      | Some (id, rev) ->
-          let knowledge =
-            Knowledge_store.set_pending_artifact_revision (Some (id, Some rev))
-              m.knowledge
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:(Printf.sprintf "산출물 리비전 r%d 불러오는 중..." rev)
-                 ~en:(Printf.sprintf "Loading artifact revision r%d..." rev))
-              { m with knowledge }
-          , [
-              Cmd.Http_get
-                {
-                  epoch = m.epoch;
-                  req = Cmd.Get_artifact_detail { id; revision = Some rev };
-                };
-              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_artifact_checks };
-            ] )
-      | None -> (m, []))
+      step_artifact_revision ~now ~delta m
   | Keymap.Step_context_item dir -> (
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in
       match active_keeper_for_context m with
@@ -7522,16 +7547,21 @@ and execute_action ~now (m : Model.t) action =
                     m.knowledge
                 in
                 ({ m with knowledge }, [])
+            | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+                step_artifact_revision ~now ~delta m
             | Some
                 ( Nav.Dive_keeper _
                 | Nav.Dive_work _
-                | Nav.Dive_knowledge
-                    (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+                | Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Memory_diff_dive _)
                 | Nav.Dive_runtime _
                 | Nav.Dive_infra _ ) ->
                 (m, [])
             | None -> (
                 match m.nav.workspace with
+                | Nav.Knowledge
+                  when Nav.equal_knowledge_tab m.knowledge.active_tab
+                         Nav.Knowledge_artifacts ->
+                    step_artifact_revision ~now ~delta m
                 | Nav.Runtime
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_tools_usage

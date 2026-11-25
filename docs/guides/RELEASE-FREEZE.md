@@ -22,8 +22,9 @@ and included range) for complete verification — it never freezes `main`.
   Keepers and release leaders must not enable `MASC_RELEASE_FREEZE=1` for routine
   release cuts or publication waits. Only an explicit operator incident decision
   may set it (recording incident cause, scope, and lift condition), and it gates
-  only the wired automated merge-submission workflows (`approval-auto-merge` and
-  `approval-merge-sweep`), not `main` itself.
+  the automated submissions in `approval-auto-merge` and `approval-merge-sweep`.
+  The worker also handles requests recorded by `approval-merge-request`. Manual
+  merges remain subject to the repository's usual branch protection rules.
 
 ## Freeze the candidate snapshot
 
@@ -113,10 +114,8 @@ additionally requires every quantitative gate in
 [Production readiness](../PRODUCTION-READINESS-GATES.md). Release tags and published assets identify that verified commit;
 publish its existing RC assets with `rc_run_id`, without a fresh rebuild.
 
-Integration back into main is a separate obligation. Moving main does not
-require recutting the release. If a required merge creates or rebases to a new
-commit that will be tagged, that commit becomes the candidate and requires full
-verification; do not substitute old-head evidence or weaken merge safeguards.
+Moving `main` does not require recutting the release. A replacement candidate
+requires full RC verification at its own SHA before publication.
 Published versions/tags/assets are not replaced to repair a release: issue a
 patch version. A failed unpublished candidate keeps the same version available.
 Public artifact publication and production deployment have separate evidence.

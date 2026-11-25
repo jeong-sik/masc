@@ -1192,6 +1192,56 @@ let test_dispatch_writes_reobserve base_path _workspace =
         (Board.Agent_id.to_string updated.author);
       Alcotest.(check string) "external append kept" external_.body (current fresh external_).body)
 
+(* A vote, a reaction and a thread link each gate on a readable posts source.
+   Reached first after another writer's append, each must reobserve on its
+   own instead of refusing until some other entry point happens to run. *)
+let test_dispatch_vote_reaction_thread_reobserve base_path _workspace =
+  present_empty_posts base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ())
+    (fun () ->
+      Result.get_ok (Board_dispatch.init_jsonl ~base_path
+        ~recipient_lookup:Recipient_lookup.none_declared ());
+      let store = Board_dispatch.backend () in
+      let first = require_post (create store "post voted through Dispatch") in
+      let post_id = Board.Post_id.to_string first.id in
+      let reader = Masc_board_handlers.Board_access.Operator in
+      let readable (store : Board.store) =
+        match store.Board.posts_source with
+        | Board.Posts_readable _ -> true
+        | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ -> false
+      in
+      let reload_complete () =
+        let other = make_store base_path in
+        (match Rows.load_persisted_posts other with
+         | Ok _ -> ()
+         | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
+        other
+      in
+      let cause_stale () =
+        ignore (require_post (create (reload_complete ()) "external append"));
+        require_pre_effect (create store "refused against the stale cursor");
+        require_stale_cursor_refusal store
+      in
+      cause_stale ();
+      ignore (require_board (Board_dispatch.vote ~reader ~voter:"peer" ~post_id
+        ~direction:Board.Up));
+      Alcotest.(check bool) "vote reobserved the source" true (readable store);
+      cause_stale ();
+      ignore (require_board (Board_dispatch.toggle_reaction ~reader
+        ~target_type:Board.Reaction_post ~target_id:post_id ~user_id:"peer" ~emoji:"👍"));
+      Alcotest.(check bool) "reaction reobserved the source" true (readable store);
+      cause_stale ();
+      (* [set_thread_id] stays in memory until the flusher writes it, so the
+         check is that the shared [write_post] entry reobserved first. *)
+      require_board (Board_dispatch.set_thread_id ~post_id ~thread_id:"thread-4036");
+      Alcotest.(check bool) "write_post reobserved the source" true (readable store);
+      Alcotest.(check (option string)) "thread link applied" (Some "thread-4036")
+        (current store first).thread_id;
+      ignore (require_post (create store "a post after every entry point recovered")))
+
 (* An unknown earlier write is not read clear: reobservation performs no read,
    keeps the evidence and names the cause and the needed restart. *)
 let test_unsettled_reobservation_names_restart base_path _workspace =
@@ -1268,6 +1318,8 @@ let () =
         [ case "another writer's append is reobserved once" test_stale_observation_is_reobserved
         ; case "Dispatch reobserves before pinning and checks the current author"
             test_dispatch_writes_reobserve
+        ; case "Dispatch votes, reactions and thread links reobserve"
+            test_dispatch_vote_reaction_thread_reobserve
         ; case "unsettled reobservation names the restart"
             test_unsettled_reobservation_names_restart ]
     ; "unknown writes",

@@ -409,6 +409,50 @@ let test_hourly_empty () =
   let timeline = Trajectory.hourly_timeline [] in
   Alcotest.(check int) "empty" 0 (List.length timeline)
 
+let test_tool_activity_follows_trace_changes () =
+  with_tmpdir (fun masc_root ->
+    let keeper_name = "activity-keeper" in
+    Fs_compat.mkdir_p (Trajectory.trajectories_dir masc_root keeper_name);
+    let path = Trajectory.trajectory_path masc_root keeper_name "active" in
+    let second = Trajectory.trajectory_path masc_root keeper_name "other" in
+    let row ?(gate = Trajectory.Pass) ~ts ~duration label =
+      mk_entry ~ts ~gate "tool_execute" duration label
+      |> Trajectory.entry_to_json |> Yojson.Safe.to_string
+    in
+    let old = row ~ts:3600. ~duration:11 "old" in
+    let normal = row ~ts:7200. ~duration:15 "normal" in
+    let tail = row ~gate:(Reject "deny") ~ts:10800. ~duration:20 "tail" in
+    let other = row ~ts:10800. ~duration:31 "other" in
+    let check label ~since ~retain_since =
+      let entries = Trajectory.read_entries_since ~masc_root ~keeper_name ~since in
+      let expected = Trajectory.{
+        tools = aggregate_tool_stats entries;
+        timeline = hourly_timeline entries;
+        latest_ts = List.fold_left (fun _ (entry : tool_call_entry) -> Some entry.ts) None entries;
+      } in
+      let observed = Trajectory.read_tool_activity ~masc_root ~keeper_name ~since ~retain_since in
+      Alcotest.(check bool) label true (expected = observed)
+    in
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc (old ^ "\n{broken\n" ^ normal ^ "\n" ^ tail));
+    Out_channel.with_open_bin second (fun oc -> output_string oc (other ^ "\n"));
+    check "a valid unterminated row is counted once" ~since:7200. ~retain_since:3600.;
+    check "same file and tail can be observed again" ~since:7200. ~retain_since:3600.;
+    Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0 path (fun oc ->
+      output_string oc ("\n" ^ row ~ts:7200. ~duration:55 "backdated" ^ "\n"));
+    check "completed tail and backdated append" ~since:7200. ~retain_since:3600.;
+    check "time alone expires rows" ~since:10800. ~retain_since:10800.;
+    check "earlier cutoff reopens discarded history" ~since:3600. ~retain_since:3600.;
+    let rewritten = row ~ts:10800. ~duration:32 "other" in
+    Out_channel.with_open_bin second (fun oc -> output_string oc (rewritten ^ "\n"));
+    Unix.utimes second 1. 1.;
+    check "same-size edit reloads the trace" ~since:3600. ~retain_since:3600.;
+    Out_channel.with_open_bin (path ^ ".next") (fun oc -> output_string oc (normal ^ "\n"));
+    Unix.rename (path ^ ".next") path;
+    check "replacement drops rows from the old file" ~since:3600. ~retain_since:3600.;
+    Unix.unlink second;
+    check "removal drops all rows of that trace" ~since:3600. ~retain_since:3600.)
+
 (* ================================================================ *)
 (* Test: tool_stat_to_json / hourly_bucket_to_json                   *)
 (* ================================================================ *)
@@ -996,6 +1040,8 @@ let () =
       Alcotest.test_case "with errors" `Quick test_hourly_with_errors;
       Alcotest.test_case "persisted hourly rejections match tool failures" `Quick
         test_persisted_hourly_rejections_match_tool_failures;
+      Alcotest.test_case "tool activity follows time and trace changes" `Quick
+        test_tool_activity_follows_trace_changes;
       Alcotest.test_case "empty input" `Quick test_hourly_empty;
     ]);
     ("json_serialization", [

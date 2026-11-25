@@ -259,4 +259,17 @@ val read_entries_since :
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
 
+type tool_activity = {
+  tools : tool_stat list;
+  timeline : hourly_bucket list;
+  latest_ts : float option;
+}
+
+val read_tool_activity :
+  masc_root:string -> keeper_name:string -> since:float -> retain_since:float ->
+  tool_activity
+(** Summarize the same calls as {!read_entries_since} without retaining tool
+    arguments or results. Per-file cursors reuse samples since [retain_since]
+    across requests and decode only appended rows. An earlier cutoff or a
+    replaced trace can require rereading a file. *)
 

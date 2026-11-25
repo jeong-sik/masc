@@ -530,6 +530,15 @@ val fold_file_appended_complete_entries_result :
     cursor there, so an incomplete final row is read on a later call once it
     is complete, or once the writer cuts it and appends another. *)
 
+val fold_private_file_appended_entries_result :
+  string -> cursor:append_cursor option -> init:'a ->
+  f:('a -> recent_entry -> 'a) ->
+  (('a * recent_entry option) appended_read, read_error) result
+(** As {!fold_file_appended_complete_entries_result}, for a file whose writer
+    takes the private JSONL path and descriptor locks before appending. The
+    captured extent excludes writes still subject to rollback. Also returns
+    the unterminated row, if nonblank, outside the accumulator and cursor. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

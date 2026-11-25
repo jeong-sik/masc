@@ -160,7 +160,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`와
 배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다.
-`eval "$(opam env)"`를 적용한 셸에서 실행하세요. 새 작업 공간은 경로를 명시합니다.
+`eval "$(opam env)"`를 적용한 셸에서 실행하세요. 업데이트로 `masc.opam.locked`가
+바뀌었다면 같은 스위치에서 `opam install ./masc.opam --deps-only --locked`를
+다시 실행한 뒤 빌드하세요. 새 작업 공간은 경로를 명시합니다.
 
 ```bash
 scripts/install-local-build.sh --base-path "$HOME/MASC"

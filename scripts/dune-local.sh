@@ -402,6 +402,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${_subcommand}" != "clean" ]]; then
   if command -v opam >/dev/null 2>&1; then
     _required_findlib=(
+      cmarkit
       httpun
       httpun-eio
       httpun-ws

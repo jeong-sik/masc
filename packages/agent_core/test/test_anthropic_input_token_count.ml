@@ -1112,6 +1112,30 @@ let test_gemini_transport_success () =
     (Yojson.Safe.to_string (Yojson.Safe.from_string body))
 ;;
 
+let test_gemini_vertex_count_body_is_top_level () =
+  let base_url =
+    match Vertex_endpoint.base_url ~project:"count-fixture" ~location:(Regional "us-central1") with
+    | Ok url -> url
+    | Error detail -> fail detail
+  in
+  match
+    Count_tokens_sync.gemini_count_tokens_body
+      ~config:(gemini_config base_url)
+      ~messages
+      ~tools:[ tool ]
+  with
+  | Error _ -> fail "expected a Vertex count body"
+  | Ok body ->
+    (match Yojson.Safe.from_string body with
+     | `Assoc fields ->
+       check
+         (list string)
+         "Vertex CountTokensRequest takes only its own top-level fields"
+         [ "contents"; "generationConfig"; "systemInstruction"; "tools" ]
+         (List.map fst fields |> List.sort compare)
+     | _ -> fail "Vertex count body is not an object")
+;;
+
 let test_gemini_admission_selects_exact_fit () =
   check
     bool
@@ -3026,6 +3050,10 @@ let () =
             test_unsupported_provider_blocks_stream_dispatch
         ; test_case "typed HTTP error" `Quick test_transport_error
         ; test_case "Gemini countTokens transport" `Quick test_gemini_transport_success
+        ; test_case
+            "Gemini Vertex count body is top-level"
+            `Quick
+            test_gemini_vertex_count_body_is_top_level
         ; test_case
             "Gemini admission measures before dispatch"
             `Quick

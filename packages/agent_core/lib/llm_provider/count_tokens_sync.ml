@@ -129,24 +129,44 @@ let count_anthropic_staged
          , Measurement_before_dispatch ))
 ;;
 
-(* Gemini [models/{model}:countTokens] counts a whole
-   [generateContentRequest]: system instruction, tools and generation config
-   included. The body is the one {!Backend_gemini.build_request} produces for
-   the same messages and tools, so the count is of the request the dispatch
-   sends. Ref: aistudio.google.com/api-reference/tokens. *)
+(* Gemini [models/{model}:countTokens] counts a whole request: system
+   instruction, tools and generation config included. The body comes from
+   {!Backend_gemini.build_request} for the same messages and tools, so the
+   count is of the request the dispatch sends, and the URL uses the same
+   [base_url/models/model_id] the dispatch URL uses
+   ({!Complete_sampling.gemini_url}).
+
+   The two Gemini endpoints take different count bodies:
+   - Gemini Developer API: [{"generateContentRequest": {"model": "models/<id>", ...}}]
+     (aistudio.google.com/api-reference/tokens).
+   - Vertex AI publisher endpoint ([Vertex_endpoint.parse_base_url] accepts
+     the base URL): a top-level [CountTokensRequest] with [contents],
+     [systemInstruction], [tools] and [generationConfig]; the model comes
+     from the URL (cloud.google.com aiplatform.v1 CountTokensRequest). *)
 let gemini_count_tokens_url (config : Provider_config.t) =
   Printf.sprintf "%s/models/%s:countTokens" config.base_url config.model_id
 ;;
 
+let vertex_count_tokens_fields = [ "contents"; "systemInstruction"; "tools"; "generationConfig" ]
+
 let gemini_count_tokens_body ~(config : Provider_config.t) ~messages ~tools =
   match Backend_gemini.build_request ~config ~messages ~tools () |> Yojson.Safe.from_string with
   | `Assoc fields ->
-    Ok
-      (Yojson.Safe.to_string
-         (`Assoc
-             [ ( "generateContentRequest"
-               , `Assoc (("model", `String ("models/" ^ config.model_id)) :: fields) )
-             ]))
+    (match Vertex_endpoint.parse_base_url config.base_url with
+     | Ok (_ : string * Vertex_endpoint.location) ->
+       Ok
+         (Yojson.Safe.to_string
+            (`Assoc
+                (List.filter
+                   (fun (name, _) -> List.mem name vertex_count_tokens_fields)
+                   fields)))
+     | Error (_ : string) ->
+       Ok
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ ( "generateContentRequest"
+                  , `Assoc (("model", `String ("models/" ^ config.model_id)) :: fields) )
+                ])))
   | _ ->
     Error (Http_client.AcceptRejected { reason = "Gemini request body is not a JSON object" })
   | exception Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })

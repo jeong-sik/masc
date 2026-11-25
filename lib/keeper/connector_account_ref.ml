@@ -1,10 +1,13 @@
 type t = Discord_user of int64
 
-let discord_user user_id =
-  match Int64.of_string_opt ("0u" ^ user_id) with
-  | Some id when id <> 0L && String.equal (Printf.sprintf "%Lu" id) user_id ->
-    Some (Discord_user id)
+let discord_snowflake source =
+  match Int64.of_string_opt ("0u" ^ source) with
+  | Some id when id <> 0L && String.equal (Printf.sprintf "%Lu" id) source -> Some id
   | Some _ | None -> None
+
+let is_discord_snowflake source = Option.is_some (discord_snowflake source)
+
+let discord_user user_id = Option.map (fun id -> Discord_user id) (discord_snowflake user_id)
 
 let matches_actor (Discord_user id) ~surface ~actor_id =
   match surface, actor_id with

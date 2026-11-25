@@ -80,6 +80,7 @@ let f_tool_call = "tool_call"
 let f_tool_name = "tool_name"
 let f_actor = "actor"
 let f_account = "account"
+let f_account_scope = "account_scope"
 let f_urgency = "urgency"
 let f_runtime_context = "runtime_context"
 let f_messages = "messages"
@@ -289,19 +290,24 @@ let chat_fields (line : Keeper_chat_store_line_decode.parsed_line) =
 ;;
 
 let external_fields (item : Keeper_external_attention.item) =
+  let account_scope = Keeper_external_attention.original_message_scope item in
+  let account = Option.map (fun (Connector_memory_scope.Discord { account; _ }) -> account) account_scope in
   [ f_kind, `String "external"
   ; ( f_actor
     , sender
         ~authority:item.actor.authority
         ~id:item.actor.actor_id
         ~name:item.actor.display_name
-        ~account:(Keeper_external_attention.original_message_account item) )
+        ~account )
   ; f_source, `String item.source_label
   ; f_surface, Surface_ref.to_json item.conversation.surface
   ; f_conversation_id, `String item.conversation.conversation_id
   ; f_urgency, `String (Keeper_external_attention.urgency_to_string item.urgency)
   ; f_content, `String item.content_preview
   ]
+  @ (match account_scope with
+     | None -> []
+     | Some scope -> [ f_account_scope, Connector_memory_scope.destination_to_json scope ])
   @ (match item.external_message with
      | None -> []
      | Some message -> [ f_external_message_id, `String message.message_id ])

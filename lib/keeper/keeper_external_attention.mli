@@ -87,6 +87,11 @@ type item = {
 val original_message_account : item -> Connector_account_ref.t option
 (** Account that this observation can supply as original-message evidence. *)
 
+val original_message_scope : item -> Connector_memory_scope.t option
+(** Personal Memory scope proven by the original item. Verification requires
+    a canonical message ID. Unattested authors or incomplete addresses do not
+    qualify. *)
+
 (** What the store records: an external message arrived and this is what it
     was. Whether a Keeper still owes it an answer is not here. Since #34662 the
     event queue's pending entry does not answer it either: a completed turn

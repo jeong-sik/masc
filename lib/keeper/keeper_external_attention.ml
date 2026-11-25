@@ -201,6 +201,12 @@ let original_message_account item =
      | Error _ -> None)
   | Some (Account_without_original_proof _) | None -> None
 
+let original_message_scope item =
+  match original_message_account item, item.external_message with
+  | Some account, Some message when Connector_account_ref.is_discord_snowflake message.message_id ->
+    Connector_memory_scope.of_surface ~account item.conversation.surface
+  | _ -> None
+
 let account_of_actor_json : Yojson.Safe.t -> (account_evidence option, string) result =
   function
   | `Assoc fields ->

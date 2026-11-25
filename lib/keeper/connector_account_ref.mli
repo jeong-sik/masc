@@ -3,6 +3,9 @@
 
 type t
 
+val is_discord_snowflake : string -> bool
+(** A canonical positive unsigned 64-bit Discord identifier. *)
+
 val discord_user : string -> t option
 (** The Discord gateway supplies the user ID. Callers must first exclude
     bot and webhook authors. The ID must be a canonical, positive unsigned

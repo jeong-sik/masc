@@ -845,6 +845,7 @@ let switch_workspace (m : Model.t) ws =
       config;
       knowledge;
       attention;
+      infra = { m.infra with show_raw_json = false };
       runtime = { m.runtime with pending_addon_decl_path = None };
       inline_modal = None;
       ask_modal = None;
@@ -1215,7 +1216,6 @@ let push_dive (m : Model.t) dive =
         in
         { m.runtime with exact_run_detail }
     | Nav.Dive_runtime (Nav.Tool_dive _) -> { m.runtime with scroll_offset = 0 }
-    | Nav.Dive_runtime (Nav.Fusion_dive _)
     | Nav.Dive_keeper _
     | Nav.Dive_work _
     | Nav.Dive_knowledge _
@@ -1657,13 +1657,23 @@ let cycle_sub_tab (m : Model.t) dir =
                 }
               in
               let next =
-                { m with nav; runtime } |> Model.sync_sidebar_cursor
+                {
+                  m with
+                  nav;
+                  runtime;
+                  infra = { m.infra with show_raw_json = false };
+                }
+                |> Model.sync_sidebar_cursor
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Infra ->
               let infra =
-                Infra_store.cycle_tab dir m.infra
-                |> Infra_store.set_code_right_mode Infra_store.Code_file
+                {
+                  (Infra_store.cycle_tab dir m.infra
+                  |> Infra_store.set_code_right_mode Infra_store.Code_file)
+                  with
+                  show_raw_json = false;
+                }
               in
               let nav =
                 {
@@ -3338,6 +3348,7 @@ let keeper_identity_entries (m : Model.t) ~name : keeper_identity_entry list =
    where the key does something. *)
 type enter_plan =
   | Enter_noop
+  | Enter_toggle_zoom
   | Enter_expand_company of string
   | Enter_keeper_action of Cmd.t list
   | Enter_dispatch of Cmd.t list
@@ -3468,6 +3479,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
         }
       , [] )
   | Enter_noop
+  | Enter_toggle_zoom
   | Enter_expand_company _
   | Enter_dispatch _
   | Enter_open_dos_screen
@@ -3515,32 +3527,6 @@ let enter_plan (m : Model.t) : enter_plan =
              | Nav.Keeper_identity ) as tab;
          }) ->
       keeper_enter_plan ~name ~tab m
-  | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> (
-      let post_id_opt =
-        match Runtime_store.fusion_detail_for ~run_id m.runtime with
-        | Some { evidence = Wire_runtime.Evidence_recorded p; _ } ->
-            Some p.post_id
-        | Some
-            {
-              evidence = Wire_runtime.Evidence_pending | Wire_runtime.Evidence_absent;
-              _;
-            }
-        | None -> (
-            match Runtime_store.historical_evidence_for_run ~run_id m.runtime with
-            | Some ev -> Some ev.post_id
-            | None -> None)
-      in
-      match post_id_opt with
-      | Some post_id ->
-          Enter_dispatch
-            [
-              Cmd.Http_get
-                {
-                  epoch = m.epoch;
-                  req = Cmd.Get_fusion_board_evidence { post_id };
-                };
-            ]
-      | None -> Enter_noop)
   | Some
       (Nav.Dive_keeper
          {
@@ -3767,7 +3753,7 @@ let enter_plan (m : Model.t) : enter_plan =
               else Enter_noop
           | Nav.Runtime_failover_lanes -> (
               match Runtime_store.selected_lane m.runtime with
-              | Some lane -> Enter_push (Nav.Dive_infra (Nav.Lane_dive lane.id))
+              | Some _ -> Enter_toggle_zoom
               | None -> Enter_noop)
           | Nav.Runtime_efficiency_spend -> (
               match Runtime_store.selected_keeper_spend_row m.runtime with
@@ -3814,9 +3800,43 @@ let enter_plan (m : Model.t) : enter_plan =
                   Enter_noop)
           | Nav.Runtime_fusion -> (
               match Runtime_store.selected_fusion_run m.runtime with
+              | None -> Enter_noop
               | Some run ->
-                  Enter_push (Nav.Dive_runtime (Nav.Fusion_dive run.run_id))
-              | None -> Enter_noop)
+                  if m.nav.zoomed then
+                    let post_id_opt =
+                      match
+                        Runtime_store.fusion_detail_for ~run_id:run.run_id
+                          m.runtime
+                      with
+                      | Some { evidence = Wire_runtime.Evidence_recorded p; _ } ->
+                          Some p.post_id
+                      | Some
+                          {
+                            evidence =
+                              Wire_runtime.Evidence_pending
+                              | Wire_runtime.Evidence_absent;
+                            _;
+                          }
+                      | None -> (
+                          match
+                            Runtime_store.historical_evidence_for_run
+                              ~run_id:run.run_id m.runtime
+                          with
+                          | Some ev -> Some ev.post_id
+                          | None -> None)
+                    in
+                    match post_id_opt with
+                    | Some post_id ->
+                        Enter_dispatch
+                          [
+                            Cmd.Http_get
+                              {
+                                epoch = m.epoch;
+                                req = Cmd.Get_fusion_board_evidence { post_id };
+                              };
+                          ]
+                    | None -> Enter_toggle_zoom
+                  else Enter_toggle_zoom)
           | Nav.Runtime_addons_browser when m.runtime.addon_catalog_mode -> (
               match Runtime_store.selected_addon_catalog_entry m.runtime with
               | Some (Wire_runtime.Catalog_folder { path }) ->
@@ -3849,8 +3869,7 @@ let enter_plan (m : Model.t) : enter_plan =
           match m.infra.active_tab with
           | Nav.Infra_sandboxes -> (
               match Infra_store.selected_sandbox_keeper m.infra with
-              | Some keeper ->
-                  Enter_push (Nav.Dive_infra (Nav.Sandbox_dive keeper))
+              | Some _ -> Enter_toggle_zoom
               | None -> Enter_noop)
           | Nav.Infra_code ->
               let scope = m.infra.code.scope in
@@ -3899,8 +3918,7 @@ let enter_plan (m : Model.t) : enter_plan =
                 | None -> Enter_noop
               else (
                 match Infra_store.selected_timeline_entry m.infra with
-                | Some (Infra_store.Entry_log e) ->
-                    Enter_push (Nav.Dive_infra (Nav.Log_detail_dive e.seq))
+                | Some (Infra_store.Entry_log _) -> Enter_toggle_zoom
                 | Some (Infra_store.Entry_event { keeper = Some k; _ }) ->
                     Enter_push (Nav.Dive_infra (Nav.Runtime_trace_dive k))
                 | Some (Infra_store.Entry_event { keeper = None; _ }) | None ->
@@ -3910,6 +3928,37 @@ let enter_plan (m : Model.t) : enter_plan =
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
+  | Enter_toggle_zoom ->
+      if not (Model.can_zoom_current_view m) then (m, [])
+      else if m.nav.zoomed then
+        let m0 =
+          {
+            m with
+            nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+            infra = { m.infra with show_raw_json = false };
+          }
+        in
+        let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
+        let restored =
+          match m.nav.pre_zoom_pane_index with
+          | Some p -> max 0 (min max_pane p)
+          | None -> max 0 (min max_pane m0.nav.pane_index)
+        in
+        ({ m0 with nav = { m0.nav with pane_index = restored } }, [])
+      else
+        let next =
+          {
+            m with
+            nav =
+              {
+                m.nav with
+                zoomed = true;
+                pre_zoom_pane_index = Some m.nav.pane_index;
+                pane_index = 0;
+              };
+          }
+        in
+        (next, View_fetches.fetches_for_current_view next)
   | Enter_expand_company company ->
       ( {
           m with
@@ -4026,6 +4075,7 @@ let enter_hint (m : Model.t) =
     | Enter_noop -> Enter_hint_hidden
     | Enter_open_dos_screen -> Enter_hint_dos_screen
     | Enter_open_memory_reading _ -> Enter_hint_memory_reading
+    | Enter_toggle_zoom
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
@@ -8597,6 +8647,10 @@ let runtime_detail_max_scroll (m : Model.t) =
           in
           let insp_inner = ui_card_inner insp_rect in
           if Rect.is_empty insp_inner then 0
+          else if m.infra.show_raw_json then
+            let content = ui_pad_content ~bp insp_inner in
+            if Rect.is_empty content then 0
+            else max 0 (4 + List.length lane.runtime_ids - max 1 content.h)
           else
             let band_h = if insp_inner.h >= 6 then 2 else 1 in
             let body_area =
@@ -8754,20 +8808,34 @@ let infra_detail_max_scroll (m : Model.t) =
           if Rect.is_empty inner then 0
           else
             match
-              sandbox_entry_info_for_keeper ~use_keeper_detail:false
+              sandbox_entry_info_for_keeper ~use_keeper_detail:true
                 ~keeper:kp m.infra
             with
             | None -> 0
             | Some info ->
-                let rem_rows =
-                  sandbox_inspector_rem_rows ~inner_h:inner.h info
-                in
-                if rem_rows <= 0 then 0
+                if m.infra.show_raw_json then
+                  let content = ui_pad_content ~bp inner in
+                  if Rect.is_empty content then 0
+                  else
+                    let lines =
+                      Masc_tui_ui.Json_tree.flatten ~max_depth:5
+                        ~redact_secrets:true info.json
+                    in
+                    max 0 (List.length lines - content.h)
                 else
-                  max 0
-                    (Infra_store.sandbox_inspector_event_count ~keeper:kp
-                       m.infra
-                    - rem_rows)))
+                  let eff_h =
+                    if zoomed && inner.h >= 10 then max 0 (inner.h - 3)
+                    else inner.h
+                  in
+                  let rem_rows =
+                    sandbox_inspector_rem_rows ~inner_h:eff_h info
+                  in
+                  if rem_rows <= 0 then 0
+                  else
+                    max 0
+                      (Infra_store.sandbox_inspector_event_count ~keeper:kp
+                         m.infra
+                      - rem_rows)))
   | Nav.Infra_repos_changes -> (
       match Infra_store.selected_change m.infra with
       | Some fc -> (
@@ -8910,7 +8978,7 @@ let infra_detail_max_scroll (m : Model.t) =
                       e.message
                   in
                   let tree_lines =
-                    Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                    Masc_tui_ui.Json_tree.flatten ~max_depth:5
                       ~redact_secrets:true e.details
                   in
                   let total =
@@ -9388,14 +9456,6 @@ let dive_max_scroll (m : Model.t) active =
           | Some desc when md_h > 0 && mc.w > 0 ->
               markdown_max_scroll ~theme ~width:mc.w ~height:md_h desc
           | Some _ | None -> 0))
-  | Nav.Dive_runtime (Nav.Fusion_dive run_id) ->
-      let content = ui_card_inner br |> ui_pad_content ~bp in
-      if Rect.is_empty content then 0
-      else
-        let total =
-          List.length (fusion_detail_lines ~width:content.w m ~run_id)
-        in
-        max 0 (total - max 1 content.h)
   | Nav.Dive_runtime (Nav.Skill_dive ref_s) -> (
       let content = ui_card_inner br |> ui_pad_content ~bp in
       if Rect.is_empty content then 0
@@ -9747,75 +9807,6 @@ let dive_max_scroll (m : Model.t) active =
                 (json_of_verification_store v)
           in
           max main_max json_max)
-  | Nav.Dive_infra (Nav.Sandbox_dive keeper) -> (
-      let inner = ui_card_inner br in
-      if Rect.is_empty inner then 0
-      else
-        match
-          sandbox_entry_info_for_keeper ~use_keeper_detail:true ~keeper m.infra
-        with
-        | None -> 0
-        | Some info ->
-            if m.infra.show_raw_json then
-              let content = ui_pad_content ~bp inner in
-              if Rect.is_empty content then 0
-              else
-                let lines =
-                  Masc_tui_ui.Json_tree.flatten ~max_depth:5
-                    ~redact_secrets:true info.json
-                in
-                max 0 (List.length lines - content.h)
-            else
-              let body_rect =
-                match
-                  Masc_tui_ui.Layout.split_v inner
-                    [ Masc_tui_ui.Layout.Fixed 3; Masc_tui_ui.Layout.Flex 1 ]
-                with
-                | [ _; b ] -> b
-                | _ -> Rect.empty
-              in
-              if Rect.is_empty body_rect then 0
-              else
-                let rem_rows =
-                  sandbox_inspector_rem_rows ~inner_h:body_rect.h info
-                in
-                if rem_rows <= 0 then 0
-                else
-                  max 0
-                    (Infra_store.sandbox_inspector_event_count ~keeper m.infra
-                    - rem_rows))
-  | Nav.Dive_infra (Nav.Lane_dive lane_id) ->
-      let inner = ui_card_inner br in
-      let content = ui_pad_content ~bp inner in
-      if m.infra.show_raw_json then
-        let slot_n =
-          match Observed.to_option m.runtime.runtime_resolved with
-          | Some snap -> (
-              match
-                List.find_opt
-                  (fun (l : Wire_runtime.failover_lane) ->
-                    String.equal l.id lane_id)
-                  snap.lanes
-              with
-              | Some l -> List.length l.runtime_ids
-              | None -> 0)
-          | None -> 0
-        in
-        max 0 (4 + slot_n - max 1 content.h)
-      else
-        let tail_h =
-          match
-            Masc_tui_ui.Layout.split_v content
-              [
-                Masc_tui_ui.Layout.Fixed 2;
-                Masc_tui_ui.Layout.Ratio 0.54;
-                Masc_tui_ui.Layout.Flex 1;
-              ]
-          with
-          | [ _; _; t ] -> max 1 (t.h - 1)
-          | _ -> max 1 (content.h / 3)
-        in
-        max 0 (List.length m.infra.logs - tail_h)
   | Nav.Dive_infra (Nav.Incident_dive incident_id) -> (
       match Incidents.find_by_id incident_id m.incidents with
       | None -> 0
@@ -9888,23 +9879,6 @@ let dive_max_scroll (m : Model.t) active =
                 tr.raw
             in
             max 0 (List.length lines - tree_h))
-  | Nav.Dive_infra (Nav.Log_detail_dive seq) -> (
-      match Infra_store.find_log_by_seq seq m.infra with
-      | None -> 0
-      | Some e ->
-          let content = ui_card_inner br |> ui_pad_content ~bp in
-          if Rect.is_empty content then 0
-          else
-            let msg_lines =
-              wrap_lines ~width:(max 1 (content.w - 2)) e.message
-            in
-            let jlines =
-              Masc_tui_ui.Json_tree.flatten ~max_depth:5 ~redact_secrets:true
-                e.details
-            in
-            let body_h = max 1 (content.h - 1) in
-            let total = List.length msg_lines + 1 + List.length jlines in
-            max 0 (total - body_h))
 
 let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
   let _, content_h =
@@ -11944,10 +11918,7 @@ let apply_move (m : Model.t) dir =
                      }
                  | Nav.Dive_knowledge
                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                 | Nav.Dive_runtime
-                     ( Nav.Fusion_dive _
-                     | Nav.Skill_dive _
-                     | Nav.Exact_run_dive _ )
+                 | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
                  | Nav.Dive_infra _ ) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
@@ -13162,6 +13133,9 @@ let apply_move (m : Model.t) dir =
                     let prev_code_path =
                       Infra_store.active_code_file_path m.infra
                     in
+                    let prev_sandbox_keeper =
+                      Infra_store.selected_sandbox_keeper m.infra
+                    in
                     let infra0 =
                       Infra_store.move_selection ~pane_index ~viewport_rows
                         ?max_detail_scroll ~delta:eff_delta m.infra
@@ -13172,6 +13146,15 @@ let apply_move (m : Model.t) dir =
                       && not
                            (Option.equal String.equal prev_code_path
                               (Infra_store.active_code_file_path infra0))
+                    then
+                      let next_m = { m with infra = infra0 } in
+                      (next_m, View_fetches.fetches_for_current_view next_m)
+                    else if
+                      Nav.equal_infra_tab infra0.active_tab Nav.Infra_sandboxes
+                      && pane_index = 0
+                      && not
+                           (Option.equal String.equal prev_sandbox_keeper
+                              (Infra_store.selected_sandbox_keeper infra0))
                     then
                       let next_m = { m with infra = infra0 } in
                       (next_m, View_fetches.fetches_for_current_view next_m)

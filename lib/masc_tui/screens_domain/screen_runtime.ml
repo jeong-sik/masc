@@ -2997,9 +2997,21 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     in
     if String.equal extra "" then keys else extra ^ " · " ^ keys
   in
+  let insp_focused = Model.detail_pane_focused ~detail_index:1 model in
+  let insp_badge =
+    if insp_focused || model.infra.show_raw_json then
+      Some
+        (H.make_badge
+           ~tone:
+             (if model.infra.show_raw_json then Theme.Status_active
+              else Theme.Status_historical)
+           (if model.infra.show_raw_json then "[Space] Json_tree ON"
+            else "[Space] Json_tree"))
+    else None
+  in
   let insp_inner =
     Card.draw ~cache grid ~rect:insp_rect ~theme
-      (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
+      (H.card_spec ~focused:insp_focused ?badge:insp_badge
          ?subtitle:(Option.map (fun (l : Wire_runtime.failover_lane) -> l.id) sel_lane)
          ~hotkey:setup_hint
          (Say.resolve lang
@@ -3010,6 +3022,20 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | None ->
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp insp_inner)
           ~theme ~lang ~filter_query:rt.filter_query rt.runtime_resolved
+    | Some lane when model.infra.show_raw_json ->
+        let json =
+          `Assoc
+            [
+              ("id", `String lane.id);
+              ("declared", `Bool lane.declared);
+              ( "runtime_ids"
+              , `List (List.map (fun s -> `String s) lane.runtime_ids) );
+            ]
+        in
+        let lines = Json_tree.flatten ~max_depth:4 ~redact_secrets:true json in
+        ignore
+          (Json_tree.draw grid ~rect:(H.pad_content ~bp insp_inner) ~theme
+             ~scroll:rt.detail_scroll_offset lines)
     | Some lane ->
         let slot_quota_st rid =
           match Hashtbl.find_opt runtimes_tbl rid with
@@ -3465,8 +3491,8 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[Enter] 상세 다이브 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
-               ~en:"[Enter] Dive · [e] Evidence · [f] Launch · [Tab] Scroll"))
+            (Say.make ~ko:"[Enter/z] 확대 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
+               ~en:"[Enter/z] Zoom · [e] Evidence · [f] Launch · [Tab] Scroll"))
        pills);
   let left_rect, right_rect =
     if model.nav.zoomed && Model.can_zoom_current_view model then
@@ -3478,7 +3504,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 다이브 · [f] 실행" ~en:"[Enter] Dive · [f] Launch"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter/z] 확대 · [f] 실행" ~en:"[Enter/z] Zoom · [f] Launch"))
          (Say.resolve lang (Say.make ~ko:"Fusion 팬아웃 목록" ~en:"Fusion Panel Runs")))
   in
   if not (Rect.is_empty left_inner) then begin
@@ -3590,9 +3616,17 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~theme ~lang obs
   end;
   let det_inner =
+    let zoomed_fusion = model.nav.zoomed && Model.can_zoom_current_view model in
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 전체 보기 · [e] 증거" ~en:"[Enter] Dive · [e] Evidence"))
+         ~hotkey:
+           (Say.resolve lang
+              (if zoomed_fusion then
+                 Say.make ~ko:"[Enter/e] 보드 증거 · [z/Esc] 축소"
+                   ~en:"[Enter/e] Evidence · [z/Esc] Unzoom"
+               else
+                 Say.make ~ko:"[Enter/z] 확대 · [e] 증거"
+                   ~en:"[Enter/z] Zoom · [e] Evidence"))
          (Say.resolve lang (Say.make ~ko:"Fusion 파이프라인 상세" ~en:"Fusion Pipeline Detail")))
   in
   if not (Rect.is_empty det_inner) then begin
@@ -6824,52 +6858,6 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
               in
               H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
                 ~theme ~lang rt.tool_detail_series
-        end
-    | Nav.Fusion_dive run_id ->
-        let inner =
-          Card.draw ~cache grid ~rect:body ~theme
-            (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:run_id
-               ~hotkey:
-                 (Say.resolve lang
-                    (Say.make
-                       ~ko:"[e/Enter] 보드 증거 로드 · [y] ID 복사 · [Esc] 뒤로"
-                       ~en:"[e/Enter] Board Evidence · [y] Copy ID · [Esc] Back"))
-               (Say.resolve lang
-                  (Say.make ~ko:"런타임 > 퓨전 실행 상세"
-                     ~en:"Runtime > Fusion Run Dive")))
-        in
-        let content = H.pad_content ~bp inner in
-        if not (Rect.is_empty content) then begin
-          let lines =
-            Update_nav.fusion_detail_lines ~width:content.w model ~run_id
-          in
-          let max_skip = Int.max 0 (List.length lines - content.h) in
-          let skip =
-            Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
-          in
-          let y = ref content.y and bot = Rect.bottom content in
-          List.iter
-            (fun ln ->
-              if !y < bot then begin
-                let st =
-                  if String.starts_with ~prefix:"──" ln then
-                    H.accent_style ~theme ~attrs:Attr.bold ()
-                  else if
-                    String.starts_with ~prefix:"  [WARN]" ln
-                    || String.starts_with ~prefix:"[Replay" ln
-                  then H.status_style ~theme Theme.Status_attention
-                  else if
-                    String.starts_with ~prefix:"  [FAIL]" ln
-                    || String.starts_with ~prefix:"  Failure:" ln
-                  then H.status_style ~theme Theme.Status_critical
-                  else H.text_style ~theme ()
-                in
-                ignore
-                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                     ~max_w:content.w ~style:st ln);
-                incr y
-              end)
-            (Store_scroll.drop skip lines)
         end
     | Nav.Skill_dive ref_s ->
         let inner =

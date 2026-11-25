@@ -64,16 +64,12 @@ type knowledge_dive_target =
 
 type runtime_dive_target =
   | Tool_dive of string
-  | Fusion_dive of string
   | Skill_dive of string
   | Exact_run_dive of string
 
 type infra_dive_target =
-  | Sandbox_dive of string
-  | Lane_dive of string
   | Incident_dive of int
   | Runtime_trace_dive of string
-  | Log_detail_dive of int
 
 type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }
@@ -555,29 +551,20 @@ let equal_knowledge_dive_target a b =
 let equal_runtime_dive_target a b =
   match a, b with
   | Tool_dive x, Tool_dive y
-  | Fusion_dive x, Fusion_dive y
   | Skill_dive x, Skill_dive y
   | Exact_run_dive x, Exact_run_dive y ->
       String.equal x y
-  | Tool_dive _, (Fusion_dive _ | Skill_dive _ | Exact_run_dive _)
-  | Fusion_dive _, (Tool_dive _ | Skill_dive _ | Exact_run_dive _)
-  | Skill_dive _, (Tool_dive _ | Fusion_dive _ | Exact_run_dive _)
-  | Exact_run_dive _, (Tool_dive _ | Fusion_dive _ | Skill_dive _) ->
+  | Tool_dive _, (Skill_dive _ | Exact_run_dive _)
+  | Skill_dive _, (Tool_dive _ | Exact_run_dive _)
+  | Exact_run_dive _, (Tool_dive _ | Skill_dive _) ->
       false
 
 let equal_infra_dive_target a b =
   match a, b with
-  | Sandbox_dive x, Sandbox_dive y
-  | Lane_dive x, Lane_dive y
-  | Runtime_trace_dive x, Runtime_trace_dive y ->
-      String.equal x y
-  | Incident_dive x, Incident_dive y | Log_detail_dive x, Log_detail_dive y ->
-      Int.equal x y
-  | Sandbox_dive _, (Lane_dive _ | Incident_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
-  | Lane_dive _, (Sandbox_dive _ | Incident_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
-  | Incident_dive _, (Sandbox_dive _ | Lane_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
-  | Runtime_trace_dive _, (Sandbox_dive _ | Lane_dive _ | Incident_dive _ | Log_detail_dive _)
-  | Log_detail_dive _, (Sandbox_dive _ | Lane_dive _ | Incident_dive _ | Runtime_trace_dive _) ->
+  | Runtime_trace_dive x, Runtime_trace_dive y -> String.equal x y
+  | Incident_dive x, Incident_dive y -> Int.equal x y
+  | Incident_dive _, Runtime_trace_dive _
+  | Runtime_trace_dive _, Incident_dive _ ->
       false
 
 let equal_dive a b =

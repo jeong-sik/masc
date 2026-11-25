@@ -193,14 +193,7 @@ let refresh_404_fallbacks ~now (m : Model.t) =
 
 let fusion_detail_matches_active (m : Model.t) run_id =
   match Model.active_dive m with
-  | Some (Nav.Dive_runtime (Nav.Fusion_dive rid)) -> String.equal rid run_id
-  | Some
-      ( Nav.Dive_keeper _
-      | Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
-      | Nav.Dive_infra _ ) ->
-      false
+  | Some _ -> false
   | None -> (
       match Runtime_store.selected_fusion_run m.runtime with
       | Some sel -> String.equal sel.run_id run_id
@@ -227,11 +220,7 @@ let runtime_trace_matches_active (m : Model.t) keeper =
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
-      | Nav.Dive_infra
-          ( Nav.Sandbox_dive _
-          | Nav.Lane_dive _
-          | Nav.Incident_dive _
-          | Nav.Log_detail_dive _ ) )
+      | Nav.Dive_infra (Nav.Incident_dive _) )
   | None ->
       true
 
@@ -3857,22 +3846,17 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some modal -> modal.submitting && matches_lane_modal modal.kind
         | None -> false
       in
-      let dive_stack, dive_return_stack =
-        if is_op `Delete then
-          match m.nav.dive_stack with
-          | top :: rest
-            when Nav.equal_dive top (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
-              let return_rest =
-                match m.nav.dive_return_stack with
-                | _ :: r -> r
-                | [] -> []
-              in
-              (rest, return_rest)
-          | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
-        else (m.nav.dive_stack, m.nav.dive_return_stack)
-      in
       let nav =
-        let nav0 = { m.nav with dive_stack; dive_return_stack } in
+        let nav0 =
+          if
+            is_op `Delete
+            && m.nav.zoomed
+            && Nav.equal_workspace m.nav.workspace Nav.Runtime
+            && Nav.equal_runtime_tab m.runtime.active_tab
+                 Nav.Runtime_failover_lanes
+          then { m.nav with zoomed = false; pre_zoom_pane_index = None }
+          else m.nav
+        in
         if not close_modal then nav0
         else
           match nav0.overlay with
@@ -3889,6 +3873,16 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.System_gate _ )
           | None ->
               nav0
+      in
+      let infra =
+        if
+          is_op `Delete
+          && m.nav.zoomed
+          && Nav.equal_workspace m.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab m.runtime.active_tab
+               Nav.Runtime_failover_lanes
+        then { m.infra with show_raw_json = false }
+        else m.infra
       in
       let inline_modal = if close_modal then None else m.inline_modal in
       let toast_msg =
@@ -3907,7 +3901,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~en:("Lane deleted: " ^ lane_id)
       in
       let next =
-        { m with nav; inline_modal }
+        { m with nav; infra; inline_modal }
         |> Model.with_toast ~now ~level:Model.Toast_success toast_msg
       in
       ( next
@@ -4237,7 +4231,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ )
         | None ->
             []
@@ -4671,11 +4665,33 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_runtime "clients") ~ko:"클라이언트 조회"
         ~en:"MCP clients fetch" err
   | Msg.Reply_sandboxes (Ok sb) ->
-      ( {
-          m with
-          infra = Infra_store.apply_sandboxes ~observed_at:now sb m.infra;
-        }
-      , [] )
+      let infra = Infra_store.apply_sandboxes ~observed_at:now sb m.infra in
+      let next = { m with infra } in
+      let cmds =
+        if
+          Option.is_none (Model.active_dive next)
+          && Nav.equal_workspace next.nav.workspace Nav.Infra
+          && Nav.equal_infra_tab next.infra.active_tab Nav.Infra_sandboxes
+        then
+          match Infra_store.selected_sandbox_keeper next.infra with
+          | Some keeper -> (
+              match Infra_store.keeper_sandbox_for ~keeper next.infra with
+              | Observed.Value { stale = false; _ } | Observed.Loading _ -> []
+              | Observed.Value { stale = true; _ }
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  [
+                    Cmd.Http_get
+                      {
+                        epoch = next.epoch;
+                        req = Cmd.Get_keeper_sandbox { keeper };
+                      };
+                  ])
+          | None -> []
+        else []
+      in
+      (next, cmds)
   | Msg.Reply_sandboxes (Error err) -> (
       match err with
       | Msg.Http_error { status = 404; _ } ->
@@ -6879,7 +6895,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ )
         | None ->
             false
@@ -6900,7 +6916,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ )
         | None ->
             false
@@ -6942,7 +6958,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ )
         | None ->
             false
@@ -7925,7 +7941,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime
-                (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Skill_dive _)
+                (Nav.Tool_dive _ | Nav.Skill_dive _)
             | Nav.Dive_infra _ )
         | None ->
             false
@@ -7949,7 +7965,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime
-                (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Skill_dive _)
+                (Nav.Tool_dive _ | Nav.Skill_dive _)
             | Nav.Dive_infra _ )
         | None ->
             false

@@ -4451,7 +4451,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Fusion modal closes cleanly on submit (no hang)" true
     (Option.is_none m_fmod_done.inline_modal
      && Option.is_none m_fmod_done.nav.overlay);
-  (* Runtime Failover Enter with non-empty fusion_launch_draft dives into Lane_dive, NEVER fires Post_fusion_launch *)
+  (* Runtime Failover Enter with non-empty fusion_launch_draft zooms selected lane detail, NEVER fires Post_fusion_launch *)
   let rt_with_lane =
     m_rt_failover.runtime
     |> Runtime_store.apply_runtime_resolved ~observed_at:t0
@@ -4471,8 +4471,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     }
   in
   let m_rt_q_enter, _ = step m_rt_quotas_with_lane (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Runtime Quotas Enter does NOT dive stale Lane_dive" true
-    (Option.is_none (Model.active_dive m_rt_q_enter));
+  Alcotest.(check bool) "Runtime Quotas Enter does NOT dive or zoom lane detail" true
+    (Option.is_none (Model.active_dive m_rt_q_enter) && not m_rt_q_enter.nav.zoomed);
   let m_rt_lane = { m_rt_failover with runtime = rt_with_lane } in
   let m_rt_enter, cmds_rt_enter = step m_rt_lane (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Runtime Enter does NOT hijack with Post_fusion_launch" false
@@ -4481,10 +4481,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | Cmd.Http_post { req = Cmd.Post_fusion_launch _; _ } -> true
          | _ -> false)
        cmds_rt_enter);
-  Alcotest.(check bool) "Runtime Failover Enter dives into Lane_dive" true
-    (match Model.active_dive m_rt_enter with
-    | Some (Nav.Dive_infra (Nav.Lane_dive "lane-default")) -> true
-    | _ -> false);
+  Alcotest.(check bool) "Runtime Failover Enter zooms lane detail in place" true
+    (m_rt_enter.nav.zoomed && Option.is_none (Model.active_dive m_rt_enter));
 
   (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
   let chat_page : Wire_fleet.chat_history_page =
@@ -11959,18 +11957,40 @@ let test_single_slot_dive_error_target_guards () =
     | Observed.Value _ ->
         false
   in
-  (* (a) Fusion_dive B ignores delayed Reply_fusion_run_detail Error for A,
+  (* (a) Runtime_fusion selected run-B ignores delayed Reply_fusion_run_detail Error for A,
      still routes Workspace_mismatch, and records matching B error. *)
+  let mk_fusion_run run_id : Wire_runtime.fusion_run =
+    {
+      run_id;
+      keeper = "alpha";
+      preset = "consensus";
+      topology = Wire_runtime.Judge_of_judges;
+      started_at_unix = 1795253000.0;
+      finished_at_unix = None;
+      status = Wire_runtime.Fusion_running;
+      stage = "panel";
+      decision = None;
+      summary = None;
+    }
+  in
   let m_fusion_b =
     let base = Model.initial () in
+    let rt =
+      base.runtime
+      |> Runtime_store.set_tab Nav.Runtime_fusion
+      |> Runtime_store.apply_fusion_runs ~observed_at:t0
+           [ mk_fusion_run "run-A"; mk_fusion_run "run-B" ]
+    in
     {
       base with
       nav =
         {
           base.nav with
           workspace = Nav.Runtime;
-          dive_stack = [ Nav.Dive_runtime (Nav.Fusion_dive "run-B") ];
+          zoomed = true;
+          pane_index = 0;
         };
+      runtime = { rt with fusion_selected_index = 1 };
     }
   in
   let m_f_stale, cmds_f_stale =
@@ -11984,9 +12004,9 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Fusion_dive B ignores stale run-A Error (slot not Failed)" false
+    "Runtime_fusion run-B ignores stale run-A Error (slot not Failed)" false
     (is_failed m_f_stale.runtime.fusion_detail);
-  Alcotest.(check int) "Fusion_dive B ignores stale run-A Error (0 cmds)" 0
+  Alcotest.(check int) "Runtime_fusion run-B ignores stale run-A Error (0 cmds)" 0
     (List.length (Cmd.flatten cmds_f_stale));
   let m_f_ws, cmds_f_ws =
     Update.step ~now:t1 m_fusion_b
@@ -11999,7 +12019,7 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Fusion_dive B still handles Workspace_mismatch even for run-A" true
+    "Runtime_fusion run-B still handles Workspace_mismatch even for run-A" true
     ((not (Epoch.equal m_f_ws.epoch m_fusion_b.epoch))
      && List.exists
           (function
@@ -12017,7 +12037,7 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Fusion_dive B records matching run-B Error on fusion_detail" true
+    "Runtime_fusion run-B records matching run-B Error on fusion_detail" true
     (is_failed m_f_match.runtime.fusion_detail);
   (* (b) Verification_dive B ignores delayed 401/403/500 Error for A without
      poisoning verification_evidence or verification_evidence_auth_denied,
@@ -13792,7 +13812,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
     }
   in
   let m_pushed, _ =
-    Update_nav.push_dive m_raw (Nav.Dive_infra (Nav.Sandbox_dive "alpha"))
+    Update_nav.push_dive m_raw (Nav.Dive_infra (Nav.Runtime_trace_dive "alpha"))
   in
   Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
     m_pushed.infra.show_raw_json;
@@ -18116,39 +18136,41 @@ let test_runtime_lane_crud_requests_and_cas () =
          | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
          | _ -> false)
        (Cmd.flatten conflict_cmds));
-  (* 7. Lane_dive fetches Get_runtime_config_raw, supports [a], and [d] pops dive on success *)
-  let m_dive =
+  (* 7. Zoomed Runtime_failover_lanes fetches Get_runtime_config_raw, supports [a], and [d] unzooms on delete *)
+  let m_zoomed_lane =
     {
       m_coder with
       nav =
         {
           m_coder.nav with
-          dive_stack = [ Nav.Dive_infra (Nav.Lane_dive "coder") ];
+          zoomed = true;
+          pre_zoom_pane_index = Some 0;
+          pane_index = 0;
         };
     }
   in
-  let dive_fetches =
-    Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m_dive)
+  let zoomed_fetches =
+    Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m_zoomed_lane)
   in
-  Alcotest.(check bool) "Lane_dive fetches Get_runtime_config_raw" true
+  Alcotest.(check bool) "zoomed lane fetches Get_runtime_config_raw" true
     (List.exists
        (function
          | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
          | _ -> false)
-       dive_fetches);
-  let m_assign_from_dive, _ =
-    Update.step ~now:t1 m_dive (Msg.Key_event (char_key "a"))
+       zoomed_fetches);
+  let m_assign_from_zoom, _ =
+    Update.step ~now:t1 m_zoomed_lane (Msg.Key_event (char_key "a"))
   in
-  Alcotest.(check bool) "[a] in Lane_dive keeps Form_runtime_assign accessible" true
-    (match m_assign_from_dive.inline_modal with
+  Alcotest.(check bool) "[a] in zoomed lane keeps Form_runtime_assign accessible" true
+    (match m_assign_from_zoom.inline_modal with
     | Some { fields = { key = "assign_keeper"; _ } :: _; _ } -> true
     | _ -> false);
   let m_del_open, _ =
-    Update.step ~now:t1 m_dive (Msg.Key_event (char_key "d"))
+    Update.step ~now:t1 m_zoomed_lane (Msg.Key_event (char_key "d"))
   in
   (match m_del_open.nav.overlay with
   | Some (Nav.Inline_action (Nav.Runtime_lane_delete { lane_id = "coder"; _ })) -> ()
-  | _ -> Alcotest.fail "[d] in Lane_dive must open Runtime_lane_delete");
+  | _ -> Alcotest.fail "[d] in zoomed lane must open Runtime_lane_delete");
   let m_del_wrong =
     set_modal_fields [ ("confirm_lane_id", "wrong") ] m_del_open
   in
@@ -18187,10 +18209,10 @@ let test_runtime_lane_crud_requests_and_cas () =
                { lane_id = "coder"; operation = `Delete; result = Ok () };
          })
   in
-  Alcotest.(check bool) "delete Ok closes modal and pops Lane_dive" true
+  Alcotest.(check bool) "delete Ok closes modal and unzooms failover lane" true
     (Option.is_none m_deleted.inline_modal
     && Option.is_none m_deleted.nav.overlay
-    && m_deleted.nav.dive_stack = []);
+    && not m_deleted.nav.zoomed);
   Alcotest.(check bool) "delete Ok refreshes runtime_resolved and raw config" true
     (List.exists
        (function
@@ -22617,7 +22639,7 @@ let () =
         ] );
       ( "runtime_lane_crud"
       , [
-          Alcotest.test_case "create/edit/delete requests, CAS checks & Lane_dive pop"
+          Alcotest.test_case "create/edit/delete requests, CAS checks & zoomed unzoom"
             `Quick test_runtime_lane_crud_requests_and_cas;
         ] );
       ( "work_and_board_crud"
@@ -25304,5 +25326,124 @@ let () =
               Alcotest.(check bool)
                 "Esc clears stale zoomed on non-zoomable empty Work_inbox" false
                 m_stale_esc.nav.zoomed);
+          Alcotest.test_case
+            "Layer 2: remove Fusion/Lane/Log/Sandbox dives, [Space] Json_tree & Incidents [o] jump"
+            `Quick
+            (fun () ->
+              let step m msg = Update.step ~now:t0 m msg in
+              let step_k m k = step m (Msg.Key_event k) in
+              let base = Model.initial ~cols:140 ~rows:36 () in
+              (* 1. Runtime_failover_lanes: [Space] pane 0 toggles outside probes; pane 1 / zoomed toggles raw JSON *)
+              let rt_lanes =
+                base.runtime
+                |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+                |> Runtime_store.apply_runtime_resolved ~observed_at:t0
+                     {
+                       generated_at_iso = "2026-11-25T00:00:00Z";
+                       config_path = None;
+                       default_route = Some "lane-a";
+                       lanes =
+                         [
+                           { id = "lane-a"; declared = true; runtime_ids = [ "sonnet-4" ] };
+                           { id = "lane-b"; declared = true; runtime_ids = [ "glm-4" ] };
+                         ];
+                       runtimes = [];
+                       usage_windows = None;
+                     }
+              in
+              let m_lanes =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+                  runtime = rt_lanes;
+                }
+              in
+              let m_p0_sp, _ = step_k m_lanes (char_key " ") in
+              Alcotest.(check bool)
+                "Failover pane 0 [Space] toggles outside probes, NOT raw JSON"
+                true
+                (m_p0_sp.runtime.show_outside_lane_probes
+                && not m_p0_sp.infra.show_raw_json);
+              let m_lane_z, _ = step_k m_lanes (key Keymap.Input.Enter) in
+              Alcotest.(check bool)
+                "Failover Enter zooms in place without pushing dive" true
+                (m_lane_z.nav.zoomed && Option.is_none (Model.active_dive m_lane_z));
+              let m_lz_sp, _ = step_k m_lane_z (char_key " ") in
+              Alcotest.(check bool)
+                "Zoomed Failover [Space] toggles show_raw_json" true
+                m_lz_sp.infra.show_raw_json;
+              let m_lz_esc1, _ = step_k m_lz_sp (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "First Esc clears show_raw_json before unzooming" true
+                ((not m_lz_esc1.infra.show_raw_json) && m_lz_esc1.nav.zoomed);
+              let m_lz_esc2, _ = step_k m_lz_esc1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Second Esc unzooms Failover" false
+                m_lz_esc2.nav.zoomed;
+              (* 2. Incidents [o] Source_runtime & Source_sandbox jump_to_workspace + Esc restores Incidents *)
+              let inc_rt, _ =
+                Incidents.push ~occurred_at_unix:1_795_254_000.0
+                  ~source:(Health.Source_runtime "lane-b")
+                  ~summary:(Say.literal "Lane degraded") ~detail:"429"
+                  ~status:Health.Resolved Incidents.empty
+              in
+              let m_inc_rt =
+                {
+                  base with
+                  nav = { base.nav with overlay = Some Nav.Incidents };
+                  runtime = rt_lanes;
+                  incidents = inc_rt;
+                }
+              in
+              let m_j_rt, _ = step_k m_inc_rt (char_key "o") in
+              Alcotest.(check bool)
+                "Incidents [o] Source_runtime jumps to Runtime_failover_lanes selecting lane-b"
+                true
+                (Nav.equal_workspace m_j_rt.nav.workspace Nav.Runtime
+                && Nav.equal_runtime_tab m_j_rt.runtime.active_tab
+                     Nav.Runtime_failover_lanes
+                && Option.is_none (Model.active_dive m_j_rt)
+                && (match Runtime_store.selected_lane m_j_rt.runtime with
+                   | Some l -> String.equal l.id "lane-b"
+                   | None -> false)
+                && Int.equal (List.length m_j_rt.nav.workspace_return_stack) 1);
+              let m_j_rt_back, _ = step_k m_j_rt (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc from jumped Runtime returns to Incidents overlay" true
+                (Option.equal Nav.equal_overlay m_j_rt_back.nav.overlay
+                   (Some Nav.Incidents)
+                && m_j_rt_back.nav.workspace_return_stack = []);
+              let inc_sb, _ =
+                Incidents.push ~occurred_at_unix:1_795_254_000.0
+                  ~source:(Health.Source_sandbox "alpha")
+                  ~summary:(Say.literal "Sandbox error") ~detail:"sock missing"
+                  ~status:Health.Resolved Incidents.empty
+              in
+              let m_inc_sb =
+                {
+                  base with
+                  nav = { base.nav with overlay = Some Nav.Incidents };
+                  incidents = inc_sb;
+                }
+              in
+              let m_j_sb, _ = step_k m_inc_sb (char_key "o") in
+              Alcotest.(check bool)
+                "Incidents [o] Source_sandbox jumps to Infra_sandboxes and stashes pending target when cold"
+                true
+                (Nav.equal_workspace m_j_sb.nav.workspace Nav.Infra
+                && Nav.equal_infra_tab m_j_sb.infra.active_tab
+                     Nav.Infra_sandboxes
+                && Option.is_none (Model.active_dive m_j_sb)
+                && Option.equal String.equal m_j_sb.infra.pending_sandbox_keeper
+                     (Some "alpha")
+                && Int.equal (List.length m_j_sb.nav.workspace_return_stack) 1);
+              let m_z_unzoom, _ = step_k m_lz_sp (char_key "z") in
+              Alcotest.(check bool)
+                "[z] unzoom clears show_raw_json cleanly" true
+                ((not m_z_unzoom.nav.zoomed)
+                && not m_z_unzoom.infra.show_raw_json);
+              let m_sw_raw, _ = Update_nav.switch_workspace m_lz_sp Nav.Infra in
+              Alcotest.(check bool)
+                "switch_workspace clears show_raw_json cleanly" false
+                m_sw_raw.infra.show_raw_json);
         ] );
     ]

@@ -825,19 +825,49 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
   | Keymap.Input.Char "o" when is_printable_key norm -> (
       match Incidents.selected_entry m.incidents with
       | None -> Some (m, [])
-      | Some inc ->
-          let target_dive =
-            match inc.source with
-            | Health.Source_keeper name ->
-                Nav.Dive_keeper { name; tab = Nav.Keeper_chat }
-            | Health.Source_sandbox name ->
-                Nav.Dive_infra (Nav.Sandbox_dive name)
-            | Health.Source_runtime lane_id ->
-                Nav.Dive_infra (Nav.Lane_dive lane_id)
-            | Health.Source_client_http | Health.Source_stream ->
-                Nav.Dive_infra (Nav.Incident_dive inc.id)
-          in
-          Some (Update_nav.push_dive m target_dive))
+      | Some inc -> (
+          match inc.source with
+          | Health.Source_keeper name ->
+              Some
+                (Update_nav.push_dive m
+                   (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }))
+          | Health.Source_sandbox name ->
+              let infra =
+                m.infra
+                |> Infra_store.set_tab Nav.Infra_sandboxes
+                |> Infra_store.select_sandbox_by_keeper name
+              in
+              let m' = { m with infra } in
+              let zoomed =
+                not
+                  (Model.detail_visible
+                     {
+                       m' with
+                       nav =
+                         {
+                           m'.nav with
+                           workspace = Nav.Infra;
+                           dive_stack = [];
+                           overlay = None;
+                           zoomed = false;
+                         };
+                     })
+              in
+              Some
+                (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed m' Nav.Infra)
+          | Health.Source_runtime lane_id ->
+              let runtime =
+                m.runtime
+                |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+                |> Runtime_store.select_lane_by_id lane_id
+              in
+              Some
+                (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed:false
+                   { m with runtime } Nav.Runtime)
+          | Health.Source_client_http | Health.Source_stream ->
+              Some
+                (Update_nav.push_dive m
+                   (Nav.Dive_infra (Nav.Incident_dive inc.id)))))
   | Keymap.Input.Char "/" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Focus_filter)
   | Keymap.Input.Char _
@@ -1548,22 +1578,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
         match printable_char with
         | Some "e" -> open_wiki_edit_modal ~now m ~slug
         | _ -> (m, []))
-  | Some (Nav.Dive_infra (Nav.Sandbox_dive keeper)) -> (
-      match printable_char with
-      | Some "p" ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("샌드박스 프로브 실행: " ^ keeper)
-                 ~en:("Probing sandbox: " ^ keeper))
-              m
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req = Cmd.Post_sandbox_probe (`Keeper keeper);
-                };
-            ] )
-      | _ -> (m, []))
   | Some (Nav.Dive_keeper { name; tab }) -> (
       match tab, printable_char with
       | Nav.Keeper_sandbox, Some "p" ->
@@ -1768,13 +1782,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | _ -> (m, []))
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
-      | Nav.Dive_runtime
-          (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
-      | Nav.Dive_infra
-          ( Nav.Lane_dive _
-          | Nav.Incident_dive _
-          | Nav.Runtime_trace_dive _
-          | Nav.Log_detail_dive _ ) ) ->
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
+      | Nav.Dive_infra (Nav.Incident_dive _ | Nav.Runtime_trace_dive _) ) ->
       (m, [])
   | None -> (
       (* 2. Workspace-level contextual hotkeys *)
@@ -3757,18 +3766,13 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             | Some "p"
                               when (match Model.active_dive m with
                                    | Some
-                                       ( Nav.Dive_infra (Nav.Sandbox_dive _)
-                                       | Nav.Dive_keeper
+                                       ( Nav.Dive_keeper
                                            { tab = Nav.Keeper_sandbox; _ }
                                        | Nav.Dive_knowledge (Nav.Thread_dive _) )
                                      ->
                                        true
                                    | Some
-                                       ( Nav.Dive_infra
-                                           ( Nav.Lane_dive _
-                                           | Nav.Incident_dive _
-                                           | Nav.Runtime_trace_dive _
-                                           | Nav.Log_detail_dive _ )
+                                       ( Nav.Dive_infra _
                                        | Nav.Dive_keeper
                                            {
                                              tab =

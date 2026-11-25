@@ -134,6 +134,7 @@ type t = {
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
   show_raw_json : bool;
+  pending_sandbox_keeper : string option;
   selected_index : int;
   scroll_offset : int;
   diff_scroll_offset : int;
@@ -169,6 +170,7 @@ let empty =
     runtime_trace = Observed.absent;
     code = empty_code_state;
     show_raw_json = false;
+    pending_sandbox_keeper = None;
     selected_index = 0;
     scroll_offset = 0;
     diff_scroll_offset = 0;
@@ -185,6 +187,7 @@ let set_tab active_tab t =
   {
     t with
     active_tab;
+    pending_sandbox_keeper = None;
     selected_index = 0;
     scroll_offset = 0;
     diff_scroll_offset = 0;
@@ -201,12 +204,55 @@ let cycle_tab dir t =
   in
   set_tab next_tab t
 
+let all_sandbox_keepers_of_snapshot (s : Wire_infra.sandboxes_snapshot) =
+  let microvms =
+    List.map (fun (g : Wire_infra.microvm_guest) -> g.keeper) s.microvm_guests
+  in
+  let ssh_bound =
+    List.concat_map
+      (fun (p : Wire_infra.ssh_pool) ->
+        List.map
+          (fun (ks : Wire_infra.ssh_keeper_session) -> ks.keeper)
+          p.keeper_sessions)
+      s.ssh_pools
+  in
+  let ssh_unbound =
+    List.map
+      (fun (u : Wire_infra.ssh_unbound_keeper) -> u.keeper)
+      s.ssh_unbound_keepers
+  in
+  let docker =
+    List.map (fun (d : Wire_infra.docker_keeper) -> d.keeper) s.docker_keepers
+  in
+  microvms @ ssh_bound @ ssh_unbound @ docker
+
 let apply_sandboxes ~observed_at sandboxes t =
-  {
-    t with
-    sandboxes = Observed.value ~observed_at sandboxes;
-    sandboxes_fallback_404 = false;
-  }
+  let base =
+    {
+      t with
+      sandboxes = Observed.value ~observed_at sandboxes;
+      sandboxes_fallback_404 = false;
+    }
+  in
+  match base.pending_sandbox_keeper with
+  | None -> base
+  | Some keeper ->
+      let names = all_sandbox_keepers_of_snapshot sandboxes in
+      let rec find i = function
+        | [] -> None
+        | k :: rest -> if String.equal k keeper then Some i else find (i + 1) rest
+      in
+      (match find 0 names with
+      | Some idx ->
+          {
+            base with
+            pending_sandbox_keeper = None;
+            filter_query = "";
+            selected_index = idx;
+            scroll_offset = Store_scroll.adjust_scroll ~scroll:base.scroll_offset idx;
+            detail_scroll_offset = 0;
+          }
+      | None -> { base with pending_sandbox_keeper = None })
 
 let empty_tool_metrics_24h : Wire_infra.tool_metrics_24h =
   {
@@ -701,6 +747,32 @@ let filtered_repositories t =
 let selected_sandbox_keeper t =
   let names = filtered_sandbox_keepers t in
   List.nth_opt names (clamp_index (List.length names) t.selected_index)
+
+let select_sandbox_by_keeper keeper t =
+  let find_idx names =
+    let rec loop i = function
+      | [] -> None
+      | k :: rest -> if String.equal k keeper then Some i else loop (i + 1) rest
+    in
+    loop 0 names
+  in
+  let t0, idx_opt =
+    match find_idx (filtered_sandbox_keepers t) with
+    | Some i -> (t, Some i)
+    | None ->
+        let cleared = { t with filter_query = "" } in
+        (cleared, find_idx (filtered_sandbox_keepers cleared))
+  in
+  match idx_opt with
+  | Some idx ->
+      {
+        t0 with
+        pending_sandbox_keeper = None;
+        selected_index = idx;
+        scroll_offset = Store_scroll.adjust_scroll ~scroll:t0.scroll_offset idx;
+        detail_scroll_offset = 0;
+      }
+  | None -> { t0 with pending_sandbox_keeper = Some keeper }
 
 let selected_repository t =
   let repos = filtered_repositories t in

@@ -845,13 +845,9 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
       | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
-      | Nav.Dive_infra (Nav.Lane_dive _) -> Nav.workspace_label Nav.Runtime
       | Nav.Dive_infra (Nav.Incident_dive _) ->
           Nav.workspace_label model.nav.workspace
-      | Nav.Dive_infra
-          ( Nav.Sandbox_dive _
-          | Nav.Runtime_trace_dive _
-          | Nav.Log_detail_dive _ ) ->
+      | Nav.Dive_infra (Nav.Runtime_trace_dive _) ->
           Nav.workspace_label Nav.Infra
     in
     let dive_segment_label = function
@@ -888,16 +884,10 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           Printf.sprintf "%s rev %d..%d" scope from_rev to_rev
       | Nav.Dive_runtime (Nav.Tool_dive name) ->
           Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
-      | Nav.Dive_runtime (Nav.Fusion_dive run_id) ->
-          Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion") ^ " " ^ run_id
       | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
           Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
       | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
           Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
-      | Nav.Dive_infra (Nav.Sandbox_dive name) ->
-          Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandbox") ^ " " ^ name
-      | Nav.Dive_infra (Nav.Lane_dive id) ->
-          Say.resolve lang (Say.make ~ko:"레인" ~en:"Lane") ^ " " ^ id
       | Nav.Dive_infra (Nav.Incident_dive id) ->
           Printf.sprintf "%s #%d"
             (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
@@ -905,10 +895,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) ->
           Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
           ^ " " ^ keeper
-      | Nav.Dive_infra (Nav.Log_detail_dive seq) ->
-          Printf.sprintf "%s #%d"
-            (Say.resolve lang (Say.make ~ko:"로그" ~en:"Log"))
-            seq
     in
     let format_dive_chain () =
       let chain = List.rev model.nav.dive_stack in
@@ -1605,6 +1591,15 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
           || model.nav.zoomed
+          || (model.infra.show_raw_json
+              && Option.is_none (Model.active_dive model)
+              && Model.detail_visible model
+              && ((Nav.equal_workspace model.nav.workspace Nav.Runtime
+                   && Nav.equal_runtime_tab model.runtime.active_tab
+                        Nav.Runtime_failover_lanes)
+                  || (Nav.equal_workspace model.nav.workspace Nav.Infra
+                      && Nav.equal_infra_tab model.infra.active_tab
+                           Nav.Infra_sandboxes)))
           || model.nav.workspace_return_stack <> []
           || not (String.equal (String.trim (active_filter_text model)) "")
           || Option.is_some (Memory_diagram.active_diagram model)

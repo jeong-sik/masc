@@ -1195,8 +1195,7 @@ let focusable_pane_count m =
                   _;
                 }
             | Nav.Dive_knowledge _
-            | Nav.Dive_runtime
-                (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             1
         | None ->
@@ -1357,8 +1356,7 @@ let pane_rects m =
               _;
             }
         | Nav.Dive_knowledge _
-        | Nav.Dive_runtime
-            (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
+        | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ ) ->
         [ br ]
     | None -> (
@@ -1707,21 +1705,13 @@ let active_focus_label m =
             if m.nav.pane_index = 1 then
               pane_prefix ~ko:(name ^ " · 시계열") ~en:(name ^ " · Series")
             else pane_prefix ~ko:("도구 · " ^ name) ~en:("Tool · " ^ name)
-        | Some (Nav.Dive_runtime (Nav.Fusion_dive id)) ->
-            Say.make ~ko:("퓨전 · " ^ id) ~en:("FUSION · " ^ id)
         | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
             Say.make ~ko:("스킬 · " ^ ref_s) ~en:("SKILL · " ^ ref_s)
         | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) ->
             Say.make ~ko:("실행 · " ^ run_id) ~en:("RUN · " ^ run_id)
-        | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
-            Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
         | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
             Say.make ~ko:("추적 · " ^ keeper) ~en:("TRACE · " ^ keeper)
-        | Some (Nav.Dive_infra (Nav.Log_detail_dive seq)) ->
-            Say.make
-              ~ko:(Printf.sprintf "로그 · #%d" seq)
-              ~en:(Printf.sprintf "LOG · #%d" seq)
-        | Some (Nav.Dive_infra (Nav.Sandbox_dive _ | Nav.Incident_dive _)) ->
+        | Some (Nav.Dive_infra (Nav.Incident_dive _)) ->
             Say.make ~ko:"인프라 상세" ~en:"INFRA DIVE"
         | None -> (
             match m.nav.workspace with
@@ -4300,17 +4290,6 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.tools_dashboard;
               ];
         }
-  | Some (Nav.Dive_runtime (Nav.Fusion_dive _)) ->
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt m.runtime.fusion_detail;
-                observed_at_opt m.runtime.fusion_runs;
-              ];
-        }
   | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
       Synced_snapshot
         {
@@ -4335,32 +4314,13 @@ let active_view_ssot_mode m =
         }
   | Some (Nav.Dive_infra target) -> (
       match target with
-      | Nav.Sandbox_dive keeper ->
-          Synced_snapshot
-            {
-              observer = m.freshness.observer;
-              observed_at =
-                latest_observed_at
-                  [
-                    observed_at_opt
-                      (Infra_store.keeper_sandbox_for ~keeper m.infra);
-                    observed_at_opt m.infra.sandboxes;
-                  ];
-            }
-      | Nav.Lane_dive _ ->
-          Synced_snapshot
-            {
-              observer = m.freshness.observer;
-              observed_at = observed_at_opt m.runtime.runtime_resolved;
-            }
       | Nav.Runtime_trace_dive _ ->
           Synced_snapshot
             {
               observer = m.freshness.observer;
               observed_at = observed_at_opt m.infra.runtime_trace;
             }
-      | Nav.Incident_dive _ | Nav.Log_detail_dive _ ->
-          Snapshot_only { observed_at = None })
+      | Nav.Incident_dive _ -> Snapshot_only { observed_at = None })
   | None -> (
       match m.nav.workspace with
       | Nav.Pulse ->

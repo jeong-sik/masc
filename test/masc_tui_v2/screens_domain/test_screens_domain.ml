@@ -1838,14 +1838,8 @@ let test_infra_all_tabs_and_dives () =
                     (contains_sub ~needle:"sk-live-secret-should-redact"
                        ~haystack:text))
             tabs;
-          (* All 3 Infra Dives in both structured mode and [J] Json_tree mode *)
-          let dives =
-            [
-              Nav.Sandbox_dive "e-masc-the-leader";
-              Nav.Lane_dive "sonnet-then-glm";
-              Nav.Incident_dive 1;
-            ]
-          in
+          (* Infra Dive + zoomed Sandboxes in both structured and [Space] Json_tree mode *)
+          let dives = [ Nav.Incident_dive 1 ] in
           List.iter
             (fun target ->
               let g1 =
@@ -2897,19 +2891,31 @@ let test_p1_5_infra_sandboxes_404_fallback_honesty () =
         ("NEVER renders 5/19 running contradiction (" ^ Say.lang_code lang ^ ")")
         false
         (contains_sub ~needle:"5/19" ~haystack:txt);
-      (* Sandbox_dive aligns raw JSON toggle hint to [Space], never conflicting [J] *)
-      let g_dive =
-        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-            Screen_infra.render_dive ~target:(Nav.Sandbox_dive "vm-ok-00")
-              ~model:m ~cache ~rect gr)
+      (* Zoomed Infra_sandboxes aligns raw JSON toggle hint to [Space], never conflicting [J] *)
+      let m_zoom_sb =
+        {
+          m with
+          nav =
+            {
+              m.nav with
+              workspace = Nav.Infra;
+              zoomed = true;
+              pane_index = 0;
+            };
+          infra = Infra_store.set_tab Nav.Infra_sandboxes m.infra;
+        }
       in
-      assert_grid_invariants ~label:("P1-5/SandboxDive/" ^ Say.lang_code lang) g_dive;
-      let dive_txt = grid_all_text g_dive in
-      Alcotest.(check bool) "Sandbox_dive uses [Space] for Json_tree" true
-        (contains_sub ~needle:"[Space]" ~haystack:dive_txt);
-      Alcotest.(check bool) "Sandbox_dive never prints conflicting [J] Json_tree"
+      let g_zoom =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_infra.render ~model:m_zoom_sb ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-5/SandboxZoom/" ^ Say.lang_code lang) g_zoom;
+      let zoom_txt = grid_all_text g_zoom in
+      Alcotest.(check bool) "Zoomed Sandbox inspector uses [Space] for Json_tree" true
+        (contains_sub ~needle:"[Space]" ~haystack:zoom_txt);
+      Alcotest.(check bool) "Zoomed Sandbox inspector never prints conflicting [J] Json_tree"
         false
-        (contains_sub ~needle:"[J]" ~haystack:dive_txt))
+        (contains_sub ~needle:"[J]" ~haystack:zoom_txt))
     [ Say.Lang_ko; Say.Lang_en ]
 
 let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =

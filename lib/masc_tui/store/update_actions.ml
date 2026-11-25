@@ -949,30 +949,9 @@ let runtime_config_revision_opt (m : Model.t) : string option =
     (fun (meta : Wire_runtime.runtime_config_raw_meta) -> meta.source_revision)
     (Observed.to_option m.runtime.runtime_config_raw)
 
-let find_resolved_lane (m : Model.t) (lane_id : string) :
-    Wire_runtime.failover_lane option =
-  match Observed.to_option m.runtime.runtime_resolved with
-  | Some snap ->
-      List.find_opt
-        (fun (l : Wire_runtime.failover_lane) -> String.equal l.id lane_id)
-        snap.lanes
-  | None -> None
-
 let selected_lane_for_crud (m : Model.t) : Wire_runtime.failover_lane option =
   match Model.active_dive m with
-  | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
-      find_resolved_lane m lane_id
-  | Some
-      ( Nav.Dive_infra
-          ( Nav.Sandbox_dive _
-          | Nav.Incident_dive _
-          | Nav.Runtime_trace_dive _
-          | Nav.Log_detail_dive _ )
-      | Nav.Dive_keeper _
-      | Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _ ) ->
-      None
+  | Some _ -> None
   | None ->
       if
         Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -3967,8 +3946,28 @@ and confirm_palette ~now (m : Model.t) =
               Update_nav.push_dive m_closed
                 (Nav.Dive_knowledge (Nav.Wiki_dive slug))
           | Update_nav.Pal_dive_sandbox keeper ->
-              Update_nav.push_dive m_closed
-                (Nav.Dive_infra (Nav.Sandbox_dive keeper))
+              let infra =
+                m_closed.infra
+                |> Infra_store.set_tab Nav.Infra_sandboxes
+                |> Infra_store.select_sandbox_by_keeper keeper
+              in
+              let m' = { m_closed with infra } in
+              let zoomed =
+                not
+                  (Model.detail_visible
+                     {
+                       m' with
+                       nav =
+                         {
+                           m'.nav with
+                           workspace = Nav.Infra;
+                           dive_stack = [];
+                           overlay = None;
+                           zoomed = false;
+                         };
+                     })
+              in
+              Update_nav.jump_to_workspace ~pane_index:1 ~zoomed m' Nav.Infra
           | Update_nav.Pal_open_infra_sandboxes pool ->
               let infra =
                 m_closed.infra
@@ -5064,6 +5063,29 @@ and execute_action ~now (m : Model.t) action =
                                 m.knowledge;
                           }
                         , [] )
+                      else if
+                        m.infra.show_raw_json
+                        && Model.detail_visible m
+                        && ((Nav.equal_workspace m.nav.workspace Nav.Runtime
+                             && Nav.equal_runtime_tab m.runtime.active_tab
+                                  Nav.Runtime_failover_lanes)
+                            || (Nav.equal_workspace m.nav.workspace Nav.Infra
+                                && Nav.equal_infra_tab m.infra.active_tab
+                                     Nav.Infra_sandboxes))
+                      then
+                        ( {
+                            m with
+                            infra =
+                              {
+                                m.infra with
+                                show_raw_json = false;
+                                detail_scroll_offset = 0;
+                              };
+                            runtime =
+                              { m.runtime with detail_scroll_offset = 0 };
+                            nav = { m.nav with json_scroll_offset = 0 };
+                          }
+                        , [] )
                       else if m.nav.zoomed && Model.can_zoom_current_view m then
                         let m0 =
                           {
@@ -5486,12 +5508,22 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Runtime -> (
                   match m.runtime.active_tab with
                   | Nav.Runtime_failover_lanes ->
-                      ( {
-                          m with
-                          runtime =
-                            Runtime_store.toggle_outside_lane_probes m.runtime;
-                        }
-                      , [] )
+                      if Model.detail_pane_focused ~detail_index:1 m then
+                        ( {
+                            m with
+                            infra = Infra_store.toggle_raw_json m.infra;
+                            runtime =
+                              { m.runtime with detail_scroll_offset = 0 };
+                            nav = { m.nav with json_scroll_offset = 0 };
+                          }
+                        , [] )
+                      else
+                        ( {
+                            m with
+                            runtime =
+                              Runtime_store.toggle_outside_lane_probes m.runtime;
+                          }
+                        , [] )
                   | Nav.Runtime_addons_browser ->
                       if m.nav.pane_index = 1 && not m.runtime.addon_catalog_mode
                       then
@@ -5543,12 +5575,14 @@ and execute_action ~now (m : Model.t) action =
                       (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
-                  | Nav.Infra_activity_logs ->
+                  | Nav.Infra_activity_logs
+                    when not (m.nav.zoomed && Model.can_zoom_current_view m) ->
                       ( {
                           m with
                           infra = Infra_store.cycle_log_level_filter m.infra;
                         }
                       , [] )
+                  | Nav.Infra_activity_logs -> (m, [])
                   | Nav.Infra_code
                     when m.nav.pane_index = 0
                          && not (m.nav.zoomed && Model.can_zoom_current_view m)
@@ -5585,6 +5619,18 @@ and execute_action ~now (m : Model.t) action =
                           in
                           ({ m with infra }, cmds)
                       | Some _ | None -> (m, []))
+                  | Nav.Infra_sandboxes
+                    when Model.detail_pane_focused ~detail_index:1 m ->
+                      ( {
+                          m with
+                          infra =
+                            {
+                              (Infra_store.toggle_raw_json m.infra) with
+                              detail_scroll_offset = 0;
+                            };
+                          nav = { m.nav with json_scroll_offset = 0 };
+                        }
+                      , [] )
                   | Nav.Infra_code
                   | Nav.Infra_sandboxes
                   | Nav.Infra_repos_changes ->
@@ -5688,8 +5734,6 @@ and execute_action ~now (m : Model.t) action =
                       (String.trim m.knowledge.artifact_search_query)
                       "") ->
               step_artifact_search ~now ~delta:1 m
-          | Some (Nav.Dive_infra (Nav.Lane_dive _)) ->
-              open_runtime_lane_create_modal m
           | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
               execute_slash ~now m (Slash.Skill Slash.Skill_new)
           | Some
@@ -5700,12 +5744,9 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Thread_dive _
                   | Nav.Wiki_dive _
                   | Nav.Memory_diff_dive _ )
-              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
-              | Nav.Dive_infra
-                  ( Nav.Sandbox_dive _
-                  | Nav.Incident_dive _
-                  | Nav.Runtime_trace_dive _
-                  | Nav.Log_detail_dive _ ) ) ->
+              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
+              | Nav.Dive_infra (Nav.Incident_dive _ | Nav.Runtime_trace_dive _) )
+            ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -6189,16 +6230,12 @@ and execute_action ~now (m : Model.t) action =
                     | Some wm -> wm.briefing.text
                     | None -> None))
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
-            | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> Some run_id
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) -> Some run_id
             | Some (Nav.Dive_infra idive) -> (
                 match idive with
-                | Nav.Sandbox_dive keeper | Nav.Runtime_trace_dive keeper ->
-                    Some keeper
-                | Nav.Lane_dive lane_id -> Some lane_id
-                | Nav.Incident_dive id | Nav.Log_detail_dive id ->
-                    Some (Int.to_string id))
+                | Nav.Runtime_trace_dive keeper -> Some keeper
+                | Nav.Incident_dive id -> Some (Int.to_string id))
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge -> (
@@ -6666,15 +6703,8 @@ and execute_action ~now (m : Model.t) action =
               in
               open_url_or_notice url_opt
           | Some (Nav.Dive_work (Nav.Verification_dive _))
-          | Some (Nav.Dive_runtime _) ->
-              (m, [])
-          | Some
-              (Nav.Dive_infra
-                 ( Nav.Sandbox_dive _
-                 | Nav.Lane_dive _
-                 | Nav.Incident_dive _
-                 | Nav.Runtime_trace_dive _
-                 | Nav.Log_detail_dive _ )) ->
+          | Some (Nav.Dive_runtime _)
+          | Some (Nav.Dive_infra _) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -6809,6 +6839,7 @@ and execute_action ~now (m : Model.t) action =
               {
                 m with
                 nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+                infra = { m.infra with show_raw_json = false };
               }
             in
             let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
@@ -6825,6 +6856,8 @@ and execute_action ~now (m : Model.t) action =
              || not (Int.equal (Model.inner_body_width next) (Model.inner_body_width m)))
         then
           Update_nav.refresh_open_memory_diagram ~now next
+        else if zoomed && not in_dive then
+          (next, View_fetches.fetches_for_current_view next)
         else (next, [])
   | Keymap.Cycle_memory_view ->
       let in_memory =
@@ -7086,8 +7119,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Wiki_dive _
                 | Nav.Artifact_dive _
                 | Nav.Memory_diff_dive _ )
-            | Nav.Dive_runtime
-                (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -7933,12 +7965,6 @@ and execute_action ~now (m : Model.t) action =
               | None -> ""
             in
             open_runtime_assign_modal m ~keeper_default:name ~runtime_default ()
-        | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
-            let keeper_default =
-              Option.value (Update_nav.resolve_target_keeper m) ~default:""
-            in
-            open_runtime_assign_modal m ~keeper_default ~runtime_default:lane_id
-              ()
         | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
             open_board_comment_for_selected m
         | Some
@@ -7968,11 +7994,8 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Artifact_dive _
                 | Nav.Memory_diff_dive _ )
             | Nav.Dive_runtime _
-            | Nav.Dive_infra
-                ( Nav.Sandbox_dive _
-                | Nav.Incident_dive _
-                | Nav.Runtime_trace_dive _
-                | Nav.Log_detail_dive _ ) ) ->
+            | Nav.Dive_infra (Nav.Incident_dive _ | Nav.Runtime_trace_dive _) )
+          ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -8153,7 +8176,7 @@ and execute_action ~now (m : Model.t) action =
             execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
         | Some
             ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -8374,55 +8397,6 @@ and execute_action ~now (m : Model.t) action =
                   { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
                 in
                 (next, View_fetches.fetches_for_current_view next)
-            | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> (
-                let post_id_opt =
-                  match Runtime_store.fusion_detail_for ~run_id m.runtime with
-                  | Some { evidence = Wire_runtime.Evidence_recorded p; _ } ->
-                      Some p.post_id
-                  | Some
-                      {
-                        evidence =
-                          Wire_runtime.Evidence_pending
-                          | Wire_runtime.Evidence_absent;
-                        _;
-                      }
-                  | None -> (
-                      match
-                        Runtime_store.historical_evidence_for_run ~run_id
-                          m.runtime
-                      with
-                      | Some ev -> Some ev.post_id
-                      | None -> None)
-                in
-                match post_id_opt with
-                | Some post_id ->
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make
-                           ~ko:("보드 증거 불러오는 중: " ^ post_id)
-                           ~en:("Loading board evidence: " ^ post_id))
-                        m
-                    , [
-                        Cmd.Http_get
-                          {
-                            epoch = m.epoch;
-                            req = Cmd.Get_fusion_board_evidence { post_id };
-                          };
-                      ] )
-                | None ->
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make ~ko:"연결된 보드 증거가 없습니다"
-                           ~en:"No linked board evidence for this fusion run")
-                        m
-                    , [] ))
-            | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) -> (
-                match find_resolved_lane m lane_id with
-                | Some lane -> open_runtime_lane_edit_modal ~now m lane
-                | None ->
-                    ( Model.with_toast ~now ~level:Model.Toast_warning
-                        (Say.make ~ko:("레인을 찾을 수 없습니다: " ^ lane_id)
-                           ~en:("Lane not found: " ^ lane_id))
-                        m
-                    , [] ))
             | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
                 match
                   List.find_opt
@@ -8468,11 +8442,8 @@ and execute_action ~now (m : Model.t) action =
                       _;
                     }
                 | Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)
-                | Nav.Dive_infra
-                    ( Nav.Sandbox_dive _
-                    | Nav.Incident_dive _
-                    | Nav.Runtime_trace_dive _
-                    | Nav.Log_detail_dive _ ) ) ->
+                | Nav.Dive_infra (Nav.Incident_dive _ | Nav.Runtime_trace_dive _) )
+              ->
                 (m, [])
             | None ->
                 if
@@ -9051,16 +9022,11 @@ and execute_action ~now (m : Model.t) action =
         if Option.is_some m.nav.overlay then None
         else
           match Model.active_dive m with
-          | Some (Nav.Dive_infra (Nav.Sandbox_dive keeper))
           | Some
               (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_sandbox }) ->
               Some (`Keeper keeper, keeper)
           | Some
-              ( Nav.Dive_infra
-                  ( Nav.Lane_dive _
-                  | Nav.Incident_dive _
-                  | Nav.Runtime_trace_dive _
-                  | Nav.Log_detail_dive _ )
+              ( Nav.Dive_infra _
               | Nav.Dive_keeper
                   {
                     tab =

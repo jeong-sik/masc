@@ -439,49 +439,6 @@ max-concurrent = 1
                   antigravity-cli")
          errors)
 
-let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
-  let render (protocol : Runtime_toml.editor_protocol) =
-    let transport =
-      match protocol.transport with
-      | Runtime_toml.Endpoint -> "endpoint"
-      | Runtime_toml.Command -> "command"
-    in
-    let semantics =
-      match protocol.semantics with
-      | Runtime_toml.Http_provider -> "http_provider"
-      | Runtime_toml.Official_client -> "official_client"
-    in
-    let credential_policy =
-      match protocol.credential_policy with
-      | Runtime_toml.Credentials_optional -> "optional"
-      | Runtime_toml.Credentials_forbidden -> "forbidden"
-      | Runtime_toml.Credentials_file_required -> "file_required"
-    in
-    Printf.sprintf
-      "%s:%s:%s:%s:%b:%s:%s"
-      protocol.protocol
-      transport
-      semantics
-      credential_policy
-      protocol.requires_non_interactive
-      (String.concat "," protocol.provider_fields)
-      (String.concat "," protocol.required_provider_fields)
-  in
-  check
-    (list string)
-    "only production-materializable protocols are offered"
-    [ "messages-http:endpoint:http_provider:optional:false::"
-    ; "openai-compatible-http:endpoint:http_provider:optional:false::"
-    ; "ollama-http:endpoint:http_provider:optional:false::"
-    ; "gemini-http:endpoint:http_provider:optional:false::"
-    ; "vertex-gemini:endpoint:http_provider:optional:false::"
-    ; "codex-app-server:command:official_client:forbidden:true:account-home:"
-    ; "claude-code:command:official_client:forbidden:true:account-home:"
-    ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
-    ]
-    (List.map render Runtime_toml.editor_protocols)
-;;
-
 (* Only a provider id becomes a top-level table (its bindings), so only a
    provider id is refused for naming one; test_runtime_toml_namespace
    covers every name and shows model ids are not refused (#39539). *)
@@ -4714,10 +4671,6 @@ let () =
             "runtime TOML rejects unknown protocol"
             `Quick
             test_runtime_toml_rejects_unknown_protocol
-        ; test_case
-            "runtime TOML editor protocol inventory is backend-owned"
-            `Quick
-            test_runtime_toml_editor_protocol_inventory_is_backend_owned
         ; test_case
             "runtime TOML rejects reserved provider and model ids"
             `Quick

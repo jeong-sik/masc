@@ -454,14 +454,14 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
               let patch_result = edit_message ~message_id:mid ~content:head in
               combine_delivery_results patch_result (send_overflow overflow)
         in
-        (match reply_to_message_id with
-         | None ->
-           on_send_result final_result;
-           List.iter send_rich_embed (rich_embeds_of_text acc_text)
-         | Some _ ->
-           if Result.is_ok final_result then
-             List.iter send_rich_embed (rich_embeds_of_text acc_text);
-           on_send_result (combine_delivery_results final_result !rich_delivery));
+        let final_result =
+          if Option.is_some reply_to_message_id
+          then combine_delivery_results final_result !rich_delivery
+          else final_result
+        in
+        on_send_result final_result;
+        if Option.is_none reply_to_message_id || Result.is_ok final_result then
+          List.iter send_rich_embed (rich_embeds_of_text acc_text);
         Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
         external_effect_completed := true;

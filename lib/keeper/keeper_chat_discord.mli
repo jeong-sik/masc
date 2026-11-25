@@ -77,7 +77,8 @@ val adapter_loop :
     [on_send_result] is invoked once at terminal delivery. The primary reply
     must deliver its final text or error, including any overflow. When
     [reply_to_message_id] is present, [Run_finished] also includes the results
-    of typed rich blocks and final text embeds. The callback defaults to a no-op.
+    of typed rich blocks. Final text previews are sent after settlement.
+    The callback defaults to a no-op.
 
     The loop exits after one turn; the caller must restart it for
     subsequent turns. *)

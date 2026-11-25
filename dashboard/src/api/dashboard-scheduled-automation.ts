@@ -5,7 +5,9 @@
 // nested field of /api/v1/dashboard/tools, so any surface needing schedule
 // state pulled the whole tool inventory with it.
 
-import { get, type AbortableRequestOptions } from './core'
+import { authSession, resolveWorkspaceUrl } from '../core/auth'
+import { apiGet } from '../core/transport'
+import { ApiRequestError, DEFAULT_GET_TIMEOUT_MS, get, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import type {
   DashboardScheduledAutomation,
@@ -307,6 +309,9 @@ export function normalizeScheduledAutomation(
     || activeCount === null
     || terminalCount === null
     || typeof record.truncated !== 'boolean'
+    || !Array.isArray(record.requests)
+    || data.requests.length > requestCount
+    || (!data.truncated && data.requests.length !== requestCount)
   ) {
     return {
       state: 'unavailable',
@@ -348,17 +353,39 @@ export type ScheduledAutomationReadOptions = AbortableRequestOptions & {
   activeOnly?: boolean
 }
 
+async function readSchedulePayload(path: string, signal?: AbortSignal): Promise<unknown> {
+  if (authSession.peek().kind !== 'multi_account_signed_in') {
+    await ensureDevToken()
+    // Keep the bearer reader's exact-owner credential refusal and renewal.
+    return get<unknown>(resolveWorkspaceUrl(path), { signal })
+  }
+  // Account requests use the current session cookie and its workspace route.
+  const result = await apiGet<unknown>(path, { signal, cache: 'no-store', timeoutMs: DEFAULT_GET_TIMEOUT_MS })
+  if (result.ok) return result.value
+
+  const { error } = result
+  if (error.kind === 'aborted' || error.kind === 'epoch_stale') {
+    throw new DOMException(error.message, 'AbortError')
+  }
+  throw new ApiRequestError({
+    method: 'GET',
+    path,
+    status: error.status ?? undefined,
+    errorCode: error.code ?? undefined,
+    detail: error.message,
+    timeout: error.kind === 'timeout',
+    timeoutMs: DEFAULT_GET_TIMEOUT_MS,
+  })
+}
+
 export async function fetchDashboardScheduledAutomation(
   opts?: ScheduledAutomationReadOptions,
 ): Promise<DashboardScheduledAutomationProjection> {
-  await ensureDevToken()
   const activeOnly = opts?.activeOnly === true
   const path = activeOnly
     ? '/api/v1/dashboard/scheduled-automation?active_only=true'
     : '/api/v1/dashboard/scheduled-automation'
-  const raw = await get<unknown>(path, {
-    signal: opts?.signal,
-  })
+  const raw = await readSchedulePayload(path, opts?.signal)
   const projection = normalizeScheduledAutomation(raw)
   // The page says what it is narrowed to. A server from before the
   // active-only page ignores the parameter and answers with the fleet page,
@@ -378,10 +405,7 @@ export async function fetchDashboardScheduledAutomationLookup(
   scheduleId: string,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardScheduledAutomationLookup> {
-  await ensureDevToken()
   const query = new URLSearchParams({ schedule_id: scheduleId })
-  const raw = await get<unknown>(`/api/v1/dashboard/scheduled-automation?${query}`, {
-    signal: opts?.signal,
-  })
+  const raw = await readSchedulePayload(`/api/v1/dashboard/scheduled-automation?${query}`, opts?.signal)
   return decodeScheduledAutomationLookup(raw, scheduleId)
 }

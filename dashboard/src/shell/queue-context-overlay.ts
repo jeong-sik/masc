@@ -6,12 +6,15 @@
  */
 
 import { html } from 'htm/preact'
+import { InlineSpinner } from '../components/common/inline-spinner'
 import { MarkdownContent } from '../components/common/markdown-renderer'
+import { activeScheduleRead, subscribeActiveSchedulesRefresh } from '../components/schedule/schedule-state'
 import type { VNode } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { isAuthenticated, sessionEpoch } from '../core/auth'
 import { formatObserved, resourceCache } from '../core/resource-cache'
 import { apiGet } from '../core/transport'
+import { formatTimestampKo } from '../lib/format-time'
 import { navigate } from '../routes/router'
 import {
   closeActiveOverlay,
@@ -46,14 +49,7 @@ interface QuickPeekSchedule {
   readonly status: string
 }
 
-interface QuickPeekScheduleSummary {
-  readonly total: number
-  readonly truncated: boolean
-  readonly rows: readonly QuickPeekSchedule[]
-}
-
 const SHELL_CACHE_KEY = 'shell:queue-context'
-const SCHEDULES_CACHE_KEY = 'shell:queue-context:schedules'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -79,6 +75,7 @@ function decodeShellSummary(raw: unknown): ShellQueueSummary {
 }
 
 const MAX_QPEEK_PREVIEW = 10
+const MAX_SCHEDULE_PREVIEW = 5
 
 function formatScheduleDue(isoRaw: unknown, unixRaw: unknown): string | null {
   const iso = asStr(isoRaw)
@@ -94,39 +91,19 @@ function formatScheduleDue(isoRaw: unknown, unixRaw: unknown): string | null {
   return null
 }
 
-function decodeSchedulesSummary(raw: unknown): QuickPeekScheduleSummary {
-  if (!isRecord(raw)) {
-    throw new Error('예약 자동화 응답 형식이 잘못되었습니다.')
-  }
-  const readError = asStr(raw.schedule_store_read_error)
-  if (readError) throw new Error(readError)
-  if (raw.schedule_store_known === false || raw.status === 'unknown') {
-    throw new Error('예약 저장소 상태를 확인할 수 없습니다.')
-  }
-  if (!Array.isArray(raw.requests)) {
-    return { total: 0, truncated: false, rows: [] }
-  }
-  const rows: QuickPeekSchedule[] = []
-  for (const r of raw.requests) {
-    if (!isRecord(r)) continue
-    const id = asStr(r.schedule_id)
-    if (!id) continue
-    const summary = asStr(r.payload_summary)
-    rows.push({
-      id,
-      summary: summary ?? id,
-      summaryIsProse: summary !== null && r.payload_kind === 'masc.keeper_wake',
-      keeper: asStr(r.payload_keeper_name) ?? asStr(r.payload_target),
-      dueAt: formatScheduleDue(r.next_due_at_iso, r.next_due_at) ?? formatScheduleDue(r.due_at_iso, r.due_at),
-      status: asStr(r.status) ?? 'scheduled',
-    })
-  }
-  const total = asNumberOrNull(raw.request_count) ?? rows.length
-  return {
-    total,
-    truncated: raw.truncated === true || total > 5 || rows.length > 5,
-    rows: rows.slice(0, 5),
-  }
+function quickPeekSchedule(raw: unknown): QuickPeekSchedule[] {
+  if (!isRecord(raw)) return []
+  const id = asStr(raw.schedule_id)
+  if (!id) return []
+  const summary = asStr(raw.payload_summary)
+  return [{
+    id,
+    summary: summary ?? id,
+    summaryIsProse: summary !== null && raw.payload_kind === 'masc.keeper_wake',
+    keeper: asStr(raw.payload_keeper_name) ?? asStr(raw.payload_target),
+    dueAt: formatScheduleDue(raw.next_due_at_iso, raw.next_due_at) ?? formatScheduleDue(raw.due_at_iso, raw.due_at),
+    status: asStr(raw.status) ?? '미보고',
+  }]
 }
 
 export function QueueContextOverlayBody(): VNode {
@@ -141,7 +118,13 @@ export function QueueContextOverlayBody(): VNode {
   const sourceStatus = effectiveHitlSourceStatus.value
   const inboxUnchecked = inboxUncheckedSources.value
   const observed = resourceCache.observe<ShellQueueSummary>(SHELL_CACHE_KEY).value
-  const schedulesObs = resourceCache.observe<QuickPeekScheduleSummary>(SCHEDULES_CACHE_KEY).value
+  const { observation: schedules, loading: schedulesLoading, error: schedulesError } = activeScheduleRead.value
+  const schedulePage = schedules?.projection.page
+  const scheduleRows = schedules?.projection.data.requests.flatMap(quickPeekSchedule).slice(0, MAX_SCHEDULE_PREVIEW) ?? []
+  const lastSchedules = schedules !== null && (schedulesLoading || schedulesError !== null)
+  const scheduleCount = schedulePage
+    ? `${schedulePage.totalCount}${lastSchedules ? ' · 마지막 확인' : ''}`
+    : schedulesError ? '조회 실패' : '…'
 
   const sectionCountLabel = (count: number, st: HitlSourceState): string => {
     if (st.kind === 'ok') return String(count)
@@ -159,16 +142,9 @@ export function QueueContextOverlayBody(): VNode {
       }),
       { ttlMs: 10_000, topics: ['workspace_dataset_changed', 'keeper_heartbeat'], reason: 'mount' },
     )
-    void resourceCache.fetch(
-      SCHEDULES_CACHE_KEY,
-      (signal) => apiGet<QuickPeekScheduleSummary>('/api/v1/dashboard/scheduled-automation?active_only=true', {
-        signal,
-        decode: decodeSchedulesSummary,
-      }),
-      { ttlMs: 10_000, topics: ['schedules', 'schedule_store_changed', 'scheduled_automation_changed'], reason: 'mount' },
-    )
     void refreshPendingHitl()
   }, [authed, epoch])
+  useEffect(() => authed ? subscribeActiveSchedulesRefresh() : undefined, [authed])
 
   const formatMetric = (value: number | null | undefined): string => {
     if (observed.kind !== 'value') return formatObserved(observed)
@@ -210,7 +186,7 @@ export function QueueContextOverlayBody(): VNode {
               <div class="ap-mini-kpi">
                 <span class="ap-mini-kpi-k">Schedules</span>
                 <strong class="ap-mini-kpi-v tnum">
-                  ${schedulesObs.kind === 'value' ? String(schedulesObs.data.total) : formatObserved(schedulesObs)}
+                  ${scheduleCount}
                 </strong>
               </div>
             </div>
@@ -405,7 +381,7 @@ export function QueueContextOverlayBody(): VNode {
 
             <section class="ap-qpeek-section">
               <header class="ap-qpeek-section-head">
-                <h3>Upcoming Schedules (${schedulesObs.kind === 'value' ? schedulesObs.data.total : '…'})</h3>
+                <h3>Upcoming Schedules (${scheduleCount})</h3>
                 <button
                   type="button"
                   class="btn-ghost"
@@ -414,31 +390,42 @@ export function QueueContextOverlayBody(): VNode {
                   Open Schedules →
                 </button>
               </header>
-              ${schedulesObs.kind === 'failed'
-                ? html`<p class="ap-error" role="alert">예약 조회 실패: ${schedulesObs.error.message}</p>`
-                : schedulesObs.kind !== 'value'
-                  ? html`<p class="ap-muted">예약 불러오는 중…</p>`
-                  : schedulesObs.data.rows.length === 0
-                    ? html`<p class="ap-muted">활성 예약 자동화가 없습니다.</p>`
-                    : html`
-                        <ul class="ap-qpeek-list">
-                          ${schedulesObs.data.rows.map((s) => html`
-                            <li key=${s.id} class="ap-qpeek-card">
-                              <div class="ap-qpeek-card-top">
-                                <strong>${s.keeper ?? s.id}</strong>
-                                <span class="mono ap-muted">${s.status}</span>
-                              </div>
-                              ${s.summaryIsProse
-                                ? html`<${MarkdownContent} class="ap-qpeek-card-text" text=${s.summary} />`
-                                : html`<p class="ap-qpeek-card-text">${s.summary}</p>`}
-                              ${s.dueAt && html`<div class="ap-qpeek-card-meta mono">due=${s.dueAt}</div>`}
-                            </li>
-                          `)}
-                        </ul>
-                        ${schedulesObs.data.truncated && html`
-                          <p class="ap-muted">표시 제한으로 일부 예약만 표시됩니다. 전체 목록은 Schedules에서 확인하세요.</p>
-                        `}
-                      `}
+              ${schedulesLoading && html`
+                <p class="ap-muted" role="status">
+                  <${InlineSpinner} /> ${schedules ? '예약 갱신 중…' : '예약 불러오는 중…'}
+                </p>
+              `}
+              ${schedulesError && html`<p class="ap-error" role="alert">예약 조회 실패 · ${schedulesError}</p>`}
+              ${!schedules && !schedulesLoading && !schedulesError && html`
+                <p class="ap-muted">예약 조회 대기 중</p>
+              `}
+              ${schedules && lastSchedules && html`
+                <p class="ap-muted">마지막 확인 · <time dateTime=${new Date(schedules.observedAt).toISOString()}>
+                  ${formatTimestampKo(schedules.observedAt / 1000)}
+                </time></p>
+              `}
+              ${schedulePage?.totalCount === 0 && html`
+                <p class="ap-muted">${lastSchedules ? '마지막 조회에 활성 예약이 없었습니다.' : '활성 예약 자동화가 없습니다.'}</p>
+              `}
+              ${scheduleRows.length > 0 && html`
+                <ul class="ap-qpeek-list">
+                  ${scheduleRows.map((s) => html`
+                    <li key=${s.id} class="ap-qpeek-card">
+                      <div class="ap-qpeek-card-top">
+                        <strong>${s.keeper ?? s.id}</strong>
+                        <span class="mono ap-muted">${s.status}</span>
+                      </div>
+                      ${s.summaryIsProse
+                        ? html`<${MarkdownContent} class="ap-qpeek-card-text" text=${s.summary} />`
+                        : html`<p class="ap-qpeek-card-text">${s.summary}</p>`}
+                      ${s.dueAt && html`<div class="ap-qpeek-card-meta mono">due=${s.dueAt}</div>`}
+                    </li>
+                  `)}
+                </ul>
+              `}
+              ${schedulePage && (schedulePage.truncated || scheduleRows.length < schedulePage.totalCount) && html`
+                <p class="ap-muted">표시 제한으로 일부 예약만 표시됩니다. 전체 목록은 Schedules에서 확인하세요.</p>
+              `}
             </section>
           `}
     </div>

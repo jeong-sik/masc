@@ -8,6 +8,7 @@ import {
   bumpSessionEpoch,
   registerWorkspaceTargets,
   resetAuthStateForTests,
+  selectWorkspace,
   sessionEpoch,
 } from '../core/auth'
 import {
@@ -15,8 +16,12 @@ import {
   resetObserverStateForTests,
   viewProvenance,
 } from '../core/observer'
+import { resourceCache } from '../core/resource-cache'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
+import { subscribeActiveSchedulesRefresh } from '../components/schedule/schedule-state'
+import { publishDashboardObservationChange } from '../lib/observation-refresh'
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { navigate, resetRouterForTests } from '../routes/router'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
@@ -59,6 +64,19 @@ const EMPTY_HITL: Readonly<Record<string, object>> = {
   '/api/v1/verification/requests': { requests: [] },
 }
 
+const EMPTY_ACTIVE_SCHEDULES = {
+  status: 'ok',
+  schedule_store_known: true,
+  schedule_store_read_error: null,
+  active_only_selector: true,
+  request_count: 0,
+  request_limit: 20,
+  truncated: false,
+  counts: {},
+  fsm: { state: 'idle', active_count: 0, terminal_count: 0 },
+  requests: [],
+}
+
 function hitlJson(payload: object, status = 200): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
 }
@@ -74,6 +92,8 @@ describe('Proposal A+ Shell components', () => {
     resetTimeWindowForTests('24h')
     resetRouterForTests('/pulse')
     resetShellStateForTests()
+    resourceCache.clearAll()
+    confirmRuntimeTestWorkspace()
   })
 
   afterEach(() => {
@@ -462,9 +482,8 @@ describe('Proposal A+ Shell components', () => {
       if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 3, tasks: 7, agents: 2 } })
       if (url.includes('/api/v1/dashboard/scheduled-automation')) {
         return json({
-          status: 'ok',
-          schedule_store_known: true,
-          request_count: 1,
+          ...EMPTY_ACTIVE_SCHEDULES,
+          request_count: 2,
           truncated: true,
           requests: [
             {
@@ -607,7 +626,7 @@ describe('Proposal A+ Shell components', () => {
       requestedUrls.push(url)
       const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
-      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json(EMPTY_ACTIVE_SCHEDULES)
       if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
       return json({})
     })
@@ -654,7 +673,7 @@ describe('Proposal A+ Shell components', () => {
         return new Response(JSON.stringify({ error: 'approval store offline' }), { status: 503, headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 2, tasks: 4, agents: 1 } })
-      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) return json(EMPTY_ACTIVE_SCHEDULES)
       if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
       if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [] })
       if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
@@ -696,7 +715,7 @@ describe('Proposal A+ Shell components', () => {
       const url = String(input)
       if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 1, tasks: 2, agents: 1 } })
       if (url.includes('/api/v1/dashboard/scheduled-automation')) {
-        return json({ status: 'ok', schedule_store_known: true, request_count: 0, requests: [] })
+        return json(EMPTY_ACTIVE_SCHEDULES)
       }
       if (url.includes('/api/v1/verification/requests')) return json(verifPayload)
       for (const [prefix, body] of Object.entries(EMPTY_HITL)) {
@@ -757,5 +776,119 @@ describe('Proposal A+ Shell components', () => {
     expect(effectiveHitlSourceStatus.value.verification).toEqual({ kind: 'ok' })
     expect(container.textContent).not.toContain('Awaiting Verifications')
     vi.unstubAllGlobals()
+  })
+
+  describe('Upcoming Schedules', () => {
+    beforeEach(() => {
+      authSession.value = {
+        kind: 'single_user_local',
+        mode: 'single_user',
+        tokenPresent: true,
+        authMethods: AUTH_METHODS,
+        workspaceId: 'default',
+      }
+    })
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('reports a missing schedule array as unavailable', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+          return hitlJson({ ...EMPTY_ACTIVE_SCHEDULES, requests: undefined })
+        }
+        return hitlJson(Object.entries(EMPTY_HITL).find(([path]) => url.includes(path))?.[1] ?? {})
+      }))
+
+      await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
+
+      await waitFor(() => expect(container.textContent).toContain('예약 조회 실패'))
+      expect(container.textContent).not.toContain('Upcoming Schedules (0)')
+      expect(container.textContent).not.toContain('활성 예약 자동화가 없습니다.')
+    })
+
+    it('shares the calendar read and retains its last sample through an unavailable response', async () => {
+      const reads: Array<(response: Response) => void> = []
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/v1/dashboard/scheduled-automation?active_only=true')) {
+          return new Promise<Response>(resolve => { reads.push(resolve) })
+        }
+        return hitlJson(Object.entries(EMPTY_HITL).find(([path]) => url.includes(path))?.[1] ?? {})
+      }))
+
+      const stopCalendar = subscribeActiveSchedulesRefresh()
+      try {
+        await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
+        await waitFor(() => expect(reads).toHaveLength(1))
+        expect(container.textContent).toContain('예약 불러오는 중')
+        await act(async () => reads[0]!(hitlJson({
+          ...EMPTY_ACTIVE_SCHEDULES,
+          request_count: 1,
+          requests: [{ schedule_id: 'sc-2', status: 'scheduled', payload_summary: 'Patrol sample' }],
+        })))
+        await waitFor(() => expect(container.textContent).toContain('Patrol sample'))
+        expect(container.textContent).toContain('Upcoming Schedules (1)')
+
+        await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
+        await waitFor(() => expect(reads).toHaveLength(2))
+        expect(container.textContent).toContain('예약 갱신 중')
+        expect(container.textContent).toContain('Patrol sample')
+        await act(async () => reads[1]!(hitlJson({
+          status: 'unknown',
+          schedule_store_known: false,
+          schedule_store_read_error: 'ledger offline',
+        })))
+        await waitFor(() => expect(container.textContent).toContain('ledger offline'))
+        expect(container.textContent).toContain('Patrol sample')
+        expect(container.textContent).toContain('마지막 확인')
+        expect(container.querySelector('time')?.getAttribute('datetime')).toBeTruthy()
+
+        await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
+        await waitFor(() => expect(reads).toHaveLength(3))
+        await act(async () => reads[2]!(hitlJson(EMPTY_ACTIVE_SCHEDULES)))
+        await waitFor(() => expect(container.textContent).toContain('활성 예약 자동화가 없습니다.'))
+        expect(container.textContent).toContain('Upcoming Schedules (0)')
+        expect(container.textContent).not.toContain('Patrol sample')
+        expect(container.textContent).not.toContain('ledger offline')
+      } finally { stopCalendar() }
+    })
+
+    it('releases the previous workspace sample and request before reading the selected route', async () => {
+      const reads: Array<{ url: string; signal: AbortSignal | null; finish: (response: Response) => void }> = []
+      registerWorkspaceTargets([
+        { id: 'alpha', label: 'Alpha', baseUrl: '/ws/alpha' },
+        { id: 'beta', label: 'Beta', baseUrl: '/ws/beta' },
+      ])
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/v1/dashboard/scheduled-automation?active_only=true')) {
+          return new Promise<Response>(finish => { reads.push({ url, signal: init?.signal ?? null, finish }) })
+        }
+        return hitlJson(Object.entries(EMPTY_HITL).find(([path]) => url.includes(path))?.[1] ?? {})
+      }))
+      const page = (id: string) => hitlJson({
+        ...EMPTY_ACTIVE_SCHEDULES, request_count: 1,
+        requests: [{ schedule_id: id, payload_summary: id, status: 'scheduled' }],
+      })
+      await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
+      await waitFor(() => expect(reads).toHaveLength(1))
+      expect(reads[0]?.url).toBe('/ws/alpha/api/v1/dashboard/scheduled-automation?active_only=true')
+      await act(async () => reads[0]!.finish(page('Alpha patrol')))
+      await waitFor(() => expect(container.textContent).toContain('Alpha patrol'))
+
+      await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
+      await waitFor(() => expect(reads).toHaveLength(2))
+      await act(async () => { selectWorkspace('beta') })
+      expect(container.textContent).not.toContain('Alpha patrol')
+      expect(reads[1]?.signal?.aborted).toBe(true)
+      await waitFor(() => expect(reads).toHaveLength(3))
+      expect(reads[2]?.url).toBe('/ws/beta/api/v1/dashboard/scheduled-automation?active_only=true')
+      await act(async () => reads[2]!.finish(page('Beta patrol')))
+      await waitFor(() => expect(container.textContent).toContain('Beta patrol'))
+      await act(async () => reads[1]!.finish(page('Alpha late patrol')))
+      expect(container.textContent).toContain('Beta patrol')
+      expect(container.textContent).not.toContain('Alpha late patrol')
+    })
   })
 })

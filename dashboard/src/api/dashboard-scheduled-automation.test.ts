@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi, afterEach } from 'vitest'
+import { authSession, registerWorkspaceTargets, resetAuthStateForTests } from '../core/auth'
+import { clearStoredToken, setRejectedCredentialListener, setStoredToken } from './core'
+import { pruneSchedules } from './dashboard-schedule'
 import {
   decodeScheduledAutomationLookup,
   fetchDashboardScheduledAutomation,
@@ -212,6 +215,26 @@ describe('decodeScheduledAutomationLookup', () => {
 })
 
 describe('fetchDashboardScheduledAutomation', () => {
+  it('keeps the bearer credential owner’s token refusal signal', async () => {
+    const token = 'schedule-fixture-token'
+    const rejected = vi.fn()
+    setStoredToken(token, { source: 'manual' })
+    setRejectedCredentialListener(rejected)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: 'token expired', auth_error_code: 'token_expired' }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    )))
+    try {
+      await expect(fetchDashboardScheduledAutomation({ activeOnly: true })).rejects.toMatchObject({ status: 401 })
+      await vi.waitFor(() => expect(rejected).toHaveBeenCalledWith({
+        token, authErrorCode: 'token_expired', httpStatus: 401,
+      }))
+    } finally {
+      setRejectedCredentialListener(null)
+      clearStoredToken()
+    }
+  })
+
   it('requests the dedicated endpoint, not the tool inventory', async () => {
     // A fresh Response per call: a body can only be read once, and the
     // dev-token preflight consumes the first one.
@@ -327,4 +350,33 @@ describe('fetchDashboardScheduledAutomation', () => {
       expect(projection).toEqual({ state: 'unavailable', reason: 'corrupt ledger' })
     })
   })
+})
+
+it('prunes on the selected workspace through the active account session', async () => {
+  authSession.value = {
+    kind: 'multi_account_signed_in',
+    mode: 'multi_account',
+    accountId: 'fixture-account',
+    email: null,
+    displayName: 'Fixture',
+    role: 'admin',
+    csrfToken: 'fixture-csrf',
+    authMethods: { google: true, github: false, dev_token: false },
+    workspaceId: 'default',
+  }
+  registerWorkspaceTargets([{ id: 'selected', label: 'Selected', baseUrl: '/ws/selected' }])
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(
+    JSON.stringify({ ok: true, pruned_count: 2 }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    await expect(pruneSchedules()).resolves.toEqual({ ok: true, pruned_count: 2 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/ws/selected/api/v1/dashboard/schedule/prune')
+    expect(init?.credentials).toBe('same-origin')
+    expect(new Headers(init?.headers).get('x-masc-csrf-token')).toBe('fixture-csrf')
+  } finally { resetAuthStateForTests() }
 })

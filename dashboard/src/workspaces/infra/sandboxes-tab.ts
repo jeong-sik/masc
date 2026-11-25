@@ -23,7 +23,7 @@ import {
   resourceCache,
   sessionEpoch,
 } from '../../core'
-import { DataTable, type DataTableColumn } from '../../components/primitives'
+import { DataTable, RefreshButton, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
   expectOptionalArrayField,
@@ -317,8 +317,8 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   }, [props.onNavigate])
 
   const loadSandboxes = (reason: 'mount' | 'manual' = 'mount') => {
-    if (!canReadSuOrMaAdmin(authSession.peek())) return
-    void resourceCache.fetch<InfraSandboxesData>(
+    if (!canReadSuOrMaAdmin(authSession.peek())) return Promise.resolve()
+    return resourceCache.fetch<InfraSandboxesData>(
       'infra:sandboxes',
       (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', {
         signal,
@@ -329,7 +329,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   }
 
   useEffect(() => {
-    if (canReadSandboxes) loadSandboxes('mount')
+    if (canReadSandboxes) void loadSandboxes('mount')
   }, [epoch, canReadSandboxes])
 
   const handleTriggerProbe = async () => {
@@ -345,7 +345,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
       return
     }
     pushShellToast('샌드박스 프로브 요청이 접수되었습니다.', 'success')
-    loadSandboxes('manual')
+    void loadSandboxes('manual')
   }
 
   const microVmColumns = useMemo<readonly DataTableColumn<InfraMicroVmGuest>[]>(() => [
@@ -660,7 +660,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               ${probing ? '프로브 실행 중…' : '지금 프로브 실행'}
             </button>
           `}
-          <button type="button" class="btn-ghost" onClick=${() => loadSandboxes('manual')}>새로고침</button>
+          <${RefreshButton} onRefresh=${() => loadSandboxes('manual')} />
         </div>
       </header>
 

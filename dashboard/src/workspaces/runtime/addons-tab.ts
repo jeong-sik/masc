@@ -28,7 +28,7 @@ import {
   subscribeObserverReconnect,
   subscribeObserverResync,
 } from '../../core'
-import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MasterDetail, RefreshButton, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import {
   expectOptionalArrayField,
@@ -173,9 +173,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const loadAddons = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
-    if (!hasLocalAddonAccess()) return
+    if (!hasLocalAddonAccess()) return Promise.resolve()
     const startEpoch = currentSessionEpoch()
-    void Promise.all([
+    return Promise.all([
       resourceCache.fetch<LaneAddonsPayload>(
         'runtime:lane-addons',
         (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', {
@@ -263,7 +263,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
         mountedRef.current = false
       }
     }
-    loadAddons('mount')
+    void loadAddons('mount')
     void loadBrowserLane()
 
     const watchedTopics = new Set([
@@ -279,7 +279,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       timer = setTimeout(() => {
         timer = null
         if (!mountedRef.current || !isEpochCurrent(epoch)) return
-        loadAddons('sse')
+        void loadAddons('sse')
         void loadBrowserLane()
       }, 350)
     }
@@ -291,7 +291,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
     const recover = () => {
       if (!mountedRef.current || !isEpochCurrent(epoch)) return
       resourceCache.invalidateTopic('lane_addon')
-      loadAddons('sse')
+      void loadAddons('sse')
       void loadBrowserLane()
     }
     const unsubReconnect = subscribeObserverReconnect(recover)
@@ -348,7 +348,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
     setBanner(null)
     pushShellToast(`애드온 연결됨 (${manifestPath}).`, 'success')
     setPreview(null)
-    loadAddons('manual')
+    void loadAddons('manual')
     void loadBrowserLane()
   }
 
@@ -363,7 +363,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
     }
     setBanner(null)
     pushShellToast(`${instanceId} 연결 해제 요청 완료.`, 'success')
-    loadAddons('manual')
+    void loadAddons('manual')
   }
 
   const handleObserve = async (instanceId: string) => {
@@ -375,7 +375,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `관측 트리거 실패: ${res.error.message}` })
       return
     }
-    loadAddons('manual')
+    void loadAddons('manual')
   }
 
   const handleInvokeAction = async (inst: LaneAddonInstanceRow) => {
@@ -449,7 +449,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
     }
     setBanner(null)
     pushShellToast(`애드온 질문 ${ask.ask_id} 응답이 기록되었습니다.`, 'success')
-    loadAddons('manual')
+    void loadAddons('manual')
   }
 
   const handleReadOpenTabs = async (client: BrowserClientRow) => {
@@ -494,7 +494,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
         <h3>Lane-Addons 인스턴스 (${instances.length})</h3>
         <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
           <button type="button" class="btn-ghost" onClick=${() => void loadCatalog()}>패키지 탐색</button>
-          <button type="button" class="btn-ghost" onClick=${() => loadAddons('manual')}>새로고침</button>
+          <${RefreshButton} onRefresh=${() => loadAddons('manual')} />
         </div>
       </div>
 
@@ -693,7 +693,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
     <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
       <div class="wka-h">
         <h3>Browser Lane 클라이언트 & 온디맨드 탭</h3>
-        <button type="button" class="btn-ghost" onClick=${() => void loadBrowserLane()}>새로고침</button>
+        <${RefreshButton} onRefresh=${() => loadBrowserLane()} />
       </div>
 
       ${browserState.kind === 'loading' && html`<div class="dtable-absent">Browser Lane 상태 확인 중…</div>`}
@@ -713,7 +713,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
           </div>
           <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
             <button type="button" class="btn-ghost" onClick=${() => void loadCatalog()}>왼쪽 카탈로그에서 애드온 Attach</button>
-            <button type="button" class="btn-ghost" onClick=${() => void loadBrowserLane()}>다시 확인</button>
+            <${RefreshButton} label="다시 확인" onRefresh=${() => loadBrowserLane()} />
           </div>
         </div>
       `}

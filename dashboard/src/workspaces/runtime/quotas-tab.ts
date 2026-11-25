@@ -42,6 +42,7 @@ import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   PopoverMenu,
+  RefreshButton,
   UPlotChart,
   type PopoverMenuItem,
   type UPlotSeriesSpec,
@@ -262,7 +263,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const singleLocal = curSession.kind === 'single_user_local'
     if (!multiSignedIn && !singleLocal) {
       rawConfigAbortRef.current?.abort()
-      return
+      return Promise.resolve()
     }
     const startEpoch = currentSessionEpoch()
     const jobs: Promise<unknown>[] = [
@@ -326,7 +327,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       rawConfigAbortRef.current?.abort()
     }
 
-    void Promise.all(jobs).then(() => {
+    return Promise.all(jobs).then(() => {
       if (mountedRef.current && isEpochCurrent(startEpoch)) markViewSynced()
     })
   }
@@ -339,7 +340,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }, [epoch])
 
   useEffect(() => {
-    loadAll('mount')
+    void loadAll('mount')
   }, [providerDays, session.kind, epoch, adminLocked])
 
   useEffect(() => {
@@ -360,7 +361,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       timer = setTimeout(() => {
         timer = null
         if (!mountedRef.current || !isEpochCurrent(epoch)) return
-        loadAll('sse')
+        void loadAll('sse')
       }, 450)
     }
     const unsubFrames = subscribeObserverFrames((frame) => {
@@ -370,7 +371,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     })
     const recover = () => {
       if (!mountedRef.current || !isEpochCurrent(epoch)) return
-      loadAll('sse')
+      void loadAll('sse')
     }
     const unsubReconnect = subscribeObserverReconnect(recover)
     const unsubResync = subscribeObserverResync(recover)
@@ -578,7 +579,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       setActionBanner(null)
       pushShellToast(`${providerId} 개인 API 키가 등록되었습니다.`, 'success')
       setCredForm(null)
-      loadAll('manual')
+      void loadAll('manual')
       return
     }
 
@@ -615,7 +616,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     setActionBanner(null)
     pushShellToast(`${providerId} 자격 증명이 저장되었습니다.`, 'success')
     setCredForm(null)
-    loadAll('manual')
+    void loadAll('manual')
   }
 
   const loginAbortRef = useRef<AbortController | null>(null)
@@ -739,7 +740,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           }))
           setActionBanner(null)
           pushShellToast(`${integrationId} CLI OAuth 로그인이 완료되었습니다.`, 'success')
-          loadAll('manual')
+          void loadAll('manual')
           const ref = receipt.accountRef
           // POST /api/v1/setup/accounts/verify is only mounted in multi_account mode (server_login_http.mli:79)
           if (multiSignedIn && ref && resolveModelForIntegration(integrationId)) {
@@ -875,7 +876,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
     setActionBanner(null)
     pushShellToast(`${acctId} (${model}) 계정 검증 완료.`, 'success')
-    loadAll('manual')
+    void loadAll('manual')
   }
 
   const handleRemoveKey = async (id: string) => {
@@ -892,7 +893,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
     setActionBanner(null)
     pushShellToast(`${id} 자격 증명을 제거했습니다.`, 'success')
-    loadAll('manual')
+    void loadAll('manual')
   }
 
   const renderScopeCard = (scope: ProviderUsageScope, idx: number) => {
@@ -1133,9 +1134,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
               + API 키 등록
             </button>
           `}
-          <button type="button" class="btn-ghost" onClick=${() => loadAll('manual')}>
-            새로고침
-          </button>
+          <${RefreshButton} onRefresh=${() => loadAll('manual')} />
         </div>
       </header>
 
@@ -1713,9 +1712,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
           <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
             ${loginReceipt.loginId && html`
-              <button type="button" class="btn-ghost" onClick=${handleRefreshLoginReceipt} disabled=${actionBusy === 'receipt'}>
-                영수증 상태 새로고침
-              </button>
+              <${RefreshButton} label="영수증 상태 새로고침" onRefresh=${handleRefreshLoginReceipt} />
             `}
             ${isMultiAccountSignedIn && loginReceipt.accountRef && html`
               <button

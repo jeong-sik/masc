@@ -200,6 +200,26 @@ let base_path state =
   (Mcp_server.workspace_config state).Workspace.base_path
 ;;
 
+let running_batch_json ~base_path ~keeper_name =
+  match Registry.operation_projection ~base_path ~keeper_name with
+  | Error error -> Error (api_error_of_command_error (Command_lookup_failed error))
+  | Ok { store_unavailable = true; _ } ->
+    Error (unavailable Public_error.Store_commit_unknown "Keeper chat operation store unavailable")
+  | Ok { running_operation_id = None; store_unavailable = false; _ } -> Ok `Null
+  | Ok { running_operation_id = Some execution_id; store_unavailable = false; _ } ->
+    (match Registry.batch_operations ~base_path ~keeper_name execution_id with
+     | Ok (leader :: (_ :: _ as members))
+       when Operation_id.equal leader.operation_id execution_id
+            && Operation.State_name.(Operation.state_name leader.state = Running) ->
+       Ok
+         (`Assoc
+            [ "execution_id", `String (Operation_id.to_string execution_id)
+            ; "member_count", `Int (1 + List.length members)
+            ])
+     | Ok _ -> Ok `Null
+     | Error error -> Error (api_error_of_command_error error))
+;;
+
 let parse_after_sequence request =
   match Server_utils.query_param request "after_sequence" with
   | None -> Ok None
@@ -655,20 +675,29 @@ let handle_get state request reqd = function
         with
         | Error error -> respond_error request reqd (api_error_of_command_error error)
         | Ok operations ->
-          Log.Dashboard.debug
-            "keeper_chat_operation_list keeper=%s state=queued count=%d"
-            keeper_name
-            (List.length operations);
-          Server_auth.respond_json_value_with_cors
-            request
-            reqd
-            (`Assoc
-               [ "schema", `String "masc.keeper_chat_operations.list.v1"
-               ; "state", `String Operation.State_name.(to_wire Queued)
-               ; "operations", `List (List.map
-                   (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
-                     ~base_path:(base_path state) ~keeper_name)) operations)
-               ]))
+          let batch =
+            if Option.is_none after_sequence then
+              running_batch_json ~base_path:(base_path state) ~keeper_name
+            else Ok `Null
+          in
+          (match batch with
+           | Error error -> respond_error request reqd error
+           | Ok running_batch ->
+             Log.Dashboard.debug
+               "keeper_chat_operation_list keeper=%s state=queued count=%d"
+               keeper_name
+               (List.length operations);
+             Server_auth.respond_json_value_with_cors
+               request
+               reqd
+               (`Assoc
+                  [ "schema", `String "masc.keeper_chat_operations.list.v1"
+                  ; "state", `String Operation.State_name.(to_wire Queued)
+                  ; "running_batch", running_batch
+                  ; "operations", `List (List.map
+                      (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
+                        ~base_path:(base_path state) ~keeper_name)) operations)
+                  ])))
         | Some _ | None ->
           respond_error request reqd (invalid_input "state=queued is required")))
 ;;

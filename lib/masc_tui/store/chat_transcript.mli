@@ -59,6 +59,9 @@ val active_turn_short_activity : Wire_fleet.active_turn -> Say.t
 (** Concise live activity label for a running Owner-slot turn, derived from
     [turn.preview] (or fallback [tool_in_flight]/[phase]). *)
 
+val keeper_work_overview : model:Model.t -> keeper:string -> Say.t list
+(** The observed turn, its start decisions, and the referenced Task and Goal. *)
+
 val active_turn_detail_summary : Wire_fleet.active_turn -> Say.t
 (** Single-line progress summary ([<lane> · <activity/preparation/last tool>])
     for the active-turn transcript observation row. *)
@@ -118,6 +121,18 @@ type pending_tx_projection = {
   tx : Drafts.pending_message;
   notice_only : bool;
 }
+
+type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
+
+val tools_mode : Model.t -> Slash.tools_mode
+val history_tool_groups :
+  tools_mode:Slash.tools_mode ->
+  Wire_fleet.chat_message list ->
+  Wire_fleet.chat_message tool_group list
+val stream_tool_groups :
+  tools_mode:Slash.tools_mode ->
+  Fleet_store.active_tool_call list ->
+  Fleet_store.active_tool_call tool_group list
 
 type transcript_section =
   | Section_history of Wire_fleet.chat_message list

@@ -216,6 +216,8 @@ type turn_preparation = {
   started_at_unix : float;
 }
 
+type turn_work_context = { task_id : string option; start_reasons : string list }
+
 type turn_preview = {
   status_text : string;
   activity : turn_preview_activity;
@@ -224,6 +226,7 @@ type turn_preview = {
   updated_at_unix : float;
   revision : int option;
   preparation : turn_preparation option;
+  work_context : turn_work_context option;
 }
 
 type turn_preview_update = {
@@ -548,6 +551,11 @@ let equal_turn_preview (a : turn_preview) (b : turn_preview) =
   && Float.equal a.updated_at_unix b.updated_at_unix
   && Option.equal Int.equal a.revision b.revision
   && Option.equal equal_turn_preparation a.preparation b.preparation
+  && Option.equal
+       (fun a b ->
+         Option.equal String.equal a.task_id b.task_id
+         && List.equal String.equal a.start_reasons b.start_reasons)
+       a.work_context b.work_context
 
 let equal_active_turn (a : active_turn) (b : active_turn) =
   equal_turn_lane a.lane b.lane
@@ -780,6 +788,17 @@ let decode_turn_preparation json =
   let* started_at_unix = required_finite_float json "started_at_unix" in
   Ok { phase; state; started_at_unix }
 
+let decode_turn_work_context json =
+  let* task_id = optional_nonblank_string json "task_id" in
+  let* reasons = required_list_field json "start_reasons" in
+  let* start_reasons =
+    decode_list "start_reasons"
+      (function `String reason -> Ok reason
+      | bad -> field_type_error "start_reasons" "a string reason" bad)
+      reasons
+  in
+  Ok { task_id; start_reasons }
+
 let decode_turn_preview json =
   let* status_text = required_string_field json "status_text" in
   let* activity =
@@ -802,7 +821,13 @@ let decode_turn_preview json =
         let* p = decode_turn_preparation pjson in
         Ok (Some p)
   in
-  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; revision; preparation }
+  let* work_context = optional_object_field json "work_context" in
+  let* work_context =
+    match work_context with
+    | None -> Ok None
+    | Some json -> Result.map Option.some (decode_turn_work_context json)
+  in
+  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; revision; preparation; work_context }
 
 let decode_turn_preview_update json =
   let* owner_key = required_nonblank_string json "owner_key" in
@@ -1709,6 +1734,7 @@ type chat_operation = {
   state : Keeper_chat_operation.State_name.t;
   message : string option;
   failure_detail : string option;
+  batch_execution_id : Keeper_chat_operation.Operation_id.t option;
 }
 
 type interactive_outcome =
@@ -2085,7 +2111,13 @@ let decode_chat_operation json =
         Result.map Option.some (required_nonblank_string json "failure_detail")
     | Queued | Running | Succeeded | Cancelled -> Ok None
   in
-  Ok { id; sequence; state; message; failure_detail }
+  let* batch_id = optional_nonblank_string json "batch_execution_id" in
+  let* batch_execution_id =
+    match batch_id with
+    | None -> Ok None
+    | Some id -> Result.map Option.some (Keeper_chat_operation.Operation_id.of_string id)
+  in
+  Ok { id; sequence; state; message; failure_detail; batch_execution_id }
 
 let decode_chat_queue ~after json =
   let* state = operation_state json in
@@ -2100,6 +2132,22 @@ let decode_chat_queue ~after json =
   in
   if state = Keeper_chat_operation.State_name.Queued && valid_page after rows then Ok rows
   else Error "invalid queued operations page"
+
+type running_chat_batch = {
+  execution_id : Keeper_chat_operation.Operation_id.t;
+  member_count : int;
+}
+
+let decode_running_chat_batch json =
+  let* batch = optional_object_field json "running_batch" in
+  match batch with
+  | None -> Ok None
+  | Some batch ->
+      let* id = required_nonblank_string batch "execution_id" in
+      let* execution_id = Keeper_chat_operation.Operation_id.of_string id in
+      let* member_count = required_int_field batch "member_count" in
+      if member_count < 2 then Error "running batch must include at least two inputs"
+      else Ok (Some { execution_id; member_count })
 
 let interactive_outcome_of_string raw =
   match String.lowercase_ascii (String.trim raw) with

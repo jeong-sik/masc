@@ -398,7 +398,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                  x))
         ~source:(Health.Source_keeper keeper) ~ko:"턴 기록 조회"
         ~en:"Turn records fetch" err
-  | Msg.Reply_chat_queue { keeper; requested_at; operations; result } ->
+  | Msg.Reply_chat_queue { keeper; requested_at; operations; running_batch; result } ->
       let prior = Fleet_store.chat_queue_for ~keeper m.fleet in
       let previous = match prior.read with
         | Observed.Loading { since_ns } -> Some since_ns
@@ -421,22 +421,24 @@ let apply_http_reply ~now (m : Model.t) reply =
                  && Fleet_store.String_set.mem id recorded
               then Drafts.mark_queued ~now ~request_id:tx.request_id ~operation_id:(Some id) drafts
               else drafts) m.drafts (Drafts.pending_txs_for_keeper ~keeper m.drafts) in
-          { m with drafts; fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet } in
+          { m with drafts; fleet = Fleet_store.set_chat_queue ~keeper { operations; running_batch; read } m.fleet } in
         (match result with
          | None -> (set (Observed.loading ~since_ns:requested_at), [])
          | Some (Ok ()) -> (set (Observed.value ~observed_at:requested_at ()), [])
          | Some (Error err) ->
              let read = Observed.failed ~at:requested_at ~reason:(Msg.http_error_detail err)
                ~retryable:(Msg.http_error_retryable err) in
-             let operations =
+             let operations, running_batch =
                match err with
-               | Msg.Workspace_mismatch _ | Msg.Http_error { status = (401 | 403); _ } -> []
+               | Msg.Workspace_mismatch _ | Msg.Http_error { status = (401 | 403); _ } -> ([], None)
                | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
                    (* The empty terminator proves an empty queue on success. On a
                       failed read, no rows means the first page never arrived. *)
-                   (match operations with [] -> prior.operations | _ :: _ -> operations)
+                   (match operations with
+                    | [] -> (prior.operations, prior.running_batch)
+                    | _ :: _ -> (operations, running_batch))
              in
-             let fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet in
+             let fleet = Fleet_store.set_chat_queue ~keeper { operations; running_batch; read } m.fleet in
              record_http_incident ~now ~source:(Health.Source_keeper keeper)
                ~context:(Say.make ~ko:"대기열 조회" ~en:"Chat queue read") err { m with fleet })
   | Msg.Reply_chat_absence { keeper; operation_id; requested_at } ->
@@ -462,6 +464,12 @@ let apply_http_reply ~now (m : Model.t) reply =
                                      Clock.Mono.compare requested_at tx.updated_at < 0 -> m.drafts
              | Queued -> Drafts.mark_queued ~now ~request_id ~operation_id:(Some operation_id) m.drafts
              | Running -> Drafts.mark_accepted ~now ~request_id ~operation_id:(Some operation_id) m.drafts in
+           let drafts =
+             match operation.batch_execution_id with
+             | Some id when String.equal operation_id (Keeper_chat_operation.Operation_id.to_string operation.id) ->
+                 Drafts.note_batch_execution ~request_id id drafts
+             | Some _ | None -> drafts
+           in
            ({ m with drafts }, []))
   | Msg.Reply_chat_status { keeper; result = Error err; _ } ->
       record_http_incident ~now ~source:(Health.Source_keeper keeper)

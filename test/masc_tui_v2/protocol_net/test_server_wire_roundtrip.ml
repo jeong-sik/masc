@@ -1722,6 +1722,8 @@ let test_keeper_turns_preview_roundtrip () =
       ~execution_scope:None ~turn_ref:None ~now:1795503000.0
       ~redaction:Masc.Keeper_secret_redaction.empty
   in
+  Preview.note_work_context ~writer
+    { task_id = Some "task-42"; start_reasons = [ "scheduled_automation_due"; "task_backlog" ] };
   Preview.note_attempt ~writer:(Some writer) ~now:1795503001.0
     ~runtime_id:"ollama-rt";
   Preview.note_tool ~writer:(Some writer) ~now:1795503002.0 "Execute";
@@ -1806,7 +1808,14 @@ let test_keeper_turns_preview_roundtrip () =
               Alcotest.(check (option string)) "last_tool preserved"
                 (Some "Execute") p.last_tool;
               Alcotest.(check string) "text_tail preserved"
-                "Streaming summary line" p.text_tail
+                "Streaming summary line" p.text_tail;
+              (match p.work_context with
+               | None -> Alcotest.fail "owned work context missing"
+               | Some work ->
+                   Alcotest.(check (option string)) "Task reference stays with its turn"
+                     (Some "task-42") work.task_id;
+                   Alcotest.(check (list string)) "decision inputs cross the wire"
+                     [ "scheduled_automation_due"; "task_backlog" ] work.start_reasons)
           | None -> Alcotest.fail "expected preview on r1")
       | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ ->
           Alcotest.fail "expected Turn_active for r1");
@@ -1815,7 +1824,9 @@ let test_keeper_turns_preview_roundtrip () =
           Alcotest.(check bool) "Chat_operation maps to Lane_chat" true
             (Wire_fleet.equal_turn_lane t.lane Wire_fleet.Lane_chat);
           match t.preview with
-          | Some { preparation = Some prep; _ } ->
+          | Some { preparation = Some prep; work_context; _ } ->
+              Alcotest.(check bool) "another writer cannot borrow work context"
+                true (Option.is_none work_context);
               Alcotest.(check bool) "Context_preparation maps to Prep_context"
                 true
                 (Wire_fleet.equal_turn_preparation_phase prep.phase

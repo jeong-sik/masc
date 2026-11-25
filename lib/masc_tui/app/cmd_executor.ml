@@ -920,20 +920,26 @@ let read_chat_queue ~timeout_sec t ~keeper ~partial =
          else Fleet_store.String_set.add id seen, row :: ordered)
       (Fleet_store.String_set.empty, []) acc |> snd
   in
-  let rec read after acc =
+  let rec read after acc running_batch =
     let path = Wire_fleet.chat_queue_path ~keeper ~after in
+    let decode json =
+      Result.bind (Wire_fleet.decode_chat_queue ~after json) (fun page ->
+        if Option.is_none after then
+          Result.map (fun batch -> (page, batch)) (Wire_fleet.decode_running_chat_batch json)
+        else Ok (page, running_batch))
+    in
     let page = match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec endpoint ~path with
       | Error err -> Error (msg_error_of_http err)
-      | Ok raw -> decode_raw_json t ~decode:(Wire_fleet.decode_chat_queue ~after) raw in
+      | Ok raw -> decode_raw_json t ~decode raw in
     match page with
-    | Error err -> rows acc, Error err
-    | Ok [] -> rows acc, Ok ()
-    | Ok page ->
+    | Error err -> rows acc, running_batch, Error err
+    | Ok ([], running_batch) -> rows acc, running_batch, Ok ()
+    | Ok (page, running_batch) ->
         let acc = List.rev_append page acc in
-        partial (rows acc);
-        read (Some (List.hd acc).sequence) acc
+        partial (rows acc) running_batch;
+        read (Some (List.hd acc).sequence) acc running_batch
   in
-  read None []
+  read None [] None
 
 let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   let base = Printf.sprintf "%d:%s" (Epoch.to_int epoch) path in
@@ -1196,11 +1202,13 @@ let rec execute_get t ~epoch req =
             Msg.Http_reply
               { epoch; reply = Msg.Reply_keeper_turn_records { keeper; result } }
         | Cmd.Get_chat_queue { keeper } ->
-            let reply operations result =
-              Msg.Http_reply { epoch; reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } } in
-            let partial rows = Ui_bus.publish_snapshot t.bus ~key:snapshot_key (reply rows None) in
-            let rows, result = read_chat_queue ~timeout_sec t ~keeper ~partial in
-            reply rows (Some result)
+            let reply operations running_batch result =
+              Msg.Http_reply { epoch; reply = Msg.Reply_chat_queue {
+                keeper; requested_at; operations; running_batch; result } } in
+            let partial rows batch =
+              Ui_bus.publish_snapshot t.bus ~key:snapshot_key (reply rows batch None) in
+            let rows, batch, result = read_chat_queue ~timeout_sec t ~keeper ~partial in
+            reply rows batch (Some result)
         | Cmd.Get_chat_status { keeper; operation_id } ->
             (* Preserve each exact observation until the reducer has consumed it.
                A delayed queued read cannot replace a running or terminal one. *)

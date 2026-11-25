@@ -51,6 +51,8 @@ type source_position = { generation : int; start_byte : int }
 (** Byte offsets in the text this writer's redactor actually released.
     Attempts and full-text replacements create a new generation. *)
 
+type work_context = { task_id : string option; start_reasons : string list }
+
 type t =
   { text_position : source_position
   ; text_tail : string
@@ -69,6 +71,7 @@ type t =
   ; preparation : preparation option
   ; preparation_timeline : preparation_timeline
   ; execution_scope : Keeper_execution_scope_id.t option
+  ; work_context : work_context option
   }
 
 val tail_bytes : int
@@ -76,6 +79,9 @@ val tail_bytes : int
 (** A write capability for exactly one preview and its redaction state. Older
     writers never resolve the currently displayed preview by Keeper name. *)
 type writer
+
+val note_work_context : writer:writer -> work_context -> unit
+(** Publish the Task reference and the decision reasons for this writer's run. *)
 
 val snapshot : writer -> t
 (** Read this exact writer under the preview lock. The immutable result stays

@@ -46,6 +46,7 @@ type active_tool_call = {
 
 type chat_queue = {
   operations : Wire_fleet.chat_operation list;
+  running_batch : Wire_fleet.running_chat_batch option;
   read : unit Observed.t;
 }
 

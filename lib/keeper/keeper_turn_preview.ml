@@ -36,6 +36,8 @@ let preparation_timeline_is_empty = Preparation_scopes.is_empty
 
 type source_position = { generation : int; start_byte : int }
 
+type work_context = { task_id : string option; start_reasons : string list }
+
 type t =
   { text_position : source_position
   ; text_tail : string
@@ -48,6 +50,7 @@ type t =
   ; preparation : preparation option
   ; preparation_timeline : preparation_timeline
   ; execution_scope : Keeper_execution_scope_id.t option
+  ; work_context : work_context option
   }
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
@@ -116,7 +119,20 @@ let shown_after_write writer = if displayed writer then Some (!writer).shown_as 
 
 let empty ~execution_scope ~revision now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now; revision
-  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope }
+  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope; work_context = None }
+
+let note_work_context ~writer work_context =
+  announce (with_lock (fun () ->
+    let entry = !writer in
+    writer :=
+      { entry with
+        preview =
+          { entry.preview with
+            work_context = Some work_context
+          ; revision = next_revision ()
+          }
+      };
+    shown_after_write writer))
 
 let current ~keeper_name =
   with_lock (fun () ->
@@ -533,6 +549,12 @@ let activity_to_json = function
   | Tool_observed -> `String "tool"
   | Failed -> `String "failed"
 
+let work_context_to_json { task_id; start_reasons } =
+  `Assoc
+    [ "task_id", Option.fold ~none:`Null ~some:(fun id -> `String id) task_id
+    ; "start_reasons", `List (List.map (fun reason -> `String reason) start_reasons)
+    ]
+
 let to_json ?(include_preparation_timeline = false) preview =
   `Assoc ["status_text", `String (status_text preview);
     "activity", activity_to_json preview.activity;
@@ -545,4 +567,5 @@ let to_json ?(include_preparation_timeline = false) preview =
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
     "preparation_timeline",(if include_preparation_timeline then
       preparation_timeline_to_json preview.preparation_timeline else `Null);
-    "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope]
+    "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope;
+    "work_context",Option.fold ~none:`Null ~some:work_context_to_json preview.work_context]

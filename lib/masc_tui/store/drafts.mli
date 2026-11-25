@@ -30,6 +30,7 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
+  batch_execution_id : Keeper_chat_operation.Operation_id.t option;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
@@ -220,6 +221,9 @@ val pending_txs_for_keeper : keeper:string -> t -> pending_message list
 val tx_position_for_keeper : keeper:string -> request_id:string -> t -> int option
 (** Return the 0-based chronological index of [request_id] among [keeper]'s
     retained transmissions, or [None] if absent. *)
+
+val note_batch_execution :
+  request_id:string -> Keeper_chat_operation.Operation_id.t -> t -> t
 
 val is_voice_active : t -> bool
 val voice_start_recording : now:Clock.Mono.t -> t -> t

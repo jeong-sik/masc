@@ -1174,9 +1174,10 @@ let test_queue_drawer_walks_all_http_pages () =
     `Assoc ["operation_id", `String (Printf.sprintf "%s-%d" prefix number);
             "sequence", `String (string_of_int sequence); "state", `String "Queued";
             "input", `Assoc ["message", `String "queued input"]] in
-  let page rows =
+  let page ?(running_batch = `Null) rows =
     `Assoc ["schema", `String "masc.keeper_chat_operations.list.v1"; "state", `String "Queued";
-            "operations", `List rows] in
+            "operations", `List rows; "running_batch", running_batch] in
+  let running_batch = `Assoc ["execution_id", `String "alpha-batch"; "member_count", `Int 2] in
   let first_page = List.init 100 (fun n -> operation alpha (n + 1) (n + 1)) in
   (* Operation 2 moves to the tail after the first page was read. *)
   let next_page = [operation alpha 101 101; operation alpha 102 102; operation alpha 103 103;
@@ -1189,7 +1190,7 @@ let test_queue_drawer_walks_all_http_pages () =
   let respond ~meth ~path =
     if meth <> "GET" then Alcotest.failf "unexpected HTTP method %s" meth;
     seen := path :: !seen;
-    if path = start alpha then (incr alpha_reads; 200, page first_page)
+    if path = start alpha then (incr alpha_reads; 200, page ~running_batch first_page)
     else if path = after alpha 100 then
       (match !alpha_reads with
        | 1 -> 503, `Assoc []
@@ -1224,6 +1225,13 @@ let test_queue_drawer_walks_all_http_pages () =
   dispatch alpha Masc_tui_keymap.Keymap.Open_queue_context;
   await_reply alpha failed;
   Alcotest.(check (list string)) "a second-page error retains every first-page id" expected_first (ids alpha);
+  let batch keeper =
+    Option.map (fun (batch : Masc_tui_protocol.Wire_fleet.running_chat_batch) ->
+        (Keeper_chat_operation.Operation_id.to_string batch.execution_id, batch.member_count))
+      (queue keeper).running_batch
+  in
+  Alcotest.(check (option (pair string int))) "a partial reply retains the first-page execution"
+    (Some ("alpha-batch", 2)) (batch alpha);
   Alcotest.(check bool) "the partial inventory remains explicitly failed" true
     (match (queue alpha).read with Observed.Failed { retryable = true; _ } -> true | _ -> false);
   dispatch alpha Masc_tui_keymap.Keymap.Refresh;
@@ -1236,6 +1244,10 @@ let test_queue_drawer_walks_all_http_pages () =
   await_reply alpha complete;
   Alcotest.(check (list string)) "all 103 durable ids include the operation moved across pages once"
     expected_all (ids alpha);
+  Alcotest.(check (option (pair string int))) "later pages preserve the first-page execution"
+    (Some ("alpha-batch", 2)) (batch alpha);
+  Alcotest.(check (option (pair string int))) "running batch belongs to the requested Keeper"
+    None (batch beta);
   Eio.Promise.resolve resume ();
   await_reply alpha failed;
   Alcotest.(check bool) "an older deferred failure leaves the newer complete read intact" true

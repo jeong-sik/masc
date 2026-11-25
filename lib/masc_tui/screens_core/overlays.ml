@@ -2625,8 +2625,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             match t with
             | Nav.Drawer_queue ->
                 Say.resolve lang
-                  (Say.make ~ko:"대기열 [Steer/FollowUp/Carry]"
-                     ~en:"Queue [Steer/FollowUp/Carry]")
+                  (Say.make ~ko:"작업 · 큐" ~en:"Work & Queue")
             | Nav.Drawer_context ->
                 Say.resolve lang
                   (Say.make ~ko:"컨텍스트 · 캐시" ~en:"Context Window & Cache")
@@ -2668,6 +2667,13 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Nav.Drawer_queue ->
             let rows_acc = ref [] in
             let push style txt = rows_acc := (style, txt) :: !rows_acc in
+            let overview = Chat_transcript.keeper_work_overview ~model ~keeper in
+            if overview <> [] then begin
+              push (Typography.anchor ~bg theme)
+                (Say.resolve lang (Say.make ~ko:"Keeper 작업" ~en:"Keeper work"));
+              List.iter (fun line -> push pri_st (Say.resolve lang line)) overview;
+              push pri_st ""
+            end;
             let attn_count = Attention.count model.attention in
             if attn_count > 0 then begin
               push (Typography.anchor ~bg theme)
@@ -2722,9 +2728,32 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~en:"  [Esc] close · resolve via [Y]/[N] strip or [2 Work > Inbox]"));
               push pri_st ""
             end;
+            let show_batch = Option.iter (fun id ->
+                let execution = Keeper_chat_operation.Operation_id.to_string id in
+                push struct_st (Say.resolve lang
+                  (Say.make ~ko:("    묶음 실행 · " ^ execution)
+                     ~en:("    Batch execution · " ^ execution)))) in
             let queue, txs = Model.drawer_queue ~keeper model in
             let draft = Drafts.draft_for ~keeper model.drafts in
             let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) in
+            Option.iter
+              (fun (batch : Wire_fleet.running_chat_batch) ->
+                let label =
+                  match queue.read with
+                  | Observed.Value { stale = false; _ } ->
+                      Say.make ~ko:"실행 중인 묶음" ~en:"Running batch"
+                  | Observed.Value { stale = true; _ } | Observed.Failed _
+                  | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+                      Say.make ~ko:"마지막 확인 묶음" ~en:"Last observed batch"
+                in
+                let size =
+                  Say.make ~ko:(Printf.sprintf "요청 %d개" batch.member_count)
+                    ~en:(Printf.sprintf "%d requests" batch.member_count)
+                in
+                let id = Keeper_chat_operation.Operation_id.to_string batch.execution_id in
+                push pri_st (Say.resolve lang
+                  (Say.concat ~sep:Typography.sep_dot [ label; size; Say.literal id ])))
+              queue.running_batch;
             (match queue.read with
              | Observed.Value { stale; _ } ->
                  let label =
@@ -2745,9 +2774,11 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"
                    else Say.make ~ko:"서버 대기열 조회 중…" ~en:"Reading server queue…" in
                  push whisper_st (Say.resolve lang label));
-            List.iter (fun (op : Wire_fleet.chat_operation) ->
+            List.iteri (fun index (op : Wire_fleet.chat_operation) ->
                let body = Option.value op.message ~default:"" |> one_line in
-               push pri_st (Printf.sprintf "  %s  %s" (Keeper_chat_operation.Operation_id.to_string op.id) body))
+               push pri_st (Printf.sprintf "  %d. %s  %s" (index + 1) body
+                 (Keeper_chat_operation.Operation_id.to_string op.id));
+               show_batch op.batch_execution_id)
               queue.operations;
             if txs <> [] then begin
               push (Typography.anchor ~bg theme)
@@ -2790,7 +2821,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   in
                   push st_style
                     (Printf.sprintf "  %s %s (%s) · %s" mode_s st_s tx.request_id
-                       body_one))
+                       body_one);
+                  show_batch tx.batch_execution_id)
                 txs
             end;
             push pri_st "";

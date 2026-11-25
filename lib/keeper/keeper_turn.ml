@@ -630,6 +630,8 @@ let run_keeper_invocation_turn_admitted_inner
               ~now:(Time_compat.now ())
               ~redaction:(Keeper_secret_redaction.snapshot ~base_path:ctx.config.base_path
                 ~keeper_name:meta.name) in
+            Keeper_turn_preview.note_work_context ~writer:preview
+              { task_id = Keeper_runtime_contract.current_task_id_opt meta; start_reasons = [] };
             Keeper_preparation_runtime_observation.with_turn ~config:ctx.config
               ~keeper_name:meta.name ~preview @@ fun () ->
             let current_task,held_task_skills,skill_snapshot =

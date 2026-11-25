@@ -614,6 +614,102 @@ let active_turn_short_activity (turn : Wire_fleet.active_turn) =
           | Some p -> Say.literal p
           | None -> Say.make ~ko:"진행 중" ~en:"Running"))
 
+let start_reason_label = function
+  | "mention_pending" -> Say.make ~ko:"멘션 도착" ~en:"Mention received"
+  | "board_event_pending" -> Say.make ~ko:"보드 이벤트" ~en:"Board event"
+  | "scope_message_pending" -> Say.make ~ko:"범위 메시지" ~en:"Scope message"
+  | "bootstrap_stimulus_pending" | "never_started" ->
+      Say.make ~ko:"첫 실행" ~en:"First run"
+  | "tool_result_ready_pending" -> Say.make ~ko:"도구 결과 도착" ~en:"Tool result ready"
+  | "connector_attention_pending" -> Say.make ~ko:"연동 이벤트" ~en:"Connector event"
+  | "ask_answered_pending" -> Say.make ~ko:"질문 답변 도착" ~en:"Answer received"
+  | "hitl_resolved_pending" -> Say.make ~ko:"도구 승인 결정" ~en:"Tool approval decision"
+  | "completion_authority_rejection_pending" ->
+      Say.make ~ko:"완료 증거 반려" ~en:"Completion evidence rejected"
+  | "task_outcome_pending" -> Say.make ~ko:"Task 결과 도착" ~en:"Task outcome received"
+  | "task_cancellation_pending" -> Say.make ~ko:"Task 취소" ~en:"Task cancelled"
+  | "workspace_message_pending" -> Say.make ~ko:"작업공간 메시지" ~en:"Workspace message"
+  | "deferred_runtime_lane_pending" -> Say.make ~ko:"보류한 실행 재개" ~en:"Deferred run resumed"
+  | "scheduled_autonomous_turn" -> Say.make ~ko:"자율 실행 주기" ~en:"Autonomous cadence"
+  | "scheduled_automation_due" -> Say.make ~ko:"예약 작업 도래" ~en:"Scheduled work due"
+  | "task_backlog" -> Say.make ~ko:"대기 중인 Task" ~en:"Task backlog"
+  | reason -> Say.literal reason
+
+let keeper_work_overview ~(model : Model.t) ~keeper =
+  let labeled ~ko ~en text = Say.concat ~sep:"  " [ Say.make ~ko ~en; text ] in
+  let turn = Fleet_store.active_turn_for ~keeper model.fleet in
+  let work_context =
+    Option.bind turn (fun (turn : Wire_fleet.active_turn) ->
+      Option.bind turn.preview (fun preview -> preview.work_context))
+  in
+  let assignment =
+    Option.map (fun (summary : Wire_fleet.keeper_summary) -> summary.current_task_id)
+      (Fleet_store.find_keeper ~name:keeper model.fleet)
+  in
+  let start_task_label = Say.make ~ko:"시작 시 Task" ~en:"Task at start" in
+  let observed_task =
+    match assignment, work_context with
+    | Some id, _ -> Some (id, Say.make ~ko:"할당 Task" ~en:"Assigned Task")
+    | None, Some work -> Some (work.task_id, start_task_label)
+    | None, None -> None
+  in
+  let task_rows =
+    match observed_task with
+    | None -> []
+    | Some (None, label) ->
+        [ Say.concat ~sep:"  " [ label; Say.make ~ko:"없음" ~en:"None" ] ]
+    | Some (Some id, label) ->
+        let task = List.find_opt (fun (task : Wire_work.task) -> String.equal task.id id)
+            (Work_store.tasks model.work) in
+        let task_text = match task with
+          | Some task -> id ^ " · " ^ task.title
+          | None -> id
+        in
+        let goal =
+          match task with
+          | None -> Say.make ~ko:"Task 상세 미확인" ~en:"Task details unavailable"
+          | Some { goal_link = Wire_work.Unlinked; _ } ->
+              Say.make ~ko:"연결 없음" ~en:"No link"
+          | Some { goal_link = Wire_work.Linked id; _ } ->
+              let goal = List.find_opt (fun (goal : Wire_work.goal) -> String.equal goal.id id)
+                  (Work_store.goals model.work) in
+              Say.literal (Option.fold ~none:id ~some:(fun (goal : Wire_work.goal) ->
+                id ^ " · " ^ goal.title) goal)
+        in
+        [ Say.concat ~sep:"  " [ label; Say.literal task_text ];
+          labeled ~ko:"연결 Goal" ~en:"Linked Goal" goal ]
+  in
+  let task_rows =
+    match assignment, work_context with
+    | Some current, Some work when not (Option.equal String.equal current work.task_id) ->
+        let at_start =
+          Option.fold ~none:(Say.make ~ko:"없음" ~en:"None") ~some:Say.literal work.task_id
+        in
+        task_rows @ [ Say.concat ~sep:"  " [ start_task_label; at_start ] ]
+    | (Some _ | None), (Some _ | None) -> task_rows
+  in
+  match turn with
+  | None -> task_rows
+  | Some turn ->
+      let status = labeled ~ko:"관측한 턴" ~en:"Observed turn"
+          (Say.concat ~sep:Typography.sep_dot
+             [ turn_lane_label turn.lane; active_turn_short_activity turn ]) in
+      let starts =
+        match work_context with
+        | Some { start_reasons = first :: rest; _ } ->
+            labeled ~ko:"시작 계기" ~en:"Started by" (start_reason_label first)
+            :: List.map (fun reason ->
+                 Say.concat ~sep:" " [ Say.literal "  ·"; start_reason_label reason ]) rest
+        | Some { start_reasons = []; _ } | None ->
+            let source =
+              if Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_chat then
+                Say.make ~ko:"대화 요청" ~en:"Chat request"
+              else Say.make ~ko:"이 턴의 시작 이벤트 미확인" ~en:"Start event unobserved"
+            in
+            [ labeled ~ko:"시작 계기" ~en:"Started by" source ]
+      in
+      status :: (starts @ task_rows)
+
 let normalize_preview_inline s =
   String.trim
     (String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
@@ -1082,6 +1178,73 @@ type pending_tx_projection = {
   notice_only : bool;
 }
 
+type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
+
+let tools_mode (model : Model.t) =
+  if model.fleet.chat_turn_details_expanded then Slash.Tools_full
+  else model.fleet.chat_tools_mode
+
+let consecutive_tool_groups ~tools_mode ~same rows =
+  match tools_mode with
+  | Slash.Tools_results | Slash.Tools_full -> List.map (fun row -> Single row) rows
+  | Slash.Tools_compact ->
+      let rec take first taken = function
+        | row :: rest when same first row -> take first (row :: taken) rest
+        | rest -> (List.rev taken, rest)
+      in
+      let rec loop groups = function
+        | [] -> List.rev groups
+        | row :: rest ->
+            let related, remaining = take row [] rest in
+            let item =
+              match related with
+              | [] -> Single row
+              | _ :: _ -> Grouped (row, related)
+            in
+            loop (item :: groups) remaining
+      in
+      loop [] rows
+
+let history_tool_groups ~tools_mode rows =
+  let can_group (row : Wire_fleet.chat_message) =
+    match row.role with
+    | Wire_fleet.Role_tool -> Option.is_none row.failure_kind
+    | Wire_fleet.Role_user | Wire_fleet.Role_peer _ | Wire_fleet.Role_assistant
+    | Wire_fleet.Role_system | Wire_fleet.Role_request_failure -> false
+  in
+  let turn_ref (row : Wire_fleet.chat_message) =
+    match row.turn_ref, row.provenance with
+    | Some id, _ -> Some id
+    | None, Some { delivery_key = Autonomous_turn id; _ } ->
+        Some (Ids.Turn_ref.to_string id)
+    | None, (None | Some {
+        delivery_key =
+          ( Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _
+          | Workspace_message _ | Connector_message _ | Approval_lifecycle _ );
+        _;
+      }) -> None
+  in
+  let same a b =
+    can_group a && can_group b
+    &&
+    match turn_ref a, turn_ref b with
+    | Some a, Some b -> String.equal a b
+    | (Some _ | None), (Some _ | None) -> false
+  in
+  consecutive_tool_groups ~tools_mode ~same rows
+
+let stream_tool_groups ~tools_mode rows =
+  let succeeded (call : Fleet_store.active_tool_call) =
+    match call.tool_state with
+    | Fleet_store.Tool_settled -> Option.equal Bool.equal call.ok (Some true)
+    | Fleet_store.Tool_pending | Fleet_store.Tool_unfinished
+    | Fleet_store.Tool_result_pending _ -> false
+  in
+  let same a b =
+    succeeded a && succeeded b && Option.equal Int.equal a.stream_scope b.stream_scope
+  in
+  consecutive_tool_groups ~tools_mode ~same rows
+
 type transcript_section =
   | Section_history of Wire_fleet.chat_message list
   | Section_active_turn of Wire_fleet.active_turn
@@ -1448,10 +1611,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
     | Fleet_store.Display_origin_bare -> Fleet_store.Display_origin_bare
     | Fleet_store.Display_origin_row -> Fleet_store.Display_origin_row
   in
-  let tools_mode =
-    if model.fleet.chat_turn_details_expanded then Slash.Tools_full
-    else model.fleet.chat_tools_mode
-  in
+  let tools_mode = tools_mode model in
   let expanded_tools =
     match tools_mode with
     | Slash.Tools_compact -> false
@@ -1467,8 +1627,11 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
   let count_history hist_msgs =
     let _, total =
       List.fold_left
-        (fun (first, acc) (msg : Wire_fleet.chat_message) ->
+        (fun (first, acc) item ->
           let spacing = if first then 0 else 1 in
+          match item with
+          | Grouped _ -> (false, acc + spacing + 1)
+          | Single (msg : Wire_fleet.chat_message) ->
           let msg_r =
             match msg.role with
             | Wire_fleet.Role_user ->
@@ -1545,7 +1708,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                 + cut_reply_r
           in
           (false, acc + spacing + msg_r))
-        (true, 0) hist_msgs
+        (true, 0) (history_tool_groups ~tools_mode hist_msgs)
     in
     total
   in
@@ -1566,14 +1729,16 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
       if not sp.show_tools then 0
       else
         List.fold_left
-          (fun acc (tc : Fleet_store.active_tool_call) ->
+          (fun acc -> function
+            | Grouped _ -> acc + 1
+            | Single (tc : Fleet_store.active_tool_call) ->
             let det =
               match expanded_tools, tc.output_preview with
               | true, Some out -> count_tool_output_rows ~tools_mode ~width out
               | false, _ | true, None -> 0
             in
             acc + 1 + det)
-          0 buf.tools
+          0 (stream_tool_groups ~tools_mode buf.tools)
     in
     let text_r =
       if not sp.show_text then 0

@@ -194,6 +194,7 @@ type http_reply =
       keeper : string;
       requested_at : Clock.Mono.t;
       operations : Wire_fleet.chat_operation list;
+      running_batch : Wire_fleet.running_chat_batch option;
       result : (unit, http_error) result option;
     }
   | Reply_chat_absence of { keeper : string; operation_id : string; requested_at : Clock.Mono.t }

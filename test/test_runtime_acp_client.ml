@@ -1838,39 +1838,96 @@ let read_file_text path =
 ;;
 
 let test_acp_80_pct_rollover_marker_and_overflow_classification () =
-  let should = Keeper_acp_runtime.For_testing.should_rollover_context in
-  check bool "below 80% threshold does not trigger rollover" false
-    (should ~context_used:(Some 200_000) ~context_size:None ~max_context_tokens:262_144);
-  check bool "at/above 80% threshold triggers rollover" true
-    (should ~context_used:(Some 210_000) ~context_size:None ~max_context_tokens:262_144);
-  check bool "smaller advertised context_size governs 80% rollover" true
-    (should ~context_used:(Some 80_000) ~context_size:(Some 100_000) ~max_context_tokens:262_144);
-  check bool "smaller operator max_context_tokens caps 80% rollover on larger provider window" true
-    (should ~context_used:(Some 320_000) ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
-  check bool "below 80% of operator max_context_tokens cap does not trigger rollover" false
-    (should ~context_used:(Some 319_999) ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
-  check int "effective_context_limit_tokens takes min of positive context_size and max_context_tokens"
+  let limit tokens =
+    Result.get_ok
+      (Llm_provider.Input_budget.of_agent_window
+         ~model_id:"acp-test"
+         ~max_context_tokens:tokens)
+  in
+  let rollover ~context_used ~context_size tokens =
+    Keeper_acp_runtime.For_testing.rollover_of_usage
+      ~context_used
+      ~context_size
+      ~input_limit:(limit tokens)
+  in
+  let rollover_t = option (pair int int) in
+  check rollover_t "below 80% of the declared limit keeps the session" None
+    (rollover ~context_used:(Some 200_000) ~context_size:None 262_144);
+  check rollover_t "80% of the declared limit by the agent's count ends the session"
+    (Some (210_000, 262_144))
+    (rollover ~context_used:(Some 210_000) ~context_size:None 262_144);
+  check rollover_t "a smaller reported window governs" (Some (80_000, 100_000))
+    (rollover ~context_used:(Some 80_000) ~context_size:(Some 100_000) 262_144);
+  check rollover_t "a smaller declared limit caps a larger agent window"
+    (Some (320_000, 400_000))
+    (rollover ~context_used:(Some 320_000) ~context_size:(Some 1_048_576) 400_000);
+  check rollover_t "below 80% of the declared cap keeps the session" None
+    (rollover ~context_used:(Some 319_999) ~context_size:(Some 1_048_576) 400_000);
+  check rollover_t "an unreported count never ends the session" None
+    (rollover ~context_used:None ~context_size:(Some 100_000) 262_144);
+  check int "a non-positive reported window leaves the declared limit"
     400_000
     (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
-       ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
-  check int "effective_context_limit_tokens keeps smaller provider context_size"
-    100_000
-    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
-       ~context_size:(Some 100_000) ~max_context_tokens:400_000);
-  check int "effective_context_limit_tokens falls back to max_context_tokens when context_size is non-positive"
-    400_000
-    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
-       ~context_size:(Some 0) ~max_context_tokens:400_000);
-  check int "effective_context_limit_tokens falls back to context_size when max_context_tokens is non-positive"
-    100_000
-    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
-       ~context_size:(Some 100_000) ~max_context_tokens:0);
-  check int "effective_context_limit_tokens returns 0 when both limits are non-positive"
-    0
-    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
-       ~context_size:(Some (-1)) ~max_context_tokens:0);
-  check bool "missing context_used does not trigger rollover" false
-    (should ~context_used:None ~context_size:(Some 100_000) ~max_context_tokens:262_144);
+       ~context_size:(Some 0) ~input_limit:(limit 400_000));
+  check bool "an undeclared limit does not resolve" true
+    (Result.is_error
+       (Llm_provider.Input_budget.of_agent_window ~model_id:"acp-test" ~max_context_tokens:0));
+  let counted =
+    Masc.Keeper_compaction.Provider_counted_window
+      { used_tokens = 320_000; limit_tokens = 400_000 }
+  in
+  check bool "a counted-window trigger reads back as itself" true
+    (Masc.Keeper_compaction.trigger_of_json
+       (Masc.Keeper_compaction.trigger_to_json counted)
+     = Ok counted);
+  (* A resumed session is refused (nothing sent), the fresh retry under the
+     placeholder cap [max_int / 2] is refused too: the durable trigger must
+     carry the bytes that fresh start sent, never the placeholder cap. *)
+  let trigger =
+    Keeper_acp_runtime.For_testing.overflow_trigger ~input_limit:(limit 400_000)
+  in
+  let trigger_t =
+    testable
+      (fun ppf t -> Format.pp_print_string ppf (Yojson.Safe.to_string (Masc.Keeper_compaction.trigger_to_json t)))
+      ( = )
+  in
+  check trigger_t "a refused resume is the provider's overflow at the declared limit"
+    (Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+    (trigger ~previous_capacity:max_int ~refused_sent_bytes:None ~capacity:(max_int / 2));
+  check trigger_t "an uncapped start refused by the agent is the provider's overflow"
+    (Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+    (trigger ~previous_capacity:max_int ~refused_sent_bytes:(Some 1_800_000) ~capacity:900_000);
+  check trigger_t "after a refused resume, the fresh start records the bytes it sent"
+    (Masc.Keeper_compaction.Explicit_hard_limit
+       { capacity_bytes = 900_000; observed_bytes = 1_800_000 })
+    (trigger ~previous_capacity:(max_int / 2) ~refused_sent_bytes:(Some 1_800_000)
+       ~capacity:900_000);
+  (* The ledger names the start range by its first atom; the host reports it
+     as a message position. The two must agree for every start. *)
+  let msg role text : Agent_core.Types.message =
+    { origin = Agent_core.Llm_provider.Types.Conversation
+    ; role
+    ; content = [ Agent_core.Types.Text text ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let history =
+    [ msg Agent_core.Types.User "u0"
+    ; msg Agent_core.Types.Assistant "a0"
+    ; msg Agent_core.Types.User "u1"
+    ; msg Agent_core.Types.Assistant "a1"
+    ]
+  in
+  let _, atom_count = Runtime_model_input_tail_window.annotate history in
+  for first_atom = 0 to atom_count do
+    check int
+      (Printf.sprintf "sends_from maps back to first atom %d" first_atom)
+      first_atom
+      (Keeper_acp_runtime.For_testing.first_atom_of_sends_from history
+         ~sends_from:(Keeper_request_start.sends_from history ~first_atom))
+  done;
   (* Durable rollover marker roundtrip under <masc_root>/runtime/acp-rollover/
      (classified by Server_tool_blob_scope so Tool_blob_sweep.reclaim is never blocked). *)
   let base_path = Filename.temp_dir "acp-rollover-" "" in
@@ -2360,9 +2417,13 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
         ~already_compacted
         ~keepers_dir
         ~keeper_id:"k-shrink"
-        ~starting_capacity_bytes:100_000
-        ~effective_max_context_tokens:25_000
-        ~previous_capacity:(100_000 / attempt)
+        ~input_limit:
+          (Result.get_ok
+             (Llm_provider.Input_budget.of_agent_window
+                ~model_id:"acp-test"
+                ~max_context_tokens:25_000))
+        ~previous_capacity:(if attempt = 1 then max_int else 100_000 / attempt)
+        ~refused_sent_bytes:(Some (100_000 / attempt))
         ~capacity:(50_000 / attempt)
         ~initial_messages
     done;

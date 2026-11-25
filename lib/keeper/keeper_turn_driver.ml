@@ -2694,9 +2694,9 @@ let run_named
 	     ([Keeper_carried_front.Hands_over_its_own_list]), so a range the last
 	     completed turn measured names the same atoms there. A front a refusal
 	     moved is the turn's, not one candidate's, so it stands for these
-	     candidates too. Those lanes hold no ledger of their own — it is
-	     written from the usage of a request this process composed — so this
-	     is their whole answer. *)
+	     candidates too. The ACP lane moves this seed further by its own
+	     ledger's size signal; the other official lanes hold no ledger, so
+	     this is their whole answer. *)
 	  let official_client_carried_front_seed ~runtime_id : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
 	    | Some seed ->
@@ -3855,10 +3855,20 @@ let run_named
           official_model_input_observation hooks
         in
         let run_acp () =
-          match authorize_host_account (Runtime_account_access.Acp_client config.driver) with
-          | Error error ->
+          match
+            ( authorize_host_account (Runtime_account_access.Acp_client config.driver)
+            , Keeper_turn_driver_try_provider.input_limit_of_runtime (Some runtime) )
+          with
+          | Error error, (Some _ | None) ->
             Keeper_official_client_attempt.refused_before_dispatch error
-          | Ok host ->
+          | Ok _, None ->
+            (* Load rejects an ACP runtime without max-context
+               (Runtime_config_validation.validate_runtime_max_context). *)
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Keeper_official_client_host.config_error
+                 ~field:"max-context"
+                 (Printf.sprintf "ACP runtime %s has no declared max-context" runtime.id))
+          | Ok host, Some input_limit ->
             reset_model_input_observation ();
             let tools = if runtime.model.tools_support then tools else [] in
             let on_transmitted_model_input transmitted =
@@ -3868,7 +3878,7 @@ let run_named
                    observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
                 on_request_attribution
             in
-            Keeper_acp_runtime.run ~on_guidance_prepared ~input_source ~media_store
+            Keeper_acp_runtime.run ~on_guidance_prepared ~input_limit ~input_source ~media_store
               ?on_native_tool_completion
               ~host
               ~configured_reasoning_effort:runtime.model.reasoning_effort

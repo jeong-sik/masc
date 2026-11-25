@@ -326,9 +326,11 @@ let warn_if_sent_on_unknown_start ~keeper_name = function
    this candidate starts where the last completed turn ended rather than at
    the oldest atom.
 
-   These lanes hold no ledger: the ledger is written from the usage of a
-   request this process composed ([Keeper_turn_driver_try_provider]), and an
-   official client composes its own. The seed the caller reads is therefore
+   Codex, Claude Code and Antigravity hold no ledger: the ledger is written
+   from the usage of a request this process composed, and those clients
+   compose their own. The ACP lane writes its fresh-session start range
+   against the agent's count and hands this function a seed already moved by
+   that size signal. The seed the caller reads is therefore
    the whole answer, and with no seed the range starts at [turn_start]: the
    end of the last completed turn on this history, where the Agent Core path
    starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).

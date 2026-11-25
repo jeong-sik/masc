@@ -88,6 +88,11 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     in
     let outcome =
       Keeper_acp_runtime.run
+        ~input_limit:
+          (Result.get_ok
+             (Agent_core.Llm_provider.Input_budget.of_agent_window
+                ~model_id:runtime_id
+                ~max_context_tokens:400_000))
         ~read_retained_media:None
         ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
         ~host:acp_host

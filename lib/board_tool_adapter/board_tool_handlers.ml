@@ -526,6 +526,13 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"closed_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok closed_by ->
+    let authorize = post_close_authorization ~reader ~action:"close" ~post_id ~actor:closed_by in
+    (* A non-author learns the refusal before the successor and summary
+       checks, as before the in-lock check; set_closed checks again under
+       the lock. *)
+    match Result.bind (Board_dispatch.get_post ~reader ~post_id) authorize with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok () ->
     let summary = get_string args "summary" "" in
     let successor_id = get_string_opt args "successor_id" in
     let no_successor = Safe_ops.json_bool_opt "no_successor" args in
@@ -549,7 +556,6 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         msg
     | Ok successor ->
-    let authorize = post_close_authorization ~reader ~action:"close" ~post_id ~actor:closed_by in
     match
       Board_dispatch.set_closed
         ~authorize

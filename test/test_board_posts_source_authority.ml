@@ -1168,7 +1168,8 @@ let test_dispatch_writes_reobserve base_path _workspace =
       let external_ = require_post (create other "external append before pin") in
       cause_stale ();
       require_board (Board_dispatch.set_pinned ~post_id ~pinned:true);
-      let other = reloaded base_path 2 in
+      (* Rows, not posts: the pin appended a third row for the first post. *)
+      let other = reloaded base_path 3 in
       let new_author = "new-source-owner" in
       ignore (require_board (Board.update_post_with_outcome other
         ~lookup:Recipient_lookup.none_declared ~post_id ~editor:"source-writer"

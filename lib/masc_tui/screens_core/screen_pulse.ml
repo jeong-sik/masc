@@ -287,19 +287,26 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
         (hero.microvm_count, hero.ssh_count, hero.docker_count)
       else Fleet_store.fleet_infra_counts model.fleet
     in
+    let company_count =
+      Observed.map
+        (fun _ -> Int.max hero.company_count (List.length groups))
+        model.fleet.keepers
+    in
     let infra_mix =
       if fleet_vm + fleet_ssh + fleet_dk > 0 then
         let base = Printf.sprintf "%dvm · %dssh" fleet_vm fleet_ssh in
-        if fleet_dk > 0 then Printf.sprintf "%s · %ddk" base fleet_dk else base
+        Some (if fleet_dk > 0 then Printf.sprintf "%s · %ddk" base fleet_dk else base)
       else
         match heap_summary model with
         | Some h ->
-            Say.resolve lang (Say.make ~ko:("힙 " ^ h) ~en:("Heap " ^ h))
-        | None ->
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%d 조직" (Int.max hero.company_count (List.length groups)))
-                 ~en:(Printf.sprintf "%d cos" (Int.max hero.company_count (List.length groups))))
+            Some (Say.resolve lang (Say.make ~ko:("힙 " ^ h) ~en:("Heap " ^ h)))
+        | None -> (
+            match Observed.to_option company_count with
+            | Some n ->
+                Some (Say.resolve lang
+                  (Say.make ~ko:(Printf.sprintf "%d 조직" n)
+                     ~en:(Printf.sprintf "%d cos" n)))
+            | None -> None)
     in
     let roster_ks =
       match Observed.to_option model.fleet.keepers with
@@ -317,6 +324,12 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
             0 groups
         in
         (hero.running_keepers, hero.total_keepers, ft)
+    in
+    let fleet_count =
+      if Observed.is_value model.fleet.fleet_reading
+         || Observed.is_value model.fleet.keepers
+      then Printf.sprintf "%d/%d" hero_active_k hero_total_k
+      else format_observed_marker ~lang model.fleet.keepers
     in
     let turns_str =
       match Observed.to_option hero.turns_24h with
@@ -614,9 +627,10 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
              put_left_right grid ~clip:(Rect.make ~x:lc.x ~y:lc.y ~w:lc.w ~h:1)
                ~y:lc.y
                ~left_text:
-                 (Printf.sprintf "%s %d/%d · %s"
+                 (Printf.sprintf "%s %s"
                     (Say.resolve lang (Say.make ~ko:"플릿" ~en:"Fleet"))
-                    hero_active_k hero_total_k infra_mix)
+                    (String.concat Typography.sep_dot
+                       (fleet_count :: Option.to_list infra_mix)))
                ~left_style:anchor_st ~right_text:turns_str ~right_style:struct_st;
              put_left_right grid ~clip:(Rect.make ~x:rc.x ~y:rc.y ~w:rc.w ~h:1)
                ~y:rc.y
@@ -689,15 +703,23 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                       failing_total,
                     Typography.status ~bg ~bold:true theme Theme.Status_critical )
                 else
-                  ( Say.resolve lang
-                      (Say.make
-                         ~ko:(Printf.sprintf "%s %d조직"
-                                (Glyph.to_utf8 Glyph.Live_healthy)
-                                (Int.max hero.company_count (List.length groups)))
-                         ~en:(Printf.sprintf "%s %d cos"
-                                (Glyph.to_utf8 Glyph.Live_healthy)
-                                (Int.max hero.company_count (List.length groups)))),
-                    ok_st )
+                  match company_count with
+                  | Observed.Value { data = n; stale; _ } ->
+                      let glyph, style =
+                        if stale then Glyph.Transport_stale, whisper_st
+                        else Glyph.Live_healthy, ok_st
+                      in
+                      let icon = Glyph.to_utf8 glyph in
+                      ( Say.resolve lang
+                          (Say.make ~ko:(Printf.sprintf "%s %d조직" icon n)
+                             ~en:(Printf.sprintf "%s %d cos" icon n)),
+                        style )
+                  | Observed.Failed _ ->
+                      ( Say.resolve lang
+                          (Say.make ~ko:"키퍼 조회 실패" ~en:"Keeper lookup failed"),
+                        crit_st )
+                  | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
+                      (format_observed_marker ~lang company_count, whisper_st)
               in
               put_left_right grid ~clip:r0 ~y:r0.y
                 ~left_text:
@@ -706,9 +728,8 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                 ~right_style:status_st;
               if body_h >= 2 then
                 put_left_right grid ~clip:r1 ~y:r1.y
-                  ~left_text:
-                    (Printf.sprintf "%d/%d" hero_active_k hero_total_k)
-                  ~left_style:anchor_st ~right_text:infra_mix
+                  ~left_text:fleet_count
+                  ~left_style:anchor_st ~right_text:(Option.value ~default:"" infra_mix)
                   ~right_style:act_st;
               if body_h >= 3 then begin
                 let adv =
@@ -1348,29 +1369,32 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         (fun acc (g : Wire_fleet.company_group) -> acc + List.length g.keepers)
         0 groups
     in
-    let title =
-      Say.resolve lang
-        (Say.make
-           ~ko:(Printf.sprintf "%d개 자율 조직" (List.length groups))
-           ~en:(Printf.sprintf "%d Autonomous Companies" (List.length groups)))
-    in
-    let spend_bd = Runtime_store.spend_24h_breakdown model.runtime in
-    let subtitle =
-      match spend_bd.system_unattributed_usd with
-      | Some sys_usd ->
-          Say.resolve lang
-            (Say.make
-               ~ko:
-                 (Printf.sprintf "%d 키퍼 · 시스템 %s" total_keepers
-                    (Format_val.format_value Format_val.Usd sys_usd))
-               ~en:
-                 (Printf.sprintf "%d Keepers · Sys %s" total_keepers
-                    (Format_val.format_value Format_val.Usd sys_usd)))
-      | None ->
-          Say.resolve lang
-            (Say.make
-               ~ko:(Printf.sprintf "%d 키퍼" total_keepers)
-               ~en:(Printf.sprintf "%d Keepers" total_keepers))
+    let title, subtitle =
+      match model.fleet.keepers with
+      | Observed.Value _ ->
+          let organizations = List.length groups in
+          let label =
+            Say.make
+              ~ko:(Printf.sprintf "%d개 자율 조직" organizations)
+              ~en:(Printf.sprintf "%d Autonomous Companies" organizations)
+          in
+          let keepers =
+            Say.resolve lang
+              (Say.make ~ko:(Printf.sprintf "%d 키퍼" total_keepers)
+                 ~en:(Printf.sprintf "%d Keepers" total_keepers))
+          in
+          let spend = Runtime_store.spend_24h_breakdown model.runtime in
+          let subtitle =
+            match spend.system_unattributed_usd with
+            | None -> keepers
+            | Some usd ->
+                let system = Say.resolve lang (Say.make ~ko:"시스템" ~en:"Sys") in
+                Printf.sprintf "%s · %s %s" keepers system
+                  (Format_val.format_value Format_val.Usd usd)
+          in
+          (label, Some subtitle)
+      | Observed.Loading _ | Observed.Failed _ | Observed.Absent | Observed.Unreported ->
+          (Say.make ~ko:"자율 조직" ~en:"Autonomous Companies", None)
     in
     let hotkey =
       Say.resolve lang
@@ -1402,8 +1426,8 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
-          (Card.default_spec ~title) with
-          subtitle = Some subtitle;
+          (Card.default_spec ~title:(Say.resolve lang title)) with
+          subtitle;
           badge = comp_badge;
           hotkey = Some hotkey;
           focused = pane_focused;

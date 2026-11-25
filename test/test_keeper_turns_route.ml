@@ -89,11 +89,15 @@ let client_response request wire =
   match !result with Some response -> response | None -> Alcotest.fail "incomplete HTTP response"
 ;;
 
-let with_pending_confirm_read_result value f =
+let with_pending_confirm_reader read f =
   let previous = Atomic.get Workspace_hooks.operator_pending_confirm_read_result_fn in
-  Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn (fun _ -> value);
+  Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn read;
   Fun.protect ~finally:(fun () ->
     Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn previous) f
+;;
+
+let with_pending_confirm_read_result value =
+  with_pending_confirm_reader (fun _ -> value)
 ;;
 
 let with_test_state f =
@@ -145,6 +149,44 @@ let test_empty_workspace_answers_an_empty_fleet () =
       | Some (`List rows) ->
         Alcotest.failf "expected no rows, got %d" (List.length rows)
       | _ -> Alcotest.fail "keepers field absent or mistyped")
+;;
+
+let test_overlapping_requests_share_one_fresh_waiting_read () =
+  with_test_state (fun ~sw ~config:_ ~state ->
+    let started, mark_started = Eio.Promise.create () in
+    let release, release_first = Eio.Promise.create () in
+    let reads = ref 0 in
+    let read_pending _ =
+      incr reads;
+      if !reads = 1 then (
+        Eio.Promise.resolve mark_started ();
+        Eio.Promise.await release;
+        Error "first observation failed")
+      else Ok []
+    in
+    let read_response () =
+      turns_response ~state |> body_of |> Yojson.Safe.from_string
+      |> member "waiting_errors"
+    in
+    with_pending_confirm_reader read_pending (fun () ->
+      let first = Eio.Fiber.fork_promise ~sw read_response in
+      Eio.Promise.await started;
+      let second = Eio.Fiber.fork_promise ~sw read_response in
+      let third = Eio.Fiber.fork_promise ~sw read_response in
+      Alcotest.(check int) "overlapping reads wait for the current inventory" 1 !reads;
+      Eio.Promise.resolve release_first ();
+      (match Eio.Promise.await_exn first with
+       | Some (`List (_ :: _)) -> ()
+       | _ -> Alcotest.fail "the first client must see its own read failure");
+      List.iter
+        (fun response ->
+          match Eio.Promise.await_exn response with
+          | Some (`List []) -> ()
+          | _ -> Alcotest.fail "later requests must see the fresh observation")
+        [ second; third ];
+      Alcotest.(check int) "later requests shared one read" 2 !reads;
+      ignore (read_response ());
+      Alcotest.(check int) "a completed read is not cached" 3 !reads))
 ;;
 
 let test_installed_keeper_rides_as_an_idle_row () =
@@ -502,6 +544,8 @@ let () =
 
         ; Alcotest.test_case "empty workspace answers an empty fleet" `Quick
             test_empty_workspace_answers_an_empty_fleet
+        ; Alcotest.test_case "overlapping requests share one fresh waiting read" `Quick
+            test_overlapping_requests_share_one_fresh_waiting_read
         ; Alcotest.test_case "an installed keeper rides as an idle row" `Quick
             test_installed_keeper_rides_as_an_idle_row
         ; Alcotest.test_case "fleet waiting read errors stay public" `Quick

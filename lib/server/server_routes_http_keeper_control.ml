@@ -132,6 +132,105 @@ let handle_keeper_tool_approvals_list _state request reqd =
        ])
 ;;
 
+type waiting_inventory = ((string * Yojson.Safe.t) list, Yojson.Safe.t list) result
+
+type waiting_inventory_outcome =
+  | Observed of (string list * waiting_inventory, string) result
+  | Failed of exn * Printexc.raw_backtrace
+  | Released
+
+type waiting_inventory_flight =
+  { outcome : waiting_inventory_outcome Eio.Promise.t
+  ; resolver : waiting_inventory_outcome Eio.Promise.u
+  }
+
+type waiting_inventory_read =
+  | Queued of waiting_inventory_flight
+  | Reading of waiting_inventory_flight * waiting_inventory_flight option
+
+let new_waiting_inventory_flight () =
+  let outcome, resolver = Eio.Promise.create () in
+  { outcome; resolver }
+;;
+
+let waiting_inventory_reads = Hashtbl.create 4
+let waiting_inventory_lock = Mutex.create ()
+
+let read_keeper_census_and_waiting config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error detail -> Error detail
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> Error (Printexc.to_string exn)
+  | Ok keeper_names ->
+    Ok (keeper_names, Server_keeper_waiting_inventory.keeper_turns_json_by_name config)
+;;
+
+(* Share the read before submitting to the executor. A request that arrives
+   after the worker starts needs a new observation: a source may already
+   have been read before the event that caused the new request. Those callers
+   share one trailing read, which starts after the current job settles. *)
+let rec read_waiting_inventory ~name (config : Workspace.config) =
+  let key = config.base_path, config.workspace_path in
+  let action =
+    Mutex.protect waiting_inventory_lock (fun () ->
+      match Hashtbl.find_opt waiting_inventory_reads key with
+      | Some (Queued flight | Reading (_, Some flight)) -> `Join flight
+      | Some (Reading (current, None)) ->
+        let next = new_waiting_inventory_flight () in
+        Hashtbl.replace waiting_inventory_reads key (Reading (current, Some next));
+        `Own (next, Some current.outcome)
+      | None ->
+        let flight = new_waiting_inventory_flight () in
+        Hashtbl.add waiting_inventory_reads key (Queued flight);
+        `Own (flight, None))
+  in
+  match action with
+  | `Join flight ->
+    (match Eio.Promise.await flight.outcome with
+     | Observed snapshot -> snapshot
+     | Failed (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+     | Released -> read_waiting_inventory ~name config)
+  | `Own (flight, previous) ->
+    let finish outcome =
+      Mutex.protect waiting_inventory_lock (fun () ->
+        match Hashtbl.find_opt waiting_inventory_reads key with
+        | Some (Reading (current, next)) when current == flight ->
+          (match next with
+           | Some next -> Hashtbl.replace waiting_inventory_reads key (Queued next)
+           | None -> Hashtbl.remove waiting_inventory_reads key)
+        | Some (Reading (current, Some next)) when next == flight ->
+          Hashtbl.replace waiting_inventory_reads key (Reading (current, None))
+        | Some (Queued queued) when queued == flight ->
+          Hashtbl.remove waiting_inventory_reads key
+        | Some (Queued _ | Reading _) | None -> ());
+      Eio.Promise.resolve flight.resolver outcome
+    in
+    (match
+       Option.iter (fun outcome -> ignore (Eio.Promise.await outcome)) previous;
+       Eio.Fiber.check ();
+       Domain_pool_ref.submit_io_or_inline ~name (fun () ->
+         let owns_slot =
+           Mutex.protect waiting_inventory_lock (fun () ->
+             match Hashtbl.find_opt waiting_inventory_reads key with
+             | Some (Queued queued) when queued == flight ->
+               Hashtbl.replace waiting_inventory_reads key (Reading (flight, None));
+               true
+             | Some (Queued _ | Reading _) | None -> false)
+         in
+         if owns_slot then Some (read_keeper_census_and_waiting config) else None)
+     with
+     | Some snapshot ->
+       finish (Observed snapshot);
+       snapshot
+     | None ->
+       finish Released;
+       read_waiting_inventory ~name config
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       finish (if Eio.Fiber.is_cancelled () then Released else Failed (exn, backtrace));
+       Printexc.raise_with_backtrace exn backtrace)
+;;
+
 (* Which keepers are mid-turn right now, one row per registered keeper. The
    running-turn slot lives in the Keeper Owner (process memory), not in the
    durable meta a keeper list is read from, so surfaces that draw a
@@ -144,27 +243,14 @@ let handle_keeper_tool_approvals_list _state request reqd =
 let handle_keeper_turns_list state request reqd =
   let preparation_details_for = Server_utils.query_param request "preparation_details_for" in
   let config = Mcp_server.workspace_config state in
-  match Keeper_meta_store.keeper_names_result config with
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    respond_json_value_with_cors ~status:`Internal_server_error request reqd
-      (`Assoc
-         [ ( "error"
-           , `String
-               (Printf.sprintf "keeper name census failed: %s"
-                  (Printexc.to_string exn)) )
-         ])
+  match read_waiting_inventory ~name:__FUNCTION__ config with
   | Error detail ->
     respond_json_value_with_cors ~status:`Internal_server_error request reqd
       (`Assoc
          [ ( "error"
            , `String (Printf.sprintf "keeper name census failed: %s" detail) )
          ])
-  | Ok keeper_names ->
-    let waiting_snapshot =
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Server_keeper_waiting_inventory.keeper_turns_json_by_name config)
-    in
+  | Ok (keeper_names, waiting_snapshot) ->
     let waiting_by_name, waiting_errors =
       match waiting_snapshot with
       | Error errors -> [], errors

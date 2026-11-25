@@ -125,7 +125,7 @@ let test_every_section_name_reads_back () =
   let sources =
     List.map (fun layer -> L.Layer layer) all_layers
     @ List.map (fun reason -> L.Unattributed reason)
-        [ L.World_frame; L.Host_workspace_recall; L.Direct_turn; L.Unprojected_input ]
+        [ L.World_frame; L.Host_workspace_recall; L.Connector_personal_memory; L.Direct_turn; L.Unprojected_input ]
   in
   List.iter
     (fun source ->
@@ -283,6 +283,38 @@ let test_partition_by_author_and_volatile_tail () =
      | None -> false)
 ;;
 
+let test_private_connector_section_can_be_removed_from_capture () =
+  let module Assembly = Masc.Keeper_context_assembly in
+  let rendered = L.singleton Board_activity "shared activity\n" in
+  let rendered = L.append_unattributed rendered Connector_personal_memory "private fact\n" in
+  let assemble partition =
+    Assembly.assemble ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None ~blocks:[ Dynamic_context, L.text partition ]
+  in
+  let live = assemble rendered in
+  check bool "live request carries scoped text" true (Assembly.has_connector_personal_memory live);
+  let capture = Assembly.without_connector_personal_memory live in
+  check bool "capture has no scoped section" false (Assembly.has_connector_personal_memory capture);
+  check (option string) "capture keeps only shared activity" (Some "shared activity\n")
+    capture.extra_system_context
+;;
+
+let test_private_connector_requires_request_only_runtime () =
+  let api ?previous_response_id kind =
+    Llm_provider.Provider_config.make ~kind ~provider_id:"fixture" ~model_id:"fixture"
+      ~base_url:"http://127.0.0.1" ?previous_response_id ()
+    |> Runtime_account_access.seal_api
+    |> fun sealed -> Runtime_execution.Agent_core sealed
+  in
+  let supports = Runtime_execution.supports_request_only_context in
+  check bool "ordinary Agent Core HTTP receives request-local context" true
+    (supports (api OpenAI_compat));
+  check bool "signed context can be retained in the Anthropic checkpoint" false
+    (supports (api Anthropic));
+  check bool "a provider-side response chain can retain the carrier" false
+    (supports (api ~previous_response_id:"response-fixture" OpenAI_compat))
+;;
+
 let () =
   run "keeper_context_layers"
     [
@@ -290,6 +322,10 @@ let () =
         [
           test_case "partition_by_author and split_outside_context keep goals/proofs out of system_prompt_override" `Quick
             test_partition_by_author_and_volatile_tail;
+          test_case "private connector section is removed from captures" `Quick
+            test_private_connector_section_can_be_removed_from_capture;
+          test_case "only request-local runtimes can receive private connector context" `Quick
+            test_private_connector_requires_request_only_runtime;
         ] );
       ( "ordering",
         [

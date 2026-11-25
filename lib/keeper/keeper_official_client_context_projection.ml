@@ -993,7 +993,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
                | Wiki | Lane_updates | Autonomous_trigger | Scheduled_automation
                | Completion_authority | Task_cancellations | Pending_mentions
                | Own_board_posts | Board_activity | Own_recent_actions | Recent_work | Fleet_messages)
-           | Unattributed (World_frame | Host_workspace_recall | Direct_turn) -> true) sections
+           | Unattributed (World_frame | Host_workspace_recall | Connector_personal_memory | Direct_turn) -> true) sections
        | Some _, None | None, _ -> false)
   in
   let held_context =

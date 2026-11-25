@@ -118,6 +118,13 @@ val logical_blocks : t -> (Prompt_block_id.t * string) list
 
 val effective_system_prompt : base_text:string -> t -> string
 
+val has_connector_personal_memory : t -> bool
+(** True only for a request that carries an actual private recall section. *)
+
+val without_connector_personal_memory : t -> t
+(** A fresh display capture with the connector-private section removed from
+    both the logical blocks and their assembled carrier. *)
+
 val system_prompt_override : previous:string option -> t -> string option
 (** Override only when the request carries an observation suffix. Otherwise preserve
     [None] versus [Some ""] and every byte of the prior override. *)

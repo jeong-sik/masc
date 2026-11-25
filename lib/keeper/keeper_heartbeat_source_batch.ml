@@ -1,8 +1,12 @@
-type t = { admitted : Keeper_event_queue_state.pending_selection list }
+type t =
+  { admitted : Keeper_event_queue_state.pending_selection list
+  ; connector_items : (string * Keeper_external_attention.item) list
+  }
 
-let empty = { admitted = [] }
-let of_selections admitted = { admitted }
+let empty = { admitted = []; connector_items = [] }
+let of_selections ?(connector_items = []) admitted = { admitted; connector_items }
 let selections batch = batch.admitted
+let connector_items batch = batch.connector_items
 let stimuli batch =
   List.map (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
     (selections batch)
@@ -48,7 +52,7 @@ let validate ~diagnostic ~standing batch =
   | Ok (kept, withdrawn) ->
     (match batch.admitted with
      | [] -> Ok (batch, withdrawn)
-     | _ :: _ -> Ok ({ admitted = kept }, withdrawn))
+     | _ :: _ -> Ok ({ batch with admitted = kept }, withdrawn))
 
 type turn_input = { batch : t; reactive : bool }
 let for_turn ~reactive batch = { batch; reactive }

@@ -298,9 +298,12 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
 let prepare_request_dynamic_context
       ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
       ~dynamic_context ~dynamic_context_for_tools
-      ?(deferred_names = []) ?(loader_alive = false) ?host_recall
+      ?(deferred_names = []) ?(loader_alive = false) ?(request_only_context = false) ?host_recall
       (tools : Agent_core.Tool.t list) =
-  let access = Keeper_request_tool_access.create ~offered:tools ~deferred_names ~loader_alive in
+  let access =
+    Keeper_request_tool_access.create ~offered:tools ~deferred_names ~loader_alive
+    |> Keeper_request_tool_access.with_request_only_context request_only_context
+  in
   let dynamic_context =
     match dynamic_context_for_tools with
     | Some project when not post_tool_round -> project access
@@ -407,6 +410,7 @@ let assemble_hooks
           ~runtime_id:_ ~official_turn:_ ~identity:_ ~tool_name:_ = () in
     let active_tool_surface_enabled = ref false in
     let active_checkpoint_owner = ref None in
+    let request_only_context = ref false in
     let host_memory = ref None in
     (* The queue is read when a turn starts, so a row that arrives while this
        run goes on waits for it to end. A round that follows tool results lists
@@ -489,6 +493,7 @@ let assemble_hooks
       Keeper_run_tools_hook_accumulator.set_delivered_source_invalidations acc [];
       active_tool_surface_enabled := attempt.tool_surface_enabled;
       active_checkpoint_owner := Some attempt.checkpoint_owner;
+      request_only_context := attempt.supports_request_only_context;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       usage_report_of_attempt := Some attempt.usage_report;
       client_reported_in_attempt := false;
@@ -826,6 +831,7 @@ let assemble_hooks
                     ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
                     ~deferred_names:deferred_tool_names
                     ~loader_alive:attempt_surface.loader_alive
+                    ~request_only_context:!request_only_context
                     ?host_recall:(if recall_permitted then Some host_recall else None)
                     offered_tools in
                 let dynamic_context_partition = dynamic_context in
@@ -932,6 +938,9 @@ let assemble_hooks
                       current_params.extra_system_context
                     ~blocks:(List.rev !recorded_blocks)
                 in
+                let carries_personal_memory =
+                  Keeper_context_assembly.has_connector_personal_memory extra_system_context_assembly
+                in
                 let ctx = extra_system_context_assembly.extra_system_context in
                 let effective_system_prompt = Keeper_context_assembly.effective_system_prompt
                     ~base_text:base_system_prompt extra_system_context_assembly in
@@ -955,7 +964,10 @@ let assemble_hooks
                    cannot mark that request: the System observations ride it
                    too. *)
                 (if not post_tool_round
-                 then
+                 then (
+                   let capture_assembly = Keeper_context_assembly.without_connector_personal_memory
+                     extra_system_context_assembly in
+                   let blocks = Keeper_context_assembly.logical_blocks capture_assembly in
                    Keeper_prompt_capture.write
                      ~config
                      ~keeper:meta.name
@@ -966,12 +978,12 @@ let assemble_hooks
                         run. Stamping the provider round here made one request
                         read as #721 in last-prompt and #13 in turn-records. *)
                      ~absolute_turn:keeper_turn_id
-                     ~blocks:(match extra_system_context_assembly.system_prompt with
-                       | None -> recorded_blocks_for_receipt
+                     ~blocks:(match capture_assembly.system_prompt with
+                       | None -> blocks
                        | Some issued -> (Prompt_block_id.Keeper_instructions, issued.base_text)
-                           :: recorded_blocks_for_receipt)
-                     ~assembled:ctx
-                     ~system_prompt:extra_system_context_assembly.system_prompt);
+                           :: blocks)
+                     ~assembled:capture_assembly.extra_system_context
+                     ~system_prompt:capture_assembly.system_prompt));
                 if consumed_operator_note
                 then
                   Keeper_operator_note.mark_consumed
@@ -1128,7 +1140,7 @@ let assemble_hooks
                 (* Phase O observability: capture the effective AGENT_CORE request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
-                Keeper_wire_capture.capture_request
+                (if not carries_personal_memory then Keeper_wire_capture.capture_request
                   ~base_path:config.base_path
                   ~keeper_name:meta.name
                   ~turn_id:keeper_turn_id
@@ -1139,7 +1151,7 @@ let assemble_hooks
                   ~user_message
                   ~history_messages:messages
                   ~tools:offered_tools
-                  ();
+                  ());
                 Eio.Fiber.yield ();
                 emit_request_prompt_metrics ();
                 let extra_system_context, extra_outside_context =

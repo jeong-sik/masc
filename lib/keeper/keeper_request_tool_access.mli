@@ -10,3 +10,7 @@ val create :
 
 val offered : t -> Agent_core.Tool.t list
 val route : t -> name:string -> route
+
+val with_request_only_context : bool -> t -> t
+val supports_request_only_context : t -> bool
+(** True when the actual selected runtime keeps the context request-local. *)

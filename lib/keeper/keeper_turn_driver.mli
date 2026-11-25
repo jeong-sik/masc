@@ -381,6 +381,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; supports_request_only_context : bool
   ; tool_result_inline_ceiling_bytes : int
   ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report

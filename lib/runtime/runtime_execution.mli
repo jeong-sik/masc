@@ -68,6 +68,12 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
+val supports_request_only_context : t -> bool
+(** An Agent Core request whose outside context will not become part of a
+    retained conversation. Anthropic may checkpoint carriers alongside signed
+    thinking. Official clients and provider-side response chains also retain
+    context. *)
+
 (** Where a turn's provider spend becomes visible to MASC, which decides who
     writes the cost ledger's raw rows. Separate from [checkpoint_owner]: that
     answers who holds resumable state, this answers who reports usage.

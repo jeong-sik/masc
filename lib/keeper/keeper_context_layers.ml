@@ -120,7 +120,8 @@ let author_of_layer = function
   | Fleet_messages -> Outside_text
 ;;
 
-type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
+type unattributed =
+  | World_frame | Host_workspace_recall | Connector_personal_memory | Direct_turn | Unprojected_input
 type source = Layer of layer_id | Unattributed of unattributed
 type resend_on_resume = Sent_when_changed | Sent_every_resume | Sent_with_other_sections
 type section_rows =
@@ -149,10 +150,9 @@ let unattributed reason text =
   { text; spans = [make_span (Unattributed reason) 0 text] }
 let singleton layer text =
   { text; spans = [make_span (Layer layer) 0 text] }
-let partition_layer layer rendered =
-  let selected, remaining = List.partition (fun span -> match span.source with
-    | Layer candidate -> candidate = layer
-    | Unattributed _ -> false) rendered.spans in
+let contains_source source rendered = List.exists (fun span -> span.source = source) rendered.spans
+let partition_source source rendered =
+  let selected, remaining = List.partition (fun span -> span.source = source) rendered.spans in
   let project spans =
     let buffer = Buffer.create (String.length rendered.text) in
     let spans = List.map (fun span ->
@@ -161,10 +161,11 @@ let partition_layer layer rendered =
       {span with offset}) spans in
     {text = Buffer.contents buffer; spans} in
   project selected, project remaining
+let partition_layer layer = partition_source (Layer layer)
 let author_of_source = function
   | Layer layer -> author_of_layer layer
   | Unattributed (World_frame | Host_workspace_recall) -> Host_state
-  | Unattributed (Direct_turn | Unprojected_input) -> Outside_text
+  | Unattributed (Connector_personal_memory | Direct_turn | Unprojected_input) -> Outside_text
 let partition_by_author rendered =
   let host_spans, outside_spans =
     List.partition
@@ -235,6 +236,7 @@ let layer_name = function
 let unattributed_name = function
   | World_frame -> "world_frame"
   | Host_workspace_recall -> "host_workspace_recall"
+  | Connector_personal_memory -> "connector_personal_memory"
   | Direct_turn -> "direct_turn"
   | Unprojected_input -> "unprojected_input"
 
@@ -242,7 +244,8 @@ let source_name = function
   | Layer layer -> layer_name layer
   | Unattributed reason -> unattributed_name reason
 
-let all_unattributed = [ World_frame; Host_workspace_recall; Direct_turn; Unprojected_input ]
+let all_unattributed =
+  [ World_frame; Host_workspace_recall; Connector_personal_memory; Direct_turn; Unprojected_input ]
 
 let source_of_name name =
   List.map (fun layer -> Layer layer) ordered
@@ -272,6 +275,7 @@ let resend_on_resume = function
       ( Goals_awaiting_proof | Autonomous_trigger | Scheduled_automation | Completion_authority
       | Task_cancellations | Board_activity ) ->
     Sent_every_resume
+  | Unattributed Connector_personal_memory -> Sent_every_resume
   | Unattributed World_frame -> Sent_with_other_sections
 
 let sections rendered =

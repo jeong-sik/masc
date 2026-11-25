@@ -33,15 +33,6 @@ val render_lines :
     when [false], links include a muted italic [" (target)"] preview so the
     destination stays visible. *)
 
-val measure :
-  theme:Theme.t ->
-  width:int ->
-  ?osc8:bool ->
-  string ->
-  int
-(** Exact rendered line count projected by {!render_lines} ([0] when
-    [width <= 0]), guaranteed 1-to-1 parity with {!draw}. *)
-
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

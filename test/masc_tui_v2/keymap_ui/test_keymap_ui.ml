@@ -2304,20 +2304,19 @@ let test_markdown_inline_mermaid_blocks () =
   let line_text (l : Markdown.rendered_line) =
     String.concat "" (List.map (fun (sp : Markdown.styled_span) -> sp.text) l.spans)
   in
+  (* draw reports the line count that render_lines produced. *)
   let check_parity ~width md =
     let lines = Markdown.render_lines ~theme ~width ~osc8:true md in
-    let measured = Markdown.measure ~theme ~width ~osc8:true md in
-    let grid = Cell_grid.create ~cols:width ~rows:(max 4 (measured + 2)) in
+    let total = List.length lines in
+    let grid = Cell_grid.create ~cols:width ~rows:(max 4 (total + 2)) in
     let drawn =
-      Markdown.draw grid ~rect:(Rect.make ~x:0 ~y:0 ~w:width ~h:(max 4 (measured + 2)))
+      Markdown.draw grid
+        ~rect:(Rect.make ~x:0 ~y:0 ~w:width ~h:(max 4 (total + 2)))
         ~theme ~osc8:true md
     in
     Alcotest.(check int)
-      (Printf.sprintf "measure == List.length render_lines at w=%d" width)
-      (List.length lines) measured;
-    Alcotest.(check int)
-      (Printf.sprintf "draw total == measure at w=%d" width)
-      measured drawn;
+      (Printf.sprintf "draw total == render_lines length at w=%d" width)
+      total drawn;
     List.iter
       (fun l ->
         Alcotest.(check bool) "rendered line width <= width" true
@@ -2365,25 +2364,21 @@ let test_markdown_inline_mermaid_blocks () =
   Alcotest.(check bool) "over-8192-byte mermaid falls back safely" true
     (List.length lines_huge > 10);
 
-  (* 4. Empty width (width <= 0) matches draw = 0; tiny width = 4 falls back with parity *)
+  (* 4. An empty rect draws nothing; tiny width = 4 falls back with parity *)
   let empty_grid = Cell_grid.create ~cols:10 ~rows:5 in
-  Alcotest.(check int) "measure ~width:0 == 0" 0
-    (Markdown.measure ~theme ~width:0 ~osc8:true md_lr);
-  Alcotest.(check int) "measure ~width:(-3) == 0" 0
-    (Markdown.measure ~theme ~width:(-3) ~osc8:true md_lr);
   Alcotest.(check int) "draw empty rect == 0" 0
     (Markdown.draw empty_grid ~rect:(Rect.make ~x:0 ~y:0 ~w:0 ~h:5) ~theme
        ~osc8:true md_lr);
-  let lines_w4 = Markdown.render_lines ~theme ~width:4 ~osc8:true md_lr in
-  let meas_w4 = Markdown.measure ~theme ~width:4 ~osc8:true md_lr in
-  let grid_w4 = Cell_grid.create ~cols:4 ~rows:(max 4 (meas_w4 + 2)) in
-  let draw_w4 =
-    Markdown.draw grid_w4 ~rect:(Rect.make ~x:0 ~y:0 ~w:4 ~h:(max 4 (meas_w4 + 2)))
-      ~theme ~osc8:true md_lr
+  (* render_lines raises a tiny width to its floor, so only the line count
+     is compared here. *)
+  let total_w4 =
+    List.length (Markdown.render_lines ~theme ~width:4 ~osc8:true md_lr)
   in
-  Alcotest.(check int) "width=4 measure == render_lines length"
-    (List.length lines_w4) meas_w4;
-  Alcotest.(check int) "width=4 draw == measure" meas_w4 draw_w4;
+  let grid_w4 = Cell_grid.create ~cols:4 ~rows:(max 4 (total_w4 + 2)) in
+  Alcotest.(check int) "width=4 draw == render_lines length" total_w4
+    (Markdown.draw grid_w4
+       ~rect:(Rect.make ~x:0 ~y:0 ~w:4 ~h:(max 4 (total_w4 + 2)))
+       ~theme ~osc8:true md_lr);
 
   (* 5. Parse-error mermaid falls back cleanly to raw source lines with exact parity *)
   let md_parse_err = "```mermaid\nflowchart TD\nA[\"bad\"]::: --> B\n```" in

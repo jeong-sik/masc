@@ -1561,7 +1561,7 @@ let apply_workspace_search ~observed_at ~scope result t =
 let set_code_active_file active_file_path t =
   {
     t with
-    code = { t.code with active_file_path; pending_jump_line = None };
+    code = { t.code with active_file_path; file_scroll_offset = 0; pending_jump_line = None };
   }
 
 let active_code_file_path t =
@@ -1596,7 +1596,13 @@ let apply_workspace_file ~observed_at ~scope ~path content t =
           in
           let max_offset = max 0 (total_lines - 1) in
           min max_offset (max 0 (line - 1))
-      | Some _ | None -> 0
+      | Some _ | None -> (
+          match Observed.to_option t.code.open_file with
+          | Some (previous_scope, previous_path, _)
+            when Wire_infra.equal_workspace_scope previous_scope scope
+                 && String.equal previous_path path ->
+              t.code.file_scroll_offset
+          | Some _ | None -> 0)
     in
     {
       t with

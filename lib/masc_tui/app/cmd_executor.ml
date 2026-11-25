@@ -1021,7 +1021,9 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
   | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _
-  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending | Cmd.Get_artifacts _ -> scoped ""
+  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending | Cmd.Get_artifacts _
+  | Cmd.Get_workspace_file _ ->
+      scoped ""
   | Cmd.Get_harness_health ->
       let _, snapshot_key =
         scoped (Printf.sprintf "#%Ld" (Clock.Mono.to_ns requested_at))
@@ -1097,7 +1099,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_workspace_children _
   | Cmd.Get_workspace_files _
   | Cmd.Get_workspace_search _
-  | Cmd.Get_workspace_file _
   | Cmd.Get_git_branches _
   | Cmd.Get_git_worktrees _
   | Cmd.Get_git_status _

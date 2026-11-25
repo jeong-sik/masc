@@ -327,6 +327,7 @@ let test_pinned_text () =
     [ {|{"kind":"unknown_ref"}|}
     ; {|{"kind":"ref_used_twice"}|}
     ; {|{"kind":"source_outside_question"}|}
+    ; {|{"kind":"source_reserved_for_personal_memory"}|}
     ; {|{"kind":"removed_during_flight","seq":7}|}
     ; {|{"kind":"not_valid_alone"}|}
     ; {|{"kind":"not_valid_in_room"}|}

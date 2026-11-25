@@ -34,6 +34,8 @@ let every_op : Answer.op list =
   [ Add (new_fact ~from_units:[ "u1"; "u2" ] "the port is 8935")
   ; Add (new_fact ~observation:(board ()) "the board said so")
   ; Add (new_fact ~observation:(board ~comment_id:comment ()) "a comment said so")
+  ; Remember_personal
+      { unit_name = "u2"; item_index = 0; claim = "prefers short answers"; category = Types.Fact }
   ; Drop { ref_ = "m2"; reason = "the build moved" }
   ; Merge { refs = [ "m1"; "m3" ]; into = new_fact "one sentence for both" }
   ; Revise { ref_ = "m4"; into = new_fact ~from_units:[ "u2" ] "the port is 8936" }
@@ -265,11 +267,13 @@ let schema_offers (schema : Yojson.Safe.t) =
 let test_schema_of_each_question () =
   let offers = Alcotest.(pair (list string) string) in
   check offers "Memory and units: every op, either working state"
-    ( [ "add"; "drop"; "merge"; "revise"; "seen"; "synthesize"; "molt"; "promote_to_world" ]
+    ( [ "add"; "remember_personal"; "drop"; "merge"; "revise"; "seen"; "synthesize"; "molt"
+      ; "promote_to_world"
+      ]
     , {|["string","null"]|} )
     (schema_offers Answer.schemas.range);
   check offers "one item alone: what it says anew, no working state"
-    ([ "add" ], {|"null"|})
+    ([ "add"; "remember_personal" ], {|"null"|})
     (schema_offers Answer.schemas.item_alone);
   check offers "Memory and no unit: the ops that name a fact without a unit"
     ( [ "drop"; "merge"; "revise"; "synthesize"; "molt"; "promote_to_world" ]

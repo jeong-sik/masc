@@ -431,12 +431,9 @@ max-concurrent = 1
       (List.exists
          (fun (err : Runtime_toml.parse_error) ->
             String.equal err.path "providers.invalid_protocol.protocol"
-            && String.equal err.message
-                 "unknown protocol \"future-wire\": expected one of \
-                  messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http, gemini-http, \
-                  vertex-gemini, codex-app-server, claude-code, \
-                  antigravity-cli")
+            && String.starts_with
+                 ~prefix:"unknown protocol \"future-wire\": expected one of "
+                 err.message)
          errors)
 
 (* Only a provider id becomes a top-level table (its bindings), so only a

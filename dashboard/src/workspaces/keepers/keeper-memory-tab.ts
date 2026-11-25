@@ -10,6 +10,7 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { activeWorkspaceId } from '../../core/auth'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -143,7 +144,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
 
   const ordinaryColumns = useMemo<readonly DataTableColumn<OrdinaryMemoryFact>[]>(() => [
     { id: 'category', header: 'Category', accessor: (r) => r.category, sortable: true },
-    { id: 'claim', header: 'Claim', accessor: (r) => r.claim },
+    { id: 'claim', header: 'Claim', cell: (r) => html`<${MarkdownContent} text=${r.claim} />` },
     { id: 'memory_id', header: 'ID', accessor: (r) => r.memory_id },
     {
       id: 'act',
@@ -165,7 +166,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
 
   const sourceBoundColumns = useMemo<readonly DataTableColumn<SourceBoundMemoryFact>[]>(() => [
     { id: 'path', header: 'Source Path', accessor: (r) => r.path, sortable: true },
-    { id: 'claim', header: 'Claim', accessor: (r) => r.claim },
+    { id: 'claim', header: 'Claim', cell: (r) => html`<${MarkdownContent} text=${r.claim} />` },
     { id: 'sha', header: 'SHA256', accessor: (r) => r.sha256.slice(0, 12) },
   ], [])
 

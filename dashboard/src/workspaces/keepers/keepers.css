@@ -495,11 +495,15 @@
   flex: 1 1 auto;
   overflow-y: auto;
   padding: var(--sp-4);
+  min-width: 0;
+  min-height: 0;
+}
+
+.kp-chat-feed {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
   min-width: 0;
-  min-height: 0;
 }
 
 .kp-scroll-bottom-btn {

@@ -1,22 +1,31 @@
 // Markdown renderer core — uses `marked` + `dompurify` (GFM tables, code fences, <think> blocks).
 
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { sanitizeHtml } from '../../lib/dompurify'
 import { memoizeLru } from '../../lib/lru-cache'
 
-const renderer = {
+const documentRenderer = {
+  image(this: Renderer, token: Tokens.Image) {
+    return Renderer.prototype.image.call(this, token)
+      .replace(/^<img /, '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" ')
+  },
   checkbox({ checked }: Tokens.Checkbox) {
     return checked ? '☑ ' : '☐ '
   },
+}
+
+const renderer = {
+  ...documentRenderer,
   link(this: Renderer, token: Tokens.Link) {
     return Renderer.prototype.link.call(this, token)
       .replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ')
   },
 }
 
-const md = new Marked({ gfm: true, breaks: false }).use({ renderer })
+const md = new Marked({ gfm: true, breaks: false }).use({ renderer: documentRenderer })
 
 const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
@@ -28,7 +37,7 @@ const PURIFY_CONFIG = {
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'src', 'alt', 'class',
-    'align', 'start',
+    'align', 'start', 'loading', 'decoding', 'referrerpolicy',
   ],
   ALLOW_DATA_ATTR: false,
 }
@@ -41,7 +50,7 @@ const thinkBlock = {
   name: 'thinkBlock',
   level: 'block' as const,
   start(source: string) {
-    const index = source.indexOf('<think>')
+    const index = source.search(/^<think>/m)
     return index >= 0 ? index : undefined
   },
   tokenizer(source: string) {
@@ -67,7 +76,10 @@ const MARKDOWN_CACHE_MAX = 256
 export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
 
 const renderMarkdownDocument = memoizeLru(
-  (text: string) => sanitize(md.parse(text, { async: false })),
+  (text: string) => sanitizeHtml(md.parse(text, { async: false }), {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+  }),
   { max: MARKDOWN_CACHE_MAX },
 )
 
@@ -75,11 +87,19 @@ export function MarkdownContent({
   text,
   class: className,
   document = false,
-}: { text: string; class?: string; document?: boolean }) {
+  streaming = false,
+}: { text: string; class?: string; document?: boolean; streaming?: boolean }) {
+  const root = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(
     () => (document ? renderMarkdownDocument : renderMarkdown)(text),
     [document, text],
   )
+  useEffect(() => {
+    const element = root.current
+    if (!streaming && element && htmlStr.includes('language-')) return enhanceRichCode(element)
+    return undefined
+  }, [htmlStr, streaming])
+
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
-  return html`<div class=${classes} dangerouslySetInnerHTML=${{ __html: htmlStr }}></div>`
+  return html`<div ref=${root} class=${classes} dangerouslySetInnerHTML=${{ __html: htmlStr }}></div>`
 }

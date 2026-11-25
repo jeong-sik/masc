@@ -124,6 +124,22 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('summary')).not.toBeNull()
   })
 
+  it('keeps inline think tags and document fragment navigation intact', () => {
+    const container = document.createElement('div')
+    render(h(MarkdownContent, { text: 'Use `<think>literal</think>`.' }), container)
+    expect(container.querySelector('code')?.textContent).toBe('<think>literal</think>')
+    expect(container.querySelector('details')).toBeNull()
+
+    render(h(MarkdownContent, {
+      document: true,
+      text: '[Appendix](#appendix)\n\n<h2 id="appendix">Appendix</h2>\n\n<details open><summary>Key</summary><kbd>Enter</kbd></details>',
+    }), container)
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('#appendix')
+    expect(container.querySelector('a')?.hasAttribute('target')).toBe(false)
+    expect(container.querySelector('#appendix')?.textContent).toBe('Appendix')
+    expect(container.querySelector('details[open] kbd')?.textContent).toBe('Enter')
+  })
+
   it('applies custom class', () => {
     const container = document.createElement('div')
     render(h(MarkdownContent, { text: '', class: 'extra-class' }), container)

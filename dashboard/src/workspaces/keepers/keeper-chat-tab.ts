@@ -248,6 +248,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [liveToolPulse, setLiveToolPulse] = useState<KeeperLiveToolPulse | null>(null)
 
   const chatListRef = useRef<HTMLDivElement>(null)
+  const chatFeedRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const voiceInputRef = useRef<HTMLInputElement>(null)
@@ -352,6 +353,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       el.scrollTo({ top: el.scrollHeight, behavior })
     }
   }, [])
+
+  useEffect(() => {
+    const feed = chatFeedRef.current
+    if (!feed || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollToBottom()
+    })
+    observer.observe(feed)
+    return () => observer.disconnect()
+  }, [scrollToBottom])
 
   const handleChatScroll = useCallback(() => {
     const el = chatListRef.current
@@ -2053,6 +2064,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             aria-label="Keeper 대화 기록"
             onScroll=${handleChatScroll}
           >
+            <div class="kp-chat-feed" ref=${chatFeedRef}>
             ${loadingHistory && messages.length === 0
               ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
               : displayItems.length === 0 && !showLiveTurnCard
@@ -2254,7 +2266,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
                         ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
                           ${blocks.bodyText
-                            ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} />`
+                            ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
                             : html`<div class="kp-msg-body">응답 생성 중…</div>`}
                         `}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
@@ -2300,6 +2312,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 </div>
               </section>
             `}
+            </div>
           </div>
           ${!isNearBottom && (visibleEntries.length > 0 || showLiveTurnCard) && html`
             <button
@@ -2434,7 +2447,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 <strong>Q:</strong>
                 <${MarkdownContent} text=${btw.prompt} />
                 ${btw.reply
-                  ? html`<${MarkdownContent} text=${btw.reply} />`
+                  ? html`<${MarkdownContent} text=${btw.reply} streaming=${btw.status === 'streaming'} />`
                   : btw.status === 'streaming' && html`<div>응답 수신 중…</div>`}
                 ${btw.error && html`<div class="ap-error">${btw.error}</div>`}
               </div>

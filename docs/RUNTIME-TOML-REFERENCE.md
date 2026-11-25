@@ -212,11 +212,17 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   context window use. It writes the counts of every model request and every
   approval review to
   `<data root>/muse/sessions/YYYY/MM/DD/<session id>/session.jsonl`, and MASC
-  reads what that file gains during each prompt. The turn's cost-ledger row
-  holds the requests and the reviews added up, the way the ledger holds a turn
-  of the other ACP drivers, and the Keeper log line `Muse turn usage` shows the
-  two apart. When the host reports no occupancy, the input of the turn's last
-  request stands in for it. The file's format is the host's own and
+  reads what that file gains during each prompt. A plugin of the host can start
+  observers, child sessions that call the model on their own. Their counts are
+  in `subagent/<child id>/session.jsonl` under the session's directory, and MASC
+  adds those of the observers that had finished when the prompt returned. An
+  observer that is still running, or that the host linked without a journal,
+  adds nothing, and the log line counts them. The turn's cost-ledger row holds
+  the requests, the reviews and the observers added up, the way the ledger
+  holds a turn of the other ACP drivers, and the Keeper log line
+  `Muse turn usage` shows the three apart. When the host reports no occupancy,
+  the input of the turn's last request stands in for it. The file's format is
+  the host's own and
   unpublished: MASC reads the record versions it was checked against (muse
   1.4.25) and, for any other, logs `Muse turn usage unreadable` with the
   reason and leaves the turn without counts instead of writing zeros.

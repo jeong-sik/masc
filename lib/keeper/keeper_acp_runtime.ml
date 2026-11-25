@@ -377,19 +377,25 @@ let usage_is_nonzero (u : Agent_core.Types.api_usage) =
 ;;
 
 (* A Muse turn's token counts come from the host's session journal. The ledger
-   and the response hold the sum of the model requests and the approval
-   reviews; this line is where the two can be told apart. A journal that could
-   not be read leaves the turn without counts, and the line says why. *)
+   and the response hold the sum of the model requests, the approval reviews
+   and the observers' requests; this line is where the three can be told
+   apart. An observer still running or linked without a journal adds nothing,
+   and the line counts them. A journal that could not be read leaves the turn
+   without counts, and the line says why. *)
 let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
   match source with
   | Acp.Usage_from_acp -> ()
   | Acp.Usage_from_muse_journal turn ->
     let main = turn.Muse_log.main
-    and review = turn.Muse_log.review in
+    and review = turn.Muse_log.review
+    and observers = turn.Muse_log.observers in
+    let observer_counts = observers.Muse_log.counts in
     Log.Keeper.info
       ~keeper_name
       "Muse turn usage turn_id=%s requests=%d input=%d cache_read=%d output=%d reasoning=%d \
-       reviews=%d review_input=%d review_cache_read=%d review_output=%d review_reasoning=%d"
+       reviews=%d review_input=%d review_cache_read=%d review_output=%d review_reasoning=%d \
+       observers=%d observers_running=%d observers_without_journal=%d observer_input=%d \
+       observer_cache_read=%d observer_output=%d observer_reasoning=%d"
       turn_id
       turn.Muse_log.main_requests
       main.Muse_log.input_tokens
@@ -401,6 +407,13 @@ let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
       review.Muse_log.cache_read_tokens
       review.Muse_log.output_tokens
       review.Muse_log.reasoning_tokens
+      observers.Muse_log.finished
+      observers.Muse_log.running
+      observers.Muse_log.without_journal
+      observer_counts.Muse_log.input_tokens
+      observer_counts.Muse_log.cache_read_tokens
+      observer_counts.Muse_log.output_tokens
+      observer_counts.Muse_log.reasoning_tokens
   | Acp.Usage_unreadable err ->
     Log.Keeper.warn
       ~keeper_name

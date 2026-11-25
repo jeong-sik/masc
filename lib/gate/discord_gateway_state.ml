@@ -640,6 +640,7 @@ let decode_message_create ~bot_user_id ~payload =
     in
     author_bot_flag || Option.is_some (field_string_opt "webhook_id" payload)
   in
+  let message_reference = assoc_opt "message_reference" payload in
   let author_is_user_message =
     match author, assoc_opt "type" payload, assoc_opt "webhook_id" payload with
     | Some author, Some (`Int (0 | 19)), None ->
@@ -657,10 +658,20 @@ let decode_message_create ~bot_user_id ~payload =
         | Some (`Int flags) -> flags >= 0 && flags land (1 lsl 1) = 0
         | Some _ -> false
       in
-      is_original && absent_or_false "bot" && absent_or_false "system"
+      let has_direct_reference =
+        match message_reference with
+        | None -> true
+        | Some (`Assoc _ as reference) ->
+          (match assoc_opt "type" reference with
+           | None | Some (`Int 0) -> true
+           | Some _ -> false)
+        | Some _ -> false
+      in
+      is_original && has_direct_reference
+      && Option.is_none (assoc_opt "message_snapshots" payload)
+      && absent_or_false "bot" && absent_or_false "system"
     | _ -> false
   in
-  let message_reference = assoc_opt "message_reference" payload in
   let message_reference_channel_id =
     match message_reference with
     | Some json -> field_string_opt "channel_id" json

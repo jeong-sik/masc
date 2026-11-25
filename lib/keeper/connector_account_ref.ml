@@ -23,10 +23,20 @@ let to_json (Discord_user id) : Yojson.Safe.t =
 let of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+    let sorted = List.sort (fun (left, _) (right, _) -> String.compare left right) fields in
+    (match sorted with
      | [ "kind", `String "discord_user"; "user_id", `String user_id; "version", `Int 1 ] ->
        (match discord_user user_id with
-        | Some account -> Ok account
+        | Some account -> Ok (Some account)
         | None -> Error "invalid Discord account snowflake")
-     | _ -> Error "invalid connector account key")
+     | _ ->
+       (match List.assoc_opt "kind" sorted, List.assoc_opt "version" sorted with
+        | Some (`String kind), Some (`Int version)
+          when kind <> "" && String.equal kind (String.trim kind) && version > 0
+               && (kind <> "discord_user" || version > 1) ->
+          let names = List.map fst sorted in
+          if List.length names = List.length (List.sort_uniq String.compare names)
+          then Ok None
+          else Error "duplicate connector account key field"
+        | _ -> Error "invalid connector account key"))
   | _ -> Error "invalid connector account key"

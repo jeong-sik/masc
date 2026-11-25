@@ -119,6 +119,39 @@ let write_file path contents =
     (fun () -> output_string channel contents)
 ;;
 
+let test_unsupported_account_does_not_hide_stored_observations () =
+  with_temp_base "keeper-external-attention-account-version" @@ fun base_path ->
+  let first = item () in
+  let encode account att =
+    match A.item_to_json att with
+    | `Assoc fields ->
+      (match List.assoc_opt "actor" fields with
+       | Some (`Assoc actor_fields) ->
+         let actor = `Assoc (("account", account) :: actor_fields) in
+         `Assoc [ "event", `String "recorded"
+                ; "item", `Assoc (("actor", actor) :: List.remove_assoc "actor" fields) ]
+         |> Yojson.Safe.to_string
+       | _ -> Alcotest.fail "fixture has no actor")
+    | _ -> Alcotest.fail "fixture has no fields"
+  in
+  let second = item ~dedupe_key:"other-event" () in
+  let unsupported_version = `Assoc [ "kind", `String "discord_user"; "version", `Int 2 ] in
+  let unsupported_kind = `Assoc [ "kind", `String "future_user"; "version", `Int 1 ] in
+  let path = A.attention_path ~base_path ~keeper_name:first.keeper_name in
+  let original = encode unsupported_version first ^ "\n" ^ encode unsupported_kind second ^ "\n" in
+  write_file path original;
+  (match A.load_events_result ~base_path ~keeper_name:first.keeper_name with
+   | Ok events ->
+     Alcotest.(check bool) "both observations remain readable without account evidence" true
+       (events = [ A.Recorded first; A.Recorded second ])
+   | Error error -> Alcotest.fail (A.read_error_to_string error));
+  Alcotest.(check string) "read preserves original bytes" original (Fs_compat.load_file path);
+  let malformed = `Assoc [ "kind", `String "discord_user"; "version", `Int 1 ] in
+  write_file path (encode malformed first ^ "\n");
+  Alcotest.(check bool) "malformed known keys still reject the row" true
+    (Result.is_error (A.load_events_result ~base_path ~keeper_name:first.keeper_name))
+;;
+
 (* F943: [record] dedups against a bounded recent tail, not the whole
    (unbounded) store. A duplicate inside the window is still suppressed;
    one pushed past the window is re-appended (rare, harmless). This pins
@@ -183,15 +216,22 @@ let test_record_dedup_window_bounded () =
 
 let test_record_dedupes_and_reads_pending () =
   with_temp_base "keeper-external-attention-record" @@ fun base_path ->
-  let att = item () in
+  let actor_id = "900000000000000001" in
+  let att = item ~external_message:(external_message "msg-1") () in
+  let att = { att with actor = { att.actor with actor_id = Some actor_id } } in
+  let account = Masc.Connector_account_ref.discord_user actor_id in
+  Alcotest.(check bool) "replay has valid account evidence" true (Option.is_some account);
+  let replay = { att with actor = { att.actor with account } } in
   (match record ~base_path att with
   | `Recorded -> ()
   | `Duplicate _ -> Alcotest.fail "first record was duplicate"
   | `Error detail -> Alcotest.failf "record failed: %s" detail);
-  (match record ~base_path att with
+  (match record ~base_path replay with
   | `Duplicate duplicate ->
       Alcotest.(check string) "duplicate event id" att.A.event_id
-        duplicate.A.event_id
+        duplicate.A.event_id;
+      Alcotest.(check bool) "replay keeps first admission without account proof" true
+        (Option.is_none duplicate.actor.account)
   | `Recorded -> Alcotest.fail "duplicate record appended again"
   | `Error detail -> Alcotest.failf "duplicate record failed: %s" detail);
   Alcotest.(check int) "one physical recorded event" 1
@@ -380,6 +420,8 @@ let () =
       );
       ( "store",
         [
+          Alcotest.test_case "unsupported account keys preserve stored observations" `Quick
+            test_unsupported_account_does_not_hide_stored_observations;
           Alcotest.test_case "tail boundary preserves a complete first row" `Quick
             test_tail_boundary_keeps_complete_row;
           Alcotest.test_case "strict reader waits for timestamped admission" `Quick

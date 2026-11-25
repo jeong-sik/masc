@@ -57,22 +57,6 @@ let rollover_of_usage ~context_used ~context_size ~input_limit =
   | Some _ | None -> None
 ;;
 
-(* Load rejects a runtime that declares no [max-context]
-   ({!Runtime_config_validation.validate_runtime_max_context}), so a runtime
-   without one here was removed or redefined under the turn. *)
-let declared_input_limit ~runtime_id =
-  match
-    Keeper_turn_driver_try_provider.input_limit_of_runtime
-      (Runtime.get_runtime_by_id runtime_id)
-  with
-  | Some limit -> Ok limit
-  | None ->
-    Error
-      (config_error
-         ~field:"max-context"
-         (Printf.sprintf "ACP runtime %s has no declared max-context" runtime_id))
-;;
-
 let rollover_dir_for_base_path ~base_path =
   Filename.concat
     (Filename.concat
@@ -3522,6 +3506,7 @@ let compact_once_for_overflow
 
 let run
       ?(on_guidance_prepared = fun () -> Ok ())
+      ~input_limit
       ~input_source
       ~media_store
       ?argument_source
@@ -3602,7 +3587,6 @@ let run
          Keeper_official_client_attempt.Effect_cell.read effect_cell
          = Keeper_provider_attempt_effect.Effect_attempted
        in
-       let* input_limit = declared_input_limit ~runtime_id in
        Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
          ~starting_capacity:unbounded_start_capacity_bytes
          ~shrink_capacity:(fun ~capacity ~default_capacity ->

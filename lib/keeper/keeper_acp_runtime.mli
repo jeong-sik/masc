@@ -21,6 +21,9 @@ val evict_all : unit -> unit
 
 val run :
   ?on_guidance_prepared:(unit -> (unit, Agent_core.Error.t) result) ->
+  input_limit:Llm_provider.Input_budget.t ->
+  (* The declared [max-context] of the runtime this attempt runs on
+     ({!Keeper_turn_driver_try_provider.input_limit_of_runtime}). *)
   input_source:Keeper_request_source.t ->
   media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->

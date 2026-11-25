@@ -996,7 +996,28 @@ let apply_sse_event ~now (m : Model.t) = function
           |> Model.mark_all_domains_stale
         in
         (next, View_fetches.bootstrap_fetches next)
-      else (next, [])
+      else
+        let fresh_connection =
+          match hs.handshake with
+          | Some { replay = Fresh; _ } -> true
+          | Some { replay = Resumed | Resumed_after_gap _ | Reset _; _ } -> false
+          | None -> Option.is_none m.freshness.last_observer_cursor
+        in
+        if fresh_connection
+        then
+          let runtime =
+            { next.runtime with
+              fusion_runs = Observed.mark_stale next.runtime.fusion_runs }
+          in
+          let cmds =
+            if Nav.equal_workspace next.nav.workspace Nav.Runtime
+               && (Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
+                   || Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_failover_lanes)
+            then [ get_cmd next.epoch Cmd.Get_fusion_runs ]
+            else []
+          in
+          ({ next with runtime }, cmds)
+        else (next, [])
   | Msg.Sse_observer_delivery delivery -> (
       let freshness =
         match delivery.cursor with

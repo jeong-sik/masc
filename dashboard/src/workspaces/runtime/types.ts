@@ -474,23 +474,6 @@ export const FUSION_TOPOLOGIES: readonly { readonly value: FusionTopology; reado
   { value: 'staged_judge_of_judges', label: 'Staged Judge of Judges' },
 ]
 
-export interface FusionRunRow {
-  readonly run_id: string
-  readonly keeper: string
-  readonly preset: string
-  readonly topology: FusionTopology
-  readonly started_at: number
-  readonly status: 'running' | 'completed' | 'failed'
-  readonly error?: string
-  readonly failure_code?: string
-}
-
-export interface FusionRunsPayload {
-  readonly generated_at: string
-  readonly count: number
-  readonly runs: readonly FusionRunRow[]
-}
-
 export interface ToolMetricStat {
   readonly call_count: number
   readonly failure_count: number

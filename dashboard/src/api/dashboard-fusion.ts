@@ -44,6 +44,8 @@ export interface FusionRunRecord {
   // The decoder requires the topology emitted by the current registry.
   topology: FusionTopologyLabel
   startedAt: number // unix seconds
+  finishedAt?: number // unix seconds, when the registry recorded a terminal result
+  stage?: string
   status: FusionRunStatusLabel
   // Failure attribution, present only on `failed` rows. The backend emits both
   // as additive fields (Fusion_run_registry.run_to_yojson): `error` is the human
@@ -119,6 +121,8 @@ function parseFusionRun(raw: unknown, index: number): FusionRunRecord {
   const topology = requiredRunString(raw.topology, `${context}.topology`)
   if (!(FUSION_TOPOLOGIES as readonly string[]).includes(topology)) throw new Error(`Unknown Fusion ${context}.topology: ${topology}`)
   const startedAt = nonnegativeNumber(raw.started_at, `${context}.started_at`)
+  const finishedAt = raw.finished_at == null ? undefined : nonnegativeNumber(raw.finished_at, `${context}.finished_at`)
+  const stage = raw.stage === undefined ? undefined : requiredRunString(raw.stage, `${context}.stage`)
   const status = raw.status
   if (status !== 'running' && status !== 'completed' && status !== 'failed') {
     throw new Error(`Unknown Fusion ${context}.status: ${String(status)}`)
@@ -128,7 +132,7 @@ function parseFusionRun(raw: unknown, index: number): FusionRunRecord {
   if (status !== 'failed' && (raw.error != null || raw.failure_code != null)) {
     throw new Error(`Invalid Fusion ${context}: only failed runs may carry failure attribution`)
   }
-  return { runId, keeper, preset, topology: topology as FusionTopologyLabel, startedAt, status, error, failureCode }
+  return { runId, keeper, preset, topology: topology as FusionTopologyLabel, startedAt, finishedAt, stage, status, error, failureCode }
 }
 
 export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {

@@ -5649,23 +5649,44 @@ let apply_http_reply ~now (m : Model.t) reply =
         Runtime_store.apply_fusion_runs_snapshot ~observed_at:now snap m.runtime
       in
       let next = { m with runtime } in
-      let detail_cmds =
-        if
-          Option.is_none (Model.active_inspector next)
-          && Nav.equal_workspace next.nav.workspace Nav.Runtime
-          && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
+      let selected_run =
+        if Nav.equal_workspace next.nav.workspace Nav.Runtime
+           && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
         then
-          match Runtime_store.selected_fusion_run next.runtime with
+          match Model.active_inspector next with
+          | None -> Runtime_store.selected_fusion_run next.runtime
+          | Some _ ->
+            List.find_opt
+              (fun (run : Wire_runtime.fusion_run) ->
+                fusion_detail_matches_active next run.run_id)
+              snap.runs
+        else None
+      in
+      let detail_cmds =
+          match selected_run with
           | Some run -> (
               if
                 Runtime_store.is_retained_fusion_run ~run_id:run.run_id
                   next.runtime
               then
-                if
-                  Option.is_none
-                    (Runtime_store.fusion_detail_for ~run_id:run.run_id
-                       next.runtime)
-                then
+                let need_detail =
+                  match
+                    Runtime_store.fusion_detail_for ~run_id:run.run_id
+                      next.runtime
+                  with
+                  | None -> true
+                  | Some detail ->
+                      (match (detail.run.status, run.status) with
+                      | Wire_runtime.Fusion_running,
+                        (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _) ->
+                          true
+                      | Wire_runtime.Fusion_running, Wire_runtime.Fusion_running
+                      | (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _),
+                        (Wire_runtime.Fusion_running | Wire_runtime.Fusion_completed
+                        | Wire_runtime.Fusion_failed _) ->
+                          false)
+                in
+                if need_detail then
                   [
                     Cmd.Http_get
                       {
@@ -5694,7 +5715,6 @@ let apply_http_reply ~now (m : Model.t) reply =
                     ]
                 | Some _ | None -> [])
           | None -> []
-        else []
       in
       (next, detail_cmds)
   | Msg.Reply_fusion_runs_snapshot (Error err) ->

@@ -19,13 +19,22 @@ import {
   apiGet,
   apiMutate,
   currentSessionEpoch,
+  extractObserverTopics,
   formatObserved,
   isEpochCurrent,
+  observerConnected,
   resourceCache,
   sessionEpoch,
+  subscribeObserverFrames,
+  subscribeObserverResync,
+  type ApiError,
 } from '../../core'
+import { parseFusionRunsResponse, type DashboardFusionRunsResponse, type FusionRunRecord } from '../../api/dashboard-fusion'
 import { DataTable, VirtualList, type DataTableColumn } from '../../components/primitives'
+import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { formatDuration } from '../../lib/format-time'
+import type { Result } from '../../lib/result'
 import { currentRoute } from '../../routes/router'
 import {
   buildLaneUnifiedDiff,
@@ -44,8 +53,6 @@ import {
   type ExactLaneRunRow,
   type ExactLaneRunsPayload,
   type ExactRunKind,
-  type FusionRunRow,
-  type FusionRunsPayload,
   type FusionTopology,
   type RuntimeProbePayload,
   type RuntimeProbeProviderRow,
@@ -54,6 +61,50 @@ import {
 } from './types'
 
 type LanesMode = 'failover' | 'exact' | 'fusion'
+
+const FUSION_RUNS_KEY = 'runtime:fusion-runs'
+const FUSION_RUNS_TOPIC = 'fusion_run_status'
+const fusionStatusText = { running: '진행 중', completed: '완료', failed: '실패' } as const
+const fusionStageText: ReadonlyMap<string, string> = new Map([
+  ['panel', '패널 응답 수집'],
+  ['judge', '판정 중'],
+  ['computed', '판정 결과 수신'],
+  ['recording_evidence', '증거 기록 중'],
+])
+
+function loadFusion(reason: 'mount' | 'manual' | 'sse') {
+  return resourceCache.fetch(
+    FUSION_RUNS_KEY,
+    (signal) => apiGet('/api/v1/dashboard/fusion-runs', { signal, decode: parseFusionRunsResponse }),
+    { ttlMs: 15_000, topics: [FUSION_RUNS_TOPIC], reason },
+  )
+}
+
+function FusionRunSnapshot({ row, epoch }: { row: FusionRunRecord; epoch: number }) {
+  const current = sessionEpoch.value === epoch
+  const [read, setRead] = useState<Result<unknown, ApiError> | null>(null)
+  useEffect(() => {
+    if (!current) return
+    const controller = new AbortController()
+    void apiGet(`/api/v1/dashboard/fusion-runs/${encodeURIComponent(row.runId)}`, {
+      signal: controller.signal,
+    }).then((result) => {
+      if (!controller.signal.aborted && isEpochCurrent(epoch)) setRead(result)
+    })
+    return () => controller.abort()
+  }, [row.runId, epoch, current])
+
+  if (!current) return null
+  if (read === null) {
+    return html`<p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />실행 상세 불러오는 중…</p>`
+  }
+  return html`
+    ${read.ok
+      ? html`<p class="ap-muted">상세를 열 때 읽은 스냅샷입니다.</p>`
+      : html`<div class="ap-error" role="alert">실행 상세 조회 실패. 아래는 목록에서 마지막으로 읽은 값입니다. ${read.error.message}</div>`}
+    <pre class="ap-inspect-json mono">${JSON.stringify(read.ok ? read.value : row, null, 2)}</pre>
+  `
+}
 
 interface LaneConfigSource {
   readonly sourceText: string
@@ -186,7 +237,7 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const exactKey = `runtime:exact-runs:${runKindFilter}:${currentCursor ? `${currentCursor.startedAt}:${currentCursor.runId}` : 'head'}`
   const exactObs = resourceCache.observe<ExactLaneRunsPayload>(exactKey).value
-  const fusionObs = resourceCache.observe<FusionRunsPayload>('runtime:fusion-runs').value
+  const fusionObs = resourceCache.observe<DashboardFusionRunsResponse>(FUSION_RUNS_KEY).value
 
   const discardLanePreview = () => {
     previewRequest.current?.abort()
@@ -257,14 +308,6 @@ export function LanesTab(props: WorkspaceViewProps) {
     )
   }
 
-  const loadFusion = (reason: 'mount' | 'manual' = 'mount') => {
-    void resourceCache.fetch<FusionRunsPayload>(
-      'runtime:fusion-runs',
-      (signal) => apiGet<FusionRunsPayload>('/api/v1/dashboard/fusion-runs', { signal }),
-      { ttlMs: 15_000, topics: ['fusion_run_status'], reason },
-    )
-  }
-
   useEffect(() => {
     setSourceRevision(null)
     setLaneEditor(null)
@@ -279,8 +322,35 @@ export function LanesTab(props: WorkspaceViewProps) {
   useEffect(() => {
     if (mode === 'failover') loadFailover(false, 'mount')
     else if (mode === 'exact') loadExact('mount')
-    else loadFusion('mount')
   }, [mode, runKindFilter, currentCursor, epoch])
+
+  useEffect(() => {
+    if (mode !== 'fusion') return
+    let disposed = false
+    const unsubscribeFrames = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).includes(FUSION_RUNS_TOPIC)) void loadFusion('sse')
+    })
+    const recover = () => {
+      resourceCache.invalidateKey(FUSION_RUNS_KEY)
+      queueMicrotask(() => {
+        // Observer also invalidates the shared cache on reconnection.
+        if (!disposed && isEpochCurrent(epoch)) void loadFusion('sse')
+      })
+    }
+    let wasConnected = observerConnected.peek()
+    const unsubscribeConnection = observerConnected.subscribe((connected) => {
+      if (connected && !wasConnected) recover()
+      wasConnected = connected
+    })
+    const unsubscribeResync = subscribeObserverResync(recover)
+    void loadFusion('mount')
+    return () => {
+      disposed = true
+      unsubscribeFrames()
+      unsubscribeConnection()
+      unsubscribeResync()
+    }
+  }, [mode, epoch])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   const probeData = probeObs.kind === 'value' ? probeObs.data : null
@@ -372,11 +442,13 @@ export function LanesTab(props: WorkspaceViewProps) {
     },
   ], [])
 
-  const fusionColumns = useMemo<readonly DataTableColumn<FusionRunRow>[]>(() => [
+  const fusionStale = fusionObs.kind === 'value' && fusionObs.stale
+  const fusionLive = observerConnected.value && !fusionStale
+  const fusionColumns = useMemo<readonly DataTableColumn<FusionRunRecord>[]>(() => [
     {
       id: 'run_id',
       header: 'Run ID',
-      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.run_id.slice(0, 14)}</span>`,
+      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.runId.slice(0, 14)}</span>`,
     },
     {
       id: 'keeper',
@@ -401,21 +473,36 @@ export function LanesTab(props: WorkspaceViewProps) {
       header: '상태',
       sortable: true,
       sortValue: (r) => r.status,
-      cell: (r) => html`
-        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
-          ${r.status}
-        </span>
-      `,
+      cell: (r) => {
+        const stage = r.stage && (fusionStageText.get(r.stage) ?? r.stage)
+        const accepted = r.status === 'running' && r.stage === 'accepted'
+        return html`
+          <span class="inline-flex items-center gap-1" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-12)', fontWeight: 'var(--fw-600)' }}>
+            ${r.status === 'running' && !accepted && fusionLive && html`<${InlineSpinner} size="xs" />`}
+            ${accepted ? '접수됨' : fusionStatusText[r.status]}
+          </span>
+          ${r.status === 'running' && !accepted && stage && html`<span class="ml-2">${stage}</span>`}
+          ${r.status === 'failed' && r.error && html`<div style=${{ color: 'var(--err-fg)' }}>${r.error}</div>`}
+        `
+      },
     },
     {
       id: 'started',
       header: '시작 시각',
       numeric: true,
       sortable: true,
-      sortValue: (r) => r.started_at,
-      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTime(r.started_at)}</span>`,
+      sortValue: (r) => r.startedAt,
+      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTime(r.startedAt)}</span>`,
     },
-  ], [])
+    {
+      id: 'duration',
+      header: '소요 시간',
+      numeric: true,
+      cell: (r) => r.status !== 'running' && r.finishedAt !== undefined
+        ? formatDuration(r.finishedAt - r.startedAt)
+        : '—',
+    },
+  ], [fusionLive])
 
   const declaredTomlLanes = useMemo<readonly ParsedTomlLane[]>(() => {
     if (rawConfig) return parseLanesFromToml(rawConfig.sourceText)
@@ -678,25 +765,12 @@ export function LanesTab(props: WorkspaceViewProps) {
     })
   }
 
-  const handleInspectFusionRun = async (row: FusionRunRow) => {
-    inspectRequest.current?.abort()
-    const ctrl = new AbortController()
-    inspectRequest.current = ctrl
-    const res = await apiGet<unknown>(
-      `/api/v1/dashboard/fusion-runs/${encodeURIComponent(row.run_id)}`,
-      { signal: ctrl.signal },
-    )
-    if (ctrl.signal.aborted) return
+  const handleInspectFusionRun = (row: FusionRunRecord) => {
     props.onInspect({
       title: `Fusion · ${row.preset}`,
-      subtitle: `${row.run_id} (${row.topology} · ${row.status})`,
+      subtitle: `${row.runId} · ${row.topology}`,
       kind: 'fusion_run',
-      data: res.ok ? res.value : row,
-      render: () => html`
-        <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', background: 'var(--bg-0)', padding: 'var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
-          ${JSON.stringify(res.ok ? res.value : row, null, 2)}
-        </pre>
-      `,
+      render: () => html`<${FusionRunSnapshot} key=${row.runId} row=${row} epoch=${epoch} />`,
     })
   }
 
@@ -1409,16 +1483,26 @@ export function LanesTab(props: WorkspaceViewProps) {
             </div>
           </div>
 
-          <${DataTable}
-            data=${exactData?.runs ?? []}
+          ${exactObs.kind === 'failed' && html`
+            <div class="ap-error" role="alert">Exact Output 실행 이력 조회 실패. ${exactObs.error.message}</div>
+            <button type="button" class="btn-ghost self-start" onClick=${() => loadExact('manual')}>다시 조회</button>
+          `}
+          ${exactObs.kind === 'loading' && html`
+            <p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />Exact Output 실행 이력 불러오는 중…</p>
+          `}
+          ${(exactObs.kind === 'absent' || exactObs.kind === 'unreported') && html`
+            <p role="status">서버에서 Exact Output 실행 이력을 확인할 수 없습니다.</p>
+          `}
+          ${exactData && html`<${DataTable}
+            data=${exactData.runs}
             columns=${exactColumns}
             getRowId=${(r: ExactLaneRunRow) => r.run_id}
             onRowClick=${(r: ExactLaneRunRow) => void handleInspectExactRun(r)}
             virtualizeThreshold=${25}
             maxHeight=${460}
             caption="Exact Output 실행 이력"
-            emptyLabel=${exactObs.kind === 'loading' ? '불러오는 중…' : 'Exact Output 실행 기록이 없습니다.'}
-          />
+            emptyLabel="Exact Output 실행 기록이 없습니다."
+          />`}
         </div>
       `}
 
@@ -1493,16 +1577,34 @@ export function LanesTab(props: WorkspaceViewProps) {
             </form>
           `}
 
-          <${DataTable}
-            data=${fusionData?.runs ?? []}
+          ${fusionObs.kind === 'loading' && html`
+            <p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />Fusion 실행 이력 불러오는 중…</p>
+          `}
+          ${fusionStale && html`
+            <p role="status" class="ap-error sev-warn">Fusion 실행 이력을 새로고침하고 있습니다. 목록은 마지막 관측입니다.</p>
+          `}
+          ${fusionData && !fusionLive && !fusionStale && html`
+            <p role="status" class="ap-muted">실시간 연결을 기다리는 중입니다. 목록은 마지막 관측입니다.</p>
+          `}
+          ${fusionObs.kind === 'failed' && html`
+            <div class="ap-error" role="alert">Fusion 실행 이력 조회 실패. ${fusionObs.error.message}</div>
+          `}
+          ${(fusionObs.kind === 'absent' || fusionObs.kind === 'unreported') && html`
+            <p role="status">서버에서 Fusion 실행 이력을 확인할 수 없습니다.</p>
+          `}
+          ${fusionObs.kind !== 'loading' && html`
+            <button type="button" class="btn-ghost self-start" onClick=${() => void loadFusion('manual')}>Fusion 이력 새로고침</button>
+          `}
+          ${fusionData && html`<${DataTable}
+            data=${fusionData.runs}
             columns=${fusionColumns}
-            getRowId=${(r: FusionRunRow) => r.run_id}
-            onRowClick=${(r: FusionRunRow) => void handleInspectFusionRun(r)}
+            getRowId=${(r: FusionRunRecord) => r.runId}
+            onRowClick=${handleInspectFusionRun}
             virtualizeThreshold=${25}
             maxHeight=${440}
             caption="Fusion 실행 목록"
-            emptyLabel=${fusionObs.kind === 'loading' ? '불러오는 중…' : 'Fusion 실행 이력이 없습니다.'}
-          />
+            emptyLabel=${fusionStale ? '마지막으로 확인한 실행은 없습니다.' : 'Fusion 실행 이력이 없습니다.'}
+          />`}
         </div>
       `}
     </div>

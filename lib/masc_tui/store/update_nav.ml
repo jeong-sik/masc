@@ -7401,13 +7401,30 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
         List.iter (fun ln -> push (indent ^ ln)) rest
   in
   let detail_opt = Runtime_store.fusion_detail_for ~run_id m.runtime in
+  let registry_run =
+    Option.bind (Observed.to_option m.runtime.fusion_runs)
+      (List.find_opt
+         (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id run_id))
+  in
   let run_opt =
-    match detail_opt with
-    | Some d -> Some d.run
+    let listed_run () =
+      List.find_opt
+        (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id run_id)
+        (Runtime_store.filtered_fusion_runs m.runtime)
+    in
+    match registry_run with
+    | Some ({ status = (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _); _ } as run) ->
+        Some run
+    | Some ({ status = Wire_runtime.Fusion_running; _ } as run) ->
+        (match detail_opt with
+        | Some { run = ({ status = (Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _); _ } as terminal); _ } ->
+            Some terminal
+        | Some { run = { status = Wire_runtime.Fusion_running; _ }; _ }
+        | None -> Some run)
     | None ->
-        List.find_opt
-          (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id run_id)
-          (Runtime_store.filtered_fusion_runs m.runtime)
+        (match listed_run () with
+        | Some _ as observed -> observed
+        | None -> Option.map (fun (d : Wire_runtime.fusion_run_detail) -> d.run) detail_opt)
   in
   (match m.runtime.fusion_replay with
   | Some (Wire_runtime.Replay_incomplete { reason; lines_read; malformed_lines }) ->
@@ -7426,7 +7443,16 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
   | Some r ->
       let st =
         match r.status with
-        | Wire_runtime.Fusion_running -> "running"
+        | Wire_runtime.Fusion_running ->
+            (match (registry_run, m.freshness.observer) with
+            | Some _, Health.Live _ when not (Observed.is_stale m.runtime.fusion_runs) ->
+                "running"
+            | None, Health.Live _
+            | Some _, Health.Live _
+            | (None | Some _),
+              (Health.Connecting | Health.Reconnecting _ | Health.Stale _
+              | Health.Disconnected _ | Health.Workspace_mismatch _) ->
+                "running (last observed)")
         | Wire_runtime.Fusion_completed -> "completed"
         | Wire_runtime.Fusion_failed { code; error } ->
             Printf.sprintf "failed (%s: %s)" code error
@@ -7435,7 +7461,18 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
         (Printf.sprintf "Run: %s · Keeper: %s · Preset: %s · Topology: %s"
            r.run_id r.keeper r.preset
            (Wire_runtime.fusion_topology_to_string r.topology));
-      push (Printf.sprintf "Status: %s · Stage: %s" st r.stage);
+      (match r.status with
+      | Wire_runtime.Fusion_running ->
+          push (Printf.sprintf "Status: %s · Stage: %s" st r.stage)
+      | Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _ ->
+          push_wrapped "Status: " st;
+          Option.iter
+            (fun finished ->
+              if finished >= r.started_at_unix then
+                push
+                  ("Duration: "
+                   ^ Format_val.format_duration_s (finished -. r.started_at_unix)))
+            r.finished_at_unix);
       Option.iter (fun dec -> push ("Decision: " ^ dec)) r.decision;
       Option.iter (fun sum -> push_wrapped "Summary: " sum) r.summary);
   let evidence_post_opt, reloaded_board_post =
@@ -7566,7 +7603,7 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
         push "── Board Body ──";
         List.iter push (wrap_lines ~width:w ev.body))
   | Some { evidence = Wire_runtime.Evidence_pending; _ }, None ->
-      push "Evidence: pending (run in progress or board write pending)"
+      push "Evidence: Board publication pending"
   | Some { evidence = Wire_runtime.Evidence_absent; _ }, None -> (
       match Runtime_store.historical_evidence_for_run ~run_id m.runtime with
       | Some hist ->

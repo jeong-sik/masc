@@ -17,6 +17,7 @@ import {
   selectWorkspace,
   setObserverSseInstanceId,
   setTimeWindow,
+  startObserverStream,
 } from '../../core'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
 import { classifyQuotaScope, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope } from './types'
@@ -534,6 +535,61 @@ describe('workspaces/runtime', () => {
     expect(inspected[inspected.length - 1]!.title).toContain('librarian_exact')
   })
 
+  it('reads the current Fusion run again on Observer events and reports a failed registry read', async () => {
+    let wireStatus: 'running' | 'completed' | 'unavailable' = 'running'
+    let stage = 'panel'
+    let reads = 0
+    let stream!: ReadableStreamDefaultController<Uint8Array>
+    globalThis.fetch = vi.fn(async () => {
+      reads += 1
+      if (wireStatus === 'unavailable') return jsonResponse({ error: 'registry unavailable' }, 500)
+      const completed = wireStatus === 'completed'
+      return jsonResponse({
+        generated_at: '2026-11-24T00:00:00Z',
+        count: 1,
+        replay: { status: 'not_replayed' },
+        historical_evidence: [],
+        runs: [{
+          run_id: 'fusion-1', keeper: 'keeper-1', preset: 'panel', topology: 'simple',
+          status: wireStatus, stage: completed ? 'completed' : stage,
+          started_at: 100, finished_at: completed ? 112 : null,
+        }],
+      })
+    }) as typeof fetch
+    render(
+      html`<${RuntimeWorkspace} subroute="lanes" entityTab="fusion" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await vi.waitFor(() => expect(container.textContent).toContain('패널 응답 수집'))
+    stage = 'judge'
+    const observer = startObserverStream({
+      autoReconnect: false,
+      fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) { stream = controller },
+      }), { headers: { 'content-type': 'text/event-stream' } }),
+    })
+
+    const notify = (status: 'completed' | 'failed') => {
+      stream.enqueue(new TextEncoder().encode(
+        `event: fusion_run_status\ndata: ${JSON.stringify({ type: 'fusion_run_status', run_id: 'fusion-1', status })}\n\n`,
+      ))
+    }
+    try {
+      await vi.waitFor(() => expect(container.textContent).toContain('판정 중'))
+      wireStatus = 'completed'
+      notify('completed')
+      await vi.waitFor(() => expect(container.textContent).toContain('12초'))
+      expect(reads).toBe(3)
+      wireStatus = 'unavailable'
+      notify('failed')
+      await vi.waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain('Fusion 실행 이력 조회 실패'))
+      expect(container.textContent).not.toContain('Fusion 실행 이력이 없습니다.')
+    } finally {
+      stream.close()
+      await observer
+    }
+  })
+
   it('launches Fusion with closed topology union and acquires single runtime-tools SSE on Tools tab', async () => {
     const postCalls: { url: string; body: unknown }[] = []
     const toolStreamCalls: { url: string; instanceHeader: string | undefined }[] = []
@@ -546,7 +602,10 @@ describe('workspaces/runtime', () => {
         return pendingSseResponse()
       }
       if (url.startsWith('/api/v1/dashboard/fusion-runs')) {
-        return jsonResponse({ generated_at: '2026-11-24T00:00:00Z', count: 0, runs: [] })
+        return jsonResponse({
+          generated_at: '2026-11-24T00:00:00Z',
+          count: 0, runs: [], replay: { status: 'not_replayed' }, historical_evidence: [],
+        })
       }
       if (url.startsWith('/api/v1/keepers/') && url.endsWith('/fusion') && init?.method === 'POST') {
         postCalls.push({ url, body: JSON.parse(String(init.body)) })

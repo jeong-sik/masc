@@ -509,19 +509,21 @@ let drawer_queue ~keeper m =
   in
   queue, remaining
 
+let selected_keeper_name m =
+  match Fleet_store.selected_keeper_summary m.fleet with
+  | Some k -> Some k.name
+  | None ->
+      Option.bind m.fleet.selected_keeper (fun s ->
+          let trimmed = String.trim s in
+          if String.equal trimmed "" then None else Some trimmed)
+
 let target_keeper m =
   match m.drafts.active_keeper with
   | Some k when not (String.equal (String.trim k) "") -> Some (String.trim k)
-  | Some _ | None ->
-      Option.map
-        (fun (k : Wire_fleet.keeper_summary) -> k.name)
-        (Fleet_store.selected_keeper_summary m.fleet)
+  | Some _ | None -> selected_keeper_name m
 
 let target_keeper_for_lifecycle m =
   match active_dive m with
-  | Some (Nav.Dive_keeper { name; _ }) ->
-      let trimmed = String.trim name in
-      if String.equal trimmed "" then None else Some trimmed
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
@@ -538,10 +540,7 @@ let target_keeper_for_lifecycle m =
                  && m.nav.pane_index = 0
                  && not m.nav.zoomed ->
               None
-          | Some _ | None ->
-              Option.map
-                (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                (Fleet_store.selected_keeper_summary m.fleet))
+          | Some _ | None -> selected_keeper_name m)
       | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra ->
           target_keeper m)
 
@@ -558,28 +557,11 @@ let active_pulse_pane m =
   | None -> Pulse_companies
 
 let is_in_keeper_chat m =
-  match active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) -> true
-  | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ )
-  | None ->
-      false
+  Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Keepers
+  && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+  && Option.is_some (selected_keeper_name m)
+  && (m.nav.pane_index >= 1 || m.nav.zoomed)
 
 let uses_keeper_split ~width m =
   (equal_breakpoint m.breakpoint Wide || equal_breakpoint m.breakpoint Standard)
@@ -657,13 +639,9 @@ let composer_mode m =
 
 let keeper_dive_focused m =
   m.nav.zoomed
-  &&
-  match active_dive m with
-  | Some (Nav.Dive_keeper _) -> true
-  | Some
-      (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _)
-  | None ->
-      false
+  && Option.is_none (active_dive m)
+  && Nav.equal_workspace m.nav.workspace Nav.Keepers
+  && Option.is_some (selected_keeper_name m)
 
 let sidebar_width = 24
 let sidebar_gap = 1
@@ -791,7 +769,6 @@ let active_menu_target m =
       | Nav.Keepers -> (
           let tab_opt =
             match active_dive m with
-            | Some (Nav.Dive_keeper { tab; _ }) -> Some tab
             | Some
                 ( Nav.Dive_work _
                 | Nav.Dive_knowledge _
@@ -942,13 +919,12 @@ let can_zoom_current_view m =
   then false
   else
     match active_dive m with
-    | Some (Nav.Dive_keeper _) -> true
     | Some
         (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
         false
     | None -> (
         match m.nav.workspace with
-        | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
+        | Nav.Keepers -> Option.is_some (selected_keeper_name m)
         | Nav.Knowledge -> (
             match m.knowledge.active_tab with
             | Nav.Knowledge_board
@@ -1090,22 +1066,21 @@ let dive_work_json_pane_index m =
               Some (if task_dive_has_two_main_panes m task_id then 2 else 1)
           | Nav.Verification_dive _ -> Some 1)
     | Some
-        ( Nav.Dive_keeper _
-        | Nav.Dive_knowledge _
+        ( Nav.Dive_knowledge _
         | Nav.Dive_runtime _
         | Nav.Dive_infra _ )
     | None ->
         None
 
 let keeper_preview_has_inner_split m =
-  match Fleet_store.selected_keeper_summary m.fleet with
+  match selected_keeper_name m with
   | None -> false
-  | Some k -> (
+  | Some name -> (
       match m.fleet.keeper_dive_tab with
       | Nav.Keeper_tool_calls -> true
       | Nav.Keeper_context ->
           let ks =
-            Keeper_context_store.get_keeper ~keeper:k.name m.keeper_context
+            Keeper_context_store.get_keeper ~keeper:name m.keeper_context
           in
           Keeper_context_store.equal_context_subtab ks.subtab
             Keeper_context_store.Ctx_exact_input
@@ -1121,23 +1096,8 @@ let keeper_preview_has_inner_split m =
 let has_active_memory_reading m =
   let scope_opt =
     match active_dive m with
-    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-        Some (Some name)
     | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_chat
-                | Nav.Keeper_context
-                | Nav.Keeper_tool_calls
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
-                | Nav.Keeper_config
-                | Nav.Keeper_logs
-                | Nav.Keeper_identity );
-              _;
-            }
-        | Nav.Dive_work _
+        ( Nav.Dive_work _
         | Nav.Dive_knowledge _
         | Nav.Dive_runtime _
         | Nav.Dive_infra _ ) ->
@@ -1150,8 +1110,8 @@ let has_active_memory_reading m =
             Some m.knowledge.memory_diff_keeper
         | Nav.Keepers
           when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory -> (
-            match Fleet_store.selected_keeper_summary m.fleet with
-            | Some k -> Some (Some k.name)
+            match selected_keeper_name m with
+            | Some name -> Some (Some name)
             | None -> None)
         | Nav.Pulse
         | Nav.Work
@@ -1184,14 +1144,6 @@ let focusable_pane_count m =
         1
     | None -> (
         match active_dive m with
-        | Some (Nav.Dive_keeper { tab = Nav.Keeper_tool_calls; _ }) -> 2
-        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
-            let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-            if
-              Keeper_context_store.equal_context_subtab ks.subtab
-                Keeper_context_store.Ctx_exact_input
-            then 2
-            else 1
         | Some (Nav.Dive_work (Nav.Goal_dive _)) ->
             if m.infra.show_raw_json then
               if inner_body_width m >= 88 then 3 else 1
@@ -1211,19 +1163,7 @@ let focusable_pane_count m =
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> 2
         | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_memory
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_config
-                    | Nav.Keeper_logs
-                    | Nav.Keeper_identity );
-                  _;
-                }
-            | Nav.Dive_knowledge _
+            ( Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             1
@@ -1260,6 +1200,7 @@ let focusable_pane_count m =
               let has_roster_or_loading =
                 Fleet_store.filtered_keepers m.fleet <> []
                 || Fleet_store.companies_nav_rows m.fleet <> []
+                || Option.is_some (selected_keeper_name m)
                 || (String.equal (String.trim m.fleet.filter_query) ""
                     && not (Observed.is_value m.fleet.keepers))
               in
@@ -1351,12 +1292,6 @@ let pane_rects m =
   if n <= 1 || Rect.is_empty br then [ br ]
   else
     match active_dive m with
-    | Some (Nav.Dive_keeper { tab = Nav.Keeper_tool_calls; _ }) ->
-        let l, r = split_keeper_inner Nav.Keeper_tool_calls br in
-        [ l; r ]
-    | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) ->
-        let l, r = split_keeper_inner Nav.Keeper_context br in
-        [ l; r ]
     | Some (Nav.Dive_work _) ->
         if m.infra.show_raw_json && inner_body_width m >= 88 then
           let l, r = split_h_ratio ~gap:gap_h br 0.58 in
@@ -1372,19 +1307,7 @@ let pane_rects m =
         let t, b = split_v_fixed ~gap:gap_v br top_h in
         [ t; b ]
     | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_chat
-                | Nav.Keeper_memory
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
-                | Nav.Keeper_config
-                | Nav.Keeper_logs
-                | Nav.Keeper_identity );
-              _;
-            }
-        | Nav.Dive_knowledge _
+        ( Nav.Dive_knowledge _
         | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ ) ->
         [ br ]
@@ -1679,31 +1602,6 @@ let active_focus_label m =
         Say.make ~ko:"메뉴" ~en:"MENU"
       else
         match active_dive m with
-        | Some (Nav.Dive_keeper { name; tab }) -> (
-            if focusable_pane_count m > 1 then
-              match tab with
-              | Nav.Keeper_tool_calls ->
-                  if m.nav.pane_index = 1 then
-                    pane_prefix ~ko:(name ^ " · 상세") ~en:(name ^ " · Detail")
-                  else pane_prefix ~ko:(name ^ " · 호출") ~en:(name ^ " · Calls")
-              | Nav.Keeper_context ->
-                  if m.nav.pane_index = 1 then
-                    pane_prefix ~ko:(name ^ " · 원문") ~en:(name ^ " · Prompt")
-                  else
-                    pane_prefix ~ko:(name ^ " · 섹션") ~en:(name ^ " · Sections")
-              | Nav.Keeper_chat
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity ->
-                  Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
-            else if
-              Nav.equal_keeper_tab tab Nav.Keeper_work_candle
-              && Board_recovery.shown ~keeper:name m.knowledge.board_recovery
-            then Say.make ~ko:("격리 복구 · " ^ name) ~en:("QUARANTINE · " ^ name)
-            else Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name))
         | Some (Nav.Dive_work target) -> (
             match dive_work_json_pane_index m with
             | Some j_idx when m.nav.pane_index = j_idx ->
@@ -1811,9 +1709,9 @@ let active_focus_label m =
                   Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                     Nav.Keeper_work_candle
                   &&
-                  match Fleet_store.selected_keeper_summary m.fleet with
-                  | Some k ->
-                      Board_recovery.shown ~keeper:k.name
+                  match selected_keeper_name m with
+                  | Some name ->
+                      Board_recovery.shown ~keeper:name
                         m.knowledge.board_recovery
                   | None -> false
                 in
@@ -1962,22 +1860,8 @@ let is_keeper_config_active m =
   Option.is_none m.nav.overlay
   &&
   match active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) -> true
   | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
@@ -2009,7 +1893,6 @@ let is_keeper_lifecycle_surface m =
   && (not (sidebar_has_focus m))
   &&
   match active_dive m with
-  | Some (Nav.Dive_keeper _) -> true
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
@@ -2022,22 +1905,8 @@ let is_memory_explorer_surface m =
   Option.is_none m.nav.overlay
   &&
   match active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
   | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
@@ -2053,24 +1922,8 @@ let is_memory_diff_pin_surface m =
   is_memory_explorer_surface m
   &&
   match active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
-      Knowledge_store.equal_keeper_memory_subview
-        m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow
   | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_context
-              | Nav.Keeper_tool_calls
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config
-              | Nav.Keeper_logs
-              | Nav.Keeper_identity );
-            _;
-          }
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
@@ -3701,8 +3554,7 @@ let is_viewing_wiki_slug ~slug m =
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive dive_slug)) ->
       String.equal dive_slug slug
   | Some
-      ( Nav.Dive_keeper _
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _
       | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _) ) ->
@@ -4212,113 +4064,6 @@ let active_view_ssot_mode m =
     | None -> Health.Connecting
   in
   match active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
-      Live_sse
-        {
-          stream_name = "fleet/stream";
-          freshness = m.freshness.fleet;
-          live_count;
-          planned_count;
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
-      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt ks.turn_records;
-                observed_at_opt ks.next_request;
-                observed_at_opt ks.cache_outcome;
-              ];
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_tool_calls }) ->
-      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt ks.tool_stats;
-                observed_at_opt ks.tool_calls;
-              ];
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt
-                  (Knowledge_store.memory_diff_for ~keeper:(Some name)
-                     ~window:m.knowledge.memory_diff_window m.knowledge);
-                observed_at_opt
-                  (Knowledge_store.memory_os_internals_for ~keeper:name
-                     m.knowledge);
-              ];
-        }
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_work_candle; _ }) ->
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt m.work.planning;
-                observed_at_opt m.work.candle_ledger;
-              ];
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_sandbox }) ->
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt
-                  (Infra_store.keeper_sandbox_for ~keeper:name m.infra);
-                observed_at_opt m.infra.sandboxes;
-              ];
-        }
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt m.runtime.runtime_config_raw;
-                observed_at_opt m.config.schema;
-              ];
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_logs }) ->
-      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt ks.metrics;
-                observed_at_opt ks.sandbox_logs;
-              ];
-        }
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) ->
-      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
-      Synced_snapshot
-        {
-          observer = m.freshness.observer;
-          observed_at =
-            latest_observed_at
-              [
-                observed_at_opt m.keeper_context.oauth_providers;
-                observed_at_opt ks.oauth_attached;
-                observed_at_opt ks.github_identity;
-              ];
-        }
   | Some (Nav.Dive_work _) ->
       Synced_snapshot
         {
@@ -4408,14 +4153,143 @@ let active_view_ssot_mode m =
               live_count;
               planned_count;
             }
-      | Nav.Keepers ->
-          Live_sse
-            {
-              stream_name = "fleet/stream";
-              freshness = m.freshness.fleet;
-              live_count;
-              planned_count;
-            }
+      | Nav.Keepers -> (
+          match
+            if m.nav.pane_index >= 1 || m.nav.zoomed then selected_keeper_name m
+            else None
+          with
+          | Some name -> (
+              match m.fleet.keeper_dive_tab with
+              | Nav.Keeper_chat ->
+                  Live_sse
+                    {
+                      stream_name = "fleet/stream";
+                      freshness = m.freshness.fleet;
+                      live_count;
+                      planned_count;
+                    }
+              | Nav.Keeper_context ->
+                  let ks =
+                    Keeper_context_store.get_keeper ~keeper:name
+                      m.keeper_context
+                  in
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt ks.turn_records;
+                            observed_at_opt ks.next_request;
+                            observed_at_opt ks.cache_outcome;
+                          ];
+                    }
+              | Nav.Keeper_tool_calls ->
+                  let ks =
+                    Keeper_context_store.get_keeper ~keeper:name
+                      m.keeper_context
+                  in
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt ks.tool_stats;
+                            observed_at_opt ks.tool_calls;
+                          ];
+                    }
+              | Nav.Keeper_memory ->
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt
+                              (Knowledge_store.memory_diff_for
+                                 ~keeper:(Some name)
+                                 ~window:m.knowledge.memory_diff_window
+                                 m.knowledge);
+                            observed_at_opt
+                              (Knowledge_store.memory_os_internals_for
+                                 ~keeper:name m.knowledge);
+                          ];
+                    }
+              | Nav.Keeper_work_candle ->
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt m.work.planning;
+                            observed_at_opt m.work.candle_ledger;
+                          ];
+                    }
+              | Nav.Keeper_sandbox ->
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt
+                              (Infra_store.keeper_sandbox_for ~keeper:name
+                                 m.infra);
+                            observed_at_opt m.infra.sandboxes;
+                          ];
+                    }
+              | Nav.Keeper_config ->
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt m.runtime.runtime_config_raw;
+                            observed_at_opt m.config.schema;
+                          ];
+                    }
+              | Nav.Keeper_logs ->
+                  let ks =
+                    Keeper_context_store.get_keeper ~keeper:name
+                      m.keeper_context
+                  in
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt ks.metrics;
+                            observed_at_opt ks.sandbox_logs;
+                          ];
+                    }
+              | Nav.Keeper_identity ->
+                  let ks =
+                    Keeper_context_store.get_keeper ~keeper:name
+                      m.keeper_context
+                  in
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt m.keeper_context.oauth_providers;
+                            observed_at_opt ks.oauth_attached;
+                            observed_at_opt ks.github_identity;
+                          ];
+                    })
+          | None ->
+              Live_sse
+                {
+                  stream_name = "fleet/stream";
+                  freshness = m.freshness.fleet;
+                  live_count;
+                  planned_count;
+                })
       | Nav.Work ->
           let observed_at =
             match m.work.active_tab with
@@ -4672,8 +4546,7 @@ let focused_artifact m =
   | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
       Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
   | Some
-      ( Nav.Dive_keeper _
-      | Nav.Dive_work _
+      ( Nav.Dive_work _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _
       | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )

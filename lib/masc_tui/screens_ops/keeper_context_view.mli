@@ -1,6 +1,6 @@
 (** Per-Turn Keeper Context Inspector & Per-Keeper Tool Calls views.
 
-    Mounts into BOTH [Keepers] Split right pane and full-screen [Dive_keeper]
+    Mounts into BOTH [Keepers] Split right pane and zoomed full-screen [Keepers]
     for [Nav.Keeper_context] and [Nav.Keeper_tool_calls]. Pure [Cell_grid]
     rendering over {!Masc_tui_ui} primitives with zero raw ANSI. *)
 

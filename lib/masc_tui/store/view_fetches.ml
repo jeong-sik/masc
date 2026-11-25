@@ -482,8 +482,6 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
 let fetches_for_dive ~force (m : Model.t) =
   match Model.active_dive m with
   | None -> []
-  | Some (Nav.Dive_keeper { name; tab }) ->
-      fetches_for_keeper_tab ~force ~name ~tab m
   | Some (Nav.Dive_work target) ->
       let extra =
         match target with
@@ -920,9 +918,9 @@ let fetches_for_workspace ~force (m : Model.t) =
           @ keeper_scoped_reqs)
   | Nav.Keepers ->
       let embedded_dive_reqs =
-        match Fleet_store.selected_keeper_summary m.fleet with
-        | Some k ->
-            fetches_for_keeper_tab ~force ~name:k.name
+        match Model.selected_keeper_name m with
+        | Some name ->
+            fetches_for_keeper_tab ~force ~name
               ~tab:m.fleet.keeper_dive_tab m
         | None -> []
       in
@@ -1474,8 +1472,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
       match Model.active_dive m with
       | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> true
       | Some
-          ( Nav.Dive_keeper _
-          | Nav.Dive_work _
+          ( Nav.Dive_work _
           | Nav.Dive_knowledge _
           | Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)
           | Nav.Dive_infra _ ) ->
@@ -1554,8 +1551,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
               ]
           | Some { reference_json = None; _ } | None -> [])
     | Some
-        ( Nav.Dive_keeper _
-        | Nav.Dive_work _
+        ( Nav.Dive_work _
         | Nav.Dive_knowledge _
         | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
         | Nav.Dive_infra _ )
@@ -1569,40 +1565,20 @@ let overlay_fetches (m : Model.t) =
     (fun req -> Cmd.Http_get { epoch = m.epoch; req })
     (fetches_for_overlay ~force:false m)
 
-(* The keeper's Chat transcript is on screen: as the top dive's Chat tab, or
-   as the Keepers split's Chat pane for the selected keeper with no dive
-   open. *)
+(* The keeper's Chat transcript is on screen on the Keepers workspace Chat tab
+   with no dive open. *)
 let chat_tab_shown ~keeper (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
-      String.equal name keeper
-  | Some
-      (Nav.Dive_keeper
-         {
-           tab =
-             ( Nav.Keeper_context
-             | Nav.Keeper_tool_calls
-             | Nav.Keeper_memory
-             | Nav.Keeper_work_candle
-             | Nav.Keeper_logs
-             | Nav.Keeper_identity
-             | Nav.Keeper_sandbox
-             | Nav.Keeper_config );
-           _;
-         })
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       false
-  | None -> (
+  | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
-      &&
-      match Fleet_store.selected_keeper_summary m.fleet with
-      | Some k -> String.equal k.name keeper
-      | None -> false)
+      && Option.equal String.equal (Model.selected_keeper_name m) (Some keeper)
 
 let cut_reply_fetches ~keeper (m : Model.t) =
   if chat_tab_shown ~keeper m then
@@ -1613,21 +1589,6 @@ let cut_reply_fetches ~keeper (m : Model.t) =
 
 let active_chat_keeper (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> Some name
-  | Some
-      (Nav.Dive_keeper
-         {
-           tab =
-             ( Nav.Keeper_context
-             | Nav.Keeper_tool_calls
-             | Nav.Keeper_memory
-             | Nav.Keeper_work_candle
-             | Nav.Keeper_logs
-             | Nav.Keeper_identity
-             | Nav.Keeper_sandbox
-             | Nav.Keeper_config );
-           _;
-         })
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
@@ -1638,10 +1599,7 @@ let active_chat_keeper (m : Model.t) =
       if
         Nav.equal_workspace m.nav.workspace Nav.Keepers
         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
-      then
-        Option.map
-          (fun (k : Wire_fleet.keeper_summary) -> k.name)
-          (Fleet_store.selected_keeper_summary m.fleet)
+      then Model.selected_keeper_name m
       else None
 
 let max_chat_tool_result_fetches = 6
@@ -1771,18 +1729,13 @@ let bootstrap_fetches (m : Model.t) =
   |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })
 
 let keeper_lifecycle_refresh_fetches ~name (m : Model.t) =
-  let dive_reqs =
-    match Model.active_dive m with
-    | Some (Nav.Dive_keeper { name = dn; tab }) when String.equal dn name ->
-        fetches_for_keeper_tab ~force:true ~name ~tab m
-    | Some
-        ( Nav.Dive_keeper _
-        | Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        | Nav.Dive_infra _ )
-    | None ->
-        []
+  let tab_reqs =
+    if
+      Option.is_none (Model.active_dive m)
+      && Nav.equal_workspace m.nav.workspace Nav.Keepers
+      && Option.equal String.equal (Model.selected_keeper_name m) (Some name)
+    then fetches_for_keeper_tab ~force:true ~name ~tab:m.fleet.keeper_dive_tab m
+    else []
   in
-  dedup_reqs (Cmd.Get_keepers_roster :: dive_reqs)
+  dedup_reqs (Cmd.Get_keepers_roster :: tab_reqs)
   |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })

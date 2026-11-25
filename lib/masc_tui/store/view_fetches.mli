@@ -42,7 +42,7 @@ val bootstrap_fetches : Model.t -> Cmd.t list
 val keeper_lifecycle_refresh_fetches : name:string -> Model.t -> Cmd.t list
 (** Immediate post-mutation refresh after a Keeper lifecycle reply (success,
     HTTP 202 partial resume, or non-mismatch failure/error): always refreshes
-    [Get_keepers_roster], plus the active [Dive_keeper] tab when currently
-    diving into [name]. *)
+    [Get_keepers_roster], plus the active Keeper tab when currently viewing
+    [name] on [4 Keepers]. *)
 
 val read_board_quarantines : now:Masc_tui_core.Clock.Mono.t -> keeper:string -> Model.t -> Model.t * Cmd.t list

@@ -1,5 +1,6 @@
-(** 5-Tab Keeper Dive renderer shared between full-width [Screen_keepers.render_dive]
-    and the [Wide] right-hand side-by-side live detail pane.
+(** Keeper Detail tab renderer shared between full-width Focus Mode
+    ([model.nav.zoomed = true]) and the side-by-side right detail pane of
+    [Screen_keepers].
 
     Tabs:
     1. [Keeper_chat]: [Origin_bare]/[Origin_inline]/[Origin_row] transcript via

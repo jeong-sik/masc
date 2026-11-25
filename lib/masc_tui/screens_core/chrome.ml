@@ -609,15 +609,10 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     let keeper_focus_context =
       (not (Model.is_keeper_config_active model))
       && Option.is_none model.nav.overlay
-      &&
-      match Model.active_dive model with
-      | Some (Nav.Dive_keeper _) -> true
-      | Some
-          ( Nav.Dive_work _
-          | Nav.Dive_knowledge _
-          | Nav.Dive_runtime _
-          | Nav.Dive_infra _ )
-      | None -> false
+      && Option.is_none (Model.active_dive model)
+      && Nav.equal_workspace model.nav.workspace Nav.Keepers
+      && Option.is_some (Model.selected_keeper_name model)
+      && (model.nav.pane_index >= 1 || model.nav.zoomed)
     in
     let keeper_focus_hint =
       keeper_focus_context
@@ -644,28 +639,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         (hint, whisper_style)
       else if Option.is_some (Model.active_dive model) then
         let txt =
-          if Model.is_keeper_config_active model then
-            if compact then "[ / ] [Esc]"
-            else
-              Say.resolve lang
-                (Say.make ~ko:"[←→] 값  [ / ] 탭  [Esc] 뒤로"
-                   ~en:"[←→] Cycle  [ / ] Tabs  [Esc] Back")
-          else
-            match Model.active_dive model with
-            | Some (Nav.Dive_keeper _) ->
-                if compact then "[ / ] [Esc]"
-                else
-                  Say.resolve lang
-                    (Say.make ~ko:"[ / ] 탭  [Esc] 뒤로"
-                       ~en:"[ / ] Tabs  [Esc] Back")
-            | Some
-                ( Nav.Dive_work _
-                | Nav.Dive_knowledge _
-                | Nav.Dive_runtime _
-                | Nav.Dive_infra _ )
-            | None ->
-                if compact then "[Esc]"
-                else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
+          if compact then "[Esc]"
+          else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
         in
         (txt, whisper_style)
       else if model.nav.zoomed && Model.can_zoom_current_view model then
@@ -675,10 +650,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
             Say.resolve lang
               (Say.make ~ko:"[z/Esc] 확대 해제  [←→] 값  [ / ] 탭"
                  ~en:"[z/Esc] Unzoom  [←→] Cycle  [ / ] Tabs")
-          else if Nav.equal_workspace model.nav.workspace Nav.Keepers then
-            Say.resolve lang
-              (Say.make ~ko:"[z/Esc] 확대 해제  [ / ] 탭"
-                 ~en:"[z/Esc] Unzoom  [ / ] Tabs")
           else
             Say.resolve lang
               (Say.make ~ko:"[z/Esc] 확대 해제" ~en:"[z/Esc] Unzoom")
@@ -694,7 +665,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         Option.is_none (Model.active_dive model)
         && Nav.equal_workspace model.nav.workspace Nav.Keepers
         && model.nav.pane_index >= 1
-        && Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
+        && Option.is_some (Model.selected_keeper_name model)
       then
         let txt =
           if compact then "[Tab] [ / ]"
@@ -841,15 +812,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       end
     in
     let dive_root_label = function
-      | Nav.Dive_keeper _ -> Nav.workspace_label Nav.Keepers
       | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
       | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
       | Nav.Dive_infra _ -> Nav.workspace_label Nav.Infra
     in
     let dive_segment_label = function
-      | Nav.Dive_keeper { name; _ } ->
-          Grapheme.truncate_to_width ~max_width:20 name
       | Nav.Dive_work (Nav.Goal_dive id) ->
           Say.resolve lang (Say.make ~ko:"목표" ~en:"Goal") ^ " " ^ id
       | Nav.Dive_work (Nav.Task_dive id) ->
@@ -893,22 +861,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           String.concat sep (root :: segs)
     in
     (match Model.active_dive model with
-     | Some (Nav.Dive_keeper { tab; _ }) ->
-         let crumb = format_dive_chain () in
-         let adv =
-           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
-             ~style:crumb_style crumb
-         in
-         x := !x + adv + 2;
-         let use_compact_kt = compact || rect.w < 150 in
-         let tabs =
-           List.map
-             (fun t ->
-               ( compact_keeper_tab_label ~lang ~compact:use_compact_kt t,
-                 Nav.equal_keeper_tab t tab ))
-             Nav.all_keeper_tabs
-         in
-         draw_tab_list ~gap:(if use_compact_kt then 1 else gap) tabs
      | Some
          ( Nav.Dive_work _
          | Nav.Dive_knowledge _
@@ -961,15 +913,15 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                 of Fleet modes. *)
              match
                if model.nav.pane_index >= 1 || model.nav.zoomed then
-                 Fleet_store.selected_keeper_summary model.fleet
+                 Model.selected_keeper_name model
                else None
              with
-             | Some k ->
+             | Some k_name ->
                  let crumb =
                    Printf.sprintf "%s %s %s"
                      (Say.resolve lang (Nav.workspace_label Nav.Keepers))
                      (Glyph.to_utf8 Glyph.Prompt_caret)
-                     (Grapheme.truncate_to_width ~max_width:14 k.name)
+                     (Grapheme.truncate_to_width ~max_width:14 k_name)
                  in
                  let adv =
                    Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
@@ -1437,7 +1389,6 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
               | Some
                   ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                  | Nav.Dive_keeper _
                   | Nav.Dive_work _
                   | Nav.Dive_runtime _
                   | Nav.Dive_infra _ )
@@ -1501,13 +1452,17 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           match Model.active_dive model with
           | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> false
           | Some
-              ( Nav.Dive_keeper _
-              | Nav.Dive_work _
+              ( Nav.Dive_work _
               | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
               | Nav.Dive_runtime _
               | Nav.Dive_infra _ ) ->
               true
-          | None -> Nav.equal_workspace model.nav.workspace Nav.Pulse
+          | None ->
+              Nav.equal_workspace model.nav.workspace Nav.Pulse
+              || Model.is_in_keeper_chat model
+              || (Nav.equal_workspace model.nav.workspace Nav.Keepers
+                  && model.nav.zoomed
+                  && Model.can_zoom_current_view model)
         in
         let tab_relabel_opt =
           match model.nav.overlay with
@@ -1556,7 +1511,6 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               false
           | None -> (
               match Model.active_dive model with
-              | Some (Nav.Dive_keeper _) -> true
               | Some
                   ( Nav.Dive_work _
                   | Nav.Dive_knowledge _
@@ -1610,40 +1564,18 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                    Nav.Runtime_addons_browser
               && model.runtime.addon_catalog_mode)
           || Model.is_keeper_config_active model
-          || (match Model.active_dive model with
-              | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_work_candle }) ->
-                  Board_recovery.shown ~keeper:name model.knowledge.board_recovery
-              | Some
-                  ( Nav.Dive_keeper
-                      {
-                        tab =
-                          ( Nav.Keeper_chat
-                          | Nav.Keeper_context
-                          | Nav.Keeper_tool_calls
-                          | Nav.Keeper_memory
-                          | Nav.Keeper_sandbox
-                          | Nav.Keeper_config
-                          | Nav.Keeper_logs
-                          | Nav.Keeper_identity );
-                        _;
-                      }
-                  | Nav.Dive_work _
-                  | Nav.Dive_knowledge _
-                  | Nav.Dive_runtime _
-                  | Nav.Dive_infra _ ) ->
-                  false
-              | None ->
-                  Nav.equal_workspace model.nav.workspace Nav.Keepers
-                  && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
-                       Nav.Keeper_work_candle
-                  && (model.nav.pane_index = 1
-                     || (model.nav.zoomed && Model.can_zoom_current_view model))
-                  &&
-                  match Fleet_store.selected_keeper_summary model.fleet with
-                  | Some k ->
-                      Board_recovery.shown ~keeper:k.name
-                        model.knowledge.board_recovery
-                  | None -> false)
+          || (Option.is_none (Model.active_dive model)
+              && Nav.equal_workspace model.nav.workspace Nav.Keepers
+              && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
+                   Nav.Keeper_work_candle
+              && (model.nav.pane_index >= 1
+                 || (model.nav.zoomed && Model.can_zoom_current_view model))
+              &&
+              match Model.selected_keeper_name model with
+              | Some name ->
+                  Board_recovery.shown ~keeper:name
+                    model.knowledge.board_recovery
+              | None -> false)
           || (Nav.equal_workspace model.nav.workspace Nav.Work
               && Nav.equal_work_tab model.work.active_tab Nav.Work_tasks
               && not
@@ -2250,20 +2182,13 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
           let progress_in_chat =
             (* The chat needs two inner rows to reserve its status strip. *)
             layout.body.h >= 4
-            &&
-            match Model.active_dive model with
-            | Some dive ->
-                Nav.equal_dive dive
-                  (Nav.Dive_keeper { name = comp_st.target_keeper; tab = Nav.Keeper_chat })
-            | None ->
-                Nav.equal_workspace model.nav.workspace Nav.Keepers
-                && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
-                && (model.nav.zoomed
-                    || Model.uses_keeper_split ~width:layout.body.w model)
-                && Option.exists
-                     (fun (keeper : Wire_fleet.keeper_summary) ->
-                       String.equal keeper.name comp_st.target_keeper)
-                     (Fleet_store.selected_keeper_summary model.fleet)
+            && Option.is_none (Model.active_dive model)
+            && Nav.equal_workspace model.nav.workspace Nav.Keepers
+            && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
+            && (model.nav.zoomed
+                || Model.uses_keeper_split ~width:layout.body.w model)
+            && Option.equal String.equal (Model.selected_keeper_name model)
+                 (Some comp_st.target_keeper)
           in
           let c =
             Composer.draw ~show_pending_tx:(not progress_in_chat) grid ~rect:r

@@ -1189,14 +1189,13 @@ let render_with_history_rows
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let all_ks = Fleet_store.filtered_keepers model.fleet in
-    let selected_keeper_opt = Fleet_store.selected_keeper_summary model.fleet in
+    let selected_keeper_name_opt = Model.selected_keeper_name model in
     let open_memory_diagram_for_selected =
       Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_memory
       &&
-      match selected_keeper_opt, model.knowledge.memory_diagram with
-      | Some k, Some d ->
-          Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some k.name)
-            d
+      match selected_keeper_name_opt, model.knowledge.memory_diagram with
+      | Some name, Some d ->
+          Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some name) d
       | (Some _ | None), (Some _ | None) -> false
     in
     let is_split =
@@ -1205,11 +1204,11 @@ let render_with_history_rows
     in
     if
       (model.nav.zoomed || open_memory_diagram_for_selected)
-      && Option.is_some selected_keeper_opt
+      && Option.is_some selected_keeper_name_opt
     then
-      match selected_keeper_opt with
-      | Some k ->
-          Keeper_dive.render_tabs_body ?history_rows ~embedded:false ~name:k.name
+      match selected_keeper_name_opt with
+      | Some name ->
+          Keeper_dive.render_tabs_body ?history_rows ~embedded:false ~name
             ~tab:model.fleet.keeper_dive_tab ~model ~cache ~rect grid
       | None -> ()
     else if is_split then
@@ -1326,15 +1325,15 @@ let render_with_history_rows
           if not (Rect.is_empty rail_rect) then
             render_narrow_company_rail grid ~rect:rail_rect ~theme ~model;
           draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model;
-          (match selected_keeper_opt with
-          | Some k ->
-              Keeper_dive.render_tabs_body ?history_rows ~embedded:true ~name:k.name
+          (match selected_keeper_name_opt with
+          | Some name ->
+              Keeper_dive.render_tabs_body ?history_rows ~embedded:true ~name
                 ~tab:model.fleet.keeper_dive_tab ~model ~cache ~rect:right_rect
                 grid
           | None ->
               let empty_spec =
                 Card.default_spec
-                  ~title:(Ops_common.say model ~ko:"키퍼 상세" ~en:"Keeper Dive")
+                  ~title:(Ops_common.say model ~ko:"키퍼 상세" ~en:"Keeper Detail")
               in
               let r_inner =
                 Card.draw ~cache grid ~rect:right_rect ~theme empty_spec
@@ -1396,8 +1395,8 @@ let render_with_history_rows
                  });
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[Enter] 상세 · [ / ] 모드"
-                 ~en:"[Enter] Dive · [ / ] Mode");
+              (Ops_common.say model ~ko:"[Enter/z] 확대 · [ / ] 모드"
+                 ~en:"[Enter/z] Zoom · [ / ] Mode");
           footer_hint =
             Some
               (match model.keeper_stop_armed with

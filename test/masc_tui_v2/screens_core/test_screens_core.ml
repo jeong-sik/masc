@@ -4032,15 +4032,15 @@ let test_settings_tui_enum_rendering_and_zero_double_brackets () =
         40,
         {
           base with
+          fleet =
+            base.fleet
+            |> Fleet_store.select_keeper "alpha-builder"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
           nav =
             {
               base.nav with
               workspace = Nav.Keepers;
-              dive_stack =
-                [
-                  Nav.Dive_keeper
-                    { name = "alpha-builder"; tab = Nav.Keeper_chat };
-                ];
+              zoomed = true;
             };
         } );
       ( tag ^ "_dive_config_140",
@@ -4048,15 +4048,15 @@ let test_settings_tui_enum_rendering_and_zero_double_brackets () =
         40,
         {
           base with
+          fleet =
+            base.fleet
+            |> Fleet_store.select_keeper "alpha-builder"
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
           nav =
             {
               base.nav with
               workspace = Nav.Keepers;
-              dive_stack =
-                [
-                  Nav.Dive_keeper
-                    { name = "alpha-builder"; tab = Nav.Keeper_config };
-                ];
+              zoomed = true;
             };
         } );
       ( tag ^ "_queue_ctx_140",

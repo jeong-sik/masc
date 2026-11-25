@@ -131,6 +131,14 @@ val jump_to_workspace :
 (** [jump_to_workspace m ws] pushes a return frame and opens [ws]. The frame
     is captured from [return_from] (default [m]); pass the model as it was
     before retargeting a destination tab so [Esc] restores the departure tab. *)
+val jump_to_keeper :
+  ?tab:Nav.keeper_tab ->
+  ?zoomed:bool ->
+  ?pane_index:int ->
+  ?preserve_return:bool ->
+  Model.t ->
+  string ->
+  Model.t * Cmd.t list
 val pop_workspace_return : Model.t -> (Model.t * Cmd.t list) option
 val navigate_menu_target :
   ?keep_sidebar_focus:bool -> Model.t -> Nav.menu_target -> Model.t * Cmd.t list

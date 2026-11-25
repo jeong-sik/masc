@@ -234,8 +234,8 @@ let chrome_body_rect (m : Model.t) =
             | Some k when not (String.equal (String.trim k) "") ->
                 String.trim k
             | Some _ | None -> (
-                match Fleet_store.selected_keeper_summary sized_model.fleet with
-                | Some k -> k.name
+                match Model.selected_keeper_name sized_model with
+                | Some name -> name
                 | None -> Drafts.target_keeper_key sized_model.drafts)
           in
           let phase = Chat_transcript.live_chat_phase ~model:sized_model ~keeper in
@@ -288,8 +288,8 @@ let chrome_body_rect (m : Model.t) =
     in
     Some (bp, body)
 
-let keeper_memory_content_of_tabs_body ~model ~name ~bp ~embedded ~has_keeper
-    (target_rect : Rect.t) =
+let keeper_memory_content_of_tabs_body ~(model : Model.t) ~name ~bp ~embedded
+    ~has_keeper (target_rect : Rect.t) =
   let inner = Card.inner_rect target_rect in
   if Rect.is_empty inner then Rect.empty
   else
@@ -299,7 +299,7 @@ let keeper_memory_content_of_tabs_body ~model ~name ~bp ~embedded ~has_keeper
       else inner
     in
     let content_rect =
-      if embedded && after_hero.h >= 3 then
+      if embedded && model.nav.pane_index = 0 && after_hero.h >= 3 then
         let _, body_rect = Rect.split_v after_hero ~top_h:1 in
         if body_rect.h >= 6 then
           Rect.make ~x:body_rect.x ~y:(body_rect.y + 1) ~w:body_rect.w
@@ -338,30 +338,8 @@ let active_memory_content_rect (m : Model.t) =
     | None -> None
     | Some (bp, body) -> (
         match Model.active_dive m with
-        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-            let has_keeper =
-              Option.is_some (Fleet_store.find_keeper ~name m.fleet)
-            in
-            let content =
-              keeper_memory_content_of_tabs_body ~model:m ~name ~bp
-                ~embedded:false ~has_keeper body
-            in
-            if Rect.is_empty content then None else Some (name, content)
         | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_context
-                    | Nav.Keeper_tool_calls
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_config
-                    | Nav.Keeper_logs
-                    | Nav.Keeper_identity );
-                  _;
-                }
-            | Nav.Dive_work _
+            ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
@@ -371,19 +349,22 @@ let active_memory_content_rect (m : Model.t) =
             | Nav.Keepers
               when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
               -> (
-                match Fleet_store.selected_keeper_summary m.fleet with
+                match Model.selected_keeper_name m with
                 | None -> None
-                | Some k ->
+                | Some name ->
                     (* Open Memory Diagrams on [4 Keepers > Memory] always
                        expand into the full body card ([~embedded:false]), so
                        compact widths (< 104 cols) and wide panes share the
                        exact same geometry and never drop [.] / [Ctrl+O]. *)
+                    let has_keeper =
+                      Option.is_some (Fleet_store.find_keeper ~name m.fleet)
+                    in
                     let content =
-                      keeper_memory_content_of_tabs_body ~model:m ~name:k.name
-                        ~bp ~embedded:false ~has_keeper:true body
+                      keeper_memory_content_of_tabs_body ~model:m ~name
+                        ~bp ~embedded:false ~has_keeper body
                     in
                     if Rect.is_empty content then None
-                    else Some (k.name, content))
+                    else Some (name, content))
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory

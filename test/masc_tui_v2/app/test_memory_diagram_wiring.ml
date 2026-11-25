@@ -159,8 +159,8 @@ let model_in_keeper_memory_dive ~keeper =
   in
   let m1 = { m0 with fleet; knowledge } in
   let m2, _ =
-    Update_nav.push_dive m1
-      (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_memory })
+    Update_nav.jump_to_keeper ~preserve_return:false ~zoomed:true
+      ~tab:Nav.Keeper_memory m1 keeper
   in
   m2
 
@@ -566,8 +566,10 @@ let test_store_diagram_keybindings_and_scope_safety () =
     (Option.is_none m_esc.knowledge.memory_diagram);
   check bool "Esc emits Cancel_memory_diagram" true
     (has_cancel_diagram_cmd esc_cmds);
-  check bool "Esc preserves Dive_keeper" true
-    (Option.is_some (Model.active_dive m_esc));
+  check bool "Esc preserves Keepers zoomed Focus Mode" true
+    (Nav.equal_workspace m_esc.nav.workspace Nav.Keepers
+    && m_esc.nav.zoomed
+    && Nav.equal_keeper_tab m_esc.fleet.keeper_dive_tab Nav.Keeper_memory);
 
   (* Re-opening with '.' after Esc allocates strictly higher request_id *)
   let m_reopen, _ = Update.step ~now:now0 m_esc (Msg.Key_event (key_char ".")) in
@@ -1243,7 +1245,7 @@ let test_visibility_enter_refresh_and_resize () =
   check bool "Esc does not hijack/close hidden diagram" true
     (Option.is_some m_hidden_esc.knowledge.memory_diagram);
 
-  (* Micro viewport also hides active_diagram on Dive_keeper *)
+  (* Micro viewport also hides active_diagram on Keepers Memory *)
   let m_dive = model_in_keeper_memory_dive ~keeper:"alpha" in
   let m_dive_open, _ = Update.step ~now:now0 m_dive (Msg.Key_event (key_char ".")) in
   let m_micro, _ =
@@ -1526,7 +1528,7 @@ let test_pele_cooperative_cancellation () =
 let test_all_subviews_and_orphan_fact_snapshot () =
   let m0 = model_in_keeper_memory_dive ~keeper:"alpha" in
 
-  (* 1. All keeper-scoped subviews in Dive_keeper allow '.' and Ctrl+O,
+  (* 1. All keeper-scoped subviews in Keepers Memory allow '.' and Ctrl+O,
         and Esc restores the exact prior subview *)
   let check_keeper_subview label subview =
     let m_sv =
@@ -1616,8 +1618,8 @@ let test_all_subviews_and_orphan_fact_snapshot () =
       |> Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
     in
     let m1, _ =
-      Update_nav.push_dive { m_en with fleet; knowledge }
-        (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+      Update_nav.jump_to_keeper ~preserve_return:false ~zoomed:true
+        ~tab:Nav.Keeper_memory { m_en with fleet; knowledge } "alpha"
     in
     (* Move selection down twice to reach m-orphan (index 2: m-1, m-3, m-orphan) *)
     let m2, _ = Update.step ~now:now0 m1 (Msg.Key_event (key_char "j")) in

@@ -505,9 +505,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const chat = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
     fireEvent.click(await chat.findByRole('button', { name: 'Discord 답장' }))
     fireEvent.input(await chat.findByRole('textbox', { name: 'Discord 답장 내용' }), { target: { value: '답장' } })
-    await waitFor(() => expect(chat.getByRole<HTMLButtonElement>('button', { name: 'Discord로 보내기' }).disabled).toBe(false))
+    await waitFor(() => expect(chat.getByRole('button', { name: 'Discord로 보내기' }).hasAttribute('disabled')).toBe(false))
     fireEvent.click(chat.getByRole('button', { name: 'Discord로 보내기' }))
-    expect((await chat.findByRole<HTMLAnchorElement>('link', { name: '전송한 메시지 열기' })).href)
+    expect((await chat.findByRole('link', { name: '전송한 메시지 열기' })).getAttribute('href'))
       .toBe('https://discord.com/channels/100/200/302')
     expect(mockFetch.mock.calls.filter(([input]) => String(input).startsWith('/api/v1/dashboard/shell'))).toHaveLength(1)
     const request = mockFetch.mock.calls.find(([input]) => String(input) === '/api/v1/keepers/discord/reply')?.[1]

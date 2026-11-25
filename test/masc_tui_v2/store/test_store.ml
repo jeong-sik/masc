@@ -22625,8 +22625,11 @@ let test_hidden_music_command () =
     (List.exists
        (fun (spec : Slash.spec) -> String.equal spec.name "/music")
        Slash.all);
-  Alcotest.(check int) "a typed /music matches no listed command" 0
-    (List.length (Slash.filter ~query:"/music" ~lang:Say.Lang_en));
+  List.iter
+    (fun query ->
+      Alcotest.(check int) (query ^ " matches no listed command") 0
+        (List.length (Slash.filter ~query ~lang:Say.Lang_en)))
+    [ "/music"; "/music play"; "/music midi /tmp/a.mid" ];
   Alcotest.(check bool) "a partial word still filters the listed commands" true
     (Slash.filter ~query:"/mod" ~lang:Say.Lang_en <> []);
   (* English UI: the description of /model holds the letters of "music" in

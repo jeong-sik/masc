@@ -943,6 +943,31 @@ let split_command_and_arg trimmed =
   in
   (cmd, arg)
 
+(* The commands [parse] accepts and [all] does not list. This is the one place
+   that names them; [parse] and [filter] both go through it. *)
+type unlisted_word = Music_word
+
+let unlisted_word_of_command = function
+  | "/music" -> Some Music_word
+  | _ -> None
+
+let parse_music ~cmd arg =
+  match arg with
+  | None -> Ok (Music Music_workbench)
+  | Some raw_arg -> (
+      match split_command_and_arg raw_arg with
+      | "midi", Some path -> Ok (Music (Music_import_midi path))
+      | _ ->
+          Error
+            (Invalid_argument
+               {
+                 command = cmd;
+                 expected =
+                   Say.make ~ko:"인자 없음 | midi <파일 경로>"
+                     ~en:"no argument | midi <file path>";
+                 got = raw_arg;
+               }))
+
 let parse raw =
   let trimmed = String.trim raw in
   if String.length trimmed = 0 || not (Char.equal trimmed.[0] '/') then
@@ -1937,23 +1962,10 @@ let parse raw =
     | "/help" -> no_arg cmd Help arg
     | "/restart" -> no_arg cmd Restart arg
     | "/quit" -> no_arg cmd Quit arg
-    | "/music" -> (
-        match arg with
-        | None -> Ok (Music Music_workbench)
-        | Some raw_arg -> (
-            match split_command_and_arg raw_arg with
-            | "midi", Some path -> Ok (Music (Music_import_midi path))
-            | _ ->
-                Error
-                  (Invalid_argument
-                     {
-                       command = cmd;
-                       expected =
-                         Say.make ~ko:"인자 없음 | midi <파일 경로>"
-                           ~en:"no argument | midi <file path>";
-                       got = raw_arg;
-                     })))
-    | other -> Error (Unknown_command other)
+    | other -> (
+        match unlisted_word_of_command other with
+        | Some Music_word -> parse_music ~cmd arg
+        | None -> Error (Unknown_command other))
 
 (* UTF-8 Unicode scalar decomposition with ASCII case-folding so multi-byte
    Hangul/CJK syllables never produce byte-prefix false positives. *)
@@ -2011,11 +2023,11 @@ let strip_leading_slash s =
 
 (* An exactly typed unlisted command must not fuzzy-match a listed one. In the
    English UI "music" is a subsequence of the description "Open Model/Runtime
-   switcher", and Enter on that popup would run /model instead. *)
+   switcher", and Enter on that popup would run /model instead. [needle] is
+   the typed text without its slash; only its first word names the command. *)
 let is_unlisted_word needle =
-  match parse ("/" ^ needle) with
-  | Ok (Music _) -> true
-  | Ok _ | Error _ -> false
+  let command, _ = split_command_and_arg ("/" ^ needle) in
+  Option.is_some (unlisted_word_of_command command)
 
 let filter ~query ~lang =
   let needle = String.lowercase_ascii (strip_leading_slash query) in

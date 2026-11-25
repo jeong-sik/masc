@@ -200,6 +200,21 @@ let base_path state =
   (Mcp_server.workspace_config state).Workspace.base_path
 ;;
 
+let running_batch_json ~base_path ~keeper_name =
+  match Registry.operation_projection ~base_path ~keeper_name with
+  | Ok { running_operation_id = Some execution_id; store_unavailable = false; _ } ->
+    (match Registry.batch_operations ~base_path ~keeper_name execution_id with
+     | Ok (leader :: (_ :: _ as members))
+       when Operation_id.equal leader.operation_id execution_id
+            && Operation.State_name.(Operation.state_name leader.state = Running) ->
+       `Assoc
+         [ "execution_id", `String (Operation_id.to_string execution_id)
+         ; "member_count", `Int (1 + List.length members)
+         ]
+     | Ok _ | Error _ -> `Null)
+  | Ok _ | Error _ -> `Null
+;;
+
 let parse_after_sequence request =
   match Server_utils.query_param request "after_sequence" with
   | None -> Ok None
@@ -665,6 +680,10 @@ let handle_get state request reqd = function
             (`Assoc
                [ "schema", `String "masc.keeper_chat_operations.list.v1"
                ; "state", `String Operation.State_name.(to_wire Queued)
+               ; "running_batch",
+                 (if Option.is_none after_sequence then
+                    running_batch_json ~base_path:(base_path state) ~keeper_name
+                  else `Null)
                ; "operations", `List (List.map
                    (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
                      ~base_path:(base_path state) ~keeper_name)) operations)

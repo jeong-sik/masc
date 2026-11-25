@@ -196,7 +196,7 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
                 turn_ref = Some turn_ref;
               })
 
-let chat_status_fetches ~keeper (m : Model.t) =
+let chat_status_requests ~queue_view ~keeper (m : Model.t) =
   let has_stream request_id =
     match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
     | Some stream -> stream.active && String.equal stream.request_id request_id
@@ -208,9 +208,17 @@ let chat_status_fetches ~keeper (m : Model.t) =
        | Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _ -> None
        | Drafts.Sending | Drafts.Queued | Drafts.Pending_processing | Drafts.Interrupting
        | Drafts.Confirming_delivery ->
-           if has_stream tx.request_id then None
-           else Some (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_chat_status {
-               keeper; operation_id = Option.value tx.operation_id ~default:tx.request_id } }))
+           let operation_id =
+             if queue_view then tx.operation_id
+             else if has_stream tx.request_id then None
+             else Some (Option.value tx.operation_id ~default:tx.request_id)
+           in
+           Option.map (fun operation_id -> Cmd.Get_chat_status { keeper; operation_id })
+             operation_id)
+
+let chat_status_fetches ~keeper (m : Model.t) =
+  chat_status_requests ~queue_view:false ~keeper m
+  |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })
 
 let fetches_for_overlay ~force (m : Model.t) =
   match m.nav.overlay with
@@ -248,9 +256,14 @@ let fetches_for_overlay ~force (m : Model.t) =
        | None -> []
        | Some keeper ->
            let read = (Fleet_store.chat_queue_for ~keeper m.fleet).read in
-           if needs_fetch ~force read && (force || not (Observed.is_loading read)) then
-             [ Cmd.Get_chat_queue { keeper } ]
-           else [])
+           let reads =
+             if needs_fetch ~force read && (force || not (Observed.is_loading read))
+             then Cmd.Get_chat_queue { keeper } :: chat_status_requests ~queue_view:true ~keeper m
+             else []
+           in
+           reads
+           |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
+           |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning)
   | Some (Nav.Queue_context Nav.Drawer_schedules) ->
       if needs_fetch ~force m.work.schedules then
         [ Cmd.Get_schedules { cursor = None } ]

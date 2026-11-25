@@ -7471,7 +7471,8 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
   let m_c3, _ = Update.step ~now:t_p9 pending (Msg.Http_reply { epoch = pending.epoch;
       reply = Msg.Reply_chat_status { keeper = "alpha-leader"; operation_id = op; requested_at = t_p9;
           result = Ok { id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string op); sequence = 0L; state = Keeper_chat_operation.State_name.Failed;
-                        message = None; failure_detail = Some "operation failed" } } }) in
+                        message = None; failure_detail = Some "operation failed";
+                        batch_execution_id = None } } }) in
   Alcotest.(check bool) "the persisted failure ends the pending operation" false
     (Drafts.has_active_tx_for ~keeper:"alpha-leader" m_c3.drafts);
   (* [X] dismisses failed pending txs cleanly in Dive Keeper_chat *)
@@ -10659,10 +10660,11 @@ let test_reopen_keeper_queue_and_reconcile () =
   let op : Wire_fleet.chat_operation = {
     id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string "queued-from-another-session");
     state = Keeper_chat_operation.State_name.Queued;
-    sequence = 11L; message = Some "prior input"; failure_detail = None } in
+    sequence = 11L; message = Some "prior input"; failure_detail = None;
+    batch_execution_id = None } in
   let receive model ~keeper ~requested_at operations result =
     Update.step ~now:t2 model (Msg.Http_reply { epoch = model.Model.epoch;
-       reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } }) |> fst in
+       reply = Msg.Reply_chat_queue { keeper; requested_at; operations; running_batch = None; result } }) |> fst in
   let progress = receive model ~keeper:"alpha" ~requested_at:t1 [op] None in
   Alcotest.(check bool) "a partial receipt keeps its active read"
     false (List.exists (function Cmd.Http_get { req = Cmd.Get_chat_queue _; _ } -> true | _ -> false)
@@ -10821,7 +10823,14 @@ let test_exact_operation_absence_recovery () =
     (List.length (Drafts.pending_txs_for_keeper ~keeper dismissed.drafts));
   let _, second_id = send missing later in
   Alcotest.(check bool) "a deliberate second POST gets a fresh request id" false (String.equal second_id id);
-  let exact state = Ok Wire_fleet.{ id = op_id; sequence = 1L; state; message = None; failure_detail = None } in
+  let exact ?batch_execution_id state =
+    Ok Wire_fleet.{ id = op_id; sequence = 1L; state; message = None; failure_detail = None; batch_execution_id }
+  in
+  let execution_id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string "batch-lead") in
+  let batched = read ~started:t1 ~now:t2 (exact ~batch_execution_id:execution_id Running) detached in
+  Alcotest.(check bool) "exact status retains the batch binding of the submitted operation"
+    true (Option.equal Keeper_chat_operation.Operation_id.equal
+      (Some execution_id) (row batched).batch_execution_id);
   let accepted = read ~started:t1 ~now:t2 (exact Running) detached in
   let late_absence = read ~started:t1 ~now:later absent accepted in
   Alcotest.(check bool) "an absence lookup started before a later acceptance cannot erase it" true
@@ -10846,7 +10855,7 @@ let test_exact_operation_absence_recovery () =
   let queue (m : Model.t) at =
     let op = Result.get_ok (exact Queued) in
     Update.step ~now:later m (Msg.Http_reply { epoch = m.epoch; reply = Msg.Reply_chat_queue {
-        keeper; requested_at = at; operations = [op]; result = Some (Ok ()) } }) |> fst in
+        keeper; requested_at = at; operations = [op]; running_batch = None; result = Some (Ok ()) } }) |> fst in
   Alcotest.(check bool) "stale drawer evidence cannot reopen a later absence" true
     ((row (queue missing t1)).state = Drafts.No_operation_record);
   Alcotest.(check bool) "a newly read scoped queue can recover the exact id" true
@@ -16139,6 +16148,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       updated_at_unix = 1795503086.0;
       revision = None;
       preparation = None;
+      work_context = None;
     }
   in
   let active_turn_no_tail : Wire_fleet.active_turn =

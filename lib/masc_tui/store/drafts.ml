@@ -24,6 +24,7 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
+  batch_execution_id : Keeper_chat_operation.Operation_id.t option;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
@@ -540,6 +541,7 @@ let enqueue_submission ~now ~keeper ~mode t =
         body = d.text;
         mode;
         operation_id = None;
+        batch_execution_id = None;
         state = Queued;
         created_at = now;
         updated_at = now;
@@ -577,6 +579,12 @@ let update_tx ~request_id f t =
       t.pending_txs
   in
   { t with pending_txs }
+
+let note_batch_execution ~request_id execution_id =
+  update_tx ~request_id (fun tx ->
+    match tx.batch_execution_id with
+    | Some _ -> tx
+    | None -> { tx with batch_execution_id = Some execution_id })
 
 let mark_sending ~now ~request_id t =
   update_tx ~request_id

@@ -43,6 +43,7 @@ type active_tool_call = {
 
 type chat_queue = {
   operations : Wire_fleet.chat_operation list;
+  running_batch : Wire_fleet.running_chat_batch option;
   read : unit Observed.t;
 }
 
@@ -1013,7 +1014,7 @@ let apply_chat_history ~observed_at ~keeper page t =
 
 let chat_queue_for ~keeper t =
   Option.value (String_map.find_opt keeper t.chat_queues)
-    ~default:{ operations = []; read = Observed.unreported }
+    ~default:{ operations = []; running_batch = None; read = Observed.unreported }
 
 let set_chat_queue ~keeper queue t =
   { t with chat_queues = String_map.add keeper queue t.chat_queues }

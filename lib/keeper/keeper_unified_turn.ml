@@ -472,6 +472,15 @@ let run_keeper_cycle
                  ~now:(Time_compat.now ())
                  ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
                    ~keeper_name:meta.name) in
+               let start_reasons =
+                 match turn_decision.verdict with
+                 | Keeper_world_observation.Run { reasons = first, rest } ->
+                     List.map Keeper_world_observation_turn_types.turn_reason_to_string
+                       (first :: rest)
+                 | Keeper_world_observation.Skip _ -> []
+               in
+               Keeper_turn_preview.note_work_context ~writer:preview
+                 { task_id = Keeper_runtime_contract.current_task_id_opt meta; start_reasons };
                Keeper_preparation_runtime_observation.with_turn ~config
                  ~keeper_name:meta.name ~preview @@ fun () ->
                let current_task,skill_snapshot =

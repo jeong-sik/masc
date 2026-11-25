@@ -2625,8 +2625,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             match t with
             | Nav.Drawer_queue ->
                 Say.resolve lang
-                  (Say.make ~ko:"대기열 [Steer/FollowUp/Carry]"
-                     ~en:"Queue [Steer/FollowUp/Carry]")
+                  (Say.make ~ko:"작업 · 큐" ~en:"Work & Queue")
             | Nav.Drawer_context ->
                 Say.resolve lang
                   (Say.make ~ko:"컨텍스트 · 캐시" ~en:"Context Window & Cache")
@@ -2668,6 +2667,110 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Nav.Drawer_queue ->
             let rows_acc = ref [] in
             let push style txt = rows_acc := (style, txt) :: !rows_acc in
+            let overview = Chat_transcript.keeper_work_overview ~model ~keeper in
+            if overview <> [] then begin
+              push (Typography.anchor ~bg theme)
+                (Say.resolve lang (Say.make ~ko:"Keeper 작업" ~en:"Keeper work"));
+              List.iter (fun line -> push pri_st (Say.resolve lang line)) overview;
+              push pri_st ""
+            end;
+            let show_batch = Option.iter (fun id ->
+                let execution = Keeper_chat_operation.Operation_id.to_string id in
+                push struct_st (Say.resolve lang
+                  (Say.make ~ko:("    묶음 실행 · " ^ execution)
+                     ~en:("    Batch execution · " ^ execution)))) in
+            let queue, txs = Model.drawer_queue ~keeper model in
+            let draft = Drafts.draft_for ~keeper model.drafts in
+            let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) in
+            Option.iter
+              (fun (batch : Wire_fleet.running_chat_batch) ->
+                let label =
+                  match queue.read with
+                  | Observed.Value { stale = false; _ } ->
+                      Say.make ~ko:"실행 중인 묶음" ~en:"Running batch"
+                  | Observed.Value { stale = true; _ } | Observed.Failed _
+                  | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+                      Say.make ~ko:"마지막 확인 묶음" ~en:"Last observed batch"
+                in
+                let size =
+                  Say.make ~ko:(Printf.sprintf "요청 %d개" batch.member_count)
+                    ~en:(Printf.sprintf "%d requests" batch.member_count)
+                in
+                let id = Keeper_chat_operation.Operation_id.to_string batch.execution_id in
+                push pri_st (Say.resolve lang
+                  (Say.concat ~sep:Typography.sep_dot [ label; size; Say.literal id ])))
+              queue.running_batch;
+            (match queue.read with
+             | Observed.Value { stale; _ } ->
+                 let label =
+                   if stale then Say.make ~ko:"서버 대기열 · 마지막 조회" ~en:"Server queue · last read"
+                   else Say.make ~ko:"서버 대기열" ~en:"Server queue"
+                 in
+                 push (Typography.anchor ~bg theme)
+                   (Printf.sprintf "%s (%d)" (Say.resolve lang label) (List.length queue.operations))
+             | Observed.Failed { reason; _ } ->
+                 let label =
+                   match queue.operations with
+                   | [] -> Say.make ~ko:"서버 대기열 조회 실패" ~en:"Server queue read failed"
+                   | _ :: _ -> Say.make ~ko:"서버 대기열 조회 실패 · 마지막 관측" ~en:"Server queue read failed · last observed rows"
+                 in
+                 push crit_st (Say.resolve lang label ^ " · " ^ reason)
+             | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+                 let label = if Option.is_none (Model.target_keeper model) then
+                     Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"
+                   else Say.make ~ko:"서버 대기열 조회 중…" ~en:"Reading server queue…" in
+                 push whisper_st (Say.resolve lang label));
+            List.iteri (fun index (op : Wire_fleet.chat_operation) ->
+               let body = Option.value op.message ~default:"" |> one_line in
+               push pri_st (Printf.sprintf "  %d. %s  %s" (index + 1) body
+                 (Keeper_chat_operation.Operation_id.to_string op.id));
+               show_batch op.batch_execution_id)
+              queue.operations;
+            if txs <> [] then begin
+              push (Typography.anchor ~bg theme)
+                (Say.resolve lang (Say.make ~ko:"이 세션의 전송" ~en:"Session transmissions"));
+              List.iter
+                (fun (tx : Drafts.pending_message) ->
+                  let mode_s =
+                    match tx.mode with
+                    | Drafts.Mode_direct -> "[Direct]"
+                    | Drafts.Mode_steer -> "[Steer]"
+                    | Drafts.Mode_follow_up -> "[FollowUp]"
+                  in
+                  let st_s, st_style =
+                    match tx.state with
+                    | Drafts.Delivered ->
+                        ( Say.resolve lang
+                            (Say.make ~ko:"전송 완료" ~en:"Delivered"),
+                          ok_st )
+                    | Drafts.No_operation_record ->
+                        (Say.resolve lang (Drafts.absence_notice tx), attn_st)
+                    | Drafts.Failed_retryable { reason } ->
+                        ( Say.resolve lang
+                            (Say.make ~ko:("전송 실패: " ^ reason)
+                               ~en:("Send failed: " ^ reason)),
+                          crit_st )
+                    | Drafts.Queued
+                    | Drafts.Sending
+                    | Drafts.Pending_processing
+                    | Drafts.Confirming_delivery
+                    | Drafts.Interrupting ->
+                        let lbl =
+                          match Drafts.tx_state_label tx.state with
+                          | Some s -> Say.resolve lang s
+                          | None -> "Active"
+                        in
+                        (lbl, attn_st)
+                  in
+                  let body_one =
+                    String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body
+                  in
+                  push st_style
+                    (Printf.sprintf "  %s %s (%s) · %s" mode_s st_s tx.request_id
+                       body_one);
+                  show_batch tx.batch_execution_id)
+                txs
+            end;
             let attn_count = Attention.count model.attention in
             if attn_count > 0 then begin
               push (Typography.anchor ~bg theme)
@@ -2721,77 +2824,6 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~ko:"  [Esc] 닫기 · 상단 바 [Y]/[N] 또는 [2 Work > Inbox]에서 처리"
                         ~en:"  [Esc] close · resolve via [Y]/[N] strip or [2 Work > Inbox]"));
               push pri_st ""
-            end;
-            let queue, txs = Model.drawer_queue ~keeper model in
-            let draft = Drafts.draft_for ~keeper model.drafts in
-            let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) in
-            (match queue.read with
-             | Observed.Value { stale; _ } ->
-                 let label =
-                   if stale then Say.make ~ko:"서버 대기열 · 마지막 조회" ~en:"Server queue · last read"
-                   else Say.make ~ko:"서버 대기열" ~en:"Server queue"
-                 in
-                 push (Typography.anchor ~bg theme)
-                   (Printf.sprintf "%s (%d)" (Say.resolve lang label) (List.length queue.operations))
-             | Observed.Failed { reason; _ } ->
-                 let label =
-                   match queue.operations with
-                   | [] -> Say.make ~ko:"서버 대기열 조회 실패" ~en:"Server queue read failed"
-                   | _ :: _ -> Say.make ~ko:"서버 대기열 조회 실패 · 마지막 관측" ~en:"Server queue read failed · last observed rows"
-                 in
-                 push crit_st (Say.resolve lang label ^ " · " ^ reason)
-             | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
-                 let label = if Option.is_none (Model.target_keeper model) then
-                     Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"
-                   else Say.make ~ko:"서버 대기열 조회 중…" ~en:"Reading server queue…" in
-                 push whisper_st (Say.resolve lang label));
-            List.iter (fun (op : Wire_fleet.chat_operation) ->
-               let body = Option.value op.message ~default:"" |> one_line in
-               push pri_st (Printf.sprintf "  %s  %s" (Keeper_chat_operation.Operation_id.to_string op.id) body))
-              queue.operations;
-            if txs <> [] then begin
-              push (Typography.anchor ~bg theme)
-                (Say.resolve lang (Say.make ~ko:"이 세션의 전송" ~en:"Session transmissions"));
-              List.iter
-                (fun (tx : Drafts.pending_message) ->
-                  let mode_s =
-                    match tx.mode with
-                    | Drafts.Mode_direct -> "[Direct]"
-                    | Drafts.Mode_steer -> "[Steer]"
-                    | Drafts.Mode_follow_up -> "[FollowUp]"
-                  in
-                  let st_s, st_style =
-                    match tx.state with
-                    | Drafts.Delivered ->
-                        ( Say.resolve lang
-                            (Say.make ~ko:"전송 완료" ~en:"Delivered"),
-                          ok_st )
-                    | Drafts.No_operation_record ->
-                        (Say.resolve lang (Drafts.absence_notice tx), attn_st)
-                    | Drafts.Failed_retryable { reason } ->
-                        ( Say.resolve lang
-                            (Say.make ~ko:("전송 실패: " ^ reason)
-                               ~en:("Send failed: " ^ reason)),
-                          crit_st )
-                    | Drafts.Queued
-                    | Drafts.Sending
-                    | Drafts.Pending_processing
-                    | Drafts.Confirming_delivery
-                    | Drafts.Interrupting ->
-                        let lbl =
-                          match Drafts.tx_state_label tx.state with
-                          | Some s -> Say.resolve lang s
-                          | None -> "Active"
-                        in
-                        (lbl, attn_st)
-                  in
-                  let body_one =
-                    String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body
-                  in
-                  push st_style
-                    (Printf.sprintf "  %s %s (%s) · %s" mode_s st_s tx.request_id
-                       body_one))
-                txs
             end;
             push pri_st "";
             push (Typography.anchor ~bg theme)

@@ -102,12 +102,20 @@ let concise_tool_preview ~max_w raw =
     in
     Grapheme.truncate_to_width ~max_width:(Int.max 8 max_w) one_line
 
-let effective_tools_mode (model : Model.t) =
-  if model.fleet.chat_turn_details_expanded then Slash.Tools_full
-  else model.fleet.chat_tools_mode
+let tool_group_row ~(model : Model.t) ~(theme : Theme.t) ~count names =
+  let label =
+    Ops_common.say model ~ko:(Printf.sprintf "도구 호출 %d회" count)
+      ~en:(Printf.sprintf "%d tool calls" count)
+  in
+  let text =
+    String.concat Typography.sep_dot (label :: List.sort_uniq String.compare names)
+  in
+  single_span_row ~prefix:(Glyph.to_utf8 Glyph.Tool_square ^ " ")
+    ~prefix_fg:theme.text_muted ~text ~text_fg:theme.text_secondary
+    ~bg_rgb:theme.surface_1 ()
 
 let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
-  let tools_mode = effective_tools_mode model in
+  let tools_mode = Chat_transcript.tools_mode model in
   let max_preview, show_expand_hint =
     match tools_mode with
     | Slash.Tools_compact -> (0, false)
@@ -226,7 +234,20 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   in
   let rec loop prev_minute acc = function
     | [] -> List.rev acc
-    | (msg : Wire_fleet.chat_message) :: rest ->
+    | Chat_transcript.Grouped (first, related) :: rest ->
+        let calls = first :: related in
+        let names =
+          List.filter_map (fun (msg : Wire_fleet.chat_message) -> msg.tool_call_name) calls
+        in
+        let row = tool_group_row ~model ~theme ~count:(List.length calls) names in
+        let hhmm =
+          Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
+            (List.fold_left (fun _ (msg : Wire_fleet.chat_message) -> msg.ts_unix)
+               first.ts_unix related)
+        in
+        let acc = if acc = [] then acc else blank_row ~bg_rgb:base_bg :: acc in
+        loop (Some hhmm) (row :: acc) rest
+    | Chat_transcript.Single (msg : Wire_fleet.chat_message) :: rest ->
         let hhmm =
           Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec msg.ts_unix
         in
@@ -379,7 +400,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 | None -> Ops_common.say model ~ko:"도구" ~en:"tool"
               in
               let expanded =
-                match effective_tools_mode model with
+                match Chat_transcript.tools_mode model with
                 | Slash.Tools_compact -> false
                 | Slash.Tools_results | Slash.Tools_full -> true
               in
@@ -463,7 +484,9 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
         in
         loop (Some hhmm) (List.rev_append (spacing @ msg_rows) acc) rest
   in
-  loop None [] messages
+  loop None []
+    (Chat_transcript.history_tool_groups ~tools_mode:(Chat_transcript.tools_mode model)
+       messages)
 
 let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
     (sp : Chat_transcript.stream_projection) =
@@ -553,14 +576,20 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
           think_lines
   end;
   (* 2. Collapsible Elevated Tool Cards (surface_2 header + recessed surface_0 preview) *)
+  let tools_mode = Chat_transcript.tools_mode model in
   let expanded_tools =
-    match effective_tools_mode model with
+    match tools_mode with
     | Slash.Tools_compact -> false
     | Slash.Tools_results | Slash.Tools_full -> true
   in
   if sp.show_tools then
     List.iter
-      (fun (tc : Fleet_store.active_tool_call) ->
+      (function
+        | Chat_transcript.Grouped (first, related) ->
+            let calls = first :: related in
+            let names = List.map (fun (call : Fleet_store.active_tool_call) -> call.tool_name) calls in
+            push (tool_group_row ~model ~theme ~count:(List.length calls) names)
+        | Chat_transcript.Single (tc : Fleet_store.active_tool_call) ->
         let rail_rgb, pill_txt, pill_fg =
           match tc.tool_state with
           | Fleet_store.Tool_pending ->
@@ -631,7 +660,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
         | true, Some out ->
             push_all (preview_tool_output_rows ~theme ~model ~width out)
         | false, _ | true, None -> ())
-      buf.tools;
+      (Chat_transcript.stream_tool_groups ~tools_mode buf.tools);
   (* 3. Live Assistant Text Delta *)
   if sp.show_text then begin
     let fg = theme.text_secondary in
@@ -3445,14 +3474,18 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
              ~en:"[l] Login · [L] Poll · [a/Enter] Switch · [U] Disconnect · [K] PAT · [y] Copy")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
-          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [[ ]] 탭"
-             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [[ ]] Tabs")
+          (Ops_common.say model ~ko:"[Ctrl+T] 작업·큐 · [Esc/Ctrl+X] 턴 중단"
+             ~en:"[Ctrl+T] Work & Queue · [Esc/Ctrl+X] Interrupt")
       else if
         Nav.equal_keeper_tab tab Nav.Keeper_chat && can_explicit_interrupt
       then
         Some
-          (Ops_common.say model ~ko:"[Ctrl+X] 턴 중단 · [y] 복사 · [Esc] 목록"
-             ~en:"[Ctrl+X] Interrupt · [y] Copy · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[Ctrl+T] 작업·큐 · [Ctrl+X] 턴 중단"
+             ~en:"[Ctrl+T] Work & Queue · [Ctrl+X] Interrupt")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+        Some
+          (Ops_common.say model ~ko:"[Ctrl+T] 작업·큐 · [Ctrl+O] 도구 상세"
+             ~en:"[Ctrl+T] Work & Queue · [Ctrl+O] Tool details")
       else
         Some
           (Ops_common.say model ~ko:"[[ ]] 탭 · [y] 응답 복사 · [Esc] 목록"

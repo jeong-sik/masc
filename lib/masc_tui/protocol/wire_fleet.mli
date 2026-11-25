@@ -92,6 +92,8 @@ type turn_preparation = {
   started_at_unix : float;
 }
 
+type turn_work_context = { task_id : string option; start_reasons : string list }
+
 type turn_preview = {
   status_text : string;
   activity : turn_preview_activity;
@@ -100,6 +102,7 @@ type turn_preview = {
   updated_at_unix : float;
   revision : int option;
   preparation : turn_preparation option;
+  work_context : turn_work_context option;
 }
 
 type turn_preview_update = {
@@ -583,6 +586,7 @@ type chat_operation = {
   state : Keeper_chat_operation.State_name.t;
   message : string option;
   failure_detail : string option;
+  batch_execution_id : Keeper_chat_operation.Operation_id.t option;
 }
 
 val chat_queue_path : keeper:string -> after:int64 option -> string
@@ -593,6 +597,15 @@ val is_absent_operation_error : keeper:string -> operation_id:string -> status:i
 val decode_chat_operation : Yojson.Safe.t -> (chat_operation, string) result
 val decode_chat_queue :
   after:int64 option -> Yojson.Safe.t -> (chat_operation list, string) result
+
+type running_chat_batch = {
+  execution_id : Keeper_chat_operation.Operation_id.t;
+  member_count : int;
+}
+
+val decode_running_chat_batch :
+  Yojson.Safe.t -> (running_chat_batch option, string) result
+(** A server-observed running execution with at least two frozen inputs. *)
 
 val accepted_input_operation : chat_message -> string option
 val terminal_operation : chat_message -> string option

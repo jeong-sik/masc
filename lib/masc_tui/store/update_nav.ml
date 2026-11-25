@@ -6455,9 +6455,24 @@ let queue_context_max_scroll (m : Model.t) tab =
         let attn_count = Attention.count m.attention in
         let attn_rows = if attn_count > 0 then attn_count + 3 else 0 in
         let queue, txs = Model.drawer_queue ~keeper m in
-        let server_rows = List.length queue.operations in
+        let overview = Chat_transcript.keeper_work_overview ~model:m ~keeper in
+        let overview_rows =
+          match overview with [] -> 0 | _ :: _ -> List.length overview + 2
+        in
+        let server_rows =
+          List.fold_left (fun rows (op : Wire_fleet.chat_operation) ->
+            rows + if Option.is_some op.batch_execution_id then 2 else 1)
+            0 queue.operations
+        in
+        let local_rows =
+          List.fold_left (fun rows (tx : Drafts.pending_message) ->
+            rows + if Option.is_some tx.batch_execution_id then 2 else 1)
+            0 txs
+        in
         let others = Drafts.other_keepers_draft_count m.drafts in
-        attn_rows + 1 + server_rows + (if txs = [] then 0 else 1 + List.length txs)
+        let running_rows = if Option.is_some queue.running_batch then 1 else 0 in
+        overview_rows + attn_rows + running_rows + 1 + server_rows
+        + (if txs = [] then 0 else 1 + local_rows)
         + 3 + (if others > 0 then 1 else 0)
     | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)
     | Nav.Drawer_context ->

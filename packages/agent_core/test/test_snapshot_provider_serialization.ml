@@ -701,7 +701,7 @@ let test_anthropic_caller_input_keeps_its_message () =
 (* ── Gemini ─────────────────────────────────────────── *)
 
 let gemini_any_expected =
-  {|{"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},"tools":[{"functionDeclarations":[{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}],"generationConfig":{"temperature":0.7,"maxOutputTokens":1024},"contents":[{"role":"user","parts":[{"text":"What's the weather in Seoul?"}]},{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Seoul"}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"get_weather","response":{"result":"Sunny, 25C","is_error":false}}}]}]}|}
+  {|{"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},"tools":[{"functionDeclarations":[{"name":"get_weather","description":"Get weather for a city","parametersJsonSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}],"generationConfig":{"temperature":0.7,"maxOutputTokens":1024},"contents":[{"role":"user","parts":[{"text":"What's the weather in Seoul?"}]},{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Seoul"}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"get_weather","response":{"result":"Sunny, 25C","is_error":false}}}]}]}|}
 ;;
 
 let test_gemini_any () =

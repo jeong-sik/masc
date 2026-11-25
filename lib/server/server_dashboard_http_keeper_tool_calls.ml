@@ -118,38 +118,25 @@ let handle_stats_get state req reqd name =
   else
     let config = (Mcp_server.workspace_config state) in
     let masc_root = Workspace.masc_dir config in
+    let max_window_hours = 168 in
     let window_hours =
       Server_utils.int_query_param req "window_hours"
         ~default:24
-      |> max 1 |> min 168  (* 1h .. 7d *)
+      |> max 1 |> min max_window_hours
     in
-    (* Trajectory scan + tool-stat aggregation + hourly timeline +
-       coverage-gap lookup all hit disk under [masc_root]. 5-trial
-       latency variance 0.16s..1.92s (mean ~1.0s) on PR #19097 HEAD
-       because each miss ran on the calling fiber's Eio main domain.
-       Mirrors PRs #19088 / #19097 — cache + offload, key includes the
-       inputs that change the result. *)
     let cache_key =
       Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
     in
     let payload =
       Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-        let since =
-          Time_compat.now ()
-          -. (float_of_int window_hours *. Masc_time_constants.hour)
+        let now = Time_compat.now () in
+        let cutoff hours = now -. (float_of_int hours *. Masc_time_constants.hour) in
+        let { Trajectory.tools; timeline; latest_ts } =
+          Trajectory.read_tool_activity ~masc_root ~keeper_name:name
+            ~since:(cutoff window_hours) ~retain_since:(cutoff max_window_hours)
         in
-        let entries =
-          Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
-        in
-        let tools = Trajectory.aggregate_tool_stats entries in
-        let timeline = Trajectory.hourly_timeline entries in
-        let latest_ts =
-          List.fold_left
-            (fun acc (entry : Trajectory.tool_call_entry) ->
-              match acc with
-              | Some ts when ts >= entry.ts -> acc
-              | _ -> Some entry.ts)
-            None entries
+        let total_entries =
+          List.fold_left (fun count (tool : Trajectory.tool_stat) -> count + tool.call_count) 0 tools
         in
         let latest_age_s =
           match latest_ts with
@@ -185,7 +172,7 @@ let handle_stats_get state req reqd name =
         `Assoc [
           ("keeper", `String name);
           ("window_hours", `Int window_hours);
-          ("total_entries", `Int (List.length entries));
+          ("total_entries", `Int total_entries);
           ("source", `String "trajectory_tool_call");
           ( "producer",
             `String

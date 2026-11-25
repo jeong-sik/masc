@@ -2158,7 +2158,7 @@ let appended_read_changed path =
    this read is running. Callback errors are deliberately outside I/O catches. *)
 let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
   let rec drive acc boundary position fragment =
-    if position >= until then Ok (acc, boundary)
+    if position >= until then Ok (acc, boundary, fragment)
     else
       let chunk = Bytes.create (min 65536 (until - position)) in
       let read =
@@ -2246,7 +2246,7 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
             | Some (_, _, boundary) -> boundary
             | None -> 0
           in
-          let* value, boundary =
+          let* value, boundary, _ =
             fold_captured_entries_result channel ~path ~from
               ~until:captured.Unix.st_size ~init:acc
               ~f:(fun acc -> function Parsed row -> f acc row | Malformed_json _ -> acc)
@@ -2277,19 +2277,67 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
 type incomplete_tail =
   | Incomplete_tail_is_error
   | Incomplete_tail_is_unwritten
+  | Include_private_tail
+
+let rec shared_file_lock fd =
+  match Unix.lockf fd Unix.F_RLOCK 0 with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> shared_file_lock fd
+;;
+
+let inspect_settled_descriptor path channel =
+  let fd = Unix.descr_of_in_channel channel in
+  try
+    shared_file_lock fd;
+    (* The path opener already holds the in-process append mutex. The shared
+       descriptor lock synchronizes with other processes. Once this extent
+       is captured, later appends can write and roll back only beyond it. *)
+    Ok (Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0)
+          (fun () -> Unix.fstat fd))
+  with Unix.Unix_error (error, _, _) ->
+    Error (Io_error {operation=Inspect;path;detail=Unix.error_message error})
+;;
 
 let fold_file_appended path ~incomplete_tail ~cursor ~init ~f =
   let open Result.Syntax in
-  let* captured = inspect_path_result path in
-  let* () = match non_regular_file_kind_of_stats captured with
+  let* inspected = inspect_path_result path in
+  let* () = match non_regular_file_kind_of_stats inspected with
     | Some kind -> Error (Non_regular_file {path;kind}) | None -> Ok () in
   let previous = match cursor with None -> [] | Some cursor -> cursor in
-  match previous with
-  | (_ :: _ :: _) -> Ok Cursor_invalidated
-  | [(prior_path, prior, _)] when prior_path <> path || not (append_only_successor prior captured) ->
-      Ok Cursor_invalidated
-  | [] | [_] ->
-    Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result (fun channel ->
+  let previous_matches captured =
+    match previous with
+    | [] -> true
+    | [(prior_path, prior, _)] -> String.equal prior_path path && append_only_successor prior captured
+    | _ :: _ :: _ -> false
+  in
+  let already_read =
+    match previous with
+    | [(_, _, boundary)] -> boundary = inspected.Unix.st_size && previous_matches inspected
+    | [] | _ :: _ :: _ -> false
+  in
+  if incomplete_tail = Include_private_tail && already_read then
+    Ok (Appended ((init, None), [(path, inspected, inspected.Unix.st_size)]))
+  else if incomplete_tail <> Include_private_tail && not (previous_matches inspected) then
+    Ok Cursor_invalidated
+  else
+    let captured = ref inspected in
+    let open_input path =
+      let* channel = open_regular_input_result path in
+      match incomplete_tail with
+      | Incomplete_tail_is_error | Incomplete_tail_is_unwritten -> Ok channel
+      | Include_private_tail ->
+        (match inspect_settled_descriptor path channel with
+         | Ok stats -> captured := stats; Ok channel
+         | Error error -> close_in_noerr channel; Error error
+         | exception exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           close_in_noerr channel;
+           Printexc.raise_with_backtrace exn backtrace)
+    in
+    Fs_compat.Input.with_open_result ~path ~open_input (fun channel ->
+      let captured = !captured in
+      if not (previous_matches captured) then Ok Cursor_invalidated
+      else
       let* opened = match Unix.fstat (Unix.descr_of_in_channel channel) with
         | stats -> Ok stats
         | exception Unix.Unix_error (error, _, _) ->
@@ -2297,28 +2345,40 @@ let fold_file_appended path ~incomplete_tail ~cursor ~init ~f =
       if not (append_only_successor captured opened) then Error (appended_read_changed path)
       else
         let from = match previous with [] -> 0 | (_,_,offset) :: _ -> offset in
-        let* value, boundary = fold_captured_entries_result channel ~path ~from
+        let* value, boundary, fragment = fold_captured_entries_result channel ~path ~from
           ~until:captured.Unix.st_size ~init ~f in
-        let* () =
-          if boundary = captured.Unix.st_size then Ok ()
+        let* tail =
+          if boundary = captured.Unix.st_size then Ok None
           else
             match incomplete_tail with
             | Incomplete_tail_is_error ->
               Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"})
-            | Incomplete_tail_is_unwritten -> Ok ()
+            | Incomplete_tail_is_unwritten -> Ok None
+            | Include_private_tail -> Ok (entry_of_physical_line ~path (Buffer.contents fragment))
         in
         let* after = inspect_path_result path in
         if append_only_successor captured after then
-          Ok (Appended (value, [(path,captured,boundary)]))
+          Ok (Appended ((value, tail), [(path,captured,boundary)]))
         else Error (appended_read_changed path))
 ;;
 
+let fold_file_without_tail path ~incomplete_tail ~cursor ~init ~f =
+  fold_file_appended path ~incomplete_tail ~cursor ~init ~f
+  |> Result.map (function
+       | Appended ((value, _), cursor) -> Appended (value, cursor)
+       | Cursor_invalidated -> Cursor_invalidated)
+;;
+
 let fold_file_appended_entries_result path =
-  fold_file_appended path ~incomplete_tail:Incomplete_tail_is_error
+  fold_file_without_tail path ~incomplete_tail:Incomplete_tail_is_error
 ;;
 
 let fold_file_appended_complete_entries_result path =
-  fold_file_appended path ~incomplete_tail:Incomplete_tail_is_unwritten
+  fold_file_without_tail path ~incomplete_tail:Incomplete_tail_is_unwritten
+;;
+
+let fold_private_file_appended_entries_result path =
+  fold_file_appended path ~incomplete_tail:Include_private_tail
 ;;
 
 (* Like [read_range] but bounded to the [n] most recent entries within

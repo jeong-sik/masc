@@ -220,7 +220,32 @@ let gate_decision_of_json = function
       | _ -> None)
   | _ -> None
 
-let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
+module Tool_sample = struct
+  type t = {
+    ts : float;
+    ts_iso : string;
+    tool_name : string;
+    duration_ms : int;
+    failed : bool;
+  }
+end
+
+type decoded_tool_call = {
+  sample : Tool_sample.t;
+  turn : int;
+  round : int;
+  args : Yojson.Safe.t;
+  gate_decision : gate_decision;
+  result : string option;
+  error : string option;
+  execution_id : string option;
+}
+
+let tool_call_failed ~gate_decision ~error =
+  Option.is_some error
+  || (match gate_decision with Reject _ -> true | Pass -> false)
+
+let decode_tool_call ?since (json : Yojson.Safe.t) : decoded_tool_call option =
   try
     match Json_util.assoc_member_opt "type" json with
     | Some (`String "trajectory_summary") -> None
@@ -249,10 +274,15 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
           | Some (`String value) -> Some (Some value)
           | Some _ -> None
         in
+        let* ts = number "ts" in
+        let* () =
+          match since with
+          | Some cutoff when not (ts >= cutoff) -> None
+          | None | Some _ -> Some ()
+        in
         let* gate_decision =
           gate_decision_of_json (Option.value ~default:`Null (member "gate"))
         in
-        let* ts = number "ts" in
         let* ts_iso = string "ts_iso" in
         let* turn = int "turn" in
         let* round = int "round" in
@@ -262,28 +292,40 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
         let* duration_ms = int "duration_ms" in
         let* error = optional_string "error" in
         let* execution_id = optional_string "execution_id" in
+        let sample : Tool_sample.t =
+          { ts; ts_iso; tool_name; duration_ms; failed = tool_call_failed ~gate_decision ~error }
+        in
         Some
           {
-            ts;
-            ts_iso;
+            sample;
             turn;
             round;
-            tool_name;
-            args_json = Yojson.Safe.to_string args;
+            args;
             gate_decision;
             result;
-            duration_ms;
             error;
             execution_id;
           }
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
+let tool_call_entry_of_json json : tool_call_entry option =
+  match decode_tool_call json with
+  | None -> None
+  | Some { sample; turn; round; args; gate_decision; result; error; execution_id } ->
+    Some
+      { ts = sample.ts; ts_iso = sample.ts_iso; tool_name = sample.tool_name;
+        duration_ms = sample.duration_ms; turn; round;
+        args_json = Yojson.Safe.to_string args; gate_decision; result; error; execution_id }
+
 (** Single definition of "this tool call counts as a failure" for dashboard
     aggregation. *)
 let entry_is_failure (e : tool_call_entry) : bool =
-  Option.is_some e.error
-  || (match e.gate_decision with Reject _ -> true | Pass -> false)
+  tool_call_failed ~gate_decision:e.gate_decision ~error:e.error
+
+let sample_of_entry (e : tool_call_entry) : Tool_sample.t =
+  { ts = e.ts; ts_iso = e.ts_iso; tool_name = e.tool_name;
+    duration_ms = e.duration_ms; failed = entry_is_failure e }
 
 (* ================================================================ *)
 (* File I/O                                                         *)
@@ -780,23 +822,22 @@ let p95_of_sorted (durations : int array) : int =
 
 module String_map = Map.Make (String)
 
-let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
+let aggregate_samples (samples : Tool_sample.t list) : tool_stat list =
   let by_tool =
     List.fold_left
-      (fun acc (e : tool_call_entry) ->
-        let is_failure = entry_is_failure e in
+      (fun acc (e : Tool_sample.t) ->
         match String_map.find_opt e.tool_name acc with
         | None ->
-          let succ = if is_failure then 0 else 1 in
-          let fail = if is_failure then 1 else 0 in
+          let succ = if e.failed then 0 else 1 in
+          let fail = if e.failed then 1 else 0 in
           String_map.add e.tool_name ([e.duration_ms], succ, fail, e.ts, e.ts_iso) acc
         | Some (durations, succ, fail, max_ts, max_iso) ->
-          let succ' = if is_failure then succ else succ + 1 in
-          let fail' = if is_failure then fail + 1 else fail in
+          let succ' = if e.failed then succ else succ + 1 in
+          let fail' = if e.failed then fail + 1 else fail in
           let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
           String_map.add e.tool_name (e.duration_ms :: durations, succ', fail', ts', iso') acc)
       String_map.empty
-      entries
+      samples
   in
   let stats =
     String_map.fold
@@ -821,27 +862,31 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
   in
   List.sort (fun (a : tool_stat) (b : tool_stat) -> Int.compare b.call_count a.call_count) stats
 
+let aggregate_tool_stats entries = aggregate_samples (List.map sample_of_entry entries)
+
 (** Truncate a Unix timestamp to the start of its UTC hour. *)
 let hour_start_iso (ts : float) : string =
   let t = Unix.gmtime ts in
   Printf.sprintf "%04d-%02d-%02dT%02d:00:00Z"
     (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday t.tm_hour
 
-let hourly_timeline (entries : tool_call_entry list) : hourly_bucket list =
+let timeline_of_samples (samples : Tool_sample.t list) : hourly_bucket list =
   let by_hour =
     List.fold_left
-      (fun acc (e : tool_call_entry) ->
+      (fun acc (e : Tool_sample.t) ->
         let hour = hour_start_iso e.ts in
-        let is_err = entry_is_failure e in
+        let error = if e.failed then 1 else 0 in
         match String_map.find_opt hour acc with
-        | None -> String_map.add hour (1, if is_err then 1 else 0) acc
+        | None -> String_map.add hour (1, error) acc
         | Some (c, errs) ->
-          String_map.add hour (c + 1, errs + (if is_err then 1 else 0)) acc)
+          String_map.add hour (c + 1, errs + error) acc)
       String_map.empty
-      entries
+      samples
   in
   String_map.bindings by_hour
   |> List.map (fun (hour, (call_count, error_count)) -> { hour; call_count; error_count })
+
+let hourly_timeline entries = timeline_of_samples (List.map sample_of_entry entries)
 
 let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
   `Assoc [
@@ -862,36 +907,142 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
     ("error_count", `Int b.error_count);
   ]
 
-(** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
-    Scans the keeper's trajectory directory for all trace files. *)
-let read_entries_since ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : tool_call_entry list =
+let trace_files dir =
+  if Sys.file_exists dir then
+    Sys.readdir dir |> Array.to_list
+    |> List.filter_map (fun name ->
+         if Filename.check_suffix name ".jsonl" then Some (Filename.concat dir name)
+         else None)
+  else []
+
+let fold_trace_contents path ~init ~f contents =
+  contents |> String.split_on_char '\n'
+  |> List.fold_left (fun acc line ->
+       match Dated_jsonl.entry_of_physical_line ~path line with
+       | Some (Parsed json) -> f acc json
+       | None | Some (Malformed_json _) -> acc) init
+
+let read_entries_since ~masc_root ~keeper_name ~since =
+  trace_files (trajectories_dir masc_root keeper_name)
+  |> List.fold_left (fun entries path ->
+       match Fs_compat.load_file path with
+       | exception Sys_error _ -> entries
+       | contents ->
+         fold_trace_contents path ~init:entries contents ~f:(fun entries json ->
+           match tool_call_entry_of_json json with
+           | Some entry when entry.ts >= since -> entry :: entries
+           | Some _ | None -> entries)) []
+  |> List.sort (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
+
+type tool_activity = {
+  tools : tool_stat list;
+  timeline : hourly_bucket list;
+  latest_ts : float option;
+}
+
+type retained_activity = {
+  cursor : Dated_jsonl.append_cursor;
+  retained_since : float;
+  samples : Tool_sample.t list;
+}
+
+type keeper_activity_cache = {
+  files : retained_activity String_map.t Atomic.t;
+  mutable last_read_at : float;
+}
+
+let tool_activity_cache : (string, keeper_activity_cache) Hashtbl.t = Hashtbl.create 16
+
+let tool_activity_cache_mutex = Mutex.create ()
+
+let tool_activity_cache_for ~retain_since dir =
+  let now = Time_compat.now () in
+  Mutex.protect tool_activity_cache_mutex (fun () ->
+    Hashtbl.filter_map_inplace (fun _ cache ->
+      if cache.last_read_at < retain_since then None else Some cache) tool_activity_cache;
+    match Hashtbl.find_opt tool_activity_cache dir with
+    | Some cache -> cache.last_read_at <- now; cache.files
+    | None ->
+      let files = Atomic.make String_map.empty in
+      Hashtbl.add tool_activity_cache dir { files; last_read_at = now };
+      files)
+
+let samples_since since = List.filter (fun (s : Tool_sample.t) -> s.ts >= since)
+
+let read_activity_fallback path ~f =
+  try
+    Fs_compat.Input.with_open
+      ~path
+      ~open_input:(In_channel.open_gen [Open_rdonly; Open_binary; Open_nonblock] 0)
+      (fun channel ->
+        let stats = Unix.fstat (Unix.descr_of_in_channel channel) in
+        if stats.Unix.st_kind <> Unix.S_REG then []
+        else fold_trace_contents path ~init:[] ~f (really_input_string channel stats.st_size))
+  with Sys_error _ | End_of_file | Unix.Unix_error _ -> []
+
+let rec read_activity_file ~retain_since path previous =
+  let cursor, samples =
+    match previous with
+    | Some file when file.retained_since <= retain_since ->
+      Some file.cursor, samples_since retain_since file.samples
+    | Some _ | None -> None, []
+  in
+  let add samples json =
+    match decode_tool_call ~since:retain_since json with
+    | Some call -> call.sample :: samples
+    | None -> samples
+  in
+  let fold samples = function
+    | Dated_jsonl.Parsed json -> add samples json
+    | Dated_jsonl.Malformed_json _ -> samples
+  in
+  match Dated_jsonl.fold_private_file_appended_entries_result path ~cursor ~init:samples ~f:fold with
+  | Ok (Dated_jsonl.Appended ((samples, tail), cursor)) ->
+    let retained = { cursor; retained_since = retain_since; samples } in
+    Option.fold ~none:samples ~some:(fold samples) tail, Some retained
+  | Ok Dated_jsonl.Cursor_invalidated when Option.is_some cursor ->
+    read_activity_file ~retain_since path None
+  | Ok Dated_jsonl.Cursor_invalidated | Error _ ->
+    (* A file may have moved between inspection and opening. Answer using
+       the ordinary read, while only a verified read can advance the cursor. *)
+    read_activity_fallback path ~f:add, previous
+
+let read_tool_activity ~masc_root ~keeper_name ~since ~retain_since =
+  let retain_since = min since retain_since in
   let dir = trajectories_dir masc_root keeper_name in
-  if not (Sys.file_exists dir) then []
-  else
-    let files = Sys.readdir dir in
-    let all_entries = ref [] in
-    Array.iter (fun fname ->
-      if Filename.check_suffix fname ".jsonl" then begin
-        let path = Filename.concat dir fname in
-        (try
-           let content = Fs_compat.load_file path in
-           String.split_on_char '\n' content
-           |> List.iter (fun line ->
-             if String.trim line <> "" then
-               try
-                 let json = Yojson.Safe.from_string line in
-                 (match tool_call_entry_of_json json with
-                  | Some entry when entry.ts >= since ->
-                      all_entries := entry :: !all_entries
-                  | _ -> ())
-               with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
-         with Sys_error _ -> ())
-      end
-    ) files;
-    List.sort
-      (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
-      !all_entries
+  match trace_files dir with
+  | [] ->
+    Mutex.protect tool_activity_cache_mutex (fun () -> Hashtbl.remove tool_activity_cache dir);
+    { tools = []; timeline = []; latest_ts = None }
+  | paths ->
+    let cache = tool_activity_cache_for ~retain_since dir in
+    let previous = Atomic.get cache in
+    let files, samples =
+      List.fold_left (fun (files, rows) path ->
+        let samples, retained =
+          read_activity_file ~retain_since path (String_map.find_opt path previous)
+        in
+        let files =
+          match retained with
+          | Some file -> String_map.add path file files
+          | None -> files
+        in
+        files, samples :: rows) (String_map.empty, []) paths
+    in
+    (* A concurrent refresh may have started from the same cursor. Use its
+       publication if it wins, without delaying this request or overwriting it. *)
+    ignore (Atomic.compare_and_set cache previous files);
+    (* The projections only use per-tool and per-hour order. Keep physical
+       traversal order for tied timestamps, as the detailed reader's stable
+       timestamp sort would. *)
+    let samples = List.concat samples |> samples_since since in
+    let latest_ts =
+      List.fold_left (fun latest (s : Tool_sample.t) ->
+        match latest with
+        | Some ts when ts >= s.ts -> latest
+        | Some _ | None -> Some s.ts) None samples
+    in
+    { tools = aggregate_samples samples; timeline = timeline_of_samples samples; latest_ts }
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)

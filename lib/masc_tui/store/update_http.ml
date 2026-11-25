@@ -7678,8 +7678,13 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       match result with
       | Ok proof -> (
-          match m.inline_modal with
-          | Some modal when modal_matches modal -> (
+          (* Fail closed if the proof payload names another goal than the
+             one the modal was opened and the request was issued for. *)
+          if not (String.equal (String.trim proof.goal_id) (String.trim goal_id))
+          then (m, [])
+          else
+            match m.inline_modal with
+            | Some modal when modal_matches modal -> (
               let fill field_key value_opt (f : Model.modal_form_field) =
                 match value_opt with
                 | Some v when not (String.equal (String.trim v) "") ->

@@ -3896,6 +3896,26 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     | Some md ->
         String.equal (Model.modal_field_value ~key:"confirm_request_id" md) ""
     | None -> false);
+  (* A proof payload naming another goal than requested must be ignored. *)
+  let m_gconf_mismatch, _ =
+    Update.step ~now:t2 m_gconf_mod
+      (Msg.Http_reply
+         {
+           epoch = m_gconf_mod.epoch;
+           reply =
+             Msg.Reply_goal_confirmation
+               {
+                 goal_id = "goal-100";
+                 result = Ok { proof_ok with goal_id = "goal-999" };
+               };
+         })
+  in
+  Alcotest.(check bool) "proof payload with mismatched goal_id leaves modal untouched"
+    true
+    (match m_gconf_mismatch.inline_modal with
+    | Some md ->
+        String.equal (Model.modal_field_value ~key:"confirm_request_id" md) ""
+    | None -> false);
   (* Prefilled proof submits with Enter, no typing. *)
   let _, cmds_gconf_auto = step m_gconf_prefilled (key Keymap.Input.Enter) in
   Alcotest.(check bool) "prefilled confirmation submits with Enter" true

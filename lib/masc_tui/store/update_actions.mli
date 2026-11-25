@@ -27,3 +27,6 @@ val step_settings_pane_lr :
 
 val step_artifact_search :
   now:Clock.Mono.t -> delta:int -> Model.t -> Model.t * Cmd.t list
+
+val open_goal_confirmation_proof_modal :
+  Model.t -> goal_id:string -> criterion_revision:string -> Model.t * Cmd.t list

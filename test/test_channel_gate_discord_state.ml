@@ -410,6 +410,31 @@ let test_binding_store_failures_are_not_empty_state () =
     Discord_state.bound_channels_result ~keeper_name:"luna"
     |> expect_error "presence reduced malformed store to empty")
 
+let test_recorded_thread_without_registry () =
+  with_temp_dir (fun dir -> with_discord_paths dir (fun () ->
+    let thread = "recorded-thread" in
+    Discord_state.unregister_thread ~thread_id:thread;
+    check bool "bind recorded parent" true
+      (Result.is_ok (Discord_state.bind ~channel_id:"recorded-parent" ~keeper_name:"parent-keeper"
+        ~actor_name:"operator"));
+    let current_keeper () =
+      Discord_state.resolve_keeper_for_recorded_channel_result ~channel_id:thread
+        ~parent_channel_id:(Some "recorded-parent")
+      |> Result.map (Option.map (fun binding -> binding.Discord_state.keeper_name))
+    in
+    check (option string) "recorded parent survives an empty thread registry"
+      (Some "parent-keeper") (Result.get_ok (current_keeper ()));
+    check bool "bind exact thread" true
+      (Result.is_ok (Discord_state.bind ~channel_id:thread ~keeper_name:"thread-keeper"
+        ~actor_name:"operator"));
+    check (option string) "exact channel overrides the recorded parent"
+      (Some "thread-keeper") (Result.get_ok (current_keeper ()));
+    Discord_state.register_thread ~thread_id:thread ~parent_channel_id:"different-parent";
+    Fun.protect ~finally:(fun () -> Discord_state.unregister_thread ~thread_id:thread)
+      (fun () ->
+        check (option string) "conflicting live topology refuses the reply"
+          None (Result.get_ok (current_keeper ())))))
+
 let test_thread_registry_round_trip () =
   let suffix = Printf.sprintf "%d-%06d" (Unix.getpid ()) !temp_dir_counter in
   let thread_id = "thread-registry-" ^ suffix in
@@ -533,6 +558,8 @@ let () =
             test_bind_audit_carries_constant_empty_guild_id;
           test_case "thread resolves through parent binding" `Quick
             test_resolve_keeper_for_thread_parent_binding;
+          test_case "a verified recorded thread survives a registry gap" `Quick
+            test_recorded_thread_without_registry;
           test_case "exact binding wins over parent" `Quick
             test_resolve_keeper_exact_binding_wins_over_parent;
         ] );

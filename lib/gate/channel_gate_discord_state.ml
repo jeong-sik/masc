@@ -397,48 +397,39 @@ type keeper_binding_resolution = {
   parent_channel_id : string option;
 }
 
-let resolve_keeper_for_channel_result ~channel_id =
-  let normalized = String.trim channel_id in
-  if String.equal normalized "" then Ok None
+let current_thread_parent ~channel_id =
+  match parent_channel_of_thread ~channel_id with
+  | Some parent when not (String.equal parent channel_id) -> Some parent
+  | Some _ | None -> None
+
+let resolve_keeper_binding ~channel_id ~parent_channel_id =
+  if String.equal channel_id "" then Ok None
   else
     match read_bindings_lookup_result () with
     | Error _ as error -> error
     | Ok candidates ->
-      let parent_channel_id =
-        match parent_channel_of_thread ~channel_id:normalized with
-        | Some parent when not (String.equal parent normalized) -> Some parent
-        | Some _ | None -> None
+      let binding, via_parent =
+        match Store.find_binding_by_channel_id candidates ~channel_id with
+        | Some binding -> Some binding, false
+        | None ->
+          Option.bind parent_channel_id
+            (fun parent -> Store.find_binding_by_channel_id candidates ~channel_id:parent),
+          true
       in
-      (match
-         Store.find_binding_by_channel_id candidates ~channel_id:normalized
-       with
-       | Some binding ->
-         Ok
-           (Some
-              { keeper_name = binding.keeper_name
-              ; incoming_channel_id = normalized
-              ; bound_channel_id = binding.channel_id
-              ; via_parent = false
-              ; parent_channel_id
-              })
-       | None ->
-         let parent_binding =
-           Option.bind
-             parent_channel_id
-             (fun parent_channel_id ->
-                Store.find_binding_by_channel_id candidates
-                  ~channel_id:parent_channel_id)
-         in
-         Ok
-           (Option.map
-              (fun (binding : binding) ->
-                 { keeper_name = binding.keeper_name
-                 ; incoming_channel_id = normalized
-                 ; bound_channel_id = binding.channel_id
-                 ; via_parent = true
-                 ; parent_channel_id
-                 })
-              parent_binding))
+      Ok (Option.map
+        (fun (binding : binding) ->
+          { keeper_name = binding.keeper_name; incoming_channel_id = channel_id
+          ; bound_channel_id = binding.channel_id; via_parent; parent_channel_id })
+        binding)
+
+let resolve_keeper_for_channel_result ~channel_id =
+  let channel_id = String.trim channel_id in
+  resolve_keeper_binding ~channel_id ~parent_channel_id:(current_thread_parent ~channel_id)
+
+let resolve_keeper_for_recorded_channel_result ~channel_id ~parent_channel_id =
+  match current_thread_parent ~channel_id with
+  | Some live_parent when parent_channel_id <> Some live_parent -> Ok None
+  | Some _ | None -> resolve_keeper_binding ~channel_id ~parent_channel_id
 
 let keeper_for_channel_result ~channel_id =
   resolve_keeper_for_channel_result ~channel_id

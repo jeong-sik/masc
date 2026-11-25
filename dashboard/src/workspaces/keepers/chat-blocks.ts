@@ -10,6 +10,7 @@
  * payloads, and autonomous turn JSON blobs into clean structured blocks instead of raw JSON.
  */
 
+import { Marked } from 'marked'
 import type { KeeperChatTranscriptSlot } from '../../keeper-delivery-provenance'
 import { parseToolBlobMarker } from '../../lib/tool-blob-marker'
 import type { ChatToolBlock, ChatTranscriptEntry } from './types'
@@ -154,39 +155,45 @@ export function toolResultMarkdownPreview(content: string): string | null {
     ? marker.preview : null
 }
 
-function extractInlineThinkingTags(content: string): {
-  readonly extractedThinking: string | null
-  readonly remaining: string
-} {
-  const parts: string[] = []
-  const cleaned = content.replace(
-    /<(?:thinking|thought|reasoning)>([\s\S]*?)<\/(?:thinking|thought|reasoning)>/gi,
-    (_m, inner: string) => {
-      const t = inner.trim()
-      if (t) parts.push(t)
-      return ''
-    },
-  )
-  return {
-    extractedThinking: parts.length > 0 ? parts.join('\n\n') : null,
-    remaining: cleaned.trim(),
-  }
-}
+const auxiliaryTags = 'thinking|thought|reasoning|memory_recall|memory|recalled_memory'
+const auxiliaryStart = new RegExp(`\n {0,3}<(?:${auxiliaryTags})>`, 'i')
+const auxiliaryBlock = new RegExp(`^ {0,3}<(${auxiliaryTags})>([\\s\\S]*?)</\\1>`, 'i')
 
-function extractInlineMemoryTags(content: string): {
-  readonly extractedMemory: readonly string[]
-  readonly remaining: string
-} {
-  const items: string[] = []
-  const cleaned = content.replace(
-    /<(?:memory_recall|memory|recalled_memory)>([\s\S]*?)<\/(?:memory_recall|memory|recalled_memory)>/gi,
-    (_m, inner: string) => {
-      const t = inner.trim()
-      if (t) items.push(t)
-      return ''
+const chatLexer = new Marked().use({
+  extensions: [{
+    name: 'chatAuxiliary',
+    level: 'block',
+    start(source) {
+      const index = source.search(auxiliaryStart)
+      return index >= 0 ? index + 1 : undefined
     },
-  )
-  return { extractedMemory: items, remaining: cleaned.trim() }
+    tokenizer(source) {
+      const match = auxiliaryBlock.exec(source)
+      if (!match) return undefined
+      const tag = match[1]?.toLowerCase()
+      const kind = tag === 'thinking' || tag === 'thought' || tag === 'reasoning' ? 'thinking' : 'memory'
+      return { type: 'chatAuxiliary', raw: match[0], kind, text: (match[2] ?? '').trim() }
+    },
+  }],
+})
+
+function extractAuxiliaryBlocks(content: string) {
+  const thinking: string[] = []
+  const memory: string[] = []
+  if (!auxiliaryBlock.test(content) && !auxiliaryStart.test(content)) {
+    return { thinking, memory, body: content.trim() }
+  }
+  const body: string[] = []
+  for (const token of chatLexer.lexer(content)) {
+    if (token.type === 'chatAuxiliary') {
+      if (!token.text) continue
+      if (token.kind === 'thinking') thinking.push(token.text)
+      else memory.push(token.text)
+    } else {
+      body.push(token.raw)
+    }
+  }
+  return { thinking, memory, body: body.join('').trim() }
 }
 
 /**
@@ -208,16 +215,16 @@ export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBloc
     }
   }
 
-  const { extractedThinking, remaining: afterThinking } = extractInlineThinkingTags(msg.content)
-  const { extractedMemory, remaining: cleanedBody } = extractInlineMemoryTags(afterThinking)
+  const auxiliary = extractAuxiliaryBlocks(msg.content)
+  const cleanedBody = auxiliary.body
 
-  const thinkingParts = [msg.thinking?.trim(), extractedThinking].filter(
+  const thinkingParts = [msg.thinking?.trim(), ...auxiliary.thinking].filter(
     (s): s is string => Boolean(s && s.length > 0),
   )
   const thinkingText = thinkingParts.length > 0 ? thinkingParts.join('\n\n') : null
 
   const toolBlocks: ChatToolBlock[] = [...(msg.toolCalls ?? [])]
-  const memoryItems: string[] = [...(msg.memoryItems ?? []), ...extractedMemory]
+  const memoryItems: string[] = [...(msg.memoryItems ?? []), ...auxiliary.memory]
   let bodyText = cleanedBody
   let autonomousSummary: string | null = null
   let autonomousDetails: string | null = null

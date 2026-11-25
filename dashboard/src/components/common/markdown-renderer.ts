@@ -7,6 +7,7 @@ import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { sanitizeHtml } from '../../lib/dompurify'
 import { memoizeLru } from '../../lib/lru-cache'
+import { parseUrl } from '../../lib/parse-url'
 
 const documentRenderer = {
   image(this: Renderer, token: Tokens.Image) {
@@ -51,8 +52,8 @@ const thinkBlock = {
   name: 'thinkBlock',
   level: 'block' as const,
   start(source: string) {
-    const index = source.search(/^<think>/m)
-    return index >= 0 ? index : undefined
+    const index = source.indexOf('\n<think>')
+    return index >= 0 ? index + 1 : undefined
   },
   tokenizer(source: string) {
     const match = /^<think>([\s\S]*?)<\/think\s*>/.exec(source)
@@ -112,6 +113,32 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   target?.scrollIntoView({ block: 'start' })
 }
 
+function linkUnloadedImages(container: HTMLElement) {
+  const cleanups: Array<() => void> = []
+  for (const image of container.querySelectorAll('img[src]')) {
+    if (!(image instanceof HTMLImageElement) || image.closest('a')) continue
+    const url = parseUrl(image.src, container.ownerDocument.baseURI)
+    if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) continue
+    const showOriginal = () => {
+      const link = container.ownerDocument.createElement('a')
+      link.href = url.href
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      link.textContent = image.alt ? `${image.alt} · 이미지 열기` : '이미지 열기'
+      image.replaceWith(link)
+      cleanups.push(() => {
+        if (link.parentNode) link.replaceWith(image)
+      })
+    }
+    if (image.complete && image.naturalWidth === 0) showOriginal()
+    else {
+      image.addEventListener('error', showOriginal, { once: true })
+      cleanups.push(() => image.removeEventListener('error', showOriginal))
+    }
+  }
+  return () => cleanups.forEach(cleanup => cleanup())
+}
+
 export function MarkdownContent({
   text,
   class: className,
@@ -125,8 +152,13 @@ export function MarkdownContent({
   )
   useEffect(() => {
     const element = root.current
-    if (!streaming && element && htmlStr.includes('language-')) return enhanceRichCode(element)
-    return undefined
+    if (!element) return undefined
+    const restoreImages = htmlStr.includes('<img ') ? linkUnloadedImages(element) : undefined
+    const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
+    return () => {
+      restoreImages?.()
+      restoreFences?.()
+    }
   }, [htmlStr, streaming])
 
   const classes = ['markdown-content', className].filter(Boolean).join(' ')

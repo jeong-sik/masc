@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest'
+import { act } from 'preact/test-utils'
 import { h } from 'preact'
 import { render } from 'preact'
 import { currentRoute, initAPlusRouter } from '../../routes/router'
@@ -83,6 +84,21 @@ describe('MarkdownContent', () => {
     render(h(MarkdownContent, { text: '[**검토** `head`](https://example.test/review)' }), container)
     expect(container.querySelector('a strong')?.textContent).toBe('검토')
     expect(container.querySelector('a code')?.textContent).toBe('head')
+  })
+
+  it('links a failed image to its source when URL.parse is unavailable', () => {
+    const container = document.createElement('div')
+    class BrowserUrl extends URL {}
+    Object.defineProperty(BrowserUrl, 'parse', { value: undefined })
+    vi.stubGlobal('URL', BrowserUrl)
+    try {
+      act(() => render(h(MarkdownContent, { text: '![diagram](https://example.test/diagram.png)' }), container))
+      container.querySelector('img')?.dispatchEvent(new Event('error'))
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.test/diagram.png')
+    } finally {
+      render(null, container)
+      vi.unstubAllGlobals()
+    }
   })
 
   it('renders blockquote', () => {

@@ -1,4 +1,5 @@
-import bravuraUrl from '@coderline/alphatab/font/Bravura.woff2?url'
+import { sanitizeHtml } from '../../lib/dompurify'
+import './rich-code-preview.css'
 
 type RichCodeKind = 'mermaid' | 'pele' | 'alphatex'
 
@@ -55,30 +56,48 @@ async function renderDiagram(host: HTMLElement, source: string, label: string, s
 }
 
 async function renderScore(host: HTMLElement, source: string, signal: AbortSignal) {
-  const { AlphaTabApi, FontFileFormat, StaveProfile } = await import('@coderline/alphatab')
+  const { importer, rendering, Settings, StaveProfile } = await import('@coderline/alphatab')
   signal.throwIfAborted()
-  const api = new AlphaTabApi(host, {
-    core: {
-      useWorkers: false,
-      smuflFontSources: new Map([[FontFileFormat.Woff2, bravuraUrl]]),
-    },
-    display: { staveProfile: StaveProfile.Tab },
+  const settings = new Settings()
+  settings.core.engine = 'svg'
+  settings.core.enableLazyLoading = false
+  settings.display.staveProfile = StaveProfile.Tab
+  const reader = new importer.AlphaTexImporter()
+  reader.logErrors = false
+  reader.initFromString(source, settings)
+  const score = reader.readScore()
+  const renderer = new rendering.ScoreRenderer(settings)
+  renderer.width = host.clientWidth
+  const canvas = host.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  let renderError: unknown
+  renderer.error.on(error => { renderError = error })
+  renderer.renderFinished.on(({ totalWidth, totalHeight }) => {
+    canvas.setAttribute('width', String(totalWidth))
+    canvas.setAttribute('height', String(totalHeight))
   })
-  signal.addEventListener('abort', () => api.destroy(), { once: true })
-
-  await new Promise<void>((resolve, reject) => {
-    const aborted = () => reject(signal.reason)
-    signal.addEventListener('abort', aborted, { once: true })
-    api.renderFinished.on(() => {
-      signal.removeEventListener('abort', aborted)
-      resolve()
+  renderer.partialRenderFinished.on(({ renderResult, x, y }) => {
+    if (typeof renderResult !== 'string') return
+    const clean = sanitizeHtml(renderResult, {
+      USE_PROFILES: { svg: true },
+      FORBID_TAGS: ['style', 'a', 'image', 'foreignObject'],
+      FORBID_ATTR: ['href', 'xlink:href'],
     })
-    api.error.on(error => {
-      signal.removeEventListener('abort', aborted)
-      reject(error)
-    })
-    api.tex(source, 'all')
+    const doc = new DOMParser().parseFromString(clean, 'image/svg+xml')
+    const part = doc.documentElement
+    if (part.localName === 'svg') {
+      part.setAttribute('x', String(x))
+      part.setAttribute('y', String(y))
+      canvas.append(part)
+    }
   })
+  try {
+    renderer.renderScore(score, score.tracks.map(track => track.index))
+    if (renderError) throw renderError
+    if (!canvas.childNodes.length) throw new Error('Score did not produce notation')
+    host.append(canvas)
+  } finally {
+    renderer.destroy()
+  }
 }
 
 export function enhanceRichCode(root: HTMLElement): () => void {

@@ -1,0 +1,19 @@
+@font-face {
+  font-family: 'MASC Bravura';
+  src: url('@coderline/alphatab/font/Bravura.woff2') format('woff2');
+  font-display: swap;
+}
+
+.rich-code-score .at {
+  font: normal 36px/1 'MASC Bravura';
+}
+
+.rich-code-score svg {
+  display: block;
+  overflow: visible;
+}
+
+.rich-code-score text {
+  dominant-baseline: alphabetic;
+  white-space: pre;
+}

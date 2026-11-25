@@ -3583,7 +3583,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
        (Some (Nav.Inline_action (Nav.Harness_overrule valid_hash64)))
      &&
      match m_hov.inline_modal with
-     | Some md -> md.active_field = 2
+     | Some md -> md.active_field = 1
      | None -> false);
   let m_hov_typed, _ = step m_hov (char_key "r") in
   let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
@@ -14963,12 +14963,12 @@ let test_ux_sweep_12_fixes () =
   in
   let m_gd_hh_h, _ = step m_gd_hh (char_k "h") in
   Alcotest.(check bool)
-    "Item 8: Goal_dive [h] auto-seeds linked 64-hex hash and starts on reason (field 2)"
+    "Item 8: Goal_dive [h] binds the linked hash and starts on reason"
     true
     (Option.equal Nav.equal_overlay m_gd_hh_h.nav.overlay
        (Some (Nav.Inline_action (Nav.Harness_overrule hash64)))
      && match m_gd_hh_h.inline_modal with
-        | Some md -> md.active_field = 2
+        | Some md -> md.active_field = 1
         | None -> false);
   let m_sched_tab =
     {
@@ -15244,9 +15244,9 @@ let test_ux_sweep_12_fixes () =
   Alcotest.(check string)
     "Item 8 (Finding #8): Goal_dive [h] on selected tk-2 seeds tk-2's hash (not tk-1)"
     hash_tk2
-    (match m_gd_two_h.inline_modal with
-     | Some md -> Model.modal_field_value ~key:"notes_hash" md
-     | None -> "");
+    (match m_gd_two_h.nav.overlay with
+     | Some (Nav.Inline_action (Nav.Harness_overrule hash)) -> hash
+     | _ -> "");
   Alcotest.(check (option string))
     "P3: open_harness_overrule_for_context focuses 'reason' field dynamically"
     (Some "reason")
@@ -21144,6 +21144,29 @@ let () =
               Alcotest.(check bool) "/exec opens Tool_dive" true
                 (Model.active_dive m_exec
                  = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_status")));
+              let m_picker, _ =
+                Update_nav.open_inline_modal m1
+                  (Nav.Tool_execute_form { tool_name = None; args_json = "{}" })
+              in
+              let m_picker, _ =
+                Update.step ~now:t0 m_picker
+                  (Msg.Key_event (key ~ctrl:true (Keymap.Input.Char "u")))
+              in
+              let m_picker, _ =
+                Update.step ~now:t0 m_picker (Msg.Paste_text "masc_who")
+              in
+              let _, picker_cmds =
+                Update.step ~now:t0 m_picker (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check bool) "a general execute form uses the entered tool"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_mcp_tools_call { tool_name = "masc_who"; _ }; _ } ->
+                         true
+                     | _ -> false)
+                   (Cmd.flatten picker_cmds));
               let rpc_id cmds =
                 match
                   List.find_map
@@ -21160,12 +21183,22 @@ let () =
               let m_form, _ =
                 Update_nav.open_inline_modal m_exec
                   (Nav.Tool_execute_form
-                     { tool_name = "masc_who"; args_json = "{}" })
+                     { tool_name = Some "masc_who"; args_json = "" })
               in
               let m_pending, form_cmds =
                 Update.step ~now:t0 m_form
                   (Msg.Key_event (key Keymap.Input.Enter))
               in
+              Alcotest.(check bool)
+                "blank arguments submit an empty object for the selected tool" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_mcp_tools_call
+                             { tool_name = "masc_who"; arguments = `Assoc []; _ }; _ } ->
+                         true
+                     | _ -> false)
+                   (Cmd.flatten form_cmds));
               let m_stale, _ =
                 Update.step ~now:t0 m_pending
                   (Msg.Http_reply
@@ -21614,11 +21647,42 @@ let () =
                          true
                      | _ -> false)
                    cmds_rst);
-              (* P1-7: Lossless inline escape/unescape preserves literal \n and whitespace *)
-              let tricky = "  line1\nPrintf.printf \"hi\\n\"\n  indented  \n" in
-              Alcotest.(check string) "lossless escape/unescape round-trip"
-                tricky
-                (Model.unescape_inline_text (Model.escape_inline_text tricky));
+              let m_prompt, _ =
+                Update_nav.open_inline_modal m1
+                  (Nav.Prompt_override_form { key = "keeper" })
+              in
+              let first = "  line1\nPrintf.printf \"hi\\n\"" in
+              let tail = "  indented  \n" in
+              let m_prompt, _ =
+                Update.step ~now:t0 m_prompt (Msg.Paste_text first)
+              in
+              let m_prompt, newline_cmds =
+                Update.step ~now:t0 m_prompt
+                  (Msg.Key_event (key ~shift:true Keymap.Input.Enter))
+              in
+              Alcotest.(check bool) "Shift+Enter only edits the prompt" true
+                (List.is_empty (Cmd.flatten newline_cmds));
+              let m_prompt, fallback_cmds =
+                Update.step ~now:t0 m_prompt
+                  (Msg.Key_event (key ~ctrl:true (Keymap.Input.Char "j")))
+              in
+              Alcotest.(check bool) "Ctrl+J also edits without submitting" true
+                (List.is_empty (Cmd.flatten fallback_cmds));
+              let m_prompt, _ =
+                Update.step ~now:t0 m_prompt (Msg.Paste_text tail)
+              in
+              let _, cmds_prompt =
+                Update.step ~now:t0 m_prompt (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check (option string)) "submit keeps newlines and literal escapes"
+                (Some (first ^ "\n\n" ^ tail))
+                (List.find_map
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_prompt_override { key = "keeper"; value }; _ } ->
+                         value
+                     | _ -> None)
+                   (Cmd.flatten cmds_prompt));
               (* P1-1 & P1-2: Real Msg.Key_event tests for [n]/[a]/[x]/[R] hotkeys *)
               let press ch m_in =
                 let m_next, cmds = Update.step ~now:t0 m_in (Msg.Key_event (char_key ch)) in

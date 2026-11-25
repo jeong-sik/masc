@@ -808,17 +808,7 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
 let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
   match Knowledge_store.wiki_page_for ~slug m.knowledge with
   | Observed.Value { data = d; stale = false; _ } ->
-      let m1 = Model.open_wiki_edit_modal_for_detail d m in
-      let m2 =
-        if String.contains d.body_markdown '\n' then
-          Model.with_toast ~now ~level:Model.Toast_info
-            (Say.make
-               ~ko:"다중줄 위키 본문은 [Ctrl+E] $EDITOR 편집을 권장합니다"
-               ~en:"Multiline wiki body: use [Ctrl+E] $EDITOR for full Markdown")
-            m1
-        else m1
-      in
-      (m2, [])
+      (Model.open_wiki_edit_modal_for_detail d m, [])
   | Observed.Value _ | Observed.Loading _ | Observed.Absent
   | Observed.Unreported | Observed.Failed _ ->
       let m =
@@ -2443,7 +2433,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                   (Nav.Skill_edit_form { reference = loaded.reference })
               in
               ( prefill_field ~key:"source_text"
-                  ~value:(Model.escape_inline_text loaded.source_text) m1
+                  ~value:loaded.source_text m1
               , cmds )
           | Some (Runtime_store.Catalog_skill _) | None ->
               let m1, cmds =
@@ -2502,7 +2492,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
           let m2 =
             match current_val with
             | Some v ->
-                prefill_field ~key:"value" ~value:(Model.escape_inline_text v) m1
+                prefill_field ~key:"value" ~value:v m1
             | None -> m1
           in
           (m2, cmds)
@@ -3737,7 +3727,7 @@ and confirm_palette ~now (m : Model.t) =
               else if Slash.equal_command_id spec.id Slash.Cmd_exec then
                 Update_nav.open_inline_modal m_closed
                   (Nav.Tool_execute_form
-                     { tool_name = "masc_status"; args_json = "{}" })
+                     { tool_name = None; args_json = "{}" })
               else if Slash.equal_command_id spec.id Slash.Cmd_skill then
                 let drafts =
                   m_closed.drafts |> Drafts.set_current_text "/skill "
@@ -8234,7 +8224,8 @@ and execute_action ~now (m : Model.t) action =
                   | Some _ | None -> "{}"
                 in
                 Update_nav.open_inline_modal m
-                  (Nav.Tool_execute_form { tool_name; args_json = skeleton })
+                  (Nav.Tool_execute_form
+                     { tool_name = Some tool_name; args_json = skeleton })
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
             | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) -> (m, [])

@@ -16,9 +16,7 @@ let layout_bp (model : Model.t) =
   | Model.Micro -> Layout.Micro
 
 let pad_x_for ~(model : Model.t) (rect : Rect.t) =
-  if rect.w < 20 then 0
-  else if rect.w < 44 then 1
-  else Layout.card_pad_x (layout_bp model)
+  Layout.card_pad_x_for_width (layout_bp model) rect.w
 
 let contains_ci ~needle haystack =
   let n_len = String.length needle in

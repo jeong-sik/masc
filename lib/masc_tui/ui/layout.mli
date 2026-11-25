@@ -59,6 +59,9 @@ val card_pad_x : breakpoint -> int
 (** Card interior horizontal padding inside [│ ... │]: [2] on {!Wide}/{!Standard},
     [1] on {!Compact}/{!Micro}. *)
 
+val card_pad_x_for_width : breakpoint -> int -> int
+(** Card padding for an interior of the given width. *)
+
 val table_col_gap : breakpoint -> int
 (** Table column gap: [2] on {!Wide}/{!Standard}, [1] on {!Compact}/{!Micro}. *)
 

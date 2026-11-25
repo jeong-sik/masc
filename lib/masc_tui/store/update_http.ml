@@ -7928,7 +7928,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             List.map
               (fun (f : Model.modal_form_field) ->
                 if String.equal f.key "source_text" then
-                  { f with value = Model.escape_inline_text doc.source_text }
+                  { f with value = doc.source_text }
                 else f)
               base_modal.fields
           in

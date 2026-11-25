@@ -898,6 +898,56 @@ let slice_editing_value ~max_w ~cursor_byte raw =
         in
         (ind ^ visible_before, visible_after)
 
+let inline_text_rows text =
+  let rec count from rows =
+    if rows = 4 then rows
+    else
+      match String.index_from_opt text from '\n' with
+      | None -> rows
+      | Some newline -> count (newline + 1) (rows + 1)
+  in
+  count 0 1
+
+let draw_editing_line grid ~(row : Rect.t) ~x ~width ~style ~cursor_style
+    ~cursor_byte text =
+  let before, after = slice_editing_value ~max_w:width ~cursor_byte text in
+  let offset =
+    Cell_grid.put_text ~clip:row grid ~x ~y:row.y ~style before
+  in
+  let cursor_x = x + offset in
+  if cursor_x < x + width && cursor_x < Rect.right row then begin
+    let advance =
+      Cell_grid.put_text ~clip:row grid ~x:cursor_x ~y:row.y ~style:cursor_style
+        "▏"
+    in
+    let after_x = cursor_x + advance in
+    if after_x < x + width && after_x < Rect.right row then
+      ignore (Cell_grid.put_text ~clip:row grid ~x:after_x ~y:row.y ~style after)
+  end
+
+let draw_inline_text grid ~(row : Rect.t) ~x ~width ~rows ~style ~cursor_style
+    ~base_style ~cursor_byte text =
+  let lines = String.split_on_char '\n' text |> Array.of_list in
+  let rec locate line offset =
+    let len = String.length lines.(line) in
+    if offset <= len || line = Array.length lines - 1 then line, Int.min len offset
+    else locate (line + 1) (offset - len - 1)
+  in
+  let cursor_line, offset = locate 0 (Int.max 0 cursor_byte) in
+  let first = Int.max 0 (cursor_line - rows + 1) in
+  for i = 0 to Int.min (rows - 1) (Array.length lines - 1 - first) do
+    let line = first + i in
+    let clip = Rect.make ~x:row.x ~y:(row.y + i) ~w:row.w ~h:1 in
+    if i > 0 then Cell_grid.fill_rect ~clip grid ~rect:clip ~style:base_style ();
+    if line = cursor_line then
+      draw_editing_line grid ~row:clip ~x ~width ~style ~cursor_style
+        ~cursor_byte:offset lines.(line)
+    else
+      ignore
+        (Cell_grid.put_text ~clip grid ~x ~y:clip.y ~style
+           (Grapheme.truncate_to_width ~max_width:width lines.(line)))
+  done
+
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
     ?section_header ?show_row_badges ?show_help_footer ?(focused = true)
     ?(elevated = false) ?edit_cursor (st : state) =
@@ -957,6 +1007,22 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
           Some st.fields.(idx)
       | Some _ | None -> None
     in
+    let inline_text =
+      if not (focused && st.editing) then None
+      else
+        match focused_field, edit_cursor with
+        | Some f, Some cursor -> (
+            match f.value with
+            | Multiline_val text -> Some (text, cursor)
+            | Text_val _ | Secret_val _ | Int_val _ | Float_val _ | Bool_val _
+            | Enum_val _ -> None)
+        | Some _, None | None, (Some _ | None) -> None
+    in
+    let editor_rows =
+      match inline_text with
+      | None -> 1
+      | Some (text, _) -> Int.min (Int.max 1 fields_rect.h) (inline_text_rows text)
+    in
     let focused_pos =
       match active_idx with
       | None -> 0
@@ -975,7 +1041,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
           let is_focused =
             match active_idx with Some a -> Int.equal a idx | None -> false
           in
-          field_row_height ~inline_help ~is_focused st.fields.(idx))
+          field_row_height ~inline_help ~is_focused st.fields.(idx)
+          + if is_focused then editor_rows - 1 else 0)
     in
     let start_pos =
       compute_scroll_start ~avail_h:fields_rect.h ~focused_pos heights
@@ -1089,65 +1156,46 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
         in
         let val_style = Style.make ~fg:(Color.of_rgb val_fg) ~bg ~attrs:val_attrs () in
         if val_w > 0 then begin
-          let is_text_editing =
-            is_focused && st.editing
-            &&
-            match f.value with
-            | Text_val _ | Multiline_val _ | Int_val _ | Float_val _
-            | Secret_val _ ->
-                true
-            | Bool_val _ | Enum_val _ -> false
+          let cursor_style =
+            Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
           in
-          if is_text_editing then begin
-            let cursor_byte =
-              match f.value with
-              | Secret_val { revealed = false; _ } -> String.length val_str
-              | Text_val _
-              | Multiline_val _
-              | Int_val _
-              | Float_val _
-              | Bool_val _
-              | Enum_val _
-              | Secret_val { revealed = true; _ } -> (
-                  match edit_cursor with
-                  | Some c -> c
-                  | None -> String.length val_str)
-            in
-            let vis_before, vis_after =
-              slice_editing_value ~max_w:val_w ~cursor_byte val_str
-            in
-            let adv_before =
-              if String.length vis_before > 0 then
-                Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y
-                  ~style:val_style vis_before
-              else 0
-            in
-            let cx = val_x + adv_before in
-            let adv_cur =
-              if cx < val_x + val_w && cx < Rect.right row_rect then
-                let cur_st =
-                  Style.make ~fg:(Color.of_rgb theme.accent) ~bg
-                    ~attrs:Attr.bold ()
+          match (if is_focused then inline_text else None) with
+          | Some (text, cursor_byte) ->
+              let rows = Int.min editor_rows (bottom - !y) in
+              draw_inline_text grid ~row:row_rect ~x:val_x ~width:val_w ~rows
+                ~style:val_style ~cursor_style ~base_style ~cursor_byte text
+          | None ->
+              let is_text_editing =
+                is_focused && st.editing
+                &&
+                match f.value with
+                | Text_val _ | Multiline_val _ | Int_val _ | Float_val _
+                | Secret_val _ -> true
+                | Bool_val _ | Enum_val _ -> false
+              in
+              if is_text_editing then begin
+                let cursor_byte =
+                  match f.value with
+                  | Secret_val { revealed = false; _ } -> String.length val_str
+                  | Text_val _
+                  | Multiline_val _
+                  | Int_val _
+                  | Float_val _
+                  | Bool_val _
+                  | Enum_val _
+                  | Secret_val { revealed = true; _ } -> (
+                      match edit_cursor with
+                      | Some cursor -> cursor
+                      | None -> String.length val_str)
                 in
-                Cell_grid.put_text ~clip:row_rect grid ~x:cx ~y:!y
-                  ~style:cur_st "▏"
-              else 0
-            in
-            let ax = cx + adv_cur in
-            if
-              String.length vis_after > 0
-              && ax < val_x + val_w
-              && ax < Rect.right row_rect
-            then
-              ignore
-                (Cell_grid.put_text ~clip:row_rect grid ~x:ax ~y:!y
-                   ~style:val_style vis_after)
-          end
-          else
-            ignore
-              (Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y
-                 ~style:val_style
-                 (Grapheme.truncate_to_width ~max_width:val_w val_str))
+                draw_editing_line grid ~row:row_rect ~x:val_x ~width:val_w
+                  ~style:val_style ~cursor_style ~cursor_byte val_str
+              end
+              else
+                ignore
+                  (Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y
+                     ~style:val_style
+                     (Grapheme.truncate_to_width ~max_width:val_w val_str))
         end;
         (match chip with
          | Some (chip_str, chip_style) when show_chip ->
@@ -1156,7 +1204,7 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
                (Cell_grid.put_text ~clip:row_rect grid ~x:bx ~y:!y
                   ~style:chip_style chip_str)
          | Some _ | None -> ());
-        incr y;
+        y := !y + (if is_focused then editor_rows else 1);
         incr drawn;
         (* Validation error line (if any) *)
         (match f.error with

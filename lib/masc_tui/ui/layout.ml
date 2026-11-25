@@ -64,6 +64,11 @@ let card_pad_x = function
   | Wide | Standard -> 2
   | Compact | Micro -> 1
 
+let card_pad_x_for_width bp width =
+  if width < 20 then 0
+  else if width < 44 then 1
+  else card_pad_x bp
+
 let table_col_gap = function
   | Wide | Standard -> 2
   | Compact | Micro -> 1

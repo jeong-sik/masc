@@ -139,6 +139,26 @@ val empty : t
 val equal_chat_display_origin : chat_display_origin -> chat_display_origin -> bool
 val equal_thinking_display : thinking_display -> thinking_display -> bool
 
+type open_work_kind =
+  | Open_tool_running
+  | Open_tool_called
+  | Open_reasoning
+  | Open_answer
+  | Open_nothing_yet
+  | Open_nothing
+
+type open_work = {
+  kind : open_work_kind;
+  phrase : Say.t;
+  since_unix : float option;
+    (** When the open state began. [None] when nothing is open. *)
+}
+
+val open_work_of_preview : Wire_fleet.turn_preview -> open_work option
+(** What a running turn is doing, from the work the server saw start and did
+    not see end. [None] for a server that does not report the open work, and
+    for a failed attempt or a turn that is still preparing. *)
+
 val keeper_live_state : Wire_fleet.keeper_summary -> Health.live_state
 (** Project authoritative [keeper_health] onto Channel 2 {!Health.live_state}. *)
 

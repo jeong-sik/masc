@@ -738,22 +738,27 @@ let preview_short_activity (p : Wire_fleet.turn_preview) =
       let ph = preparation_phase_label phase in
       Say.make ~ko:(ph.ko ^ " 준비 중단") ~en:(ph.en ^ " halted")
   | None -> (
-      match p.activity with
-      | Wire_fleet.Preview_preparing ->
-          Say.make ~ko:"턴 준비 중" ~en:"Preparing"
-      | Wire_fleet.Preview_waiting ->
-          preview_with_last_tool p
-            (Say.make ~ko:"모델 응답 대기" ~en:"Waiting for model")
-      | Wire_fleet.Preview_streaming ->
-          preview_with_last_tool p
-            (Say.make ~ko:"응답 수신" ~en:"Response activity")
-      | Wire_fleet.Preview_tool_observed -> (
-          match p.last_tool with
-          | Some tool ->
-              Say.make ~ko:("최근 도구 · " ^ tool) ~en:("Last tool · " ^ tool)
-          | None -> Say.make ~ko:"도구 활동" ~en:"Tool activity")
-      | Wire_fleet.Preview_failed ->
-          Say.make ~ko:"시도 실패" ~en:"Attempt failed")
+      (* The open work names the turn when the server reports it. A failed
+         attempt still says so, and an older server keeps the wording below. *)
+      match Fleet_store.open_work_of_preview p with
+      | Some work -> work.phrase
+      | None -> (
+          match p.activity with
+          | Wire_fleet.Preview_preparing ->
+              Say.make ~ko:"턴 준비 중" ~en:"Preparing"
+          | Wire_fleet.Preview_waiting ->
+              preview_with_last_tool p
+                (Say.make ~ko:"모델 응답 대기" ~en:"Waiting for model")
+          | Wire_fleet.Preview_streaming ->
+              preview_with_last_tool p
+                (Say.make ~ko:"응답 수신" ~en:"Response activity")
+          | Wire_fleet.Preview_tool_observed -> (
+              match p.last_tool with
+              | Some tool ->
+                  Say.make ~ko:("최근 도구 · " ^ tool) ~en:("Last tool · " ^ tool)
+              | None -> Say.make ~ko:"도구 활동" ~en:"Tool activity")
+          | Wire_fleet.Preview_failed ->
+              Say.make ~ko:"시도 실패" ~en:"Attempt failed"))
 
 let active_turn_short_activity (turn : Wire_fleet.active_turn) =
   match turn.tool_in_flight with
@@ -837,6 +842,28 @@ let active_turn_duration ~(model : Model.t) (turn : Wire_fleet.active_turn) =
   then None
   else Some (format_elapsed (Int.of_float (wall -. turn.started_at_unix)))
 
+(* How long the current open state has been open, counted from when the
+   server says it began. [None] when the server reports no open state, or
+   when the wall clock cannot be read against it. *)
+let open_work_duration ~(model : Model.t) (turn : Wire_fleet.active_turn) =
+  let wall = model.freshness.last_wall_unix in
+  match Option.bind turn.preview (fun p -> Fleet_store.open_work_of_preview p) with
+  | None -> None
+  | Some work -> (
+      match work.since_unix with
+      | None -> None
+      | Some since ->
+          if (not (Float.is_finite since && Float.is_finite wall)) || wall < since
+          then None
+          else Some (format_elapsed (Int.of_float (wall -. since))))
+
+(* Why a message the operator sent is not running yet: it waits for the
+   turn in front of it. *)
+let queued_messages_phrase count =
+  Say.make
+    ~ko:(Printf.sprintf "메시지 %d건 대기 · 지금 턴이 끝나면 실행" count)
+    ~en:(Printf.sprintf "%d message(s) queued · run when this turn ends" count)
+
 let observed_turn_label ~model ~live (turn : Wire_fleet.active_turn) =
   let lane =
     if Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_proactive
@@ -846,7 +873,10 @@ let observed_turn_label ~model ~live (turn : Wire_fleet.active_turn) =
   let activity = active_turn_short_activity turn in
   let parts =
     if live then
-      activity :: lane :: Option.to_list (active_turn_duration ~model turn)
+      [ activity ]
+      @ Option.to_list (open_work_duration ~model turn)
+      @ [ lane ]
+      @ Option.to_list (active_turn_duration ~model turn)
     else
       [ Say.make ~ko:"마지막 확인" ~en:"Last observed"; lane; activity ]
   in
@@ -895,14 +925,37 @@ let observed_turn_badge ~model ~keeper (turn : Wire_fleet.active_turn) =
     | Composer.Turn_kind_attention -> Glyph.Action_required, Theme.Status_attention, label
     | Composer.Turn_kind_active | Composer.Turn_kind_tool ->
         if live then
+          (* The model's own work, reasoning included, takes the model's
+             color. A tool and an answer take the working color. *)
           let tone =
-            match turn.tool_in_flight, turn.preview with
-            | None, Some { activity = Wire_fleet.Preview_waiting | Wire_fleet.Preview_preparing; _ } ->
+            match
+              Option.bind turn.preview (fun p -> Fleet_store.open_work_of_preview p)
+            with
+            | Some
+                { kind =
+                    ( Fleet_store.Open_reasoning
+                    | Fleet_store.Open_nothing_yet
+                    | Fleet_store.Open_nothing );
+                  _
+                } ->
                 Theme.Status_ai
-            | Some _, _
-            | None, Some { activity = Wire_fleet.Preview_streaming | Wire_fleet.Preview_tool_observed
-                                    | Wire_fleet.Preview_failed; _ }
-            | None, None -> Theme.Status_active
+            | Some
+                { kind =
+                    ( Fleet_store.Open_tool_running
+                    | Fleet_store.Open_tool_called
+                    | Fleet_store.Open_answer );
+                  _
+                } ->
+                Theme.Status_active
+            | None -> (
+                match turn.tool_in_flight, turn.preview with
+                | None, Some { activity = Wire_fleet.Preview_waiting | Wire_fleet.Preview_preparing; _ } ->
+                    Theme.Status_ai
+                | Some _, _
+                | None, Some { activity = Wire_fleet.Preview_streaming | Wire_fleet.Preview_tool_observed
+                                        | Wire_fleet.Preview_failed; _ }
+                | None, None ->
+                    Theme.Status_active)
           in
           progress_glyph model, tone, label
         else Glyph.Live_idle, Theme.Status_historical, label
@@ -1061,36 +1114,39 @@ let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
                 let ph = preparation_phase_label phase in
                 Say.make ~ko:(ph.ko ^ " 준비 중단") ~en:(ph.en ^ " prep halted")
             | None -> (
-                match p.activity with
-                | Wire_fleet.Preview_preparing ->
-                    Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
-                | Wire_fleet.Preview_waiting ->
-                    preview_with_last_tool p
-                      (Say.make ~ko:"응답 대기 중" ~en:"Waiting for model")
-                | Wire_fleet.Preview_streaming ->
-                    preview_with_last_tool p
-                      (Say.make ~ko:"응답 수신" ~en:"Response activity")
-                | Wire_fleet.Preview_tool_observed -> (
-                    match p.last_tool with
-                    | Some tool ->
-                        Say.make
-                          ~ko:("도구 활동 · " ^ tool)
-                          ~en:("Tool activity · " ^ tool)
-                    | None -> Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
-                | Wire_fleet.Preview_failed -> (
-                    match extract_preview_failure_detail p.status_text with
-                    | Some detail ->
-                        Say.make
-                          ~ko:("시도 실패 · " ^ detail)
-                          ~en:("Attempt failed · " ^ detail)
-                    | None -> (
+                match Fleet_store.open_work_of_preview p with
+                | Some work -> work.phrase
+                | None -> (
+                    match p.activity with
+                    | Wire_fleet.Preview_preparing ->
+                        Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+                    | Wire_fleet.Preview_waiting ->
+                        preview_with_last_tool p
+                          (Say.make ~ko:"응답 대기 중" ~en:"Waiting for model")
+                    | Wire_fleet.Preview_streaming ->
+                        preview_with_last_tool p
+                          (Say.make ~ko:"응답 수신" ~en:"Response activity")
+                    | Wire_fleet.Preview_tool_observed -> (
                         match p.last_tool with
                         | Some tool ->
                             Say.make
-                              ~ko:("시도 실패 · 최근 도구: " ^ tool)
-                              ~en:("Attempt failed · last tool: " ^ tool)
-                        | None ->
-                            Say.make ~ko:"시도 실패" ~en:"Attempt failed"))))
+                              ~ko:("도구 활동 · " ^ tool)
+                              ~en:("Tool activity · " ^ tool)
+                        | None -> Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
+                    | Wire_fleet.Preview_failed -> (
+                        match extract_preview_failure_detail p.status_text with
+                        | Some detail ->
+                            Say.make
+                              ~ko:("시도 실패 · " ^ detail)
+                              ~en:("Attempt failed · " ^ detail)
+                        | None -> (
+                            match p.last_tool with
+                            | Some tool ->
+                                Say.make
+                                  ~ko:("시도 실패 · 최근 도구: " ^ tool)
+                                  ~en:("Attempt failed · last tool: " ^ tool)
+                            | None ->
+                                Say.make ~ko:"시도 실패" ~en:"Attempt failed")))))
         | None -> (
             match turn.phase with
             | Some p
@@ -1116,13 +1172,7 @@ let turn_running_badge_label ~(turn : Wire_fleet.active_turn) ~queued_count =
   let observed = Say.make ~ko:"최근 확인" ~en:"Last observed" in
   let base = Say.concat ~sep:" · " [ observed; act_say; lane_say ] in
   if queued_count > 0 then
-    Say.concat ~sep:" · "
-      [
-        base;
-        Say.make
-          ~ko:(Printf.sprintf "대기 %d" queued_count)
-          ~en:(Printf.sprintf "queued %d" queued_count);
-      ]
+    Say.concat ~sep:" · " [ queued_messages_phrase queued_count; base ]
   else base
 
 let history_msgs_for_keeper ~(model : Model.t) ~keeper =
@@ -1314,13 +1364,11 @@ let live_chat_phase_badge ~(model : Model.t) ~keeper =
       match phase with
       | Phase_turn_running { turn; queued_count } ->
           let glyph, tone, label = observed_turn_badge ~model ~keeper turn in
+          (* The operator's waiting message comes first: the line is cut at
+             the pane's edge, and this is what they are waiting to know. *)
           let label =
             if queued_count = 0 then label
-            else Say.concat ~sep:" · "
-                [ label
-                ; Say.make ~ko:(Printf.sprintf "대기 %d" queued_count)
-                    ~en:(Printf.sprintf "queued %d" queued_count)
-                ]
+            else Say.concat ~sep:" · " [ queued_messages_phrase queued_count; label ]
           in
           Some (glyph, tone, label)
       | Phase_thinking | Phase_tool_running _ | Phase_tool_waiting _ | Phase_streaming ->

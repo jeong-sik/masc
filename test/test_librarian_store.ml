@@ -197,9 +197,9 @@ let test_personal_evidence_survives_replay () =
   let reopened = booted ~at:160. place in
   check string "replay restores the exact snapshot" latest_snapshot (file_bytes (snapshot_path place));
   let module Recall = Masc.Keeper_connector_memory_recall in
-  let connector actor channel message : Masc.Keeper_event_queue.stimulus * Masc.Keeper_continuation_channel.t =
+  let connector actor channel message : Keeper_event_queue.stimulus * Keeper_continuation_channel.t =
     let route =
-      Result.get_ok (Masc.Keeper_continuation_channel.discord ~guild_id:(Some "100")
+      Result.get_ok (Keeper_continuation_channel.discord ~guild_id:(Some "100")
         ~channel_id:channel ~parent_channel_id:None ~thread_id:None
         ~reply_to_message_id:message ~user_id:actor ())
     in

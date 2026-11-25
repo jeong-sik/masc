@@ -15,13 +15,14 @@
 
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
+import { isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
-import { observedValue, resourceCache } from '../../core/resource-cache'
+import { formatObserved, observedValue, resourceCache } from '../../core/resource-cache'
 import { TIME_WINDOWS, setTimeWindow, timeWindow, type TimeWindow } from '../../core/time-window'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
-import { err, ok } from '../../lib/result'
+import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
   DataTable,
@@ -53,13 +54,64 @@ const MEMORY_FLOW_SERIES: readonly UPlotSeriesSpec[] = [
   { label: 'Net Total', colorToken: '--info-fg', width: 2.0 },
 ]
 
+const WORLD_KEY = 'kn:memory:world'
+const MEMORY_TOPICS = ['memory', 'world_memory', 'librarian']
+
+function memoryDiffKey(win: TimeWindow) {
+  return `kn:memory:diff:${win}`
+}
+
+function loadWorld(reason: 'mount' | 'manual') {
+  return resourceCache.fetch<WorldMemoryViewModel>(
+    WORLD_KEY,
+    async (signal) => {
+      const world = await apiGetV2('/api/v1/memory/world', {
+        signal,
+        decode: (raw) => {
+          const decoded = decodeWorldMemory(raw)
+          if (!decoded.ok) throw new Error(decoded.error)
+          return decoded.value
+        },
+      })
+      if (world.ok || (world.error.kind !== 'not_found' && world.error.status !== 404)) return world
+      return apiGet('/api/v1/dashboard/workspace-memory-inventory', {
+        signal,
+        decode: (raw) => {
+          const decoded = decodeWorkspaceInventoryFallback(raw)
+          if (!decoded.ok) throw new Error(decoded.error)
+          return decoded.value
+        },
+      })
+    },
+    { ttlMs: 12_000, topics: MEMORY_TOPICS, reason },
+  )
+}
+
+function loadMemoryDiff(win: TimeWindow, reason: 'mount' | 'manual') {
+  return resourceCache.fetch<WorldDiffViewModel>(
+    memoryDiffKey(win),
+    (signal) => apiGetV2(buildWorldMemoryDiffUrl(win), {
+      signal,
+      decode: (raw) => {
+        const decoded = decodeWorldDiff(raw)
+        if (!decoded.ok) throw new Error(decoded.error)
+        if (decoded.value.window !== win) throw new Error(`서버가 ${win} 기간에 해당하는 Diff를 반환하지 않았습니다.`)
+        return decoded.value
+      },
+    }),
+    { ttlMs: 12_000, topics: MEMORY_TOPICS, reason },
+  )
+}
+
 export function MemoryTab(_props: WorkspaceViewProps) {
   const activeWin: TimeWindow = timeWindow.value
-  const [world, setWorld] = useState<WorldMemoryViewModel | null>(null)
-  const [diffData, setDiffData] = useState<WorldDiffViewModel | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const epoch = sessionEpoch.value
+  const worldObs = resourceCache.observe<WorldMemoryViewModel>(WORLD_KEY).value
+  const diffObs = resourceCache.observe<WorldDiffViewModel>(memoryDiffKey(activeWin)).value
+  const world = worldObs.kind === 'value' ? worldObs.data : null
+  const diffData = diffObs.kind === 'value' ? diffObs.data : null
   const [section, setSection] = useState<MemorySection>('claims')
+  const visibleSection = world === null ? 'diff' : section
   const [diffSubTab, setDiffSubTab] = useState<'added' | 'updated' | 'retracted'>('added')
 
   // Librarian Recovery Act panel state
@@ -74,79 +126,28 @@ export function MemoryTab(_props: WorkspaceViewProps) {
   const [actBusy, setActBusy] = useState<string | null>(null)
   const [actFeedback, setActFeedback] = useState<{ kind: 'ok' | 'err' | 'warn'; message: string } | null>(null)
 
-  const loadWorldAndDiff = useCallback(async (win: TimeWindow, reason: 'mount' | 'manual' = 'mount') => {
-    setLoading(true)
-    setLoadError(null)
-    const diffUrl = buildWorldMemoryDiffUrl(win)
-    const obs = await resourceCache.fetch<{ world: WorldMemoryViewModel; diff: WorldDiffViewModel | null }>(
-      `kn:memory:world:${win}`,
-      async (signal) => {
-        const [worldRes, diffRes] = await Promise.all([
-          apiGetV2<unknown>('/api/v1/memory/world', { signal }),
-          apiGetV2<unknown>(diffUrl, { signal }),
-        ])
-
-        let decodedWorld: WorldMemoryViewModel | null = null
-        if (worldRes.ok) {
-          const dec = decodeWorldMemory(worldRes.value)
-          if (!dec.ok) {
-            return err({
-              kind: 'decode',
-              status: 200,
-              code: 'world_memory_decode',
-              message: dec.error,
-              retryable: false,
-            })
-          }
-          decodedWorld = dec.value
-        } else if (worldRes.error.kind === 'not_found' || worldRes.error.status === 404) {
-          // Graceful fallback to legacy workspace-memory-inventory per TUI `#6`
-          const fallbackRes = await apiGet<unknown>('/api/v1/dashboard/workspace-memory-inventory', { signal })
-          if (!fallbackRes.ok) return fallbackRes
-          const dec = decodeWorkspaceInventoryFallback(fallbackRes.value)
-          if (!dec.ok) {
-            return err({
-              kind: 'decode',
-              status: 200,
-              code: 'inventory_decode',
-              message: dec.error,
-              retryable: false,
-            })
-          }
-          decodedWorld = dec.value
-        } else {
-          return worldRes
-        }
-
-        let decodedDiff: WorldDiffViewModel | null = null
-        if (diffRes.ok) {
-          const d = decodeWorldDiff(diffRes.value)
-          if (d.ok) decodedDiff = d.value
-        }
-
-        return ok({ world: decodedWorld, diff: decodedDiff })
-      },
-      { ttlMs: 12_000, topics: ['memory', 'world_memory', 'librarian'], reason },
-    )
-    setLoading(false)
-    if (obs.kind === 'value') {
-      setWorld(obs.data.world)
-      setDiffData(obs.data.diff)
-      markViewSynced()
-    } else if (obs.kind === 'failed') {
-      setLoadError(obs.error.message)
-    }
-  }, [])
-
   useEffect(() => {
-    void loadWorldAndDiff(activeWin, 'mount')
-  }, [activeWin, loadWorldAndDiff])
+    void loadWorld('mount')
+    setActBusy(null)
+    setActFeedback(null)
+    setActKeeper(null)
+  }, [epoch])
+  useEffect(() => {
+    void loadMemoryDiff(activeWin, 'mount')
+  }, [activeWin, epoch])
+  useEffect(() => {
+    if (worldObs.kind === 'value' && !worldObs.stale
+        && diffObs.kind === 'value' && !diffObs.stale) markViewSynced()
+  }, [worldObs, diffObs])
+
+  const refresh = () => Promise.all([loadWorld('manual'), loadMemoryDiff(timeWindow.peek(), 'manual')])
 
   const executeRecoveryAct = async (
     keeper: string,
     kind: RecoveryActKind,
     override?: { observed?: string; turnLog?: string; line?: number; store?: string; at?: number; offset?: number },
   ) => {
+    if (!isEpochCurrent(epoch)) return
     const payloadRes = buildMemoryRecoveryPayload({
       action: kind,
       observed: override?.observed ?? actObserved,
@@ -167,6 +168,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       `/api/v1/keepers/${encodeURIComponent(keeper)}/memory/act`,
       payloadRes.value,
     )
+    if (!isEpochCurrent(epoch)) return
     setActBusy(null)
     if (!res.ok) {
       const isRefused = res.error.status === 409
@@ -182,7 +184,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       message: `${keeper} → ${kind}: ${summary}`,
     })
     resourceCache.invalidateTopic('memory')
-    await loadWorldAndDiff(activeWin, 'manual')
+    await refresh()
   }
 
   const flowChartData = useMemo<uPlot.AlignedData>(() => {
@@ -319,7 +321,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         </div>
       `,
     },
-  ], [actBusy, activeWin])
+  ], [actBusy, epoch])
 
   const activeDiffList = diffData
     ? diffSubTab === 'added'
@@ -333,13 +335,13 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     <div class="kn-scroll-body">
       <div class="kn-toolbar">
         <div class="kn-chips">
-          <span class="kn-badge kn-badge--info">
-            ${world?.sourceKind === 'world_memory_db'
+          ${world && html`<span class="kn-badge kn-badge--info">
+            ${world.sourceKind === 'world_memory_db'
               ? 'MVCC World DB'
-              : world?.sourceKind === 'workspace_inventory_fallback'
+              : world.sourceKind === 'workspace_inventory_fallback'
                 ? 'Legacy Inventory Fallback'
                 : 'Legacy Ledger'}
-          </span>
+          </span>`}
           ${world?.ledgerSha256 && html`
             <span class="mono kn-sub-id">
               sha256:${world.ledgerSha256.slice(0, 12)}
@@ -360,42 +362,49 @@ export function MemoryTab(_props: WorkspaceViewProps) {
               </button>
             `)}
           </div>
-          <button type="button" class="btn-ghost" onClick=${() => void loadWorldAndDiff(activeWin, 'manual')}>새로고침</button>
+          <button type="button" class="btn-ghost" onClick=${() => void refresh()}>새로고침</button>
         </div>
       </div>
 
-      ${loadError && html`<div class="kn-notice kn-notice--err" role="alert">${loadError}</div>`}
-      ${loading && !world && html`<span class="dtable-absent">World Memory 불러오는 중…</span>`}
+      ${worldObs.kind === 'failed' && html`<div class="kn-notice kn-notice--err" role="alert">World Memory 조회 실패. ${worldObs.error.message}</div>`}
+      ${worldObs.kind === 'loading' && html`<span role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />World Memory 불러오는 중…</span>`}
+      ${worldObs.kind === 'value' && worldObs.stale && html`<p role="status" class="kn-notice kn-notice--warn">마지막으로 확인한 World Memory입니다.</p>`}
+      ${(worldObs.kind === 'absent' || worldObs.kind === 'unreported') && html`<p role="status">서버에서 World Memory를 확인할 수 없습니다.</p>`}
 
-      ${world && html`
+      ${diffObs.kind === 'failed' && html`<div class="kn-notice kn-notice--err" role="alert">${activeWin} 메모리 Diff 조회 실패. ${diffObs.error.message}</div>`}
+      ${diffObs.kind === 'loading' && html`<span role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />${activeWin} 메모리 Diff 불러오는 중…</span>`}
+      ${diffObs.kind === 'value' && diffObs.stale && html`<p role="status" class="kn-notice kn-notice--warn">마지막으로 확인한 ${activeWin} 메모리 Diff입니다.</p>`}
+      ${(diffObs.kind === 'absent' || diffObs.kind === 'unreported') && html`<p role="status">서버에서 ${activeWin} 메모리 Diff를 확인할 수 없습니다.</p>`}
+
+      ${(world || diffData) && html`
         <div class="ov-kpis">
-          <div class="ov-kpi">
-            <div class="ov-kpi-k">Claims</div>
-            <div class="ov-kpi-v">${world.ledgerState === 'missing' ? '없음' : String(world.claimsCount)}</div>
-          </div>
-          <div class="ov-kpi">
-            <div class="ov-kpi-k">Facts</div>
-            <div class="ov-kpi-v">${world.ledgerState === 'missing' ? '없음' : String(world.factsCount)}</div>
-          </div>
-          <div class="ov-kpi">
-            <div class="ov-kpi-k">Active Conflicts</div>
-            <div class=${`ov-kpi-v ${world.conflictsCount > 0 ? 'warn' : 'ok'}`}>${String(world.conflictsCount)}</div>
-          </div>
+          ${world && html`
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">Claims</div>
+              <div class="ov-kpi-v">${world.ledgerState === 'missing' ? '없음' : String(world.claimsCount)}</div>
+            </div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">Facts</div>
+              <div class="ov-kpi-v">${world.ledgerState === 'missing' ? '없음' : String(world.factsCount)}</div>
+            </div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">Active Conflicts</div>
+              <div class=${`ov-kpi-v ${world.conflictsCount > 0 ? 'warn' : 'ok'}`}>${String(world.conflictsCount)}</div>
+            </div>
+          `}
           <div class="ov-kpi">
             <div class="ov-kpi-k">Window Diff (${activeWin})</div>
             <div class="ov-kpi-v kn-kpi-compact">
-              ${diffData ? `+${diffData.counts.added} / ~${diffData.counts.updated} / -${diffData.counts.retracted}` : '없음'}
+              ${formatObserved(diffObs, diff => `+${diff.counts.added} / ~${diff.counts.updated} / -${diff.counts.retracted}`)}
             </div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Retrieval Heat (H/W/C/0x)</div>
             <div class="ov-kpi-v kn-kpi-compact">
-              ${diffData
-                ? `${diffData.retrievalHeat.hot}/${diffData.retrievalHeat.warm}/${diffData.retrievalHeat.cold}/${diffData.retrievalHeat.neverRetrieved}`
-                : '없음'}
+              ${formatObserved(diffObs, ({ retrievalHeat }) => `${retrievalHeat.hot}/${retrievalHeat.warm}/${retrievalHeat.cold}/${retrievalHeat.neverRetrieved}`)}
             </div>
           </div>
-          ${world.worldMvcc && html`
+          ${world?.worldMvcc && html`
             <div class="ov-kpi">
               <div class="ov-kpi-k">MVCC Rev / Edges</div>
               <div class="ov-kpi-v kn-kpi-compact">
@@ -404,8 +413,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             </div>
           `}
         </div>
+      `}
 
-        <${UPlotChart}
+      ${diffData && html`<${UPlotChart}
           id="world-memory-flow"
           title=${`Memory Flow (Added ▲ / Retracted ▼ vs Net Total · ${activeWin})`}
           subtitle=${html`<span class="mono kn-sub-id">scope=world · window=${activeWin}</span>`}
@@ -413,8 +423,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           series=${MEMORY_FLOW_SERIES}
           height=${210}
           emptyLabel="선택한 기간 내 메모리 변동 틱이 없습니다."
-        />
+      />`}
 
+      ${world && html`
         <section class="kn-section" aria-label="World Briefing">
           <div class="kn-section-head">
             <h3 class="kn-section-title">World Briefing</h3>
@@ -425,7 +436,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
               <span class="kn-badge">Sources: ${world.briefing.sourceIdsCount}</span>
               ${world.briefing.buildingTarget !== null && html`
                 <span class="kn-badge kn-badge--info">
-                  Building: ${world.briefing.buildingTarget - (world.briefing.buildingRemaining ?? 0)}/${world.briefing.buildingTarget}
+                  ${world.briefing.buildingRemaining === null
+                    ? '브리핑 생성 중'
+                    : `브리핑 생성 중 · ${world.briefing.buildingTarget - world.briefing.buildingRemaining}/${world.briefing.buildingTarget}`}
                 </span>
               `}
             </div>
@@ -435,23 +448,27 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             ? html`<${MarkdownContent} class="kn-body-md" text=${world.briefing.text} />`
             : html`<span class="dtable-absent">World Briefing 본문이 아직 생성되지 않았습니다.</span>`}
         </section>
+      `}
 
+      ${(world || diffData) && html`
         <div class="kn-chips" role="tablist" aria-label="World Memory 상세 섹션">
-          <button type="button" role="tab" class="kn-chip" aria-selected=${section === 'claims'} aria-pressed=${section === 'claims'} onClick=${() => setSection('claims')}>
-            Claims <span class="kn-chip-count">${world.claims.length}</span>
-          </button>
-          <button type="button" role="tab" class="kn-chip" aria-selected=${section === 'conflicts'} aria-pressed=${section === 'conflicts'} onClick=${() => setSection('conflicts')}>
-            Active Conflicts <span class="kn-chip-count">${world.activeConflicts.length}</span>
-          </button>
-          <button type="button" role="tab" class="kn-chip" aria-selected=${section === 'diff'} aria-pressed=${section === 'diff'} onClick=${() => setSection('diff')}>
+          ${world && html`
+            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'claims'} aria-pressed=${visibleSection === 'claims'} onClick=${() => setSection('claims')}>
+              Claims <span class="kn-chip-count">${world.claims.length}</span>
+            </button>
+            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'conflicts'} aria-pressed=${visibleSection === 'conflicts'} onClick=${() => setSection('conflicts')}>
+              Active Conflicts <span class="kn-chip-count">${world.activeConflicts.length}</span>
+            </button>
+          `}
+          <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'diff'} aria-pressed=${visibleSection === 'diff'} onClick=${() => setSection('diff')}>
             Temporal Diff (${activeWin})
           </button>
-          <button type="button" role="tab" class="kn-chip" aria-selected=${section === 'writers'} aria-pressed=${section === 'writers'} onClick=${() => setSection('writers')}>
+          ${world && html`<button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'writers'} aria-pressed=${visibleSection === 'writers'} onClick=${() => setSection('writers')}>
             Librarian Writers <span class="kn-chip-count">${world.writers.length}</span>
-          </button>
+          </button>`}
         </div>
 
-        ${section === 'claims' && html`
+        ${world && visibleSection === 'claims' && html`
           <${DataTable}
             data=${world.claims}
             columns=${claimColumns}
@@ -461,7 +478,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           />
         `}
 
-        ${section === 'conflicts' && html`
+        ${world && visibleSection === 'conflicts' && html`
           <section class="kn-section" aria-label="Side-by-Side Active Conflicts Inspector">
             <div class="kn-notice kn-notice--info" role="note">
               읽기 전용 충돌 검사기 (Read-Only): 현재 서버에는 World Memory 충돌 해소 쓰기 API가 노출되어 있지 않습니다. 허위 해소 버튼을 제공하지 않으며, 각 Keeper의 원천 사실과 경합 주장을 나란히 비교할 수 있습니다.
@@ -495,18 +512,18 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           </section>
         `}
 
-        ${section === 'diff' && html`
+        ${visibleSection === 'diff' && html`
           <section class="kn-section" aria-label="Temporal Memory Diff">
             <div class="kn-toolbar">
               <div class="kn-chips" role="group" aria-label="Diff 유형">
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'added'} onClick=${() => setDiffSubTab('added')}>
-                  Added <span class="kn-chip-count">${diffData?.counts.added ?? 0}</span>
+                  Added ${diffData && html`<span class="kn-chip-count">${diffData.counts.added}</span>`}
                 </button>
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'updated'} onClick=${() => setDiffSubTab('updated')}>
-                  Updated <span class="kn-chip-count">${diffData?.counts.updated ?? 0}</span>
+                  Updated ${diffData && html`<span class="kn-chip-count">${diffData.counts.updated}</span>`}
                 </button>
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'retracted'} onClick=${() => setDiffSubTab('retracted')}>
-                  Retracted <span class="kn-chip-count">${diffData?.counts.retracted ?? 0}</span>
+                  Retracted ${diffData && html`<span class="kn-chip-count">${diffData.counts.retracted}</span>`}
                 </button>
               </div>
               ${diffData && (diffData.counts.incompleteBatches > 0 || diffData.counts.abortedBatches > 0) && html`
@@ -515,15 +532,15 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                 </span>
               `}
             </div>
-            ${activeDiffList.length === 0
+            ${diffData !== null && (activeDiffList.length === 0
               ? html`<span class="dtable-absent">${activeWin} 기간 내 ${diffSubTab} 항목이 없습니다.</span>`
               : activeDiffList.map((entry, idx) => html`
                   <pre key=${idx} class="kn-diff-box">${JSON.stringify(entry, null, 2)}</pre>
-                `)}
+                `))}
           </section>
         `}
 
-        ${section === 'writers' && html`
+        ${world && visibleSection === 'writers' && html`
           <section class="kn-section" aria-label="Librarian Writers 상태 및 복구">
             <div class="kn-section-head">
               <h3 class="kn-section-title">Librarian Writers Status & 1-Click Recovery Acts</h3>

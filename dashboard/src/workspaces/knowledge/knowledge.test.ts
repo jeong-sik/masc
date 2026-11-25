@@ -733,6 +733,8 @@ describe('workspaces/knowledge', () => {
     // 5. Mounted World Memory UI integration: scope=world sync + conflicts read-only + 1-click recovery act
     const fetchedUrls: string[] = []
     const actPosts: { url: string; body: unknown }[] = []
+    let failSevenDayRead!: (response: Response) => void
+    let worldAvailable = true
 
     const mvccWorld = {
       schema_version: 1,
@@ -781,8 +783,11 @@ describe('workspaces/knowledge', () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       fetchedUrls.push(url)
-      if (url.startsWith('/api/v1/memory/world')) return jsonResponse(mvccWorld)
+      if (url.startsWith('/api/v1/memory/world')) {
+        return worldAvailable ? jsonResponse(mvccWorld) : jsonResponse({ error: 'world unavailable' }, 500)
+      }
       if (url.startsWith('/api/v1/memory/diff')) {
+        if (url.includes('window=7d')) return new Promise(resolve => { failSevenDayRead = resolve })
         return jsonResponse({
           schema_version: 1,
           instance_id: 'inst-1',
@@ -821,6 +826,27 @@ describe('workspaces/knowledge', () => {
     setTimeWindow('7d')
     await flushUi()
     expect(fetchedUrls).toContain('/api/v1/memory/diff?scope=world&window=7d')
+    expect(fetchedUrls.filter(url => url === '/api/v1/memory/world')).toHaveLength(1)
+    expect(container.textContent).toContain('7d 메모리 Diff 불러오는 중')
+    expect(container.textContent).not.toContain('+1 / ~0 / -0')
+    expect(container.textContent).toContain('Source-Bound')
+    failSevenDayRead(jsonResponse({ error: 'diff unavailable' }, 500))
+    await vi.waitFor(() => expect(container.textContent).toContain('7d 메모리 Diff 조회 실패'))
+    expect(container.textContent).toContain('Source-Bound')
+    setTimeWindow('24h')
+    await flushUi()
+    expect(container.textContent).toContain('+1 / ~0 / -0')
+    expect(container.textContent).not.toContain('7d 메모리 Diff 조회 실패')
+
+    const refresh = [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === '새로고침')!
+    worldAvailable = false
+    refresh.click()
+    await vi.waitFor(() => expect(container.textContent).toContain('World Memory 조회 실패'))
+    expect(container.textContent).toContain('+1 / ~0 / -0')
+    expect(container.querySelector('[aria-label="Temporal Memory Diff"]')?.textContent).toContain('fact_id')
+    worldAvailable = true
+    refresh.click()
+    await vi.waitFor(() => expect(container.textContent).toContain('Source-Bound'))
 
     // Active Conflicts tab shows side-by-side claims + honest read-only notice
     const conflictsTab = [...container.querySelectorAll('button[role="tab"]')].find((b) =>

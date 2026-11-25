@@ -419,6 +419,7 @@ let test_slash_36_commands () =
       ("/tools full", Slash.Tools (Some Slash.Tools_full));
       ("/clear", Slash.Clear);
       ("/theme arcade_hi", Slash.Theme (Some Theme.Arcade_hi));
+      ("/theme muted", Slash.Theme (Some Theme.Muted));
       ("/lang ko", Slash.Lang (Some Say.Lang_ko));
       ("/help", Slash.Help);
       ("/restart", Slash.Restart);
@@ -512,8 +513,18 @@ let test_slash_36_commands () =
     (List.exists (fun (s : Slash.spec) -> String.equal s.name "/knowledge")
        (Slash.filter ~query:"knw" ~lang:Say.Lang_en));
   Alcotest.(check (list string)) "theme arg completion"
-    [ "/theme midnight"; "/theme mono" ]
-    (Slash.complete ~prefix:"/theme m")
+    [ "/theme midnight"; "/theme mono"; "/theme muted" ]
+    (Slash.complete ~prefix:"/theme m");
+  (* Every name the picker lists is a name /theme accepts. *)
+  List.iter
+    (fun preset ->
+      let input = "/theme " ^ Theme.preset_name preset in
+      match Slash.parse input with
+      | Ok actual ->
+          Alcotest.(check bool) ("parse " ^ input) true
+            (Slash.equal_parsed (Slash.Theme (Some preset)) actual)
+      | Error _ -> Alcotest.fail ("expected Ok for " ^ input))
+    Theme.all_presets
 
 (* --- 3. Layout & Breakpoints Tests --- *)
 
@@ -1266,7 +1277,7 @@ let test_form_secret_diff_scroll_filter_bounds () =
 
 let test_slash_trailing_space_completion () =
   Alcotest.(check (list string)) "/theme <space> lists all presets"
-    [ "/theme midnight"; "/theme arcade_hi"; "/theme paper_light"; "/theme mono" ]
+    (List.map (fun p -> "/theme " ^ Theme.preset_name p) Theme.all_presets)
     (Slash.complete ~prefix:"/theme ");
   Alcotest.(check (list string)) "/lang <space> lists ko and en"
     [ "/lang ko"; "/lang en" ]

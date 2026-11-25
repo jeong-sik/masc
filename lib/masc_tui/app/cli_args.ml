@@ -41,7 +41,7 @@ let help_text =
       "  --base-path <path>            Workspace base path (.masc lives below it)";
       "  --base <path>                 Alias for --base-path";
       "  --workspace <name>            Workspace display name (default: basename of base path)";
-      "  --theme <midnight|arcade|paper|mono>";
+      "  --theme <midnight|arcade|paper|mono|muted>";
       "                                Color theme preset (default: midnight)";
       "  --lang <ko|en>                UI language (default: ko)";
       "  --no-auto-start               Do not auto-start a local masc server when offline";

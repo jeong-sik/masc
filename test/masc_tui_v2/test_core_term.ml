@@ -350,7 +350,7 @@ let test_input_decoder () =
   Alcotest.(check (option string)) "IME ㄱ -> r" (Some "r")
     (Ime.single_latin_key "ㄱ")
 
-(* ---- (e) All Theme text/status/bg pairs meet >= 4.5:1 WCAG/Oklab contrast across ALL 4 surfaces ---- *)
+(* ---- (e) Every preset keeps its own text floors (Theme.text_floors) and >= 4.5:1 for status, accent and gradients across ALL 4 surfaces ---- *)
 let test_theme_contrast () =
   (* v2.5 Midnight calm-selection and exact token invariants *)
   let mid = Theme.of_preset Theme.Midnight in
@@ -359,10 +359,28 @@ let test_theme_contrast () =
   Alcotest.(check int) "Midnight border_subtle (#232D3D)" 0x232D3D mid.border_subtle;
   Alcotest.(check int) "Midnight text_bright (#F3F6FA)" 0xF3F6FA mid.text_bright;
   Alcotest.(check int) "Midnight status_ai Violet (#C084FC)" 0xC084FC mid.status_ai;
+  (* Floors became per-preset data; the original four keep the values they had,
+     and Muted still holds WCAG 2.1 AAA (7:1) for body text. *)
+  List.iter
+    (fun preset ->
+      let f = Theme.text_floors preset in
+      Alcotest.(check (list (float 0.0)))
+        (Theme.preset_name preset ^ " text floors")
+        [ 12.0; 9.0; 6.5; Theme.min_text_contrast; 12.0 ]
+        [ f.Theme.bright; f.Theme.primary; f.Theme.secondary; f.Theme.muted;
+          f.Theme.selection ])
+    Theme.[ Midnight; Arcade_hi; Paper_light; Mono ];
+  Alcotest.(check bool) "Muted body text floor is WCAG AAA" true
+    ((Theme.text_floors Theme.Muted).Theme.primary >= 7.0);
   List.iter
     (fun preset ->
       let th = Theme.of_preset preset in
       let pname = Theme.preset_name preset in
+      let floors = Theme.text_floors preset in
+      Alcotest.(check bool) (pname ^ ": saved name reloads to the same preset") true
+        (match Theme.preset_of_name pname with
+         | Some back -> Theme.equal_preset back preset
+         | None -> false);
       let surfaces =
         [
           ("surface_0", th.surface_0);
@@ -373,11 +391,11 @@ let test_theme_contrast () =
       in
       let fgs =
         [
-          ("text_bright", th.text_bright, 12.0);
-          ("text_primary", th.text_primary, 9.0);
-          ("text_secondary", th.text_secondary, 6.5);
-          ("text_muted", th.text_muted, Theme.min_text_contrast);
-          ("selection_fg", th.selection_fg, 12.0);
+          ("text_bright", th.text_bright, floors.Theme.bright);
+          ("text_primary", th.text_primary, floors.Theme.primary);
+          ("text_secondary", th.text_secondary, floors.Theme.secondary);
+          ("text_muted", th.text_muted, floors.Theme.muted);
+          ("selection_fg", th.selection_fg, floors.Theme.selection);
           ("status_ok", th.status_ok, Theme.min_text_contrast);
           ("status_active", th.status_active, Theme.min_text_contrast);
           ("status_attention", th.status_attention, Theme.min_text_contrast);

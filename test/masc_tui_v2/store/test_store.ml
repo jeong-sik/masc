@@ -1355,6 +1355,24 @@ let test_keymap_and_slash_commands () =
                  Slash.Tools_full))
     slash_cases
 
+(* /theme without an argument moves to the next preset in Theme.all_presets and
+   wraps from the last one to the first. [Update_actions.next_theme_preset] is a
+   hand-written match, so this keeps it in step with the list the pickers use. *)
+let test_theme_slash_cycles_all_presets () =
+  let presets = Theme.all_presets in
+  let next_in_list =
+    match presets with [] -> [] | first :: rest -> rest @ [ first ]
+  in
+  List.iter2
+    (fun preset expected ->
+      let m = Model.initial ~theme_preset:preset () in
+      let m_after, _ = Update.execute_slash ~now:t1 m (Slash.Theme None) in
+      Alcotest.(check string)
+        ("/theme from " ^ Theme.preset_name preset)
+        (Theme.preset_name expected)
+        (Theme.preset_name m_after.theme_preset))
+    presets next_in_list
+
 (* 7. Knowledge defaults & Config strict inline editing *)
 let test_knowledge_and_config_store () =
   let m0 = Model.initial () in
@@ -22997,6 +23015,8 @@ let () =
       , [
           Alcotest.test_case "keymap actions & all 27 slash commands" `Quick
             test_keymap_and_slash_commands;
+          Alcotest.test_case "/theme without argument cycles all presets and wraps"
+            `Quick test_theme_slash_cycles_all_presets;
           Alcotest.test_case
             "Keeper lifecycle controls ([W]/[D], 2-press arm, 202 follow-up, slash & Ctrl+K)"
             `Quick test_keeper_lifecycle_controls_and_guards;

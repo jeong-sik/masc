@@ -19,6 +19,7 @@ type preset =
   | Arcade_hi
   | Paper_light
   | Mono
+  | Muted
 
 type status_token =
   | Status_ok
@@ -100,6 +101,20 @@ val lerp_oklab : background:rgb -> floor:float -> t:float -> rgb -> rgb -> rgb
 
 val min_text_contrast : float
 (** Hard WCAG AA floor: [4.5]. *)
+
+type text_floors = {
+  bright : float;  (** [text_bright] *)
+  primary : float;  (** [text_primary] *)
+  secondary : float;  (** [text_secondary] *)
+  muted : float;  (** [text_muted] *)
+  selection : float;  (** [selection_fg], measured on every surface *)
+}
+
+val text_floors : preset -> text_floors
+(** The contrast ratio each text color of [preset] keeps against every one of
+    its surfaces, the selection background included. [of_preset] lifts a color
+    that falls short up to its floor, so a floor is also the dimmest the text
+    of that preset can be. *)
 
 val all_presets : preset list
 val all_status_tokens : status_token list

@@ -132,9 +132,8 @@ let count_anthropic_staged
 (* Gemini [models/{model}:countTokens] counts a whole request: system
    instruction, tools and generation config included. The body comes from
    {!Backend_gemini.build_request} for the same messages and tools, so the
-   count is of the request the dispatch sends, and the URL uses the same
-   [base_url/models/model_id] the dispatch URL uses
-   ({!Complete_sampling.gemini_url}).
+   count is of the request the dispatch sends. Both routes use the same
+   canonical model ({!Complete_sampling.gemini_target}).
 
    The two Gemini endpoints take different count bodies:
    - Gemini Developer API: [{"generateContentRequest": {"model": "models/<id>", ...}}]
@@ -143,16 +142,17 @@ let count_anthropic_staged
      the base URL): a top-level [CountTokensRequest] with [contents],
      [systemInstruction], [tools] and [generationConfig]; the model comes
      from the URL (cloud.google.com aiplatform.v1 CountTokensRequest). *)
-let gemini_count_tokens_url (config : Provider_config.t) =
-  Printf.sprintf "%s/models/%s:countTokens" config.base_url config.model_id
-;;
-
 let vertex_count_tokens_fields = [ "contents"; "systemInstruction"; "tools"; "generationConfig" ]
 
-let gemini_count_tokens_body ~(config : Provider_config.t) ~messages ~tools =
+let build_gemini_count_tokens_body
+      ~(target : Complete_sampling.gemini_target)
+      ~config
+      ~messages
+      ~tools
+  =
   match Backend_gemini.build_request ~config ~messages ~tools () |> Yojson.Safe.from_string with
   | `Assoc fields ->
-    (match Vertex_endpoint.parse_base_url config.base_url with
+    (match Vertex_endpoint.parse_base_url target.base_url with
      | Ok (_ : string * Vertex_endpoint.location) ->
        Ok
          (Yojson.Safe.to_string
@@ -165,12 +165,17 @@ let gemini_count_tokens_body ~(config : Provider_config.t) ~messages ~tools =
          (Yojson.Safe.to_string
             (`Assoc
                 [ ( "generateContentRequest"
-                  , `Assoc (("model", `String ("models/" ^ config.model_id)) :: fields) )
+                  , `Assoc (("model", `String target.model_resource) :: fields) )
                 ])))
   | _ ->
     Error (Http_client.AcceptRejected { reason = "Gemini request body is not a JSON object" })
   | exception Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
   | exception Yojson.Json_error reason -> Error (Http_client.AcceptRejected { reason })
+;;
+
+let gemini_count_tokens_body ~config ~messages ~tools =
+  let target = Complete_sampling.gemini_target ~config in
+  build_gemini_count_tokens_body ~target ~config ~messages ~tools
 ;;
 
 let count_gemini_staged
@@ -184,7 +189,8 @@ let count_gemini_staged
       ()
   =
   let protocol = Input_token_count.Gemini_count_tokens in
-  match gemini_count_tokens_body ~config ~messages ~tools with
+  let target = Complete_sampling.gemini_target ~config in
+  match build_gemini_count_tokens_body ~target ~config ~messages ~tools with
   | Error error ->
     Error (Count_failed (Input_token_count.Transport error, Measurement_before_dispatch))
   | Ok body ->
@@ -195,7 +201,7 @@ let count_gemini_staged
       ~net
       ~protocol
       ~config
-      ~url:(gemini_count_tokens_url config)
+      ~url:(Complete_sampling.gemini_count_tokens_url target)
       ~headers:config.headers
       ~body
       ()

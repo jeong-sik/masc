@@ -1054,10 +1054,10 @@ let test_transport_success () =
 (* Gemini counts through models/{model}:countTokens with the whole
    generateContent body wrapped as generateContentRequest, so the count is of
    the request the dispatch sends (system instruction and tools included). *)
-let gemini_config base_url =
+let gemini_config ?(model_id = "input-count-fixture") base_url =
   Provider_config.make
     ~kind:Provider_config.Gemini
-    ~model_id:"input-count-fixture"
+    ~model_id
     ~base_url
     ~api_key:"test-key"
     ~max_context:512
@@ -1086,13 +1086,19 @@ let test_gemini_transport_success () =
   let result, (path, headers, body) =
     with_mock ~status:`OK ~response:{|{"totalTokens":91}|}
     @@ fun ~sw ~net ~base_url ->
+    let config = gemini_config ~model_id:"models/input-count-fixture" (base_url ^ "/") in
+    check
+      string
+      "Gemini generation shares the count model route"
+      (base_url ^ "/models/input-count-fixture:streamGenerateContent?alt=sse")
+      (Complete_sampling.gemini_url ~config ~stream:true);
     (* Fail inside the server's scope: a measurement that stops before
        dispatch would otherwise leave the mock waiting for a request. *)
     match
       Count_tokens_sync.measure_completion_request
         ~sw
         ~net
-        { (completion_request (gemini_config base_url)) with messages = gemini_messages }
+        { (completion_request config) with messages = gemini_messages }
     with
     | Ok _ as ok -> ok
     | Error (Count_tokens_sync.Input_count_failed (Count.Transport (Http_client.AcceptRejected { reason }))) ->
@@ -1147,7 +1153,14 @@ let test_gemini_vertex_count_body_is_top_level () =
     | Ok url -> url
     | Error detail -> fail detail
   in
-  let body = gemini_body_or_fail (gemini_config base_url) in
+  let config = gemini_config ~model_id:"models/input-count-fixture" (base_url ^ "/") in
+  let target = Complete_sampling.gemini_target ~config in
+  check
+    string
+    "Vertex count model path"
+    (base_url ^ "/models/input-count-fixture:countTokens")
+    (Complete_sampling.gemini_count_tokens_url target);
+  let body = gemini_body_or_fail config in
   (match Yojson.Safe.from_string body with
      | `Assoc fields ->
        check

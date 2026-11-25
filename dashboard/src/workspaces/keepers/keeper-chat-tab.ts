@@ -118,16 +118,14 @@ function KeeperTurnElapsed({ startedAt, observedAt, live }: {
   readonly live: boolean
 }) {
   const [now, setNow] = useState(Date.now)
-  const heldSeconds = useRef<number | null>(null)
-  if (live) heldSeconds.current = null
-  else heldSeconds.current ??= (observedAt - startedAt) / 1000
   useEffect(() => {
     if (!live) return
     setNow(Date.now())
     const interval = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(interval)
-  }, [live, startedAt])
-  const seconds = heldSeconds.current ?? (now - startedAt) / 1000
+  }, [live])
+  const elapsedAt = live ? Math.max(now, observedAt) : observedAt
+  const seconds = (elapsedAt - startedAt) / 1000
   return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`
 }
 
@@ -328,14 +326,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     readonly epoch: number
     readonly active: KeeperActiveTurn | null
     readonly updatedAt: number
+    readonly retiredOwners: Set<string>
   } | null>(null)
   const row = turnRead?.kind === 'value' ? turnRead.data.get(keeper.name) : undefined
   let snapshot = lastTurn.current?.keeper === keeper.name && isEpochCurrent(lastTurn.current.epoch)
     ? lastTurn.current : null
   if (turnRead?.kind === 'value' && row?.status === 'ok' && (!turnRead.stale || !snapshot)) {
+    const retiredOwners = snapshot?.retiredOwners ?? new Set<string>()
+    const previousOwner = snapshot?.active?.owner_key
+    const observedOwner = row.active?.owner_key
+    // An idle or replacement receipt can end an owner before its first
+    // preview arrives. A preview for another owner may still be ahead of HTTP.
+    if (!turnRead.stale && previousOwner
+        && (row.active === null || (observedOwner && observedOwner !== previousOwner))) {
+      retiredOwners.add(previousOwner)
+    }
     snapshot = {
       keeper: keeper.name, epoch: currentSessionEpoch(),
-      active: row.active, updatedAt: turnRead.updatedAt,
+      active: row.active, updatedAt: turnRead.updatedAt, retiredOwners,
     }
     lastTurn.current = snapshot
   }
@@ -749,7 +757,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           if (!event.ownerKey) break
           const sample = { ownerKey: event.ownerKey, preview: event.preview, receivedAt: Date.now(), live: true }
           const owner = turnOwnerRef.current
-          setTurnPreviews((previous) => retainTurnPreview(previous, owner, sample))
+          const snapshot = lastTurn.current
+          const retiredOwners = snapshot?.keeper === keeper.name && isEpochCurrent(snapshot.epoch)
+            ? snapshot.retiredOwners : undefined
+          setTurnPreviews((previous) => retainTurnPreview(previous, owner, sample, retiredOwners))
           break
         }
         case 'turn_changed':
@@ -1645,7 +1656,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
   }, [autoHydrateKey, keeper.name, blockPrefs.tools, requestToolResult])
 
-  const matchedPreview = previewForObservedTurn(turnPreviews, activeTurn, snapshot?.updatedAt)
+  const matchedPreview = previewForObservedTurn(turnPreviews, activeTurn, snapshot?.updatedAt, snapshot?.retiredOwners)
   const effectivePreview = matchedPreview?.preview ?? activeTurn?.preview ?? null
   const hasTurnObservation = activeTurn !== null || effectivePreview !== null
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'

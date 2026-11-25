@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
-import { resourceCache } from '../../core/resource-cache'
+import { observedValue, resourceCache } from '../../core/resource-cache'
 import { releaseAllViewStreams } from '../../core/view-stream-slot'
 import {
   DEFAULT_CHAT_BLOCK_PREFS,
@@ -63,6 +63,17 @@ describe('owner-scoped turn progress', () => {
     expect(retainTurnPreview(seen, 'A', sample('A', 2, 30))).toBe(seen)
     expect(previewForObservedTurn(seen, null, 9)).toBe(stale)
     expect(retainTurnPreview(seen, 'A', sample('A', 4, 40))[0]?.live).toBe(true)
+  })
+  it('drops the first late frame of a retired owner and retains the next preview', () => {
+    const retired = new Set(['A'])
+    const late = sample('A', 1, 20)
+    const next = sample('B', 6, 25)
+    const seen = retainTurnPreview([], null, late, retired)
+    expect(seen).toEqual([])
+    const pending = retainTurnPreview(seen, null, next, retired)
+    expect(retainTurnPreview(pending, null, late, retired)).toBe(pending)
+    expect(previewForObservedTurn([late, next], null, 10, retired)).toBe(next)
+    expect(previewForObservedTurn(pending, turn('B', 5), 30, retired)).toBe(next)
   })
 })
 
@@ -601,6 +612,25 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     cleanup()
     releaseAllViewStreams()
     vi.restoreAllMocks()
+  })
+
+  it('updates a disconnected turn timer only when a newer observation arrives', () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'))
+    const keeper = makeRosterKeeper()
+    const startedAt = 1_700_000_000
+    const active: KeeperActiveTurn = {
+      owner_key: 'A', lane: 'autonomous', started_at_unix: startedAt, tool_in_flight: null,
+    }
+    const at = (elapsed: number) => {
+      const turns = observedValue(new Map([[keeper.name, {
+        keeper_name: keeper.name, status: 'ok' as const, active, chat_control_token: null, waiting: null,
+      }]]), (startedAt + elapsed) * 1000)
+      return html`<${KeeperChatTab} keeper=${keeper} turnSnapshot=${turns} onInspect=${vi.fn()} onMutated=${vi.fn()} />`
+    }
+    const view = render(at(10))
+    expect(view.getByRole('timer').textContent).toBe('10s')
+    view.rerender(at(30))
+    expect(view.getByRole('timer').textContent).toBe('30s')
   })
 
   it('extracts Keeper Delegate metadata (including status_many operations) and collapses consecutive tool-only rows with stable IDs', () => {

@@ -11,7 +11,9 @@ export function retainTurnPreview(
   previous: readonly ReceivedTurnPreview[],
   activeOwner: string | null | undefined,
   incoming: ReceivedTurnPreview,
+  retiredOwners?: ReadonlySet<string>,
 ): readonly ReceivedTurnPreview[] {
+  if (retiredOwners?.has(incoming.ownerKey)) return previous
   const prior = previous.find((sample) => sample.ownerKey === incoming.ownerKey)
   if (prior) {
     const before = prior.preview
@@ -33,11 +35,13 @@ export function previewForObservedTurn(
   previews: readonly ReceivedTurnPreview[],
   activeTurn: KeeperActiveTurn | null,
   snapshotAt: number | undefined,
+  retiredOwners?: ReadonlySet<string>,
 ): ReceivedTurnPreview | undefined {
   if (activeTurn) {
     const through = activeTurn.preview_observed_through ?? activeTurn.preview?.revision ?? 0
     return previews.find((sample) => sample.ownerKey === activeTurn.owner_key
       && (sample.preview.revision ?? 0) > through)
   }
-  return previews.find((sample) => snapshotAt === undefined || sample.receivedAt > snapshotAt)
+  return previews.find((sample) => !retiredOwners?.has(sample.ownerKey)
+    && (snapshotAt === undefined || sample.receivedAt > snapshotAt))
 }

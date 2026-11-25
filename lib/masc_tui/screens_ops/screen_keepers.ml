@@ -1181,6 +1181,38 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                        tone = Some Theme.Status_ok;
                      });
               hotkey = Some "/Filter";
+              footer_hint =
+                Some
+                  (match model.keeper_stop_armed with
+                  | Some (armed_name, _) ->
+                      let inner_budget = Int.max 0 (left_rect.w - 6) in
+                      if inner_budget >= 34 then
+                        let ko_name =
+                          Grapheme.truncate_to_width
+                            ~max_width:(Int.max 4 (inner_budget - 22))
+                            armed_name
+                        in
+                        let en_name =
+                          Grapheme.truncate_to_width
+                            ~max_width:(Int.max 4 (inner_budget - 24))
+                            armed_name
+                        in
+                        Ops_common.say model
+                          ~ko:(Printf.sprintf "[D] %s 중지 · [Esc] 취소" ko_name)
+                          ~en:(Printf.sprintf "[D] Stop %s · [Esc] Cancel" en_name)
+                      else
+                        Ops_common.say model
+                          ~ko:"[D] 중지 확정 · [Esc] 취소"
+                          ~en:"[D] Confirm · [Esc] Cancel"
+                  | None ->
+                      if left_rect.w >= 39 then
+                        Ops_common.say model
+                          ~ko:"[W] 깨우기/온라인 · [D] 중지(2회)"
+                          ~en:"[W] Wake/Online · [D] Stop(2x)"
+                      else
+                        Ops_common.say model
+                          ~ko:"[W] 깨우기 · [D] 중지"
+                          ~en:"[W] Wake · [D] Stop");
               focused = Model.pane_focused model 0;
             }
           in
@@ -1246,6 +1278,22 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             Some
               (Ops_common.say model ~ko:"[Enter] 상세 · [[ ]] 모드"
                  ~en:"[Enter] Dive · [[ ]] Mode");
+          footer_hint =
+            Some
+              (match model.keeper_stop_armed with
+              | Some (armed_name, _) ->
+                  Ops_common.say model
+                    ~ko:(Printf.sprintf "[D] 한 번 더 눌러 '%s' 중지 · [Esc] 취소" armed_name)
+                    ~en:(Printf.sprintf "Press [D] again to stop '%s' · [Esc] Cancel" armed_name)
+              | None ->
+                  if rect.w >= 54 then
+                    Ops_common.say model
+                      ~ko:"[W] 깨우기/온라인 · [D] 중지(2회)"
+                      ~en:"[W] Wake/Online · [D] Stop(2x)"
+                  else
+                    Ops_common.say model
+                      ~ko:"[W] 깨우기 · [D] 중지"
+                      ~en:"[W] Wake · [D] Stop");
           focused = Model.body_has_focus model;
         }
       in

@@ -1619,3 +1619,20 @@ let bootstrap_fetches (m : Model.t) =
   in
   dedup_reqs (core_reqs @ view_reqs)
   |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+
+let keeper_lifecycle_refresh_fetches ~name (m : Model.t) =
+  let dive_reqs =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name = dn; tab }) when String.equal dn name ->
+        fetches_for_keeper_tab ~force:true ~name ~tab m
+    | Some
+        ( Nav.Dive_keeper _
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ )
+    | None ->
+        []
+  in
+  dedup_reqs (Cmd.Get_keepers_roster :: dive_reqs)
+  |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })

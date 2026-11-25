@@ -510,8 +510,24 @@ let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
   && (not on_knowledge_memory)
   && not korean_in_keeper_chat
 
-let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
-    ~last_voice_tick_ns ~toast_expires_ns ~voice_recording =
+let armed_expiry_deadline_ns (m : Model.t) : int64 option =
+  let stop_dl =
+    Option.map
+      (fun (_, armed_at) ->
+        Clock.Mono.to_ns
+          (Clock.Mono.after_s armed_at Model.keeper_stop_arm_window_s))
+      m.keeper_stop_armed
+  in
+  let quit_dl =
+    Option.map
+      (fun armed_at ->
+        Clock.Mono.to_ns (Clock.Mono.after_s armed_at Model.quit_arm_window_s))
+      m.quit_armed_at
+  in
+  earliest_opt stop_dl quit_dl
+
+let should_emit_tick ~oauth_poll_deadline_ns ~now_ns ~last_voice_tick_ns
+    ~toast_expires_ns ~arm_expires_ns ~voice_recording =
   let toast_expired =
     match toast_expires_ns with
     | Some exp -> Int64.compare now_ns exp >= 0
@@ -519,6 +535,16 @@ let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
   in
   let toast_deadline =
     match toast_expires_ns with
+    | Some exp when Int64.compare now_ns exp < 0 -> Some exp
+    | Some _ | None -> None
+  in
+  let arm_expired =
+    match arm_expires_ns with
+    | Some exp -> Int64.compare now_ns exp >= 0
+    | None -> false
+  in
+  let arm_deadline =
+    match arm_expires_ns with
     | Some exp when Int64.compare now_ns exp < 0 -> Some exp
     | Some _ | None -> None
   in
@@ -540,8 +566,10 @@ let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
     | Some due when Int64.compare now_ns due < 0 -> Some due
     | Some _ | None -> None
   in
-  ( toast_expired || voice_due || oauth_due
-  , earliest_opt (earliest_opt toast_deadline voice_deadline) oauth_deadline )
+  ( toast_expired || arm_expired || voice_due || oauth_due
+  , earliest_opt
+      (earliest_opt (earliest_opt toast_deadline arm_deadline) voice_deadline)
+      oauth_deadline )
 
 let clock_minute_of_unix wall_unix =
   if (not (Float.is_finite wall_unix)) || wall_unix <= 0.0 then 0L
@@ -1320,10 +1348,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     ~now_ns:now_after_ns ~wall_unix:wall_now
                     !model.keeper_context
                 in
+                let arm_expires_ns = armed_expiry_deadline_ns !model in
                 let emit_tick, extra =
                   should_emit_tick ~oauth_poll_deadline_ns ~now_ns:now_after_ns
                     ~last_voice_tick_ns:!last_voice_tick_ns ~toast_expires_ns
-                    ~voice_recording
+                    ~arm_expires_ns ~voice_recording
                 in
                 let minute_due, cur_minute, minute_deadline =
                   next_minute_tick ~now_ns:now_after_ns ~wall_unix:wall_now
@@ -1353,12 +1382,14 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                         ~now_ns:now_after_ns ~wall_unix:wall_now
                         !model.keeper_context
                     in
+                    let post_arm_expires = armed_expiry_deadline_ns !model in
                     let _, next_extra =
                       should_emit_tick
                         ~oauth_poll_deadline_ns:post_oauth_deadline
                         ~now_ns:now_after_ns
                         ~last_voice_tick_ns:!last_voice_tick_ns
-                        ~toast_expires_ns:post_toast_expires ~voice_recording
+                        ~toast_expires_ns:post_toast_expires
+                        ~arm_expires_ns:post_arm_expires ~voice_recording
                     in
                     earliest_opt
                       (earliest_opt next_extra (Some minute_deadline))

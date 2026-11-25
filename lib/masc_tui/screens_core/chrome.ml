@@ -1586,6 +1586,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Option.is_some (Memory_diagram.active_diagram model)
           || Model.has_active_memory_reading model
           || Option.is_some model.knowledge.armed_vote
+          || Option.is_some model.keeper_stop_armed
+          || Option.is_some model.quit_armed_at
           || Option.is_some model.knowledge.pending_wiki_edit_slug
           || (Option.is_none (Model.active_dive model)
               && Nav.equal_workspace model.nav.workspace Nav.Infra

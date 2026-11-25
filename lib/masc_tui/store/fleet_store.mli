@@ -173,6 +173,7 @@ type companies_nav_row =
   | Nav_company_collapsed of string
   | Nav_keeper of Wire_fleet.keeper_summary
 
+val keepers_list : t -> Wire_fleet.keeper_summary list
 val filtered_keepers : t -> Wire_fleet.keeper_summary list
 val companies_nav_rows : t -> companies_nav_row list
 val company_groups :

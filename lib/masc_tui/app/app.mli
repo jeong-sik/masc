@@ -185,17 +185,23 @@ val can_launch_pending_wiki_editor : Model.t -> bool
     gate, so a completed async wiki pre-fetch may safely suspend the terminal
     for [$EDITOR]. *)
 
+val armed_expiry_deadline_ns : Model.t -> int64 option
+(** Earliest monotonic nanosecond deadline at which an armed 2-press guard
+    ([keeper_stop_armed] or [quit_armed_at]) expires, or [None] when unarmed. *)
+
 val should_emit_tick :
   oauth_poll_deadline_ns:int64 option ->
   now_ns:int64 ->
   last_voice_tick_ns:int64 ->
   toast_expires_ns:int64 option ->
+  arm_expires_ns:int64 option ->
   voice_recording:bool ->
   bool * int64 option
 (** Pure active-timer gate returning [(emit_tick_now, next_extra_deadline_ns)].
     Returns [(false, None)] when idle (0 Hz pure sleep). When voice recording or
     an active keeper OAuth exchange poll is running, schedules wakeups strictly
-    at the active cadence rather than spinning idle ticks. *)
+    at the active cadence rather than spinning idle ticks. Also schedules prompt
+    wakeups for toast and armed-guard ([arm_expires_ns]) expiry deadlines. *)
 
 val clock_minute_of_unix : float -> int64
 (** Whole wall-clock minute index ([floor wall_unix / 60]), or [0L] for

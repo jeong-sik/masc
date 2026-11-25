@@ -79,6 +79,7 @@ type t = {
   voice_caps : voice_capabilities option;
   btw : btw_status;
   popup_selected : int;
+  popup_navigated : bool;
   popup_dismissed : bool;
 }
 
@@ -100,6 +101,7 @@ let empty =
     voice_caps = None;
     btw = Btw_idle;
     popup_selected = 0;
+    popup_navigated = false;
     popup_dismissed = false;
   }
 
@@ -193,7 +195,13 @@ let with_current_draft ?(reset_popup = true) f t =
     else String_map.add key next t.by_keeper
   in
   if reset_popup then
-    { t with by_keeper; popup_selected = 0; popup_dismissed = false }
+    {
+      t with
+      by_keeper;
+      popup_selected = 0;
+      popup_navigated = false;
+      popup_dismissed = false;
+    }
   else { t with by_keeper }
 
 let set_active_keeper name t =
@@ -226,12 +234,20 @@ let set_active_keeper name t =
       active_keeper = Some trimmed;
       by_keeper;
       popup_selected = 0;
+      popup_navigated = false;
       popup_dismissed = false;
     }
 
 let set_focus focused t =
   if Bool.equal t.focused focused then t
-  else { t with focused; popup_selected = 0; popup_dismissed = false }
+  else
+    {
+      t with
+      focused;
+      popup_selected = 0;
+      popup_navigated = false;
+      popup_dismissed = false;
+    }
 let is_focused t = t.focused
 
 let has_non_empty_draft t =
@@ -484,7 +500,7 @@ let set_preferred_mode preferred_mode t =
   with_current_draft ~reset_popup:false (fun d -> { d with preferred_mode }) t
 
 let move_popup ~delta ~count ~wrap t =
-  if count <= 0 then { t with popup_selected = 0 }
+  if count <= 0 then { t with popup_selected = 0; popup_navigated = false }
   else
     let cur = Store_scroll.clamp_index count t.popup_selected in
     let next =
@@ -493,12 +509,22 @@ let move_popup ~delta ~count ~wrap t =
         if r < 0 then r + count else r
       else Store_scroll.clamp_index count (cur + delta)
     in
-    { t with popup_selected = next; popup_dismissed = false }
+    {
+      t with
+      popup_selected = next;
+      popup_navigated = true;
+      popup_dismissed = false;
+    }
 
 let set_popup_selected idx t =
-  { t with popup_selected = max 0 idx; popup_dismissed = false }
+  {
+    t with
+    popup_selected = max 0 idx;
+    popup_navigated = true;
+    popup_dismissed = false;
+  }
 
-let dismiss_popup t = { t with popup_dismissed = true }
+let dismiss_popup t = { t with popup_dismissed = true; popup_navigated = false }
 
 let process_session_nonce =
   let pid = Unix.getpid () in
@@ -559,6 +585,7 @@ let enqueue_submission ~now ~keeper ~mode t =
           pending_txs;
           next_request_seq = next_seq;
           popup_selected = 0;
+          popup_navigated = false;
           popup_dismissed = false;
         }
       , msg )

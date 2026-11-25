@@ -406,7 +406,8 @@ type post_request =
       keeper : string;
       op : Wire_fleet.keeper_lifecycle_op;
       expected_workspace : (string * string) option;
-      from_modal : bool;
+      req_seq : int;
+      modal_submission_id : int option;
     }
   | Post_keeper_purge of {
       keeper : string;

@@ -14,15 +14,65 @@ let keeper_purge_path = "/api/v1/dashboard/agents/purge"
 
 type keeper_lifecycle_op =
   | Keeper_boot
+  | Keeper_wakeup
   | Keeper_pause
   | Keeper_resume of { operator_operation_id : string }
   | Keeper_shutdown
   | Keeper_reset
 
+let equal_keeper_lifecycle_op a b =
+  match (a, b) with
+  | Keeper_boot, Keeper_boot
+  | Keeper_wakeup, Keeper_wakeup
+  | Keeper_pause, Keeper_pause
+  | Keeper_shutdown, Keeper_shutdown
+  | Keeper_reset, Keeper_reset ->
+      true
+  | ( Keeper_resume { operator_operation_id = x }
+    , Keeper_resume { operator_operation_id = y } ) ->
+      String.equal x y
+  | ( Keeper_boot
+    , ( Keeper_wakeup
+      | Keeper_pause
+      | Keeper_resume _
+      | Keeper_shutdown
+      | Keeper_reset ) )
+  | ( Keeper_wakeup
+    , ( Keeper_boot
+      | Keeper_pause
+      | Keeper_resume _
+      | Keeper_shutdown
+      | Keeper_reset ) )
+  | ( Keeper_pause
+    , ( Keeper_boot
+      | Keeper_wakeup
+      | Keeper_resume _
+      | Keeper_shutdown
+      | Keeper_reset ) )
+  | ( Keeper_resume _
+    , ( Keeper_boot
+      | Keeper_wakeup
+      | Keeper_pause
+      | Keeper_shutdown
+      | Keeper_reset ) )
+  | ( Keeper_shutdown
+    , ( Keeper_boot
+      | Keeper_wakeup
+      | Keeper_pause
+      | Keeper_resume _
+      | Keeper_reset ) )
+  | ( Keeper_reset
+    , ( Keeper_boot
+      | Keeper_wakeup
+      | Keeper_pause
+      | Keeper_resume _
+      | Keeper_shutdown ) ) ->
+      false
+
 let keeper_lifecycle_path ~keeper = function
   | Keeper_boot ->
       Printf.sprintf "/api/v1/keepers/%s/boot" (percent_encode keeper)
-  | Keeper_pause | Keeper_resume _ ->
+  | Keeper_wakeup | Keeper_pause | Keeper_resume _ ->
       Printf.sprintf "/api/v1/keepers/%s/directive" (percent_encode keeper)
   | Keeper_shutdown ->
       Printf.sprintf "/api/v1/keepers/%s/shutdown" (percent_encode keeper)
@@ -31,16 +81,24 @@ let keeper_lifecycle_path ~keeper = function
 
 let keeper_lifecycle_op_label = function
   | Keeper_boot -> "boot"
+  | Keeper_wakeup -> "wakeup"
   | Keeper_pause -> "pause"
   | Keeper_resume _ -> "resume"
   | Keeper_shutdown -> "shutdown"
   | Keeper_reset -> "reset"
 
 let encode_ws_pair (base_path, masc_root) =
-  `Assoc [ ("base_path", `String base_path); ("masc_root", `String masc_root) ]
+  Wire_work.encode_expected_workspace { Wire_work.base_path; masc_root }
 
 let encode_keeper_lifecycle_body ?expected_workspace = function
   | Keeper_boot | Keeper_shutdown | Keeper_reset -> `Assoc []
+  | Keeper_wakeup ->
+      let ws_field =
+        match expected_workspace with
+        | Some ws -> [ ("expected_workspace", encode_ws_pair ws) ]
+        | None -> []
+      in
+      `Assoc (("action", `String "wakeup") :: ws_field)
   | Keeper_pause ->
       let ws_field =
         match expected_workspace with
@@ -2513,3 +2571,31 @@ let decode_turn_interrupt_response json =
   let* chat_control_token = optional_nonblank_string body "chat_control_token" in
   let* reason = optional_nonblank_string body "reason" in
   Ok { signalled; paused; chat_control_token; reason }
+
+type keeper_lifecycle_reply = {
+  ok : bool;
+  action : string option;
+  name : string option;
+  already_live : bool;
+  already_absent : bool;
+  committed : bool;
+  error : string option;
+}
+
+let decode_keeper_lifecycle_reply json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* ok = required_bool_field body "ok" in
+  let* action = optional_nonblank_string body "action" in
+  let* name = optional_nonblank_string body "name" in
+  let* already_live = decode_bool_field_or body "already_live" ~default:false in
+  let* already_absent =
+    decode_bool_field_or body "already_absent" ~default:false
+  in
+  let* committed = decode_bool_field_or body "committed" ~default:false in
+  let* error =
+    match optional_nonblank_string body "error" with
+    | Error _ as err -> err
+    | Ok (Some _ as msg) -> Ok msg
+    | Ok None -> optional_nonblank_string body "message"
+  in
+  Ok { ok; action; name; already_live; already_absent; committed; error }

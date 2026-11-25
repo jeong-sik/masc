@@ -16,6 +16,7 @@ let open_custom_inline_modal (m : Model.t)
       fields;
       active_field = 0;
       submitting = false;
+      submission_id = 0;
       error = None;
     }
   in
@@ -2604,6 +2605,26 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         elapsed >= 0.0 && elapsed <= Model.quit_arm_window_s
     | None -> false
   in
+  let is_keeper_stop_key =
+    Model.is_keeper_lifecycle_surface m
+    &&
+    match
+      Keymap.dispatch
+        ~scope_chain:(Keymap.Screen_context :: Model.focus_scope_chain m)
+        norm
+    with
+    | Some act -> Keymap.equal_action act Keymap.Keeper_stop_armed
+    | None -> false
+  in
+  let keeper_stop_arm_active =
+    Model.is_keeper_lifecycle_surface m
+    &&
+    match m.keeper_stop_armed with
+    | Some (_, armed_at) ->
+        let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+        elapsed >= 0.0 && elapsed < Model.keeper_stop_arm_window_s
+    | None -> false
+  in
   let m =
     if Option.is_some m.quit_armed_at && not is_quit_key then
       let toast =
@@ -2612,6 +2633,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         | other -> other
       in
       { m with quit_armed_at = None; toast }
+    else m
+  in
+  let m =
+    if Option.is_some m.keeper_stop_armed && not is_keeper_stop_key then
+      Model.disarm_keeper_stop m
     else m
   in
   let is_plain_escape =
@@ -2637,10 +2663,13 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
     | Keymap.Input.Function _ ->
         false
   in
-  (* Plain Esc consumes only the quit arm without popping an active dive/modal.
-     Every other non-Quit_app key disarms above AND continues normal dispatch
-     so the user's first keypress is never lost. *)
-  if quit_arm_active && (not is_quit_key) && is_plain_escape then (m, [])
+  (* Plain Esc consumes only an active arm (quit or keeper stop) without popping
+     an active dive/modal. Every other non-confirm key disarms above AND
+     continues normal dispatch so the user's first keypress is never lost. *)
+  if
+    (quit_arm_active && (not is_quit_key) && is_plain_escape)
+    || (keeper_stop_arm_active && (not is_keeper_stop_key) && is_plain_escape)
+  then (m, [])
   else
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
      mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
@@ -3871,6 +3900,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    && Nav.equal_runtime_tab m.runtime.active_tab
                                         Nav.Runtime_addons_browser ->
                                 Some Keymap.Refresh_browser_tabs
+                            | Some "W" when Model.is_keeper_lifecycle_surface m
+                              ->
+                                Some Keymap.Keeper_wake_or_online
+                            | Some "D" when Model.is_keeper_lifecycle_surface m
+                              ->
+                                Some Keymap.Keeper_stop_armed
                             | Some _ | None -> None
                       in
                       if is_ctrl_x then
@@ -3953,7 +3988,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Toggle_memory_chart
                       | Keymap.Open_external_editor
                       | Keymap.Delete_selected
-                      | Keymap.Link_task_goal ->
+                      | Keymap.Link_task_goal
+                      | Keymap.Keeper_wake_or_online
+                      | Keymap.Keeper_stop_armed ->
                           `Ignore
                     in
                     match
@@ -4249,6 +4286,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
     in
     match ev with
     | Keymap.Input.Wheel { dir; col; row } -> (
+        let m = Model.disarm_keeper_stop m in
         let gx = col - 1 in
         let gy = row - 1 in
         let move_dir =
@@ -4338,7 +4376,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
           || Model.equal_breakpoint m.breakpoint Model.Micro
         then (m, [])
         else
-          let m = cancel_edit m in
+          let m = m |> cancel_edit |> Model.disarm_keeper_stop in
           let gx = col - 1 in
           let gy = row - 1 in
           (* 1. Top Rail clickable [b] Menu toggle at cols 1..4, row 0 *)

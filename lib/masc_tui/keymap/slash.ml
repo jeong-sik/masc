@@ -15,6 +15,11 @@ type command_id =
   | Cmd_jump
   | Cmd_voice
   | Cmd_btw
+  | Cmd_wake
+  | Cmd_up
+  | Cmd_resume
+  | Cmd_pause
+  | Cmd_down
   | Cmd_queue
   | Cmd_context
   | Cmd_ctl
@@ -176,6 +181,11 @@ type parsed =
   | Jump
   | Voice
   | Btw of string
+  | Wake of string option
+  | Up of string option
+  | Resume of string option
+  | Pause of string option
+  | Down of string option
   | Queue
   | Context
   | Ctl of { action : keeper_ctl_action; target : string option }
@@ -224,24 +234,29 @@ let command_id_rank = function
   | Cmd_jump -> 10
   | Cmd_voice -> 11
   | Cmd_btw -> 12
-  | Cmd_queue -> 13
-  | Cmd_context -> 14
-  | Cmd_ctl -> 15
-  | Cmd_gate -> 16
-  | Cmd_exec -> 17
-  | Cmd_skill -> 18
-  | Cmd_prompt -> 19
-  | Cmd_preset -> 20
-  | Cmd_lane -> 21
-  | Cmd_addon -> 22
-  | Cmd_browser -> 23
-  | Cmd_tools -> 24
-  | Cmd_clear -> 25
-  | Cmd_theme -> 26
-  | Cmd_lang -> 27
-  | Cmd_help -> 28
-  | Cmd_restart -> 29
-  | Cmd_quit -> 30
+  | Cmd_wake -> 13
+  | Cmd_up -> 14
+  | Cmd_resume -> 15
+  | Cmd_pause -> 16
+  | Cmd_down -> 17
+  | Cmd_queue -> 18
+  | Cmd_context -> 19
+  | Cmd_ctl -> 20
+  | Cmd_gate -> 21
+  | Cmd_exec -> 22
+  | Cmd_skill -> 23
+  | Cmd_prompt -> 24
+  | Cmd_preset -> 25
+  | Cmd_lane -> 26
+  | Cmd_addon -> 27
+  | Cmd_browser -> 28
+  | Cmd_tools -> 29
+  | Cmd_clear -> 30
+  | Cmd_theme -> 31
+  | Cmd_lang -> 32
+  | Cmd_help -> 33
+  | Cmd_restart -> 34
+  | Cmd_quit -> 35
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -566,24 +581,29 @@ let parsed_tag = function
   | Jump -> 10
   | Voice -> 11
   | Btw _ -> 12
-  | Queue -> 13
-  | Context -> 14
-  | Ctl _ -> 15
-  | Gate _ -> 16
-  | Exec _ -> 17
-  | Skill _ -> 18
-  | Prompt _ -> 19
-  | Preset _ -> 20
-  | Lane _ -> 21
-  | Addon _ -> 22
-  | Browser _ -> 23
-  | Tools _ -> 24
-  | Clear -> 25
-  | Theme _ -> 26
-  | Lang _ -> 27
-  | Help -> 28
-  | Restart -> 29
-  | Quit -> 30
+  | Wake _ -> 13
+  | Up _ -> 14
+  | Resume _ -> 15
+  | Pause _ -> 16
+  | Down _ -> 17
+  | Queue -> 18
+  | Context -> 19
+  | Ctl _ -> 20
+  | Gate _ -> 21
+  | Exec _ -> 22
+  | Skill _ -> 23
+  | Prompt _ -> 24
+  | Preset _ -> 25
+  | Lane _ -> 26
+  | Addon _ -> 27
+  | Browser _ -> 28
+  | Tools _ -> 29
+  | Clear -> 30
+  | Theme _ -> 31
+  | Lang _ -> 32
+  | Help -> 33
+  | Restart -> 34
+  | Quit -> 35
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -593,6 +613,11 @@ let equal_parsed a b =
     | Model x, Model y -> Option.equal String.equal x y
     | Config x, Config y -> Option.equal String.equal x y
     | Btw x, Btw y -> String.equal x y
+    | Wake x, Wake y -> Option.equal String.equal x y
+    | Up x, Up y -> Option.equal String.equal x y
+    | Resume x, Resume y -> Option.equal String.equal x y
+    | Pause x, Pause y -> Option.equal String.equal x y
+    | Down x, Down y -> Option.equal String.equal x y
     | Ctl x, Ctl y ->
         equal_keeper_ctl_action x.action y.action
         && Option.equal String.equal x.target y.target
@@ -638,6 +663,11 @@ let equal_parsed a b =
       | Jump
       | Voice
       | Btw _
+      | Wake _
+      | Up _
+      | Resume _
+      | Pause _
+      | Down _
       | Queue
       | Context
       | Ctl _
@@ -717,6 +747,27 @@ let all : spec list =
       ~arg_hint:(Say.make ~ko:"<질문>" ~en:"<question>")
       ~ko:"현재 대화 흐름을 깨지 않는 일회성 사이드 질문"
       ~en:"Ask an ephemeral side-query without polluting thread" Slash_interaction;
+    mk Cmd_wake "/wake"
+      ~arg_hint:(Say.make ~ko:"[이름]" ~en:"[name]")
+      ~ko:"키퍼 깨우기 · 온라인 전환 · 일시정지 해제"
+      ~en:"Wake, bring online, or resume a keeper" Slash_interaction;
+    mk Cmd_up "/up"
+      ~arg_hint:(Say.make ~ko:"[이름]" ~en:"[name]")
+      ~ko:"키퍼 온라인 부팅 (/boot 별칭 · 일시정지 시 자동 재개)"
+      ~en:"Bring keeper online (alias /boot; auto-resumes if paused)"
+      Slash_interaction;
+    mk Cmd_resume "/resume"
+      ~arg_hint:(Say.make ~ko:"[이름]" ~en:"[name]")
+      ~ko:"일시정지·중지된 키퍼 재개"
+      ~en:"Resume a paused or stopped keeper" Slash_interaction;
+    mk Cmd_pause "/pause"
+      ~arg_hint:(Say.make ~ko:"[이름]" ~en:"[name]")
+      ~ko:"키퍼 일시정지"
+      ~en:"Pause a keeper" Slash_interaction;
+    mk Cmd_down "/down"
+      ~arg_hint:(Say.make ~ko:"[이름]" ~en:"[name]")
+      ~ko:"키퍼 중지 (오프라인)"
+      ~en:"Shut down a keeper (offline)" Slash_interaction;
     mk Cmd_queue "/queue" ~ko:"키퍼 큐 서랍 열기"
       ~en:"Open Keeper Queue drawer" Slash_interaction;
     mk Cmd_context "/context" ~ko:"키퍼 컨텍스트 윈도우 및 캐시 서랍 열기"
@@ -907,6 +958,11 @@ let parse raw =
                    expected = Say.make ~ko:"비어 있지 않은 질문" ~en:"non-empty question";
                    got = "";
                  }))
+    | "/wake" -> Ok (Wake arg)
+    | "/up" | "/boot" -> Ok (Up arg)
+    | "/resume" -> Ok (Resume arg)
+    | "/pause" -> Ok (Pause arg)
+    | "/down" -> Ok (Down arg)
     | "/queue" -> no_arg cmd Queue arg
     | "/context" -> no_arg cmd Context arg
     | "/ctl" -> (

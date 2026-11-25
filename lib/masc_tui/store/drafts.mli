@@ -87,6 +87,7 @@ type t = {
   voice_caps : voice_capabilities option;
   btw : btw_status;
   popup_selected : int;
+  popup_navigated : bool;
   popup_dismissed : bool;
 }
 

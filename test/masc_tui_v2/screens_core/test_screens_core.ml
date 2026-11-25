@@ -2939,6 +2939,7 @@ let test_setup_key_inline_modal_masks_secret () =
         ];
       active_field = 1;
       submitting = false;
+      submission_id = 0;
       error = None;
     }
   in
@@ -3592,6 +3593,7 @@ let test_pr54557_form_cursor_insertion_and_settings_secret_mask () =
           ];
         active_field = 0;
         submitting = false;
+        submission_id = 0;
         error = None;
       }
     in

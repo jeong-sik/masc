@@ -110,6 +110,7 @@ type inline_modal_state = {
   fields : modal_form_field list;
   active_field : int;
   submitting : bool;
+  submission_id : int;
   error : string option;
 }
 
@@ -199,9 +200,97 @@ type t = {
   ask_modal : ask_modal option;
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;
+  keeper_stop_armed : (string * Clock.Mono.t) option;
+  keeper_resume_op_ids : (string * string * int) list;
+  keeper_lifecycle_seq : int;
+  modal_submission_seq : int;
 }
 
 let quit_arm_window_s = 2.5
+let keeper_stop_arm_window_s = 2.5
+
+let keeper_stop_arm_toast_message ~name =
+  Say.make
+    ~ko:
+      (Printf.sprintf
+         "한 번 더 [D]를 누르면 '%s'을(를) 중지(오프라인)합니다 (Esc 취소)"
+         name)
+    ~en:
+      (Printf.sprintf "Press [D] again to stop '%s' (Esc to cancel)" name)
+
+let disarm_keeper_stop m =
+  match m.keeper_stop_armed with
+  | None -> m
+  | Some (armed_name, _) ->
+      let toast =
+        match m.toast with
+        | Some t
+          when Say.equal t.message
+                 (keeper_stop_arm_toast_message ~name:armed_name) ->
+            None
+        | other -> other
+      in
+      { m with keeper_stop_armed = None; toast }
+
+let next_keeper_lifecycle_seq m =
+  let seq = m.keeper_lifecycle_seq in
+  let next_seq = if seq = Int.max_int then 1 else seq + 1 in
+  (seq, { m with keeper_lifecycle_seq = next_seq })
+
+let next_modal_submission_id m =
+  let id = m.modal_submission_seq in
+  let next_id = if id = Int.max_int then 1 else id + 1 in
+  (id, { m with modal_submission_seq = next_id })
+
+let modal_mark_submitting_with_id (modal : inline_modal_state) m =
+  let sub_id, m1 = next_modal_submission_id m in
+  ( sub_id
+  , {
+      m1 with
+      inline_modal =
+        Some { modal with submitting = true; submission_id = sub_id; error = None };
+    } )
+
+let process_resume_nonce =
+  let pid = Unix.getpid () in
+  let ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
+  Printf.sprintf "%d-%Lx" pid ms
+
+let resume_op_id_for ~keeper m =
+  List.find_map
+    (fun (k, op_id, _seq) -> if String.equal k keeper then Some op_id else None)
+    m.keeper_resume_op_ids
+
+let get_or_create_resume_op_id ~keeper m =
+  match resume_op_id_for ~keeper m with
+  | Some op_id -> (op_id, m)
+  | None ->
+      let minted_seq, m1 = next_keeper_lifecycle_seq m in
+      let op_id =
+        Printf.sprintf "tui-resume-%s-%d" process_resume_nonce minted_seq
+      in
+      let keeper_resume_op_ids =
+        (keeper, op_id, minted_seq) :: m1.keeper_resume_op_ids
+      in
+      (op_id, { m1 with keeper_resume_op_ids })
+
+let clear_resume_op_id ~keeper ~operator_operation_id m =
+  let keeper_resume_op_ids =
+    List.filter
+      (fun (k, id, _seq) ->
+        not (String.equal k keeper && String.equal id operator_operation_id))
+      m.keeper_resume_op_ids
+  in
+  { m with keeper_resume_op_ids }
+
+let clear_resume_op_ids_for_keeper ~keeper ~before_seq m =
+  let keeper_resume_op_ids =
+    List.filter
+      (fun (k, _id, minted_seq) ->
+        not (String.equal k keeper && minted_seq < before_seq))
+      m.keeper_resume_op_ids
+  in
+  { m with keeper_resume_op_ids }
 
 let equal_breakpoint a b =
   match a, b with
@@ -345,6 +434,10 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     ask_modal = None;
     toast = None;
     quit_armed_at = None;
+    keeper_stop_armed = None;
+    keeper_resume_op_ids = [];
+    keeper_lifecycle_seq = 1;
+    modal_submission_seq = 1;
   }
 
 let active_dive m =
@@ -375,6 +468,34 @@ let target_keeper m =
       Option.map
         (fun (k : Wire_fleet.keeper_summary) -> k.name)
         (Fleet_store.selected_keeper_summary m.fleet)
+
+let target_keeper_for_lifecycle m =
+  match active_dive m with
+  | Some (Nav.Dive_keeper { name; _ }) ->
+      let trimmed = String.trim name in
+      if String.equal trimmed "" then None else Some trimmed
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      target_keeper m
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Keepers -> (
+          match m.fleet.selected_collapsed_company with
+          | Some _
+            when Nav.equal_keepers_fleet_mode m.fleet.fleet_mode
+                   Nav.Fleet_companies
+                 && m.nav.pane_index = 0
+                 && not m.nav.zoomed ->
+              None
+          | Some _ | None ->
+              Option.map
+                (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                (Fleet_store.selected_keeper_summary m.fleet))
+      | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra ->
+          target_keeper m)
 
 let pulse_panes m =
   if Attention.is_empty m.attention then
@@ -1709,6 +1830,23 @@ let is_text_capture_active m =
         false
     | None -> is_keeper_config_active m && Config_store.is_editing_field m.config
 
+let is_keeper_lifecycle_surface m =
+  Option.is_none m.nav.overlay
+  && (not (is_too_small_viewport m.viewport))
+  && (not (equal_breakpoint m.breakpoint Micro))
+  && (not (is_text_capture_active m))
+  && (not (sidebar_has_focus m))
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_keeper _) -> true
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      false
+  | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
+
 let inline_modal_for kind =
   let fields =
     match kind with
@@ -2559,7 +2697,7 @@ let inline_modal_for kind =
     | Nav.Setup_login_input_form _ ->
         0
   in
-  { kind; fields; active_field; submitting = false; error = None }
+  { kind; fields; active_field; submitting = false; submission_id = 0; error = None }
 
 let modal_field_raw_value ~key modal =
   match
@@ -3387,6 +3525,7 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
         ];
       active_field = 0;
       submitting = false;
+      submission_id = 0;
       error = None;
     }
   in
@@ -3426,6 +3565,13 @@ let with_toast ~now ?duration_s ~level message m =
   else
     let expires_at = Clock.Mono.after_s now eff_duration in
     { m with toast = Some { message; level; expires_at } }
+
+let with_incident ~source ~summary ~detail ~status m =
+  let incidents, _ =
+    Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix ~source ~summary
+      ~detail ~status m.incidents
+  in
+  { m with incidents }
 
 let expire_toast ~now m =
   match m.toast with

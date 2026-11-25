@@ -100,6 +100,8 @@ type action =
   | Interrupt_turn
   | Delete_selected
   | Link_task_goal
+  | Keeper_wake_or_online
+  | Keeper_stop_armed
   | Quit_app
 
 type scope =

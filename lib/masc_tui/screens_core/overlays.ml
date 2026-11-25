@@ -4645,6 +4645,8 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Interrupt_turn
         | Keymap.Delete_selected
         | Keymap.Link_task_goal
+        | Keymap.Keeper_wake_or_online
+        | Keymap.Keeper_stop_armed
         | Keymap.Quit_app ->
             Some e)
       grp.entries

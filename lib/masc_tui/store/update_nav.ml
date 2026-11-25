@@ -210,6 +210,11 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
+  | Slash.Cmd_wake
+  | Slash.Cmd_up
+  | Slash.Cmd_resume
+  | Slash.Cmd_pause
+  | Slash.Cmd_down
   | Slash.Cmd_queue
   | Slash.Cmd_context
   | Slash.Cmd_preset
@@ -222,7 +227,9 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_quit ->
       false
 
-let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
+let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
+    ~arg_raw =
+  let cmd_prefix = Option.value cmd_name ~default:spec.name in
   match spec.id with
   | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl
   | Slash.Cmd_gate | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_preset
@@ -250,24 +257,73 @@ let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
                   detail = Some arg;
                 })
         all_for_cmd
-  | Slash.Cmd_keeper ->
+  | Slash.Cmd_keeper
+  | Slash.Cmd_wake
+  | Slash.Cmd_up
+  | Slash.Cmd_resume
+  | Slash.Cmd_pause
+  | Slash.Cmd_down ->
+      let preferred_keeper =
+        match spec.id with
+        | Slash.Cmd_wake
+        | Slash.Cmd_up
+        | Slash.Cmd_resume
+        | Slash.Cmd_pause
+        | Slash.Cmd_down ->
+            Model.target_keeper_for_lifecycle m
+        | Slash.Cmd_keeper
+        | Slash.Cmd_pulse
+        | Slash.Cmd_work
+        | Slash.Cmd_knowledge
+        | Slash.Cmd_keepers
+        | Slash.Cmd_runtime
+        | Slash.Cmd_infra
+        | Slash.Cmd_model
+        | Slash.Cmd_config
+        | Slash.Cmd_incidents
+        | Slash.Cmd_jump
+        | Slash.Cmd_voice
+        | Slash.Cmd_btw
+        | Slash.Cmd_queue
+        | Slash.Cmd_context
+        | Slash.Cmd_ctl
+        | Slash.Cmd_gate
+        | Slash.Cmd_exec
+        | Slash.Cmd_skill
+        | Slash.Cmd_prompt
+        | Slash.Cmd_preset
+        | Slash.Cmd_lane
+        | Slash.Cmd_addon
+        | Slash.Cmd_browser
+        | Slash.Cmd_tools
+        | Slash.Cmd_clear
+        | Slash.Cmd_theme
+        | Slash.Cmd_lang
+        | Slash.Cmd_help
+        | Slash.Cmd_restart
+        | Slash.Cmd_quit ->
+            None
+      in
       let rank_keeper (k : Wire_fleet.keeper_summary) =
         let q = String.lowercase_ascii (String.trim arg_raw) in
         let n = String.lowercase_ascii k.name in
-        if String.equal q "" then 0
+        let is_preferred =
+          Option.equal String.equal preferred_keeper (Some k.name)
+        in
+        if String.equal q "" then if is_preferred then 0 else 1
         else if String.equal n q then 0
         else if String.starts_with ~prefix:q n then 1
         else if contains_ci ~needle:q k.name then 2
         else 3
       in
-      Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
+      Fleet_store.keepers_list m.fleet
       |> List.filter (fun (k : Wire_fleet.keeper_summary) ->
              contains_ci ~needle:arg_raw k.name
              || contains_ci ~needle:arg_raw k.company)
       |> List.stable_sort (fun a b ->
              Int.compare (rank_keeper a) (rank_keeper b))
       |> List.map (fun (k : Wire_fleet.keeper_summary) ->
-             let full_text = spec.name ^ " " ^ k.name in
+             let full_text = cmd_prefix ^ " " ^ k.name in
              {
                kind = Popup_slash_arg { spec; arg = k.name; full_text };
                trigger = full_text;
@@ -407,12 +463,16 @@ let resolve_composer_popup (m : Model.t) : composer_popup =
           match
             List.find_opt
               (fun (s : Slash.spec) ->
-                String.equal (String.lowercase_ascii s.name) cmd_tok)
+                String.equal (String.lowercase_ascii s.name) cmd_tok
+                || (String.equal cmd_tok "/boot"
+                    && Slash.equal_command_id s.id Slash.Cmd_up))
               Slash.all
           with
           | None -> Composer_popup_none
           | Some spec ->
-              let items = resolve_slash_arg_candidates m spec ~arg_raw in
+              let items =
+                resolve_slash_arg_candidates ~cmd_name:cmd_tok m spec ~arg_raw
+              in
               if items = [] then Composer_popup_none
               else
                 let selected =
@@ -521,8 +581,18 @@ type palette_section =
   | Pal_sec_settings
   | Pal_sec_slash
 
+type keeper_lifecycle_op =
+  | Op_wake_or_online
+  | Op_pause
+  | Op_resume
+  | Op_shutdown
+
 type palette_action =
   | Pal_keymap_action of Keymap.action
+  | Pal_keeper_lifecycle of {
+      keeper : string;
+      op : keeper_lifecycle_op;
+    }
   | Pal_menu_target of Nav.menu_target
   | Pal_dive_keeper of string
   | Pal_select_company of string
@@ -1740,8 +1810,69 @@ let palette_entries_with_overflow (m : Model.t) :
     if hidden > 0 then overflow := (sec, hidden) :: !overflow;
     shown
   in
+  let keeper_lifecycle_entries =
+    match Model.target_keeper_for_lifecycle m with
+    | None -> []
+    | Some name ->
+        let specs =
+          [
+            ( Op_wake_or_online
+            , "W"
+            , "/wake"
+            , Theme.Status_active
+            , Say.make
+                ~ko:(Printf.sprintf "키퍼: 깨우기 / 온라인 (%s)" name)
+                ~en:(Printf.sprintf "Keeper: Wake / Online (%s)" name)
+            , "wake online boot up 깨우기 온라인 부팅 " ^ name );
+            ( Op_pause
+            , "—"
+            , "/pause"
+            , Theme.Status_active
+            , Say.make
+                ~ko:(Printf.sprintf "키퍼: 일시정지 (%s)" name)
+                ~en:(Printf.sprintf "Keeper: Pause (%s)" name)
+            , "pause 일시정지 " ^ name );
+            ( Op_resume
+            , "—"
+            , "/resume"
+            , Theme.Status_active
+            , Say.make
+                ~ko:(Printf.sprintf "키퍼: 재개 (%s)" name)
+                ~en:(Printf.sprintf "Keeper: Resume (%s)" name)
+            , "resume online 재개 온라인 " ^ name );
+            ( Op_shutdown
+            , "D"
+            , "/down"
+            , Theme.Status_attention
+            , Say.make
+                ~ko:(Printf.sprintf "키퍼: 중지 / 오프라인 (%s)" name)
+                ~en:(Printf.sprintf "Keeper: Shutdown (%s)" name)
+            , "shutdown down stop offline 중지 오프라인 " ^ name );
+          ]
+        in
+        List.filter_map
+          (fun (op, badge, slash, tone, title_say, keywords) ->
+            let haystack =
+              Printf.sprintf "%s %s %s %s %s" badge slash
+                (Say.resolve Say.Lang_ko title_say)
+                (Say.resolve Say.Lang_en title_say)
+                keywords
+            in
+            if String.equal q "" || Option.is_some (fuzzy_opt haystack) then
+              Some
+                {
+                  section = Pal_sec_commands;
+                  badge;
+                  title = Say.resolve lang title_say;
+                  meta = slash;
+                  tone = Some tone;
+                  action = Pal_keeper_lifecycle { keeper = name; op };
+                }
+            else None)
+          specs
+  in
   let cmd_entries =
-    palette_filtered_commands m
+    (palette_filtered_commands m
     |> List.map (fun (c : Keymap.palette_command) ->
            let slash_s =
              match c.slash_twin with Some s -> s | None -> ""
@@ -1753,7 +1884,8 @@ let palette_entries_with_overflow (m : Model.t) :
              meta = slash_s;
              tone = Some Theme.Status_active;
              action = Pal_keymap_action c.action;
-           })
+           }))
+    @ keeper_lifecycle_entries
   in
   let ws_entries =
     Nav.all_menu_items
@@ -5084,17 +5216,17 @@ let submit_inline_modal ~now (m : Model.t) =
               in
               let op_res =
                 match action_raw with
-                | "boot" -> Ok Wire_fleet.Keeper_boot
-                | "pause" -> Ok Wire_fleet.Keeper_pause
+                | "boot" -> Ok (Wire_fleet.Keeper_boot, m)
+                | "pause" -> Ok (Wire_fleet.Keeper_pause, m)
                 | "resume" ->
-                    let operator_operation_id =
-                      Printf.sprintf "tui-resume-%s-%Ld" keeper
-                        (Clock.Mono.to_ns now)
+                    let operator_operation_id, m1 =
+                      Model.get_or_create_resume_op_id ~keeper m
                     in
-                    Ok (Wire_fleet.Keeper_resume { operator_operation_id })
+                    Ok
+                      (Wire_fleet.Keeper_resume { operator_operation_id }, m1)
                 | "shutdown" ->
                     if String.equal confirm keeper then
-                      Ok Wire_fleet.Keeper_shutdown
+                      Ok (Wire_fleet.Keeper_shutdown, m)
                     else
                       Error
                         (Printf.sprintf
@@ -5102,7 +5234,7 @@ let submit_inline_modal ~now (m : Model.t) =
                            keeper)
                 | "reset" ->
                     if String.equal confirm keeper then
-                      Ok Wire_fleet.Keeper_reset
+                      Ok (Wire_fleet.Keeper_reset, m)
                     else
                       Error
                         (Printf.sprintf
@@ -5113,19 +5245,24 @@ let submit_inline_modal ~now (m : Model.t) =
               in
               match op_res with
               | Error err -> set_modal_error err
-              | Ok op ->
-                  ( mark_submitting m
+              | Ok (op, m1) ->
+                  let sub_id, m2 =
+                    Model.modal_mark_submitting_with_id modal m1
+                  in
+                  let req_seq, m3 = Model.next_keeper_lifecycle_seq m2 in
+                  ( m3
                   , [
                       Cmd.Http_post
                         {
-                          epoch = m.epoch;
+                          epoch = m3.epoch;
                           req =
                             Cmd.Post_keeper_lifecycle
                               {
                                 keeper;
                                 op;
                                 expected_workspace = ws_pair;
-                                from_modal = true;
+                                req_seq;
+                                modal_submission_id = Some sub_id;
                               };
                         };
                     ] ))
@@ -6376,6 +6513,8 @@ let help_max_scroll (m : Model.t) =
             | Keymap.Interrupt_turn
             | Keymap.Delete_selected
             | Keymap.Link_task_goal
+            | Keymap.Keeper_wake_or_online
+            | Keymap.Keeper_stop_armed
             | Keymap.Quit_app ->
                 acc + 1)
           0 grp.entries

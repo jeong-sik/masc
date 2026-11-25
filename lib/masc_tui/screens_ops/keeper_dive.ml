@@ -3462,7 +3462,17 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
              ~en:"[[ ]] Tabs · [y] Copy · [Esc] Fleet")
     in
     let footer_hint =
-      if embedded then
+      let stop_armed_for_here =
+        match model.keeper_stop_armed with
+        | Some (armed_name, _) -> String.equal armed_name name
+        | None -> false
+      in
+      if stop_armed_for_here then
+        Some
+          (Ops_common.say model
+             ~ko:"[D] 한 번 더 눌러 중지 확정 · [Esc] 취소"
+             ~en:"Press [D] again to confirm stop · [Esc] Cancel")
+      else if embedded then
         if
           Nav.equal_keeper_tab tab Nav.Keeper_config
           && Model.is_keeper_config_active model
@@ -3479,12 +3489,26 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
             (Ops_common.say model
                ~ko:"[Enter] 전문 읽기 · [z] 확대 · [Tab] 목록"
                ~en:"[Enter] Read · [z] Zoom · [Tab] Fleet")
+        else if rect.w >= 73 then
+          Some
+            (Ops_common.say model
+               ~ko:"[W] 깨우기 · [D] 중지(2회) · [Enter] Dive · [c] 채팅 · [V] 음성 PTT"
+               ~en:"[W] Wake/Online · [D] Stop(2x) · [Enter] Dive · [c] Chat · [V] PTT")
         else
           Some
             (Ops_common.say model
-               ~ko:"[Enter] Dive · [c] 바로 채팅 · [V] 음성 PTT"
-               ~en:"[Enter] Dive · [c] Quick Chat · [V] Voice PTT")
-      else None
+               ~ko:"[W] 깨우기 · [D] 중지 · [Enter] Dive · [c] 채팅 · [V] PTT"
+               ~en:"[W] Wake · [D] Stop · [Enter] Dive · [c] Chat · [V] PTT")
+      else if rect.w >= 54 then
+        Some
+          (Ops_common.say model
+             ~ko:"[W] 깨우기/온라인 · [D] 중지(2회)"
+             ~en:"[W] Wake/Online · [D] Stop(2x)")
+      else
+        Some
+          (Ops_common.say model
+             ~ko:"[W] 깨우기 · [D] 중지"
+             ~en:"[W] Wake · [D] Stop")
     in
     let card_spec : Card.spec =
       {

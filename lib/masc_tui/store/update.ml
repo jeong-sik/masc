@@ -126,12 +126,15 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
     else next2.nav.overlay
   in
   let next =
-    {
-      next2 with
-      drafts;
-      config;
-      nav = { next2.nav with overlay; pane_index; filter_focused };
-    }
+    let next =
+      {
+        next2 with
+        drafts;
+        config;
+        nav = { next2.nav with overlay; pane_index; filter_focused };
+      }
+    in
+    if micro_locked then Model.disarm_keeper_stop next else next
   in
   (* Preserve active user overlays/modals across resize while defensively
      clearing any explicit [Micro_viewport] gate once enlarged >= 80x24. *)
@@ -320,13 +323,22 @@ let step_raw ~now (m : Model.t) = function
         match m.quit_armed_at with
         | Some armed_at ->
             let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
-            if elapsed < 0.0 || elapsed > Model.quit_arm_window_s then None
+            if elapsed < 0.0 || elapsed >= Model.quit_arm_window_s then None
             else Some armed_at
         | None -> None
       in
+      let m_stop_checked =
+        match m.keeper_stop_armed with
+        | Some (_, armed_at) ->
+            let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+            if elapsed < 0.0 || elapsed >= Model.keeper_stop_arm_window_s then
+              Model.disarm_keeper_stop m
+            else m
+        | None -> m
+      in
       let next0 =
         let m' =
-          { m with freshness; fleet; drafts; quit_armed_at }
+          { m_stop_checked with freshness; fleet; drafts; quit_armed_at }
           |> Model.expire_toast ~now
         in
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
@@ -574,7 +586,9 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       runtime;
       keeper_context =
         Keeper_context_store.clear_epoch_logins after.keeper_context;
+      keeper_resume_op_ids = [];
     }
+    |> Model.disarm_keeper_stop
 
 (* The view planner only returns commands. Reserve its inventory read before the
    next UI event can plan the same generation or submit from the previous read.
@@ -601,6 +615,17 @@ let step ~now m msg =
       if Int.equal clamped next0.nav.pane_index then next0
       else { next0 with nav = { next0.nav with pane_index = clamped } }
     else next0
+  in
+  let next0 =
+    match next0.keeper_stop_armed with
+    | Some (armed_name, _)
+      when (not (Model.is_keeper_lifecycle_surface next0))
+           || not
+                (Option.equal String.equal
+                   (Model.target_keeper_for_lifecycle next0)
+                   (Some armed_name)) ->
+        Model.disarm_keeper_stop next0
+    | Some _ | None -> next0
   in
   let view_stream_changed =
     not

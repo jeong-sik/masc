@@ -1830,6 +1830,65 @@ let test_keeper_turns_preview_roundtrip () =
           Alcotest.fail "expected Turn_active for r2")
   | Ok _ -> Alcotest.fail "expected exactly two keeper turn rows"
 
+(* POST /api/v1/keepers/:name/directive: TUI directive encoder matches the
+   server's workspace precondition validation and Resume_owner parser. *)
+let test_keeper_lifecycle_directive_roundtrip () =
+  with_workspace @@ fun config expected_workspace ->
+  let ws_pair = (expected_workspace.base_path, expected_workspace.masc_root) in
+  let resume_body =
+    Wire_fleet.encode_keeper_lifecycle_body
+      ~expected_workspace:ws_pair
+      (Wire_fleet.Keeper_resume { operator_operation_id = "op-rt-resume-1" })
+  in
+  (match Workspace.validate_expected_workspace ~config resume_body with
+  | Error _ ->
+      Alcotest.fail "server validate_expected_workspace rejected TUI resume body"
+  | Ok validated -> (
+      match
+        Server_dashboard_http_keeper_api_post.For_testing.parse_resume_request
+          validated
+      with
+      | Ok op_id ->
+          Alcotest.(check string) "server parsed operator_operation_id"
+            "op-rt-resume-1" op_id
+      | Error err ->
+          Alcotest.fail ("server parse_resume_request rejected TUI body: " ^ err)));
+  (* Plain wakeup & pause bodies pass workspace precondition and fail only with
+     "request is not Resume_owner" (meaning server parsed them as Plain_directive!). *)
+  List.iter
+    (fun (label, op) ->
+      let body =
+        Wire_fleet.encode_keeper_lifecycle_body ~expected_workspace:ws_pair op
+      in
+      match Workspace.validate_expected_workspace ~config body with
+      | Error _ ->
+          Alcotest.fail
+            ("server validate_expected_workspace rejected " ^ label)
+      | Ok validated -> (
+          match
+            Server_dashboard_http_keeper_api_post.For_testing.parse_resume_request
+              validated
+          with
+          | Error "request is not Resume_owner" -> ()
+          | Ok _ -> Alcotest.fail (label ^ " must not parse as Resume_owner")
+          | Error other ->
+              Alcotest.fail
+                (Printf.sprintf "server rejected %s directive: %s" label other)))
+    [
+      ("wakeup", Wire_fleet.Keeper_wakeup);
+      ("pause", Wire_fleet.Keeper_pause);
+    ];
+  (* Mismatched workspace precondition is rejected by server *)
+  let wrong_ws_pair = ("/nonexistent/other", "/nonexistent/other/.masc") in
+  let bad_body =
+    Wire_fleet.encode_keeper_lifecycle_body ~expected_workspace:wrong_ws_pair
+      Wire_fleet.Keeper_wakeup
+  in
+  Alcotest.(check bool) "mismatched expected_workspace rejected" true
+    (match Workspace.validate_expected_workspace ~config bad_body with
+    | Error Workspace.Workspace_precondition_failed -> true
+    | Error Workspace.Invalid_workspace_precondition | Ok _ -> false)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1881,6 +1940,9 @@ let () =
           Alcotest.test_case
             "Keeper_turn_preview.to_json -> decode_keeper_turns"
             `Quick test_keeper_turns_preview_roundtrip;
+          Alcotest.test_case
+            "encode_keeper_lifecycle_body -> validate_expected_workspace & parse_resume_request"
+            `Quick test_keeper_lifecycle_directive_roundtrip;
         ] );
       ( "knowledge",
         [

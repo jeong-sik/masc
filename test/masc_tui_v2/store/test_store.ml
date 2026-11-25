@@ -1223,7 +1223,7 @@ let test_subscriptions_bounded_and_zero_polling () =
   Alcotest.(check (list int)) "next frame appends after the reset" [ 2; 1 ]
     (List.map (fun (e : Wire_infra.system_log_entry) -> e.seq) m_logs4.infra.logs)
 
-(* 6. Keymap actions & all 22 Slash commands *)
+(* 6. Keymap actions & all 27 Slash commands *)
 let test_keymap_and_slash_commands () =
   let m0 = Model.initial () in
   (* 1..6 switch workspaces *)
@@ -1297,7 +1297,7 @@ let test_keymap_and_slash_commands () =
   in
   Alcotest.(check bool) "Esc popped Dive_keeper" true
     (Option.is_none (Model.active_dive m_popped));
-  (* Slash commands: exercise all 22 *)
+  (* Slash commands: exercise all 27 *)
   let slash_cases =
     [
       "/pulse";
@@ -1313,6 +1313,12 @@ let test_keymap_and_slash_commands () =
       "/jump";
       "/voice";
       "/btw quick check";
+      "/wake alpha";
+      "/up alpha";
+      "/boot alpha";
+      "/resume alpha";
+      "/pause alpha";
+      "/down alpha";
       "/queue";
       "/context";
       "/tools full";
@@ -18262,7 +18268,8 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
         keeper = "alpha";
         op = Wire_fleet.Keeper_boot;
         expected_workspace = Some ws_pair;
-        from_modal = false;
+        req_seq = 1;
+        modal_submission_id = None;
       }
   in
   Alcotest.(check string) "keeper boot path" "/api/v1/keepers/alpha/boot"
@@ -18275,7 +18282,8 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
         keeper = "alpha";
         op = Wire_fleet.Keeper_resume { operator_operation_id = "op-42" };
         expected_workspace = Some ws_pair;
-        from_modal = false;
+        req_seq = 2;
+        modal_submission_id = None;
       }
   in
   Alcotest.(check string) "keeper directive path"
@@ -20511,6 +20519,1663 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     "#20c: has_active_memory_reading is false outside Memory scope" false
     (Model.has_active_memory_reading m_stale_mr)
 
+let test_keeper_lifecycle_controls_and_guards () =
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-1";
+      base_path = "/tmp/ws";
+      masc_root = "/tmp/ws/.masc";
+      workspace_sha256 = Some "sha-ws";
+    }
+  in
+  let exp_ws : Wire_work.expected_workspace =
+    { base_path = "/tmp/ws"; masc_root = "/tmp/ws/.masc" }
+  in
+  let mk_k ~name ~paused ~keepalive_running ~health : Wire_fleet.keeper_summary =
+    let base = sample_keeper name in
+    { base with paused; keepalive_running; health }
+  in
+  let k_paused =
+    mk_k ~name:"alpha" ~paused:true ~keepalive_running:false
+      ~health:Wire_fleet.Keeper_paused
+  in
+  let k_offline =
+    mk_k ~name:"beta" ~paused:false ~keepalive_running:false
+      ~health:Wire_fleet.Keeper_offline
+  in
+  let k_live =
+    mk_k ~name:"gamma" ~paused:false ~keepalive_running:true
+      ~health:Wire_fleet.Keeper_healthy
+  in
+  let m0 =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base =
+      {
+        base with
+        server_identity = { base.server_identity with workspace = Some ws_id };
+      }
+    in
+    let m_r, _ =
+      Update.step ~now:t0 base
+        (Msg.Http_reply
+           {
+             epoch = base.epoch;
+             reply =
+               Msg.Reply_keepers_roster
+                 (Ok (roster_of [ k_paused; k_offline; k_live ]));
+           })
+    in
+    let m_k, _ = Update.step ~now:t0 m_r (Msg.Key_event (char_key "4")) in
+    m_k
+  in
+  let find_post cmds =
+    List.find_map
+      (function Cmd.Http_post { req; _ } -> Some req | _ -> None)
+      (Cmd.flatten cmds)
+  in
+  let expect_expected_ws ws_opt =
+    match ws_opt with
+    | Some (base_path, masc_root) ->
+        Alcotest.(check string) "expected_workspace.base_path" exp_ws.base_path
+          base_path;
+        Alcotest.(check string) "expected_workspace.masc_root" exp_ws.masc_root
+          masc_root
+    | None -> Alcotest.fail "expected expected_workspace to be attached"
+  in
+  (* 1. Smart [W] across all 3 keeper states on Screen_keepers *)
+  (* 1a. paused=true (alpha) -> Keeper_resume with operator_operation_id + expected_workspace *)
+  let m_w1, cmds_w1 =
+    Update.step ~now:t0 m0 (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let op_id_1, req_seq_1 =
+    match find_post cmds_w1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "alpha";
+             op = Wire_fleet.Keeper_resume { operator_operation_id };
+             expected_workspace;
+             req_seq;
+             modal_submission_id = None;
+           }) ->
+        expect_expected_ws expected_workspace;
+        Alcotest.(check bool) "non-empty op_id" true
+          (String.length operator_operation_id > 0);
+        (operator_operation_id, req_seq)
+    | _ -> Alcotest.fail "W on paused keeper must emit Keeper_resume"
+  in
+  (* Failed uncommitted resume preserves operator_operation_id on retry *)
+  let m_w1_fail, _ =
+    Update.step ~now:t1 m_w1
+      (Msg.Http_reply
+         {
+           epoch = m_w1.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op =
+                   Wire_fleet.Keeper_resume { operator_operation_id = op_id_1 };
+                 req_seq = req_seq_1;
+                 modal_submission_id = None;
+                 result =
+                   Error
+                     (Msg.Http_error
+                        {
+                          status = 500;
+                          body = {|{"ok":false,"error":"temporary lock"}|};
+                          api_error = None;
+                        });
+               };
+         })
+  in
+  Alcotest.(check (option string)) "uncommitted failure keeps pending op_id"
+    (Some op_id_1) (Model.resume_op_id_for ~keeper:"alpha" m_w1_fail);
+  (* [a] quick-action also reuses the exact same operator_operation_id SSOT *)
+  let _, cmds_a_reuse =
+    Update.step ~now:t1 m_w1_fail (Msg.Key_event (char_key "a"))
+  in
+  (match find_post cmds_a_reuse with
+  | Some
+      (Cmd.Post_keeper_lifecycle
+         {
+           keeper = "alpha";
+           op = Wire_fleet.Keeper_resume { operator_operation_id };
+           modal_submission_id = None;
+           _;
+         }) ->
+      Alcotest.(check string) "[a] retry reuses exact same operator_operation_id"
+        op_id_1 operator_operation_id
+  | _ -> Alcotest.fail "[a] on paused keeper must emit Keeper_resume");
+  let m_w1_retry, cmds_w1_retry =
+    Update.step ~now:t1 m_w1_fail (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let req_seq_retry =
+    match find_post cmds_w1_retry with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "alpha";
+             op = Wire_fleet.Keeper_resume { operator_operation_id };
+             req_seq;
+             modal_submission_id = None;
+             _;
+           }) ->
+        Alcotest.(check string) "retry reuses exact same operator_operation_id"
+          op_id_1 operator_operation_id;
+        req_seq
+    | _ -> Alcotest.fail "retry W must emit Keeper_resume"
+  in
+  (* 202 partial resume (committed=true, ok=false) clears pending op_id, auto-boots, refreshes roster, & records error incident *)
+  let incidents_before_202 = Incidents.count m_w1_retry.incidents in
+  let m_w1_202, cmds_w1_202 =
+    Update.step ~now:t1 m_w1_retry
+      (Msg.Http_reply
+         {
+           epoch = m_w1_retry.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op =
+                   Wire_fleet.Keeper_resume { operator_operation_id = op_id_1 };
+                 req_seq = req_seq_retry;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = false;
+                       action = Some "resume";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = true;
+                       error = Some "lane offline";
+                     };
+               };
+         })
+  in
+  Alcotest.(check (option string)) "202 committed clears pending op_id" None
+    (Model.resume_op_id_for ~keeper:"alpha" m_w1_202);
+  Alcotest.(check bool) "202 committed dispatches Keeper_boot follow-up" true
+    (match find_post cmds_w1_202 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "alpha";
+             op = Wire_fleet.Keeper_boot;
+             req_seq;
+             modal_submission_id = None;
+             _;
+           }) ->
+        req_seq > req_seq_retry
+    | _ -> false);
+  Alcotest.(check bool) "202 committed also refreshes Get_keepers_roster" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keepers_roster; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_w1_202));
+  Alcotest.(check bool) "202 committed records non-empty reply.error as incident" true
+    (Incidents.count m_w1_202.incidents = incidents_before_202 + 1
+    &&
+    match m_w1_202.incidents.entries with
+    | inc :: _ ->
+        String.equal inc.detail "lane offline"
+        && Health.equal_incident_status inc.status Health.Retried
+    | [] -> false);
+  (* 1b. offline unpaused (beta) -> Keeper_boot *)
+  let m_beta = { m0 with fleet = Fleet_store.select_keeper "beta" m0.fleet } in
+  let _, cmds_beta =
+    Update.step ~now:t0 m_beta (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "W on offline unpaused keeper emits Keeper_boot" true
+    (match find_post cmds_beta with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "beta";
+             op = Wire_fleet.Keeper_boot;
+             modal_submission_id = None;
+             _;
+           }) ->
+        true
+    | _ -> false);
+  (* 1c. online running (gamma) -> Keeper_wakeup *)
+  let m_gamma = { m0 with fleet = Fleet_store.select_keeper "gamma" m0.fleet } in
+  let _, cmds_gamma =
+    Update.step ~now:t0 m_gamma (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  (match find_post cmds_gamma with
+  | Some
+      (Cmd.Post_keeper_lifecycle
+         {
+           keeper = "gamma";
+           op = Wire_fleet.Keeper_wakeup;
+           expected_workspace;
+           modal_submission_id = None;
+           _;
+         }) ->
+      expect_expected_ws expected_workspace
+  | _ -> Alcotest.fail "W on running keeper must emit Keeper_wakeup");
+  (* 1d. Dive_keeper for all 3 states + unknown-in-roster fallback to boot *)
+  let dive_model name =
+    let m_d, _ =
+      Update_nav.push_dive m0 (Nav.Dive_keeper { name; tab = Nav.Keeper_chat })
+    in
+    m_d
+  in
+  let _, cmds_dive_gamma =
+    Update.step ~now:t0 (dive_model "gamma")
+      (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "W in Dive_keeper(gamma) emits Keeper_wakeup" true
+    (match find_post cmds_dive_gamma with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "gamma";
+             op = Wire_fleet.Keeper_wakeup;
+             modal_submission_id = None;
+             _;
+           }) ->
+        true
+    | _ -> false);
+  let _, cmds_dive_unknown =
+    Update.step ~now:t0 (dive_model "delta-unlisted")
+      (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "W in Dive_keeper(unlisted) safely defaults to Keeper_boot" true
+    (match find_post cmds_dive_unknown with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "delta-unlisted";
+             op = Wire_fleet.Keeper_boot;
+             modal_submission_id = None;
+             _;
+           }) ->
+        true
+    | _ -> false);
+  (* 1e. Empty roster -> honest warning toast, zero POST *)
+  let m_empty, _ =
+    Update.step ~now:t0 (Model.initial ~cols:140 ~rows:40 ())
+      (Msg.Key_event (char_key "4"))
+  in
+  let m_empty_w, cmds_empty_w =
+    Update.step ~now:t0 m_empty (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "W with no keeper emits zero POST" true
+    (Option.is_none (find_post cmds_empty_w));
+  Alcotest.(check bool) "W with no keeper shows warning toast" true
+    (match m_empty_w.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | _ -> false);
+
+  (* 2. [D] 2-press armed confirmation guard *)
+  (* 2a. Already offline+paused (alpha) short-circuits without arming or POST *)
+  let m_d_already, cmds_d_already =
+    Update.step ~now:t0 m0 (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check bool) "D on offline+paused does not arm" true
+    (Option.is_none m_d_already.keeper_stop_armed);
+  Alcotest.(check bool) "D on offline+paused emits zero POST" true
+    (Option.is_none (find_post cmds_d_already));
+  (* 2b. 1st D on online keeper (gamma) arms without POST *)
+  let t_arm = Clock.Mono.of_ns 10_000_000_000L in
+  let m_armed, cmds_arm1 =
+    Update.step ~now:t_arm m_gamma (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check bool) "1st D arms gamma" true
+    (match m_armed.keeper_stop_armed with
+    | Some ("gamma", _) -> true
+    | _ -> false);
+  Alcotest.(check bool) "1st D emits zero POST" true
+    (Option.is_none (find_post cmds_arm1));
+  (* 2c. 2nd D within 2.5s dispatches Keeper_shutdown and clears arm *)
+  let t_confirm = Clock.Mono.of_ns 11_500_000_000L in
+  let m_confirmed, cmds_confirm =
+    Update.step ~now:t_confirm m_armed (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check bool) "2nd D clears keeper_stop_armed" true
+    (Option.is_none m_confirmed.keeper_stop_armed);
+  Alcotest.(check bool) "2nd D emits Keeper_shutdown" true
+    (match find_post cmds_confirm with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "gamma";
+             op = Wire_fleet.Keeper_shutdown;
+             modal_submission_id = None;
+             _;
+           }) ->
+        true
+    | _ -> false);
+  (* 2d. Esc while armed in Dive_keeper disarms WITHOUT popping Dive_keeper *)
+  let m_dive_g = dive_model "gamma" in
+  let m_dive_armed, _ =
+    Update.step ~now:t_arm m_dive_g (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  let m_dive_esc, cmds_dive_esc =
+    Update.step ~now:t_confirm m_dive_armed
+      (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc disarms keeper_stop_armed" true
+    (Option.is_none m_dive_esc.keeper_stop_armed);
+  Alcotest.(check bool) "Esc consumes arm without popping Dive_keeper" true
+    (Option.is_some (Model.active_dive m_dive_esc));
+  Alcotest.(check bool) "Esc arm cancel emits zero POST" true
+    (Option.is_none (find_post cmds_dive_esc));
+  (* 2e. Expired arm (>2.5s) does NOT swallow Esc — pops Dive_keeper normally *)
+  let t_expired = Clock.Mono.of_ns 13_000_000_000L in
+  let m_dive_exp_esc, _ =
+    Update.step ~now:t_expired m_dive_armed
+      (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "expired arm Esc pops Dive_keeper" true
+    (Option.is_none (Model.active_dive m_dive_exp_esc)
+    && Option.is_none m_dive_exp_esc.keeper_stop_armed);
+  (* 2f. Tick past 2.5s disarms keeper_stop_armed *)
+  let m_tick_exp, _ =
+    Update.step ~now:t_expired m_armed (Msg.Tick { wall_unix = 1700000010.0 })
+  in
+  Alcotest.(check bool) "Tick past 2.5s disarms keeper_stop_armed" true
+    (Option.is_none m_tick_exp.keeper_stop_armed);
+  (* 2g. Non-D key disarms AND executes normally *)
+  let m_other_key, _ =
+    Update.step ~now:t_confirm m_armed (Msg.Key_event (char_key "k"))
+  in
+  Alcotest.(check bool) "non-D key disarms keeper_stop_armed" true
+    (Option.is_none m_other_key.keeper_stop_armed);
+  (* 2h. Sidebar focus blocks W and D *)
+  let m_sidebar = Update_nav.enter_sidebar_focus m_gamma in
+  let _, cmds_sb_w =
+    Update.step ~now:t0 m_sidebar (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let m_sb_d, cmds_sb_d =
+    Update.step ~now:t0 m_sidebar (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check bool) "Sidebar focus blocks W" true
+    (Option.is_none (find_post cmds_sb_w));
+  Alcotest.(check bool) "Sidebar focus blocks D" true
+    (Option.is_none m_sb_d.keeper_stop_armed
+    && Option.is_none (find_post cmds_sb_d));
+  (* 2i. Composer & Filter focus NEVER fire W or D *)
+  let m_comp = { m_gamma with drafts = Drafts.set_focus true m_gamma.drafts } in
+  let m_comp_w, cmds_comp_w =
+    Update.step ~now:t0 m_comp (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let m_comp_wd, cmds_comp_wd =
+    Update.step ~now:t0 m_comp_w (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check string) "Composer captures W and D as literal text" "WD"
+    (Drafts.current_draft m_comp_wd.drafts).text;
+  Alcotest.(check bool) "Composer W/D emits zero POST" true
+    (Option.is_none (find_post cmds_comp_w)
+    && Option.is_none (find_post cmds_comp_wd));
+  let m_filt =
+    { m_gamma with nav = { m_gamma.nav with filter_focused = true } }
+  in
+  let m_filt_w, cmds_filt_w =
+    Update.step ~now:t0 m_filt (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check string) "Filter captures W as filter text" "W"
+    m_filt_w.fleet.filter_query;
+  Alcotest.(check bool) "Filter W emits zero POST" true
+    (Option.is_none (find_post cmds_filt_w));
+  (* 2j. Non-Keepers workspace (1 Pulse) ignores bare W and D *)
+  let m_pulse, _ = Update.step ~now:t0 m_gamma (Msg.Key_event (char_key "1")) in
+  let _, cmds_pulse_w =
+    Update.step ~now:t0 m_pulse (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let m_pulse_d, cmds_pulse_d =
+    Update.step ~now:t0 m_pulse (Msg.Key_event (char_key ~shift:true "D"))
+  in
+  Alcotest.(check bool) "Pulse ignores bare W and D" true
+    (Option.is_none (find_post cmds_pulse_w)
+    && Option.is_none (find_post cmds_pulse_d)
+    && Option.is_none m_pulse_d.keeper_stop_armed);
+
+  (* 3. Slash commands: /wake, /up, /boot, /resume, /pause, /down *)
+  let run_slash m s =
+    match Slash.parse s with
+    | Ok p -> Update.execute_slash ~now:t0 m p
+    | Error _ -> Alcotest.fail ("slash parse failed: " ^ s)
+  in
+  let _, cmds_up_paused = run_slash m0 "/up alpha" in
+  Alcotest.(check bool) "/up on paused keeper dispatches Keeper_resume (avoids 409)" true
+    (match find_post cmds_up_paused with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "alpha"; op = Wire_fleet.Keeper_resume _; _ }) ->
+        true
+    | _ -> false);
+  let _, cmds_boot_off = run_slash m0 "/boot beta" in
+  Alcotest.(check bool) "/boot on offline unpaused keeper dispatches Keeper_boot" true
+    (match find_post cmds_boot_off with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "beta"; op = Wire_fleet.Keeper_boot; _ }) ->
+        true
+    | _ -> false);
+  let _, cmds_pause_def = run_slash m_gamma "/pause" in
+  Alcotest.(check bool) "/pause without arg targets selected keeper gamma" true
+    (match find_post cmds_pause_def with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_pause; _ }) ->
+        true
+    | _ -> false);
+  let _, cmds_down_def = run_slash m_gamma "/down" in
+  Alcotest.(check bool) "/down without arg shuts down gamma unconditionally" true
+    (match find_post cmds_down_def with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_shutdown; _ }) ->
+        true
+    | _ -> false);
+  let m_no_k_slash, cmds_no_k_slash = run_slash m_empty "/wake" in
+  Alcotest.(check bool) "/wake with no keeper shows usage warning toast" true
+    (Option.is_none (find_post cmds_no_k_slash)
+    &&
+    match m_no_k_slash.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | _ -> false);
+
+  (* 4. Ctrl+K Command Palette lifecycle entries *)
+  let m_pal, _ =
+    Update.step ~now:t0 m_gamma (Msg.Key_event (char_key ~ctrl:true "k"))
+  in
+  let entries = Update_nav.palette_entries m_pal in
+  let has_pal_op target_op =
+    List.exists
+      (fun (e : Update_nav.palette_entry) ->
+        match e.action with
+        | Update_nav.Pal_keeper_lifecycle { keeper = "gamma"; op } ->
+            op = target_op
+        | _ -> false)
+      entries
+  in
+  Alcotest.(check bool) "Ctrl+K lists Wake/Online" true
+    (has_pal_op Update_nav.Op_wake_or_online);
+  Alcotest.(check bool) "Ctrl+K lists Pause" true
+    (has_pal_op Update_nav.Op_pause);
+  Alcotest.(check bool) "Ctrl+K lists Resume" true
+    (has_pal_op Update_nav.Op_resume);
+  Alcotest.(check bool) "Ctrl+K lists Shutdown" true
+    (has_pal_op Update_nav.Op_shutdown);
+  (* Confirming Shutdown from Palette opens confirmation modal with default_action="shutdown" and emits 0 immediate POSTs *)
+  let idx_shutdown =
+    let rec find i = function
+      | [] -> Alcotest.fail "shutdown palette entry missing"
+      | (e : Update_nav.palette_entry) :: rest -> (
+          match e.action with
+          | Update_nav.Pal_keeper_lifecycle
+              { keeper = "gamma"; op = Update_nav.Op_shutdown } ->
+              i
+          | _ -> find (i + 1) rest)
+    in
+    find 0 entries
+  in
+  let m_pal_sel =
+    { m_pal with palette = { m_pal.palette with selected = idx_shutdown } }
+  in
+  let m_pal_run, cmds_pal_run =
+    Update.step ~now:t0 m_pal_sel (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Ctrl+K Shutdown opens Keeper_lifecycle_form with default_action=shutdown and 0 POSTs"
+    true
+    (Option.is_none (find_post cmds_pal_run)
+    &&
+    match (m_pal_run.nav.overlay, m_pal_run.inline_modal) with
+    | ( Some (Nav.Inline_action (Nav.Keeper_lifecycle_form { keeper = "gamma" }))
+      , Some modal ) ->
+        String.equal
+          (Model.modal_field_value ~key:"lifecycle_action" modal)
+          "shutdown"
+        && not modal.submitting
+    | _ -> false);
+
+  (* 5. Reply_keeper_lifecycle success triggers Get_keepers_roster (+ dive fetch in Dive_keeper) *)
+  let m_dive_cfg, _ =
+    Update_nav.push_dive m0
+      (Nav.Dive_keeper { name = "gamma"; tab = Nav.Keeper_config })
+  in
+  let m_ok_reply, cmds_ok_reply =
+    Update.step ~now:t1 m_dive_cfg
+      (Msg.Http_reply
+         {
+           epoch = m_dive_cfg.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_boot;
+                 req_seq = 1;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "boot";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  let has_get pred cmds =
+    List.exists
+      (function Cmd.Http_get { req; _ } -> pred req | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  Alcotest.(check bool) "success reply triggers Get_keepers_roster" true
+    (has_get
+       (function Cmd.Get_keepers_roster -> true | _ -> false)
+       cmds_ok_reply);
+  Alcotest.(check bool) "success reply in Dive_keeper(Config) refreshes config schema" true
+    (has_get
+       (function
+         | Cmd.Get_config_schema (Wire_config.Target_keeper "gamma") -> true
+         | _ -> false)
+       cmds_ok_reply);
+  Alcotest.(check bool) "boot success shows Toast_success" true
+    (match m_ok_reply.toast with
+    | Some { level = Model.Toast_success; _ } -> true
+    | _ -> false);
+  (* Epoch transition clears both keeper_stop_armed and keeper_resume_op_ids *)
+  let m_with_state =
+    {
+      m_armed with
+      keeper_resume_op_ids = [ ("alpha", "op-stale", 1) ];
+    }
+  in
+  let m_rehandshake, _ =
+    Update.step ~now:t1 m_with_state
+      (Msg.Http_reply
+         {
+           epoch = m_with_state.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_wakeup;
+                 req_seq = 2;
+                 modal_submission_id = None;
+                 result =
+                   Error
+                     (Msg.Workspace_mismatch
+                        {
+                          expected_instance = Some "inst-1";
+                          observed_instance = Some "inst-2";
+                          observed_workspace_sha256 = None;
+                          message = "workspace switched";
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool) "leave_old_epoch clears keeper_stop_armed & keeper_resume_op_ids"
+    true
+    (Option.is_none m_rehandshake.keeper_stop_armed
+    && m_rehandshake.keeper_resume_op_ids = []);
+
+  (* 6. Wire P2 #1: HTTP 202 (not ok && committed) auto-boot ONLY fires for Keeper_resume *)
+  let m_boot_202, cmds_boot_202 =
+    Update.step ~now:t1 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "beta";
+                 op = Wire_fleet.Keeper_boot;
+                 req_seq = 1;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = false;
+                       action = Some "boot";
+                       name = Some "beta";
+                       already_live = false;
+                       already_absent = false;
+                       committed = true;
+                       error = Some "boot followup failed";
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "Keeper_boot with ok=false, committed=true NEVER loops Keeper_boot"
+    true
+    (Option.is_none (find_post cmds_boot_202));
+  Alcotest.(check bool) "Keeper_boot failure surfaces Toast_error" true
+    (match m_boot_202.toast with
+    | Some { level = Model.Toast_error; _ } -> true
+    | _ -> false);
+  Alcotest.(check bool) "Keeper_boot ok=false emits Get_keepers_roster refresh" true
+    (has_get
+       (function Cmd.Get_keepers_roster -> true | _ -> false)
+       cmds_boot_202);
+  let _, cmds_down_202 =
+    Update.step ~now:t1 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_shutdown;
+                 req_seq = 2;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = false;
+                       action = Some "shutdown";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = true;
+                       error = Some "drain failed";
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "Keeper_shutdown with ok=false, committed=true NEVER boots keeper" true
+    (Option.is_none (find_post cmds_down_202));
+
+  (* 7. Wire P2 #2: Intervening successful pause/shutdown clears timeout-pinned resume op-id *)
+  let m_res_p1, cmds_res_p1 =
+    Update.step ~now:t0 m0 (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let op_pinned, res_p1_seq =
+    match find_post cmds_res_p1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Wire_fleet.Keeper_resume { operator_operation_id };
+            req_seq;
+            _;
+          }) ->
+        (operator_operation_id, req_seq)
+    | _ -> Alcotest.fail "expected initial resume op_id for alpha"
+  in
+  let m_res_timeout, _ =
+    Update.step ~now:t1 m_res_p1
+      (Msg.Http_reply
+         {
+           epoch = m_res_p1.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op =
+                   Wire_fleet.Keeper_resume
+                     { operator_operation_id = op_pinned };
+                 req_seq = res_p1_seq;
+                 modal_submission_id = None;
+                 result = Error (Msg.Transport Health.Timeout);
+               };
+         })
+  in
+  Alcotest.(check bool) "timeout keeps resume op_id pinned" true
+    (Model.resume_op_id_for ~keeper:"alpha" m_res_timeout = Some op_pinned);
+  let m_after_pause_ok, _ =
+    Update.step ~now:t1 m_res_timeout
+      (Msg.Http_reply
+         {
+           epoch = m_res_timeout.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = m_res_timeout.keeper_lifecycle_seq;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "successful Keeper_pause clears stale timeout-pinned resume op_id" true
+    (Option.is_none (Model.resume_op_id_for ~keeper:"alpha" m_after_pause_ok));
+  let _, cmds_res_fresh =
+    Update.step ~now:t1 m_after_pause_ok
+      (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool)
+    "subsequent resume after pause mints fresh operator_operation_id" true
+    (match find_post cmds_res_fresh with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Wire_fleet.Keeper_resume { operator_operation_id };
+            _;
+          }) ->
+        not (String.equal operator_operation_id op_pinned)
+    | _ -> false);
+
+  (* 8. UX P1 #3: End-to-end Composer submit_composer for /down, /boot, Tab+Enter, spaces *)
+  let type_in_composer ~now (m : Model.t) text =
+    let m_focus : Model.t = { m with drafts = Drafts.set_focus true m.drafts } in
+    let rec loop acc i =
+      if i >= String.length text then acc
+      else
+        let ch = String.make 1 text.[i] in
+        let next, _ = Update.step ~now acc (Msg.Key_event (char_key ch)) in
+        loop next (i + 1)
+    in
+    loop m_focus 0
+  in
+  (* Viewing gamma in [alpha; beta; gamma]: '/down ', '/down   ', '/down'+Tab+Enter MUST target gamma *)
+  let m_c1 = type_in_composer ~now:t0 m_gamma "/down " in
+  let _, cmds_c1 =
+    Update.step ~now:t0 m_c1 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/down ' + Enter targets viewed gamma (NEVER roster[0] alpha)"
+    true
+    (match find_post cmds_c1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_shutdown; _ }) ->
+        true
+    | _ -> false);
+  let m_c2 = type_in_composer ~now:t0 m_gamma "/down   " in
+  let _, cmds_c2 =
+    Update.step ~now:t0 m_c2 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/down   ' + Enter targets viewed gamma (NEVER alpha)" true
+    (match find_post cmds_c2 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_shutdown; _ }) ->
+        true
+    | _ -> false);
+  let m_c3_typed = type_in_composer ~now:t0 m_gamma "/down" in
+  let m_c3_tab, _ =
+    Update.step ~now:t0 m_c3_typed (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  let _, cmds_c3 =
+    Update.step ~now:t0 m_c3_tab (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/down'+Tab+Enter targets viewed gamma (NEVER alpha)" true
+    (match find_post cmds_c3 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_shutdown; _ }) ->
+        true
+    | _ -> false);
+  (* Explicit Down navigation in '/down ' popup picks next candidate ('alpha') *)
+  let m_c4_dn, _ =
+    Update.step ~now:t0 m_c1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let _, cmds_c4 =
+    Update.step ~now:t0 m_c4_dn (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/down '+Down+Enter executes explicitly navigated keeper (alpha)"
+    true
+    (match find_post cmds_c4 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "alpha"; op = Wire_fleet.Keeper_shutdown; _ }) ->
+        true
+    | _ -> false);
+  (* '/boot ' and '/boot al' end-to-end *)
+  let m_b1 = type_in_composer ~now:t0 m_gamma "/boot " in
+  let _, cmds_b1 =
+    Update.step ~now:t0 m_b1 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Composer '/boot ' + Enter boots viewed gamma" true
+    (match find_post cmds_b1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "gamma"; op = Wire_fleet.Keeper_boot; _ }) ->
+        true
+    | _ -> false);
+  let m_b2 = type_in_composer ~now:t0 m_gamma "/boot al" in
+  let _, cmds_b2 =
+    Update.step ~now:t0 m_b2 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/boot al' + Enter completes paused alpha and resumes it" true
+    (match find_post cmds_b2 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+          { keeper = "alpha"; op = Wire_fleet.Keeper_resume _; _ }) ->
+        true
+    | _ -> false);
+
+  (* 9. UX P1 #5: Filtered, sorted, and collapsed-company Pane 0 vs Pane 1 vs Zoomed Preview *)
+  let k_acme_alpha = { k_paused with company = "acme" } in
+  let k_ops_beta = { k_offline with company = "ops" } in
+  let k_ops_gamma = { k_live with company = "ops" } in
+  let m_multi =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let m_r, _ =
+      Update.step ~now:t0 base
+        (Msg.Http_reply
+           {
+             epoch = base.epoch;
+             reply =
+               Msg.Reply_keepers_roster
+                 (Ok (roster_of [ k_acme_alpha; k_ops_beta; k_ops_gamma ]));
+           })
+    in
+    let m_k, _ = Update.step ~now:t0 m_r (Msg.Key_event (char_key "4")) in
+    m_k
+  in
+  (* Filtered roster: filter='beta' selects beta; [W] boots beta *)
+  let m_filt =
+    { m_multi with fleet = Fleet_store.set_filter "beta" m_multi.fleet }
+  in
+  let _, cmds_filt_w =
+    Update.step ~now:t0 m_filt (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "Filtered roster [W] targets filtered beta (boot)" true
+    (match find_post cmds_filt_w with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "beta"; op = Wire_fleet.Keeper_boot; _ }) ->
+        true
+    | _ -> false);
+  (* Sorted roster (Fleet_attention): [W] targets top severity keeper cleanly *)
+  let m_attn_mode =
+    {
+      m_multi with
+      fleet = Fleet_store.set_fleet_mode Nav.Fleet_attention m_multi.fleet;
+    }
+  in
+  let expected_attn_name =
+    match Fleet_store.selected_keeper_summary m_attn_mode.fleet with
+    | Some k -> k.name
+    | None -> Alcotest.fail "expected selected keeper in Fleet_attention"
+  in
+  Alcotest.(check (option string))
+    "Fleet_attention target_keeper_for_lifecycle matches selected_keeper_summary"
+    (Some expected_attn_name)
+    (Model.target_keeper_for_lifecycle m_attn_mode);
+  (* Collapsed company on Pane 0 vs Pane 1 vs Zoomed Preview *)
+  let m_coll_p0 =
+    let fleet =
+      m_multi.fleet
+      |> Fleet_store.toggle_company_collapsed "acme"
+      |> fun f -> { f with selected_collapsed_company = Some "acme" }
+    in
+    {
+      m_multi with
+      fleet;
+      drafts = { m_multi.drafts with active_keeper = None };
+      nav = { m_multi.nav with pane_index = 0; zoomed = false };
+    }
+  in
+  Alcotest.(check (option string))
+    "Collapsed company on unzoomed Pane 0 has no lifecycle target" None
+    (Model.target_keeper_for_lifecycle m_coll_p0);
+  let m_coll_w, cmds_coll_w =
+    Update.step ~now:t0 m_coll_p0 (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool)
+    "Collapsed company Pane 0 [W] emits 0 POSTs and shows warning toast" true
+    (Option.is_none (find_post cmds_coll_w)
+    &&
+    match m_coll_w.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | _ -> false);
+  (* '/down ' + Enter with NO target keeper (collapsed company Pane 0, no active keeper) emits 0 POSTs *)
+  let m_coll_down = type_in_composer ~now:t0 m_coll_p0 "/down " in
+  let m_coll_down_run, cmds_coll_down =
+    Update.step ~now:t0 m_coll_down (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Composer '/down ' with no target keeper NEVER shuts down roster[0]" true
+    (Option.is_none (find_post cmds_coll_down)
+    &&
+    match m_coll_down_run.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | _ -> false);
+  (* Collapsed-company keeper 'alpha' still appears in slash arg popup candidates *)
+  let m_coll_popup = type_in_composer ~now:t0 m_coll_p0 "/down al" in
+  Alcotest.(check bool)
+    "Slash arg popup still includes keepers inside collapsed companies" true
+    (match Update_nav.resolve_composer_popup m_coll_popup with
+    | Update_nav.Composer_popup_slash { items; _ } ->
+        List.exists
+          (fun (c : Update_nav.popup_candidate) ->
+            String.equal c.trigger "/down alpha")
+          items
+    | _ -> false);
+  (* Tabbing to Pane 1 (right Preview) or zooming (z) targets selected_keeper_summary *)
+  let m_coll_p1 =
+    { m_coll_p0 with nav = { m_coll_p0.nav with pane_index = 1 } }
+  in
+  let expected_preview =
+    Option.map
+      (fun (k : Wire_fleet.keeper_summary) -> k.name)
+      (Fleet_store.selected_keeper_summary m_coll_p1.fleet)
+  in
+  Alcotest.(check (option string))
+    "Collapsed company on Pane 1 Preview targets selected_keeper_summary"
+    expected_preview
+    (Model.target_keeper_for_lifecycle m_coll_p1);
+  let _, cmds_coll_p1_w =
+    Update.step ~now:t0 m_coll_p1 (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  Alcotest.(check bool) "Collapsed company Pane 1 [W] dispatches POST" true
+    (Option.is_some (find_post cmds_coll_p1_w));
+  let m_coll_zoom =
+    { m_coll_p0 with nav = { m_coll_p0.nav with pane_index = 0; zoomed = true } }
+  in
+  Alcotest.(check (option string))
+    "Collapsed company when Zoomed targets selected_keeper_summary"
+    expected_preview
+    (Model.target_keeper_for_lifecycle m_coll_zoom);
+
+  (* 10. UX P1 #4 & #6: Mouse click/wheel disarm, Micro resize disarm, exact t0+2.5s Tick expiry *)
+  let arm_gamma () =
+    let m_a, _ =
+      Update.step ~now:t0 m_gamma (Msg.Key_event (char_key ~shift:true "D"))
+    in
+    Alcotest.(check bool) "precondition: gamma stop armed" true
+      (Option.is_some m_a.keeper_stop_armed && Option.is_some m_a.toast);
+    m_a
+  in
+  (* Exact t0 + 2.5s Tick expiry clears BOTH arm and arm toast *)
+  let t_exact_25 = Clock.Mono.after_s t0 Model.keeper_stop_arm_window_s in
+  let m_tick_25, _ =
+    Update.step ~now:t_exact_25 (arm_gamma ()) (Msg.Tick { wall_unix = 1002.5 })
+  in
+  Alcotest.(check bool)
+    "Tick at exact t0+2.5s disarms keeper_stop_armed and clears arm toast" true
+    (Option.is_none m_tick_25.keeper_stop_armed && Option.is_none m_tick_25.toast);
+  (* Mouse click on Composer disarms AND clears arm toast; subsequent Esc blurs Composer *)
+  let m_a_comp = arm_gamma () in
+  let cr =
+    match Model.composer_rect m_a_comp with
+    | Some r -> r
+    | None -> Alcotest.fail "expected composer_rect at 140x40"
+  in
+  let m_clicked_comp, _ =
+    Update.step ~now:t1 m_a_comp
+      (Msg.Mouse_event
+         (Keymap.Input.Left_press { col = cr.x + 2; row = cr.y + 1 }))
+  in
+  Alcotest.(check bool)
+    "Mouse click on Composer focuses Composer, disarms [D], and clears arm toast"
+    true
+    (Drafts.is_focused m_clicked_comp.drafts
+    && Option.is_none m_clicked_comp.keeper_stop_armed
+    && Option.is_none m_clicked_comp.toast);
+  let m_comp_esc, _ =
+    Update.step ~now:t1 m_clicked_comp (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc after clicking Composer blurs Composer cleanly"
+    false
+    (Drafts.is_focused m_comp_esc.drafts);
+  (* Mouse click on Sidebar disarms AND clears arm toast *)
+  let m_a_sb = arm_gamma () in
+  let sr =
+    match Model.sidebar_rect m_a_sb with
+    | Some r -> r
+    | None -> Alcotest.fail "expected docked sidebar_rect at 140x40"
+  in
+  let m_clicked_sb, _ =
+    Update.step ~now:t1 m_a_sb
+      (Msg.Mouse_event
+         (Keymap.Input.Left_press { col = sr.x + 2; row = sr.y + 2 }))
+  in
+  Alcotest.(check bool)
+    "Mouse click on Sidebar disarms [D] and clears arm toast" true
+    (Option.is_none m_clicked_sb.keeper_stop_armed
+    && Option.is_none m_clicked_sb.toast);
+  (* Mouse wheel on 4 Keepers body disarms AND clears arm toast *)
+  let m_a_wh = arm_gamma () in
+  let br = Model.body_rect m_a_wh in
+  let m_wheeled, _ =
+    Update.step ~now:t1 m_a_wh
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel
+            { dir = Keymap.Input.Wheel_up; col = br.x + 4; row = br.y + 4 }))
+  in
+  Alcotest.(check bool)
+    "Mouse wheel on 4 Keepers disarms [D] and clears arm toast" true
+    (Option.is_none m_wheeled.keeper_stop_armed
+    && Option.is_none m_wheeled.toast);
+  (* Resize into Micro (<80x24) disarms AND clears arm toast *)
+  let m_resized_micro, _ =
+    Update.step ~now:t1 (arm_gamma ()) (Msg.Resize { cols = 70; rows = 20 })
+  in
+  Alcotest.(check bool)
+    "Resize into Micro disarms [D] and clears arm toast" true
+    (Option.is_none m_resized_micro.keeper_stop_armed
+    && Option.is_none m_resized_micro.toast);
+
+  (* 11. Unified Keeper_lifecycle_form modal (modal_submission_id=Some id): close-on-ok, preserve-on-error, 202 auto-boot *)
+  let m_modal_open, _ =
+    Update.step ~now:t0 m_gamma (Msg.Key_event (char_key "x"))
+  in
+  let m_modal_sub, cmds_modal_sub =
+    Update.step ~now:t0 m_modal_open (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let modal_sub_id =
+    match m_modal_sub.inline_modal with
+    | Some
+        {
+          kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+          submitting = true;
+          submission_id;
+          _;
+        }
+      when submission_id > 0 ->
+        submission_id
+    | _ -> Alcotest.fail "Keeper_lifecycle_form submit must set submitting=true and submission_id > 0"
+  in
+  let modal_req_seq =
+    match find_post cmds_modal_sub with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "gamma";
+             op = Wire_fleet.Keeper_pause;
+             req_seq;
+             modal_submission_id = Some sid;
+             _;
+           })
+      when sid = modal_sub_id ->
+        req_seq
+    | _ ->
+        Alcotest.fail
+          "Keeper_lifecycle_form must emit Post_keeper_lifecycle with matching modal_submission_id"
+  in
+  let m_modal_ok, _ =
+    Update.step ~now:t1 m_modal_sub
+      (Msg.Http_reply
+         {
+           epoch = m_modal_sub.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = modal_req_seq;
+                 modal_submission_id = Some modal_sub_id;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching modal_submission_id Ok(ok=true) closes inline_modal and clears overlay" true
+    (Option.is_none m_modal_ok.inline_modal && Option.is_none m_modal_ok.nav.overlay);
+  let m_modal_err_payload, cmds_modal_err_payload =
+    Update.step ~now:t1 m_modal_sub
+      (Msg.Http_reply
+         {
+           epoch = m_modal_sub.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = modal_req_seq;
+                 modal_submission_id = Some modal_sub_id;
+                 result =
+                   Ok
+                     {
+                       ok = false;
+                       action = Some "pause";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = Some "keeper busy";
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching modal_submission_id Ok(ok=false) keeps modal open with submitting=false & error"
+    true
+    (match (m_modal_err_payload.inline_modal, m_modal_err_payload.nav.overlay) with
+    | ( Some
+          {
+            kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+            submitting = false;
+            error = Some err;
+            _;
+          }
+      , Some (Nav.Inline_action (Nav.Keeper_lifecycle_form { keeper = "gamma" })) ) ->
+        not (String.equal err "")
+    | _ -> false);
+  Alcotest.(check bool)
+    "Reply_keeper_lifecycle Ok(ok=false) emits Get_keepers_roster refresh" true
+    (has_get
+       (function Cmd.Get_keepers_roster -> true | _ -> false)
+       cmds_modal_err_payload);
+  let m_modal_err_http, cmds_modal_err_http =
+    Update.step ~now:t1 m_modal_sub
+      (Msg.Http_reply
+         {
+           epoch = m_modal_sub.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = modal_req_seq;
+                 modal_submission_id = Some modal_sub_id;
+                 result =
+                   Error
+                     (Msg.Http_error
+                        {
+                          status = 409;
+                          body = {|{"ok":false,"error":"Durable_owner_not_paused"}|};
+                          api_error = None;
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching modal_submission_id Error(409) keeps modal open with submitting=false & error" true
+    (match (m_modal_err_http.inline_modal, m_modal_err_http.nav.overlay) with
+    | ( Some
+          {
+            kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+            submitting = false;
+            error = Some err;
+            _;
+          }
+      , Some (Nav.Inline_action (Nav.Keeper_lifecycle_form { keeper = "gamma" })) ) ->
+        not (String.equal err "")
+    | _ -> false);
+  Alcotest.(check bool)
+    "Reply_keeper_lifecycle Error(Http_error 409) emits Get_keepers_roster refresh" true
+    (has_get
+       (function Cmd.Get_keepers_roster -> true | _ -> false)
+       cmds_modal_err_http);
+  (* Keeper_lifecycle_form resume uses Model.get_or_create_resume_op_id & preserves modal_submission_id across 202 boot follow-up *)
+  let m_modal_alpha0, _ =
+    Update.step ~now:t0 m0 (Msg.Key_event (char_key "x"))
+  in
+  let m_modal_alpha_res =
+    match m_modal_alpha0.inline_modal with
+    | None -> Alcotest.fail "expected Keeper_lifecycle_form open on alpha"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "lifecycle_action" then
+                { f with value = "resume" }
+              else f)
+            st.fields
+        in
+        { m_modal_alpha0 with inline_modal = Some { st with fields } }
+  in
+  let m_modal_res_sub, cmds_modal_res_sub =
+    Update.step ~now:t0 m_modal_alpha_res
+      (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let modal_op_id, modal_res_seq, modal_res_sub_id =
+    match find_post cmds_modal_res_sub with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "alpha";
+             op = Wire_fleet.Keeper_resume { operator_operation_id };
+             req_seq;
+             modal_submission_id = Some sid;
+             _;
+           }) ->
+        Alcotest.(check (option string))
+          "modal resume pins op_id in keeper_resume_op_ids"
+          (Some operator_operation_id)
+          (Model.resume_op_id_for ~keeper:"alpha" m_modal_res_sub);
+        (operator_operation_id, req_seq, sid)
+    | _ -> Alcotest.fail "expected modal Keeper_resume POST with modal_submission_id"
+  in
+  let m_modal_202, cmds_modal_202 =
+    Update.step ~now:t1 m_modal_res_sub
+      (Msg.Http_reply
+         {
+           epoch = m_modal_res_sub.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op =
+                   Wire_fleet.Keeper_resume
+                     { operator_operation_id = modal_op_id };
+                 req_seq = modal_res_seq;
+                 modal_submission_id = Some modal_res_sub_id;
+                 result =
+                   Ok
+                     {
+                       ok = false;
+                       action = Some "resume";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = true;
+                       error = Some "lane offline";
+                     };
+               };
+         })
+  in
+  let modal_boot_seq =
+    match find_post cmds_modal_202 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           {
+             keeper = "alpha";
+             op = Wire_fleet.Keeper_boot;
+             req_seq;
+             modal_submission_id = Some sid;
+             _;
+           })
+      when sid = modal_res_sub_id ->
+        req_seq
+    | _ ->
+        Alcotest.fail
+          "modal 202 partial resume must propagate exact modal_submission_id to follow-up Keeper_boot"
+  in
+  Alcotest.(check bool)
+    "modal 202 partial resume keeps modal open, emits follow-up boot AND Get_keepers_roster"
+    true
+    (Option.is_some m_modal_202.inline_modal
+    && has_get
+         (function Cmd.Get_keepers_roster -> true | _ -> false)
+         cmds_modal_202);
+  let m_modal_boot_done, _ =
+    Update.step ~now:t1 m_modal_202
+      (Msg.Http_reply
+         {
+           epoch = m_modal_202.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op = Wire_fleet.Keeper_boot;
+                 req_seq = modal_boot_seq;
+                 modal_submission_id = Some modal_res_sub_id;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "boot";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "modal 202 follow-up boot Ok with matching modal_submission_id closes modal cleanly" true
+    (Option.is_none m_modal_boot_done.inline_modal
+    && Option.is_none m_modal_boot_done.nav.overlay);
+
+  (* 12. Review R2 regression tests: out-of-order req_seq race & modal submission identity *)
+  (* 12a. Out-of-order seq race: delayed R1 (req_seq = 1) arriving AFTER R2 Keeper_resume (minted_seq = 2)
+          preserves R2's op_id; subsequent R3 (req_seq > minted_seq) ok=true clears R2's op_id. *)
+  let m_r1_sent, cmds_r1 = run_slash m0 "/pause alpha" in
+  let r1_seq =
+    match find_post cmds_r1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "alpha"; op = Wire_fleet.Keeper_pause; req_seq; _ }) ->
+        req_seq
+    | _ -> Alcotest.fail "expected R1 pause POST"
+  in
+  let m_r2_sent, cmds_r2 =
+    Update.step ~now:t0 m_r1_sent (Msg.Key_event (char_key ~shift:true "W"))
+  in
+  let r2_op_id, r2_minted_seq, r2_req_seq =
+    match (find_post cmds_r2, m_r2_sent.keeper_resume_op_ids) with
+    | ( Some
+          (Cmd.Post_keeper_lifecycle
+             {
+               keeper = "alpha";
+               op = Wire_fleet.Keeper_resume { operator_operation_id };
+               req_seq;
+               _;
+             })
+      , ("alpha", stored_id, minted_seq) :: _ )
+      when String.equal operator_operation_id stored_id ->
+        (operator_operation_id, minted_seq, req_seq)
+    | _ -> Alcotest.fail "expected R2 resume POST with recorded minted_seq"
+  in
+  Alcotest.(check bool) "R1 req_seq < R2 minted_seq <= R2 req_seq" true
+    (r1_seq < r2_minted_seq && r2_minted_seq <= r2_req_seq);
+  let m_after_delayed_r1, _ =
+    Update.step ~now:t1 m_r2_sent
+      (Msg.Http_reply
+         {
+           epoch = m_r2_sent.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = r1_seq;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check (option string))
+    "delayed R1 ok=true (req_seq < minted_seq) preserves R2 resume op_id"
+    (Some r2_op_id)
+    (Model.resume_op_id_for ~keeper:"alpha" m_after_delayed_r1);
+  let m_r3_sent, cmds_r3 = run_slash m_after_delayed_r1 "/pause alpha" in
+  let r3_seq =
+    match find_post cmds_r3 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { keeper = "alpha"; op = Wire_fleet.Keeper_pause; req_seq; _ }) ->
+        req_seq
+    | _ -> Alcotest.fail "expected R3 pause POST"
+  in
+  Alcotest.(check bool) "R3 req_seq > R2 minted_seq" true (r3_seq > r2_minted_seq);
+  let settle_pause (model : Model.t) =
+    Update.step ~now:t1 model
+      (Msg.Http_reply
+         {
+           epoch = model.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "alpha";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = r3_seq;
+                 modal_submission_id = None;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "alpha";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  let m_after_r3, _ = settle_pause m_r3_sent in
+  Alcotest.(check (option string))
+    "subsequent R3 ok=true (req_seq > minted_seq) clears R2 resume op_id" None
+    (Model.resume_op_id_for ~keeper:"alpha" m_after_r3);
+
+  let late_partial ?(req_seq = r2_req_seq) ?modal_submission_id (model : Model.t) =
+    Update.step ~now:t1 model
+      (Msg.Http_reply
+         { epoch = model.epoch;
+           reply = Msg.Reply_keeper_lifecycle
+             { keeper = "alpha"; op = Wire_fleet.Keeper_resume { operator_operation_id = r2_op_id };
+               req_seq; modal_submission_id;
+               result = Ok { ok = false; action = Some "resume"; name = Some "alpha";
+                             already_live = false; already_absent = false; committed = true;
+                             error = Some "lane offline" } } })
+  in
+  let _, after_pause = late_partial m_after_r3 in
+  Alcotest.(check bool) "a late committed resume cannot reboot after a newer pause" true
+    (Option.is_none (find_post after_pause)
+     && has_get (function Cmd.Get_keepers_roster -> true | _ -> false) after_pause);
+  let newer, _ = run_slash m_after_r3 "/resume alpha" in
+  let fresh_id = Model.resume_op_id_for ~keeper:"alpha" newer in
+  let after_old_partial, old_cmds = late_partial newer in
+  Alcotest.(check bool) "a retired resume's 202 cannot issue a boot over a successor resume" true
+    (Option.is_some fresh_id && fresh_id <> Some r2_op_id
+     && Model.resume_op_id_for ~keeper:"alpha" after_old_partial = fresh_id
+     && Option.is_none (find_post old_cmds));
+
+  (* A form can retry the same pinned ID while the later pause is in flight. *)
+  let modal_open, _ = Update.step ~now:t0 m_r3_sent (Msg.Key_event (char_key "x")) in
+  let modal_resume, _ = Update.step ~now:t0 modal_open (Msg.Key_event (key Keymap.Input.Left)) in
+  let submitting, commands =
+    Update.step ~now:t0 modal_resume (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let req_seq, modal_submission_id =
+    match find_post commands with
+    | Some (Cmd.Post_keeper_lifecycle
+              { op = Wire_fleet.Keeper_resume { operator_operation_id }; req_seq;
+                modal_submission_id = Some id; _ }) when String.equal operator_operation_id r2_op_id ->
+        req_seq, id
+    | _ -> Alcotest.fail "modal retry must submit the same pinned resume"
+  in
+  let retired, _ = settle_pause submitting in
+  Alcotest.(check bool) "pause retires the ID while the exact form still submits" true
+    (Option.is_none (Model.resume_op_id_for ~keeper:"alpha" retired)
+     && match retired.inline_modal with
+        | Some modal -> modal.submitting && modal.submission_id = modal_submission_id
+        | None -> false);
+  let settled, commands = late_partial ~req_seq ~modal_submission_id retired in
+  Alcotest.(check bool) "matching form settles a retired 202 without authorizing a boot" true
+    (Option.is_none (find_post commands) && Option.is_none settled.inline_modal
+     && has_get (function Cmd.Get_keepers_roster -> true | _ -> false) commands);
+
+  (* 12b. Modal submission identity: reopened Keeper_lifecycle_form (submission_id = 2)
+          ignores stale R1 (modal_submission_id = Some 1) ok=true and Error replies,
+          while matching Some 2 closes/sets error cleanly. *)
+  let m_id_open1, _ =
+    Update.step ~now:t0 m_gamma (Msg.Key_event (char_key "x"))
+  in
+  let m_id_sub1, cmds_id_sub1 =
+    Update.step ~now:t0 m_id_open1 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let sub1_id, sub1_req_seq =
+    match find_post cmds_id_sub1 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { req_seq; modal_submission_id = Some sid; _ }) ->
+        (sid, req_seq)
+    | _ -> Alcotest.fail "expected R1 modal POST with modal_submission_id"
+  in
+  let m_id_closed, _ =
+    Update.step ~now:t0 m_id_sub1 (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  let m_id_open2, _ =
+    Update.step ~now:t0 m_id_closed (Msg.Key_event (char_key "x"))
+  in
+  let m_id_sub2, cmds_id_sub2 =
+    Update.step ~now:t0 m_id_open2 (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let sub2_id, sub2_req_seq =
+    match find_post cmds_id_sub2 with
+    | Some
+        (Cmd.Post_keeper_lifecycle
+           { req_seq; modal_submission_id = Some sid; _ }) ->
+        (sid, req_seq)
+    | _ -> Alcotest.fail "expected R2 modal POST with modal_submission_id"
+  in
+  Alcotest.(check bool) "reopened modal mints strictly greater submission_id" true
+    (sub2_id > sub1_id);
+  let m_stale_ok, _ =
+    Update.step ~now:t1 m_id_sub2
+      (Msg.Http_reply
+         {
+           epoch = m_id_sub2.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = sub1_req_seq;
+                 modal_submission_id = Some sub1_id;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "stale R1 ok=true reply does NOT close reopened R2 modal" true
+    (match m_stale_ok.inline_modal with
+    | Some
+        {
+          kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+          submitting = true;
+          submission_id;
+          error = None;
+          _;
+        } ->
+        submission_id = sub2_id
+    | _ -> false);
+  let m_stale_err, _ =
+    Update.step ~now:t1 m_id_sub2
+      (Msg.Http_reply
+         {
+           epoch = m_id_sub2.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = sub1_req_seq;
+                 modal_submission_id = Some sub1_id;
+                 result =
+                   Error
+                     (Msg.Http_error
+                        {
+                          status = 500;
+                          body = {|{"ok":false,"error":"stale fail"}|};
+                          api_error = None;
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "stale R1 Error reply does NOT unlock or overwrite reopened R2 modal" true
+    (match m_stale_err.inline_modal with
+    | Some
+        {
+          kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+          submitting = true;
+          submission_id;
+          error = None;
+          _;
+        } ->
+        submission_id = sub2_id
+    | _ -> false);
+  let m_match_err, _ =
+    Update.step ~now:t1 m_id_sub2
+      (Msg.Http_reply
+         {
+           epoch = m_id_sub2.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = sub2_req_seq;
+                 modal_submission_id = Some sub2_id;
+                 result =
+                   Error
+                     (Msg.Http_error
+                        {
+                          status = 500;
+                          body = {|{"ok":false,"error":"r2 fail"}|};
+                          api_error = None;
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching R2 Error unlocks modal and records error" true
+    (match m_match_err.inline_modal with
+    | Some
+        {
+          kind = Nav.Keeper_lifecycle_form { keeper = "gamma" };
+          submitting = false;
+          submission_id;
+          error = Some _;
+          _;
+        } ->
+        submission_id = sub2_id
+    | _ -> false);
+  let m_match_ok, _ =
+    Update.step ~now:t1 m_id_sub2
+      (Msg.Http_reply
+         {
+           epoch = m_id_sub2.epoch;
+           reply =
+             Msg.Reply_keeper_lifecycle
+               {
+                 keeper = "gamma";
+                 op = Wire_fleet.Keeper_pause;
+                 req_seq = sub2_req_seq;
+                 modal_submission_id = Some sub2_id;
+                 result =
+                   Ok
+                     {
+                       ok = true;
+                       action = Some "pause";
+                       name = Some "gamma";
+                       already_live = false;
+                       already_absent = false;
+                       committed = false;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching R2 ok=true closes modal cleanly" true
+    (Option.is_none m_match_ok.inline_modal
+    && Option.is_none m_match_ok.nav.overlay)
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -20582,8 +22247,11 @@ let () =
         ] );
       ( "input"
       , [
-          Alcotest.test_case "keymap actions & all 22 slash commands" `Quick
+          Alcotest.test_case "keymap actions & all 27 slash commands" `Quick
             test_keymap_and_slash_commands;
+          Alcotest.test_case
+            "Keeper lifecycle controls ([W]/[D], 2-press arm, 202 follow-up, slash & Ctrl+K)"
+            `Quick test_keeper_lifecycle_controls_and_guards;
         ] );
       ( "domains"
       , [

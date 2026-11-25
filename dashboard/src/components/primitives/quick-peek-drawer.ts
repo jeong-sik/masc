@@ -32,6 +32,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   const [wide, setWide] = useState(props.defaultWide ?? false)
   const [isPushViewport, setIsPushViewport] = useState(detectDesktopPush)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const drawerRef = useRef<HTMLElement>(null)
   const closeBtnRef = useRef<HTMLButtonElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(props.onClose)
@@ -62,6 +63,12 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined') {
+          const otherModalOpen = Array.from(
+            document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+          ).some((el) => el !== drawerRef.current)
+          if (otherModalOpen) return
+        }
         event.preventDefault()
         event.stopPropagation()
         onCloseRef.current()
@@ -95,6 +102,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
       />
     `}
     <aside
+      ref=${drawerRef}
       class="qpeek"
       role=${isOverlay ? 'dialog' : 'complementary'}
       aria-modal=${isOverlay ? 'true' : undefined}

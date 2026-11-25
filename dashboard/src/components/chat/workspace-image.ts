@@ -6,8 +6,8 @@ import { authSession, getSingleUserToken, resolveWorkspaceUrl, sessionEpoch } fr
 import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { parseUrl } from '../../lib/parse-url'
 
-// Match the default limit of the Keeper generated-media store.
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+// Match the server ceiling of KeeperGeneratedMedia.max_bytes (50 MiB).
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 
 async function readImage(response: Response): Promise<Blob | null> {
   const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim()
@@ -113,7 +113,7 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
         <div class="chat-block-media-ph img-ph">
           <span role="status">${current ? '이미지를 불러올 수 없습니다' : alt}</span>
           ${current && html`
-            <button type="button" class="btn btn-sm" aria-label="이미지 다시 시도" onClick=${() => {
+            <button type="button" class="btn-ghost" aria-label="이미지 다시 시도" onClick=${() => {
               setLoaded(null)
               setAttempt(previous => previous + 1)
             }}>다시 시도</button>

@@ -763,6 +763,9 @@ default = "muse_test.m_muse"
    | [ ({ execution = Runtime_execution.Acp exec; _ } as runtime) ] ->
      check bool "muse driver" true
        (Runtime_acp_client.equal_driver Runtime_acp_client.Muse_code exec.driver);
+     check bool "a row without contributor-mode runs the host with it off" true
+       (Runtime_acp_client.equal_contributor_mode Runtime_acp_client.Contributor_off
+          exec.contributor_mode);
      check (list string) "operator args are kept as written"
        [ "acp"; "-c"; "reasoning_effort=\"low\"" ] exec.args;
      check (option string) "model id" (Some "muse-ember-1.0")
@@ -793,65 +796,6 @@ default = "muse_eff.m"
     check string "error path identifies the effort key" "providers.muse_eff.effort" err.path
   | Error [] -> fail "expected a non-empty error list for muse_code effort"
   | Ok _ -> fail "muse_code has no effort option, so effort must be refused at parse time"
-;;
-
-(* The host reads its contributor mode from the operator's settings unless the
-   runtime declares one, so the declared value, or the default, must reach the
-   execution record. *)
-let test_muse_contributor_mode_toml () =
-  let source ~driver ~command ~extra =
-    Printf.sprintf
-      {|
-[providers.contrib]
-protocol = "acp"
-driver = %S
-command = %S
-is-non-interactive = true
-%s
-[models.m]
-api-name = "m"
-max-context = 1000
-[contrib.m]
-[runtime]
-default = "contrib.m"
-|}
-      driver
-      command
-      extra
-  in
-  let describe errs =
-    String.concat "; "
-      (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs)
-  in
-  let materialized extra =
-    match Runtime_toml.parse_string (source ~driver:"muse_code" ~command:"muse" ~extra) with
-    | Error errs -> failf "muse_code row with %S failed to parse: %s" extra (describe errs)
-    | Ok cfg ->
-      (match Runtime_instance.partition_bindings cfg cfg.bindings with
-       | [ { execution = Runtime_execution.Acp exec; _ } ], [] -> exec
-       | _ -> failf "expected one materialized muse_code runtime for %S" extra)
-  in
-  let mode =
-    testable Runtime_acp_client.pp_contributor_mode Runtime_acp_client.equal_contributor_mode
-  in
-  check mode "no key leaves the host's mode off" Runtime_acp_client.Contributor_off
-    (materialized "").contributor_mode;
-  check mode "on is kept as declared" Runtime_acp_client.Contributor_on
-    (materialized {|contributor-mode = "on"|}).contributor_mode;
-  check mode "off is kept as declared" Runtime_acp_client.Contributor_off
-    (materialized {|contributor-mode = "off"|}).contributor_mode;
-  let refused ~what ~driver ~command ~extra =
-    match Runtime_toml.parse_string (source ~driver ~command ~extra) with
-    | Error (err :: _) ->
-      check string (what ^ ": the error names the key") "providers.contrib.contributor-mode"
-        err.path
-    | Error [] -> failf "%s: expected a non-empty error list" what
-    | Ok _ -> failf "%s: must be refused at parse time" what
-  in
-  refused ~what:"a value that is neither on nor off" ~driver:"muse_code" ~command:"muse"
-    ~extra:{|contributor-mode = "maybe"|};
-  refused ~what:"a driver without a contributor mode" ~driver:"kimi_code" ~command:"kimi"
-    ~extra:{|contributor-mode = "off"|}
 ;;
 
 let test_muse_binding_effort_admission () =
@@ -4658,21 +4602,12 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
       ~skills_dirs:[]
       base_cfg
   in
-  let h_diff_contributor =
-    Keeper_acp_runtime.For_testing.process_config_sha256
-      ~native_posture:Runtime_native_tools.Native_none
-      ~skills_dirs:[]
-      { base_cfg with contributor_mode = Runtime_acp_client.Contributor_on }
-  in
   check string "process_config_sha256 ignores warm-reconfigurable model/effort/mode"
     h_base h_same_proc_diff_model;
   check bool "process_config_sha256 changes on oauth_source change" true
     (not (String.equal h_base h_diff_oauth));
   check bool "process_config_sha256 changes on native_posture change" true
     (not (String.equal h_base h_diff_posture));
-  (* A host started with the mode off must not serve a runtime that declares it on. *)
-  check bool "process_config_sha256 changes on contributor_mode change" true
-    (not (String.equal h_base h_diff_contributor));
   (* 6. hydrate_start_messages ~prefer_handoff:true preserves appended before_turn nudges *)
   let tmp = Filename.temp_dir ~perms:0o700 "masc-acp-l4-nudge-" "" in
   Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
@@ -5895,7 +5830,6 @@ let () =
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
         ; test_case "muse_code row materializes and refuses effort" `Quick
             test_muse_toml_row_and_effort
-        ; test_case "muse_code contributor-mode declaration" `Quick test_muse_contributor_mode_toml
         ; test_case "Muse model and binding effort admission" `Quick test_muse_binding_effort_admission
         ; test_case "unknown driver rejected" `Quick test_unknown_driver_rejected
         ; test_case "typed ACP effort and default model_selection TOML boundary" `Quick

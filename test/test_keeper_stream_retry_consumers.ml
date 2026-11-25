@@ -93,12 +93,12 @@ let test_discord failure () =
   let posts = ref 0 in
   let diagnostics = ref 0 in
   let outcomes = consume fixture (fun events settle ->
-    Masc.Keeper_chat_discord.For_testing.adapter_loop ~token:"test-token"
-      ~channel_id:"test-channel" ~events
-      ~post_message:(fun ~nonce:_ ~content ->
+    Masc.Keeper_chat_discord.For_testing.adapter_loop ~events
+      ~post_message:(fun ~reply_to_message_id:_ ~nonce:_ ~content ->
         incr posts; delivered := Some content; Ok "reply-message")
       ~edit_message:(fun ~message_id:_ ~content -> delivered := Some content; Ok ())
-      ~send_message:(fun ~content:_ -> incr diagnostics; Ok ())
+      ~send_message:(fun ~reply_to_message_id:_ ~content:_ -> incr diagnostics; Ok ())
+      ~send_embed:(fun ~reply_to_message_id:_ _ -> Ok ())
       ~on_send_result:(fun result ->
         check (option string) "the next answer is delivered before settlement" (Some answer) !delivered;
         settle result)

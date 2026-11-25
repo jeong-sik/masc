@@ -27,6 +27,7 @@ val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->
   channel_id:string ->
+  ?reply_to_message_id:string ->
   events:Keeper_chat_events.t ->
   ?base_url:string ->
   ?on_send_result:((unit, error) result -> unit) ->
@@ -59,6 +60,9 @@ val adapter_loop :
 
     Falls back to a single POST if no deltas arrive before [Run_finished].
 
+    [reply_to_message_id] binds text, retries, overflow, rich blocks and
+    error notices to the original message in the routed channel or thread.
+
     The streaming POST, its one retry, and the final POST that follows an
     unanswered one carry the reply's one {!Discord_rest_client.nonce} with
     [enforce_nonce]. Discord checks a nonce only "in the past few minutes"
@@ -70,12 +74,10 @@ val adapter_loop :
     external effect delivered, or with no text, sends nothing more and leaves
     a landed partial message as it is.
 
-    [on_send_result] is invoked exactly once when the turn terminates through
-    [Run_finished] or [Event_error]. The result reports whether the primary
-    final text/error reply was actually delivered: the final PATCH plus every
-    overflow POST must succeed. Streaming previews, tool embeds, and other rich
-    side messages do not produce terminal callback invocations. The callback
-    defaults to a no-op.
+    [on_send_result] is invoked once at terminal delivery. The primary reply
+    must deliver its final text or error, including any overflow. When
+    [reply_to_message_id] is present, [Run_finished] also includes the results
+    of typed rich blocks and final text embeds. The callback defaults to a no-op.
 
     The loop exits after one turn; the caller must restart it for
     subsequent turns. *)
@@ -101,13 +103,14 @@ module For_testing : sig
       are rendered into embeds for richer Discord delivery. *)
 
   val adapter_loop :
-    token:string ->
-    channel_id:string ->
+    ?reply_to_message_id:string ->
     events:Keeper_chat_events.t ->
     post_message:
-      (nonce:Discord_rest_client.nonce -> content:string -> (string, error) result) ->
+      (reply_to_message_id:string option ->
+       nonce:Discord_rest_client.nonce -> content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
-    send_message:(content:string -> (unit, error) result) ->
+    send_message:(reply_to_message_id:string option -> content:string -> (unit, error) result) ->
+    send_embed:(reply_to_message_id:string option -> Discord_rest_client.embed -> (unit, error) result) ->
     ?show_activity:(unit -> (unit, error) result) ->
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
@@ -116,12 +119,10 @@ module For_testing : sig
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
-  (** Test seam for the text-delivery and activity transports. Production uses
+  (** Test seam for outgoing messages and activity. Production uses
       {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
       exercising the real event-loop state machine. [show_activity] represents
       one native typing refresh; its failure is observational and never settles
       [on_send_result]. [now] makes edit pacing deterministic, and
-      [fresh_nonce] makes the per-reply create-message nonce deterministic. Rich
-      side-message helpers remain production-backed and should not be emitted
-      by transport tests. *)
+      [fresh_nonce] makes the per-reply create-message nonce deterministic. *)
 end

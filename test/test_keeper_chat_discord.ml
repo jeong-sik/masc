@@ -5,7 +5,9 @@ module D = Masc.Keeper_chat_discord.For_testing
 let contains haystack needle =
   String_util.contains_substring haystack needle
 
-let run_adapter ?show_activity ?now ?fresh_nonce events ~post_message
+let run_adapter ?show_activity ?now ?fresh_nonce ?reply_to_message_id
+    ?(note_target = fun _ -> ()) ?(send_embed = fun ~reply_to_message_id:_ _ -> Ok ())
+    events ~post_message
     ~edit_message ~send_message =
   Eio_main.run
   @@ fun _env ->
@@ -14,8 +16,13 @@ let run_adapter ?show_activity ?now ?fresh_nonce events ~post_message
   (* The turn closes its bus when it returns; the adapter reads to that close. *)
   Masc.Keeper_chat_events.close stream;
   let outcomes = ref [] in
-  D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
-    ~events:stream ~post_message ~edit_message ~send_message
+  D.adapter_loop ?reply_to_message_id ~events:stream ~edit_message ~send_embed
+    ~post_message:(fun ~reply_to_message_id ~nonce ~content ->
+      note_target reply_to_message_id;
+      post_message ~nonce ~content)
+    ~send_message:(fun ~reply_to_message_id ~content ->
+      note_target reply_to_message_id;
+      send_message ~content)
     ?show_activity ?now ?fresh_nonce
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
   List.rev !outcomes
@@ -326,11 +333,12 @@ let test_publisher_is_not_wedged_behind_the_settled_adapter () =
     publisher_finished := true;
     `Stop_daemon);
   let outcomes = ref [] in
-  D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
+  D.adapter_loop
     ~events:stream
-    ~post_message:(fun ~nonce:_ ~content:_ -> Ok "stream-message")
+    ~post_message:(fun ~reply_to_message_id:_ ~nonce:_ ~content:_ -> Ok "stream-message")
     ~edit_message:(fun ~message_id:_ ~content:_ -> Ok ())
-    ~send_message:(fun ~content:_ -> Ok ())
+    ~send_message:(fun ~reply_to_message_id:_ ~content:_ -> Ok ())
+    ~send_embed:(fun ~reply_to_message_id:_ _ -> Ok ())
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
   check int "delivery settles exactly once" 1 (List.length !outcomes);
   (* The adapter settles at the terminal event and tells the bus it is gone,
@@ -429,8 +437,10 @@ let test_terminal_callback_reports_final_patch_failure () =
 let test_terminal_callback_reports_overflow_failure () =
   let content = String.make 2100 'x' ^ " " in
   let overflow_posts = ref 0 in
+  let targets = ref [] in
   let outcomes =
-    run_adapter
+    run_adapter ~reply_to_message_id:"901"
+      ~note_target:(fun target -> targets := target :: !targets)
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-overflow"; thread_id = "thread-overflow" }
       ; Masc.Keeper_chat_events.Text_delta {text=content; response=Unobserved_scope (None)}
@@ -449,6 +459,8 @@ let test_terminal_callback_reports_overflow_failure () =
         Error (Discord_rest_client.Network "overflow failed"))
   in
   check int "one overflow POST" 1 !overflow_posts;
+  check (list (option string)) "head and overflow reference the original"
+    [ Some "901"; Some "901" ] !targets;
   check_single_network_error "overflow failure" "overflow failed" outcomes
 
 let test_error_reply_callback_once () =
@@ -660,7 +672,7 @@ let test_checkpoint_status_keeps_the_accumulated_stream_text () =
    attempt created, and a PATCH writes the intended text over the partial text
    that message may hold. The fixture answers the create-message requests
    with [post_results] in order and fails a reply posted as a fresh message. *)
-let run_reply_with_unanswered_posts ~post_results events =
+let run_reply_with_unanswered_posts ?reply_to_message_id ?note_target ~post_results events =
   let nonces_made = ref 0 in
   let fresh_nonce () =
     incr nonces_made;
@@ -674,7 +686,7 @@ let run_reply_with_unanswered_posts ~post_results events =
   let posts = ref [] in
   let edits = ref [] in
   let outcomes =
-    run_adapter ~fresh_nonce
+    run_adapter ~fresh_nonce ?reply_to_message_id ?note_target
       ~post_message:(fun ~nonce ~content ->
         posts := (Discord_rest_client.nonce_to_string nonce, content) :: !posts;
         match !post_results with
@@ -715,8 +727,10 @@ let check_one_reply_nonce label expected_contents posts =
 (* The last delta "c" leaves the stable prefix at "a b ", so a third streaming
    POST would send "a b " and only the final POST sends "a b c". *)
 let test_unanswered_post_is_asked_again_with_the_reply_nonce () =
+  let targets = ref [] in
   let outcomes, posts, edits =
-    run_reply_with_unanswered_posts
+    run_reply_with_unanswered_posts ~reply_to_message_id:"901"
+      ~note_target:(fun target -> targets := target :: !targets)
       ~post_results:[ lost_post; lost_post; Ok "discord-landed" ]
       [ reply_started; reply_text "a "; reply_text "b "; reply_text "c"
       ; reply_finished ]
@@ -725,9 +739,49 @@ let test_unanswered_post_is_asked_again_with_the_reply_nonce () =
   check_one_reply_nonce
     "streaming POST, its one retry and the final POST share one nonce"
     [ "a "; "a b "; "a b c" ] posts;
+  check (list (option string)) "every POST refers to the same original"
+    [ Some "901"; Some "901"; Some "901" ] !targets;
   check (list (pair string string))
     "the complete reply is written over the returned message"
     [ ("discord-landed", "a b c") ] edits
+
+let test_single_post_preserves_the_reply_target () =
+  let sent = ref [] in
+  let outcomes =
+    run_adapter ~reply_to_message_id:"901"
+      ~note_target:(fun target -> sent := target :: !sent)
+      ~post_message:(fun ~nonce:_ ~content:_ -> fail "unexpected streaming POST")
+      ~edit_message:(fun ~message_id:_ ~content:_ -> fail "unexpected edit")
+      ~send_message:(fun ~content -> check string "complete answer" "hello" content; Ok ())
+      [ reply_started; reply_text "hello"; reply_finished ]
+  in
+  check_single_ok "the reply settles" outcomes;
+  check (list (option string)) "the one-shot POST refers to the original"
+    [ Some "901" ] !sent
+
+let test_rich_only_reply_reports_delivery_failure () =
+  let run ?reply_to_message_id () =
+    let sent = ref [] in
+    let outcomes =
+      run_adapter ?reply_to_message_id
+        ~post_message:(fun ~nonce:_ ~content:_ -> fail "unexpected text POST")
+        ~edit_message:(fun ~message_id:_ ~content:_ -> fail "unexpected edit")
+        ~send_message:(fun ~content:_ -> fail "unexpected text fallback")
+        ~send_embed:(fun ~reply_to_message_id (embed : Discord_rest_client.embed) ->
+          sent := (reply_to_message_id, embed.image) :: !sent;
+          Error (Discord_rest_client.Network "embed send failed"))
+        [ reply_started
+        ; Masc.Keeper_chat_events.Image_block
+            { url = "https://example.com/image.png"; caption = None }
+        ; reply_finished ]
+    in
+    check (list (pair (option string) (option string))) "image carries the turn target"
+      [ reply_to_message_id, Some "https://example.com/image.png" ] !sent;
+    outcomes
+  in
+  check_single_network_error "referenced image failure" "embed send failed"
+    (run ~reply_to_message_id:"901" ());
+  check_single_ok "an ordinary channel keeps its primary text receipt" (run ())
 
 let test_unanswered_posts_that_all_fail_settle_the_final_error () =
   let outcomes, posts, edits =
@@ -807,6 +861,10 @@ let () =
             test_checkpoint_status_keeps_the_accumulated_stream_text
         ; test_case "unanswered POST is asked again with the reply nonce" `Quick
             test_unanswered_post_is_asked_again_with_the_reply_nonce
+        ; test_case "one-shot POST keeps the reply target" `Quick
+            test_single_post_preserves_the_reply_target
+        ; test_case "rich-only original reply reports delivery failure" `Quick
+            test_rich_only_reply_reports_delivery_failure
         ; test_case "unanswered POSTs that all fail settle the final error"
             `Quick test_unanswered_posts_that_all_fail_settle_the_final_error
         ; test_case "answered retry writes its text over the returned message"

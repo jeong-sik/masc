@@ -19,6 +19,8 @@ import {
   refreshDevTokenAfterAuthError,
 } from './dev-token'
 import type { KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
+import { decodeQueuedChatOperationPage, queuedChatOperationsPath, readQueuedChatOperations } from '../lib/keeper-chat-queue'
+import { ok, unwrapResult } from '../lib/result'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -836,25 +838,16 @@ async function fetchQueuedKeeperChatOperationPage(
   keeperName: string,
   afterSequence?: string,
 ): Promise<KeeperChatOperation[]> {
-  const query = new URLSearchParams({ state: 'queued' })
-  if (afterSequence !== undefined) query.set('after_sequence', afterSequence)
-  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations?${query.toString()}`
+  const path = queuedChatOperationsPath(keeperName, afterSequence)
   const response = await fetchWithTimeout(path, { headers: jsonHeaders() }, DEFAULT_GET_TIMEOUT_MS)
   if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
-  const value: unknown = await response.json()
-  if (
-    !isRecord(value)
-    || value.schema !== 'masc.keeper_chat_operations.list.v1'
-    || value.state !== 'Queued'
-    || !Array.isArray(value.operations)
-  ) {
-    throw new Error('Keeper chat operation list has an invalid contract')
-  }
-  const operations = value.operations.map(parseKeeperChatOperation)
-  if (operations.some(operation => operation.state.kind !== 'queued')) {
-    throw new Error('Keeper chat operation list contains a non-queued operation')
-  }
-  return operations
+  return decodeQueuedChatOperationPage(await response.json(), afterSequence, (row) => {
+    const operation = parseKeeperChatOperation(row)
+    if (operation.state.kind !== 'queued') {
+      throw new Error('Keeper chat operation list contains a non-queued operation')
+    }
+    return operation
+  })
 }
 
 /** Reconstruct the queue from durable pages, including rows past the HTTP page limit.
@@ -865,20 +858,10 @@ export async function listQueuedKeeperChatOperations(
   keeperName: string,
   afterSequence?: string,
 ): Promise<KeeperChatOperation[]> {
-  const operations = new Map<string, KeeperChatOperation>()
-  let cursor = afterSequence
-  for (;;) {
-    const page = await fetchQueuedKeeperChatOperationPage(keeperName, cursor)
-    if (page.length === 0) return [...operations.values()]
-    for (const operation of page) {
-      if (cursor !== undefined && BigInt(operation.sequence) <= BigInt(cursor)) {
-        throw new Error('Keeper chat operation page sequence did not advance')
-      }
-      cursor = operation.sequence
-      operations.delete(operation.operationId)
-      operations.set(operation.operationId, operation)
-    }
-  }
+  return unwrapResult(await readQueuedChatOperations(
+    async (cursor) => ok(await fetchQueuedKeeperChatOperationPage(keeperName, cursor)),
+    afterSequence,
+  ))
 }
 
 async function mutateQueuedKeeperChatOperation(

@@ -880,9 +880,23 @@ details[open] > .kp-sub-summary::before {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  min-height: 0;
+  max-height: min(16rem, 35vh);
   padding: var(--sp-2) var(--sp-4);
   border-top: 1px solid var(--line-1);
   background: var(--bg-1);
+}
+
+.kp-queue-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.kp-queue-rows > .kp-queue-row {
+  flex-shrink: 0;
 }
 
 .kp-queue-row {

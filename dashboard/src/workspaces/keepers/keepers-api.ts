@@ -35,6 +35,11 @@ import {
   type Observed,
 } from '../../core/resource-cache'
 import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
+import {
+  decodeQueuedChatOperationPage,
+  queuedChatOperationsPath,
+  readQueuedChatOperations,
+} from '../../lib/keeper-chat-queue'
 import { randomUuid } from '../../lib/uuid'
 import { decodeKeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import {
@@ -844,36 +849,40 @@ export function fetchKeeperChatHistoryPageApi(
   )
 }
 
+function decodeQueuedChatOperation(raw: unknown): QueuedChatOperation {
+  if (!isRecord(raw) || raw.schema !== 'masc.keeper_chat_operation.v1' || raw.state !== 'Queued') {
+    throw new Error('Expected a queued Keeper chat operation')
+  }
+  const operationId = asStr(raw.operation_id)
+  const sequence = asStr(raw.sequence)
+  const createdAt = asNum(raw.created_at)
+  const input = raw.input
+  if (
+    !operationId || sequence === null || !/^\d+$/.test(sequence)
+    || createdAt === null || createdAt < 0
+    || !isRecord(input) || typeof input.message !== 'string'
+  ) {
+    throw new Error('Queued Keeper chat operation has an invalid contract')
+  }
+  return { operationId, sequence, createdAt, message: input.message, state: raw.state }
+}
+
 export function fetchQueuedChatOperations(
   keeper: string,
   signal?: AbortSignal,
 ): Promise<Result<readonly QueuedChatOperation[], ApiError>> {
-  return apiGet<readonly QueuedChatOperation[]>(
-    `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/operations?state=queued`,
-    {
+  const startEpoch = currentSessionEpoch()
+  return readQueuedChatOperations<QueuedChatOperation, ApiError>((cursor) => {
+    if (!isEpochCurrent(startEpoch)) {
+      return Promise.resolve(err({
+        kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false,
+      }))
+    }
+    return apiGet(queuedChatOperationsPath(keeper, cursor), {
       signal,
-      decode: (raw) => {
-        if (!isRecord(raw) || !Array.isArray(raw.operations)) {
-          throw new Error('Invalid chat queue payload')
-        }
-        const ops: QueuedChatOperation[] = []
-        for (const item of raw.operations) {
-          if (!isRecord(item)) continue
-          const opId = asStr(item.operation_id)
-          if (!opId) continue
-          const input = isRecord(item.input) ? item.input : null
-          ops.push({
-            operationId: opId,
-            sequence: asStr(item.sequence) ?? String(asNum(item.sequence) ?? 0),
-            createdAt: asNum(item.created_at) ?? 0,
-            message: input && typeof input.message === 'string' ? input.message : '',
-            state: asStr(item.state) ?? 'Queued',
-          })
-        }
-        return ops
-      },
-    },
-  )
+      decode: (raw) => decodeQueuedChatOperationPage(raw, cursor, decodeQueuedChatOperation),
+    })
+  })
 }
 
 export function cancelQueuedChatOperation(keeper: string, operationId: string) {

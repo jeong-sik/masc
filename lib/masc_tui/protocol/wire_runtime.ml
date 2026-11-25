@@ -3846,9 +3846,19 @@ type setup_integration = {
   configured_runtime_ids : string list;
 }
 
+type setup_account_state =
+  | Account_read of { email : string; plan : string list }
+  | Account_not_read of { cause : string }
+
+type setup_account_email = {
+  integration_id : string;
+  account : setup_account_state;
+}
+
 type setup_inventory = {
   default_runtime_id : string option;
   integrations : setup_integration list;
+  account_emails : setup_account_email list;
 }
 
 let decode_setup_integration json =
@@ -3879,12 +3889,36 @@ let decode_setup_integration json =
       configured_runtime_ids;
     }
 
+let decode_setup_account_email json =
+  let* integration_id = required_nonblank_string json "integration_id" in
+  let* state = required_nonblank_string json "state" in
+  let* account =
+    match state with
+    | "read" ->
+        let* email = required_nonblank_string json "email" in
+        let* plan = optional_string_list json "plan" in
+        Ok (Account_read { email; plan })
+    | "not_read" ->
+        let* cause = required_nonblank_string json "cause" in
+        Ok (Account_not_read { cause })
+    | other -> Error (Printf.sprintf "unknown account_emails state %S" other)
+  in
+  Ok { integration_id; account }
+
+let setup_account_line = function
+  | Account_read { email; plan } -> String.concat " · " (email :: plan)
+  | Account_not_read { cause } -> "? " ^ cause
+
 let decode_setup_inventory json =
   let* _, body = unwrap_v2_or_raw json in
   let* default_runtime_id = optional_nonblank_string body "default_runtime_id" in
   let* items = optional_list_field body "integrations" in
   let* integrations = decode_list "integrations" decode_setup_integration items in
-  Ok { default_runtime_id; integrations }
+  let* account_items = optional_list_field body "account_emails" in
+  let* account_emails =
+    decode_list "account_emails" decode_setup_account_email account_items
+  in
+  Ok { default_runtime_id; integrations; account_emails }
 
 type setup_login_receipt = {
   login_id : string;

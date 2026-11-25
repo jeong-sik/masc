@@ -228,8 +228,14 @@ val selected_goal_dive_task : goal_id:string -> t -> Wire_work.task option
 val selected_goal_dive_verification :
   goal_id:string -> t -> Wire_work.verification_request option
 val reset_goal_dive_state : t -> t
-val select_goal_by_id : goal_id:string -> t -> t
-val select_task_by_id : task_id:string -> t -> t
+val select_goal_by_id : goal_id:string -> t -> (t, [ `Not_listed ]) result
+(** Select a goal on the Pipeline tab, clearing the text and phase filters only
+    as far as needed to list it. [Error `Not_listed] when no filter setting
+    lists the goal (for example before planning data loads); the caller must
+    not act as if it were selected. *)
+
+val select_task_by_id : task_id:string -> t -> (t, [ `Not_listed ]) result
+(** As {!select_goal_by_id}, for a task on the Tasks tab. *)
 val move_goal_dive_task :
   goal_id:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_goal_dive_verif :

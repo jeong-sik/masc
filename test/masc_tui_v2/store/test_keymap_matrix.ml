@@ -1279,14 +1279,14 @@ let test_axis_a_screen_dive_matrix () =
         {
           mw with
           nav = { mw.nav with zoomed = true; pane_index = 0 };
-          work = Work_store.select_goal_by_id ~goal_id:"goal-1" mw.work;
+          work = Result.get_ok (Work_store.select_goal_by_id ~goal_id:"goal-1" mw.work);
         } );
       ( "Work/Tasks/Zoomed"
       , let mw = with_ws Nav.Work base in
         {
           mw with
           nav = { mw.nav with zoomed = true; pane_index = 0 };
-          work = Work_store.select_task_by_id ~task_id:"task-1" mw.work;
+          work = Result.get_ok (Work_store.select_task_by_id ~task_id:"task-1" mw.work);
         } );
       ( "Knowledge/Board/Zoomed"
       , let mk = with_ws Nav.Knowledge base in

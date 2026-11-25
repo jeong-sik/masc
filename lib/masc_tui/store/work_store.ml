@@ -1136,23 +1136,23 @@ let select_goal_by_id ~goal_id t =
     in
     loop 0 gs
   in
-  let base1 =
-    match find_idx (filtered_goals base0) with
-    | Some _ -> base0
-    | None ->
-        let b = { base0 with filter_query = "" } in
-        match find_idx (filtered_goals b) with
-        | Some _ -> b
-        | None -> { b with goal_phase_filter = Goal_filter_all }
+  (* Filters are cleared only as far as needed to list the goal; a goal no
+     view lists leaves the store untouched. *)
+  let cleared = { base0 with filter_query = "" } in
+  let candidates =
+    [ base0; cleared; { cleared with goal_phase_filter = Goal_filter_all } ]
   in
-  let selected_index =
-    match find_idx (filtered_goals base1) with
-    | Some idx -> idx
-    | None -> base1.selected_index
-  in
-  let scroll_offset = adjust_scroll ~scroll:0 selected_index in
-  { base1 with selected_index; scroll_offset; detail_scroll_offset = 0 }
-  |> reset_goal_dive_state
+  match
+    List.find_map
+      (fun b -> Option.map (fun idx -> (b, idx)) (find_idx (filtered_goals b)))
+      candidates
+  with
+  | None -> Error `Not_listed
+  | Some (base1, selected_index) ->
+      let scroll_offset = adjust_scroll ~scroll:0 selected_index in
+      Ok
+        ({ base1 with selected_index; scroll_offset; detail_scroll_offset = 0 }
+        |> reset_goal_dive_state)
 
 let select_task_by_id ~task_id t =
   let base0 = set_tab Nav.Work_tasks t in
@@ -1164,29 +1164,27 @@ let select_task_by_id ~task_id t =
     in
     loop 0 ts
   in
-  let base1 =
-    match find_idx (filtered_tasks base0) with
-    | Some _ -> base0
-    | None ->
-        let b = { base0 with filter_query = "" } in
-        match find_idx (filtered_tasks b) with
-        | Some _ -> b
-        | None -> { b with task_status_filter = Status_all }
+  let cleared = { base0 with filter_query = "" } in
+  let candidates =
+    [ base0; cleared; { cleared with task_status_filter = Status_all } ]
   in
-  let selected_index =
-    match find_idx (filtered_tasks base1) with
-    | Some idx -> idx
-    | None -> base1.selected_index
-  in
-  let scroll_offset = adjust_scroll ~scroll:0 selected_index in
-  {
-    base1 with
-    selected_index;
-    scroll_offset;
-    detail_scroll_offset = 0;
-    task_dive_desc_scroll = 0;
-    task_dive_verif_scroll = 0;
-  }
+  match
+    List.find_map
+      (fun b -> Option.map (fun idx -> (b, idx)) (find_idx (filtered_tasks b)))
+      candidates
+  with
+  | None -> Error `Not_listed
+  | Some (base1, selected_index) ->
+      let scroll_offset = adjust_scroll ~scroll:0 selected_index in
+      Ok
+        {
+          base1 with
+          selected_index;
+          scroll_offset;
+          detail_scroll_offset = 0;
+          task_dive_desc_scroll = 0;
+          task_dive_verif_scroll = 0;
+        }
 
 let move_goal_dive_task ~goal_id ?viewport_rows ~delta t =
   let len = List.length (goal_linked_tasks ~goal_id t) in

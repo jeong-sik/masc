@@ -1245,7 +1245,17 @@ let jump_to_goal ?zoomed ?return_from (m : Model.t) (goal_id : string) =
     |> Knowledge_store.clear_pending_artifact_revision
     |> close_board_recovery
   in
-  let work = Work_store.select_goal_by_id ~goal_id m.work in
+  match Work_store.select_goal_by_id ~goal_id m.work with
+  | Error `Not_listed ->
+      (* Zooming whatever stays selected would show, and let [a]/[x] act on,
+         a different goal. *)
+      ( Model.with_toast ~now:m.freshness.last_mono ~level:Model.Toast_warning
+          (Say.make
+             ~ko:(Printf.sprintf "목록에 없는 목표라 열지 않았습니다: %s" goal_id)
+             ~en:(Printf.sprintf "Goal %s is not in the loaded list; not opened" goal_id))
+          m
+      , [] )
+  | Ok work ->
   let next0 =
     {
       m with
@@ -1315,7 +1325,15 @@ let jump_to_task ?zoomed ?return_from (m : Model.t) (task_id : string) =
     |> Knowledge_store.clear_pending_artifact_revision
     |> close_board_recovery
   in
-  let work = Work_store.select_task_by_id ~task_id m.work in
+  match Work_store.select_task_by_id ~task_id m.work with
+  | Error `Not_listed ->
+      ( Model.with_toast ~now:m.freshness.last_mono ~level:Model.Toast_warning
+          (Say.make
+             ~ko:(Printf.sprintf "목록에 없는 태스크라 열지 않았습니다: %s" task_id)
+             ~en:(Printf.sprintf "Task %s is not in the loaded list; not opened" task_id))
+          m
+      , [] )
+  | Ok work ->
   let next0 =
     {
       m with
@@ -10205,32 +10223,35 @@ let pop_workspace_return (m : Model.t) =
         if Nav.equal_work_tab m.work.active_tab frame.work_tab then m.work
         else Work_store.set_tab frame.work_tab m.work
       in
-      let work =
+      (* [entity_listed = false] when the frame's goal or task is no longer
+         listed: the tab is restored but not zoomed onto another entity. *)
+      let work, entity_listed =
         match frame.work_return_entity_id with
-        | None -> work0
+        | None -> (work0, true)
         | Some id -> (
+            let reselect selected select =
+              if Option.equal String.equal selected (Some id) then (work0, true)
+              else
+                match select work0 with
+                | Ok w -> (w, true)
+                | Error `Not_listed -> (work0, false)
+            in
             match frame.work_tab with
             | Nav.Work_pipeline ->
-                if
-                  Option.equal String.equal
-                    (Option.map (fun (g : Wire_work.goal) -> g.id)
-                       (Work_store.selected_goal work0))
-                    (Some id)
-                then work0
-                else Work_store.select_goal_by_id ~goal_id:id work0
+                reselect
+                  (Option.map (fun (g : Wire_work.goal) -> g.id)
+                     (Work_store.selected_goal work0))
+                  (Work_store.select_goal_by_id ~goal_id:id)
             | Nav.Work_tasks ->
-                if
-                  Option.equal String.equal
-                    (Option.map (fun (t : Wire_work.task) -> t.id)
-                       (Work_store.selected_task work0))
-                    (Some id)
-                then work0
-                else Work_store.select_task_by_id ~task_id:id work0
+                reselect
+                  (Option.map (fun (t : Wire_work.task) -> t.id)
+                     (Work_store.selected_task work0))
+                  (Work_store.select_task_by_id ~task_id:id)
             | Nav.Work_inbox
             | Nav.Work_harness
             | Nav.Work_schedules
             | Nav.Work_candle_scorecard ->
-                work0)
+                (work0, true))
       in
       let knowledge0 =
         if Nav.equal_knowledge_tab m.knowledge.active_tab frame.knowledge_tab then
@@ -10316,7 +10337,7 @@ let pop_workspace_return (m : Model.t) =
         }
       in
       let restored_zoom =
-        frame.zoomed && Model.can_zoom_current_view next0
+        frame.zoomed && entity_listed && Model.can_zoom_current_view next0
       in
       let next1 =
         {

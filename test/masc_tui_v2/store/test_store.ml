@@ -28506,13 +28506,16 @@ let () =
                 false m_gz_e2.nav.zoomed;
               (* 5. Zoomed Goal #2 -> Linked Task #2 -> Esc unzooms -> Esc restores Goal #2 (not Goal #1) *)
               let m_g2z, _ = Update_nav.jump_to_goal ~zoomed:true m0 "w3-g2" in
-              let m_g2_p1, _ = step_k m_g2z (key Keymap.Input.Tab) in
-              let m_g2_tk, _ = step_k m_g2_p1 (key Keymap.Input.Enter) in
-              Alcotest.(check (option string))
-                "Drill from Zoomed Goal #2 selects linked Task #2"
-                (Some "w3-t2")
-                (Option.map (fun (t : Wire_work.task) -> t.id)
-                   (Work_store.selected_task m_g2_tk.work));
+              (* Pane 0 of a zoomed goal is Linked Tasks; Enter there drills. *)
+              let m_g2_tk, _ = step_k m_g2z (key Keymap.Input.Enter) in
+              Alcotest.(check bool)
+                "Drill from Zoomed Goal #2 opens Tasks on linked Task #2"
+                true
+                (Nav.equal_work_tab m_g2_tk.work.active_tab Nav.Work_tasks
+                 && Option.equal String.equal
+                      (Option.map (fun (t : Wire_work.task) -> t.id)
+                         (Work_store.selected_task m_g2_tk.work))
+                      (Some "w3-t2"));
               let m_g2_back1, _ = step_k m_g2_tk (key Keymap.Input.Escape) in
               let m_g2_back2, _ = step_k m_g2_back1 (key Keymap.Input.Escape) in
               Alcotest.(check bool)
@@ -28523,6 +28526,65 @@ let () =
                  && Option.equal String.equal
                       (Option.map (fun (g : Wire_work.goal) -> g.id)
                          (Work_store.selected_goal m_g2_back2.work))
-                      (Some "w3-g2")));
+                      (Some "w3-g2"));
+              (* #54821 review: an unlisted goal or task ID never zooms whatever
+                 stays selected. *)
+              let m_missing, missing_cmds = Update_nav.jump_to_goal ~zoomed:true m0 "w3-gone" in
+              Alcotest.(check bool)
+                "A jump to an unlisted goal stays put and pushes no return frame"
+                true
+                (Nav.equal_workspace m_missing.nav.workspace m0.nav.workspace
+                 && Nav.equal_work_tab m_missing.work.active_tab Nav.Work_tasks
+                 && (not m_missing.nav.zoomed)
+                 && List.is_empty m_missing.nav.workspace_return_stack
+                 && List.is_empty missing_cmds
+                 && Option.is_some m_missing.toast);
+              let m_task_missing, _ = Update_nav.jump_to_task ~zoomed:true m0 "w3-gone" in
+              Alcotest.(check bool) "A jump to an unlisted task stays put" true
+                ((not m_task_missing.nav.zoomed)
+                 && List.is_empty m_task_missing.nav.workspace_return_stack);
+              (* A return frame whose goal is gone restores the tab, unzoomed. *)
+              let gone =
+                {
+                  m_g2_tk with
+                  work =
+                    Work_store.apply_planning ~observed_at:t0
+                      { goals = [ g1 ]; tasks = [ tk1; tk2 ] } m_g2_tk.work;
+                }
+              in
+              let gone_back1, _ = step_k gone (key Keymap.Input.Escape) in
+              let gone_back2, _ = step_k gone_back1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc to a goal that is no longer listed does not zoom another goal"
+                true
+                (Nav.equal_work_tab gone_back2.work.active_tab Nav.Work_pipeline
+                 && not gone_back2.nav.zoomed);
+              (* #54821 review: one pane rect per focusable pane when the zoomed
+                 goal has a single pane (narrow raw JSON). *)
+              let narrow =
+                let base = Model.initial ~cols:80 ~rows:36 ~lang:Say.Lang_en () in
+                { m0 with breakpoint = base.breakpoint; viewport = base.viewport }
+              in
+              let with_json (m : Model.t) =
+                { m with infra = { m.infra with show_raw_json = true } }
+              in
+              let zoomed_views =
+                [
+                  ("goal", fst (Update_nav.jump_to_goal ~zoomed:true m0 "w3-g1"));
+                  ("goal, narrow JSON",
+                    with_json (fst (Update_nav.jump_to_goal ~zoomed:true narrow "w3-g1")));
+                  ("task without verifier runs",
+                    fst (Update_nav.jump_to_task ~zoomed:true m0 "w3-t2"));
+                  ("task, narrow JSON",
+                    with_json (fst (Update_nav.jump_to_task ~zoomed:true narrow "w3-t2")));
+                ]
+              in
+              List.iter
+                (fun (label, (m : Model.t)) ->
+                  Alcotest.(check int)
+                    ("pane_rects matches focusable_pane_count: " ^ label)
+                    (Model.focusable_pane_count m)
+                    (List.length (Model.pane_rects m)))
+                zoomed_views);
         ] );
     ]

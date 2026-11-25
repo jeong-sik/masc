@@ -409,13 +409,16 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   })
 
   it('discards queue rows when the workspace session changes with the same Keeper name', async () => {
-    const nextWorkspace = Promise.withResolvers<Response>()
+    let respondToNewWorkspace!: (response: Response) => void
+    const nextWorkspace = new Promise<Response>((resolve) => {
+      respondToNewWorkspace = resolve
+    })
     let changed = false
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://localhost')
       if (url.pathname.endsWith('/chat/operations')) {
         if (url.searchParams.has('after_sequence')) return Response.json(queuedOperations())
-        return changed ? nextWorkspace.promise : Response.json(queuedOperations([1]))
+        return changed ? nextWorkspace : Response.json(queuedOperations([1]))
       }
       return Response.json({ messages: [], has_more: false, next_cursor: null })
     }))
@@ -428,7 +431,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     })
     await waitFor(() => expect(chat.queryByText('Pending request 1')).toBeNull())
     expect(chat.queryByRole('button', { name: '취소' })).toBeNull()
-    nextWorkspace.resolve(Response.json(queuedOperations([2])))
+    respondToNewWorkspace(Response.json(queuedOperations([2])))
     await chat.findByText('Pending request 2')
   })
 

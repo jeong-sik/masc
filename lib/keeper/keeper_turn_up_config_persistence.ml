@@ -385,9 +385,12 @@ let full_fields
     | None -> fields
   in
   let fields =
-    match parsed.group_present, parsed.group_opt with
-    | true, Some group -> ("group", Keeper_toml_loader.Toml_string group) :: fields
-    | _ -> fields
+    match
+      if parsed.group_present then parsed.group_opt
+      else parsed.profile_defaults.group
+    with
+    | Some group -> ("group", Keeper_toml_loader.Toml_string group) :: fields
+    | None -> fields
   in
   let fields =
     match

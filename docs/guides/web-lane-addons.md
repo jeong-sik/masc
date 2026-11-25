@@ -4,8 +4,12 @@
 
 ## Manual
 
-Lane Add-on의 연결(Attach)은 **패키지를 특정 Workspace의 Run에 연결하고 그 패키지의 worker를 시작하는 것**이다.
-패키지의 `lane.toml`은 실행기와 명령, 제공할 출력·도구·Skill을 정의한다. Workspace의 설치 선언은
+**Lane Add-on은 MASC에 기능을 추가하는 플러그인 패키지다.** 패키지의 `lane.toml`은 실행할
+worker와 제공할 기능을 선언한다. 예를 들어 MSX 패키지는 `[world.tools]`로 Keeper가 호출할
+화면 도구를, `[world.skills]`로 찾아 읽을 Skill을, `[world.outputs.screen]`으로 구독할 수 있는
+화면 관측 출력을 제공한다. 호스트가 Keeper에게 어떤 도구를 노출할지 결정한다.
+
+연결(Attach)은 패키지를 특정 Workspace의 Run에 연결하고 worker를 시작하는 것이다. Workspace의 설치 선언은
 `id`로 설치를 식별하고, `run_id`로 관측을 묶고, `binding.sources`로 읽을 입력을 지정한다.
 `run_id`는 관측과 출력 연결의 범위다. 접근 권한은 호스트가 확인한다.
 

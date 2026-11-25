@@ -1,11 +1,10 @@
 # Lane Add-on packages
 
-A package adds observations, relationships, metrics, optional Skills, tools or actions to
-an existing MASC run. Its manifest, scripts and execution image supply the domain
-behavior; the host supplies installation, source connections, lifecycle, retained
-evidence and the common Dashboard. A package can borrow an existing resource or
-own its environment. It does not replace a Keeper or make its results a required
-step in other Keeper activity.
+A Lane Add-on is an installable MASC plugin. Its package can add tools, Skills,
+observations, relationships, metrics or actions to an existing run.
+The package defines what the worker does. The host manages installation, input
+connections, worker lifecycle and retained evidence. The Dashboard has a shared
+Lane Add-ons view. A package can use an existing resource or run its own environment.
 
 | Package | Contribution | Resource and state ownership |
 | --- | --- | --- |

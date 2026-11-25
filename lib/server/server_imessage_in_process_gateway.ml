@@ -138,6 +138,7 @@ let delivery_of_row ~(row : Db.inbound_row) :
        ; conversation_id =
            Some (conversation_id ~chat_identifier:row.chat_identifier)
        ; external_message_id = Some (string_of_int row.rowid)
+       ; attachments = []
        ; workspace_id = None
        })
     (Keeper_continuation_channel.imessage ~chat_identifier:row.chat_identifier

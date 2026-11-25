@@ -88,6 +88,10 @@ type inbound_attachment =
 val content_with_attachments :
   content:string -> attachments:inbound_attachment list -> string
 
+val content_with_attachments_hiding_urls :
+  hide_urls_for:string list -> content:string -> attachments:inbound_attachment list -> string
+(** For attachments admitted by ID, keep the readable name and omit the signed URL. *)
+
 type resolved_mention =
   { mention_id : string
   ; mention_name : string option

@@ -108,7 +108,8 @@ let discord_conversation ~guild_id ~channel_id ~channel_name ~parent_channel_id 
   conversation, thread_id
 
 let discord_delivery ~(conversation : Keeper_external_attention.conversation_ref)
-    ~guild_id ~channel_id ~parent_channel_id ~thread_id ~message_id ~author_id :
+    ~guild_id ~channel_id ~parent_channel_id ~thread_id ~message_id ~author_id
+    ~attachments :
     (Gate_keeper_backend.connector_delivery, string) result =
   Result.map
     (fun continuation_channel ->
@@ -117,6 +118,7 @@ let discord_delivery ~(conversation : Keeper_external_attention.conversation_ref
        ; conversation_id = Some conversation.conversation_id
        ; external_message_id = Some message_id
        ; workspace_id = guild_id
+       ; attachments
        })
     (Keeper_continuation_channel.discord
        ~guild_id
@@ -655,10 +657,21 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     None
   | Ok (Some (resolution, resolution_metadata)) ->
     let keeper_name = resolution.State.keeper_name in
-    (* Same body on both paths. A mention that came with a photo is the same
-       message as an ambient one that did; only the trigger differs. *)
+    let image_ids =
+      if author_is_user_message then
+        attachments
+        |> List.filter_map (fun (attachment : Discord_gateway_state.inbound_attachment) ->
+               match attachment.ia_content_type with
+               | Some media_type when Result.is_ok (Keeper_vision_tool.validate_media_type media_type)
+                 && attachment.ia_id <> "" && attachment.ia_id.[0] <> '0'
+                 && String.for_all Char.Ascii.is_digit attachment.ia_id ->
+                   Some attachment.ia_id
+               | Some _ | None -> None)
+        |> List.sort_uniq String.compare
+      else []
+    in
     let content =
-      Discord_gateway_state.content_with_attachments
+      Discord_gateway_state.content_with_attachments_hiding_urls ~hide_urls_for:image_ids
         ~content:
           (render_for_keeper ~bot_user_id ~keeper_name ~resolved_mentions
              raw_content)
@@ -732,6 +745,8 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       match
         discord_delivery ~conversation ~guild_id ~channel_id ~parent_channel_id
           ~thread_id ~message_id ~author_id
+          ~attachments:(List.map (fun attachment_id ->
+            Keeper_chat_operation_payload.Discord_image { attachment_id }) image_ids)
       with
       | Error detail -> Error (Channel_gate.Internal detail)
       | Ok delivery ->

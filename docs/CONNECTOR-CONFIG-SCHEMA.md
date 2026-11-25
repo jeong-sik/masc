@@ -191,6 +191,19 @@ as balanced Telegram HTML chunks. Private/local media references and binary
 attachments without a public reference remain explicit delivery failures;
 partial sends record successful message IDs and do not imply automatic resume.
 
+
+### Discord image input
+
+For a Discord message that starts a Keeper turn, MASC records the original
+message and image attachment IDs. At execution it checks the current channel
+binding, reads that message from Discord, and downloads its matching image.
+The bot needs permission to read the channel and its message history. The
+existing Keeper image budget limits the total downloaded bytes per turn.
+Successful images appear on the accepted user row and go through the normal
+Keeper image input path. If an image is unavailable, the turn keeps the
+message and records the reason on that row. When the same turn resumes, it
+uses the retained attachment from that row.
+
 ## Dashboard and backend
 
 Connection state comes from `GET /api/v1/gate/connectors`. Keeper bindings use

@@ -21,6 +21,8 @@ let admit_person_caller ~engine_name ~user_id ~channel ~pat =
   |> Result.map (fun stored_scope -> { user_id; stored_scope })
 ;;
 
+type connector_attachment = Discord_image of { attachment_id : string }
+
 type decoded_source =
   { submitted_by : string
   ; thread_id : string
@@ -33,6 +35,7 @@ type decoded_source =
   ; conversation_id : string option
   ; external_message_id : string option
   ; workspace_id : string option
+  ; connector_attachments : connector_attachment list
   ; extra_mentions : Keeper_identity.Keeper_id.t list
   ; sender_keeper : Keeper_identity.Keeper_id.t option
   ; user_row_origin : Keeper_chat_store.user_row_origin
@@ -48,6 +51,7 @@ type decoded_input =
   }
 
 let source_schema = "masc.keeper_chat_operation.source.v3"
+let attachment_source_schema = "masc.keeper_chat_operation.source.v4"
 let input_schema = "masc.keeper_chat_operation.input.v1"
 
 let strict_fields ~context ~expected = function
@@ -417,13 +421,43 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
     ~user_row_origin
 ;;
 
+let canonical_discord_id id =
+  id <> "" && id.[0] <> '0' && String.for_all Char.Ascii.is_digit id
+
+let decode_connector_attachments ~continuation_channel ~external_message_id json =
+  let open Result.Syntax in
+  match continuation_channel, external_message_id, json with
+  | Keeper_continuation_channel.Discord { reply_to_message_id; _ }, Some original,
+    `List (_ :: _ as values)
+    when reply_to_message_id = Some original && canonical_discord_id original ->
+    let rec loop seen acc = function
+    | [] -> Ok (List.rev acc)
+    | value :: rest ->
+      let* fields = strict_fields ~context:"Connector attachment"
+        ~expected:[ "kind"; "attachment_id" ] value in
+      let* kind = string_field ~context:"Connector attachment" fields "kind" in
+      let* id = string_field ~context:"Connector attachment" fields "attachment_id" in
+      if kind <> "discord_image" || not (canonical_discord_id id) || List.mem id seen
+      then Error "Connector attachment kind or ID is invalid or duplicated"
+      else loop (id :: seen) (Discord_image { attachment_id = id } :: acc) rest
+    in
+    loop [] [] values
+  | _ -> Error "Connector attachments require a matching Discord original message"
+;;
+
 let source_of_json json =
   let open Result.Syntax in
   let context = "Keeper chat operation source" in
+  let* has_attachments =
+    match Json_util.assoc_member_opt "schema" json with
+    | Some (`String schema) when String.equal schema source_schema -> Ok false
+    | Some (`String schema) when String.equal schema attachment_source_schema -> Ok true
+    | _ -> Error "Keeper chat operation source schema is unsupported"
+  in
   let* fields =
     strict_fields ~context
       ~expected:
-        [ "schema"
+        ([ "schema"
         ; "submitted_by"
         ; "thread_id"
         ; "continuation_channel"
@@ -439,14 +473,8 @@ let source_of_json json =
         ; "sender_keeper"
         ; "user_row_origin"
         ; "person_caller"
-        ]
+        ] @ if has_attachments then [ "connector_attachments" ] else [])
       json
-  in
-  let* schema = string_field ~context fields "schema" in
-  let* () =
-    if String.equal schema source_schema
-    then Ok ()
-    else Error "Keeper chat operation source schema is unsupported"
   in
   let* submitted_by = string_field ~context fields "submitted_by" in
   let* () =
@@ -510,6 +538,12 @@ let source_of_json json =
     | _ -> Error "Keeper chat operation source user_row_origin must be a string"
   in
   let* person_caller = person_caller_of_json (List.assoc "person_caller" fields) in
+  let* connector_attachments =
+    if has_attachments then
+      decode_connector_attachments ~continuation_channel ~external_message_id
+        (List.assoc "connector_attachments" fields)
+    else Ok []
+  in
   let* () =
     validate_source_route
       ~thread_id
@@ -541,11 +575,32 @@ let source_of_json json =
     ; conversation_id
     ; external_message_id
     ; workspace_id
+    ; connector_attachments
     ; extra_mentions
     ; sender_keeper
     ; user_row_origin
     ; person_caller
     }
+;;
+
+let with_connector_attachments ~source attachments =
+  match attachments, source with
+  | [], source -> Ok source
+  | attachments, `Assoc fields ->
+    let refs =
+      List.map
+        (fun (Discord_image { attachment_id }) ->
+          `Assoc [ "kind", `String "discord_image"; "attachment_id", `String attachment_id ])
+        attachments
+    in
+    let encoded =
+      `Assoc
+        (("schema", `String attachment_source_schema)
+         :: ("connector_attachments", `List refs)
+         :: List.remove_assoc "schema" fields)
+    in
+    Result.map (fun _ -> encoded) (source_of_json encoded)
+  | _ -> Error "Connector attachment source must be an object"
 ;;
 
 let input_of_json json =

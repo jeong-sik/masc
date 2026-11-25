@@ -7,6 +7,7 @@ type connector_delivery =
   ; conversation_id : string option
   ; external_message_id : string option
   ; workspace_id : string option
+  ; attachments : Keeper_chat_operation_payload.connector_attachment list
   }
 
 let non_empty_opt value =
@@ -261,7 +262,7 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
            ~channel_user_id
        in
        let source =
-         Keeper_chat_operation_payload.source_to_json
+         let encoded = Keeper_chat_operation_payload.source_to_json
            ~submitted_by
            ~thread_id:("keeper:" ^ keeper_name)
            ~continuation_channel:delivery.continuation_channel
@@ -278,6 +279,9 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
               messages enter through masc_keeper_msg / delegate. *)
            ~sender_keeper:None
            ~user_row_origin:Keeper_chat_store.Needs_append
+         in
+         Result.bind encoded (fun source ->
+           Keeper_chat_operation_payload.with_connector_attachments ~source delivery.attachments)
        in
        (match source with
         | Error detail -> Gate_protocol.Keeper_error_result (redact_text detail)
@@ -318,7 +322,8 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
                ; channel
                ; actor_id = non_empty_opt channel_user_id
                ; status
-               ; modalities = [ "text" ]
+               ; modalities =
+                   (match delivery.attachments with [] -> [ "text" ] | _ -> [ "text"; "image" ])
                ; transport = non_empty_opt channel
                ; metadata =
                    [ "status_source", "keeper_chat_operation"
@@ -393,6 +398,7 @@ let dispatch ~clock ~config ~channel
         ; conversation_id
         ; external_message_id
         ; workspace_id
+        ; attachments = []
         }
       ~clock
       ~config

@@ -18,6 +18,7 @@ type connector_delivery =
   ; conversation_id : string option
   ; external_message_id : string option
   ; workspace_id : string option
+  ; attachments : Keeper_chat_operation_payload.connector_attachment list
   }
 (** Immutable projection of the connector-owned delivery coordinates. The leaf
     parses its own protocol and supplies this value; the Keeper adapter treats

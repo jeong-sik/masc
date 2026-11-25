@@ -332,6 +332,7 @@ let test_durable_accept_precedes_delivery_handoff () =
        ; conversation_id
        ; external_message_id
        ; workspace_id
+       ; attachments = []
        } ->
      check string "Discord delivery channel" "C123" channel_id;
      check string "Discord delivery actor" "U123" user_id;
@@ -754,6 +755,116 @@ let test_status_follows_param_set_clear_and_failed_audit () =
       check_surfaces Gw.Mention_only))
 ;;
 
+let test_gateway_admits_image_ids_with_the_origin () =
+  with_bound_luna @@ fun ~base_dir ingress ->
+  let raw = {|{
+    "id":"30001","type":0,"channel_id":"C123","guild_id":"G123","content":"what is in the image?",
+    "author":{"id":"30002","username":"alice"},
+    "attachments":[{"id":"30003","filename":"image.png","size":40,"content_type":"image/png",
+      "url":"https://cdn.discordapp.com/attachments/C123/30003/image.png?hm=old"}]}|} in
+  let event =
+    match Discord_gateway_state.decode_dispatch ~bot_user_id:None
+            ~event_name:"MESSAGE_CREATE" ~payload:(Yojson.Safe.from_string raw) with
+    | Ok event -> event
+    | Error detail -> fail detail
+  in
+  let observed = ref false in
+  let dispatch_for_delivery (delivery : Gate_keeper_backend.connector_delivery)
+      ~channel:_ ~channel_user_id:_ ~channel_user_name:_ ~channel_workspace_id:_
+      ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content =
+    check (option string) "recorded message" (Some "30001") delivery.external_message_id;
+    check bool "image ID was admitted through the native gateway" true
+      (delivery.attachments = [Keeper_chat_operation_payload.Discord_image { attachment_id = "30003" }]);
+    check bool "queued text omits the old signed URL" false
+      (String.contains content '?'
+       && String.ends_with ~suffix:"hm=old" content);
+    observed := true;
+    Gate_protocol.Reply { content = ""; structured = None; stats = None; message_request = None }
+  in
+  G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
+    ~dispatch_for_delivery ~base_dir event;
+  check bool "durable admission was called" true !observed
+;;
+
+let test_discord_image_admission_and_read () =
+  let module Media = Server_discord_inbound_media in
+  let module Payload = Keeper_chat_operation_payload in
+  let channel_id = "100002" and message_id = "100003" and author_id = "100004" in
+  let good_id = "100005" and bad_id = "100006" in
+  let route =
+    match Keeper_continuation_channel.discord ~channel_id ~reply_to_message_id:message_id
+            ~user_id:author_id () with
+    | Ok route -> route
+    | Error detail -> fail detail
+  in
+  let source original =
+    match Payload.source_to_json ~submitted_by:"discord-author" ~thread_id:"keeper:luna"
+            ~continuation_channel:route
+            ~surface:(Surface_ref.Discord { guild_id = None; channel_id; channel_name = None;
+                       parent_channel_id = None; thread_id = None })
+            ~channel:"discord" ~channel_user_id:author_id ~channel_user_name:"nickname"
+            ~channel_workspace_id:"" ~conversation_id:None ~external_message_id:(Some original)
+            ~workspace_id:None ~extra_mentions:[] ~sender_keeper:None
+            ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source
+    | Error detail -> fail detail
+  in
+  let ref_ = Payload.Discord_image { attachment_id = good_id } in
+  let encode original = Payload.with_connector_attachments ~source:(source original) [ ref_ ] in
+  let encoded = match encode message_id with Ok value -> value | Error err -> fail err in
+  (match Payload.source_of_json encoded with
+   | Ok observed ->
+     check bool "durable codec retains the exact attachment ID" true
+       (observed.connector_attachments = [ ref_ ])
+   | Error detail -> fail detail);
+  check bool "a different original cannot gain the attachment" true
+    (Result.is_error (encode "100008"));
+  let png = Base64.decode_exn
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jpTcAAAAASUVORK5CYII=" in
+  let url = "https://cdn.discordapp.com/attachments/100002/100005/test.png?ex=1&is=1&hm=current" in
+  let attachment id url =
+    `Assoc [ "id", `String id; "filename", `String "test.png";
+             "size", `Int (String.length png); "url", `String url;
+             "content_type", `String "image/png" ]
+  in
+  let original id =
+    `Assoc [ "id", `String id; "channel_id", `String channel_id;
+             "author", `Assoc [ "id", `String author_id ];
+             "attachments", `List [ attachment good_id url;
+               attachment bad_id "https://example.invalid/test.png" ] ]
+  in
+  let fetched = ref [] in
+  let resolve ~bound ~id ~max_bytes =
+    Media.For_testing.resolve ~max_bytes ~is_bound:bound
+      ~fetch_original:(fun () -> fetched := "original" :: !fetched; Ok (original id))
+      ~fetch_bytes:(fun ~max_bytes observed_url ->
+        check int "HTTP receive cap is the observed size" (String.length png) max_bytes;
+        fetched := observed_url :: !fetched;
+        Ok png)
+      ~channel_id ~message_id ~author_id ~attachment_ids:[good_id; bad_id]
+  in
+  let before = resolve ~bound:(fun () -> false) ~id:message_id ~max_bytes:1024 in
+  check int "binding refusal prevents both network calls" 0 (List.length !fetched);
+  check bool "binding refusal covers all attachments" true
+    (before.failures = [good_id, Media.Binding_changed; bad_id, Media.Binding_changed]);
+  let mismatch = resolve ~bound:(fun () -> true) ~id:"100008" ~max_bytes:1024 in
+  check int "wrong original prevents CDN access" 1 (List.length !fetched);
+  check bool "wrong original yields no images" true (mismatch.images = []);
+  let exhausted = resolve ~bound:(fun () -> true) ~id:message_id ~max_bytes:1 in
+  check bool "byte limit is evaluated before download" true
+    (List.assoc_opt good_id exhausted.failures = Some Media.Byte_budget_exceeded);
+  let loaded = resolve ~bound:(fun () -> true) ~id:message_id ~max_bytes:1024 in
+  check string "only the fresh authorized CDN URL is fetched" url (List.hd !fetched);
+  (match loaded.images with
+   | [ image ] ->
+     check string "exact original attachment ID" good_id image.id;
+     check string "verified image bytes" png (Base64.decode_exn image.data);
+     check string "image media type" "image/png" image.mime_type
+   | _ -> fail "expected one materialized image");
+  check bool "an unapproved origin cannot produce image bytes" true
+    (loaded.failures = [bad_id, Media.Invalid_attachment])
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "toml_loader"
@@ -785,6 +896,11 @@ let () =
         ; test_case "Discord thread and guild nickname survive ingress" `Quick
             test_thread_and_guild_nickname_survive_ingress
         ] )
+    ; ( "image intake"
+      , [ test_case "exact Discord attachment and bounded authorized read" `Quick
+            test_discord_image_admission_and_read
+        ; test_case "gateway submits exact image IDs with the original" `Quick
+            test_gateway_admits_image_ids_with_the_origin ] )
     ; ( "directory projection"
       , [ test_case "named channels" `Quick
             test_channel_directory_reads_named_channel

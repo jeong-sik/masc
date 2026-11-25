@@ -986,6 +986,51 @@ let test_a_native_block_is_the_clients_own_run () =
      = [ Preview.Response_open { channel = Preview.No_content; started_at = 207.; since = 207. } ])
 ;;
 
+(* Antigravity names no call id on a native block and announces an active step
+   more than once under one index. Two id-less runs of one tool can stop in
+   the other order. *)
+let test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock () =
+  let module Preview = Keeper_turn_preview in
+  let keeper_name = "open-native-tool-repeats" in
+  let current () = Option.get (Preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  let run started_at =
+    Preview.Tool_open
+      { tool_use_id = None; tool_name = "view"; stage = Preview.Tool_executing
+      ; started_at; since = started_at }
+  in
+  let waiting since =
+    [ Preview.Response_open { channel = Preview.No_content; started_at = since; since } ]
+  in
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:10. (native_tool_block 1 None "view");
+  Preview.note_stream ~writer ~now:11. (native_tool_block 1 None "view");
+  Alcotest.(check bool) "a start heard again for an open block is one run" true
+    ((current ()).open_activities = [ run 10. ]);
+  Preview.note_stream ~writer ~now:12. (block_stop 1);
+  Preview.note_stream ~writer ~now:20. (native_tool_block 2 None "view");
+  Preview.note_stream ~writer ~now:21. (native_tool_block 3 None "view");
+  Preview.note_stream ~writer ~now:25. (block_stop 3);
+  Alcotest.(check bool) "the run whose block stopped is the one that ends" true
+    ((current ()).open_activities = [ run 20. ]);
+  Preview.note_stream ~writer ~now:30. (block_stop 2);
+  Alcotest.(check bool) "and the last one to end opens the next response" true
+    ((current ()).open_activities = waiting 30.);
+  Preview.note_stream ~writer ~now:40. (block_stop 9);
+  Alcotest.(check bool) "a stop for a block the stream never opened changes nothing" true
+    ((current ()).open_activities = waiting 30.);
+  Preview.note_stream ~writer ~now:50.
+    Agent_core.Types.
+      (ContentBlockStart
+         { index = 4
+         ; content_type = Runtime_native_tools.stream_content_type
+         ; tool_id = Some "nameless"
+         ; tool_name = None
+         });
+  Alcotest.(check bool) "a native block that names no tool opens no run" true
+    ((current ()).open_activities = waiting 30.)
+;;
+
 (* Words that arrive while a call runs open a response after it. A before-tool
    hook heard twice must not close them: it says nothing new about the call. *)
 let test_words_that_come_during_a_run_outlive_a_repeated_hook () =
@@ -1090,6 +1135,8 @@ let () =
             test_an_official_client_turn_waits_on_a_new_response_after_each_tool
         ; Alcotest.test_case "a native block is the client's own run" `Quick
             test_a_native_block_is_the_clients_own_run
+        ; Alcotest.test_case "a native start heard again is one run and each run keeps its clock" `Quick
+            test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock
         ; Alcotest.test_case "words that come during a run outlive a repeated hook" `Quick
             test_words_that_come_during_a_run_outlive_a_repeated_hook
         ; Alcotest.test_case "a turn that ends at a tool boundary closes the last return" `Quick

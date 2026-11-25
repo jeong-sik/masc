@@ -143,8 +143,8 @@ val note_tool_started :
 (** The before-tool hook ran, so the host is executing this call. A call the
     stream already opened moves from requested to executing; one it never
     showed opens here. The open response ends with that move: the model's
-    message that called the tool is over. Hearing it twice for one call
-    changes nothing. *)
+    message that called the tool is over. Hearing it again while the call is
+    open changes nothing. *)
 
 val note_tool_finished :
   writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
@@ -154,9 +154,10 @@ val note_tool_finished :
     A call that was not open only becomes the last observed tool. *)
 
 val note_turn_over : writer:writer option -> now:float -> unit
-(** The turn's run ends at a tool boundary, so nothing it began is still
-    open. The agent loop yields there, and no model response or turn text
-    follows to close what the last tool return opened. *)
+(** The turn's run is over, at the tool boundary where the agent loop yields
+    or once it has returned, so nothing it began is still open. No model
+    response or turn text follows to close what the last tool return opened,
+    or a stream block whose end never came. *)
 
 val note_request : writer:writer option -> now:float -> unit
 (** A provider request of the running attempt goes out. Every earlier tool
@@ -207,7 +208,10 @@ val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_even
 (** One provider event. Besides the text it releases, the event says what
     opened, moved or ended: a message opens the response, a content delta sets
     its channel to reasoning or text, a tool block opens a tool call as
-    requested, and the message stop ends the response. *)
+    requested, and the message stop ends the response. A native tool block
+    ({!Runtime_native_tools.stream_content_type}) is the official client
+    running its own tool: its start opens the run as executing and ends the
+    open response, and its stop ends the run. *)
 val status_text : t -> string
 
 val to_json : ?include_preparation_timeline:bool -> t -> Yojson.Safe.t

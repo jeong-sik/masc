@@ -238,7 +238,19 @@ let response_after_return ~now before work =
     | Tool_open _ :: _ | Response_open _ :: _ -> work
   else work
 
-(* What one provider event changes in the open work. *)
+(* A native block is the official client's own run: it opens as running with
+   its own clock, after the message that called it is over. The run's entry
+   is handed back so the block table keeps it: its stop ends that run and no
+   other of the same name. *)
+let native_started ~now ~tool_use_id ~tool_name work =
+  let run = { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } in
+  let work = drop (function Response_open _ -> true | Tool_open _ -> false) work in
+  (work @ [ Tool_open run ], run)
+
+let ended_run run work = drop (function Tool_open tool -> tool = run | Response_open _ -> false) work
+
+(* What one provider event changes in the open work. A native block's start
+   and stop are settled in [note_stream], which knows the block table. *)
 let open_of_event ~now (preview : t) (event : Agent_core.Types.sse_event) =
   let work = preview.open_activities in
   match event with
@@ -254,12 +266,6 @@ let open_of_event ~now (preview : t) (event : Agent_core.Types.sse_event) =
       note_channel ~now Text work
   | ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _) | ReasoningDetailsDelta _; _ } ->
       note_channel ~now Thinking work
-  | Agent_core.Types.ContentBlockStart
-      { content_type; tool_id; tool_name = Some tool_name; _ }
-    when String.equal content_type Runtime_native_tools.stream_content_type ->
-      (* The official client runs its own tool from this block to its stop, so
-         the run starts here and the message that called it is over. *)
-      tool_running ~now ~tool_use_id:tool_id ~tool_name work
   | ContentBlockStart { tool_id; tool_name = Some tool_name; _ } ->
       tool_requested ~now ~tool_use_id:tool_id ~tool_name work
   | Agent_core.Types.MessageStop ->
@@ -301,11 +307,12 @@ module Tool_indexes = Map.Make (Int)
 (* What the stream said about a tool block it opened. A model's call of a MASC
    tool is a "tool_use" block: it ends when the model finishes the call and
    says nothing about the run. A native block is the official client running
-   its own tool: it ends when that run ends, and no tool hook comes for it. *)
+   its own tool: it ends when that run ends, and no tool hook comes for it.
+   [run] is that run's open activity, for a native block. *)
 type tool_block =
   { tool_name : string
-  ; tool_use_id : string option
   ; native_run : bool
+  ; run : open_tool option
   }
 
 (* The workspace and Keeper whose turns answer can show this writer. *)
@@ -649,25 +656,51 @@ let note_stream ~writer ~now event =
       released_text entry
         (Keeper_stream_text_redaction.on_event text_intake.stream event)
     in
-    let tools, last_tool, native_stop =
+    let is_native_block index =
+      match Tool_indexes.find_opt index entry.tools with
+      | Some block -> block.native_run
+      | None -> false
+    in
+    let tools, last_tool, open_activities =
       match event with
-      | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name = Some tool_name; _ } ->
-          let native_run =
-            String.equal content_type Runtime_native_tools.stream_content_type in
-          ( Tool_indexes.add index { tool_name; tool_use_id = tool_id; native_run } entry.tools
+      | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name = Some tool_name; _ }
+        when String.equal content_type Runtime_native_tools.stream_content_type -> (
+          (* The client's own run starts with its block. A start heard again
+             for a block that is still open says nothing new: Antigravity
+             announces an active step more than once under one index. *)
+          match Tool_indexes.find_opt index entry.tools with
+          | Some { native_run = true; _ } -> entry.tools, preview.last_tool, preview.open_activities
+          | Some _ | None ->
+              let open_activities, run =
+                native_started ~now ~tool_use_id:tool_id ~tool_name preview.open_activities in
+              ( Tool_indexes.add index { tool_name; native_run = true; run = Some run } entry.tools
+              , Some tool_name
+              , open_activities ))
+      | ContentBlockStop { index } when is_native_block index ->
+          (* The client's own run ends with its block. *)
+          let block = Tool_indexes.find index entry.tools in
+          let ended =
+            match block.run with
+            | Some run -> ended_run run preview.open_activities
+            | None -> preview.open_activities
+          in
+          ( Tool_indexes.remove index entry.tools
+          , Some block.tool_name
+          , response_after_return ~now preview.open_activities ended )
+      | Agent_core.Types.ContentBlockStart { index; tool_name = Some tool_name; _ } ->
+          (* The model started calling a MASC tool. *)
+          ( Tool_indexes.add index { tool_name; native_run = false; run = None } entry.tools
           , Some tool_name
-          , None )
+          , open_of_event ~now preview event )
       | ContentBlockStop { index } ->
           (* The call the model finished making is the latest one the turn
-             made, so it is the last observed tool. A native block stops when
-             the client's own run ends. *)
-          let stopped, native_stop =
+             made, so it is the last observed tool. *)
+          let stopped =
             match Tool_indexes.find_opt index entry.tools with
-            | Some block when block.native_run -> Some block.tool_name, Some block
-            | Some block -> Some block.tool_name, None
-            | None -> preview.last_tool, None
+            | Some block -> Some block.tool_name
+            | None -> preview.last_tool
           in
-          Tool_indexes.remove index entry.tools, stopped, native_stop
+          Tool_indexes.remove index entry.tools, stopped, open_of_event ~now preview event
       | Agent_core.Types.ContentBlockStart _
       | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping
       | Agent_core.Types.Connected | Agent_core.Types.MessageStart _
@@ -677,14 +710,7 @@ let note_stream ~writer ~now event =
       | Agent_core.Types.SSEUnknownEventType _
       | Agent_core.Types.SSEUnsupportedPart _
       | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-      | Agent_core.Types.StreamIncomplete _ -> entry.tools, preview.last_tool, None
-    in
-    let open_activities =
-      match native_stop with
-      | Some block ->
-          response_after_return ~now preview.open_activities
-            (tool_ended ~tool_use_id:block.tool_use_id ~tool_name:block.tool_name preview.open_activities)
-      | None -> open_of_event ~now preview event
+      | Agent_core.Types.StreamIncomplete _ -> entry.tools, preview.last_tool, open_of_event ~now preview event
     in
     let open_changed = not (open_activities == preview.open_activities) in
     let tool_changed = not (Option.equal String.equal last_tool preview.last_tool) in

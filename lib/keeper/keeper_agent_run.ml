@@ -2136,6 +2136,11 @@ let run_turn
                                    ())
                              )))
                in
+       (* The run of this turn has returned, so nothing it began is still
+          open. A stream block whose end never came, such as a native run
+          with no result frame, would otherwise stay open through the turn's
+          tail. *)
+       Keeper_turn_preview.note_turn_over ~writer:preview ~now:(Time_compat.now ());
        (* An official-client turn that fails never reaches [finalize], yet its
           input is already a fragment and its tools may already have acted.
           Persist its tool observations and client-turn ledger line here. *)

@@ -169,6 +169,11 @@ type dispatched_event =
             under the ambient policies ([All] / [Mention_only] /
             [Mention_or_thread]) so two bots cannot drive a reply loop;
             [User_only id] still honors an explicit per-snowflake opt-in. *)
+      ; author_is_user_message : bool
+        (** The original payload proves a user-authored default message or
+            reply from its original channel. This proof is withheld for
+            crosspost copies, webhooks, bot or system authors, other message
+            kinds and malformed authorship fields. *)
       ; message_reference_channel_id : string option
       ; message_reference_message_id : string option
       ; referenced_message_author_id : string option

@@ -58,6 +58,9 @@ type actor = {
   actor_id : string option;
   display_name : string option;
   authority : Keeper_chat_store.speaker_authority;
+  account : Connector_account_ref.t option;
+  (** Account proven by the original connector. When present, the recorded
+      actor and the original message must agree with the conversation surface. *)
 }
 
 type item = {

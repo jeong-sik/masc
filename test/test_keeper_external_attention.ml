@@ -49,6 +49,7 @@ let item ?(dedupe_key = "discord:chan-1:msg-1") ?(keeper_name = "alpha")
         actor_id = Some "user-1";
         display_name = Some "Alex";
         authority = Masc.Keeper_chat_store.External;
+        account = None;
       };
     urgency;
     content_preview = preview;
@@ -85,6 +86,30 @@ let with_temp_base name f =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_path with _ -> ())
     (fun () -> f base_path)
+
+let test_account_requires_matching_origin () =
+  with_temp_base "keeper-external-attention-account" @@ fun base_path ->
+  let user_id = "900000000000000001" in
+  let account = Masc.Connector_account_ref.discord_user user_id in
+  Alcotest.(check bool) "account parsed" true (Option.is_some account);
+  let message = external_message "msg-1" in
+  let att = item ~external_message:message () in
+  let att = { att with actor = { att.actor with actor_id = Some user_id; account } } in
+  check_roundtrip "proven account" A.item_to_json A.item_of_json att;
+  let mismatched_actor = { att with actor = { att.actor with actor_id = Some "900000000000000002" } } in
+  let wrong_surface = { message with surface = discord_surface "other-channel" } in
+  List.iter
+    (fun (reason, row) ->
+      Alcotest.(check bool) (reason ^ " rejected by decoder") true
+        (Result.is_error (A.item_of_json (A.item_to_json row)));
+      match A.record ~base_path row with
+      | `Error _ -> ()
+      | _ -> Alcotest.failf "%s accepted by writer" reason)
+    [ "different actor", mismatched_actor
+    ; "missing original message", { att with external_message = None }
+    ; "different message surface", { att with external_message = Some wrong_surface }
+    ]
+;;
 
 let write_file path contents =
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -348,7 +373,10 @@ let () =
   Alcotest.run "keeper_external_attention"
     [
       ( "json",
-        [ Alcotest.test_case "surface/item/event roundtrip" `Quick test_json_roundtrip ]
+        [ Alcotest.test_case "surface/item/event roundtrip" `Quick test_json_roundtrip
+        ; Alcotest.test_case "account requires a matching origin" `Quick
+            test_account_requires_matching_origin
+        ]
       );
       ( "store",
         [

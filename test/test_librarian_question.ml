@@ -154,6 +154,7 @@ let made ~shows units =
 let ask held units = made ~shows:(With_memory (memory held)) units
 
 let external_person_observation_keeps_its_scope () =
+  let account_id = "900000000000000001" in
   let surface =
     Masc.Surface_ref.Discord
       { guild_id = Some "guild"
@@ -170,7 +171,12 @@ let external_person_observation_keeps_its_scope () =
     ; conversation = { conversation_id = "discord:guild:channel:thread"; surface }
     ; external_message = Some { surface; message_id = "message"; reply_to_message_id = None }
     ; source_label = "discord"
-    ; actor = { actor_id = Some "account"; display_name = Some "Nickname"; authority = External }
+    ; actor =
+        { actor_id = Some account_id
+        ; display_name = Some "Nickname"
+        ; authority = External
+        ; account = Masc.Connector_account_ref.discord_user account_id
+        }
     ; urgency = Mention
     ; content_preview = "I prefer summaries in Korean."
     ; content_ref = None
@@ -195,8 +201,12 @@ let external_person_observation_keeps_its_scope () =
     String.sub line (String.length prefix) (String.length line - String.length prefix)
     |> Yojson.Safe.from_string |> index 0 |> member "items" |> index 0
   in
-  check string "account id" "account"
+  check string "actor id" account_id
     (observation |> member "actor" |> member "id" |> to_string);
+  let account = observation |> member "actor" |> member "account" in
+  check string "account kind" "discord_user" (account |> member "kind" |> to_string);
+  check int "account version" 1 (account |> member "version" |> to_int);
+  check string "account user id" account_id (account |> member "user_id" |> to_string);
   check string "observed name" "Nickname"
     (observation |> member "actor" |> member "name" |> to_string);
   check string "message id" "message"

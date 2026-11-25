@@ -95,7 +95,8 @@ let external_item ?(conversation_id = "agent:unit") ?external_message preview :
   ; conversation = { conversation_id; surface = Agent }
   ; external_message
   ; source_label = "agent"
-  ; actor = { actor_id = Some "external"; display_name = Some "External"; authority = External }
+  ; actor =
+      { actor_id = Some "external"; display_name = Some "External"; authority = External; account = None }
   ; urgency = Ambient
   ; content_preview = preview
   ; content_ref = None

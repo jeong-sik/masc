@@ -135,6 +135,7 @@ let connector_attention_stimulus
         { actor_id = Some "user-batch"
         ; display_name = Some "Batch User"
         ; authority = Keeper_chat_store.External
+        ; account = None
         }
     ; urgency = A.Ambient
     ; content_preview = content

@@ -75,6 +75,7 @@ type actor = {
   actor_id : string option;
   display_name : string option;
   authority : Keeper_chat_store.speaker_authority;
+  account : Connector_account_ref.t option;
 }
 
 type item = {
@@ -163,18 +164,43 @@ let actor_to_json actor =
     @ [
         ( "authority",
           `String (Keeper_chat_store.authority_label actor.authority) );
-      ])
+      ]
+    @ (match actor.account with
+       | None -> []
+       | Some account -> [ "account", Connector_account_ref.to_json account ]))
+
+let check_actor_account ~surface ~external_message actor =
+  match actor.account, actor.authority, external_message with
+  | None, _, _ -> Ok ()
+  | Some account, Keeper_chat_store.External, Some message
+    when String.trim message.message_id <> ""
+         && Surface_ref.equal surface message.surface
+         && Connector_account_ref.matches_actor account ~surface ~actor_id:actor.actor_id ->
+    Ok ()
+  | Some _, (External | Owner | Keeper), _ ->
+    Error "external attention account requires a matching external actor and original message"
+
+let account_of_actor_json : Yojson.Safe.t -> (Connector_account_ref.t option, string) result =
+  function
+  | `Assoc fields ->
+    (match List.filter_map (function "account", value -> Some value | _ -> None) fields with
+     | [] -> Ok None
+     | [ value ] -> Result.map Option.some (Connector_account_ref.of_json value)
+     | _ -> Error "duplicate external attention account")
+  | _ -> Error "invalid external attention actor"
 
 let actor_of_json json =
   let* authority_label = Json_util.require_string json "authority" in
   match Keeper_chat_store.authority_of_label authority_label with
   | None -> Error (Printf.sprintf "unknown actor authority %S" authority_label)
   | Some authority ->
+      let* account = account_of_actor_json json in
       Ok
         {
           actor_id = Json_util.assoc_string_opt "actor_id" json;
           display_name = Json_util.assoc_string_opt "display_name" json;
           authority;
+          account;
         }
 
 let item_to_json item =
@@ -212,6 +238,7 @@ let item_of_json json =
   let* source_label = Json_util.require_string json "source_label" in
   let* actor_json = required_object "actor" json in
   let* actor = actor_of_json actor_json in
+  let* () = check_actor_account ~surface:conversation.surface ~external_message actor in
   let* urgency_label = Json_util.require_string json "urgency" in
   let* urgency =
     match urgency_of_string urgency_label with
@@ -545,7 +572,7 @@ let load_recent_evidence_events ~base_path ~keeper_name =
 (* Strict snapshots use the same path mutex and descriptor lock. The timestamp
    describes admission, but is not an ordering key: the Librarian consumes
    external evidence by its durable admission-row cursor even after rollback. *)
-let record_with_clock ~now ~base_path (item : item) =
+let append_with_clock ~now ~base_path (item : item) =
   try
     ensure_attention_dir ~base_path;
     let path = attention_path ~base_path ~keeper_name:item.keeper_name in
@@ -581,6 +608,13 @@ let record_with_clock ~now ~base_path (item : item) =
   with
   | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
   | exception_ -> `Error (Printexc.to_string exception_)
+;;
+
+let record_with_clock ~now ~base_path item =
+  match check_actor_account ~surface:item.conversation.surface
+          ~external_message:item.external_message item.actor with
+  | Ok () -> append_with_clock ~now ~base_path item
+  | Error detail -> `Error detail
 ;;
 
 let record ~base_path item =

@@ -262,6 +262,7 @@ let discord_message ~message_id =
     ; mentions_bot = true
     ; explicit_mentions_bot = true
     ; author_is_bot = false
+    ; author_is_user_message = false
     ; message_reference_channel_id = None
     ; message_reference_message_id = None
     ; referenced_message_author_id = None
@@ -500,17 +501,23 @@ let test_ambient_own_bot_mention_reads_as_the_bound_keeper () =
 
 let test_thread_and_guild_nickname_survive_ingress () =
   let thread_id = "thread-456" in
+  let first_user = "900000000000000001" in
+  let second_user = "900000000000000002" in
   with_bound_luna ~thread_id @@ fun ~base_dir ingress ->
-  let event ~message_id ~author_id ~global_name ~nickname =
+  let event ?webhook_id ?bot ?system ?flags ?(message_type = 0)
+            ~message_id ~author_id ~global_name ~nickname () =
+    let fields key = function None -> [] | Some value -> [ key, value ] in
     let payload =
       `Assoc
-        [ "id", `String message_id
+        ([ "id", `String message_id
+        ; "type", `Int message_type
         ; "channel_id", `String thread_id
         ; "guild_id", `String "G123"
         ; "content", `String "A message in the thread"
-        ; "author", `Assoc [ "id", `String author_id; "global_name", `String global_name ]
+        ; "author", `Assoc ([ "id", `String author_id; "global_name", `String global_name ]
+                            @ fields "bot" bot @ fields "system" system)
         ; "member", `Assoc [ "nick", `String nickname ]
-        ]
+         ] @ fields "webhook_id" webhook_id @ fields "flags" flags)
     in
     match Discord_gateway_state.decode_dispatch ~bot_user_id:None
             ~event_name:"MESSAGE_CREATE" ~payload with
@@ -520,7 +527,7 @@ let test_thread_and_guild_nickname_survive_ingress () =
   let dispatch_for_delivery (delivery : Gate_keeper_backend.connector_delivery)
       ~channel:_ ~channel_user_id ~channel_user_name ~channel_workspace_id:_
       ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
-    check string "triggered account" "user-1" channel_user_id;
+    check string "triggered account" first_user channel_user_id;
     check string "triggered nickname" "New nickname" channel_user_name;
     (match delivery.surface with
      | Surface_ref.Discord
@@ -539,12 +546,28 @@ let test_thread_and_guild_nickname_survive_ingress () =
    | Ok () -> ()
    | Error error -> fail (Connector_ingress_lane.submit_error_to_string error));
   G.For_testing.submit_ambient_event ingress ~base_dir
-    (event ~message_id:"m1" ~author_id:"user-1" ~global_name:"First" ~nickname:"Nickname");
+    (event ~message_id:"m1" ~author_id:first_user ~global_name:"First" ~nickname:"Nickname" ());
   G.For_testing.submit_ambient_event ingress ~base_dir
-    (event ~message_id:"m2" ~author_id:"user-2" ~global_name:"Second" ~nickname:"Nickname");
+    (event ~message_id:"m2" ~author_id:second_user ~global_name:"Second" ~nickname:"Nickname" ());
   G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
     ~dispatch_for_delivery ~base_dir
-    (event ~message_id:"m3" ~author_id:"user-1" ~global_name:"First" ~nickname:"New nickname");
+    (event ~message_type:19 ~message_id:"m3" ~author_id:first_user ~global_name:"First"
+       ~nickname:"New nickname" ());
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~webhook_id:(`String "900000000000000003") ~message_id:"m4" ~author_id:first_user
+       ~global_name:"First" ~nickname:"Nickname" ());
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~bot:(`String "false") ~message_id:"m5" ~author_id:first_user
+       ~global_name:"First" ~nickname:"Nickname" ());
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~message_type:7 ~message_id:"m6" ~author_id:first_user
+       ~global_name:"First" ~nickname:"Nickname" ());
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~system:(`Bool true) ~message_id:"m7" ~author_id:first_user
+       ~global_name:"First" ~nickname:"Nickname" ());
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (event ~flags:(`Int 2) ~message_id:"m8" ~author_id:first_user
+       ~global_name:"First" ~nickname:"Nickname" ());
   State.unregister_thread ~thread_id;
   Eio.Promise.resolve resolve_release ();
   fun () ->
@@ -561,20 +584,31 @@ let test_thread_and_guild_nickname_survive_ingress () =
         | Some message ->
           check bool "message and conversation have the same surface" true
             (Surface_ref.equal item.conversation.surface message.surface);
-          message.message_id, (item.actor.actor_id, item.actor.display_name)
+          let account =
+            Option.map
+              (fun account ->
+                Yojson.Safe.Util.(Connector_account_ref.to_json account |> member "user_id" |> to_string))
+              item.actor.account
+          in
+          message.message_id, (item.actor.actor_id, item.actor.display_name, account)
         | None -> fail "missing Discord message identity")
       |> List.sort (fun (left, _) (right, _) -> String.compare left right)
     in
-    check (list (pair string (pair (option string) (option string))))
-      "same nickname never merges accounts and a rename keeps its account"
-      [ "m1", (Some "user-1", Some "Nickname")
-      ; "m2", (Some "user-2", Some "Nickname")
-      ; "m3", (Some "user-1", Some "New nickname")
+    check (list (pair string (triple (option string) (option string) (option string))))
+      "user accounts survive nicknames, and unproven authors have no account"
+      [ "m1", (Some first_user, Some "Nickname", Some first_user)
+      ; "m2", (Some second_user, Some "Nickname", Some second_user)
+      ; "m3", (Some first_user, Some "New nickname", Some first_user)
+      ; "m4", (Some first_user, Some "Nickname", None)
+      ; "m5", (Some first_user, Some "Nickname", None)
+      ; "m6", (Some first_user, Some "Nickname", None)
+      ; "m7", (Some first_user, Some "Nickname", None)
+      ; "m8", (Some first_user, Some "Nickname", None)
       ] observations;
     check (option string) "guild nickname stays out of the global directory"
       (Some "First")
       (Keeper_connector_names.recall ~base_dir ~connector:"discord"
-         ~scope:Keeper_connector_names.Person ~id:"user-1")
+         ~scope:Keeper_connector_names.Person ~id:first_user)
 ;;
 
 module Gw = Discord_gateway_state

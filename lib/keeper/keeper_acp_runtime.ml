@@ -1798,8 +1798,8 @@ let reconcile_prepared_tools ?account_home ?continuation ~native_posture ~claim_
 ;;
 
 (* The start range a fresh session sent, as the host composed it. Kept until
-   the prompt answers so its counted [usage.inputTokens] is written against
-   that very range. *)
+   the prompt answers so the agent's count is written against that very
+   range. *)
 type sent_start =
   { source_messages : Agent_core.Types.message list
   ; digest_at : int -> string option
@@ -2906,7 +2906,12 @@ let run_without_lifecycle
             ~input_limit
         in
         (* A fresh session carried a range masc composed: write the agent's
-           count for it, so the next start can read the size signal. A resumed
+           count for it, so the next start can read the size signal. The count
+           is [usage_update.used], the window the agent holds after the turn:
+           the range plus this turn's growth, which the next turn's input
+           carries at least. [usage.inputTokens] is not used: ACP reports it
+           per turn, summed over every model request (and, on Muse, over
+           reviews and observers), so it is no one request's input. A resumed
            session sent no range, so its count describes nothing masc chose. *)
         (match resumed, !sent_start, Keeper_request_source.trace_id input_source with
          | false, Some sent, Some session_id ->
@@ -2923,8 +2928,8 @@ let run_without_lifecycle
                     sent)
                ~usage:
                  (Keeper_model_input_ledger.usage_of_counts
-                    ~input_tokens:final_usage.Agent_core.Types.input_tokens
-                    ~cache_read_input_tokens:final_usage.Agent_core.Types.cache_read_input_tokens)
+                    ~input_tokens:(Option.value prompt_res.usage.Acp.context_used ~default:0)
+                    ~cache_read_input_tokens:0)
            in
            Log.Keeper.debug
              ~keeper_name

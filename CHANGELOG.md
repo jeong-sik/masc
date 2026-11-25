@@ -1,5 +1,56 @@
 ## [Unreleased]
 
+## [0.83.1] - 2026-11-25
+
+### Known issues
+
+- A `muse_code` Keeper cannot start a session while an MCP server named `masc` is defined in the operator's muse settings (`mcpServers`) or in the workspace's `.mcp.json`: the host rejects `session/new` with "session MCP server name conflicts with a host or plugin server", because MASC's bridge carries that name (#54639).
+- At `read` the host is offered its file read tool, which is not limited to the workspace (a live session on muse 1.4.25 without `run.toolset` read `/etc/hosts`). The `mcp__masc__*` entry in `run.toolset` also matches the tools of a server named `masc__<x>` from a workspace `.mcp.json` or the operator's muse settings (#54639).
+
+### Added
+
+- TUI per-turn `Ctx_flow` subtab in `Keeper_context` and `Drawer_context` showing Intake/Outcomes, runtime failover attempts, parallel tool batches (`[B{i}/{n}]`), block diff details, `memory_os` recall snapshots, checkpoints, and operator notes (#54625).
+- TUI real-time SSE auto-refresh on `Keeper_turn_complete` / `Keeper_tool_call` while viewing Keeper Context, Tool Calls, or Context Drawer, plus live AG-UI decoding of `KEEPER_PROVIDER_RETRY`, `KEEPER_CONTINUATION_CHECKPOINT`, `KEEPER_NATIVE_TOOL_PROGRESS`, and `KEEPER_STREAM_PROTOCOL_ERROR` (#54625).
+- TUI `/ctl <action> [keeper]` lifecycle and context control commands with 2-step confirmation modals for destructive actions (#54625).
+- TUI HITL Gate operations in `Work > Inbox` (`Queue`/`Rules`/`History` subviews): Always-Approve rule creation/deletion, gate & external-gate mode switching, AutoJudge retry, per-keeper `tool-approval-modes`, late-approval recovery, and `/gate` commands (#54626).
+- TUI `Tools_quality_gate` subview in `Runtime > Tools & Usage` backed by `/api/v1/dashboard/tool-quality`, `/api/v1/dashboard/gate/tool-events`, and `/api/v1/keepers/:name/waiting-inventory` (#54626).
+- TUI interactive stateless MCP `2026-07-28` Tool Executor (`POST /mcp` `tools/list` + `tools/call`) via `[e]` in `Tool_dive` and `/exec <tool> [args_json]` (#54626).
+- Server config schema exposure of canonical `keeper.tools.{native,masc_enabled,deny,attached_allow}` and `keeper.skills.names` in `/api/v1/config/schema?target=keeper:<name>` with live roundtrip tests (#54626).
+- TUI Skills inspector and `SKILL.md` editor (`Skill_dive`, `/api/v1/skills/editor/*`, `/api/v1/skills/refresh`, and `/skill` commands) with read-only guards, atomic read coalescing, lossless multiline modal escaping, and fresh-catalog post-save reload (#54627).
+- TUI `Tools_prompts_presets` subview in `Runtime > Tools & Usage` covering system Prompts overrides, Presets CRUD/restore, Runtime Params set/clear, and live Async Requests, paired with `/prompt` and `/preset` commands (#54627).
+- TUI Runtime Lane CRUD, candidate reorder, and exact-lane controls (`POST /api/v1/runtime/config/routing` with 64-hex CAS revision, `raw/preview`, `GET /api/v1/lanes`, `standalone-lanes`, `Exact_run_dive`, verifier runs, board-attention quarantine inspection/recovery, and `/lane` commands) (#54628).
+- TUI `Runtime > Addons & Browser` upgraded from observer to full operator mode (`OPERATOR · live`): addon declaration read/create/save with stale/overlay guards, attach/detach/observe/retain/evidence/actions/operator/slice/asks/answer, Browser (Ego) `scene`/`screenshot`/`command`/`interact`, `/addon` and `/browser` commands (31 slash commands total), and updated `docs/TUI-GUIDE.md` (#54628).
+
+### Changed
+
+- Show Keeper memory lists first, move charts and OS details to Health, and trim repeated information in the shared terminal bars. (#54642)
+- Release freezes now stop approval merge submissions mechanically: with the repository variable `MASC_RELEASE_FREEZE=1`, the merge worker holds new submissions — and takes back a reservation armed before the freeze — with the reason left on the pull request, the sweep starts nothing but reclaims those pre-freeze reservations itself, and the `freeze-exempt` label on a scope's top pull request admits a P0/P1 repair during the freeze. (#54644)
+- Use `z` to focus the selected Keeper detail tab, and read chat progress, recent tool activity, and input shortcuts without repeated status rows. (#54650)
+
+### Removed
+
+- Removed the unused `Markdown.measure` API from the TUI. Surfaces keep measuring rendered Markdown with `Markdown.render_lines` and `Markdown.draw` (#54652).
+
+### Fixed
+
+- Fixed TUI input, Esc-cascade, focus-trap, modal, and key-hijack defects across Keeper chat interrupt exit, Work Inbox pane-0 Ask shortcuts, universal pane clamping, Board quarantine recovery Esc/cleanup, filter focus clearing on sub-tab switches, `[m]` mouse-capture guards, async voice transcript focus preservation, Artifact search `[N]` vs Approval Strip priority, Settings edit/dirty guards, `/btw` cleanup, Ask Help round-trip, narrow Settings inspector normalization, and Micro Settings search (#54633).
+- Fixed TUI pane geometry, scrolling, navigation, wayfinding, and orphan defects across Pulse hit-testing, Tool Usage & Tool Dive scrolling, Keepers zoomed/split right-pane reachability and focus cues, `[[ ]]` sub-tab hints, non-destructive sidebar arrow browsing, Goal Dive measure and empty Inbox audit scrolling, mouse wheel pane hit-testing, filtered-empty Runtime/Inbox states, Overlay-to-Dive return restoration, origin-aware Incident breadcrumbs, Code/Addons Esc exit, `[M]` Media Viewer and `[D]` Memory Diff Dive entrypoints, 9-tab Keeper sidebar parity, Pipeline empty-verification toast accuracy, Tools/Skills pane clamping, multi-level dive breadcrumbs, Verification tab reset, and scoped Esc hints (#54634).
+- The host fails a `muse_code` turn with `invalid run configuration: unknown tool` when `run.toolset` names a tool that does not exist. MASC named `mcp__masc__*` even when its MCP bridge listed no tool (a model with `tools-support = false` has none), so such a turn would fail. MASC now names it only when the bridge lists a tool (#54639).
+- Persistent ACP sessions now use the tool list the turn hook selects. After upgrading, an older session recorded with a nonempty tool list starts fresh once because the old record could include tools the hook removed. Gate continuations that require such a session receive the existing unresumable-session refusal. Sessions recorded with an empty list can continue (#54639).
+- The release freeze gate now receives its flag through the workflows' `vars` context: both the merge worker and the sweep read `MASC_RELEASE_FREEZE` from the environment, so a freeze no longer depends on a variables-API read the workflow token cannot make. A unit test pins that both workflow steps pass `MASC_RELEASE_FREEZE` from `vars`, so the wiring cannot go missing silently again. (#54645)
+- Show one pending-turn label in the terminal UI: the draft-state pill drawn by overlays and the Keeper dive view now reads `응답 대기` / `Waiting for response` like the composer footer, instead of the older `처리 대기` / `Awaiting turn` left behind by the composer rename. (#54647)
+- The TUI Memory `.` key opens a diagram only for a selected journal event or fact. Without one it reports the missing selection instead of opening the first stored fact (#54648).
+- Show the effective Task verdict urgency in Keeper waiting inventory while preserving the queued entry's identity for operator actions. (#54665)
+- `release-coverage` now refuses with an explicit error when the repository is a shallow clone whose grafted boundary lies inside the version-cut range or whose shallow metadata cannot be read, instead of silently reporting a partial missing-post-cut count that changes with fetch state; a boundary at the cut commit still counts normally and full clones are unaffected. (#54669)
+
+### Performance
+
+- Keeper previews update live while the TUI fetches the full turn list for lifecycle changes and recovery (#54657).
+
+### Documentation
+
+- Correct the scope of the `run.toolset` change shipped in 0.83.0 for `#54624`. In 0.83.0, when the MCP bridge offered no tool of the named server, the first turn failed with `invalid run configuration: unknown tool` rather than running without those tools — the `muse_toolset_args` docstring at `97f7b5e4` says so. Since `#54639`, such a server is left out of the list instead, and turns still fail when the bridge lists only names the host cannot register (an empty name, or one whose whole `mcp__<server>__<name>` exceeds 256 characters). `read` adds the host's `read_file` and `search`, and the only MCP entry MASC itself hands to `run.toolset` is the `mcp__<server>__*` glob (`muse_toolset_args`, on `Runtime_native_tools.Native_read` and `Native_none`). Which paths those two tools may read is the host's decision — MASC does not narrow them to the workspace on this path. (#54663)
+
 ## [0.83.0] - 2026-11-24
 
 ### Added

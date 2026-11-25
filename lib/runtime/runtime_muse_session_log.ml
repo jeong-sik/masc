@@ -11,6 +11,14 @@ type counts =
   ; reasoning_tokens : int
   }
 
+type observers =
+  { counts : counts
+  ; cache_write_tokens : int
+  ; finished : int
+  ; running : int
+  ; without_journal : int
+  }
+
 type turn =
   { main : counts
   ; main_cache_write_tokens : int
@@ -18,6 +26,7 @@ type turn =
   ; last_request_input_tokens : int option
   ; review : counts
   ; reviews : int
+  ; observers : observers
   }
 
 type error =
@@ -48,6 +57,11 @@ type error =
       }
   | No_run_in_slice
   | Run_not_terminated of { run_id : string }
+  | Observer_journal of
+      { path : string
+      ; cause : error
+      }
+  | Nested_observers
 
 (* A prompt writes its tool results into the journal. This bounds the memory
    one read takes. *)
@@ -60,7 +74,7 @@ let envelope_schema_version = 1
 let run_payload_schema_version = 1
 let approval_payload_schema_version = 3
 
-let error_to_string = function
+let rec error_to_string = function
   | Data_root_unavailable ->
     "neither XDG_DATA_HOME nor HOME is an absolute directory, so the host's data \
      directory is unknown"
@@ -90,6 +104,9 @@ let error_to_string = function
   | No_run_in_slice -> "the prompt added no run to the journal"
   | Run_not_terminated { run_id } ->
     Printf.sprintf "run %s has no terminal record in the journal yet" run_id
+  | Observer_journal { path; cause } ->
+    Printf.sprintf "observer journal %s: %s" path (error_to_string cause)
+  | Nested_observers -> "the journal links observers of its own, which are not followed"
 ;;
 
 (* ── Where the journal is ─────────────────────────────────────────────────── *)
@@ -245,6 +262,10 @@ type record =
       { run_id : string
       ; counts : counts
       }
+  | Observer_linked of
+      { run_id : string
+      ; journal : string option
+      }
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -295,8 +316,16 @@ let review_counts usage =
   check_inclusive { input_tokens; output_tokens; cache_read_tokens; reasoning_tokens }
 ;;
 
-(* [None] for every record kind this module does not count. Only the four it
-   counts are held to a schema version. *)
+(* The host gives a child's journal as a path relative to the parent session's
+   directory. A path that leaves that directory is not one the host wrote. *)
+let stays_in_session_directory path =
+  path <> ""
+  && Filename.is_relative path
+  && not (List.mem Filename.parent_dir_name (String.split_on_char '/' path))
+;;
+
+(* [None] for every record kind this module does not count. Only the five it
+   reads are held to a schema version. *)
 let decode_record ~byte_offset json =
   let malformed detail = Error (Malformed_record { byte_offset; detail }) in
   let check_schema ~record ~payload_version =
@@ -330,6 +359,18 @@ let decode_record ~byte_offset json =
     | Some (`Assoc _ as usage) ->
       Result.map_error (fun detail -> Malformed_record { byte_offset; detail }) (decode usage)
     | Some _ | None -> malformed "usage is missing or not an object"
+  in
+  (* The host omits the path for a child it keeps no journal of. *)
+  let child_journal event =
+    match assoc_field "child_session_log_path" event with
+    | None | Some `Null -> Ok None
+    | Some (`String path) when stays_in_session_directory path -> Ok (Some path)
+    | Some (`String path) ->
+      malformed
+        (Printf.sprintf
+           "child_session_log_path %S is not a file inside the session directory"
+           path)
+    | Some _ -> malformed "child_session_log_path is not a string"
   in
   match assoc_field "payload" json with
   | Some (`Assoc _ as payload) ->
@@ -365,6 +406,15 @@ let decode_record ~byte_offset json =
        let* run_id = run_id payload in
        let* counts = usage_of event review_counts in
        Ok (Some (Review_completed { run_id; counts }))
+     | Some "run", Some "memory_reminder_child_session_linked" ->
+       let* () =
+         check_schema
+           ~record:"run/memory_reminder_child_session_linked"
+           ~payload_version:run_payload_schema_version
+       in
+       let* run_id = run_id payload in
+       let* journal = child_journal event in
+       Ok (Some (Observer_linked { run_id; journal }))
      | _ -> Ok None)
   | Some _ | None -> Ok None
 ;;
@@ -402,7 +452,20 @@ let add_counts a b =
   }
 ;;
 
-let total turn = add_counts turn.main turn.review
+let total turn = add_counts (add_counts turn.main turn.review) turn.observers.counts
+
+let total_cache_write_tokens turn =
+  turn.main_cache_write_tokens + turn.observers.cache_write_tokens
+;;
+
+let no_observers =
+  { counts = zero_counts
+  ; cache_write_tokens = 0
+  ; finished = 0
+  ; running = 0
+  ; without_journal = 0
+  }
+;;
 
 let no_counts =
   { main = zero_counts
@@ -411,6 +474,7 @@ let no_counts =
   ; last_request_input_tokens = None
   ; review = zero_counts
   ; reviews = 0
+  ; observers = no_observers
   }
 ;;
 
@@ -422,7 +486,8 @@ let summarize records =
     List.filter_map
       (function
         | Run_started { run_id } -> Some run_id
-        | Run_terminal _ | Model_completed _ | Review_completed _ -> None)
+        | Run_terminal _ | Model_completed _ | Review_completed _ | Observer_linked _ ->
+          None)
       records
     |> List.sort_uniq String.compare
   in
@@ -430,7 +495,8 @@ let summarize records =
     List.filter_map
       (function
         | Run_terminal { run_id } -> Some run_id
-        | Run_started _ | Model_completed _ | Review_completed _ -> None)
+        | Run_started _ | Model_completed _ | Review_completed _ | Observer_linked _ ->
+          None)
       records
   in
   match started with
@@ -439,32 +505,104 @@ let summarize records =
     (match List.find_opt (fun run_id -> not (List.mem run_id terminated)) started with
      | Some run_id -> Error (Run_not_terminated { run_id })
      | None ->
-       Ok
-         (List.fold_left
-            (fun turn record ->
-               match record with
-               | Model_completed { run_id; counts; cache_write_tokens }
-                 when List.mem run_id started ->
-                 { turn with
-                   main = add_counts turn.main counts
-                 ; main_cache_write_tokens =
-                     turn.main_cache_write_tokens + cache_write_tokens
-                 ; main_requests = turn.main_requests + 1
-                 ; last_request_input_tokens = Some counts.input_tokens
-                 }
-               | Review_completed { run_id; counts } when List.mem run_id started ->
-                 { turn with
-                   review = add_counts turn.review counts
-                 ; reviews = turn.reviews + 1
-                 }
-               | Model_completed _ | Review_completed _ | Run_started _ | Run_terminal _ ->
-                 turn)
-            no_counts
-            records))
+       let turn =
+         List.fold_left
+           (fun turn record ->
+              match record with
+              | Model_completed { run_id; counts; cache_write_tokens }
+                when List.mem run_id started ->
+                { turn with
+                  main = add_counts turn.main counts
+                ; main_cache_write_tokens =
+                    turn.main_cache_write_tokens + cache_write_tokens
+                ; main_requests = turn.main_requests + 1
+                ; last_request_input_tokens = Some counts.input_tokens
+                }
+              | Review_completed { run_id; counts } when List.mem run_id started ->
+                { turn with
+                  review = add_counts turn.review counts
+                ; reviews = turn.reviews + 1
+                }
+              | Model_completed _
+              | Review_completed _
+              | Observer_linked _
+              | Run_started _
+              | Run_terminal _ -> turn)
+           no_counts
+           records
+       in
+       let observer_journals =
+         List.filter_map
+           (function
+             | Observer_linked { run_id; journal } when List.mem run_id started ->
+               Some journal
+             | Observer_linked _
+             | Model_completed _
+             | Review_completed _
+             | Run_started _
+             | Run_terminal _ -> None)
+           records
+       in
+       Ok (turn, observer_journals))
+;;
+
+(* ── The observers' own journals ──────────────────────────────────────────── *)
+
+let read_records m =
+  let* start, slice = read_slice m in
+  decode_lines (complete_lines ~start ~offset:m.offset slice)
+;;
+
+(* A child session is new for each link, so its journal is read from its first
+   byte. *)
+let read_observer path =
+  let* records = read_records { path; offset = 0 } in
+  let* turn, observer_journals = summarize records in
+  match observer_journals with
+  | [] -> Ok (total turn, turn.main_cache_write_tokens)
+  | _ :: _ -> Error Nested_observers
+;;
+
+(* A child whose run has not ended may still add requests, so none of its
+   counts is taken. *)
+let read_observers ~session_directory journals =
+  List.fold_left
+    (fun observers journal ->
+       let* observers = observers in
+       match journal with
+       | None -> Ok { observers with without_journal = observers.without_journal + 1 }
+       | Some relative ->
+         let path = Filename.concat session_directory relative in
+         (match read_observer path with
+          | Ok (counts, cache_write_tokens) ->
+            Ok
+              { observers with
+                counts = add_counts observers.counts counts
+              ; cache_write_tokens = observers.cache_write_tokens + cache_write_tokens
+              ; finished = observers.finished + 1
+              }
+          | Error (Run_not_terminated _ | No_run_in_slice) ->
+            Ok { observers with running = observers.running + 1 }
+          | Error
+              (( Data_root_unavailable
+               | Session_id_invalid _
+               | Session_log_not_found _
+               | Read_failed _
+               | Journal_shrank _
+               | Slice_too_large _
+               | Unsupported_schema _
+               | Malformed_record _
+               | Observer_journal _
+               | Nested_observers ) as cause) -> Error (Observer_journal { path; cause })))
+    (Ok no_observers)
+    journals
 ;;
 
 let read_turn m =
-  let* start, slice = read_slice m in
-  let* records = decode_lines (complete_lines ~start ~offset:m.offset slice) in
-  summarize records
+  let* records = read_records m in
+  let* turn, observer_journals = summarize records in
+  let* observers =
+    read_observers ~session_directory:(Filename.dirname m.path) observer_journals
+  in
+  Ok { turn with observers }
 ;;

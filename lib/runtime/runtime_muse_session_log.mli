@@ -10,8 +10,15 @@
     gained between {!mark}, taken before [session/prompt] is sent, and
     {!read_turn}, taken after it returns.
 
+    A plugin of the host can start observers beside a prompt: child sessions
+    that call the model on their own. The parent's journal holds one
+    [memory_reminder_child_session_linked] record per child and none of the
+    child's counts. Each child keeps its own [session.jsonl] under the parent
+    session's directory, and {!read_turn} adds the counts of the children that
+    the prompt's runs linked.
+
     The format is the host's own and has no published schema. This module
-    decodes the four record kinds it needs, requires the envelope
+    decodes the five record kinds it needs, requires the envelope
     [schema_version] and [payload_schema_version] it was checked against
     (muse acp 1.4.25), and reports anything else as an {!error}. It never
     substitutes zero for a count it could not read. *)
@@ -33,6 +40,27 @@ type counts =
   ; reasoning_tokens : int
   }
 
+(** The observers the prompt's runs started. The host cancels some of them
+    before their model request completes, and a cancelled request is in no
+    journal, so a cancelled child adds nothing. *)
+type observers =
+  { counts : counts
+        (** The requests and approval reviews in the journals of the children
+            that had finished. *)
+  ; cache_write_tokens : int
+        (** Cache writes of the finished observers' model requests. *)
+  ; finished : int
+        (** Children whose journal holds a [terminal] record for every run it
+            started. *)
+  ; running : int
+        (** Children whose journal has no run yet, or a run without a
+            [terminal] record. Their counts may still grow, so none of them is
+            added. *)
+  ; without_journal : int
+        (** Children the host linked without a journal path, as it does for
+            its bundled [goal-reminder]. None of their counts is added. *)
+  }
+
 type turn =
   { main : counts
         (** The model requests of the prompt's runs, one [model_completed]
@@ -49,11 +77,16 @@ type turn =
             record per MCP tool call it checked. Each is a model call of its
             own. *)
   ; reviews : int
+  ; observers : observers
   }
 
-(** The model requests and the approval reviews of the turn added together:
-    what the prompt cost the host. *)
+(** The model requests, the approval reviews and the observers' counts of the
+    turn added together: what the prompt cost the host. *)
 val total : turn -> counts
+
+(** Cache writes of the prompt's model requests and its finished observers'
+    model requests added together. *)
+val total_cache_write_tokens : turn -> int
 
 type error =
   | Data_root_unavailable
@@ -87,6 +120,13 @@ type error =
   | Run_not_terminated of { run_id : string }
       (** A run the prompt started has no [terminal] record yet, so its counts
           may be incomplete. *)
+  | Observer_journal of
+      { path : string
+      ; cause : error
+      }  (** The journal of an observer the prompt linked could not be read. *)
+  | Nested_observers
+      (** The [cause] of an {!Observer_journal} only: the child's journal links
+          observers of its own, which this module does not follow. *)
 
 val error_to_string : error -> string
 
@@ -108,8 +148,12 @@ type mark
     length. Call it before [session/prompt] is sent. *)
 val mark : root -> session_id:string -> (mark, error) result
 
-(** [read_turn mark] sums the counts of the runs started after [mark]. Only
-    records ending in a newline count: a record the host is still writing is
-    left out. A record that was half written at [mark] belongs to earlier
-    activity and is skipped. *)
+(** [read_turn mark] sums the counts of the runs started after [mark], and of
+    the observers those runs linked. Only records ending in a newline count: a
+    record the host is still writing is left out. A record that was half
+    written at [mark] belongs to earlier activity and is skipped.
+
+    A [child_session_log_path] is read relative to the session's directory. A
+    path that is empty, absolute or contains a [..] segment is a
+    {!Malformed_record}. *)
 val read_turn : mark -> (turn, error) result

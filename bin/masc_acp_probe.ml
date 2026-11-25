@@ -571,6 +571,16 @@ let muse_counts_to_yojson (c : Runtime_muse_session_log.counts) : Yojson.Safe.t 
     ]
 ;;
 
+let muse_observers_to_yojson (o : Runtime_muse_session_log.observers) : Yojson.Safe.t =
+  `Assoc
+    [ "finished", `Int o.Runtime_muse_session_log.finished
+    ; "running", `Int o.Runtime_muse_session_log.running
+    ; "without_journal", `Int o.Runtime_muse_session_log.without_journal
+    ; "counts", muse_counts_to_yojson o.Runtime_muse_session_log.counts
+    ; "cache_write_tokens", `Int o.Runtime_muse_session_log.cache_write_tokens
+    ]
+;;
+
 (* Where [usage] came from. A Muse turn whose journal could not be read shows
    the reason here instead of a bare zero in [usage]. *)
 let usage_source_to_yojson (source : Runtime_acp_client.usage_source) : Yojson.Safe.t =
@@ -589,6 +599,7 @@ let usage_source_to_yojson (source : Runtime_acp_client.usage_source) : Yojson.S
           | None -> `Null )
       ; "reviews", `Int turn.Runtime_muse_session_log.reviews
       ; "review", muse_counts_to_yojson turn.Runtime_muse_session_log.review
+      ; "observers", muse_observers_to_yojson turn.Runtime_muse_session_log.observers
       ]
   | Runtime_acp_client.Usage_unreadable err ->
     `Assoc

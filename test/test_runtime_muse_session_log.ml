@@ -3,7 +3,14 @@
    one approval review, and the host was restarted between them. Rows of the
    kinds the reader never decodes were thinned out: those that held this
    machine's paths or were large are gone, and at most two of each other kind
-   remain. The rows the reader counts are untouched. *)
+   remain. The rows the reader counts are untouched.
+
+   The observers' fixtures come from other real muse acp 1.4.25 journals: a
+   parent journal that linked two observers, the journals of those two
+   children, and the journal of a child that was cancelled during its model
+   request. They keep only the rows the reader decodes, with their values. Two
+   fields are replaced because the reader never reads them: the [prompt] text
+   of every started row and the plugin name in the link rows. *)
 
 open Alcotest
 module Log = Runtime_muse_session_log
@@ -47,9 +54,27 @@ let rec set_in json keys value =
   | _ :: _, _ -> failwith "the fixture line is not an object"
 ;;
 
-let edited index keys value =
-  Yojson.Safe.to_string (set_in (Yojson.Safe.from_string fixture_lines.(index)) keys value)
+let set_field line keys value =
+  Yojson.Safe.to_string (set_in (Yojson.Safe.from_string line) keys value)
 ;;
+
+let rec remove_in json keys =
+  match keys, json with
+  | [ key ], `Assoc fields when List.mem_assoc key fields ->
+    `Assoc (List.remove_assoc key fields)
+  | key :: (_ :: _ as rest), `Assoc fields when List.mem_assoc key fields ->
+    `Assoc
+      (List.map
+         (fun (name, v) -> if name = key then (name, remove_in v rest) else (name, v))
+         fields)
+  | _ -> failwith "the fixture line has no such field"
+;;
+
+let without_field line keys =
+  Yojson.Safe.to_string (remove_in (Yojson.Safe.from_string line) keys)
+;;
+
+let edited index keys value = set_field fixture_lines.(index) keys value
 
 let lines_with_edits ~first ~last edits =
   List.mapi
@@ -129,7 +154,9 @@ let turn_t =
        Format.fprintf
          ppf
          "main in=%d out=%d cache_read=%d reasoning=%d write=%d requests=%d last_in=%s | \
-          review in=%d out=%d cache_read=%d reasoning=%d calls=%d"
+          review in=%d out=%d cache_read=%d reasoning=%d calls=%d | \
+          observers in=%d out=%d cache_read=%d reasoning=%d cache_write=%d finished=%d running=%d \
+          without_journal=%d"
          turn.main.input_tokens
          turn.main.output_tokens
          turn.main.cache_read_tokens
@@ -143,7 +170,15 @@ let turn_t =
          turn.review.output_tokens
          turn.review.cache_read_tokens
          turn.review.reasoning_tokens
-         turn.reviews)
+         turn.reviews
+         turn.observers.counts.input_tokens
+         turn.observers.counts.output_tokens
+         turn.observers.counts.cache_read_tokens
+         turn.observers.counts.reasoning_tokens
+         turn.observers.cache_write_tokens
+         turn.observers.finished
+         turn.observers.running
+         turn.observers.without_journal)
     ( = )
 ;;
 
@@ -159,6 +194,15 @@ let counts ~input ~output ~cache_read ~reasoning =
 
 let nothing = counts ~input:0 ~output:0 ~cache_read:0 ~reasoning:0
 
+let no_observers =
+  { Log.counts = nothing
+  ; cache_write_tokens = 0
+  ; finished = 0
+  ; running = 0
+  ; without_journal = 0
+  }
+;;
+
 (* Run 1: requests of 23241 in / 134 out / 0 cache read / 64 reasoning and
    23429 / 36 / 23156 / 19, and a review of 12628 / 244 / 0 / 112. *)
 let prompt_1 =
@@ -168,6 +212,7 @@ let prompt_1 =
   ; last_request_input_tokens = Some 23429
   ; review = counts ~input:12628 ~output:244 ~cache_read:0 ~reasoning:112
   ; reviews = 1
+  ; observers = no_observers
   }
 ;;
 
@@ -180,6 +225,7 @@ let prompt_2 =
   ; last_request_input_tokens = Some 23654
   ; review = counts ~input:15424 ~output:205 ~cache_read:0 ~reasoning:82
   ; reviews = 1
+  ; observers = no_observers
   }
 ;;
 
@@ -190,6 +236,7 @@ let both_prompts =
   ; last_request_input_tokens = Some 23654
   ; review = counts ~input:28052 ~output:449 ~cache_read:0 ~reasoning:194
   ; reviews = 2
+  ; observers = no_observers
   }
 ;;
 
@@ -198,6 +245,98 @@ let journal_before_run_2 data_home =
   let path = journal_path data_home ~day:"2026/11/25" ~id:session_id in
   write_file path (text ~first:0 ~last:last_line_before_run_2);
   path, mark_ok (root_of data_home) ~id:session_id
+;;
+
+(* ── The observers' fixtures ─────────────────────────────────────────────── *)
+
+let read_fixture name =
+  In_channel.with_open_bin ("fixtures/muse/" ^ name) In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> line <> "")
+;;
+
+(* The parent's rows: the run starts, links child A, makes a request, links
+   child B, makes a request and ends. *)
+let observers_parent = Array.of_list (read_fixture "muse-acp-1.4.25-observers-parent.jsonl")
+let parent_link_a = 1
+let parent_link_b = 3
+let parent_terminal = 5
+let observers_session_id = "01a211de-1163-7231-9757-91df0a810ebc"
+let child_a_path = "subagent/01a211de-34dd-7062-98d9-80dd6b9928fc/session.jsonl"
+let child_a_run_id = "01a211de-34dd-7062-98d9-80dd6b9928fc"
+let child_b_path = "subagent/01a211de-4365-7e70-8699-00517bccba9b/session.jsonl"
+let child_cancelled_path = "subagent/01a211cd-091d-7ab0-934a-55d5f98c7705/session.jsonl"
+
+(* Each child's journal: a started row, its one request (not for the cancelled
+   child) and a terminal row. *)
+let child_a = read_fixture "muse-acp-1.4.25-observer-child-completed-a.jsonl"
+let child_b = read_fixture "muse-acp-1.4.25-observer-child-completed-b.jsonl"
+let child_cancelled = read_fixture "muse-acp-1.4.25-observer-child-cancelled.jsonl"
+
+(* The parent's two requests: 23941 / 138 / 23793 / 29 and 24763 / 269 / 23921 /
+   248. Child A's request is 1981 / 255 / 1521 / 197 and child B's 2754 / 199 /
+   1777 / 141. *)
+let child_a_counts = counts ~input:1981 ~output:255 ~cache_read:1521 ~reasoning:197
+let both_children_counts = counts ~input:4735 ~output:454 ~cache_read:3298 ~reasoning:338
+
+let observers_of ~cache_write ~observer_counts ~finished ~running ~without_journal =
+  { Log.counts = observer_counts
+  ; cache_write_tokens = cache_write
+  ; finished
+  ; running
+  ; without_journal
+  }
+;;
+
+let both_children_finished =
+  observers_of
+    ~cache_write:0
+    ~observer_counts:both_children_counts
+    ~finished:2
+    ~running:0
+    ~without_journal:0
+;;
+
+let observers_prompt observers =
+  { Log.main = counts ~input:48704 ~output:407 ~cache_read:47714 ~reasoning:277
+  ; main_cache_write_tokens = 0
+  ; main_requests = 2
+  ; last_request_input_tokens = Some 24763
+  ; review = nothing
+  ; reviews = 0
+  ; observers
+  }
+;;
+
+(* The parent's rows, with the rows of [edits] replaced and the [extra] rows
+   put before the terminal row. *)
+let parent_rows ?(edits = []) ?(extra = []) () =
+  List.concat
+    (List.mapi
+       (fun index line ->
+          let line = Option.value (List.assoc_opt index edits) ~default:line in
+          if index = parent_terminal then extra @ [ line ] else [ line ])
+       (Array.to_list observers_parent))
+;;
+
+let observers_session_directory data_home =
+  Filename.dirname (journal_path data_home ~day:"2026/11/25" ~id:observers_session_id)
+;;
+
+(* Marks the parent's empty journal, writes the children's own journals, then
+   adds the rows of the prompt. *)
+let send_observers_prompt data_home ~parent ~children =
+  let path = journal_path data_home ~day:"2026/11/25" ~id:observers_session_id in
+  write_file path "";
+  let mark = mark_ok (root_of data_home) ~id:observers_session_id in
+  List.iter
+    (fun (relative, rows) ->
+       write_file
+         (Filename.concat (observers_session_directory data_home) relative)
+         (text_of rows))
+    children;
+  append_file path (text_of parent);
+  mark
 ;;
 
 (* ── Tests ───────────────────────────────────────────────────────────────── *)
@@ -300,6 +439,7 @@ let test_counts_a_run_that_made_no_request () =
       ; last_request_input_tokens = None
       ; review = nothing
       ; reviews = 0
+      ; observers = no_observers
       }
       (read_ok mark))
 ;;
@@ -463,6 +603,281 @@ let test_reports_a_journal_that_shrank () =
       (Log.read_turn mark))
 ;;
 
+let test_adds_the_observers_a_prompt_linked () =
+  with_data_home (fun data_home ->
+    (* A third child that the host cancelled during its model request. *)
+    let link_cancelled =
+      set_field
+        observers_parent.(parent_link_a)
+        [ "payload"; "event"; "child_session_log_path" ]
+        (`String child_cancelled_path)
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~extra:[ link_cancelled ] ())
+        ~children:
+          [ child_a_path, child_a
+          ; child_b_path, child_b
+          ; child_cancelled_path, child_cancelled
+          ]
+    in
+    let turn = read_ok mark in
+    check
+      turn_t
+      "the two requests of the children, none for the cancelled one"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:both_children_counts
+            ~finished:3
+            ~running:0
+            ~without_journal:0))
+      turn;
+    check int "total input" (48704 + 4735) (Log.total turn).Log.input_tokens;
+    check int "total output" (407 + 454) (Log.total turn).Log.output_tokens)
+;;
+
+let test_leaves_out_an_observer_that_is_still_running () =
+  with_data_home (fun data_home ->
+    let without_terminal = List.filteri (fun index _ -> index < 2) child_b in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:[ child_a_path, child_a; child_b_path, without_terminal ]
+    in
+    check
+      turn_t
+      "child B has a request but no terminal record"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:1
+            ~without_journal:0))
+      (read_ok mark);
+    append_file
+      (Filename.concat (observers_session_directory data_home) child_b_path)
+      (text_of [ List.nth child_b 2 ]);
+    check
+      turn_t
+      "child B once its terminal record is written"
+      (observers_prompt both_children_finished)
+      (read_ok mark))
+;;
+
+let test_reports_an_observer_linked_without_a_journal () =
+  with_data_home (fun data_home ->
+    let link_b =
+      without_field
+        observers_parent.(parent_link_b)
+        [ "payload"; "event"; "child_session_log_path" ]
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ parent_link_b, link_b ] ())
+        ~children:[ child_a_path, child_a ]
+    in
+    check
+      turn_t
+      "child B has no journal to read"
+      (observers_prompt
+         (observers_of
+            ~cache_write:0
+            ~observer_counts:child_a_counts
+            ~finished:1
+            ~running:0
+            ~without_journal:1))
+      (read_ok mark))
+;;
+
+let test_refuses_a_journal_path_outside_the_session_directory () =
+  List.iter
+    (fun path ->
+       with_data_home (fun data_home ->
+         let link =
+           set_field
+             observers_parent.(parent_link_a)
+             [ "payload"; "event"; "child_session_log_path" ]
+             (`String path)
+         in
+         let rows = parent_rows ~edits:[ parent_link_a, link ] () in
+         let mark = send_observers_prompt data_home ~parent:rows ~children:[] in
+         match Log.read_turn mark with
+         | Error (Log.Malformed_record { byte_offset; _ }) ->
+           check
+             int
+             (Printf.sprintf "the offset of the link row for path %S" path)
+             (String.length (text_of (List.filteri (fun index _ -> index < parent_link_a) rows)))
+             byte_offset
+         | other -> failf "path %S: expected a malformed record, got %s" path (describe other)))
+    [ ""; "/etc/session.jsonl"; "../session.jsonl"; "subagent/../../session.jsonl" ]
+;;
+
+let test_names_the_journal_of_an_observer_it_cannot_read () =
+  with_data_home (fun data_home ->
+    let request = set_field (List.nth child_a 1) [ "payload_schema_version" ] (`Int 2) in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:
+          [ child_a_path, [ List.nth child_a 0; request; List.nth child_a 2 ]
+          ; child_b_path, child_b
+          ]
+    in
+    check
+      (result turn_t error_t)
+      "a request of child A at payload version 2"
+      (Error
+         (Log.Observer_journal
+            { path = Filename.concat (observers_session_directory data_home) child_a_path
+            ; cause =
+                Log.Unsupported_schema
+                  { record = "run/model_completed"; found = 2; supported = 1 }
+            }))
+      (Log.read_turn mark));
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:[ child_a_path, child_a ]
+    in
+    match Log.read_turn mark with
+    | Error (Log.Observer_journal { path; cause = Log.Read_failed _ }) ->
+      check
+        string
+        "the journal of child B, which was not written"
+        (Filename.concat (observers_session_directory data_home) child_b_path)
+        path
+    | other -> failf "expected an unreadable observer journal, got %s" (describe other))
+;;
+
+let test_refuses_an_observer_that_links_observers_of_its_own () =
+  with_data_home (fun data_home ->
+    (* A link row of child A's own run, before child A's terminal row. *)
+    let nested =
+      set_field
+        (set_field
+           observers_parent.(parent_link_a)
+           [ "payload"; "run_id" ]
+           (`String child_a_run_id))
+        [ "payload"; "event"; "parent_run_id" ]
+        (`String child_a_run_id)
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:
+          [ ( child_a_path
+            , [ List.nth child_a 0; List.nth child_a 1; nested; List.nth child_a 2 ] )
+          ; child_b_path, child_b
+          ]
+    in
+    check
+      (result turn_t error_t)
+      "child A links a child of its own"
+      (Error
+         (Log.Observer_journal
+            { path = Filename.concat (observers_session_directory data_home) child_a_path
+            ; cause = Log.Nested_observers
+            }))
+      (Log.read_turn mark))
+;;
+
+let test_ignores_the_observers_of_a_run_the_prompt_did_not_start () =
+  with_data_home (fun data_home ->
+    (* A link of an earlier run that reaches the journal after the mark, ahead
+       of the prompt's own rows. The child it names is not there, and is not
+       looked for. *)
+    let earlier_run = "01a211de-0000-7000-8000-000000000000" in
+    let late_link =
+      List.fold_left
+        (fun line (keys, value) -> set_field line keys (`String value))
+        observers_parent.(parent_link_a)
+        [ [ "payload"; "run_id" ], earlier_run
+        ; [ "payload"; "event"; "parent_run_id" ], earlier_run
+        ; [ "payload"; "event"; "child_session_log_path" ], "subagent/not-written/session.jsonl"
+        ]
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(late_link :: parent_rows ())
+        ~children:[ child_a_path, child_a; child_b_path, child_b ]
+    in
+    check
+      turn_t
+      "only the observers of the prompt's own run"
+      (observers_prompt both_children_finished)
+      (read_ok mark))
+;;
+
+let test_sums_cache_write_tokens_from_finished_observers () =
+  let with_cache_write rows tokens =
+    List.mapi
+      (fun index row ->
+         if index = 1
+         then set_field row [ "payload"; "event"; "usage"; "cache_write_tokens" ] (`Int tokens)
+         else row)
+      rows
+  in
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:
+          [ child_a_path, with_cache_write child_a 100
+          ; child_b_path, with_cache_write child_b 40
+          ]
+    in
+    let turn = read_ok mark in
+    check
+      turn_t
+      "parent cache_write=0 with finished children 100 and 40"
+      (observers_prompt
+         (observers_of
+            ~cache_write:140
+            ~observer_counts:both_children_counts
+            ~finished:2
+            ~running:0
+            ~without_journal:0))
+      turn;
+    check int "total_cache_write_tokens includes finished observers" 140
+      (Log.total_cache_write_tokens turn));
+  with_data_home (fun data_home ->
+    let parent_request_1 =
+      set_field
+        observers_parent.(2)
+        [ "payload"; "event"; "usage"; "cache_write_tokens" ]
+        (`Int 25)
+    in
+    let child_b_running =
+      List.filteri (fun index _ -> index < 2) (with_cache_write child_b 40)
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ 2, parent_request_1 ] ())
+        ~children:
+          [ child_a_path, with_cache_write child_a 100
+          ; child_b_path, child_b_running
+          ]
+    in
+    let turn = read_ok mark in
+    check int "main_cache_write_tokens" 25 turn.Log.main_cache_write_tokens;
+    check int "finished observer cache_write_tokens only" 100
+      turn.Log.observers.Log.cache_write_tokens;
+    check int "total_cache_write_tokens adds parent and finished observers" 125
+      (Log.total_cache_write_tokens turn))
+;;
+
 let () =
   run
     "runtime_muse_session_log"
@@ -524,6 +939,40 @@ let () =
             "reports a journal that shrank"
             `Quick
             test_reports_a_journal_that_shrank
+        ] )
+    ; ( "observers"
+      , [ test_case
+            "adds the observers a prompt linked"
+            `Quick
+            test_adds_the_observers_a_prompt_linked
+        ; test_case
+            "leaves out an observer that is still running"
+            `Quick
+            test_leaves_out_an_observer_that_is_still_running
+        ; test_case
+            "reports an observer linked without a journal"
+            `Quick
+            test_reports_an_observer_linked_without_a_journal
+        ; test_case
+            "refuses a journal path outside the session directory"
+            `Quick
+            test_refuses_a_journal_path_outside_the_session_directory
+        ; test_case
+            "names the journal of an observer it cannot read"
+            `Quick
+            test_names_the_journal_of_an_observer_it_cannot_read
+        ; test_case
+            "refuses an observer that links observers of its own"
+            `Quick
+            test_refuses_an_observer_that_links_observers_of_its_own
+        ; test_case
+            "ignores the observers of a run the prompt did not start"
+            `Quick
+            test_ignores_the_observers_of_a_run_the_prompt_did_not_start
+        ; test_case
+            "sums cache write tokens from finished observers"
+            `Quick
+            test_sums_cache_write_tokens_from_finished_observers
         ] )
     ]
 ;;

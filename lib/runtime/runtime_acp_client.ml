@@ -301,8 +301,9 @@ let profile_of_driver = function
     (* muse acp reports no per-turn token counts over ACP: the prompt result
        holds only stopReason and usage_update holds [used]/[size] of the
        context window. The host writes the counts of every model request and
-       every approval review to its session journal, and [prompt] reads them
-       from there. The two accounting fields are the ones the journal's counts
+       every approval review to its session journal, and those of its observer
+       children to their own journals. [prompt] reads them from there. The two
+       accounting fields are the ones the journal's counts
        follow: input includes the cached tokens, output includes the reasoning
        tokens ([Runtime_muse_session_log] rejects a record that does not). *)
     ; input_accounting = Inclusive_of_cached
@@ -4034,8 +4035,9 @@ let resume_session
 
 (* ── Prompt execution with streaming & cancellation ───────────────────────── *)
 
-(* The tokens of a prompt whose host reports none over ACP: its model requests
-   and its approval reviews, read from the host's journal. [acp_usage] keeps
+(* The tokens of a prompt whose host reports none over ACP: its model requests,
+   its approval reviews and its observers' requests, read from the host's
+   journals. [acp_usage] keeps
    the context window the host does report. When the host gave no occupancy,
    the input of the last request stands in for it: the input of the whole
    prompt adds up the context of every request and is no occupancy. *)
@@ -4046,7 +4048,7 @@ let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn
   { input_tokens
   ; output_tokens
   ; cached_read_tokens = total.Runtime_muse_session_log.cache_read_tokens
-  ; cached_write_tokens = turn.Runtime_muse_session_log.main_cache_write_tokens
+  ; cached_write_tokens = Runtime_muse_session_log.total_cache_write_tokens turn
   ; thought_tokens = total.Runtime_muse_session_log.reasoning_tokens
   ; total_tokens = input_tokens + output_tokens
   ; context_used =

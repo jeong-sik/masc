@@ -117,8 +117,9 @@ type usage_channel =
           result or in [usage_update] frames. *)
   | Usage_in_muse_session_journal
       (** The host reports none over ACP. It writes the counts of every model
-          request and approval review to its session journal, which
-          {!prompt} reads ({!Runtime_muse_session_log}). *)
+          request and approval review to its session journal, and those of its
+          observer children to their own journals, which {!prompt} reads
+          ({!Runtime_muse_session_log}). *)
 
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
@@ -482,7 +483,8 @@ type usage_source =
           the context window stays the one the host sent over ACP, except
           that the input of the last request stands in for an occupancy the
           host did not send. The turn keeps the split between the model
-          requests and the approval reviews that [usage] adds up. *)
+          requests, the approval reviews and the observers that [usage] adds
+          up. *)
   | Usage_unreadable of Runtime_muse_session_log.error
       (** The host's profile says its counts are in its journal and they could
           not be read. [usage] holds what the host sent over ACP, which for

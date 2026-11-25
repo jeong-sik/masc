@@ -102,6 +102,14 @@ val fold :
 (** Stream the same nonblank rows as {!read}, including its final unterminated
     row. The callback runs in the file worker. *)
 
+type tail_state = Complete_rows | Unterminated_row
+
+val fold_with_tail :
+  keepers_dir:string -> keeper_id:string -> init:'a ->
+  f:('a -> (event, read_error) result -> 'a) -> ('a * tail_state, file_read_error) result
+(** The same fold with the observed tail state. A writer can replace an
+    unterminated tail in place, so a file version alone cannot cache it. *)
+
 (** {1 Projection} *)
 
 type summary =

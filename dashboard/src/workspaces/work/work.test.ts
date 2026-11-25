@@ -1217,6 +1217,9 @@ describe('workspaces/work', () => {
       }
       if (url.startsWith('/api/v1/verification/requests')) {
         return jsonResponse({
+          total: 12,
+          truncated: true,
+          unreadable_total: 3,
           requests: [
             {
               request_id: 'vr-standalone-1',
@@ -1267,7 +1270,9 @@ describe('workspaces/work', () => {
     )
     await flushUi(4)
 
-    expect(container.textContent).toContain('Verification Verdicts (1)')
+    expect(container.textContent).toContain('Verification Verdicts')
+    expect(container.textContent).toContain('전체 검증 저장소에서 3건 읽기 불가')
+    expect(container.textContent).toContain('검증 이력 12건 중 1건 표시')
     expect(container.textContent).toContain('rejected')
     expect(container.textContent).toContain('Missing regression test')
 
@@ -1287,5 +1292,46 @@ describe('workspaces/work', () => {
     expect(requestedUrls.some((u) => u.includes('active_only=false'))).toBe(true)
     expect(container.textContent).toContain('Completed run')
     expect(container.textContent).toContain('표시 제한으로 일부만 표시됩니다 (1 / 50건)')
+  })
+
+  it('does not use the old workspace Task selection to request the new workspace verification history', async () => {
+    authSession.value = {
+      kind: 'single_user_local', mode: 'single_user', tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true }, workspaceId: 'default',
+    }
+    let workspace = 'first'
+    let releasePlanning!: (response: Response) => void
+    const nextPlanning = new Promise<Response>((resolve) => { releasePlanning = resolve })
+    const verificationReads: string[] = []
+    const planning = (title: string) => jsonResponse({
+      goals: [], tasks: [{ id: 'shared-task', title, status: 'awaiting_verification', priority: 1 }],
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return workspace === 'first' ? planning('First Workspace Task') : nextPlanning
+      }
+      if (url.startsWith('/api/v1/verification/requests')) {
+        verificationReads.push(workspace)
+        return jsonResponse({ requests: [{ request_id: `verdict-${workspace}`, task_id: 'shared-task',
+          review_observation: { state: 'rejected', detail: `Evidence from ${workspace}` } }] })
+      }
+      return jsonResponse({ tasks: [], requests: [], events: [], next_cursor: null })
+    })
+    render(html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    expect(container.textContent).toContain('First Workspace Task')
+    expect(container.textContent).toContain('Evidence from first')
+
+    workspace = 'second'
+    bumpSessionEpoch()
+    await flushUi()
+    expect(container.textContent).not.toContain('First Workspace Task')
+    expect(verificationReads).toEqual(['first'])
+    releasePlanning(planning('Second Workspace Task'))
+    await flushUi()
+    expect(container.textContent).toContain('Second Workspace Task')
+    expect(container.textContent).toContain('Evidence from second')
+    expect(verificationReads).toEqual(['first', 'second'])
   })
 })

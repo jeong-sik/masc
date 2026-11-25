@@ -39,6 +39,7 @@ import {
   type ContrastId,
   type ThemeId,
 } from '../lib/theme'
+import { decodeVerificationCoverage } from '../lib/verification-coverage'
 import type { WorkspaceInspectPayload } from '../workspaces/types'
 
 const RAIL_STORAGE_KEY = 'masc.shell.rail_expanded'
@@ -380,6 +381,7 @@ export type HitlSourceState =
   | { readonly kind: 'ok' }
   | { readonly kind: 'unbridged'; readonly reason: 'multi_account_unbridged' }
   | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'partial' | 'recovered'; readonly message: string }
 
 export type HitlSourceStatusMap = Readonly<Record<HitlSourceKey, HitlSourceState>>
 
@@ -442,6 +444,8 @@ export function uncheckedHitlStatusLabel(state: HitlUncheckedSource['state']): s
     case 'unread': return '조회 대기'
     case 'unbridged': return '멀티 계정 미지원'
     case 'failed': return '조회 실패'
+    case 'partial': return '일부만 확인'
+    case 'recovered': return '복구본 · 읽기 전용'
   }
 }
 
@@ -790,38 +794,37 @@ export async function refreshPendingHitl(
     const verificationJob = apiGet<unknown>('/api/v1/verification/requests?view=awaiting', reqOpts).then((verifRes) => {
       if (!isCurrent()) return
       if (verifRes.ok) {
-        pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
-        const issues: string[] = []
-        let hasBacklogError = false
-        if (isRecord(verifRes.value)) {
-          const backlogErr = asNonEmptyString(verifRes.value.backlog_error)
-          if (backlogErr) {
-            hasBacklogError = true
-            issues.push(backlogErr)
-          }
-          const unreadableTotal =
-            typeof verifRes.value.unreadable_total === 'number' && Number.isFinite(verifRes.value.unreadable_total)
-              ? verifRes.value.unreadable_total
-              : 0
-          if (unreadableTotal > 0) {
-            issues.push(`unreadable verification records: ${unreadableTotal}`)
-          }
-          const unresolvedTotal =
-            typeof verifRes.value.awaiting_unresolved_total === 'number' && Number.isFinite(verifRes.value.awaiting_unresolved_total)
-              ? verifRes.value.awaiting_unresolved_total
-              : 0
-          if (unresolvedTotal > 0) {
-            issues.push(`unresolved awaiting verification ids: ${unresolvedTotal}`)
-          }
+        const raw = verifRes.value
+        if (!isRecord(raw) || (!Array.isArray(raw.requests) && !Array.isArray(raw.items))) {
+          const message = '응답에 검증 목록이 없습니다'
+          setHitlSourceState('verification', { kind: 'failed', message })
+          recordHitlIncidentOnce('verification', 'Verification queue response invalid', message)
+          return
         }
-        if (issues.length > 0) {
-          const detail = issues.join('; ')
-          setHitlSourceState('verification', { kind: 'failed', message: detail })
-          recordHitlIncidentOnce(
-            'verification',
-            hasBacklogError ? 'Verification backlog read error' : 'Verification backlog partially unreadable',
-            detail,
-          )
+        const coverage = decodeVerificationCoverage(raw)
+        const details: string[] = []
+        if (coverage.unresolvedTotal !== null && coverage.unresolvedTotal > 0) {
+          details.push(`대기 기록 누락 ${coverage.unresolvedTotal}건`)
+        }
+        if (coverage.unreadableTotal !== null && coverage.unreadableTotal > 0) {
+          details.push(`읽기 불가 ${coverage.unreadableTotal}건`)
+        }
+        if (coverage.truncated) details.push('일부 항목만 표시')
+        if (coverage.backlogError) {
+          const message = [coverage.backlogError, ...details].join(' · ')
+          setHitlSourceState('verification', { kind: 'failed', message })
+          recordHitlIncidentOnce('verification', 'Verification backlog read error', message)
+          return
+        }
+        pendingVerifications.value = parsePendingVerificationsPayload(raw, workspaceId)
+        if (coverage.backlogRecovery) {
+          const message = [coverage.backlogRecovery, ...details].join(' · ')
+          setHitlSourceState('verification', { kind: 'recovered', message })
+          recordHitlIncidentOnce('verification', 'Verification backlog recovered', message)
+        } else if (details.length > 0) {
+          const message = details.join(' · ')
+          setHitlSourceState('verification', { kind: 'partial', message })
+          recordHitlIncidentOnce('verification', 'Verification backlog partially observed', message)
         } else {
           clearHitlIncident('verification')
           setHitlSourceState('verification', { kind: 'ok' })

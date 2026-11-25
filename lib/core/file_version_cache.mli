@@ -20,20 +20,17 @@ type 'a t
 val create : unit -> 'a t
 
 val load : 'a t -> string -> decode:(unit -> ('a, 'e) result) -> ('a, 'e) result
-(** [load cache path ~decode] returns the value kept for [path] when the
-    file's current version is the one it was decoded from. Otherwise it runs
-    [decode] and returns its result. The value is kept only when the file
-    had the same version before and after [decode] ran and no {!forget} ran
-    on [cache] meanwhile. A write the version shows is never kept under the
-    new version, and a write only the writer's [forget] shows is not kept
-    once that [forget] has run. When a [forget] stops the value from being
-    kept, an entry kept for another version of [path] is dropped as well.
-    An error is returned as it is and not kept. A path that cannot be
-    stat'ed is decoded every time. *)
+(** [load cache path ~decode] returns the value kept for [path] when its
+    version matches. Otherwise it drops that old value, runs [decode] and
+    returns the result. A successful value is kept when the file had the
+    same version before and after the read and the same cache slot still
+    belongs to that path. Concurrent reads may each decode.
+    Inspection and decoding run outside the cache lock. Errors and files
+    without an observable version are never kept. *)
 
 val forget : 'a t -> string -> unit
-(** Drop what is kept for [path], and stop every decode running on the cache
-    now from keeping its value. A writer calls it after it writes, so that a
+(** Drop what is kept for [path], and stop older decodes of that path from
+    keeping their value. A writer calls it after it writes, so that a
     write that keeps the inode and the size within one file-time tick is not
     taken for the version already kept, even by a reader that was decoding
     while it wrote. *)
@@ -43,8 +40,7 @@ val keep_written : 'a t -> string -> 'a -> unit
     [path] with a new file and holds [value], what {!load}'s [decode] would
     return for the bytes it wrote. The value is kept for the version [path]
     has now, so the next reader of that file takes it without decoding.
-    Like {!forget}, it stops every decode running on the cache now from
-    keeping a value of another version.
+    Like {!forget}, it stops older decodes of [path] from keeping their value.
 
     The caller must exclude every other writer of [path] from before its
     write until this returns, and must have replaced the file rather than

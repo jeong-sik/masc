@@ -28,77 +28,93 @@ let same_version left right =
   && Float.equal left.mtime right.mtime
 ;;
 
-type 'a entry =
-  { decoded_from : version
-  ; value : 'a
+type 'a slot =
+  { version : version option
+  ; mutable value : 'a option
+  ; mutable readers : int
   }
 
 type 'a t =
-  { entries : (string, 'a entry) Hashtbl.t
-  ; (* [forget] calls so far. A decode keeps its value only when none ran
-       while it decoded: a [forget] stands for a write the version may not
-       show, and the decode may have read the file from before it. The count
-       covers every path, so a write to one file also stops keeping a decode
-       of another that runs at the same moment; writes are rare next to
-       reads, and that costs one more decode. *)
-    mutable forgets : int
+  { slots : (string, 'a slot) Hashtbl.t
   ; mutex : Mutex.t
   }
 
-let create () = { entries = Hashtbl.create 1; forgets = 0; mutex = Mutex.create () }
+let create () = { slots = Hashtbl.create 1; mutex = Mutex.create () }
 
-let kept t path =
-  Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.entries path, t.forgets)
-;;
+type 'a lookup =
+  | Kept of 'a
+  | Decode of 'a slot
 
-(* A value a [forget] stopped from being kept still says which version this
-   decode saw. An entry kept for another version goes too, as a keep would
-   have replaced it: left in place, a file that later returned to that
-   version with other bytes, through a writer that never forgets, would be
-   answered from it. The entry may instead be newer than this decode, kept
-   by a reader that started after the [forget]; the next read then decodes
-   again. An entry for the same version stays: a decode no [forget]
-   interrupted kept it, after the last [forget] of [path]. *)
-let keep t path entry ~forgets_before =
+type 'a completion =
+  | Publish of 'a
+  | Leave_unfilled
+  | File_changed
+
+let lookup t path ~seen current =
   Mutex.protect t.mutex (fun () ->
-    if t.forgets = forgets_before
-    then Hashtbl.replace t.entries path entry
+    let attached = Hashtbl.find_opt t.slots path in
+    if not (Option.equal ( == ) seen attached) then None
     else
-      match Hashtbl.find_opt t.entries path with
-      | Some kept when not (same_version kept.decoded_from entry.decoded_from) ->
-        Hashtbl.remove t.entries path
-      | Some _ | None -> ())
+      let slot =
+        match attached with
+        | Some slot when Option.equal same_version slot.version current -> slot
+        | Some _ | None ->
+          let slot = { version = current; value = None; readers = 0 } in
+          Hashtbl.replace t.slots path slot;
+          slot
+      in
+      match slot.value with
+      | Some value -> Some (Kept value)
+      | None ->
+        slot.readers <- slot.readers + 1;
+        Some (Decode slot))
 ;;
 
-let forget t path =
+(* A change of version, a forget, or a writer publication detaches the old
+   slot. Its readers can return their observations without publishing them. *)
+let finish t path slot completion =
   Mutex.protect t.mutex (fun () ->
-    Hashtbl.remove t.entries path;
-    t.forgets <- t.forgets + 1)
+    match Hashtbl.find_opt t.slots path with
+    | Some current when current == slot ->
+      (match completion with
+       | File_changed -> Hashtbl.remove t.slots path
+       | Publish value ->
+         slot.readers <- slot.readers - 1;
+         slot.value <- Some value
+       | Leave_unfilled ->
+         slot.readers <- slot.readers - 1;
+         if slot.readers = 0 && Option.is_none slot.value then Hashtbl.remove t.slots path)
+    | Some _ | None -> ())
 ;;
 
-(* The writer's own count of [forgets] goes up as it does for [forget]: a
-   decode that was running while the file was written read either the old
-   file, whose version its two stats will not both show, or the new one, and
-   [keep] leaves an entry of the same version where it is. *)
+let forget t path = Mutex.protect t.mutex (fun () -> Hashtbl.remove t.slots path)
+
 let keep_written t path value =
   let written = version_of_path path in
   Mutex.protect t.mutex (fun () ->
-    t.forgets <- t.forgets + 1;
     match written with
-    | Some decoded_from -> Hashtbl.replace t.entries path { decoded_from; value }
-    | None -> Hashtbl.remove t.entries path)
+    | Some _ -> Hashtbl.replace t.slots path { version = written; value = Some value; readers = 0 }
+    | None -> Hashtbl.remove t.slots path)
 ;;
 
-let load t path ~decode =
+let rec load t path ~decode =
+  (* A writer can publish while stat is in progress. Check the binding we
+     saw before stat so a delayed read cannot displace the published value. *)
+  let seen = Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.slots path) in
   let current = version_of_path path in
-  let held, forgets_before = kept t path in
-  match held, current with
-  | Some entry, Some version when same_version entry.decoded_from version -> Ok entry.value
-  | (Some _ | None), (Some _ | None) ->
-    let decoded = decode () in
-    (match decoded, current, version_of_path path with
-     | Ok value, Some before, Some after when same_version before after ->
-       keep t path { decoded_from = after; value } ~forgets_before
-     | (Ok _ | Error _), (Some _ | None), (Some _ | None) -> ());
-    decoded
+  match lookup t path ~seen current with
+  | None -> load t path ~decode
+  | Some (Kept value) -> Ok value
+  | Some (Decode slot) ->
+    let completion = ref Leave_unfilled in
+    Fun.protect ~finally:(fun () -> finish t path slot !completion) (fun () ->
+      let decoded = decode () in
+      (match decoded, current with
+       | Ok value, Some before ->
+         completion :=
+           (match version_of_path path with
+            | Some after when same_version before after -> Publish value
+            | Some _ | None -> File_changed)
+       | Ok _, None | Error _, (Some _ | None) -> ());
+      decoded)
 ;;

@@ -660,6 +660,12 @@
   text-transform: uppercase;
 }
 
+.kp-block-status {
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  font-style: italic;
+}
+
 .kp-block-pre {
   margin: 0;
   padding: var(--sp-2);

@@ -229,14 +229,51 @@ export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBloc
       ?? (typeof jsonObj?.tool_name === 'string' ? jsonObj.tool_name : undefined)
       ?? (typeof jsonObj?.tool === 'string' ? jsonObj.tool : undefined)
       ?? 'tool'
-    const argsVal = jsonObj ? (jsonObj.args ?? jsonObj.input ?? jsonObj.arguments) : undefined
-    const resVal = jsonObj ? (jsonObj.result ?? jsonObj.output) : (cleanedBody || undefined)
-    const statusStr = typeof jsonObj?.status === 'string'
-      ? jsonObj.status
-      : typeof jsonObj?.outcome === 'string'
-        ? jsonObj.outcome
-        : undefined
+    // Persisted `role: "tool"` rows from `keeper_chat_store` store the raw tool
+    // input object directly in `content` (e.g. `{"command":"ls","output":"x"}`)
+    // without wrapping it in `{ tool_name, args, result }`. Never steal ordinary
+    // tool parameter names like `input`/`output`/`result`/`status` from those
+    // rows — doing so drops sibling params and blocks lazy `/tool-result` fetch.
+    const isExplicitWrapper =
+      jsonObj !== null
+      && (typeof jsonObj.tool_name === 'string' || typeof jsonObj.tool === 'string')
+      && ('args' in jsonObj || 'input' in jsonObj || 'arguments' in jsonObj || 'result' in jsonObj || 'output' in jsonObj)
+
+    let argsVal: unknown
+    let resVal: unknown
+    let statusStr: string | undefined
+
+    if (msg.role === 'tool' && !isExplicitWrapper) {
+      if (jsonObj !== null) {
+        argsVal = jsonObj
+      } else if (cleanedBody) {
+        argsVal = cleanedBody
+      }
+    } else {
+      const explicitArgs = jsonObj ? (jsonObj.args ?? jsonObj.input ?? jsonObj.arguments) : undefined
+      const explicitRes = jsonObj ? (jsonObj.result ?? jsonObj.output) : undefined
+      argsVal = explicitArgs
+      resVal = explicitRes
+      if (argsVal === undefined && resVal === undefined) {
+        if (jsonObj !== null) {
+          if (msg.kind === 'tool_call') {
+            argsVal = jsonObj
+          } else {
+            resVal = jsonObj
+          }
+        } else if (cleanedBody) {
+          resVal = cleanedBody
+        }
+      }
+      statusStr = typeof jsonObj?.status === 'string'
+        ? jsonObj.status
+        : typeof jsonObj?.outcome === 'string'
+          ? jsonObj.outcome
+          : undefined
+    }
+
     toolBlocks.push({
+      executionId: msg.executionId,
       name: inferredName,
       args: argsVal !== undefined ? prettyFormatPayload(argsVal) : undefined,
       result: resVal !== undefined ? prettyFormatPayload(resVal) : undefined,
@@ -294,7 +331,11 @@ export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBloc
     } else {
       autonomousSummary = summarizeCompact(cleanedBody || '자율 턴 기록', 120)
       autonomousDetails = cleanedBody || null
-      bodyText = ''
+      // Preserve readable assistant prose when the autonomous turn also carries
+      // trace tool blocks so default `internal: hidden` never drops the reply.
+      if (toolBlocks.length === 0) {
+        bodyText = ''
+      }
     }
   }
 
@@ -334,18 +375,141 @@ export function shouldRenderChatEntry(
   blocks: ParsedChatBlocks,
   prefs: ChatBlockPrefs,
 ): boolean {
-  if (msg.errorDetail) return true
+  if (msg.errorDetail || msg.deliveryState === 'Streaming') return true
   if (blocks.isInternalOnly && prefs.internal === 'hidden') return false
   if (blocks.isToolOnly && prefs.tools === 'hidden') return false
-  if (
-    blocks.bodyText.length === 0
-    && blocks.toolBlocks.length === 0
-    && blocks.memoryItems.length === 0
-    && blocks.autonomousSummary === null
-    && blocks.thinkingText !== null
-    && prefs.thinking === 'hidden'
-  ) {
-    return false
+  const hasVisibleBody = blocks.bodyText.length > 0
+  const hasVisibleThinking = blocks.thinkingText !== null && prefs.thinking !== 'hidden'
+  const hasVisibleTools = blocks.toolBlocks.length > 0 && prefs.tools !== 'hidden'
+  const hasVisibleInternal =
+    prefs.internal === 'shown'
+    && (blocks.memoryItems.length > 0 || blocks.autonomousSummary !== null)
+  return hasVisibleBody || hasVisibleThinking || hasVisibleTools || hasVisibleInternal
+}
+
+// ── Live Stream Tool Matching, Status Labels & Native Tool Formatters ─────
+
+export interface ToolCallMatchRef {
+  readonly toolCallId?: string
+  readonly streamKey?: string
+}
+
+/**
+ * Matches a streaming tool call in a turn's `toolCalls` list without cross-
+ * contaminating parallel tool calls. Prefers `(toolStreamScope, toolCallBlockIndex)`
+ * (`streamKey`), then `toolCallId`, and only falls back to the last entry when
+ * neither identifier was supplied by the event.
+ */
+export function findToolCallIndex(
+  list: readonly ChatToolBlock[],
+  ref: ToolCallMatchRef,
+): number {
+  const sk = ref.streamKey?.trim() || undefined
+  const id = ref.toolCallId?.trim() || undefined
+  if (sk) {
+    const byKey = list.findIndex((t) => t.streamKey === sk)
+    if (byKey >= 0) return byKey
   }
-  return true
+  if (id) {
+    // Only match by provider toolCallId when stream scopes don't conflict —
+    // prevents sequential IDs (`call_0`) from colliding across tool rounds.
+    const byId = list.findIndex(
+      (t) => t.id === id && (!sk || !t.streamKey || t.streamKey === sk),
+    )
+    if (byId >= 0) return byId
+  }
+  if (!sk && !id && list.length > 0) {
+    return list.length - 1
+  }
+  return -1
+}
+
+export function upsertStreamToolCall(
+  existing: readonly ChatToolBlock[] | undefined,
+  ref: ToolCallMatchRef,
+  updater: (cur: ChatToolBlock) => ChatToolBlock,
+  createIfMissing?: () => ChatToolBlock,
+): readonly ChatToolBlock[] {
+  const list = [...(existing ?? [])]
+  const idx = findToolCallIndex(list, ref)
+  if (idx >= 0) {
+    list[idx] = updater(list[idx]!)
+    return list
+  }
+  if (createIfMissing) {
+    list.push(createIfMissing())
+  }
+  return list
+}
+
+export function toolStatusMeta(
+  status: string | undefined,
+): { readonly label: string; readonly tone: 'info' | 'warn' | 'ok' | 'bad' } {
+  switch (status) {
+    case 'running':
+    case 'pending':
+      return { label: '실행 중', tone: 'info' }
+    case 'awaiting_result':
+      return { label: '결과 대기', tone: 'info' }
+    case 'awaiting_approval':
+      return { label: '승인 대기', tone: 'warn' }
+    case 'error':
+    case 'failed':
+    case 'err':
+    case 'denied':
+    case 'rejected':
+      return { label: '오류', tone: 'bad' }
+    case 'completed':
+    case 'ok':
+    case 'settled':
+      return { label: '완료', tone: 'ok' }
+    default:
+      return { label: status ? status : '실행됨', tone: 'info' }
+  }
+}
+
+export function formatNativeProgressLabel(progress: Record<string, unknown>): string | null {
+  const kind = typeof progress.kind === 'string' ? progress.kind : null
+  if (!kind) return null
+  if (kind === 'message_reported' && typeof progress.message === 'string' && progress.message.trim()) {
+    return summarizeCompact(progress.message, 80)
+  }
+  if (kind === 'heartbeat_reported' && typeof progress.elapsed_seconds === 'number') {
+    return `실행 중 (${progress.elapsed_seconds}s)`
+  }
+  if (kind === 'output_observed' && typeof progress.byte_count === 'number') {
+    return `출력 ${progress.byte_count.toLocaleString('en-US')}B`
+  }
+  if (kind === 'retry_reported') {
+    const attempt = typeof progress.attempt === 'number' ? progress.attempt : null
+    const maxRetries = typeof progress.max_retries === 'number' ? progress.max_retries : null
+    const cat = typeof progress.error_category === 'string' ? progress.error_category : ''
+    const seq = attempt !== null && maxRetries !== null ? `${attempt}/${maxRetries}` : ''
+    return `재시도 ${seq}${cat ? ` · ${cat}` : ''}`.trim()
+  }
+  if (kind === 'retry_cleared') {
+    return '재시도 복구됨'
+  }
+  return null
+}
+
+export function formatNativeCompletionSummary(
+  completion: Record<string, unknown>,
+): { readonly status: 'completed' | 'error'; readonly summary?: string } {
+  const kind = typeof completion.kind === 'string' ? completion.kind : 'end_observed'
+  const exitCode = typeof completion.exit_code === 'number' ? completion.exit_code : null
+  const isError =
+    kind === 'error_reported'
+    || kind === 'decline_reported'
+    || (kind === 'result_received' && completion.is_error === true)
+    || (exitCode !== null && exitCode !== 0)
+  const parts: string[] = []
+  if (kind === 'error_reported') parts.push('오류 보고됨')
+  else if (kind === 'decline_reported') parts.push('거절됨')
+  else if (kind === 'unrecognized_status' && typeof completion.status === 'string') parts.push(completion.status)
+  if (exitCode !== null) parts.push(`exit ${exitCode}`)
+  return {
+    status: isError ? 'error' : 'completed',
+    summary: parts.length > 0 ? parts.join(' · ') : undefined,
+  }
 }

@@ -67,11 +67,28 @@ export interface ChatAttachmentDraft {
 
 export interface ChatToolBlock {
   readonly id?: string
+  readonly streamKey?: string
+  readonly executionId?: string
   readonly name: string
   readonly args?: string
   readonly result?: string
   readonly status?: string
+  readonly progressLabel?: string
+  readonly duration?: string
 }
+
+export type KeeperToolResultResponse =
+  | { readonly state: 'pending'; readonly executionId: string }
+  | { readonly state: 'unavailable'; readonly executionId: string; readonly reason: string }
+  | {
+      readonly state: 'page'
+      readonly executionId: string
+      readonly content: string
+      readonly isError: boolean
+      readonly recordedBytes: number
+      readonly totalBytes: number
+      readonly eof: boolean
+    }
 
 export type ChatEntryKind =
   | 'chat'
@@ -90,6 +107,7 @@ export interface ChatTranscriptEntry {
   readonly ts: number
   readonly operationId?: string
   readonly turnRef?: string
+  readonly executionId?: string
   readonly toolName?: string
   readonly kind?: ChatEntryKind
   readonly toolCalls?: readonly ChatToolBlock[]

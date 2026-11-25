@@ -3892,32 +3892,6 @@ let effective_scorecard m : Wire_fleet.daily_scorecard =
     | None -> Observed.unreported
   in
   let spend_from_rt = Runtime_store.effective_spend_24h_usd m.runtime in
-  let v_pass, v_rej, _v_await = Work_store.verification_pass_summary m.work in
-  let verif_loaded = Observed.is_value m.work.verifications in
-  let verif_passed_fb =
-    if verif_loaded then Observed.value ~observed_at:obs_at v_pass
-    else Observed.unreported
-  in
-  let verif_rejected_fb =
-    if verif_loaded then Observed.value ~observed_at:obs_at v_rej
-    else Observed.unreported
-  in
-  let goals_completed_fb =
-    if Observed.is_value m.work.planning then
-      let n =
-        List.fold_left
-          (fun acc (g : Wire_work.goal) ->
-            match g.phase with
-            | Wire_work.Completed -> acc + 1
-            | Wire_work.Executing | Wire_work.Verifying
-            | Wire_work.Awaiting_confirmation | Wire_work.Dropped
-            | Wire_work.Paused _ | Wire_work.Blocked _ ->
-                acc)
-          0 (Work_store.goals m.work)
-      in
-      Observed.value ~observed_at:obs_at n
-    else Observed.unreported
-  in
   let board_posts_fb =
     match Observed.to_option m.knowledge.board with
     | None -> Observed.unreported
@@ -3958,12 +3932,9 @@ let effective_scorecard m : Wire_fleet.daily_scorecard =
     tasks_cancelled =
       or_observed base.tasks_cancelled
         (from_backlog (fun c -> c.Wire_work.cancelled));
-    goals_completed_24h =
-      or_observed base.goals_completed_24h goals_completed_fb;
-    verifications_passed_24h =
-      or_observed base.verifications_passed_24h verif_passed_fb;
-    verifications_rejected_24h =
-      or_observed base.verifications_rejected_24h verif_rejected_fb;
+    goals_completed_24h = base.goals_completed_24h;
+    verifications_passed_24h = base.verifications_passed_24h;
+    verifications_rejected_24h = base.verifications_rejected_24h;
     board_posts_24h = or_observed base.board_posts_24h board_posts_fb;
     turns_24h = or_observed base.turns_24h turns_from_fleet;
     cost_24h_usd = or_observed base.cost_24h_usd spend_from_rt;
@@ -4377,6 +4348,7 @@ let active_view_ssot_mode m =
             | Nav.Work_pipeline ->
                 latest_observed_at
                   [
+                    observed_at_opt (Work_store.goals_read m.work);
                     observed_at_opt m.work.planning;
                     observed_at_opt m.work.verifications;
                   ]
@@ -4385,6 +4357,7 @@ let active_view_ssot_mode m =
             | Nav.Work_inbox ->
                 latest_observed_at
                   [
+                    observed_at_opt (Work_store.goals_read m.work);
                     observed_at_opt m.work.asks;
                     observed_at_opt m.work.tool_approvals;
                     observed_at_opt m.work.gate_pending;

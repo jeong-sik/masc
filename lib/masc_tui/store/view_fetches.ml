@@ -19,6 +19,14 @@ let needs_fetch ~force obs =
     | Observed.Failed { retryable = true; _ } ->
         true
 
+let needs_planning ~force (work : Work_store.t) =
+  let goals = Work_store.goals_read work in
+  match goals with
+  | Observed.Failed { retryable = false; _ } -> force
+  | Observed.Failed _ | Observed.Value _ | Observed.Loading _
+  | Observed.Unreported | Observed.Absent ->
+      needs_fetch ~force goals || needs_fetch ~force work.planning
+
 let add_if cond req acc = if cond then req :: acc else acc
 
 let needs_keeper_turn ~force ~keeper (m : Model.t) =
@@ -271,7 +279,7 @@ let fetches_for_overlay ~force (m : Model.t) =
            in
            reads
            |> add_if (needs_keeper_turn ~force ~keeper m) Cmd.Get_keeper_turns
-           |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning)
+           |> add_if (needs_planning ~force m.work) Cmd.Get_planning)
   | Some (Nav.Queue_context Nav.Drawer_schedules) ->
       if needs_fetch ~force m.work.schedules then
         [ Cmd.Get_schedules { cursor = None } ]
@@ -447,7 +455,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
         needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
       in
       []
-      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if (needs_planning ~force m.work) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.schedules)
            (Cmd.Get_schedules { cursor = None })
@@ -542,7 +550,7 @@ let fetches_for_inspector ~force (m : Model.t) =
              Cmd.Get_verification_tlc_results
       in
       ([]
-      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if (needs_planning ~force m.work) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.verifications)
            (Cmd.Get_verifications
@@ -643,10 +651,11 @@ let fetches_for_workspace ~force (m : Model.t) =
            (Cmd.Get_asks { keeper = None; include_resolved = false })
       |> add_if (needs_fetch ~force m.work.tool_approvals) Cmd.Get_tool_approvals
       |> add_if (needs_fetch ~force m.work.gate_pending) Cmd.Get_gate_pending
-      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if (needs_planning ~force m.work) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.verifications)
-           (Cmd.Get_verifications { view = `All; limit = 50; offset = 0 })
+           (Cmd.Get_verifications
+              { view = m.work.verification_view; limit = 50; offset = 0 })
       |> add_if
            (needs_fetch ~force m.work.schedules)
            (Cmd.Get_schedules { cursor = None })
@@ -679,14 +688,15 @@ let fetches_for_workspace ~force (m : Model.t) =
       match m.work.active_tab with
       | Nav.Work_pipeline ->
           []
-          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          |> add_if
+               (needs_planning ~force m.work) Cmd.Get_planning
           |> add_if
                (needs_fetch ~force m.work.verifications)
                (Cmd.Get_verifications
                   { view = m.work.verification_view; limit = 50; offset = 0 })
       | Nav.Work_tasks ->
           []
-          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          |> add_if (needs_planning ~force m.work) Cmd.Get_planning
           |> add_if
                (needs_fetch ~force m.work.verifications)
                (Cmd.Get_verifications
@@ -708,7 +718,9 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.work.gate_snapshot
                || needs_fetch ~force m.work.gate_pending)
                Cmd.Get_gate_pending
-          |> add_if (needs_fetch ~force m.work.goal_confirmations) Cmd.Get_planning
+          |> add_if
+               (needs_fetch ~force (Work_store.goals_read m.work))
+               Cmd.Get_planning
           |> add_if
                ((force || not m.work.tool_approval_modes_absent)
                && needs_fetch ~force m.work.tool_approval_modes)

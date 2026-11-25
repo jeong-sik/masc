@@ -58,7 +58,7 @@ type t = {
   active_tab : Nav.work_tab;
   inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
-  goal_confirmations : Wire_work.goal list Observed.t;
+  planning_goals : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
   harness_health : Wire_work.harness_health Observed.t;
@@ -117,7 +117,7 @@ let empty =
     active_tab = Nav.Work_pipeline;
     inbox_subview = Inbox_queue;
     planning = Observed.unreported;
-    goal_confirmations = Observed.unreported;
+    planning_goals = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
     harness_health = Observed.unreported;
@@ -201,9 +201,6 @@ let cycle_tab dir t =
     | Keymap.Prev -> Nav.prev_work_tab t.active_tab
   in
   set_tab next_tab t
-
-let apply_planning ~observed_at planning t =
-  { t with planning = Observed.value ~observed_at planning }
 
 let apply_backlog_counts counts t =
   { t with backlog_counts = Some counts }
@@ -374,8 +371,15 @@ let record_decision ~at_unix ~kind ~target_id ~keeper ~summary t =
   in
   { t with recent_decisions_24h }
 
-let goals t =
-  match Observed.to_option t.planning with Some p -> p.goals | None -> []
+let goals_read t =
+  match t.planning_goals with
+  | Observed.Unreported ->
+      Observed.map (fun (snapshot : Wire_work.planning_snapshot) -> snapshot.goals)
+        t.planning
+  | (Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Failed _) as read -> read
+
+let goals t = Option.value (Observed.to_option (goals_read t)) ~default:[]
 
 let tasks t =
   match Observed.to_option t.planning with Some p -> p.tasks | None -> []
@@ -424,24 +428,7 @@ let select_awaiting_confirmation_goals =
       | Wire_work.Blocked _ ->
           false)
 
-let confirmation_goals_read t =
-  match t.goal_confirmations with
-  | Observed.Unreported ->
-      Observed.map
-        (fun (snapshot : Wire_work.planning_snapshot) ->
-          select_awaiting_confirmation_goals snapshot.goals)
-        t.planning
-  | (Observed.Value _ | Observed.Loading _ | Observed.Absent
-    | Observed.Failed _) as read -> read
-
-let apply_goal_confirmations ~observed_at goals t =
-  let goal_confirmations =
-    Observed.value ~observed_at (select_awaiting_confirmation_goals goals)
-  in
-  { t with goal_confirmations }
-
-let awaiting_confirmation_goals t =
-  Option.value (Observed.to_option (confirmation_goals_read t)) ~default:[]
+let awaiting_confirmation_goals t = select_awaiting_confirmation_goals (goals t)
 
 let default_viewport_rows = Store_scroll.default_viewport_rows
 let adjust_scroll = Store_scroll.adjust_scroll
@@ -537,25 +524,23 @@ let goal_linked_verifications ~goal_id t =
       List.exists (String.equal v.task_id) linked_ids)
     (verifications_list t)
 
-let goal_progress_score t (g : Wire_work.goal) =
-  let linked = goal_linked_tasks ~goal_id:g.id t in
-  let total = List.length linked in
-  if total > 0 then
-    let done_n =
-      List.fold_left
-        (fun acc (tk : Wire_work.task) ->
-          if task_is_done tk.status then acc + 1 else acc)
-        0 linked
-    in
-    Float.of_int done_n /. Float.of_int total
-  else
-    match g.phase with
-    | Wire_work.Completed -> 1.0
-    | Wire_work.Awaiting_confirmation -> 0.85
-    | Wire_work.Verifying -> 0.65
-    | Wire_work.Executing -> 0.25
-    | Wire_work.Paused _ | Wire_work.Blocked _ -> 0.1
-    | Wire_work.Dropped -> 0.0
+let task_completion_counts (linked : Wire_work.task list) =
+  match linked with
+  | _ :: _ ->
+      let done_count =
+        List.fold_left
+          (fun count (task : Wire_work.task) ->
+            if task_is_done task.status then count + 1 else count)
+          0 linked
+      in
+      Some (done_count, List.length linked)
+  | [] -> None
+
+let linked_task_completion t linked =
+  match t.planning with
+  | Observed.Value { stale = false; _ } -> task_completion_counts linked
+  | Observed.Value _ | Observed.Failed _ | Observed.Loading _
+  | Observed.Unreported | Observed.Absent -> None
 
 let goal_recency_key (g : Wire_work.goal) =
   match g.updated_at with
@@ -586,11 +571,21 @@ let filtered_goals t =
           if c <> 0 then c else Int.compare a.priority b.priority)
         matched
   | Goal_sort_progress ->
-      List.stable_sort
-        (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
-          let c = Float.compare (goal_progress_score t b) (goal_progress_score t a) in
-          if c <> 0 then c else Int.compare a.priority b.priority)
-        matched
+      matched
+      |> List.map (fun (goal : Wire_work.goal) ->
+             let linked = goal_linked_tasks ~goal_id:goal.id t in
+             let score =
+               Option.map
+                 (fun (done_count, total) ->
+                   Float.of_int done_count /. Float.of_int total)
+                 (task_completion_counts linked)
+             in
+             goal, score)
+      |> List.stable_sort
+           (fun ((a : Wire_work.goal), score_a) ((b : Wire_work.goal), score_b) ->
+             let c = Option.compare Float.compare score_b score_a in
+             if c <> 0 then c else Int.compare a.priority b.priority)
+      |> List.map fst
   | Goal_sort_recent ->
       List.stable_sort
         (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
@@ -716,6 +711,35 @@ let move_pulse_goal ?viewport_rows:_ ~delta t =
 let selected_goal t =
   let gs = filtered_goals t in
   if t.selected_index < 0 then None else List.nth_opt gs t.selected_index
+
+let preserve_pipeline_selection previous next =
+  if not (Nav.equal_work_tab previous.active_tab Nav.Work_pipeline) then next
+  else
+    match selected_goal previous with
+    | None -> next
+    | Some goal ->
+        let index =
+          List.find_index
+            (fun (candidate : Wire_work.goal) -> String.equal candidate.id goal.id)
+            (filtered_goals next)
+        in
+        match index with
+        | Some selected_index -> { next with selected_index }
+        | None -> next
+
+let apply_planning_goals ~observed_at goals t =
+  preserve_pipeline_selection t
+    { t with planning_goals = Observed.value ~observed_at goals }
+
+let apply_planning_tasks ~observed_at planning t =
+  preserve_pipeline_selection t
+    { t with planning = Observed.value ~observed_at planning }
+
+let apply_planning ~observed_at (planning : Wire_work.planning_snapshot) t =
+  preserve_pipeline_selection t
+    { t with
+      planning_goals = Observed.value ~observed_at planning.goals;
+      planning = Observed.value ~observed_at planning }
 
 let selected_task t =
   let ts = filtered_tasks t in
@@ -1262,7 +1286,7 @@ let toggle_verification_view t =
   {
     t with
     verification_view;
-    verifications = Observed.mark_stale t.verifications;
+    verifications = Observed.unreported;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
   }
@@ -1278,7 +1302,7 @@ let mark_stale_all t =
   {
     t with
     planning = Observed.mark_stale t.planning;
-    goal_confirmations = Observed.mark_stale t.goal_confirmations;
+    planning_goals = Observed.mark_stale t.planning_goals;
     verifications = Observed.mark_stale t.verifications;
     harness_health = Observed.mark_stale t.harness_health;
     verification_evidence = Observed.mark_stale t.verification_evidence;
@@ -1399,7 +1423,7 @@ let inbox_queue_reads t =
     Inbox_approvals, as_unit t.tool_approvals;
     Inbox_asks, as_unit t.asks;
     Inbox_gate, as_unit t.gate_pending;
-    Inbox_goals, as_unit (confirmation_goals_read t);
+    Inbox_goals, as_unit (goals_read t);
   ]
 
 let inbox_queue_rects (rect : Rect.t) t =

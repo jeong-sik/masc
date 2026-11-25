@@ -218,6 +218,15 @@ let scrub_json_secrets = Chat_transcript.scrub_json_secrets
 let draw_hrule grid ~(rect : Rect.t) ~y ~(theme : Theme.t) ~bg ?title () =
   Card.draw_hairline ~pad_x:0 ?label:title ~bg grid ~rect ~y ~theme
 
+let observed_read_notice ~lang obs =
+  let notice ~ko ~en = Some (Say.resolve lang (Say.make ~ko ~en)) in
+  match obs with
+  | Observed.Failed _ -> notice ~ko:"조회 실패" ~en:"unavailable"
+  | Observed.Value { stale = true; _ } -> notice ~ko:"마지막 조회" ~en:"last read"
+  | Observed.Loading _ -> notice ~ko:"불러오는 중" ~en:"loading"
+  | Observed.Unreported | Observed.Absent -> notice ~ko:"미관측" ~en:"unobserved"
+  | Observed.Value { stale = false; _ } -> None
+
 let draw_observed_empty grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang obs
     ~empty_msg =
   if Rect.is_empty rect then ()

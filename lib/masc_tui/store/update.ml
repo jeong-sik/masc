@@ -533,7 +533,7 @@ let step_raw ~now (m : Model.t) = function
         in
         ({ m with runtime }, [])
 
-let clear_inbox_reads (work : Work_store.t) =
+let clear_work_reads (work : Work_store.t) =
   let clear = function
     | Observed.Loading _ -> Observed.unreported
     | (Observed.Value _ | Observed.Absent | Observed.Unreported
@@ -545,7 +545,9 @@ let clear_inbox_reads (work : Work_store.t) =
     tool_approvals = clear work.tool_approvals;
     gate_pending = clear work.gate_pending;
     gate_snapshot = clear work.gate_snapshot;
-    goal_confirmations = clear work.goal_confirmations;
+    planning_goals = clear work.planning_goals;
+    planning = clear work.planning;
+    verifications = clear work.verifications;
   }
 
 (* A new epoch is a new handshake, and the server behind it may be another
@@ -609,7 +611,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
         |> Fleet_store.clear_turn_preview_updates;
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;
-      work = clear_inbox_reads after.work;
+      work = clear_work_reads after.work;
       inline_modal;
       ask_modal;
       config = Config_store.clear_in_flight after.config;
@@ -636,7 +638,7 @@ let reserve_board_view_read ~now (m : Model.t) cmds =
         { m with knowledge = { m.knowledge with board_recovery } }
       else m
 
-let reserve_inbox_reads ~now (m : Model.t) cmds =
+let reserve_work_reads ~now (m : Model.t) cmds =
   let start = function
     | Observed.Value _ as read -> Observed.mark_stale read
     | Observed.Loading _ as read -> read
@@ -656,7 +658,11 @@ let reserve_inbox_reads ~now (m : Model.t) cmds =
                gate_pending = start work.gate_pending;
                gate_snapshot = start work.gate_snapshot }
          | Cmd.Get_planning ->
-             { work with goal_confirmations = start work.goal_confirmations }
+             { work with
+               planning_goals = start (Work_store.goals_read work);
+               planning = start work.planning }
+         | Cmd.Get_verifications { view; _ } when view = work.verification_view ->
+             { work with verifications = start work.verifications }
          | _ -> work)
     | _ -> work) [@warning "-4"]
   in
@@ -707,4 +713,4 @@ let step ~now m msg =
     |> reconcile_memory_diagram ~before:m ~after:next
   in
   let next = reserve_board_view_read ~now next cmds in
-  (reserve_inbox_reads ~now next cmds, final_cmds)
+  (reserve_work_reads ~now next cmds, final_cmds)

@@ -36,6 +36,10 @@ type ack_effect =
   | Ack_close_modal_and_refresh
   | Ack_editor_saved
 
+type planning_failure =
+  | Planning_goals_failed of http_error
+  | Planning_tasks_failed of http_error
+
 type http_reply =
   (* Fleet & Pulse *)
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
@@ -86,11 +90,13 @@ type http_reply =
       result : (Wire_fleet.keeper_lifecycle_reply, http_error) result;
     }
   (* Work *)
-  | Reply_planning of (Wire_work.planning_snapshot, http_error) result
-  | Reply_goal_confirmations of (Wire_work.goal list, http_error) result
+  | Reply_planning of (Wire_work.planning_snapshot, planning_failure) result
+  | Reply_planning_goals of Wire_work.goal list
   | Reply_planning_backlog of Wire_work.task_backlog_counts
-  | Reply_verifications of
-      (Wire_work.verification_request list, http_error) result
+  | Reply_verifications of {
+      view : [ `All | `Pending ];
+      result : (Wire_work.verification_request list, http_error) result;
+    }
   | Reply_schedules of
       (Wire_work.schedule_row list * string option, http_error) result
   | Reply_asks of (Wire_work.ask_row list, http_error) result

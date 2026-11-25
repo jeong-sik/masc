@@ -8696,7 +8696,10 @@ let work_detail_max_scroll (m : Model.t) =
               in
               y := !y + step_used + if step_avail >= 12 then 1 else 0
             end;
-            if body_bot - !y >= 5 then y := !y + min 2 (body_bot - !y);
+            let linked = Work_store.goal_linked_tasks ~goal_id:g.id m.work in
+            if body_bot - !y >= 5
+               && Option.is_some (Work_store.linked_task_completion m.work linked)
+            then y := !y + 2;
             (match g.last_review_note with
             | Some note
               when !y < body_bot && not (String.equal (String.trim note) "") ->
@@ -10552,12 +10555,25 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
     (md_max, verif_max)
 
 let hidden_verif_toast_msg (m : Model.t) =
-  if Work_store.filtered_verifications m.work = [] then
-    Say.make ~ko:"대기 중인 검증 항목이 없습니다" ~en:"No pending verifications"
-  else
-    Say.make
-      ~ko:"검증 목록이 화면 높이 부족으로 숨겨졌습니다 (창 높이를 늘려주세요)"
-      ~en:"Verifications hidden due to short terminal (increase height)"
+  match m.work.verifications with
+  | Observed.Loading _ ->
+      Say.make ~ko:"검증 목록을 불러오는 중입니다" ~en:"Loading verifications"
+  | Observed.Failed _ ->
+      Say.make ~ko:"검증 목록을 읽을 수 없습니다" ~en:"Verifications unavailable"
+  | Observed.Unreported ->
+      Say.make ~ko:"아직 검증 목록을 읽지 않았습니다" ~en:"Verifications not yet observed"
+  | Observed.Value { stale = true; _ }
+    when Work_store.filtered_verifications m.work = [] ->
+      Say.make ~ko:"마지막으로 읽은 검증 목록에 표시할 항목이 없습니다"
+        ~en:"No rows in the last verification read"
+  | Observed.Absent -> Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows"
+  | Observed.Value _ ->
+      if Work_store.filtered_verifications m.work = [] then
+        Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows"
+      else
+        Say.make
+          ~ko:"검증 목록을 보려면 창 높이를 늘려주세요"
+          ~en:"Increase terminal height to view verifications"
 
 let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
   let max_scroll =

@@ -107,7 +107,9 @@ let apply_dataset_invalidation (m : Model.t) ds =
   match ds with
   | Wire_observer.Dataset_goals | Wire_observer.Dataset_backlog ->
       let work =
-        { m.work with planning = Observed.mark_stale m.work.planning }
+        { m.work with
+          planning = Observed.mark_stale m.work.planning;
+          planning_goals = Observed.mark_stale m.work.planning_goals }
       in
       let wants_planning =
         Option.is_some (keeper_queue_target m)

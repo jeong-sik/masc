@@ -475,9 +475,7 @@ let test_three_channel_separation () =
       (Msg.Http_reply
          {
            epoch = m5.epoch;
-           reply =
-             Msg.Reply_planning
-               (Ok { goals = [ sample_goal () ]; tasks = [] });
+           reply = Msg.Reply_planning_goals [ sample_goal () ];
          })
   in
   let m8, _ =
@@ -1740,8 +1738,7 @@ let test_verifier_regressions () =
       (Msg.Http_reply
          {
            epoch = m0.epoch;
-           reply =
-             Msg.Reply_planning (Ok { goals = [ sample_goal () ]; tasks = [] });
+           reply = Msg.Reply_planning_goals [ sample_goal () ];
          })
   in
   let m_goal_dived, cmds_goal =
@@ -24130,7 +24127,7 @@ let () =
                 (Keeper_context_store.get_keeper ~keeper:"alpha"
                    m_denied.keeper_context)
                   .checkpoints_auth_denied);
-          Alcotest.test_case "Inbox publishes confirmed goals before Execution"
+          Alcotest.test_case "Goal and Execution receipts retain their source"
             `Quick (fun () ->
               let initial = Model.initial () in
               let loading, _ =
@@ -24148,24 +24145,106 @@ let () =
                   (Msg.Http_reply { epoch = loading.epoch; reply })
                 |> fst
               in
-              let goal = sample_goal () in
-              let ready = reply loading (Msg.Reply_goal_confirmations (Ok [ goal ])) in
+              let goals =
+                [ sample_goal (); sample_goal ~id:"executing" ~phase:Wire_work.Executing () ]
+              in
+              let check_goals model =
+                Alcotest.(check (list string)) "current Goal identities" ["g-1"; "executing"]
+                  (List.map (fun (goal : Wire_work.goal) -> goal.id)
+                     (Work_store.goals model.Model.work));
+                Alcotest.(check bool) "Goals remain fresh" false
+                  (Observed.is_stale (Work_store.goals_read model.work));
+                Alcotest.(check int) "Attention includes just the awaiting goal"
+                  1 (Attention.count model.attention)
+              in
+              let ready = reply loading (Msg.Reply_planning_goals goals) in
+              check_goals ready;
+              Alcotest.(check bool) "Task read still in progress" true
+                (Observed.is_loading ready.work.planning);
+              let unavailable =
+                Msg.Http_error { status = 503; body = "read unavailable"; api_error = None }
+              in
               let failed =
                 reply ready
-                  (Msg.Reply_planning
-                     (Error (Msg.Http_error { status = 503; body = "Execution unavailable"; api_error = None })))
+                  (Msg.Reply_planning (Error (Msg.Planning_tasks_failed unavailable)))
               in
-              Alcotest.(check bool) "Execution failure remains visible" true
+              check_goals failed;
+              Alcotest.(check bool) "terminal Execution failure is visible" true
                 (Observed.is_failed failed.work.planning);
-              Alcotest.(check bool) "Goal confirmation retains its current read"
+              let failed_before_execution =
+                reply loading (Msg.Reply_planning (Error (Msg.Planning_goals_failed unavailable)))
+              in
+              Alcotest.(check bool) "Goal failure retains its provenance" true
+                (Observed.is_failed (Work_store.goals_read failed_before_execution.work));
+              Alcotest.(check bool) "unissued Execution read returns to unreported" true
+                (match failed_before_execution.work.planning with
+                 | Observed.Unreported -> true
+                 | Observed.Value _ | Observed.Failed _ | Observed.Loading _ | Observed.Absent ->
+                     false));
+          Alcotest.test_case "Planning refresh preserves the selected Goal"
+            `Quick (fun () ->
+              let goal id priority =
+                { (sample_goal ~id ~phase:Wire_work.Executing ()) with priority }
+              in
+              let a, b = goal "a" 1, goal "b" 2 in
+              let task id goal_link status : Wire_work.task =
+                { id; title = id; description = None; priority = 1; status;
+                  goal_link = Wire_work.Linked goal_link;
+                  created_at = None; updated_at = None }
+              in
+              let done_status =
+                Wire_work.Done { assignee = "alpha"; completed_at = ""; notes = None }
+              in
+              let a_task = task "ta" a.id Wire_work.Todo in
+              let b_task = task "tb" b.id done_status in
+              let initial = Model.initial () in
+              let initial =
+                { initial.work with goal_sort_mode = Work_store.Goal_sort_progress }
+              in
+              let fresh =
+                Work_store.apply_planning ~observed_at:t0
+                  { goals = [a; b]; tasks = [a_task; b_task] } initial
+              in
+              let selected work =
+                Option.map (fun (goal : Wire_work.goal) -> goal.id)
+                  (Work_store.selected_goal work)
+              in
+              Alcotest.(check (option string)) "selection follows observed completion"
+                (Some b.id) (selected fresh);
+              let stale = Work_store.mark_stale_all fresh in
+              Alcotest.(check (option string)) "refresh keeps selected goal stable"
+                (Some b.id) (selected stale);
+              Alcotest.(check (option (pair int int))) "stale tasks yield no current completion"
+                None (Work_store.linked_task_completion stale [b_task]);
+              let changed =
+                Work_store.apply_planning ~observed_at:t0
+                  { goals = [a; b]; tasks = [ { a_task with status = done_status };
+                                            { b_task with status = Wire_work.Todo } ] }
+                  stale
+              in
+              Alcotest.(check (option string)) "a new rank preserves the selected identity"
+                (Some b.id) (selected changed));
+          Alcotest.test_case "Verification replies belong to the current filter"
+            `Quick (fun () ->
+              let initial = Model.initial () in
+              let work = Work_store.toggle_verification_view initial.work in
+              let model = { initial with work } in
+              let receive model view result =
+                Update.step ~now:t0 model
+                  (Msg.Http_reply { epoch = initial.epoch;
+                                    reply = Msg.Reply_verifications { view; result } })
+                |> fst
+              in
+              let current = receive model `Pending (Ok []) in
+              let late =
+                receive current `All (Error (Msg.Decode_error "old filter response"))
+              in
+              Alcotest.(check bool) "late error cannot replace a current empty result"
                 true
-                (match failed.work.goal_confirmations with
-                 | Observed.Value { data = [ received ]; stale = false; _ } ->
-                     String.equal received.id goal.id
-                 | Observed.Value _ | Observed.Failed _ | Observed.Loading _
-                 | Observed.Absent | Observed.Unreported -> false);
-              Alcotest.(check bool) "Attention received the Goal confirmation"
-                false (Attention.is_empty failed.attention));
+                (match late.work.verifications with
+                 | Observed.Value { data = []; stale = false; _ } -> true
+                 | Observed.Value _ | Observed.Loading _ | Observed.Failed _
+                 | Observed.Absent | Observed.Unreported -> false));
           Alcotest.test_case
             "Wave 4 Layer 2: HITL Gate CRUD/modes/retry, Tools quality & MCP executor"
             `Quick (fun () ->

@@ -934,38 +934,41 @@ let apply_http_reply ~now (m : Model.t) reply =
               next
           , inc_cmds
             @ View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next ))
-  | Msg.Reply_goal_confirmations (Ok goals) ->
-      let work = Work_store.apply_goal_confirmations ~observed_at:now goals m.work in
+  | Msg.Reply_planning_goals goals ->
+      let work = Work_store.apply_planning_goals ~observed_at:now goals m.work in
       (Model.rebuild_attention { m with work }, [])
-  | Msg.Reply_goal_confirmations (Error (Msg.Workspace_mismatch _)) ->
-      (m, [])
-  | Msg.Reply_goal_confirmations
-      (Error ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err)) ->
-      let work =
-        { m.work with goal_confirmations = failed_slot err m.work.goal_confirmations }
-      in
-      ({ m with work }, [])
   | Msg.Reply_planning (Ok planning) ->
-      let work = Work_store.apply_planning ~observed_at:now planning m.work in
-      ( { m with work }
-        |> Model.rebuild_attention
-        |> Model.sync_effective_scorecard ~now
-      , [] )
-  | Msg.Reply_planning (Error err) ->
+      let work = Work_store.apply_planning_tasks ~observed_at:now planning m.work in
+      ({ m with work } |> Model.sync_effective_scorecard ~now, [])
+  | Msg.Reply_planning (Error (Msg.Planning_goals_failed error)) ->
       err_reply
         ~fail:
-          (on_work (fun (x : Work_store.t) ->
-               { x with planning = failed_slot err x.planning }))
-        ~source:Health.Source_client_http ~ko:"목표·작업 조회"
-        ~en:"Planning fetch" err
+          (on_work (fun work ->
+               let planning =
+                 if Observed.is_loading work.planning then Observed.unreported
+                 else work.planning
+               in
+               { work with
+                 planning;
+                 planning_goals = failed_slot error (Work_store.goals_read work) }))
+        ~source:Health.Source_client_http ~ko:"목표 조회" ~en:"Goals fetch" error
+  | Msg.Reply_planning (Error (Msg.Planning_tasks_failed error)) ->
+      err_reply
+        ~fail:
+          (on_work (fun work ->
+               { work with planning = failed_slot error work.planning }))
+        ~source:Health.Source_client_http ~ko:"연결 작업 조회"
+        ~en:"Linked tasks fetch" error
   | Msg.Reply_planning_backlog counts ->
       let work = Work_store.apply_backlog_counts counts m.work in
       ({ m with work } |> Model.sync_effective_scorecard ~now, [])
-  | Msg.Reply_verifications (Ok vs) ->
+  | Msg.Reply_verifications { view; _ } when view <> m.work.verification_view ->
+      (m, [])
+  | Msg.Reply_verifications { result = Ok vs; _ } ->
       ( { m with work = Work_store.apply_verifications ~observed_at:now vs m.work }
         |> Model.sync_effective_scorecard ~now
       , [] )
-  | Msg.Reply_verifications (Error err) ->
+  | Msg.Reply_verifications { result = Error err; _ } ->
       err_reply
         ~fail:
           (on_work (fun (x : Work_store.t) ->

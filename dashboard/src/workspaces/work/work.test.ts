@@ -602,6 +602,7 @@ describe('workspaces/work', () => {
 
     approvalBody = { pending: null }
     chip('Tool Approvals').click()
+    await flushUi()
     refresh.click()
     await flushUi()
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('도구 승인 조회 불가')

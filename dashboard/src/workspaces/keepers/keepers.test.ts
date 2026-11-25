@@ -1480,6 +1480,126 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     })
   })
 
+  it('shows a received Keeper task while other reads are pending and preserves edits across note reads and writes', async () => {
+    const keeper = 'code-reviewer-sister'
+    const json = (data: unknown, status = 200) =>
+      new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+    let resolveSandbox!: (response: Response) => void
+    let resolveNote!: (response: Response) => void
+    let resolveSave!: (response: Response) => void
+    const firstSandbox = new Promise<Response>(resolve => { resolveSandbox = resolve })
+    const noteRead = new Promise<Response>(resolve => { resolveNote = resolve })
+    const noteWrite = new Promise<Response>(resolve => { resolveSave = resolve })
+    let sandboxReads = 0
+    const saves: unknown[] = []
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/dashboard/execution?light=true')) {
+        return json({ tasks: [{ id: 't-1', title: 'Inspect local cache', assignee: keeper }] })
+      }
+      if (url.includes('/infra/sandboxes')) {
+        if (++sandboxReads === 1) return firstSandbox
+        return json({ error: 'No sandbox telemetry' }, 404)
+      }
+      if (url.endsWith('/operator-note')) {
+        if (init?.method === 'POST') {
+          saves.push(JSON.parse(String(init.body)))
+          return noteWrite
+        }
+        return noteRead
+      }
+      return json({ entries: [], tools: [] })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+    const view = render(html`<${KeeperWorkSandboxTab} keeperName=${keeper} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await view.findByText('Inspect local cache')
+    expect(view.getByRole('region', { name: 'Keeper 샌드박스 상태' }).textContent).toContain('샌드박스 불러오는 중')
+    expect(view.queryByText('등록된 샌드박스 텔레메트리 없음')).toBeNull()
+
+    const note = view.getByLabelText('운영자 노트 입력') as HTMLTextAreaElement
+    fireEvent.input(note, { target: { value: 'Temporary draft' } })
+    fireEvent.input(note, { target: { value: '' } })
+    await act(async () => {
+      resolveNote(json({ keeper, pending: false, note: { text: 'Old saved note' } }))
+      resolveSandbox(json({ error: 'Sandbox unavailable' }, 503))
+    })
+    await view.findByText('저장된 노트', { exact: true })
+    expect(note.value).toBe('')
+    await view.findByRole('alert')
+    fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
+    await view.findByText('등록된 샌드박스 텔레메트리 없음')
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).includes('/dashboard/execution'))).toHaveLength(1)
+
+    fireEvent.input(note, { target: { value: 'Save this draft' } })
+    fireEvent.click(view.getByRole('button', { name: '운영자 노트 저장' }))
+    expect((view.getByRole('button', { name: '저장 중…' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.input(note, { target: { value: 'Keep editing during the save' } })
+    await act(async () => {
+      resolveSave(json({ ok: true, keeper, pending: true, note: { text: 'Save this draft' } }))
+    })
+    await view.findByText('운영자 노트 저장 완료')
+    expect(saves).toEqual([{ text: 'Save this draft' }])
+    expect(note.value).toBe('Keep editing during the save')
+    expect(view.getByText('저장되지 않은 초안')).toBeTruthy()
+  })
+
+  it('keeps Keeper facts visible when Journal fails and reports an already absent fact as such', async () => {
+    const keeper = 'code-reviewer-sister'
+    const json = (data: unknown, status = 200) =>
+      new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+    let resolveJournal!: (response: Response) => void
+    let resolveRetraction!: (response: Response) => void
+    const firstJournal = new Promise<Response>(resolve => { resolveJournal = resolve })
+    const retraction = new Promise<Response>(resolve => { resolveRetraction = resolve })
+    let journalReads = 0
+    let factReads = 0
+    const retractions: { plan_id: string; retractions: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/memory-journal')) {
+        if (++journalReads === 1) return firstJournal
+        return json({ keeper, returned: 0, entries: [] })
+      }
+      if (url.endsWith('/memory-facts')) {
+        ++factReads
+        return json({
+          keeper,
+          ordinary: { present: true, revision: 5, facts: [{ memory_id: 'fact-A', claim: 'Keeper fact body' }] },
+          source_bound: { present: false },
+        })
+      }
+      if (url.endsWith('/memory/retractions')) {
+        retractions.push(JSON.parse(String(init?.body)))
+        return retraction
+      }
+      return json({ keeper, compaction: { present: false }, canonical_turns: { present: false },
+        memory_digest: { present: false }, librarian_molt: {} })
+    }))
+    const view = render(html`<${KeeperMemoryTab} keeperName=${keeper} />`)
+    await view.findByText('Keeper fact body')
+    expect(view.getByRole('heading', { name: 'Memory Journal (—)' })).toBeTruthy()
+    expect(view.queryByText('메모리 저널 기록 없음')).toBeNull()
+    await act(async () => { resolveJournal(json({ error: 'Journal unavailable' }, 503)) })
+    expect((await view.findByRole('alert')).textContent).toContain('Journal unavailable')
+    expect(view.getByText('Keeper fact body')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: '메모리 저널 다시 읽기' }))
+    await view.findByRole('heading', { name: 'Memory Journal (0)' })
+    expect(factReads).toBe(1)
+
+    fireEvent.click(view.getByRole('button', { name: 'Retract 선택' }))
+    fireEvent.click(view.getByRole('button', { name: 'Fact 철회 (POST /memory/retractions)' }))
+    expect((view.getByRole('button', { name: '철회 요청 중…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(retractions[0]?.retractions).toEqual([{ memory_id: 'fact-A', reason: 'operator_cleanup' }])
+    await act(async () => {
+      resolveRetraction(json({
+        ok: true, keeper, plan_id: retractions[0]?.plan_id,
+        retractions: [{ memory_id: 'fact-A', outcome: 'not_current' }],
+      }))
+    })
+    await view.findByText('현재 메모리에 없는 항목 · fact-A')
+    expect(view.queryByText('철회 완료 · fact-A')).toBeNull()
+  })
+
   it('auto-scrolls Chat on load/send, shows jump-to-bottom pill when scrolled up, preserves anchor on prepend, updates user badge to Delivered, and guards /btw IME Enter', async () => {
     const streamCalls: Record<string, unknown>[] = []
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

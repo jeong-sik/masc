@@ -9,8 +9,11 @@
 
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { InlineSpinner } from '../../components/common/inline-spinner'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
   fetchKeeperLinkedTasksApi,
@@ -20,14 +23,7 @@ import {
   fetchKeeperToolStatsApi,
   saveKeeperOperatorNoteApi,
 } from './keepers-api'
-import type {
-  KeeperLinkedTask,
-  KeeperOperatorNoteData,
-  KeeperSandboxData,
-  KeeperToolCallEntry,
-  KeeperToolCallsData,
-  KeeperToolStatsData,
-} from './types'
+import type { KeeperToolCallEntry } from './types'
 
 export interface KeeperWorkSandboxTabProps {
   readonly keeperName: string
@@ -36,63 +32,57 @@ export interface KeeperWorkSandboxTabProps {
 }
 
 export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
+  return html`<${KeeperWorkSandboxView} key=${JSON.stringify([sessionEpoch.value, props.keeperName])} ...${props} />`
+}
+
+function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
   const { keeperName } = props
-  const [tasks, setTasks] = useState<readonly KeeperLinkedTask[]>([])
-  const [toolCalls, setToolCalls] = useState<KeeperToolCallsData | null>(null)
   const [toolLimit, setToolLimit] = useState(50)
-  const [toolStats, setToolStats] = useState<KeeperToolStatsData | null>(null)
-  const [note, setNote] = useState<KeeperOperatorNoteData | null>(null)
-  const [noteDraft, setNoteDraft] = useState('')
+  const tasksRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperLinkedTasksApi(keeperName, signal), [keeperName],
+  ))
+  const sandboxRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperSandboxApi(keeperName, signal), [keeperName],
+  ), true)
+  const noteRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperOperatorNoteApi(keeperName, signal), [keeperName],
+  ), true)
+  const statsRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperToolStatsApi(keeperName, 24, signal), [keeperName],
+  ))
+  const callsRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperToolCallsApi(keeperName, toolLimit, signal), [keeperName, toolLimit],
+  ))
+  const { data: tasks } = tasksRead
+  const { data: sandbox } = sandboxRead
+  const { data: note } = noteRead
+  const { data: toolStats } = statsRead
+  const { data: toolCalls } = callsRead
+  const [editedNote, setEditedNote] = useState<string | null>(null)
+  const noteDraft = editedNote ?? note?.text ?? ''
   const [noteSaving, setNoteSaving] = useState(false)
-  const [noteFeedback, setNoteFeedback] = useState<string | null>(null)
-  const [sandbox, setSandbox] = useState<KeeperSandboxData | null>(null)
-  const [sandboxError, setSandboxError] = useState<string | null>(null)
-
-  const loadStaticData = useCallback(async () => {
-    setSandboxError(null)
-    const [tRes, tsRes, nRes, sbRes] = await Promise.all([
-      fetchKeeperLinkedTasksApi(keeperName),
-      fetchKeeperToolStatsApi(keeperName, 24),
-      fetchKeeperOperatorNoteApi(keeperName),
-      fetchKeeperSandboxApi(keeperName),
-    ])
-    if (tRes.ok) setTasks(tRes.value)
-    if (tsRes.ok) setToolStats(tsRes.value)
-    if (nRes.ok) {
-      setNote(nRes.value)
-      setNoteDraft(nRes.value.text)
-    }
-    if (sbRes.ok) {
-      setSandbox(sbRes.value)
-    } else {
-      setSandbox(null)
-      setSandboxError(sbRes.error.kind === 'not_found' ? '등록된 샌드박스 텔레메트리 없음' : sbRes.error.message)
-    }
-  }, [keeperName])
-
-  useEffect(() => {
-    void loadStaticData()
-  }, [loadStaticData])
-
-  useEffect(() => {
-    let active = true
-    void fetchKeeperToolCallsApi(keeperName, toolLimit).then((tcRes) => {
-      if (active && tcRes.ok) setToolCalls(tcRes.value)
-    })
-    return () => { active = false }
-  }, [keeperName, toolLimit])
+  const [noteFeedback, setNoteFeedback] = useState<{ kind: 'saved' | 'failed'; text: string } | null>(null)
+  const saving = useRef<AbortController | null>(null)
+  useEffect(() => () => saving.current?.abort(), [])
 
   const handleSaveNote = async () => {
+    if (saving.current || noteDraft.trim() === '') return
+    const epoch = currentSessionEpoch()
+    const controller = new AbortController()
+    saving.current = controller
     setNoteSaving(true)
     setNoteFeedback(null)
-    const res = await saveKeeperOperatorNoteApi(keeperName, noteDraft)
+    const result = await saveKeeperOperatorNoteApi(keeperName, noteDraft, controller.signal)
+    if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+    saving.current = null
     setNoteSaving(false)
-    if (!res.ok) {
-      setNoteFeedback(`저장 실패: ${res.error.message}`)
+    if (!result.ok) {
+      setNoteFeedback({ kind: 'failed', text: result.error.message })
       return
     }
-    setNote(res.value)
-    setNoteFeedback('운영자 노트가 저장되었습니다 (다음 턴에 주입).')
+    noteRead.accept(result.value)
+    setEditedNote(current => current === noteDraft ? null : current)
+    setNoteFeedback({ kind: 'saved', text: '운영자 노트 저장 완료' })
   }
 
   const toolCallColumns = useMemo<readonly DataTableColumn<KeeperToolCallEntry>[]>(() => [
@@ -125,14 +115,14 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
         <!-- Linked Tasks -->
         <section class="kp-card" aria-label="연결된 작업">
           <div class="kp-card-head">
-            <h3>Linked Tasks (${tasks.length})</h3>
+            <h3>Linked Tasks (${tasksRead.received ? tasks?.length ?? '—' : '—'})</h3>
             <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/tasks')}>
               Tasks →
             </button>
           </div>
-          ${tasks.length === 0
-            ? html`<div class="kp-empty">담당 중인 Task 없음</div>`
-            : tasks.map((t) => html`
+          <${KeeperReadNotice} label="연결 작업" read=${tasksRead} />
+          ${tasksRead.received && tasks?.length === 0 && html`<div class="kp-empty">조회된 담당 작업 없음</div>`}
+          ${tasks?.map((t) => html`
                 <div key=${t.id} class="kp-kv-box">
                   <div class="kp-card-head">
                     <span class="kp-roster-name">${t.title}</span>
@@ -153,6 +143,7 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
               Infra →
             </button>
           </div>
+          <${KeeperReadNotice} label="샌드박스" read=${sandboxRead} />
           ${sandbox
             ? html`
                 <div class="kp-grid-2">
@@ -178,7 +169,7 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
                   샌드박스 원시 상태 보기
                 </button>
               `
-            : html`<div class="kp-empty">${sandboxError ?? '샌드박스 정보 없음'}</div>`}
+            : sandboxRead.received && html`<div class="kp-empty">등록된 샌드박스 텔레메트리 없음</div>`}
         </section>
       </div>
 
@@ -187,19 +178,25 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
         <div class="kp-card-head">
           <h3>Operator Note</h3>
           <div class="kp-pill-row">
-            <span class="kp-pill" data-tone=${note?.pending ? 'brass' : 'default'}>
-              ${note?.pending ? 'Pending (다음 턴 주입 대기)' : note?.consumed_turn != null ? `Consumed @ turn #${note.consumed_turn}` : '비어 있음'}
-            </span>
+            ${noteRead.received && html`
+              <span class="kp-pill" data-tone=${note?.pending ? 'brass' : 'default'} role="status">
+                ${note?.pending ? '다음 턴 주입 대기'
+                  : note?.consumed_turn != null ? `Consumed @ turn #${note.consumed_turn}`
+                  : note ? '저장된 노트' : '저장된 노트 없음'}
+              </span>
+            `}
+            ${editedNote !== null && html`<span class="kp-pill" data-tone="warn">저장되지 않은 초안</span>`}
             <span class="kp-pill">${noteBytes} B</span>
           </div>
         </div>
+        <${KeeperReadNotice} label="저장된 운영자 노트" read=${noteRead} />
         <textarea
           class="kp-textarea"
           rows=${3}
           aria-label="운영자 노트 입력"
           placeholder="다음 턴 시작 시 Keeper에게 전달할 운영자 지시를 작성하세요… (⌘↵ 저장)"
           value=${noteDraft}
-          onInput=${(e: Event) => setNoteDraft((e.currentTarget as HTMLTextAreaElement).value)}
+          onInput=${(e: Event) => setEditedNote((e.currentTarget as HTMLTextAreaElement).value)}
           onKeyDown=${(e: KeyboardEvent) => {
             if (e.isComposing || e.keyCode === 229) return
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !noteSaving) {
@@ -209,21 +206,23 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
           }}
         />
         <div class="kp-lifecycle-bar">
-          <button type="button" class="btn-primary" disabled=${noteSaving} onClick=${() => void handleSaveNote()}>
-            ${noteSaving ? '저장 중…' : '운영자 노트 저장'}
+          <button type="button" class="btn-primary" disabled=${noteSaving || noteDraft.trim() === ''} onClick=${() => void handleSaveNote()}>
+            ${noteSaving ? html`<${InlineSpinner} size="xs" /> 저장 중…` : '운영자 노트 저장'}
           </button>
-          ${noteFeedback && html`<span class="kp-pill" data-tone="info">${noteFeedback}</span>`}
+          ${noteSaving && html`<span class="sr-only" role="status">운영자 노트 저장 중…</span>`}
+          ${noteFeedback?.kind === 'saved' && html`<span class="kp-pill" data-tone="ok" role="status">${noteFeedback.text}</span>`}
+          ${noteFeedback?.kind === 'failed' && html`<span class="ap-error" role="alert">저장 실패 · ${noteFeedback.text}</span>`}
         </div>
       </section>
 
       <!-- Tool Stats 24h Summary -->
       <section class="kp-card" aria-label="도구 호출 통계">
         <div class="kp-card-head">
-          <h3>Tool Stats (24h · ${toolStats?.total_entries ?? 0} calls)</h3>
+          <h3>Tool Stats (24h · ${statsRead.received ? toolStats?.total_entries ?? '—' : '—'} calls)</h3>
         </div>
-        ${!toolStats || toolStats.tools.length === 0
-          ? html`<div class="kp-empty">24h 도구 통계 없음</div>`
-          : html`
+        <${KeeperReadNotice} label="도구 호출 통계" read=${statsRead} />
+        ${statsRead.received && toolStats?.tools.length === 0 && html`<div class="kp-empty">24h 도구 통계 없음</div>`}
+        ${toolStats && toolStats.tools.length > 0 && html`
               <div class="kp-grid-4">
                 ${toolStats.tools.slice(0, 8).map((st) => html`
                   <div key=${st.name} class="kp-kv-box">
@@ -241,20 +240,22 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
       <!-- Paginated Virtualized Tool Calls -->
       <section class="kp-card" aria-label="도구 호출 내역">
         <div class="kp-card-head">
-          <h3>Tool Calls (${toolCalls?.count ?? 0})</h3>
+          <h3>Tool Calls (${callsRead.received ? toolCalls?.count ?? '—' : '—'})</h3>
           <div class="kp-pill-row">
             <button
               type="button"
               class="btn-ghost"
-              disabled=${toolLimit >= 200}
+              disabled=${!callsRead.received || toolLimit >= 200}
               onClick=${() => setToolLimit((n) => Math.min(200, n + 50))}
             >
               더 불러오기 (+50)
             </button>
           </div>
         </div>
+        <${KeeperReadNotice} label="도구 호출 내역" read=${callsRead} />
+        ${toolCalls && (callsRead.received || toolCalls.entries.length > 0) && html`
         <${DataTable}
-          data=${toolCalls?.entries ?? []}
+          data=${toolCalls.entries}
           columns=${toolCallColumns}
           getRowId=${(r: KeeperToolCallEntry, idx: number) => r.execution_id ?? `${r.ts}-${idx}`}
           onRowClick=${(row: KeeperToolCallEntry) => props.onInspect({
@@ -274,7 +275,7 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
           virtualizeThreshold=${30}
           emptyLabel="도구 호출 기록 없음"
           caption="Keeper Tool Calls"
-        />
+        />`}
       </section>
     </div>
   `

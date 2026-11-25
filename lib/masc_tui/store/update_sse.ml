@@ -767,6 +767,26 @@ let apply_agent_core (m : Model.t) (ev : Wire_observer.agent_core_event) =
       in
       ({ m with infra }, [])
 
+let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
+  let fleet = { m.fleet with turns = Observed.mark_stale m.fleet.turns } in
+  let wants_turns =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; _ }) ->
+        Option.fold ~none:true ~some:(String.equal name) keeper
+    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
+        false
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Keepers -> true
+        | Nav.Pulse -> not preview_only
+        | Nav.Infra ->
+            not preview_only
+            && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_activity_logs
+        | Nav.Work | Nav.Knowledge | Nav.Runtime -> false)
+  in
+  let cmds = if wants_turns then [ get_cmd m.epoch Cmd.Get_keeper_turns ] else [] in
+  ({ m with fleet }, cmds)
+
 let apply_observer_event (m : Model.t) = function
   | Wire_observer.Observation_changed payload ->
       apply_observation_changed m payload
@@ -867,31 +887,11 @@ let apply_observer_event (m : Model.t) = function
   | Wire_observer.Keeper_roster_changed _ ->
       let fleet = Fleet_store.mark_keepers_stale m.fleet in
       ({ m with fleet }, [ get_cmd m.epoch Cmd.Get_keepers_roster ])
+  | Wire_observer.Keeper_turn_preview { keeper; update } ->
+      let fleet = Fleet_store.observe_turn_preview ~keeper update m.fleet in
+      ({ m with fleet }, [])
   | Wire_observer.Keeper_turn_changed { keeper; preview_only } ->
-      let fleet = { m.fleet with turns = Observed.mark_stale m.fleet.turns } in
-      let wants_turns =
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { name; _ }) -> String.equal keeper name
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
-            false
-        | None -> (
-            match m.nav.workspace with
-            | Nav.Keepers -> true
-            | Nav.Pulse -> not preview_only
-            | Nav.Infra ->
-                (not preview_only)
-                && Nav.equal_infra_tab m.infra.active_tab
-                     Nav.Infra_activity_logs
-            | Nav.Work | Nav.Knowledge | Nav.Runtime -> false)
-      in
-      let cmds =
-        if wants_turns then [ get_cmd m.epoch Cmd.Get_keeper_turns ] else []
-      in
-      ({ m with fleet }, cmds)
+      keeper_turns_changed ~keeper ~preview_only m
   | Wire_observer.Keeper_memory_journal_appended { keeper; _ } ->
       let mark_keeper_slot slots =
         Knowledge_store.String_map.update keeper
@@ -1022,9 +1022,15 @@ let apply_sse_event ~now (m : Model.t) = function
         }
       in
       let next = { m with server_identity } in
-      if hs.needs_cold_resync then
+      let instance_changed =
+        match m.server_identity.observer_instance_id, observer_instance_id with
+        | Some previous, Some current -> not (String.equal previous current)
+        | Some _, None | None, _ -> false
+      in
+      if hs.needs_cold_resync || instance_changed then
+        let fleet = Fleet_store.clear_turn_preview_updates next.fleet in
         let next =
-          { next with infra = Infra_store.forget_log_cursor next.infra }
+          { next with fleet; infra = Infra_store.forget_log_cursor next.infra }
           |> Model.mark_all_domains_stale
         in
         (next, View_fetches.bootstrap_fetches next)
@@ -1431,4 +1437,4 @@ let apply_stream_gap ~now dropped (m : Model.t) =
       { m with infra; incidents }
       |> Model.with_toast ~now ~level:Model.Toast_warning summary
     in
-    (next, [])
+    keeper_turns_changed next

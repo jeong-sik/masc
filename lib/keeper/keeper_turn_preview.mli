@@ -60,6 +60,9 @@ type t =
         (** Most recently observed tool name, including requests before validation
             and returned calls. This does not claim a tool is executing. *)
   ; updated_at : float
+  ; revision : int
+        (** Process-local ordering of preview writes, including writer replacement.
+            Wall-clock timestamps can move backwards. *)
   ; runtime_id : string option
   ; activity : activity
   ; last_failure : string option
@@ -84,6 +87,11 @@ val current : keeper_name:string -> t option
 val current_for_turn : keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> t option
 (** Only the exact Owner slot can read its preview. Before its writer is
     installed, an older writer remains unreadable regardless of update time. *)
+
+val current_for_turn_with_revision :
+  keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> int * t option
+(** Read under one lock. For an installed preview, return its revision. A
+    missing preview is observed through the latest process preview revision. *)
 
 val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot
@@ -130,6 +138,8 @@ val original_turn_ref : writer -> Ids.Turn_ref.t option
 
 val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
+(** Store a bounded failure preview after applying the writer's secret snapshot. *)
+
 val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
 val status_text : t -> string
 

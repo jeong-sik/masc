@@ -98,7 +98,13 @@ type turn_preview = {
   text_tail : string;
   last_tool : string option;
   updated_at_unix : float;
+  revision : int option;
   preparation : turn_preparation option;
+}
+
+type turn_preview_update = {
+  owner_key : string;
+  preview : turn_preview;
 }
 
 type active_turn = {
@@ -109,6 +115,8 @@ type active_turn = {
   phase : string option;
   tool_in_flight : string option;
   elapsed_ms : float option;
+  preview_observed_through : int option;
+  (** The last revision observed for this Owner, including an absent preview. *)
   preview : turn_preview option;
 }
 
@@ -358,6 +366,10 @@ val equal_turn_preparation_phase : turn_preparation_phase -> turn_preparation_ph
 val equal_turn_preparation_state : turn_preparation_state -> turn_preparation_state -> bool
 val equal_turn_preparation : turn_preparation -> turn_preparation -> bool
 val equal_turn_preview : turn_preview -> turn_preview -> bool
+
+val decode_turn_preview_update :
+  Yojson.Safe.t -> (turn_preview_update, string) result
+val preview_update_belongs_to_turn : turn_preview_update -> active_turn -> bool
 val equal_active_turn : active_turn -> active_turn -> bool
 
 val decode_keepers_roster :

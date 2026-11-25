@@ -4425,6 +4425,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
                        phase = Some "thinking";
                        tool_in_flight = None;
                        elapsed_ms = Some 500.0;
+                       preview_observed_through = None;
                        preview = None;
                      };
                };
@@ -9186,6 +9187,7 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
             phase = Some "thinking";
             tool_in_flight = None;
             elapsed_ms = Some 500.0;
+            preview_observed_through = None;
             preview = None;
           };
     }
@@ -16096,6 +16098,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       text_tail = "";
       last_tool = Some "Execute";
       updated_at_unix = 1795503086.0;
+      revision = None;
       preparation = None;
     }
   in
@@ -16108,6 +16111,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       phase = None;
       tool_in_flight = None;
       elapsed_ms = None;
+      preview_observed_through = None;
       preview = Some active_preview_waiting;
     }
   in
@@ -16586,6 +16590,168 @@ let test_active_turn_preview_visibility_and_queued_followup () =
   in
   Alcotest.(check bool) "Esc closes orphaned Inline_action overlay" true
     (Option.is_none m_escaped.nav.overlay)
+
+let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
+  let keeper = "alpha" in
+  let base = Model.initial () in
+  let base =
+    { base with nav = { base.nav with workspace = Nav.Keepers };
+      server_identity =
+        { base.server_identity with observer_instance_id = Some "before-restart" } }
+  in
+  let frame model json =
+    let delivery =
+      Wire_observer.decode_frame
+        { id = None; data = Yojson.Safe.to_string json }
+    in
+    Update.step ~now:t1 model
+      (Msg.Sse_event
+         { epoch = model.epoch; event = Msg.Sse_observer_delivery delivery })
+  in
+  let preview revision text : Wire_fleet.turn_preview =
+    { status_text = "streaming"; activity = Preview_streaming; text_tail = text;
+      last_tool = None; updated_at_unix = 100.0; revision = Some revision;
+      preparation = None }
+  in
+  let row ~keeper_name ~token ~ref_id ~revision ~text : Wire_fleet.keeper_turn_row =
+    { keeper_name; chat_control_token = Some (keeper_name ^ "-control");
+      state =
+        Turn_active
+          { lane = Lane_proactive; turn_ref = Some ref_id; started_at_unix = 90.0;
+            interrupt_token = token; phase = None; tool_in_flight = None;
+            elapsed_ms = None; preview_observed_through = Some revision;
+            preview = Some (preview revision text) } }
+  in
+  let missing_preview (turn_row : Wire_fleet.keeper_turn_row) revision =
+    match turn_row.state with
+    | Turn_active turn ->
+        { turn_row with
+          state = Turn_active { turn with preview = None;
+                                 preview_observed_through = Some revision } }
+    | Turn_idle | Turn_unavailable _ -> Alcotest.fail "expected an active turn fixture"
+  in
+  let send_preview model ~owner_key ~revision ~text =
+    frame model
+      (`Assoc [
+         "type", `String "keeper_turn_preview_changed";
+         "name", `String keeper;
+         "observation", `Assoc [
+           "owner_key", `String owner_key;
+           "preview", `Assoc [
+             "status_text", `String "streaming"; "activity", `String "streaming";
+             "text_tail", `String text; "last_tool", `Null;
+             "updated_at_unix", `Float 100.0; "revision", `Int revision;
+             "preparation", `Null
+           ]
+         ]
+      ])
+  in
+  let update model ~token ~revision ~text =
+    let owner_key = Digest.BLAKE256.(to_hex (string token)) in
+    send_preview model ~owner_key ~revision ~text
+  in
+  let reply model rows =
+    fst
+      (Update.step ~now:t2 model
+         (Msg.Http_reply { epoch = model.epoch; reply = Msg.Reply_keeper_turns (Ok rows) }))
+  in
+  let active model name = Fleet_store.active_turn_for ~keeper:name model.Model.fleet in
+  let check_preview label expected model name =
+    Alcotest.(check (option string)) label expected
+      (Option.bind (active model name)
+         (fun turn -> Option.map (fun p -> p.Wire_fleet.text_tail) turn.preview))
+  in
+  let has_fleet_read cmds =
+    List.exists
+      (function Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  let a = row ~keeper_name:keeper ~token:"first-owner" ~ref_id:"trace#1"
+      ~revision:8 ~text:"earlier response" in
+  let other = row ~keeper_name:"beta" ~token:"other-owner" ~ref_id:"trace#3"
+      ~revision:2 ~text:"other keeper" in
+  let pending, cmds =
+    update base ~token:"first-owner" ~revision:9 ~text:"new response"
+  in
+  Alcotest.(check bool) "preview asks for no fleet read" false (has_fleet_read cmds);
+  check_preview "preview cannot manufacture a running slot" None pending keeper;
+  let running = reply pending [ a; other ] in
+  check_preview "initial snapshot can join an earlier-arriving preview"
+    (Some "new response") running keeper;
+  Alcotest.(check (option string)) "the preview preserves the authoritative turn reference"
+    (Some "trace#1") (Option.bind (active running keeper) (fun turn -> turn.turn_ref));
+  check_preview "other keeper keeps its own preview" (Some "other keeper") running "beta";
+  check_preview "a missing preview observed earlier cannot erase the event"
+    (Some "new response") (reply running [ missing_preview a 8; other ]) keeper;
+  let withdrawn = reply running [ missing_preview a 10; other ] in
+  check_preview "a newer missing preview withdraws the previous text" None withdrawn keeper;
+  check_preview "a delayed response cannot bring back withdrawn text"
+    None (reply withdrawn [ a; other ]) keeper;
+  let running, malformed_cmds =
+    send_preview running ~owner_key:"invalid" ~revision:9000 ~text:"malformed response"
+  in
+  Alcotest.(check bool) "malformed preview asks for no fleet read" false
+    (has_fleet_read malformed_cmds);
+  let next, cmds =
+    update running ~token:"second-owner" ~revision:11 ~text:"second owner response"
+  in
+  Alcotest.(check bool) "new-owner preview leaves lifecycle reads to lifecycle events"
+    false (has_fleet_read cmds);
+  let delayed = reply next [ a; other ] in
+  check_preview "delayed old-owner reply does not borrow or lose the owner's preview"
+    (Some "new response") delayed keeper;
+  let delayed, cmds =
+    frame delayed
+      (`Assoc [ "type", `String "keeper_turn_changed"; "name", `String keeper ])
+  in
+  Alcotest.(check bool) "owner change still requests the authoritative snapshot"
+    true (has_fleet_read cmds);
+  let _, gap_cmds = Update.step ~now:t2 delayed (Msg.Stream_gap 1) in
+  Alcotest.(check bool) "a lost lifecycle event requests a snapshot in the visible view"
+    true (has_fleet_read gap_cmds);
+  let hidden = { delayed with nav = { delayed.nav with workspace = Nav.Knowledge } } in
+  let _, hidden_gap_cmds = Update.step ~now:t2 hidden (Msg.Stream_gap 1) in
+  Alcotest.(check bool) "the background fleet waits until its view is opened"
+    false (has_fleet_read hidden_gap_cmds);
+  let b = row ~keeper_name:keeper ~token:"second-owner" ~ref_id:"trace#2"
+      ~revision:10 ~text:"earlier second response" in
+  let next = reply delayed [ b; other ] in
+  check_preview "malformed observation did not block the next owner's earlier preview"
+    (Some "second owner response") next keeper;
+  let stale_event, _ =
+    update next ~token:"first-owner" ~revision:9 ~text:"late old event"
+  in
+  check_preview "late old-owner observation leaves current owner alone"
+    (Some "second owner response") stale_event keeper;
+  let idle = reply stale_event [ { b with state = Turn_idle }; other ] in
+  check_preview "terminal snapshot withdraws the preview" None idle keeper;
+  Alcotest.(check (option string)) "control token still comes from the snapshot"
+    (Some "alpha-control") (Fleet_store.chat_control_token_for ~keeper idle.fleet);
+  let after_restart = row ~keeper_name:keeper ~token:"restarted-owner" ~ref_id:"trace#4"
+      ~revision:1 ~text:"after restart" in
+  let check_restart label message =
+    let reset, _ = Update.step ~now:t2 idle message in
+    let fresh, cmds =
+      update (reply reset [ after_restart ]) ~token:"restarted-owner"
+        ~revision:2 ~text:"new process preview"
+    in
+    Alcotest.(check bool) "new process preview still needs no fleet read" false
+      (has_fleet_read cmds);
+    check_preview label (Some "new process preview") fresh keeper
+  in
+  let reconnect ~handshake ~needs_cold_resync =
+    Msg.Sse_event
+      { epoch = idle.epoch;
+        event = Msg.Sse_observer_handshake
+          { handshake; identity = None; needs_cold_resync } }
+  in
+  check_restart "cold reconnect retires the old process revision"
+    (reconnect ~handshake:None ~needs_cold_resync:true);
+  check_restart "a fresh observer instance retires the old process revision"
+    (reconnect ~handshake:(Some { instance_id = "after-restart"; replay = Fresh })
+       ~needs_cold_resync:false);
+  check_restart "a new server epoch retires the old process revision"
+    (Msg.Server_start_result (Ok ()))
 
 let test_interrupt_reply_and_stream_completion_are_request_scoped () =
   let keeper = "alpha-leader" in
@@ -19400,6 +19566,8 @@ let () =
             `Quick test_live_chat_activity_uses_open_content_and_tool_receipts;
           Alcotest.test_case "interrupt receipts and completion follow their own request"
             `Quick test_interrupt_reply_and_stream_completion_are_request_scoped;
+          Alcotest.test_case "preview events update only the observed turn owner without a fleet read"
+            `Quick test_turn_preview_updates_keep_owner_and_skip_fleet_reads;
           Alcotest.test_case
             "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
             `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;

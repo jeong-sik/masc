@@ -1760,6 +1760,7 @@ let test_keeper_turns_preview_roundtrip () =
                         ("turn_ref", `String "trace-rt#42");
                         ("started_at_unix", `Float 1795503000.0);
                         ("interrupt_token", `String "itok-rt-1");
+                        ("preview_observed_through", `Int snap_stream.revision);
                         ("preview", Preview.to_json snap_stream);
                       ] );
                 ];
@@ -1793,8 +1794,12 @@ let test_keeper_turns_preview_roundtrip () =
             (Wire_fleet.equal_turn_lane t.lane Wire_fleet.Lane_proactive);
           Alcotest.(check (option string)) "turn_ref preserved"
             (Some "trace-rt#42") t.turn_ref;
+          Alcotest.(check (option int)) "the preview observation revision survives decoding"
+            (Some snap_stream.revision) t.preview_observed_through;
           match t.preview with
           | Some p ->
+              Alcotest.(check (option int)) "preview revision preserved"
+                (Some snap_stream.revision) p.revision;
               Alcotest.(check bool) "stream activity preserved" true
                 (Wire_fleet.equal_turn_preview_activity p.activity
                    Wire_fleet.Preview_streaming);

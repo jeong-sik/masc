@@ -139,6 +139,10 @@ type event =
     }
   | Keeper_roster_changed of string option
   | Keeper_turn_changed of { keeper : string; preview_only : bool }
+  | Keeper_turn_preview of {
+      keeper : string;
+      update : Wire_fleet.turn_preview_update;
+    }
   | Keeper_memory_journal_appended of { keeper : string; at_unix : float }
   | Board_changed of { post_id : string option }
   | Approval_changed of approval_event

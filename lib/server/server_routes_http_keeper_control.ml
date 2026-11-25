@@ -194,8 +194,12 @@ let handle_keeper_turns_list state request reqd =
             (* The live glance rides only a running turn: the preview plane
                is process memory that outlives turn end unread, and gating
                it here is what keeps a stale tail unreachable. *)
+            let preview_observed_through, preview =
+              Keeper_turn_preview.current_for_turn_with_revision
+                ~keeper_name ~interrupt_token:turn.interrupt_token
+            in
             let preview_json =
-              match Keeper_turn_preview.current_for_turn ~keeper_name ~interrupt_token:turn.interrupt_token with
+              match preview with
               | None -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
                 (* The name selects detail volume only. The actual Owner token
@@ -210,6 +214,7 @@ let handle_keeper_turns_list state request reqd =
                    | None -> `Null | Some turn_ref -> Ids.Turn_ref.to_yojson turn_ref)
               ; ("started_at_unix", `Float turn.started_at)
               ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
+              ; ("preview_observed_through", `Int preview_observed_through)
               ; ("preview", preview_json)
               ]
         in

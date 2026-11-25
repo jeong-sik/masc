@@ -164,7 +164,13 @@ type turn_preview = {
   text_tail : string;
   last_tool : string option;
   updated_at_unix : float;
+  revision : int option;
   preparation : turn_preparation option;
+}
+
+type turn_preview_update = {
+  owner_key : string;
+  preview : turn_preview;
 }
 
 type active_turn = {
@@ -175,6 +181,7 @@ type active_turn = {
   phase : string option;
   tool_in_flight : string option;
   elapsed_ms : float option;
+  preview_observed_through : int option;
   preview : turn_preview option;
 }
 
@@ -481,6 +488,7 @@ let equal_turn_preview (a : turn_preview) (b : turn_preview) =
   && String.equal a.text_tail b.text_tail
   && Option.equal String.equal a.last_tool b.last_tool
   && Float.equal a.updated_at_unix b.updated_at_unix
+  && Option.equal Int.equal a.revision b.revision
   && Option.equal equal_turn_preparation a.preparation b.preparation
 
 let equal_active_turn (a : active_turn) (b : active_turn) =
@@ -491,6 +499,7 @@ let equal_active_turn (a : active_turn) (b : active_turn) =
   && Option.equal String.equal a.phase b.phase
   && Option.equal String.equal a.tool_in_flight b.tool_in_flight
   && Option.equal Float.equal a.elapsed_ms b.elapsed_ms
+  && Option.equal Int.equal a.preview_observed_through b.preview_observed_through
   && Option.equal equal_turn_preview a.preview b.preview
 
 let prefix_before_dash name =
@@ -721,6 +730,12 @@ let decode_turn_preview json =
   let* text_tail = required_string_field json "text_tail" in
   let* last_tool = optional_nonblank_string json "last_tool" in
   let* updated_at_unix = required_finite_float json "updated_at_unix" in
+  let* revision = optional_int_field json "revision" in
+  let* () =
+    match revision with
+    | Some value when value < 1 -> Error "preview revision must be positive"
+    | Some _ | None -> Ok ()
+  in
   let* prep_obj = optional_object_field json "preparation" in
   let* preparation =
     match prep_obj with
@@ -729,7 +744,24 @@ let decode_turn_preview json =
         let* p = decode_turn_preparation pjson in
         Ok (Some p)
   in
-  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; preparation }
+  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; revision; preparation }
+
+let decode_turn_preview_update json =
+  let* owner_key = required_nonblank_string json "owner_key" in
+  let* owner_key =
+    match Digest.BLAKE256.of_hex owner_key with
+    | digest -> Ok (Digest.BLAKE256.to_hex digest)
+    | exception Invalid_argument _ -> Error "invalid preview owner key"
+  in
+  let* json_preview = required_object_field json "preview" in
+  let* preview = decode_turn_preview json_preview in
+  match preview.revision with
+  | None -> Error "preview update requires a revision"
+  | Some _ -> Ok { owner_key; preview }
+
+let preview_update_belongs_to_turn (update : turn_preview_update) (turn : active_turn) =
+  String.equal update.owner_key
+    (Sse_wire.keeper_turn_observation_key ~interrupt_token:turn.interrupt_token)
 
 let decode_active_turn json =
   let* lane = decode_enum ~field:"lane" turn_lane_of_string json in
@@ -739,6 +771,7 @@ let decode_active_turn json =
   let* phase = optional_nonblank_string json "phase" in
   let* tool_in_flight = optional_nonblank_string json "tool_in_flight" in
   let* elapsed_ms = optional_finite_float json "elapsed_ms" in
+  let* preview_observed_through = optional_int_field json "preview_observed_through" in
   let* prev_obj = optional_object_field json "preview" in
   let* preview =
     match prev_obj with
@@ -746,6 +779,15 @@ let decode_active_turn json =
     | Some pjson ->
         let* p = decode_turn_preview pjson in
         Ok (Some p)
+  in
+  let preview_revision = Option.bind preview (fun preview -> preview.revision) in
+  let* preview_observed_through =
+    match preview_observed_through with
+    | None -> Ok preview_revision
+    | Some value when value >= 0
+                      && Option.compare Int.compare preview_revision (Some value) <= 0 ->
+        Ok (Some value)
+    | Some _ -> Error "invalid preview observation revision"
   in
   Ok
     {
@@ -756,6 +798,7 @@ let decode_active_turn json =
       phase;
       tool_in_flight;
       elapsed_ms;
+      preview_observed_through;
       preview;
     }
 

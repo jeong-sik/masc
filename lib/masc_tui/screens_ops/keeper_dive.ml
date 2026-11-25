@@ -13,6 +13,7 @@ type transcript_row = {
   prefix_fg : Theme.rgb;
   prefix_attrs : Attr.t;
   spans : Markdown.styled_span list;
+  image_part : Cell_grid.document_image_part option;
   right_meta : string option;
   right_meta_fg : Theme.rgb option;
   right_meta_attrs : Attr.t;
@@ -22,13 +23,14 @@ type transcript_row = {
 
 let make_row ?rail_rgb ?(prefix = "") ~prefix_fg ?(prefix_attrs = Attr.none)
     ?right_meta ?right_meta_fg ?(right_meta_attrs = Attr.italic) ~bg_rgb
-    ?(full_bleed_bg = false) spans =
+    ?(full_bleed_bg = false) ?image_part spans =
   {
     rail_rgb;
     prefix;
     prefix_fg;
     prefix_attrs;
     spans;
+    image_part;
     right_meta;
     right_meta_fg;
     right_meta_attrs;
@@ -166,7 +168,7 @@ let build_history_thinking_rows ~(theme : Theme.t) ~(lang : Say.lang)
           :: List.map
                (fun (line : Markdown.rendered_line) ->
                  make_row ~rail_rgb:theme.status_ai ~prefix:"  "
-                   ~prefix_fg:theme.status_ai ~bg_rgb:base_bg line.spans)
+                   ~prefix_fg:theme.status_ai ~bg_rgb:base_bg ?image_part:line.image_part line.spans)
                think_lines
   in
   match thinking with
@@ -290,7 +292,7 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(lang : Say.lang)
         (fun (line : Markdown.rendered_line) ->
           make_row ~rail_rgb:theme.border_subtle ~prefix:"  "
             ~prefix_fg:theme.text_muted ~bg_rgb:inset_bg ~full_bleed_bg:true
-            line.spans)
+            ?image_part:line.image_part line.spans)
         shown
     in
     if hidden > 0 then
@@ -335,13 +337,13 @@ let markdown_rows ?rail_rgb ~(theme : Theme.t) ~width ~prefix ~cont_prefix
       ]
   | first :: rest ->
       let head =
-        make_row ?rail_rgb ~prefix ~prefix_fg ~bg_rgb ~full_bleed_bg first.spans
+        make_row ?rail_rgb ~prefix ~prefix_fg ~bg_rgb ~full_bleed_bg ?image_part:first.image_part first.spans
       in
       let tail =
         List.map
           (fun (l : Markdown.rendered_line) ->
             make_row ?rail_rgb ~prefix:cont_prefix ~prefix_fg ~bg_rgb
-              ~full_bleed_bg l.spans)
+              ~full_bleed_bg ?image_part:l.image_part l.spans)
           rest
       in
       head :: tail
@@ -896,7 +898,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
             push
               (make_row ~rail_rgb:theme.status_ai ~prefix:"  "
                  ~prefix_fg:theme.status_ai ~bg_rgb:base_bg
-                 ~full_bleed_bg:false line.spans))
+                 ~full_bleed_bg:false ?image_part:line.image_part line.spans))
           think_lines
   end;
   (* 2. Collapsible Elevated Tool Cards (surface_2 header + recessed surface_0 preview) *)
@@ -1305,6 +1307,7 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
             cx := !cx + adv
           end)
         r.spans;
+      Option.iter (Cell_grid.register_document_image_part grid ~rect:span_clip) r.image_part;
       match r.right_meta with
       | Some m when String.length m > 0 && right_edge > !cx + 1 ->
           let mw = Int.min (Grapheme.display_width m) (right_edge - !cx - 1) in

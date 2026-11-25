@@ -208,6 +208,17 @@ let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
         kill_and_reap pid;
         raise ex
 
+let cache_dir ~base_path =
+  let dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "cache")
+      "pele"
+  in
+  try
+    Fs_compat.mkdir_p dir;
+    dir
+  with Sys_error _ | Unix.Unix_error _ -> Filename.get_temp_dir_name ()
+
 let render ~cache_dir ?timeout_s ?clock ?(cancelled = fun () -> false) ?raster
     ?runner { format; source; max_width; font_size; now_ms; colors } =
   if cancelled () then Error "Pele was cancelled"

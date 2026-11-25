@@ -4660,17 +4660,6 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
                 Knowledge_store.Diagram_text
                   { lines = tree_lines; note = Some reason })
 
-let ensure_pele_cache_dir ~base_path =
-  let dir =
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "cache")
-      "pele"
-  in
-  try
-    Fs_compat.mkdir_p dir;
-    dir
-  with Sys_error _ | Unix.Unix_error _ -> Filename.get_temp_dir_name ()
-
 let cancel_active_memory_diagram t =
   match Atomic.exchange t.active_memory_diagram_cancel None with
   | Some flag -> Atomic.set flag true
@@ -4748,8 +4737,7 @@ let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
                                         Error "Pele was cancelled"
                                       else
                                         let cache_dir =
-                                          ensure_pele_cache_dir
-                                            ~base_path:t.cli.base_path
+                                          Pele.cache_dir ~base_path:t.cli.base_path
                                         in
                                         Pele.render ~cache_dir
                                           ~timeout_s:pele_timeout_s

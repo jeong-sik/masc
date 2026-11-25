@@ -57,6 +57,36 @@ val clear : ?style:Style.t -> t -> unit
 val resize : cols:int -> rows:int -> t -> t
 val copy_into : src:t -> dst:t -> unit
 
+type document_image = Mermaid of string
+
+type document_image_rows = {
+  source : document_image;
+  count : int;
+}
+
+type document_image_part = {
+  rows : document_image_rows;
+  index : int;
+  left_inset : int;
+}
+
+type document_placement = {
+  image : document_image;
+  rect : Masc_tui_core.Rect.t;
+}
+
+val register_document_image_part :
+  t -> rect:Masc_tui_core.Rect.t -> document_image_part -> unit
+(** A placement is available only after every row of one image occurrence
+    has been painted consecutively inside the viewport. *)
+
+val occlude_document_images : t -> rect:Masc_tui_core.Rect.t -> unit
+(** Clear placements under a later overlay drawn by individual cell writes. *)
+
+val document_placements : t -> document_placement list
+(** Full placements in document order. A later overlapping fill or scrim
+    removes the placement. Clearing the grid resets them for each frame. *)
+
 val get : t -> x:int -> y:int -> cell
 (** Out-of-bounds reads return {!blank_cell}. *)
 

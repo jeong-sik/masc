@@ -1023,6 +1023,16 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           end
         in
         Eio.Switch.on_release sw clear_active_memory_graphic;
+        let document_graphics = Document_graphics.create () in
+        let clear_document_graphic () =
+          Document_graphics.cancel_pending document_graphics;
+          let bytes, _ = Document_graphics.clear document_graphics ~in_tmux in
+          if not (String.equal bytes "") then begin
+            Terminal_out.write bytes;
+            Terminal_out.flush ()
+          end
+        in
+        Eio.Switch.on_release sw clear_document_graphic;
 
         let clock = Eio.Stdenv.clock env in
         (* Bounded startup terminal probe (CSI 16t cell pixels, optional
@@ -1107,6 +1117,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                pause_terminal =
                  (fun () ->
                    clear_active_memory_graphic ();
+                   clear_document_graphic ();
                    (match !input_handle with
                    | Some h ->
                        input_handle := None;
@@ -1326,6 +1337,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     ~pace:Frame_scheduler.Pace_interactive !scheduler
               end;
 
+              if Document_graphics.take_dirty document_graphics then
+                scheduler :=
+                  Frame_scheduler.mark_dirty
+                    ~pace:Frame_scheduler.Pace_interactive !scheduler;
+
               (* Recover from lost terminal writes by forcing full repaint. *)
               if Terminal_out.take_lost () then begin
                 Presenter.invalidate presenter;
@@ -1440,11 +1456,30 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       Clock.Mono.us_since (Clock.Mono.now ()) ~since:render_start
                     in
                     let probe_obs = Probe.current_observation () in
+                    let theme = Theme.of_preset !model.theme_preset in
+                    let desired_document =
+                      Document_graphics.prepare document_graphics ~sw
+                        ~base_path:cli.base_path
+                        ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
+                        ~probe:probe_obs ~term_program ~in_tmux ~theme grid
+                    in
+                    Option.iter
+                      (Document_graphics.mask_fallback grid
+                         ~style:(Typography.primary ~bg:(Color.of_rgb theme.surface_0) theme))
+                      desired_document;
+                    let document_pre, invalidate_for_document =
+                      Document_graphics.before_present document_graphics
+                        ~in_tmux desired_document
+                    in
                     let pre_bytes, invalidate_for_graphic, remaining_graphic =
                       plan_memory_graphic_clear ~active:!active_memory_graphic
                         ~probe:probe_obs ~term_program ~in_tmux ~model:!model
                     in
                     active_memory_graphic := remaining_graphic;
+                    let pre_bytes = pre_bytes ^ document_pre in
+                    let invalidate_for_graphic =
+                      invalidate_for_graphic || invalidate_for_document
+                    in
                     if not (String.equal pre_bytes "") then begin
                       Terminal_out.write pre_bytes;
                       Terminal_out.flush ()
@@ -1462,6 +1497,12 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                           (diff_stats.full_repaint || invalidate_for_graphic)
                     in
                     active_memory_graphic := next_graphic;
+                    let document_post =
+                      Document_graphics.after_present document_graphics ~in_tmux
+                        ~full_repaint:(diff_stats.full_repaint || invalidate_for_graphic)
+                        desired_document
+                    in
+                    let post_bytes = post_bytes ^ document_post in
                     if not (String.equal post_bytes "") then begin
                       Terminal_out.write post_bytes;
                       Terminal_out.flush ()

@@ -96,6 +96,9 @@ val process_runner :
     {!Masc_tui_net.Worker_pool} / [Eio_unix.run_in_systhread] so blocking
     syscalls never stall the UI domain. *)
 
+val cache_dir : base_path:string -> string
+(** Creates the workspace cache directory for temporary helper files. *)
+
 val render :
   cache_dir:string ->
   ?timeout_s:float ->

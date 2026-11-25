@@ -1601,18 +1601,12 @@ let test_knowledge_all_tabs_and_dives () =
                    in
                    assert_grid_invariants ~label:(lbl ^ "/WorldDiff") g_wd))
             tabs;
-          (* All 4 Knowledge Dives *)
+          (* All 3 Knowledge Dives *)
           let dives =
             [
               Nav.Thread_dive "p-chain-22";
               Nav.Wiki_dive "release-runbook";
               Nav.Artifact_dive "artifact-e3b0c44298fc1c149afbf4c8996fb924";
-              Nav.Memory_diff_dive
-                {
-                  keeper = Some "e-masc-the-leader";
-                  from_rev = 3794;
-                  to_rev = 3828;
-                };
             ]
           in
           List.iter
@@ -1838,8 +1832,8 @@ let test_infra_all_tabs_and_dives () =
                     (contains_sub ~needle:"sk-live-secret-should-redact"
                        ~haystack:text))
             tabs;
-          (* Infra Dive + zoomed Sandboxes in both structured and [Space] Json_tree mode *)
-          let dives = [ Nav.Incident_dive 1 ] in
+          (* Infra Dive (Runtime_trace) *)
+          let dives = [ Nav.Runtime_trace_dive "e-masc-the-leader" ] in
           List.iter
             (fun target ->
               let g1 =
@@ -1941,35 +1935,38 @@ let test_p1_p2_verifier_regressions () =
         false
         (contains_sub ~needle:spark ~haystack:ssh_top_text))
     [ "▁"; "▂"; "▃"; "▄"; "▅"; "▆"; "▇" ];
-  (* P1-2: Incident_dive redacts secrets in embedded JSON and plain text (default & [J] modes) *)
+  (* P1-2: Zoomed Incidents overlay redacts secrets in embedded JSON and plain text (default & [Space] JSON modes) *)
   let inc_json_secret =
     "HTTP 500: {\"error\":\"upstream_fail\",\"api_key\":\"sk-live-secret-999\",\"token\":\"ghp_secretvalue123\"}"
   in
   let inc_plain_secret =
     "Auth failed Authorization: Bearer topsecret_bearer_xyz api_key=sk-plain-secret-888"
   in
-  let incs1, i_json =
+  let incs_json, _ =
     Incidents.push ~occurred_at_unix:now_unix
       ~source:Health.Source_client_http
       ~summary:(Say.literal "HTTP 500")
       ~detail:inc_json_secret ~status:Health.Resolved m_base.incidents
   in
-  let incs2, i_plain =
+  let incs_plain, _ =
     Incidents.push ~occurred_at_unix:now_unix
       ~source:Health.Source_client_http
       ~summary:(Say.literal "Auth failure")
-      ~detail:inc_plain_secret ~status:Health.Resolved incs1
+      ~detail:inc_plain_secret ~status:Health.Resolved m_base.incidents
   in
-  let m_inc = { m_base with incidents = incs2 } in
   List.iter
     (fun raw_flag ->
-      let m_cur =
-        { m_inc with infra = { m_inc.infra with show_raw_json = raw_flag } }
+      let m_j =
+        {
+          m_base with
+          nav = { m_base.nav with overlay = Some Nav.Incidents };
+          incidents =
+            { incs_json with zoomed = true; show_raw_json = raw_flag };
+        }
       in
       let g_j =
         render_into ~cols:140 ~rows:40 (fun ~cache ~rect g ->
-            Screen_infra.render_dive ~target:(Nav.Incident_dive i_json.id)
-              ~model:m_cur ~cache ~rect g)
+            Masc_tui_screens_core.Overlays.render ~model:m_j ~cache ~rect g)
       in
       let txt_j = grid_all_text g_j in
       Alcotest.(check bool)
@@ -1979,12 +1976,19 @@ let test_p1_p2_verifier_regressions () =
         "P1-2 redacts ghp_secretvalue123" false
         (contains_sub ~needle:"ghp_secretvalue123" ~haystack:txt_j);
       Alcotest.(check bool)
-        "P1-2 no raw JSON object dump in Incident_dive" false
+        "P1-2 no raw JSON object dump in zoomed Incidents overlay" false
         (contains_sub ~needle:"{\"error\":" ~haystack:txt_j);
+      let m_p =
+        {
+          m_base with
+          nav = { m_base.nav with overlay = Some Nav.Incidents };
+          incidents =
+            { incs_plain with zoomed = true; show_raw_json = raw_flag };
+        }
+      in
       let g_p =
         render_into ~cols:140 ~rows:40 (fun ~cache ~rect g ->
-            Screen_infra.render_dive ~target:(Nav.Incident_dive i_plain.id)
-              ~model:m_cur ~cache ~rect g)
+            Masc_tui_screens_core.Overlays.render ~model:m_p ~cache ~rect g)
       in
       let txt_p = grid_all_text g_p in
       Alcotest.(check bool)

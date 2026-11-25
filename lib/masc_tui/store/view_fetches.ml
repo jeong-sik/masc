@@ -569,15 +569,7 @@ let fetches_for_dive ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.knowledge.artifact_checks)
                Cmd.Get_artifact_checks
-          |> add_if detail_needed (Cmd.Get_artifact_detail { id = art_id; revision = rev })
-      | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
-          [
-            Cmd.Get_memory_diff
-              {
-                keeper;
-                window = Knowledge_store.Window_revs { from_rev; to_rev };
-              };
-          ])
+          |> add_if detail_needed (Cmd.Get_artifact_detail { id = art_id; revision = rev }))
   | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
       let bucket, since_hours =
         Runtime_store.tools_window_params m.runtime.tools_window
@@ -628,24 +620,21 @@ let fetches_for_dive ~force (m : Model.t) =
             needs_fetch ~force m.runtime.exact_run_detail
       in
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
-  | Some (Nav.Dive_infra target) -> (
-      match target with
-      | Nav.Incident_dive _ -> []
-      | Nav.Runtime_trace_dive keeper ->
-          let trace_needed =
-            match m.infra.runtime_trace with
-            | Observed.Value { data = k, _; stale = false; _ } ->
-                force || not (String.equal k keeper)
-            | Observed.Loading _
-            | Observed.Value { stale = true; _ }
-            | Observed.Absent
-            | Observed.Unreported
-            | Observed.Failed _ ->
-                needs_fetch ~force m.infra.runtime_trace
-          in
-          []
-          |> add_if trace_needed
-               (Cmd.Get_keeper_runtime_trace { keeper; limit = Some 50 }))
+  | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
+      let trace_needed =
+        match m.infra.runtime_trace with
+        | Observed.Value { data = k, _; stale = false; _ } ->
+            force || not (String.equal k keeper)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.infra.runtime_trace
+      in
+      []
+      |> add_if trace_needed
+           (Cmd.Get_keeper_runtime_trace { keeper; limit = Some 50 })
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
    the slot already holds it fresh. A dive covers the tab, and a Wiki dive

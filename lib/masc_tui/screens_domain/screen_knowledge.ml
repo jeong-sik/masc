@@ -2247,7 +2247,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세 · [D] Diff 상세" ~en:"[a] Recover · [A] Act · [D] Diff Dive"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세 · [D] rev고정" ~en:"[a] Recover · [A] Act · [D] Pin rev"))
          (Say.resolve lang
             (Say.make ~ko:"월드 MVCC 메모리 · 경합 충돌"
                ~en:"World MVCC Memory & Conflicts")))
@@ -2728,7 +2728,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Failed _ ) as obs ->
         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
 
-let draw_temporal_memory_diff ~is_dive ~(model : Model.t) ~grid ~cache
+let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang ~now_unix
     ~(k : Knowledge_store.t) ~focused =
   let scope_str =
@@ -2744,33 +2744,30 @@ let draw_temporal_memory_diff ~is_dive ~(model : Model.t) ~grid ~cache
     | Knowledge_store.Window_revs { from_rev; to_rev } ->
         Printf.sprintf "rev %d->%d" from_rev to_rev
   in
+  let pinned = Knowledge_store.is_memory_diff_pinned k in
   let title, hotkey =
-    if is_dive then
-      ( (match k.memory_diff_keeper with
-         | Some _ ->
-             Say.resolve lang
-               (Say.make ~ko:"키퍼 기억 Diff 상세" ~en:"Keeper Memory Diff Dive")
-         | None ->
-             Say.resolve lang
-               (Say.make ~ko:"월드 기억 Diff 상세" ~en:"World Memory Diff Dive"))
-      , Some
-          (Say.resolve lang
-             (Say.make ~ko:"[↑↓] 스크롤 · [M] 차트 · [Esc] 뒤로"
-                ~en:"[↑↓] Scroll · [M] Chart · [Esc] Back")) )
-    else
     match k.memory_diff_keeper with
     | Some _ ->
         ( Say.resolve lang
             (Say.make ~ko:"키퍼 기억 탐색기" ~en:"Keeper Memory Explorer")
-        , None )
+        , if pinned then
+            Some
+              (Say.resolve lang
+                 (Say.make ~ko:"[w/Esc] 고정 해제 · [M] 차트"
+                    ~en:"[w/Esc] Unpin · [M] Chart"))
+          else None )
     | None ->
         ( Say.resolve lang
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"
                ~en:"Temporal Memory Diff Scrubber")
         , Some
             (Say.resolve lang
-               (Say.make ~ko:"[w] 창 · [m] 범위 · [M] 흐름/총량"
-                  ~en:"[w] Window · [m] Scope · [M] Flow/Net")) )
+               (if pinned then
+                  Say.make ~ko:"[w/Esc] 고정 해제 · [m] 범위 · [M] 흐름/총량"
+                    ~en:"[w/Esc] Unpin · [m] Scope · [M] Flow/Net"
+                else
+                  Say.make ~ko:"[w] 창 · [D] rev고정 · [m] 범위 · [M] 흐름/총량"
+                    ~en:"[w] Window · [D] Pin rev · [m] Scope · [M] Flow/Net")) )
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -2953,12 +2950,12 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let draw_right ~rect ~focused =
     if diagram_open then
-      draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
+      draw_temporal_memory_diff ~model ~grid ~cache ~rect
         ~theme ~bp ~lang ~now_unix ~k ~focused
     else
       match k.memory_subview with
       | Knowledge_store.Mem_diff_flow ->
-          draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
+          draw_temporal_memory_diff ~model ~grid ~cache ~rect
             ~theme ~bp ~lang ~now_unix ~k ~focused
       | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
           draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
@@ -3435,29 +3432,6 @@ let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~scroll:model.nav.dive_scroll_offset ~is_dive:true ~dive_target_id:id
     ~focused:(Model.body_has_focus model) target
 
-let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
-    ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =
-  let k_scoped =
-    {
-      (Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
-         model.knowledge)
-      with
-      memory_subview = Knowledge_store.Mem_diff_flow;
-      memory_view_mode = Knowledge_store.View_diff;
-      diff_scroll_offset = model.nav.dive_scroll_offset;
-    }
-  in
-  let scoped_model =
-    {
-      model with
-      nav = { model.nav with pane_index = 1 };
-      knowledge = k_scoped;
-    }
-  in
-  draw_temporal_memory_diff ~is_dive:true ~model:scoped_model ~grid ~cache ~rect
-    ~theme ~bp ~lang:model.lang ~now_unix:model.freshness.last_wall_unix
-    ~k:k_scoped ~focused:(Model.body_has_focus model)
-
 let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -3477,6 +3451,3 @@ let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
         render_dive_wiki ~slug ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Artifact_dive id ->
         render_dive_artifact ~id ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
-        render_dive_memory ~keeper ~from_rev ~to_rev ~model ~cache ~rect:body
-          ~theme ~bp grid

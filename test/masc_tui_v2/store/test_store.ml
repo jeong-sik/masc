@@ -8486,46 +8486,41 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "embedded Keepers sub-tab cycle closes memory_reading" true
     (Option.is_none m_emb_tab_away.knowledge.memory_reading);
 
-  (* 9. P2 #5: Memory_diff_dive Enter always opens Reading_diff_item even in View_evolution.
-     The dive fetches into the Window_revs slot of its own range; the Memory
-     tab's Window_24h slot is empty here, so Enter must read the dive's slot. *)
+  (* 9. P2 #5: Pinned Window_revs in Knowledge > Memory opens Reading_diff_item on Enter
+     even when originally in View_evolution (pin switches to View_diff and reads the Window_revs slot). *)
   let dive_window = Knowledge_store.Window_revs { from_rev = 1; to_rev = 5 } in
-  let m_diff_dive =
+  let m_diff_pin =
     {
       m_loaded with
       nav =
         {
           m_loaded.nav with
-          dive_stack =
-            [
-              Nav.Dive_knowledge
-                (Nav.Memory_diff_dive
-                   { keeper = Some "alpha"; from_rev = 1; to_rev = 5 });
-            ];
+          workspace = Nav.Knowledge;
+          zoomed = true;
+          pane_index = 0;
         };
       knowledge =
-        {
-          (Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+        m_loaded.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.pin_memory_diff_revs ~keeper:(Some "alpha")
+             ~from_rev:1 ~to_rev:5
+        |> Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
              ~window:dive_window
-             (Observed.value ~observed_at:t0 keeper_diff)
-             m_loaded.knowledge)
-          with
-          memory_view_mode = Knowledge_store.View_evolution;
-        };
+             (Observed.value ~observed_at:t0 keeper_diff);
     }
   in
   let m_dd_enter, _ =
-    Update.step ~now:t0 m_diff_dive
+    Update.step ~now:t0 m_diff_pin
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
   in
-  Alcotest.(check bool) "Memory_diff_dive Enter opens Reading_diff_item regardless of view mode" true
+  Alcotest.(check bool) "Pinned Window_revs Enter opens Reading_diff_item" true
     (match m_dd_enter.knowledge.memory_reading with
     | Some (Knowledge_store.Reading_diff_item { keeper = Some "alpha"; item = Knowledge_store.Keeper_added f }) ->
         String.equal f.memory_id "md-1"
     | _ -> false);
 
-  (* 9b. Memory_diff_dive Down moves the cursor over the dive's own slot, keeps
-     the Memory tab's window and keeper, and Enter then opens the second item. *)
+  (* 9b. Pinned Window_revs Down moves the cursor over the pinned slot, keeps
+     the pinned window and keeper, and Enter then opens the second item. *)
   let keeper_diff_two : Wire_knowledge.memory_diff =
     {
       scope = Wire_knowledge.Scope_keeper "alpha";
@@ -8598,33 +8593,33 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
           };
     }
   in
-  let m_diff_dive_two =
+  let m_diff_pin_two =
     {
-      m_diff_dive with
+      m_diff_pin with
       knowledge =
         Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
           ~window:dive_window
           (Observed.value ~observed_at:t0 keeper_diff_two)
-          m_diff_dive.knowledge;
+          m_diff_pin.knowledge;
     }
   in
   let m_dd_down, _ =
-    Update.step ~now:t0 m_diff_dive_two
+    Update.step ~now:t0 m_diff_pin_two
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Down; mods = Keymap.Input.no_mods })
   in
-  Alcotest.(check int) "Memory_diff_dive Down moves the cursor over the dive's own slot" 1
+  Alcotest.(check int) "Pinned Window_revs Down moves the cursor over the pinned slot" 1
     m_dd_down.knowledge.selected_diff_index;
-  Alcotest.(check bool) "Memory_diff_dive Down keeps the Memory tab's window and keeper" true
+  Alcotest.(check bool) "Pinned Window_revs Down keeps the pinned window and keeper" true
     (Knowledge_store.equal_memory_diff_window
        m_dd_down.knowledge.memory_diff_window
-       m_diff_dive_two.knowledge.memory_diff_window
+       m_diff_pin_two.knowledge.memory_diff_window
     && Option.equal String.equal m_dd_down.knowledge.memory_diff_keeper
-         m_diff_dive_two.knowledge.memory_diff_keeper);
+         m_diff_pin_two.knowledge.memory_diff_keeper);
   let m_dd_down_enter, _ =
     Update.step ~now:t0 m_dd_down
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
   in
-  Alcotest.(check bool) "Memory_diff_dive Enter opens the item under the cursor" true
+  Alcotest.(check bool) "Pinned Window_revs Enter opens the item under the cursor" true
     (match m_dd_down_enter.knowledge.memory_reading with
     | Some (Knowledge_store.Reading_diff_item { keeper = Some "alpha"; item = Knowledge_store.Keeper_added f }) ->
         String.equal f.memory_id "md-2"
@@ -13512,31 +13507,23 @@ let test_ux_batch4_knowledge_runtime_infra () =
   in
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
 
-  (* UX-28: Memory_diff_dive [w] is no-op; Knowledge_memory non-Diff subview guards [e]/[f]/[Enter] *)
-  let m_mdive =
+  (* UX-28: [w] unpins Window_revs back to Window_24h; Knowledge_memory non-Diff subview guards [e]/[f]/[Enter] *)
+  let m_mpin =
     {
       m0 with
-      nav =
-        {
-          m0.nav with
-          workspace = Nav.Knowledge;
-          dive_stack =
-            [
-              Nav.Dive_knowledge
-                (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 5 });
-            ];
-        };
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true; pane_index = 0 };
       knowledge =
         m0.knowledge
         |> Knowledge_store.set_tab Nav.Knowledge_memory
-        |> Knowledge_store.set_memory_diff_window Knowledge_store.Window_24h;
+        |> Knowledge_store.pin_memory_diff_revs ~keeper:None ~from_rev:1
+             ~to_rev:5;
     }
   in
-  let m_mdive_w, _ = step m_mdive (char_key "w") in
-  Alcotest.(check bool) "UX-28 [w] inside Memory_diff_dive does not mutate main window"
+  let m_mpin_w, _ = step m_mpin (char_key "w") in
+  Alcotest.(check bool) "UX-28 [w] unpins Window_revs back to Window_24h"
     true
     (Knowledge_store.equal_memory_diff_window
-       m_mdive_w.knowledge.memory_diff_window Knowledge_store.Window_24h);
+       m_mpin_w.knowledge.memory_diff_window Knowledge_store.Window_24h);
   let m_kmem_health =
     {
       m0 with
@@ -20672,8 +20659,8 @@ let test_layer2_pane_scroll_nav_wayfinding () =
         m_whl.nav.pane_index
   | _ -> Alcotest.fail "expected 2 Tool_dive rects");
 
-  (* #15c: Overlay -> Dive return path restores Incidents and Ask_answer *)
-  let inc_store, inc =
+  (* #15c: Overlay inline zoom in Incidents & Dive return path for Ask_answer *)
+  let inc_store, _ =
     Incidents.push ~occurred_at_unix:1_795_254_000.0
       ~source:Health.Source_client_http
       ~summary:(Say.literal "Timeout") ~detail:"GET /health timed out"
@@ -20687,14 +20674,16 @@ let test_layer2_pane_scroll_nav_wayfinding () =
       incidents = inc_store;
     }
   in
-  let m_inc_dive, _ = step_k m_inc (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "#15c: Enter in Incidents pushes Incident_dive" true
-    (match Model.active_dive m_inc_dive with
-    | Some (Nav.Dive_infra (Nav.Incident_dive id)) -> Int.equal id inc.id
-    | _ -> false);
-  let m_inc_back, _ = step_k m_inc_dive (key Keymap.Input.Escape) in
-  Alcotest.(check bool) "#15c: Esc from Incident_dive restores Incidents overlay"
-    true (Option.equal Nav.equal_overlay m_inc_back.nav.overlay (Some Nav.Incidents));
+  let m_inc_zoom, _ = step_k m_inc (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "#15c: Enter in Incidents expands inline (no dive)" true
+    (m_inc_zoom.incidents.zoomed
+    && Option.is_none (Model.active_dive m_inc_zoom)
+    && Option.equal Nav.equal_overlay m_inc_zoom.nav.overlay (Some Nav.Incidents));
+  let m_inc_back, _ = step_k m_inc_zoom (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "#15c: Esc collapses zoomed incident back to Incidents list"
+    true
+    ((not m_inc_back.incidents.zoomed)
+    && Option.equal Nav.equal_overlay m_inc_back.nav.overlay (Some Nav.Incidents));
 
   let ask = sample_ask ~id:"ask-ret-1" ~keeper:"alpha" () in
   let m_ask_ov =
@@ -20747,7 +20736,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   Alcotest.(check bool) "#15e: Esc in Runtime > Addons exits addon_catalog_mode"
     false m_addon_esc.runtime.addon_catalog_mode;
 
-  (* #16a & #16c: Media_viewer via [M] on Artifacts, Memory_diff_dive via [D] on Memory *)
+  (* #16a & #16c: Media_viewer via [M] on Artifacts, Window_revs pin via [D] on Memory *)
   let art : Wire_knowledge.artifact_entry =
     {
       id = "art-mv-1";
@@ -20829,13 +20818,13 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     { base with nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 }; knowledge = k0 }
   in
   let m_mem_d, _ = step_k m_mem (char_key "D") in
-  Alcotest.(check bool) "#16c: [D] on Knowledge > Memory pushes Memory_diff_dive"
+  Alcotest.(check bool) "#16c: [D] on Knowledge > Memory pins Window_revs and zooms in place"
     true
-    (match Model.active_dive m_mem_d with
-    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { from_rev = 1; to_rev = 4; _ }))
-      ->
-        true
-    | _ -> false);
+    (Option.is_none (Model.active_dive m_mem_d)
+    && m_mem_d.nav.zoomed
+    && Knowledge_store.equal_memory_diff_window
+         m_mem_d.knowledge.memory_diff_window
+         (Knowledge_store.Window_revs { from_rev = 1; to_rev = 4 }));
 
   (* #17: All 9 keeper tabs map 1:1 in Nav.all_menu_items & Model.active_menu_target *)
   Alcotest.(check int) "#17: Nav.all_menu_items has 36 items" 36
@@ -25476,5 +25465,155 @@ let () =
               Alcotest.(check bool)
                 "switch_workspace clears show_raw_json cleanly" false
                 m_sw_raw.infra.show_raw_json);
+          Alcotest.test_case
+            "Layer 3: inline Incidents zoom + Memory Window_revs pin replace Incident_dive and Memory_diff_dive"
+            `Quick
+            (fun () ->
+              let step m msg = Update.step ~now:t0 m msg in
+              let step_k m k = step m (Msg.Key_event k) in
+              let base = Model.initial ~cols:140 ~rows:36 () in
+              (* 1. Incidents overlay: [Space] toggles show_dismissed on list, toggles raw JSON when zoomed; Esc 3-step unwind *)
+              let incs, _ =
+                Incidents.push ~occurred_at_unix:1_795_254_000.0
+                  ~source:Health.Source_client_http
+                  ~summary:(Say.literal "HTTP 502")
+                  ~detail:"{\"error\":\"bad_gateway\"}"
+                  ~status:Health.Resolved Incidents.empty
+              in
+              let m_inc =
+                {
+                  base with
+                  nav = { base.nav with overlay = Some Nav.Incidents };
+                  incidents = incs;
+                }
+              in
+              let m_sp_list, _ = step_k m_inc (char_key " ") in
+              Alcotest.(check bool)
+                "Incidents list [Space] toggles show_dismissed, not show_raw_json"
+                true
+                (m_sp_list.incidents.show_dismissed
+                && not m_sp_list.incidents.show_raw_json);
+              let m_o_zoom, _ = step_k m_inc (char_key "o") in
+              Alcotest.(check bool)
+                "Incidents [o] on Source_client_http zooms inline without dive"
+                true
+                (m_o_zoom.incidents.zoomed
+                && Option.is_none (Model.active_dive m_o_zoom));
+              let m_sp_zoom, _ = step_k m_o_zoom (char_key " ") in
+              Alcotest.(check bool)
+                "Zoomed Incidents [Space] toggles show_raw_json without mutating show_dismissed"
+                true
+                (m_sp_zoom.incidents.show_raw_json
+                && not m_sp_zoom.incidents.show_dismissed);
+              let m_e1, _ = step_k m_sp_zoom (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc #1 clears zoomed Incidents raw JSON" true
+                ((not m_e1.incidents.show_raw_json) && m_e1.incidents.zoomed);
+              let m_e2, _ = step_k m_e1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc #2 collapses zoomed Incidents back to list" true
+                ((not m_e2.incidents.zoomed)
+                && Option.equal Nav.equal_overlay m_e2.nav.overlay
+                     (Some Nav.Incidents));
+              let m_e3, _ = step_k m_e2 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Esc #3 closes Incidents overlay" true
+                (Option.is_none m_e3.nav.overlay);
+              (* 2. Knowledge > Memory: [D] pins Window_revs + zooms; Esc unzooms then restores previous window *)
+              let mdiff : Wire_knowledge.memory_diff =
+                {
+                  scope = Wire_knowledge.Scope_world;
+                  range =
+                    {
+                      window = Some "7d";
+                      from_rev = Some 10;
+                      to_rev = Some 22;
+                      from_unix = None;
+                      to_unix = None;
+                    };
+                  retrieval_heat =
+                    {
+                      hot = 0;
+                      warm = 0;
+                      cold = 0;
+                      never_retrieved = 0;
+                      total_events = 0;
+                      unreadable_event_lines = 0;
+                    };
+                  body =
+                    Wire_knowledge.World_diff
+                      {
+                        counts =
+                          {
+                            total_claims_now = 0;
+                            added = 0;
+                            updated = 0;
+                            retracted = 0;
+                            incomplete_batches = 0;
+                            aborted_batches = 0;
+                          };
+                        history = None;
+                        unparseable_timestamps = 0;
+                        revisions = [];
+                        added = [];
+                        updated = [];
+                        retracted = [];
+                      };
+                }
+              in
+              let k7d =
+                Knowledge_store.empty
+                |> Knowledge_store.set_tab Nav.Knowledge_memory
+                |> Knowledge_store.set_memory_diff_window
+                     Knowledge_store.Window_7d
+                |> Knowledge_store.set_memory_diff ~keeper:None
+                     ~window:Knowledge_store.Window_7d
+                     (Observed.value ~observed_at:t0 mdiff)
+              in
+              let m_mem =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
+                  knowledge = k7d;
+                }
+              in
+              let m_pin, cmds_pin = step_k m_mem (char_key "D") in
+              Alcotest.(check bool)
+                "[D] pins Window_revs {10..22}, zooms in place, and fetches diff"
+                true
+                (Option.is_none (Model.active_dive m_pin)
+                && m_pin.nav.zoomed
+                && Knowledge_store.equal_memory_diff_window
+                     m_pin.knowledge.memory_diff_window
+                     (Knowledge_store.Window_revs { from_rev = 10; to_rev = 22 })
+                && List.exists
+                     (function
+                       | Cmd.Http_get
+                           {
+                             req =
+                               Cmd.Get_memory_diff
+                                 {
+                                   window =
+                                     Knowledge_store.Window_revs
+                                       { from_rev = 10; to_rev = 22 };
+                                   _;
+                                 };
+                             _;
+                           } ->
+                           true
+                       | _ -> false)
+                     (Cmd.flatten cmds_pin));
+              let m_p_esc1, _ = step_k m_pin (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "First Esc unzooms pinned Memory while keeping Window_revs pinned"
+                true
+                ((not m_p_esc1.nav.zoomed)
+                && Knowledge_store.is_memory_diff_pinned m_p_esc1.knowledge);
+              let m_p_esc2, _ = step_k m_p_esc1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool)
+                "Second Esc unpins Window_revs back to prior Window_7d" true
+                (Knowledge_store.equal_memory_diff_window
+                   m_p_esc2.knowledge.memory_diff_window
+                   Knowledge_store.Window_7d));
         ] );
     ]

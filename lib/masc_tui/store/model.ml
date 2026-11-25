@@ -1091,8 +1091,6 @@ let has_active_memory_reading m =
     match active_dive m with
     | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
         Some (Some name)
-    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
-        Some keeper
     | Some
         ( Nav.Dive_keeper
             {
@@ -1108,8 +1106,7 @@ let has_active_memory_reading m =
               _;
             }
         | Nav.Dive_work _
-        | Nav.Dive_knowledge
-            (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+        | Nav.Dive_knowledge _
         | Nav.Dive_runtime _
         | Nav.Dive_infra _ ) ->
         None
@@ -1711,8 +1708,6 @@ let active_focus_label m =
             Say.make ~ko:("실행 · " ^ run_id) ~en:("RUN · " ^ run_id)
         | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
             Say.make ~ko:("추적 · " ^ keeper) ~en:("TRACE · " ^ keeper)
-        | Some (Nav.Dive_infra (Nav.Incident_dive _)) ->
-            Say.make ~ko:"인프라 상세" ~en:"INFRA DIVE"
         | None -> (
             match m.nav.workspace with
             | Nav.Pulse -> (
@@ -3613,9 +3608,7 @@ let is_viewing_wiki_slug ~slug m =
       | Nav.Dive_work _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _
-      | Nav.Dive_knowledge
-          (Nav.Thread_dive _ | Nav.Memory_diff_dive _ | Nav.Artifact_dive _) )
-    ->
+      | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _) ) ->
       false
   | None -> (
       Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -4268,16 +4261,6 @@ let active_view_ssot_mode m =
                     observed_at_opt m.knowledge.active_artifact_detail;
                     observed_at_opt m.knowledge.artifacts;
                   ];
-            }
-      | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
-          Synced_snapshot
-            {
-              observer = m.freshness.observer;
-              observed_at =
-                observed_at_opt
-                  (Knowledge_store.memory_diff_for ~keeper
-                     ~window:(Knowledge_store.Window_revs { from_rev; to_rev })
-                     m.knowledge);
             })
   | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
       Synced_snapshot
@@ -4312,15 +4295,12 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.exact_lane_runs;
               ];
         }
-  | Some (Nav.Dive_infra target) -> (
-      match target with
-      | Nav.Runtime_trace_dive _ ->
-          Synced_snapshot
-            {
-              observer = m.freshness.observer;
-              observed_at = observed_at_opt m.infra.runtime_trace;
-            }
-      | Nav.Incident_dive _ -> Snapshot_only { observed_at = None })
+  | Some (Nav.Dive_infra (Nav.Runtime_trace_dive _)) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at = observed_at_opt m.infra.runtime_trace;
+        }
   | None -> (
       match m.nav.workspace with
       | Nav.Pulse ->
@@ -4599,8 +4579,7 @@ let focused_artifact m =
       | Nav.Dive_work _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _
-      | Nav.Dive_knowledge
-          (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _) )
+      | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
   | None ->
       Knowledge_store.selected_artifact m.knowledge
 

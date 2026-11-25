@@ -880,8 +880,7 @@ let can_launch_pending_wiki_editor (m : Model.t) =
   match Model.active_dive m with
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) -> true
   | Some
-      ( Nav.Dive_knowledge
-          (Nav.Thread_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _)
       | Nav.Dive_keeper _
       | Nav.Dive_work _
       | Nav.Dive_runtime _

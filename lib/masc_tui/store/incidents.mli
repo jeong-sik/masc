@@ -17,6 +17,8 @@ type t = {
   detail_scroll_offset : int;
   filter_query : string;
   show_dismissed : bool;
+  zoomed : bool;
+  show_raw_json : bool;
   unread_count : int;
   clear_confirm_armed : bool;
 }
@@ -49,6 +51,10 @@ val move_selection : ?viewport_rows:int -> delta:int -> t -> t
 val move_detail_scroll : max_scroll:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val toggle_show_dismissed : t -> t
+val toggle_zoom : t -> t
+val set_zoomed : bool -> t -> t
+val toggle_raw_json : t -> t
+val reset_view : t -> t
 
 val count : t -> int
 val active_count : t -> int

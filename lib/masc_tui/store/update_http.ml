@@ -219,8 +219,7 @@ let runtime_trace_matches_active (m : Model.t) keeper =
       ( Nav.Dive_keeper _
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra (Nav.Incident_dive _) )
+      | Nav.Dive_runtime _ )
   | None ->
       true
 
@@ -1213,10 +1212,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
             String.equal pid post_id || String.equal pid tp.id
         | Some
-            ( Nav.Dive_knowledge
-                ( Nav.Wiki_dive _
-                | Nav.Artifact_dive _
-                | Nav.Memory_diff_dive _ )
+            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_runtime _
@@ -1243,10 +1239,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
             String.equal pid meta.post_id
         | Some
-            ( Nav.Dive_knowledge
-                ( Nav.Wiki_dive _
-                | Nav.Artifact_dive _
-                | Nav.Memory_diff_dive _ )
+            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_runtime _
@@ -1270,10 +1263,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
             String.equal pid post_id
         | Some
-            ( Nav.Dive_knowledge
-                ( Nav.Wiki_dive _
-                | Nav.Artifact_dive _
-                | Nav.Memory_diff_dive _ )
+            ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_runtime _
@@ -1502,10 +1492,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ]
         | Some
             ( Nav.Dive_knowledge
-                ( Nav.Thread_dive _
-                | Nav.Wiki_dive _
-                | Nav.Artifact_dive _
-                | Nav.Memory_diff_dive _ )
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_keeper _
             | Nav.Dive_work _
             | Nav.Dive_runtime _
@@ -1858,10 +1845,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.Dive_work _
               | Nav.Dive_runtime _
               | Nav.Dive_infra _
-              | Nav.Dive_knowledge
-                  ( Nav.Thread_dive _
-                  | Nav.Wiki_dive _
-                  | Nav.Memory_diff_dive _ ) ) ->
+              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) ) ->
               None
           | None ->
               if
@@ -1926,10 +1910,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_work _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _
-            | Nav.Dive_knowledge
-                ( Nav.Thread_dive _
-                | Nav.Wiki_dive _
-                | Nav.Memory_diff_dive _ ) )
+            | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
         | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
             | Some sel ->
@@ -1964,10 +1945,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_work _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _
-            | Nav.Dive_knowledge
-                ( Nav.Thread_dive _
-                | Nav.Wiki_dive _
-                | Nav.Memory_diff_dive _ ) )
+            | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
         | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
             | Some sel ->

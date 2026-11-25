@@ -1,7 +1,7 @@
 (** [[6] Infra] workspace renderer (3 sub-tabs: microVM & SSH Sandboxes, Repos
-    & Read-Only Syntax-Highlighted Diffs, Unified Activity & Logs) plus
-    [Dive_infra] deep views (Sandbox, Runtime Lane, and Historical Incident
-    dives with opt-in [[J]] collapsible {!Masc_tui_ui.Json_tree}).
+    & Read-Only Syntax-Highlighted Diffs, Unified Activity & Logs — with
+    in-place [[z]] detail zoom and opt-in [[Space]] collapsible
+    {!Masc_tui_ui.Json_tree}) plus the [Runtime_trace_dive] deep view.
 
     Pure projection onto {!Masc_tui_term.Cell_grid.t}: zero Eio/network
     imports, zero global mutable state, zero raw JSON dumps. *)

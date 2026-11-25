@@ -114,36 +114,6 @@ let guard_settings_dirty_leave ~now (m : Model.t) act =
     , [] )
   else (next, commands)
 
-let max_embedded_json_bytes = 262_144
-let max_embedded_json_attempts = 8
-let extract_embedded_json_opt s =
-  let trimmed = String.trim s in
-  let len = String.length trimmed in
-  if len < 2 || len > max_embedded_json_bytes then None
-  else
-    let rec try_from attempts i =
-      if i >= len || attempts >= max_embedded_json_attempts then None
-      else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
-        let rest = String.sub trimmed i (len - i) in
-        match Yojson.Safe.from_string rest with
-        | (`Assoc _ | `List _) as json ->
-            let raw_prefix =
-              if i = 0 then "" else String.trim (String.sub trimmed 0 i)
-            in
-            let plen = String.length raw_prefix in
-            let prefix =
-              if plen > 0 && Char.equal raw_prefix.[plen - 1] ':' then
-                String.trim (String.sub raw_prefix 0 (plen - 1))
-              else raw_prefix
-            in
-            Some (prefix, json)
-        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
-            try_from (attempts + 1) (i + 1)
-        | exception Yojson.Json_error _ -> try_from (attempts + 1) (i + 1)
-      else try_from attempts (i + 1)
-    in
-    try_from 0 0
-
 let patch_response_diff_row_count (resp : Wire_config.patch_response) =
   if resp.diff_hunks <> [] then
     List.fold_left
@@ -717,64 +687,12 @@ let dispatch_ask_answer_overlay_key ~now (m : Model.t)
           | Keymap.Input.Function _ ->
               None))
 
-let incidents_detail_max_scroll (m : Model.t) =
-  match Incidents.selected_entry m.incidents with
-  | None -> 0
-  | Some inc ->
-      let overlay_w = max 0 m.viewport.cols in
-      let overlay_h = max 0 (m.viewport.rows - 2) in
-      let drawer_w =
-        if overlay_w >= 110 then min 94 (overlay_w * 2 / 3)
-        else max 0 (overlay_w - 2)
-      in
-      let drawer_h = max 0 (overlay_h - 2) in
-      let inner_w = if drawer_w >= 2 && drawer_h >= 2 then drawer_w - 2 else 0 in
-      let inner_h = if drawer_w >= 2 && drawer_h >= 2 then drawer_h - 2 else 0 in
-      let content_r =
-        Rect.make ~x:0 ~y:0 ~w:inner_w ~h:(max 0 (inner_h - 1))
-      in
-      if content_r.h < 10 then 0
-      else
-        let detail_r =
-          match
-            Masc_tui_ui.Layout.split_v ~gap:1 content_r
-              [ Masc_tui_ui.Layout.Ratio 0.45; Masc_tui_ui.Layout.Flex 1 ]
-          with
-          | [ _; d ] -> d
-          | _ -> Rect.empty
-        in
-        let pad_x = if inner_w >= 56 then 2 else 1 in
-        let d_pad = Masc_tui_ui.Card.pad_inner ~pad_x detail_r in
-        let payload_w = max 0 d_pad.w in
-        let payload_h = max 0 (d_pad.h - 1) in
-        if payload_w <= 0 || payload_h <= 0 then 0
-        else
-          match extract_embedded_json_opt inc.detail with
-          | Some (prefix, json) ->
-              let tree_h =
-                if (not (String.equal prefix "")) && payload_h >= 2 then
-                  payload_h - 1
-                else payload_h
-              in
-              let lines =
-                Masc_tui_ui.Json_tree.flatten ~max_depth:4 ~redact_secrets:true
-                  json
-              in
-              max 0 (List.length lines - tree_h)
-          | None ->
-              let theme = Theme.of_preset m.theme_preset in
-              let lines =
-                Masc_tui_ui.Markdown.render_lines ~theme ~width:payload_w
-                  inc.detail
-              in
-              max 0 (List.length lines - payload_h)
-
 let dispatch_incidents_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
   match norm.key with
   | Keymap.Input.Char "J" when is_printable_key norm ->
-      let max_scroll = incidents_detail_max_scroll m in
+      let max_scroll = Update_nav.incidents_detail_max_scroll m in
       Some
         ( {
             m with
@@ -783,7 +701,7 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
           }
         , [] )
   | Keymap.Input.Char "K" when is_printable_key norm ->
-      let max_scroll = incidents_detail_max_scroll m in
+      let max_scroll = Update_nav.incidents_detail_max_scroll m in
       Some
         ( {
             m with
@@ -791,6 +709,11 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
               Incidents.move_detail_scroll ~max_scroll ~delta:(-1) m.incidents;
           }
         , [] )
+  | Keymap.Input.Char "z" when is_printable_key norm -> (
+      match Incidents.selected_entry m.incidents with
+      | Some _ ->
+          Some ({ m with incidents = Incidents.toggle_zoom m.incidents }, [])
+      | None -> Some (m, []))
   | Keymap.Input.Char "j" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
   | Keymap.Input.Char "k" when is_printable_key norm ->
@@ -803,7 +726,8 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
       Some (Update_actions.execute_action ~now m Keymap.Toggle_expand)
   | Keymap.Input.Char "d" when is_printable_key norm ->
       Some ({ m with incidents = Incidents.dismiss_selected m.incidents }, [])
-  | Keymap.Input.Char ("c" | "D") when is_printable_key norm ->
+  | Keymap.Input.Char ("c" | "D")
+    when is_printable_key norm && not m.incidents.zoomed ->
       if m.incidents.clear_confirm_armed then
         Some
           ( Model.with_toast ~now ~level:Model.Toast_info
@@ -866,10 +790,11 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
                 (Update_nav.jump_to_workspace ~pane_index:1 ~zoomed:false
                    ~return_from:m { m with runtime } Nav.Runtime)
           | Health.Source_client_http | Health.Source_stream ->
-              Some
-                (Update_nav.push_dive m
-                   (Nav.Dive_infra (Nav.Incident_dive inc.id)))))
-  | Keymap.Input.Char "/" when is_printable_key norm ->
+              if m.incidents.zoomed then Some (m, [])
+              else
+                Some
+                  ({ m with incidents = Incidents.set_zoomed true m.incidents }, [])))
+  | Keymap.Input.Char "/" when is_printable_key norm && not m.incidents.zoomed ->
       Some (Update_actions.execute_action ~now m Keymap.Focus_filter)
   | Keymap.Input.Char _
   | Keymap.Input.Enter
@@ -1782,9 +1707,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           | None -> (m, []))
       | _ -> (m, []))
   | Some
-      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
+      ( Nav.Dive_knowledge (Nav.Thread_dive _)
       | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-      | Nav.Dive_infra (Nav.Incident_dive _ | Nav.Runtime_trace_dive _) ) ->
+      | Nav.Dive_infra (Nav.Runtime_trace_dive _) ) ->
       (m, [])
   | None -> (
       (* 2. Workspace-level contextual hotkeys *)
@@ -3605,7 +3530,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                              && Knowledge_store.equal_keeper_memory_subview
                                   m.knowledge.keeper_memory_subview
                                   Knowledge_store.Kmem_diff_flow ->
-                          Some (Update_nav.open_memory_diff_dive m)
+                          Some (Update_nav.pin_memory_diff_range m)
                       | None, Keymap.Input.Char "D"
                         when is_printable_key norm
                              && ((Nav.equal_workspace m.nav.workspace
@@ -3625,7 +3550,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                     && Knowledge_store.equal_keeper_memory_subview
                                          m.knowledge.keeper_memory_subview
                                          Knowledge_store.Kmem_diff_flow)) ->
-                          Some (Update_nav.open_memory_diff_dive m)
+                          Some (Update_nav.pin_memory_diff_range m)
                       | ( ( Some
                               ( Nav.Dive_keeper
                                   {
@@ -3648,8 +3573,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                               | Nav.Dive_knowledge
                                   ( Nav.Thread_dive _
                                   | Nav.Wiki_dive _
-                                  | Nav.Artifact_dive _
-                                  | Nav.Memory_diff_dive _ )
+                                  | Nav.Artifact_dive _ )
                               | Nav.Dive_runtime _
                               | Nav.Dive_infra _ )
                           | None )
@@ -3725,9 +3649,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        true
                                    | Some
                                        ( Nav.Dive_knowledge
-                                           ( Nav.Thread_dive _
-                                           | Nav.Wiki_dive _
-                                           | Nav.Memory_diff_dive _ )
+                                           (Nav.Thread_dive _ | Nav.Wiki_dive _)
                                        | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
@@ -3754,9 +3676,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        true
                                    | Some
                                        ( Nav.Dive_knowledge
-                                           ( Nav.Thread_dive _
-                                           | Nav.Wiki_dive _
-                                           | Nav.Memory_diff_dive _ )
+                                           (Nav.Thread_dive _ | Nav.Wiki_dive _)
                                        | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _
@@ -3788,9 +3708,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                              _;
                                            }
                                        | Nav.Dive_knowledge
-                                           ( Nav.Wiki_dive _
-                                           | Nav.Artifact_dive _
-                                           | Nav.Memory_diff_dive _ )
+                                           (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _ ) ->
                                        false
@@ -3848,9 +3766,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        true
                                    | Some
                                        ( Nav.Dive_knowledge
-                                           ( Nav.Wiki_dive _
-                                           | Nav.Artifact_dive _
-                                           | Nav.Memory_diff_dive _ )
+                                           (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                                        | Nav.Dive_keeper _
                                        | Nav.Dive_work _
                                        | Nav.Dive_runtime _

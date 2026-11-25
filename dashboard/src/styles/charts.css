@@ -124,21 +124,49 @@
   pointer-events: none;
 }
 
+/* uPlot builds the legend as a table: a tbody of rows, each a th (marker and
+   label) and a td (value). The rows wrap as the tbody's flex items. */
 .u-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
+  display: block;
   margin-top: var(--sp-2);
   font-size: var(--fs-11);
   font-variant-numeric: tabular-nums slashed-zero;
   color: var(--fg-3);
 }
 
+.u-legend > tbody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+
+/* A value sits a space after its label, and closer to it than to the next series. */
 .u-legend .u-series {
   display: inline-flex;
   align-items: center;
+  gap: var(--sp-2);
+}
+
+.u-legend .u-series > * {
+  padding: 0;
+}
+
+.u-legend .u-series > th {
+  display: inline-flex;
+  align-items: center;
   gap: var(--sp-1);
+  font-weight: inherit;
+}
+
+/* A click on a series' marker or label hides it. The time's takes none, nor
+   does a value. */
+.u-legend .u-series:not(:first-child) > th {
   cursor: pointer;
+}
+
+/* The time has no line to mark. */
+.u-legend .u-series:first-child .u-marker {
+  display: none;
 }
 
 .u-legend .u-off {

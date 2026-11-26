@@ -184,6 +184,9 @@ val deterministic_fold
     never grow unbounded across compaction epochs. *)
 val default_anchor_max_bytes : int
 
+val compaction_bytes_per_token : int
+val compaction_bytes_of_tokens : int -> int
+
 (** Structural byte ceiling for a pinned compaction anchor derived strictly from
     the explicit provider window ([capacity_bytes - reserved_bytes]), preventing
     monotonic anchor growth from crowding out the live retained tail. *)

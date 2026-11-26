@@ -1,17 +1,4 @@
-type completion_request_measurement =
-  { input_count : Input_token_count.count
-  ; output_token_receipt : Types.output_token_receipt
-  }
-
-type completion_request_error =
-  | Input_count_failed of Input_token_count.error
-  | Output_token_resolution_failed of Types.required_output_token_error
-  | Invalid_completion_request of string
-
-type measurement_transport_stage =
-  | Measurement_before_dispatch
-  | Measurement_dispatch_started
-  | Measurement_response_received of int
+include Measurement_types
 
 type 'callback_error completion_request_dispatch_error =
   | Completion_request_failed of completion_request_error * measurement_transport_stage
@@ -48,12 +35,7 @@ type exact_completion_artifact =
    Gemini through its own endpoint; that does not make a Gemini request an
    Anthropic artifact. *)
 let supports_completion_request_measurement (config : Provider_config.t) =
-  match config.kind with
-  | Provider_config.Anthropic | Provider_config.Kimi -> true
-  | Provider_config.OpenAI_compat
-  | Provider_config.Ollama
-  | Provider_config.Gemini
-  | Provider_config.Glm -> false
+  Measurement_types.supports_exact_artifact_measurement config
 ;;
 
 let transport_error_stage = function

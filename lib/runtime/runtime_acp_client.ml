@@ -428,8 +428,8 @@ let resolve_mode_for_posture ~driver ~(posture : Runtime_native_tools.posture) ~
 (* ── Named protocol constants ─────────────────────────────────────────────── *)
 
 let protocol_version = 1
-let default_timeout_s = 180.0
-let init_timeout_s = 30.0
+let default_timeout_s = Runtime_timeout_budget.acp_default_turn_timeout_s
+let default_admission_timeout_s = Runtime_timeout_budget.acp_default_admission_timeout_s
 let cancel_write_timeout_s = 1.0
 let default_reap_grace_seconds = 5.0
 let max_ndjson_line_bytes = 16 * 1024 * 1024
@@ -490,7 +490,7 @@ let default_config ~driver ~cwd =
   ; cwd
   ; oauth_source = None
   ; dangerously_skip_permissions = false
-  ; admission_timeout_s = init_timeout_s
+  ; admission_timeout_s = default_admission_timeout_s
   }
 ;;
 
@@ -2375,6 +2375,7 @@ type usage_journal =
 
 type t =
   { driver : driver
+  ; admission_timeout_s : float
   ; mutable capabilities : agent_capabilities
   ; mutable init_latency_ms : int
   ; managed_schema_root : (string * string) option
@@ -3313,6 +3314,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                 in
                 let t =
                   { driver = config.driver
+                  ; admission_timeout_s = config.admission_timeout_s
                   ; capabilities =
                       { load_session = false
                       ; resume_session = false
@@ -3461,7 +3463,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
           t
           ~method_name:"initialize"
           ~params:init_params
-          ~timeout_s:(Some config.admission_timeout_s)
+          ~timeout_s:(Some t.admission_timeout_s)
           ~decoder:init_decoder
       with
       | Eio.Cancel.Cancelled _ as exn ->
@@ -3489,7 +3491,7 @@ let set_mode t ~session_id ~mode_id =
     t
     ~method_name:"session/set_mode"
     ~params
-    ~timeout_s:(Some init_timeout_s)
+    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun _ -> Ok ()) }
 ;;
 
@@ -3499,7 +3501,7 @@ let set_model t ~session_id ~model_id =
     t
     ~method_name:"session/set_model"
     ~params
-    ~timeout_s:(Some init_timeout_s)
+    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun _ -> Ok ()) }
 ;;
 
@@ -3515,11 +3517,12 @@ let set_config_option t ~session_id ~config_id ~value =
     t
     ~method_name:"session/set_config_option"
     ~params
-    ~timeout_s:(Some init_timeout_s)
+    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun json -> Ok (parse_config_options json)) }
 ;;
 
-let close_session ?(timeout_s = init_timeout_s) t ~session_id =
+let close_session ?timeout_s t ~session_id =
+  let timeout_s = Option.value timeout_s ~default:t.admission_timeout_s in
   let params = `Assoc [ "sessionId", `String session_id ] in
   rpc_call_decoded
     t
@@ -3931,7 +3934,7 @@ let new_session
       t
       ~method_name:"session/new"
       ~params
-      ~timeout_s:(Some init_timeout_s)
+      ~timeout_s:(Some t.admission_timeout_s)
       ~decoder:{ decode = parse_session_info }
   in
   let merged = merge_with_cached_session_catalog t info in
@@ -4011,12 +4014,12 @@ let attach_existing_session
           await_promise_with_idle_timeout
             ~clock:t.clock
             ~stage:method_name
-            ~idle_timeout_s:init_timeout_s
+            ~idle_timeout_s:t.admission_timeout_s
             ~last_activity_ns:t.last_activity_ns
             ~in_flight_work:t.in_flight_external_work
             promise)
       else
-        rpc_call_decoded t ~method_name ~params ~timeout_s:(Some init_timeout_s) ~decoder)
+        rpc_call_decoded t ~method_name ~params ~timeout_s:(Some t.admission_timeout_s) ~decoder)
   in
   let with_replay =
     { raw_info with

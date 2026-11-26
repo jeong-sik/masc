@@ -31,7 +31,8 @@ type config =
   ; output_schema : Yojson.Safe.t option
   }
 
-let default_timeout_s = 300.0
+let default_timeout_s = Runtime_timeout_budget.antigravity_default_turn_timeout_s
+let default_admission_timeout_s = Runtime_timeout_budget.antigravity_default_admission_timeout_s
 
 (* How long a CLI that already delivered its result event may take to
    exit before we reap it. A healthy CLI exits well under a second after
@@ -126,7 +127,7 @@ let default_config ~cwd ~model =
   ; execution_mode = Plan
   ; sandbox = false
   ; disable_slash_commands = true
-  ; admission_timeout_s = default_timeout_s
+  ; admission_timeout_s = default_admission_timeout_s
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
   }

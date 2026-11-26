@@ -238,7 +238,7 @@ val resolve_mode_for_posture
 
 val protocol_version : int
 val default_timeout_s : float
-val init_timeout_s : float
+val default_admission_timeout_s : float
 
 (** {1 Configuration & wire types} *)
 
@@ -697,7 +697,7 @@ val reconfigure_session
 
 val close_session : ?timeout_s:float -> t -> session_id:string -> (unit, error) result
 (** Invoke ACP [session/close] to release server-side state for [session_id].
-    Defaults to {!init_timeout_s}; pass a smaller [timeout_s] on ephemeral
+    Defaults to the transport's admission timeout; pass a smaller [timeout_s] on ephemeral
     one-shot clients so teardown never blocks for 30s. *)
 
 val set_mode : t -> session_id:string -> mode_id:string -> (unit, error) result

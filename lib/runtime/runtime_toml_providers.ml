@@ -412,7 +412,7 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
         |> positive_finite_float_opt_field ~path ~key:"timeout-s"
       with
       | Error _ as err -> err
-      | Ok None -> Ok Runtime_acp_client.default_timeout_s
+      | Ok None -> Ok Runtime_timeout_budget.acp_default_turn_timeout_s
       | Ok (Some timeout_s) -> Ok timeout_s
     in
     let admission_timeout_result =
@@ -423,7 +423,7 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
              ~key:Runtime_schema.admission_timeout_s_key
       with
       | Error _ as err -> err
-      | Ok None -> Ok Runtime_acp_client.init_timeout_s
+      | Ok None -> Ok Runtime_timeout_budget.acp_default_admission_timeout_s
       | Ok (Some admission_timeout_s) -> Ok admission_timeout_s
     in
     (match

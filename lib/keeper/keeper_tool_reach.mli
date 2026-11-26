@@ -9,7 +9,7 @@ type t =
       (** The Keeper sandbox's files, or a process or container on the host.
           Whether that process opens a network connection is not known. *)
   | Network  (** An outbound request to the internet or a third-party service. *)
-  | Model_provider  (** A call to a model: a fusion panel, vision, a local model runtime. *)
+  | Model_provider  (** A call to a model: a fusion panel or a vision model. *)
 
 val to_wire : t -> string
 (** ["masc_state" | "sandbox" | "network" | "model_provider"]. *)

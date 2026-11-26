@@ -407,9 +407,8 @@ let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
   (* Upload, delete and list go to the provider's Files API
      (Llm_provider.Provider_files): storage, not a model call. *)
   | Tool_masc_file_dispatch -> Some Keeper_tool_reach.Network
-  (* A fusion panel, a vision model, a local model runtime. *)
-  | Tool_masc_fusion_dispatch | Tool_analyze_image | Tool_masc_local_runtime_dispatch ->
-      Some Keeper_tool_reach.Model_provider
+  (* A fusion panel and a vision model. *)
+  | Tool_masc_fusion_dispatch | Tool_analyze_image -> Some Keeper_tool_reach.Model_provider
   (* The target is in the input: a surface is the local chat store, or
      Discord, Slack or a webhook. *)
   | Tool_surface_read | Tool_surface_post -> None
@@ -418,9 +417,10 @@ let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
      start runs a container, job result reads the store; keeper sandbox
      start/stop drives containers, the other keeper tools stay in MASC; misc
      garbage-collects host volumes, lane act runs in an add-on, the rest stays
-     in MASC. *)
+     in MASC; local runtime verify and probe check a runtime that may be on
+     this host, while decide runs a model on it. *)
   | Tool_voice_dispatch | Tool_keeper_job_dispatch | Tool_masc_keeper_dispatch
-  | Tool_masc_misc_dispatch ->
+  | Tool_masc_misc_dispatch | Tool_masc_local_runtime_dispatch ->
       None
 ;;
 

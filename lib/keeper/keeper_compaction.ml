@@ -1069,10 +1069,11 @@ let latest_anchor_in_tx db =
   Ok (Option.map fst latest)
 ;;
 
-(* The coverage of the latest epoch committed over the same kind of list.
-   Names are counted inside one list, so coverage written over the other kind
-   would claim atoms this list holds differently or never held. *)
-let latest_coverage_in_frame_in_tx db ~frame =
+(* The coverage of the latest epoch committed over [frame]. Names are counted
+   inside one list, so a producer carries on only its own kind: coverage
+   written over the other kind would claim atoms its list holds differently
+   or never held. *)
+let latest_coverage_in_frame db ~frame =
   let operation = "latest_coverage_in_frame" in
   with_stmt
     db
@@ -1097,6 +1098,16 @@ let latest_coverage_in_frame_in_tx db ~frame =
        else if rc = Sqlite3.Rc.DONE
        then Ok None
        else Error (sqlite_err db operation rc))
+;;
+
+let latest_coverages db =
+  let* message_history =
+    latest_coverage_in_frame db ~frame:Keeper_compaction_atom.Message_history
+  in
+  let* canonical_turns =
+    latest_coverage_in_frame db ~frame:Keeper_compaction_atom.Canonical_turns
+  in
+  Ok { Keeper_compaction_atom.message_history; canonical_turns }
 ;;
 
 let compact_evicted_messages
@@ -1131,10 +1142,10 @@ let compact_evicted_messages
           (* The latest epoch of either kind carries the summary on; only an
              epoch over this kind of list says which atoms are archived. *)
           let* previous = latest_anchor_in_tx db in
-          let* previous_coverage = latest_coverage_in_frame_in_tx db ~frame in
+          let* latest = latest_coverages db in
           let* step =
             Keeper_compaction_atom.advance
-              ~previous:previous_coverage
+              ~previous:(Keeper_compaction_atom.latest_over frame latest)
               atoms
               eviction
             |> Result.map_error (fun detail -> Invalid_eviction detail)
@@ -1144,21 +1155,41 @@ let compact_evicted_messages
             let* () = exec_sql db "commit_noop_tx" "COMMIT;" in
             Ok None
           | Some { coverage; fresh } ->
+            (* An atom at or before the front either kind has reached is
+               archived for this kind but stays out of the summary: the
+               summary already passed its turn, and folding it again would
+               put an older turn after newer ones. *)
+            let summarized_end =
+              Keeper_compaction_atom.furthest_covered_end ~frame latest atoms
+            in
             let archived =
               List.map
                 (fun index ->
                    let (atom : Keeper_compaction_atom.atom) = atoms.(index) in
-                   { name = atom.name
-                   ; messages = List.map (redact_message effective_redact) atom.messages
-                   })
+                   ( index
+                   , { name = atom.name
+                     ; messages = List.map (redact_message effective_redact) atom.messages
+                     } ))
                 fresh
             in
+            let unsummarized =
+              List.filter_map
+                (fun (index, atom) -> if index > summarized_end then Some atom else None)
+                archived
+            in
             let anchor =
-              fold_anchor ~previous ~coverage ~fresh:archived
+              fold_anchor ~previous ~coverage ~fresh:unsummarized
               |> redact_anchor effective_redact
               |> bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes:budget
             in
-            let* () = insert_epoch_and_atoms_in_tx db ~frame ~trigger ~anchor ~archived in
+            let* () =
+              insert_epoch_and_atoms_in_tx
+                db
+                ~frame
+                ~trigger
+                ~anchor
+                ~archived:(List.map snd archived)
+            in
             let* () = exec_sql db "commit_tx" "COMMIT;" in
             Ok (Some anchor)
         in
@@ -1179,9 +1210,9 @@ let compact_evicted_messages
        Ok (Some anchor))
 ;;
 
-let messages_after_anchor ~(anchor : compaction_anchor) messages =
+let messages_after_front ~latest messages =
   (* Cut past the later of the last inline compaction anchor message and the
-     last atom the persisted anchor covers, so a stale inline anchor from an
+     furthest front the latest epochs cover, so a stale inline anchor from an
      earlier epoch never hides a newer persisted boundary. *)
   let _, inline_pos =
     List.fold_left
@@ -1192,7 +1223,12 @@ let messages_after_anchor ~(anchor : compaction_anchor) messages =
       messages
   in
   let atoms = Keeper_compaction_atom.atoms_of_messages messages in
-  let covered = Keeper_compaction_atom.covered_end anchor.coverage.through atoms in
+  let covered =
+    Keeper_compaction_atom.furthest_covered_end
+      ~frame:Keeper_compaction_atom.Message_history
+      latest
+      atoms
+  in
   let covered_pos = if covered < 0 then -1 else atoms.(covered).last_position in
   let cut_pos = Int.max inline_pos covered_pos in
   if cut_pos < 0
@@ -1201,8 +1237,19 @@ let messages_after_anchor ~(anchor : compaction_anchor) messages =
 ;;
 
 let live_history_after_latest_anchor ~keepers_dir ~keeper_id messages =
-  match latest_anchor ~keepers_dir ~keeper_id with
-  | Ok (Some anchor) -> Ok (messages_after_anchor ~anchor messages)
-  | Ok None -> Ok messages
-  | Error err -> Error err
+  (* The two reads run outside a transaction, so they may straddle a commit.
+     Each still returns the boundary of a committed epoch, so the furthest of
+     the two is a front some epoch covered. *)
+  let* latest =
+    with_db ~create:false ~keepers_dir ~keeper_id (fun db ->
+      let* latest = latest_coverages db in
+      Ok (Some latest))
+  in
+  match latest with
+  | None | Some { Keeper_compaction_atom.message_history = None; canonical_turns = None } ->
+    Ok messages
+  | Some ({ Keeper_compaction_atom.message_history = Some _; canonical_turns = _ } as latest)
+  | Some ({ Keeper_compaction_atom.message_history = None; canonical_turns = Some _ } as latest)
+    ->
+    Ok (messages_after_front ~latest messages)
 ;;

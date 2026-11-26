@@ -289,6 +289,45 @@ let covered_end through atoms =
           scan first first))
 ;;
 
+type latest =
+  { message_history : coverage option
+  ; canonical_turns : coverage option
+  }
+
+let latest_over frame { message_history; canonical_turns } =
+  match frame with
+  | Message_history -> message_history
+  | Canonical_turns -> canonical_turns
+;;
+
+(* A turn's prompt is its ordinal 0 in both kinds of list. Past it, the
+   canonical list holds only the final answer, while the message history may
+   hold tool rounds before it. *)
+let through_read_in ~written_over ~read_in through =
+  match written_over, read_in with
+  | Message_history, Message_history | Canonical_turns, Canonical_turns -> through
+  | Canonical_turns, Message_history ->
+    (* A rollover keeps at least two atoms of at most two per turn, so its
+       boundary is a whole turn or a turn's prompt. Any other ordinal would
+       land no later in the history than it meant. *)
+    through
+  | Message_history, Canonical_turns ->
+    (match through with
+     | Through_turn { turn; extent = Up_to { ordinal = _; settled } } ->
+       Through_turn { turn; extent = Up_to { ordinal = 0; settled } }
+     | Through_turn { turn = _; extent = Whole_turn } | Through_leading _ -> through)
+;;
+
+let furthest_covered_end ~frame latest atoms =
+  let read_over written_over =
+    let through =
+      Option.bind (latest_over written_over latest) (fun coverage -> coverage.through)
+    in
+    covered_end (Option.map (through_read_in ~written_over ~read_in:frame) through) atoms
+  in
+  Int.max (read_over Message_history) (read_over Canonical_turns)
+;;
+
 (* The boundary a producer writes when its evicted prefix ends at [index].
 
    A turn settles when none of its atoms lies past [index] and every turn that

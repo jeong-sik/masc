@@ -10,10 +10,11 @@
       covers as a {!Keeper_compaction_atom.coverage}, named by Keeper turn and
       atom ordinal, and each epoch records the kind of list it was written over
       ({!Keeper_compaction_atom.frame}). A producer reads the coverage of the
-      latest epoch over its own kind of list; the per-turn consumer reads the
-      latest epoch of either kind. Both find the boundary in their own message
-      lists by reading message metadata; nothing is serialized or hashed to
-      compare.
+      latest epoch over its own kind of list to decide what to archive; the
+      summary and the per-turn consumer read the furthest of the two kinds'
+      latest boundaries ({!Keeper_compaction_atom.furthest_covered_end}).
+      Each finds a boundary in its own message list by reading message
+      metadata; nothing is serialized or hashed to compare.
     - {b Structural triggers only}: compaction triggers strictly from an
       explicit provider hard-context limit or typed [ContextOverflow]
       ({!compaction_trigger}). Cumulative turn, time, token, or cost gates are
@@ -182,7 +183,12 @@ val prefix_eviction_of_window
     atoms it covers, or archived past its boundary, are skipped. An epoch over
     the other kind counts its names in a different list, so it skips nothing
     here. When no evicted atom is new the call commits nothing and returns
-    [Ok None]. The summary folds onto the latest epoch of either kind.
+    [Ok None].
+
+    The summary folds onto the latest epoch of either kind, and only the new
+    atoms past the furthest front either kind has reached join it. A new atom
+    at or before that front is archived but left out of the summary, so the
+    summary never steps back to an older turn.
 
     The new atoms are secret-redacted and archived verbatim. The committed
     anchor is always bounded via {!bound_anchor_to_budget} (falling back to
@@ -201,20 +207,21 @@ val compact_evicted_messages
   -> unit
   -> (compaction_anchor option, store_error) result
 
-(** The part of [messages] after both the front [anchor] covers
-    ({!Keeper_compaction_atom.covered_end}) and the last inline compaction
-    anchor message. Returns [messages] unchanged when neither is in it.
-    Reads message metadata once; nothing is serialized or hashed. *)
-val messages_after_anchor
-  :  anchor:compaction_anchor
+(** The part of [messages], a message history, after both the furthest front
+    [latest] covers ({!Keeper_compaction_atom.furthest_covered_end}) and the
+    last inline compaction anchor message. Returns [messages] unchanged when
+    neither is in it. Reads message metadata once; nothing is serialized or
+    hashed. *)
+val messages_after_front
+  :  latest:Keeper_compaction_atom.latest
   -> Agent_core.Types.message list
   -> Agent_core.Types.message list
 
-(** {!messages_after_anchor} under the latest epoch of either kind, or
-    [messages] unchanged when no epoch is committed. The cut decides only
-    which tools the next turn carries, so an epoch over the canonical turn
-    list may cut the message history too. [Error] when the store cannot be
-    read, for example {!Schema_not_current}. *)
+(** {!messages_after_front} under the two kinds' latest epochs, or [messages]
+    unchanged when no epoch is committed. The cut decides only which tools
+    the next turn carries, so an epoch over the canonical turn list may cut
+    the message history too. [Error] when the store cannot be read, for
+    example {!Schema_not_current}. *)
 val live_history_after_latest_anchor
   :  keepers_dir:string
   -> keeper_id:string

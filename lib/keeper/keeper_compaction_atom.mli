@@ -9,10 +9,11 @@
     Each compaction producer names the atoms of its own list: the Agent Core
     history, an official client's start seed, the ACP list rebuilt from the
     canonical turn store. A producer carries on only coverage written over the
-    same kind of list ({!frame}). The per-turn consumer names the checkpoint
-    history the same way and looks up the latest boundary of either kind by
-    equality, so finding it reads metadata only; nothing is serialized or
-    hashed. See RFC compaction-anchor-names-a-turn-atom. *)
+    same kind of list ({!frame}). The summary and the per-turn consumer read
+    the furthest of the two kinds' latest boundaries
+    ({!furthest_covered_end}). Finding a boundary compares names, so it reads
+    metadata only; nothing is serialized or hashed. See RFC
+    compaction-anchor-names-a-turn-atom. *)
 
 type name =
   | Leading of int
@@ -113,6 +114,26 @@ val covered_end : through option -> atom array -> int
     A boundary that is missing from the list covers nothing rather than a
     guessed span, so a list that does not hold the boundary is never cut
     past what the anchor summarized. *)
+
+(** The coverage of the latest epoch written over each kind of list. *)
+type latest =
+  { message_history : coverage option
+  ; canonical_turns : coverage option
+  }
+
+val latest_over : frame -> latest -> coverage option
+
+val furthest_covered_end : frame:frame -> latest -> atom array -> int
+(** Index of the last atom of [atoms], a list of kind [frame], that the
+    furthest of [latest]'s two boundaries surely covers, or [-1] when neither
+    covers any. The summary fold and the per-turn consumer read the front this
+    way. Which atoms are archived still comes from each kind's own coverage.
+
+    A boundary written over the other kind of list is read by its turn. A
+    canonical turn list boundary is a whole turn or a turn's prompt; both name
+    the same place in the message history. A message-history boundary inside a
+    turn surely covers only that turn's prompt in the canonical turn list,
+    which holds the turn as its prompt and its final answer. *)
 
 (** Atoms a producer dropped from its list: every atom before [prefix], and
     [later] atoms at or past [prefix]. *)

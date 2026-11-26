@@ -64,6 +64,7 @@ type store_error =
       { path : string
       ; found : int64
       }
+  | Compaction_store of Keeper_compaction.store_error
 
 (* The layout whose watermarks name the settled turn (RFC
    compaction-anchor-names-a-turn-atom). A store written before it has its
@@ -81,6 +82,7 @@ let store_error_to_string = function
       path
       found
       schema_version
+  | Compaction_store err -> Keeper_compaction.store_error_to_string err
 ;;
 
 let db_suffix = ".canonical-turns.db"
@@ -1381,23 +1383,10 @@ let record_compaction_watermark
                Ok cutoff_opt)))
 ;;
 
-let map_compaction_error = function
-  | Keeper_compaction.Sqlite_error { operation; detail } ->
-    Sqlite_error { operation = "compaction." ^ operation; detail }
-  | Keeper_compaction.Corrupt_record { context; detail } ->
-    Corrupt_record { context = "compaction." ^ context; detail }
-  | Keeper_compaction.Schema_not_current { path; found } -> Schema_not_current { path; found }
-  | Keeper_compaction.Invalid_eviction _ as err ->
-    Corrupt_record
-      { context = "compaction.latest_anchor"
-      ; detail = Keeper_compaction.store_error_to_string err
-      }
-;;
-
 let record_history_reset ~keepers_dir ~keeper_id =
   let* latest_anchor =
     Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id
-    |> Result.map_error map_compaction_error
+    |> Result.map_error (fun err -> Compaction_store err)
   in
   let latest_epoch =
     match latest_anchor with
@@ -1596,7 +1585,7 @@ let () =
 let load_handoff_context ~keepers_dir ~keeper_id =
   let* raw_anchor =
     Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id
-    |> Result.map_error map_compaction_error
+    |> Result.map_error (fun err -> Compaction_store err)
   in
   let* db_snapshot =
     with_db ~create:false ~keepers_dir ~keeper_id (fun db ->

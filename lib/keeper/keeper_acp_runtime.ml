@@ -1802,25 +1802,31 @@ let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message li
     without_preamble, max 1 (atom_count - keep_recent))
 ;;
 
+(* The next fresh session starts from the handoff list, or from the message
+   history when there is none, so the rollover compacts that list. The
+   history is [initial_messages], which the overflow producer compacts too.
+   A projected start window would not do: a boundary covers everything
+   before it, so the turns in front of the window would count as archived
+   and the watermark would prune their rows. *)
 let compact_for_rollover
       ?keep_ratio
       ~keepers_dir
       ~keeper_id
       ~(rollover : rollover)
-      ~fallback_messages
+      ~initial_messages
       ()
   =
   let frame, source_messages =
     match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
     | Ok handoff when handoff.messages <> [] ->
       Keeper_compaction_atom.Canonical_turns, handoff.messages
-    | Ok _ -> Keeper_compaction_atom.Message_history, fallback_messages
+    | Ok _ -> Keeper_compaction_atom.Message_history, initial_messages
     | Error err ->
       Log.Keeper.warn
         ~keeper_name:keeper_id
-        "ACP rollover compacts the message history; canonical turn store unreadable: %s"
+        "ACP rollover compacts the message history; handoff list unreadable: %s"
         (Keeper_canonical_turn_store.store_error_to_string err);
-      Keeper_compaction_atom.Message_history, fallback_messages
+      Keeper_compaction_atom.Message_history, initial_messages
   in
   let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
   if prefix = 0
@@ -3546,7 +3552,7 @@ let run_without_lifecycle
             ~keepers_dir
             ~keeper_id:keeper_name
             ~rollover
-            ~fallback_messages:prepared.messages
+            ~initial_messages
             ();
           record_rollover_marker ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id;
           Log.Keeper.info
@@ -3926,6 +3932,15 @@ module For_testing = struct
   let rollover_marker_matches = rollover_marker_matches
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
+
+  let compact_for_rollover ~keepers_dir ~keeper_id ~used_tokens ~limit_tokens ~initial_messages =
+    compact_for_rollover
+      ~keepers_dir
+      ~keeper_id
+      ~rollover:{ used_tokens; limit_tokens }
+      ~initial_messages
+      ()
+  ;;
   let prefer_handoff_for_start = prefer_handoff_for_start
   let start_unless_stopped = start_unless_stopped
   let hydrate_start_messages = hydrate_start_messages

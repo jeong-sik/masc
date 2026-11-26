@@ -185,6 +185,14 @@ module For_testing : sig
     -> Agent_core.Types.message list
     -> Agent_core.Types.message list * int
 
+  val compact_for_rollover
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> used_tokens:int
+    -> limit_tokens:int
+    -> initial_messages:Agent_core.Types.message list
+    -> unit
+
   val prefer_handoff_for_start
     :  planned_fresh_rollover:bool
     -> force_fresh_retry:bool

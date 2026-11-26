@@ -187,7 +187,7 @@ let test_cross_runtime_continuity_compaction_and_blob_sweep () =
         ~keepers_dir
         ~keeper_id
         ~trigger:(Compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-        ~frame:Masc.Keeper_compaction_atom.Message_history
+        ~frame:Masc.Keeper_compaction_atom.Canonical_turns
         ~messages:
           (Canonical.messages_of_canonical_turn t1
            @ Canonical.messages_of_canonical_turn t2

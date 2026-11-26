@@ -81,6 +81,9 @@ type store_error =
           not read: a store written before the settled-turn watermark. Stop
           the server and delete the file with its [-wal]/[-shm]/[-journal]
           companions. *)
+  | Compaction_store of Keeper_compaction.store_error
+      (** The Keeper's compaction store failed: a read here goes through
+          {!Keeper_compaction.latest_anchor} first. *)
 
 val store_error_to_string : store_error -> string
 

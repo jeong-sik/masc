@@ -84,20 +84,17 @@ let declarations_of ~(read : string -> string option) ~(files : string list) :
        | _, _ -> None)
     files
 
-let entries : (string list * string) list Lazy.t =
-  lazy
-    (declarations_of ~read:Embedded_config.read
-       ~files:Embedded_config.file_list)
+let entries : (string list * string) list =
+  declarations_of ~read:Embedded_config.read
+    ~files:Embedded_config.file_list
 
-(* The duplicate refusal is a value, not an exception.  A [lazy] that
-   raised would cache the exception and re-raise it on every later force,
-   taking the whole shell command surface down with it; here the refusal
-   is answered by {!rewrite} as a typed error instead. *)
-let declaration_error : string option Lazy.t =
-  lazy
-    (match reject_duplicate_paths (Lazy.force entries) with
-     | Ok () -> None
-     | Error message -> Some message)
+(* The duplicate refusal is a value, not an exception.  Computed eagerly from
+   the constant embedded tree so concurrent OCaml 5 domains never race
+   [Stdlib.Lazy.force], and answered by {!rewrite} as a typed error. *)
+let declaration_error : string option =
+  match reject_duplicate_paths entries with
+  | Ok () -> None
+  | Error message -> Some message
 
 (* {1 argv to tool arguments} *)
 
@@ -194,7 +191,7 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
    [board] cannot shadow a declared [board post get]. *)
 let split_words (words : string list) : (string * string list) option =
   let paths =
-    Lazy.force entries
+    entries
     |> List.map fst
     |> List.sort (fun a b -> Int.compare (List.length b) (List.length a))
   in
@@ -203,7 +200,7 @@ let split_words (words : string list) : (string * string list) option =
     | path :: rest -> (
       match List_util.strip_prefix ~equal:String.equal path words with
       | Some argument_words -> (
-        match List.assoc_opt path (Lazy.force entries) with
+        match List.assoc_opt path entries with
         | Some tool -> Some (tool, argument_words)
         | None -> try_path rest)
       | None -> try_path rest)
@@ -250,7 +247,7 @@ let rec rewrite ~(lookup : string -> Keeper_tool_descriptor.t option)
   (* A duplicate declaration is refused as a typed error before any lookup,
      so a bad tool file answers every shell line with the same named
      refusal instead of poisoning the table's [lazy] with an exception. *)
-  match Lazy.force declaration_error with
+  match declaration_error with
   | Some message -> Error message
   | None -> rewrite_ir ~lookup ~dispatch ir
 

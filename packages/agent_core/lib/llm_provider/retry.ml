@@ -624,12 +624,6 @@ let signals_of_json (json : Yojson.Safe.t) : error_signals =
   extract_signals_from_json ~depth:0 json
 ;;
 
-let signals_of_body (body : string) : error_signals =
-  match Json_util.from_string_bounded body with
-  | Ok json -> signals_of_json json
-  | Error _ -> empty_signals
-;;
-
 (* Preserve the exact pre-stack [main] HTTP JSON signal extractor and refusal
    code/type tables exclusively for {!classify_structured_refusal} /
    {!classify_error} so existing HTTP backend behavior stays 100% invariant
@@ -1139,7 +1133,9 @@ let classify_embedded_json ?http_status ?retry_after (text : string) : signal_re
   else (
     let max_bytes = 65536 in
     let bounded =
-      if String.length trimmed <= max_bytes then trimmed else String.sub trimmed 0 max_bytes
+      if String.length trimmed <= max_bytes
+      then trimmed
+      else Agent_core_strings.utf8_prefix ~max_bytes trimmed
     in
     let classify_json = function
       | (`Assoc _ | `List _) as v ->

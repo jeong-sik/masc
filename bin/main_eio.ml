@@ -3907,12 +3907,28 @@ let sandbox_image_build_on_stdin_exit ~command ~tag ~labels ~dockerfile =
       ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous_sigpipe)
       (fun () ->
     let read_fd, write_fd = Unix.pipe () in
-    Unix.set_close_on_exec write_fd;
-    let pid =
-      Unix.create_process bin (Array.of_list argv) read_fd Unix.stdout Unix.stderr
+    let read_open = ref true in
+    let write_open = ref true in
+    let close_fd_if flag fd =
+      if !flag then (
+        flag := false;
+        try Unix.close fd with Unix.Unix_error _ -> ())
     in
-    Unix.close read_fd;
-    let oc = Unix.out_channel_of_descr write_fd in
+    let pid =
+      Fun.protect
+        ~finally:(fun () -> close_fd_if read_open read_fd)
+        (fun () ->
+           try
+             Unix.set_close_on_exec write_fd;
+             Unix.create_process bin (Array.of_list argv) read_fd Unix.stdout Unix.stderr
+           with exn ->
+             close_fd_if write_open write_fd;
+             raise exn)
+    in
+    let oc =
+      write_open := false;
+      Unix.out_channel_of_descr write_fd
+    in
     (try
        output_string oc dockerfile;
        close_out oc

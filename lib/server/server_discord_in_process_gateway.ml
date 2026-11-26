@@ -486,41 +486,46 @@ let request_directory_refresh ~sw ~clock ~base_dir =
           true
         end)
     in
-    if start_worker then
-      Eio.Fiber.fork ~sw (fun () ->
-        let stop_worker () =
-          with_directory_refresh_lock (fun () ->
-            discord_directory_refresh_running := false;
-            discord_directory_refresh_pending := false)
-        in
-        let take_pending_or_stop () =
-          with_directory_refresh_lock (fun () ->
-            if !discord_directory_refresh_pending then begin
-              discord_directory_refresh_pending := false;
-              true
-            end else begin
-              discord_directory_refresh_running := false;
-              false
-            end)
-        in
-        let rec loop () =
-          if take_pending_or_stop () then begin
-            refresh_discord_directory_once ~clock ~base_dir ~token;
-            loop ()
-          end
-        in
-        try loop () with
-        | Eio.Cancel.Cancelled _ as exn ->
-          stop_worker ();
-          raise exn
-        | exn ->
-          stop_worker ();
-          State.record_directory_refresh_finished ~server_count:0
-            ~channel_count:0 ~person_count:0 ~authentication_failed:[]
-            ~permission_denied:[]
-            ~errors:[ "worker" ];
-          Log.Server.error "Discord directory refresh crashed: %s"
-            (Printexc.to_string exn))
+    if start_worker then (
+      let stop_worker () =
+        with_directory_refresh_lock (fun () ->
+          discord_directory_refresh_running := false;
+          discord_directory_refresh_pending := false)
+      in
+      try
+        Eio.Fiber.fork ~sw (fun () ->
+          let take_pending_or_stop () =
+            with_directory_refresh_lock (fun () ->
+              if !discord_directory_refresh_pending then begin
+                discord_directory_refresh_pending := false;
+                true
+              end else begin
+                discord_directory_refresh_running := false;
+                false
+              end)
+          in
+          let rec loop () =
+            if take_pending_or_stop () then begin
+              refresh_discord_directory_once ~clock ~base_dir ~token;
+              loop ()
+            end
+          in
+          try loop () with
+          | Eio.Cancel.Cancelled _ as exn ->
+            stop_worker ();
+            raise exn
+          | exn ->
+            stop_worker ();
+            State.record_directory_refresh_finished ~server_count:0
+              ~channel_count:0 ~person_count:0 ~authentication_failed:[]
+              ~permission_denied:[]
+              ~errors:[ "worker" ];
+            Log.Server.error "Discord directory refresh crashed: %s"
+              (Printexc.to_string exn))
+      with
+      | exn ->
+        stop_worker ();
+        raise exn)
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~(conversation : Keeper_external_attention.conversation_ref)

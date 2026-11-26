@@ -107,7 +107,9 @@ type canonical_summary =
   ; summary_objects : head_objects
   }
 
+let max_canonical_summaries = 2048
 let canonical_summaries : (string, canonical_summary) Hashtbl.t = Hashtbl.create 16
+let canonical_summaries_order : string Queue.t = Queue.create ()
 
 (* Stdlib mutex on purpose: touched from systhread and main-domain paths; the
    critical section is a Hashtbl lookup with no yield. *)
@@ -215,6 +217,13 @@ let publish_summary ~canonical_path summary =
   | None -> ()
   | Some key ->
     Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
+      if not (Hashtbl.mem canonical_summaries key) then (
+        while Hashtbl.length canonical_summaries >= max_canonical_summaries do
+          match Queue.take_opt canonical_summaries_order with
+          | Some oldest -> Hashtbl.remove canonical_summaries oldest
+          | None -> Hashtbl.clear canonical_summaries
+        done;
+        Queue.add key canonical_summaries_order);
       Hashtbl.replace canonical_summaries key summary)
 
 (* After a parse: the summary describes the bytes parsed only if the file

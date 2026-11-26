@@ -22,6 +22,7 @@ let max_preview_urls = 4
 let preview_timeout_sec = 0.25
 let max_html_chars = 262_144
 
+let max_preview_cache_entries = 1024
 let preview_cache_mu = Stdlib.Mutex.create ()
 let preview_cache : (string, cache_payload) Hashtbl.t = Hashtbl.create 128
 
@@ -39,6 +40,11 @@ let cache_lookup key =
 
 let cache_store ~ttl key preview =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      if not (Hashtbl.mem preview_cache key) then
+        Server_utils.evict_oldest_if_full
+          ~max_entries:max_preview_cache_entries
+          ~age_of:(fun entry -> entry.expires_at)
+          preview_cache;
       Hashtbl.replace preview_cache key
         { preview; expires_at = Time_compat.now () +. ttl })
 
@@ -127,6 +133,13 @@ let resolve_relative_url ~base_url value =
   let base_uri = Uri.of_string base_url in
   Uri.resolve "" base_uri (Uri.of_string value) |> Uri.to_string
 
+let resolve_http_url ~base_url value =
+  let base_uri = Uri.of_string base_url in
+  let resolved = Uri.resolve "" base_uri (Uri.of_string value) in
+  if is_http_scheme (Uri.scheme resolved) && Option.is_some (Uri.host resolved)
+  then Some (Uri.to_string resolved)
+  else None
+
 let default_favicon_url url =
   let uri = Uri.of_string url in
   Uri.make ?scheme:(Uri.scheme uri) ?host:(Uri.host uri) ?port:(Uri.port uri)
@@ -163,21 +176,17 @@ let extract_html_preview_fields ~url body =
     | None -> Uri.host (Uri.of_string url)
   in
   let image_url =
-    match meta_content head "property" "og:image" with
-    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
-    | None -> (
-        match meta_content head "name" "twitter:image" with
-        | Some raw -> Some (resolve_relative_url ~base_url:url raw)
-        | None -> None)
+    match Option.bind (meta_content head "property" "og:image") (resolve_http_url ~base_url:url) with
+    | Some _ as value -> value
+    | None ->
+        Option.bind (meta_content head "name" "twitter:image") (resolve_http_url ~base_url:url)
   in
   let canonical_url =
-    match link_href head "canonical" with
-    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
-    | None -> None
+    Option.bind (link_href head "canonical") (resolve_http_url ~base_url:url)
   in
   let favicon_url =
-    match link_href head "icon" with
-    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
+    match Option.bind (link_href head "icon") (resolve_http_url ~base_url:url) with
+    | Some _ as value -> value
     | None -> Some (default_favicon_url url)
   in
   { title; description; site_name; image_url; canonical_url; favicon_url }

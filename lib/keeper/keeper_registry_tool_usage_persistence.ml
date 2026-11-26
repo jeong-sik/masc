@@ -55,7 +55,9 @@ let flush ~base_path name =
     let path = tool_usage_path ~base_path name in
     (try
        Fs_compat.mkdir_p (Filename.dirname path);
-       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+       match Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string json ^ "\n") with
+       | Ok () -> ()
+       | Error msg -> raise (Sys_error msg)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

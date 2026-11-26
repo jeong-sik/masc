@@ -26,4 +26,6 @@
   masc.crypto_rng
   masc.masc_log
   masc.masc_core
+  masc.secret_patterns
+  masc.string_util
   masc.config))

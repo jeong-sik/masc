@@ -87,7 +87,9 @@ let read_current_seq config =
   | Error _ -> 0
 
 let write_current_seq config seq =
-  Fs_compat.save_file (seq_path config) (string_of_int seq)
+  match Fs_compat.save_file_atomic_strict (seq_path config) (string_of_int seq) with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 
 let append_line path line =
   Fs_compat.append_lines path line

@@ -32,14 +32,6 @@ let clip s max_len =
   else s
 ;;
 
-let regex_match re str =
-  try
-    let (_ : int) = Str.search_forward re str 0 in
-    true
-  with
-  | Not_found -> false
-;;
-
 (** Case-insensitive substring search. Delegates to the dependency-free leaf:
     [Str] keeps its match state in globals, which is unsound under fibers, and
     recompiles the pattern on every call. *)

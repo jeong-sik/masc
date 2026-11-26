@@ -487,6 +487,24 @@ let test_metric_entry_gauge_json () =
   check bool "no sum" true (json_assoc_field "sum" json = None)
 ;;
 
+let test_metric_entry_histogram_json () =
+  let entry : Otel_tracer.metric_entry =
+    { m_name = "agent_core.latency"; m_value = 1.25; m_type = Otel_tracer.Histogram }
+  in
+  let json = Otel_tracer.metric_entry_to_json entry in
+  match json_assoc_field "histogram" json with
+  | Some (`Assoc hist_fields) ->
+    (match List.assoc_opt "dataPoints" hist_fields with
+     | Some (`List [ `Assoc dp ]) ->
+       check bool "has count" true (List.assoc_opt "count" dp = Some (`String "1"));
+       check bool "has sum" true (List.assoc_opt "sum" dp = Some (`Float 1.25));
+       check bool "has bucketCounts" true
+         (List.assoc_opt "bucketCounts" dp = Some (`List [ `String "1" ]));
+       check bool "omits invalid asDouble" true (List.assoc_opt "asDouble" dp = None)
+     | _ -> fail "expected single HistogramDataPoint")
+  | _ -> fail "expected histogram field"
+;;
+
 (* ── Trace Context Propagation ─────────────────────────────────────── *)
 
 let test_traceparent_of_span () =
@@ -618,6 +636,7 @@ let () =
         ; test_case "clear metrics" `Quick test_clear_metrics
         ; test_case "metric_entry_to_json counter" `Quick test_metric_entry_to_json
         ; test_case "metric_entry_to_json gauge" `Quick test_metric_entry_gauge_json
+        ; test_case "metric_entry_to_json histogram" `Quick test_metric_entry_histogram_json
         ] )
     ; ( "trace_context"
       , [ test_case "traceparent of span" `Quick test_traceparent_of_span

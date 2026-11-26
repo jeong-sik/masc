@@ -48,7 +48,10 @@ let report_err_ = function
 module Httpc : sig
   type t
 
-  val create : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> t
+  val create
+    :  clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> t
 
   val send
     :  t
@@ -60,13 +63,17 @@ end = struct
   open Opentelemetry.Proto
   module Httpc = Cohttp_eio.Client
 
+  let max_response_bytes = 64 * 1024
+  let request_timeout_sec = 10.0
+
   type https_connector =
     Uri.t
     -> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r
     -> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r
 
   type t =
-    { net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    { clock : float Eio.Time.clock_ty Eio.Resource.t
+    ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     ; https : https_connector option
     }
 
@@ -92,19 +99,20 @@ end = struct
       Tls_eio.client_of_flow ?host tls_config raw
   ;;
 
-  let create net =
+  let create ~clock net =
     let authenticator = authenticator () in
     let https uri raw =
       (https ~authenticator uri raw
         :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r)
     in
-    { net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t; https = Some https }
+    { clock
+    ; net = (net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ; https = Some https
+    }
   ;;
 
   let read_body body =
-    let buf = Buffer.create 4096 in
-    Eio.Flow.copy body (Eio.Flow.buffer_sink buf);
-    Buffer.contents buf
+    Eio.Buf_read.of_flow ~max_size:max_response_bytes body |> Eio.Buf_read.take_all
   ;;
 
   let decode_response ~url ~decode ~code body =
@@ -132,6 +140,10 @@ end = struct
         with
         | e -> (* cancel-guard-ok: Pbrt protobuf decoding is pure and performs no Eio operation. *)
           let bt = Printexc.get_backtrace () in
+          let safe_url = Secret_patterns.redact_text url in
+          let safe_body =
+            body |> Secret_patterns.redact_text |> String_util.utf8_prefix ~max_bytes:512
+          in
           Error
             (`Failure
                 (spf
@@ -139,10 +151,10 @@ end = struct
                     %s\n\
                     status: %S\n\
                     %s"
-                   url
+                   safe_url
                    code
                    (Printexc.to_string e)
-                   body
+                   safe_body
                    bt))
       in
       r)
@@ -153,19 +165,29 @@ end = struct
       ("Content-Type", "application/x-protobuf") :: Config.Env.get_headers ()
     in
     try
-      Eio.Switch.run (fun sw ->
-        let http_client = Httpc.make ~https:client.https client.net in
-        let response, response_body =
-          Httpc.post
-            http_client
-            ~sw
-            ~headers:(Cohttp.Header.of_list headers)
-            ~body:(Cohttp_eio.Body.of_string body)
-            (Uri.of_string url)
-        in
-        let code = Cohttp.Code.code_of_status (Cohttp.Response.status response) in
-        let body = read_body response_body in
-        decode_response ~url ~decode ~code body)
+      match
+        Eio.Time.with_timeout client.clock request_timeout_sec (fun () ->
+          Eio.Switch.run (fun sw ->
+            let http_client = Httpc.make ~https:client.https client.net in
+            let response, response_body =
+              Httpc.post
+                http_client
+                ~sw
+                ~headers:(Cohttp.Header.of_list headers)
+                ~body:(Cohttp_eio.Body.of_string body)
+                (Uri.of_string url)
+            in
+            let code = Cohttp.Code.code_of_status (Cohttp.Response.status response) in
+            let body = read_body response_body in
+            Ok (decode_response ~url ~decode ~code body)))
+      with
+      | Ok res -> res
+      | Error `Timeout ->
+        Error
+          (`Failure
+             (spf "sending signals via http POST to %S timed out after %.1fs"
+                (Secret_patterns.redact_text url)
+                request_timeout_sec))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Sys.Break -> Error `Sysbreak
@@ -175,7 +197,7 @@ end = struct
         (`Failure
            (spf
               "sending signals via http POST to %S\nfailed with:\n%s"
-              url
+              (Secret_patterns.redact_text url)
               (Printexc.to_string exn ^ "\n" ^ bt)))
   ;;
 end
@@ -195,7 +217,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
   let open struct
     let client =
       Crypto_rng.ensure_default ();
-      Httpc.create net
+      Httpc.create ~clock net
     ;;
 
     let send_http ~url data : unit =

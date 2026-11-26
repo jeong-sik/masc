@@ -210,7 +210,9 @@ let responses_assert_output_kind state emit output_index incoming =
    record is capped here instead: two long [rs_...] ids must not push the
    second digest out of the line that says which two deliveries disagreed. *)
 let responses_bounded_raw text =
-  if String.length text <= 240 then text else String.sub text 0 237 ^ "..."
+  if String.length text <= 240
+  then text
+  else Agent_core_strings.utf8_prefix ~max_bytes:237 text ^ "..."
 ;;
 
 let responses_accept_output_identity state emit output_index = function

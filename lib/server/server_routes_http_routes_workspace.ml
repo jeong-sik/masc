@@ -406,9 +406,10 @@ let read_fd_to_string fd len =
   let rec loop offset =
     if offset >= len then Bytes.unsafe_to_string buf
     else
-      let n = Unix.read fd buf offset (len - offset) in
-      if n = 0 then Bytes.sub_string buf 0 offset
-      else loop (offset + n)
+      match Unix.read fd buf offset (len - offset) with
+      | 0 -> Bytes.sub_string buf 0 offset
+      | n -> loop (offset + n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop offset
   in
   loop 0
 
@@ -419,7 +420,8 @@ let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) fil
       match before_open.Unix.st_kind with
       | Unix.S_REG ->
         let fd =
-          Unix.openfile file.resolved_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+          Unix.openfile file.resolved_path
+            [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0
         in
         Fun.protect
           ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())

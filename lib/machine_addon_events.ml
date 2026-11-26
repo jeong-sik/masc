@@ -7,7 +7,9 @@ let create ~author ~relay = {author;relay;ready=Atomic.make false}
 let ready batch = Atomic.set batch.ready true
 let preview_json json =
   let text = Yojson.Safe.to_string json in
-  if String.length text > 200 then String.sub text 0 200 ^ "..." else text
+  if String.length text > 200
+  then String_util.utf8_prefix ~max_bytes:200 text ^ "..."
+  else text
 
 let record batch (result : Mcp_protocol.Mcp_types.tool_result) =
   let contents = match result._meta with

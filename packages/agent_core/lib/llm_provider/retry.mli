@@ -159,10 +159,6 @@ type error_signals =
     to depth 2). *)
 val signals_of_json : Yojson.Safe.t -> error_signals
 
-(** Parse a JSON response body and extract {!error_signals}. Returns empty
-    signals for non-JSON payloads. *)
-val signals_of_body : string -> error_signals
-
 (** Extract an explicit HTTP refusal status code ([400..599]) from structured
     JSON fields ([http_status], [httpStatus], [status_code], [statusCode],
     integer [status], or integer [code] inside [400..599], recursing into

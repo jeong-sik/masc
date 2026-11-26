@@ -18,7 +18,9 @@ let read_file_content path =
 (** File write via Fs_compat (Eio-native when available, blocking fallback) *)
 let write_file_content path content =
   Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path content
+  match Fs_compat.save_file_atomic_strict path content with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 
 let current_task_filename = "current_task"
 

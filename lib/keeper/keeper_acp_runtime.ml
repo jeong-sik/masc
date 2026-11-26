@@ -73,9 +73,18 @@ let record_rollover_marker ~base_path ~keeper_id ~runtime_id ~session_id =
     in
     try
       Fs_compat.mkdir_p dir;
-      ignore (Fs_compat.save_file_atomic path payload : (unit, string) result)
+      match Fs_compat.save_file_atomic path payload with
+      | Ok () -> ()
+      | Error msg ->
+        Log.Keeper.warn "record_rollover_marker failed keeper=%s path=%s: %s"
+          keeper_id path msg
     with
-    | Sys_error _ | Unix.Unix_error _ -> ())
+    | Sys_error msg ->
+      Log.Keeper.warn "record_rollover_marker failed keeper=%s path=%s: %s"
+        keeper_id path msg
+    | Unix.Unix_error (err, fn, _) ->
+      Log.Keeper.warn "record_rollover_marker failed keeper=%s path=%s (%s): %s"
+        keeper_id path fn (Unix.error_message err))
 ;;
 
 let rollover_marker_matches ~base_path ~keeper_id ~runtime_id ~session_id =

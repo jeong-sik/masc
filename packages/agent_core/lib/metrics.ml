@@ -26,7 +26,7 @@ type counter_data =
 (* -- Histogram -------------------------------------------------------- *)
 
 type histogram_series =
-  { hs_observations : float list
+  { hs_bucket_counts : int array
   ; hs_sum : float
   ; hs_count : int
   }
@@ -34,11 +34,15 @@ type histogram_series =
 type histogram_data =
   { h_name : string
   ; h_buckets : float list
+  ; h_sorted_buckets : float array
   ; h_values : histogram_series LabelMap.t
   }
 
-let empty_histogram_series = { hs_observations = []; hs_sum = 0.0; hs_count = 0 }
-let empty_histogram_values () = LabelMap.singleton [] empty_histogram_series
+let empty_histogram_series n =
+  { hs_bucket_counts = Array.make n 0; hs_sum = 0.0; hs_count = 0 }
+;;
+
+let empty_histogram_values n = LabelMap.singleton [] (empty_histogram_series n)
 
 (* -- Metrics instance ------------------------------------------------- *)
 
@@ -163,8 +167,13 @@ let histogram t ~name ~buckets =
     | None ->
       check_no_normalized_collision_unlocked t ~kind:"histogram" ~name;
       check_no_duplicate_buckets_unlocked ~name ~buckets;
+      let sorted_buckets = Array.of_list (List.sort Float.compare buckets) in
       let h =
-        { h_name = name; h_buckets = buckets; h_values = empty_histogram_values () }
+        { h_name = name
+        ; h_buckets = buckets
+        ; h_sorted_buckets = sorted_buckets
+        ; h_values = empty_histogram_values (Array.length sorted_buckets)
+        }
       in
       t.histograms <- h :: t.histograms;
       t, name)
@@ -207,13 +216,19 @@ let observe (t, name) ?(labels = []) value =
          (fun h ->
             if h.h_name = name
             then (
+              let bucket_n = Array.length h.h_sorted_buckets in
               let series =
                 match LabelMap.find_opt key h.h_values with
                 | Some series -> series
-                | None -> empty_histogram_series
+                | None -> empty_histogram_series bucket_n
+              in
+              let next_counts =
+                Array.init bucket_n (fun i ->
+                  series.hs_bucket_counts.(i)
+                  + if value <= h.h_sorted_buckets.(i) then 1 else 0)
               in
               let updated =
-                { hs_observations = value :: series.hs_observations
+                { hs_bucket_counts = next_counts
                 ; hs_sum = series.hs_sum +. value
                 ; hs_count = series.hs_count + 1
                 }
@@ -241,7 +256,10 @@ let reset t =
   with_lock t (fun () ->
     t.counters <- List.map (fun c -> { c with c_values = LabelMap.empty }) t.counters;
     t.histograms
-    <- List.map (fun h -> { h with h_values = empty_histogram_values () }) t.histograms)
+    <- List.map
+         (fun h ->
+            { h with h_values = empty_histogram_values (Array.length h.h_sorted_buckets) })
+         t.histograms)
 ;;
 
 (* -- OTLP JSON export ------------------------------------------------ *)
@@ -271,19 +289,8 @@ let counter_to_json (c : counter_data) : Yojson.Safe.t =
     ]
 ;;
 
-let bucket_counts buckets observations =
-  let sorted_buckets = List.sort Float.compare buckets in
-  let counts =
-    List.map
-      (fun bound -> List.length (List.filter (fun v -> v <= bound) observations))
-      sorted_buckets
-  in
-  let overflow = List.length observations in
-  counts @ [ overflow ]
-;;
-
 let histogram_datapoint_to_json buckets labels series : Yojson.Safe.t =
-  let bc = bucket_counts buckets series.hs_observations in
+  let bc = Array.to_list series.hs_bucket_counts @ [ series.hs_count ] in
   let base =
     [ "count", `String (string_of_int series.hs_count)
     ; "sum", `Float series.hs_sum
@@ -398,19 +405,11 @@ let counter_to_prometheus buf (c : counter_data) =
 
 let histogram_to_prometheus buf (h : histogram_data) =
   let prom_name = add_prometheus_header buf ~name:h.h_name ~kind:"histogram" in
-  (* Bucket-bound uniqueness is enforced at registration via
-     [check_no_duplicate_buckets_unlocked] (root fix for the emit-time
-     [List.sort_uniq] workaround in PR #1564). Plain sort is enough
-     here; duplicates would have failed registration. *)
-  let sorted_buckets = List.sort Float.compare h.h_buckets in
   LabelMap.iter
     (fun labels series ->
-       List.iter
-         (fun bound ->
-            let count =
-              List.length
-                (List.filter (fun value -> value <= bound) series.hs_observations)
-            in
+       Array.iteri
+         (fun idx bound ->
+            let count = series.hs_bucket_counts.(idx) in
             Buffer.add_string
               buf
               (Printf.sprintf
@@ -418,7 +417,7 @@ let histogram_to_prometheus buf (h : histogram_data) =
                  prom_name
                  (labels_to_prometheus (labels @ [ "le", float_to_prometheus bound ]))
                  count))
-         sorted_buckets;
+         h.h_sorted_buckets;
        Buffer.add_string
          buf
          (Printf.sprintf

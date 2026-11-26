@@ -106,28 +106,27 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
    only means "no authored help", never a silent half-entry. *)
 module String_map = Map.Make (String)
 
-let toml_help_table : Tool_definition_toml.help String_map.t Lazy.t =
-  lazy
-    (List.fold_left
-       (fun table rel ->
-          if
-            String.starts_with ~prefix:"tools/" rel
-            && String.equal (Filename.dirname rel) "tools"
-            && Filename.check_suffix rel ".toml"
-          then (
-            let name = Filename.remove_extension (Filename.basename rel) in
-            match Embedded_config.read rel with
-            | None -> table
-            | Some contents ->
-              (match Tool_definition_toml.load ~name ~contents with
-               | Ok { Tool_definition_toml.help = Some help; _ } ->
-                 String_map.add name help table
-               | Ok { Tool_definition_toml.help = None; _ } | Error _ -> table))
-          else table)
-       String_map.empty
-       Embedded_config.file_list)
+let toml_help_table : Tool_definition_toml.help String_map.t =
+  List.fold_left
+    (fun table rel ->
+       if
+         String.starts_with ~prefix:"tools/" rel
+         && String.equal (Filename.dirname rel) "tools"
+         && Filename.check_suffix rel ".toml"
+       then (
+         let name = Filename.remove_extension (Filename.basename rel) in
+         match Embedded_config.read rel with
+         | None -> table
+         | Some contents ->
+           (match Tool_definition_toml.load ~name ~contents with
+            | Ok { Tool_definition_toml.help = Some help; _ } ->
+              String_map.add name help table
+            | Ok { Tool_definition_toml.help = None; _ } | Error _ -> table))
+       else table)
+    String_map.empty
+    Embedded_config.file_list
 
-let toml_help name = String_map.find_opt name (Lazy.force toml_help_table)
+let toml_help name = String_map.find_opt name toml_help_table
 
 (* The same scan that finds authored help also knows where it came from. A tool
    whose behaviour surprises an operator is a tool whose definition they want to
@@ -135,21 +134,20 @@ let toml_help name = String_map.find_opt name (Lazy.force toml_help_table)
    the call record. Derived from the embedded file list rather than composed
    from the name, so a tool with no shipped definition answers [None] instead of
    naming a path that does not exist. *)
-let toml_source_table : string String_map.t Lazy.t =
-  lazy
-    (List.fold_left
-       (fun table rel ->
-          if
-            String.starts_with ~prefix:"tools/" rel
-            && String.equal (Filename.dirname rel) "tools"
-            && Filename.check_suffix rel ".toml"
-          then
-            String_map.add (Filename.remove_extension (Filename.basename rel)) rel table
-          else table)
-       String_map.empty
-       Embedded_config.file_list)
+let toml_source_table : string String_map.t =
+  List.fold_left
+    (fun table rel ->
+       if
+         String.starts_with ~prefix:"tools/" rel
+         && String.equal (Filename.dirname rel) "tools"
+         && Filename.check_suffix rel ".toml"
+       then
+         String_map.add (Filename.remove_extension (Filename.basename rel)) rel table
+       else table)
+    String_map.empty
+    Embedded_config.file_list
 
-let definition_source name = String_map.find_opt name (Lazy.force toml_source_table)
+let definition_source name = String_map.find_opt name toml_source_table
 
 let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name original =
   let seed =

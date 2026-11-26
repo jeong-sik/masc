@@ -2681,41 +2681,39 @@ let stderr_secrets_of_mcp_server = function
 let register_stderr_secrets t mcp_server =
   let fresh = stderr_secrets_of_mcp_server mcp_server in
   if fresh <> []
-  then (
-    Stdlib.Mutex.lock t.stderr_mutex;
-    let merged =
-      List.fold_left
-        (fun acc s -> if List.mem s acc then acc else s :: acc)
-        t.stderr_secrets
-        fresh
-    in
-    t.stderr_secrets <- merged;
-    Stdlib.Mutex.unlock t.stderr_mutex)
+  then
+    Stdlib.Mutex.protect t.stderr_mutex (fun () ->
+      let merged =
+        List.fold_left
+          (fun acc s -> if List.mem s acc then acc else s :: acc)
+          t.stderr_secrets
+          fresh
+      in
+      t.stderr_secrets <- merged)
 ;;
 
 let stderr_tail t =
-  Stdlib.Mutex.lock t.stderr_mutex;
-  let s = Buffer.contents t.stderr_buf in
-  let secrets = t.stderr_secrets in
-  Stdlib.Mutex.unlock t.stderr_mutex;
+  let s, secrets =
+    Stdlib.Mutex.protect t.stderr_mutex (fun () ->
+      Buffer.contents t.stderr_buf, t.stderr_secrets)
+  in
   redact_stderr_text ~extra_secrets:secrets s
 ;;
 
 let append_stderr t chunk =
-  Stdlib.Mutex.lock t.stderr_mutex;
-  let current_len = Buffer.length t.stderr_buf in
-  let chunk_len = String.length chunk in
-  if current_len + chunk_len <= max_stderr_tail_bytes
-  then Buffer.add_string t.stderr_buf chunk
-  else (
-    let combined = Buffer.contents t.stderr_buf ^ chunk in
-    (* Redact BEFORE slicing so a secret straddling the ring-buffer boundary
-       cannot lose its prefix and leak an unrecognized suffix. *)
-    let redacted = redact_stderr_text ~extra_secrets:t.stderr_secrets combined in
-    let keep = utf8_safe_suffix ~max_bytes:max_stderr_tail_bytes redacted in
-    Buffer.clear t.stderr_buf;
-    Buffer.add_string t.stderr_buf keep);
-  Stdlib.Mutex.unlock t.stderr_mutex
+  Stdlib.Mutex.protect t.stderr_mutex (fun () ->
+    let current_len = Buffer.length t.stderr_buf in
+    let chunk_len = String.length chunk in
+    if current_len + chunk_len <= max_stderr_tail_bytes
+    then Buffer.add_string t.stderr_buf chunk
+    else (
+      let combined = Buffer.contents t.stderr_buf ^ chunk in
+      (* Redact BEFORE slicing so a secret straddling the ring-buffer boundary
+         cannot lose its prefix and leak an unrecognized suffix. *)
+      let redacted = redact_stderr_text ~extra_secrets:t.stderr_secrets combined in
+      let keep = utf8_safe_suffix ~max_bytes:max_stderr_tail_bytes redacted in
+      Buffer.clear t.stderr_buf;
+      Buffer.add_string t.stderr_buf keep))
 ;;
 
 let send_json t json =

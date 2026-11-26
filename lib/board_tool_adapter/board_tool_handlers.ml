@@ -55,17 +55,16 @@ let board_moderators_from_toml ~missing contents =
 ;;
 
 let default_board_moderators =
-  lazy
-    (match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
-     | None -> Error (Board.Io_error "embedded runtime.toml is missing")
-     | Some contents ->
-       board_moderators_from_toml
-         ~missing:(Error (Board.Io_error "embedded board.moderators is missing"))
-         contents)
+  match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
+  | None -> Error (Board.Io_error "embedded runtime.toml is missing")
+  | Some contents ->
+    board_moderators_from_toml
+      ~missing:(Error (Board.Io_error "embedded board.moderators is missing"))
+      contents
 ;;
 
 let configured_board_moderators () =
-  match Lazy.force default_board_moderators with
+  match default_board_moderators with
   | Error _ as err -> err
   | Ok default ->
     let resolution =

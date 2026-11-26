@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import { cleanup, render, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   deriveKeeperAttentionReason,
   pickAttentionKeepers,
@@ -24,6 +24,7 @@ import type {
 import { keepers, boardPosts, boardTotal, boardListOnScreen, boardHearthFilter, boardSearchText, lastBoardRefreshAt, shellRuntimeResolution, type BoardListQuery } from '../../store'
 import type { Goal } from '../../types/core'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 
 vi.mock('../../api/dashboard-runtime', async importOriginal => ({
   ...await importOriginal<typeof import('../../api/dashboard-runtime')>(),
@@ -41,7 +42,18 @@ vi.mock('../schedule/schedule-state', () => ({
 
 afterEach(() => {
   dashboardFullHealthResource.reset()
+  acceptedExecutionWorkspace.value = null
 })
+
+// Mounted observation reads (full health, telemetry) run only for an accepted
+// execution workspace; setupObservationRefresh skips an owner without one.
+// Tests that assert on those reads accept a fixture workspace first.
+function acceptFixtureWorkspace(): void {
+  acceptedExecutionWorkspace.value = {
+    epoch: 'overview-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'overview-fixture',
+  }
+}
 
 import type { Task, Keeper } from '../../types/core'
 
@@ -384,6 +396,8 @@ describe('Overview v2 marker classes', () => {
 })
 
 describe('Overview backend composite health', () => {
+  beforeEach(acceptFixtureWorkspace)
+
   function stubOverviewFetch(operatorActionRequired: boolean, keeperEventQueue?: unknown) {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = `${input}`
@@ -800,6 +814,7 @@ describe('Overview prototype surface', () => {
       })),
     )
     vi.stubGlobal('fetch', fetchMock)
+    acceptFixtureWorkspace()
 
     try {
       render(h(Overview, null))
@@ -962,6 +977,7 @@ describe('Overview prototype surface', () => {
         },
       })
       vi.stubGlobal('fetch', fetchMock)
+      acceptFixtureWorkspace()
 
       const { container } = render(h(Overview, null))
       await waitFor(() => {

@@ -135,6 +135,17 @@ function responseWithQueue(
   } as DashboardGateResponse
 }
 
+// The mounted Gate read runs only for an accepted execution workspace
+// (setupObservationRefresh skips an owner without one). Seed it on the same
+// fresh module graph the surface imports after vi.resetModules().
+async function acceptFixtureWorkspace(): Promise<void> {
+  const workspace = await import('../../execution-workspace-authority')
+  workspace.acceptedExecutionWorkspace.value = {
+    epoch: 'approvals-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'approvals-fixture',
+  }
+}
+
 // Mock the API seam refreshGate() reaches on mount, plus the SSE refresh
 // registry.
 async function loadSurface(
@@ -250,6 +261,7 @@ async function loadSurface(
     navigate.mockImplementation(original.navigate)
     return { ...original, navigate }
   })
+  await acceptFixtureWorkspace()
   const mod = await import('./approvals-surface')
   const gateSignals = await import('../gate-signals')
   gateSignals.clearGateAuditWriteFailures()
@@ -1314,6 +1326,7 @@ describe('ApprovalsSurface', () => {
       registerGateRefresh: vi.fn(),
       registerGateAuditReceiptObserver: vi.fn(),
     }))
+    await acceptFixtureWorkspace()
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -1359,6 +1372,7 @@ describe('ApprovalsSurface', () => {
       registerGateRefresh: vi.fn(),
       registerGateAuditReceiptObserver: vi.fn(),
     }))
+    await acceptFixtureWorkspace()
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)

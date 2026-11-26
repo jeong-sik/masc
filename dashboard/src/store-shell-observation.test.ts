@@ -419,7 +419,16 @@ describe('App-owned Shell observation', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(store.serverStatus.value?.project).toBe('B')
     expect(store.shellCounts.value?.tasks).toBe(9)
-    expect(effects.toast).toHaveBeenCalledTimes(1)
+    // Since #52520 a 401/403 shell refusal is projected as an unauthorized
+    // shell state rather than a connection-failure toast. The retired older
+    // bootstrap must neither toast nor overwrite the current refusal.
+    expect(store.shellAuthSummary.value).toMatchObject({
+      enabled: true,
+      require_token: true,
+      token_valid: true,
+      auth_error_code: 'insufficient_role',
+    })
+    expect(effects.toast).not.toHaveBeenCalled()
   })
 
   it.each(['success', 'failure'] as const)('aborts the last mounted read and suppresses its late %s effects', async outcome => {

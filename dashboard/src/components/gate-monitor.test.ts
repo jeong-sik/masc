@@ -18,6 +18,14 @@ async function loadMonitor(get: (path: string, opts?: { signal?: AbortSignal }) 
     ...await importOriginal<typeof import('../api/core')>(),
     get,
   }))
+  // The mounted Gate read runs only for an accepted execution workspace
+  // (setupObservationRefresh skips an owner without one). Seed it on the same
+  // fresh module graph the monitor imports after resetModules.
+  const workspace = await import('../execution-workspace-authority')
+  workspace.acceptedExecutionWorkspace.value = {
+    epoch: 'gate-monitor-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'gate-monitor-fixture',
+  }
   return import('./gate-monitor')
 }
 

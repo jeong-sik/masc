@@ -881,7 +881,7 @@ describe('workspaces/work', () => {
               decision_source: 'human_operator',
               decision_reason: null,
               actor: 'op-1',
-              resolved_at: '2026-11-24T05:00:00Z',
+              resolved_at: Date.parse('2026-11-24T05:00:00Z') / 1000,
             },
           ],
         })

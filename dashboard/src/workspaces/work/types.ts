@@ -1077,7 +1077,7 @@ export interface GateResolvedAuditRow {
   readonly id: string
   readonly keeper: string
   readonly toolName: string
-  readonly decision: string
+  readonly decision: 'approve' | 'reject'
   /** Null when the row does not say who decided. */
   readonly decisionSource: GateDecisionSource | null
   readonly reason: string | null

@@ -91,6 +91,13 @@ describe('P1 Dashboard shortcut & modal layering regressions', () => {
     })
     expect(submitMock).toHaveBeenCalledTimes(3)
     expect(submitMock).toHaveBeenLastCalledWith(expect.objectContaining({ approvalId: 'appr-1' }), 'approve')
+
+    // Option+Shift+Y while typing must NOT fire approve (macOS special character typing)
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Á', code: 'KeyY', altKey: true, shiftKey: true, bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(submitMock).toHaveBeenCalledTimes(3)
   })
 
   it('QuickPeekDrawer yields Escape to foreground aria-modal dialogs and CommandPalette closes via window Escape', async () => {
@@ -127,5 +134,37 @@ describe('P1 Dashboard shortcut & modal layering regressions', () => {
       await Promise.resolve()
     })
     expect(onDrawerClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('traps Tab focus inside CommandPalette dialog', async () => {
+    render(html`
+      <div>
+        <button data-testid="outside-btn">Outside</button>
+        <${CommandPalette} />
+      </div>
+    `)
+    await act(async () => {
+      openCommandPalette()
+      await Promise.resolve()
+    })
+    const dialog = document.querySelector('.ap-cmdk-dialog') as HTMLElement
+    expect(dialog).not.toBeNull()
+    const tabbables = Array.from(dialog.querySelectorAll<HTMLElement>('input, button:not([disabled])'))
+    expect(tabbables.length).toBeGreaterThan(1)
+
+    const last = tabbables[tabbables.length - 1]!
+    last.focus()
+    await act(async () => {
+      last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+      await Promise.resolve()
+    })
+    expect(document.activeElement).toBe(tabbables[0])
+
+    tabbables[0]!.focus()
+    await act(async () => {
+      tabbables[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+      await Promise.resolve()
+    })
+    expect(document.activeElement).toBe(last)
   })
 })

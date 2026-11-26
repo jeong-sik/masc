@@ -308,13 +308,13 @@ export function WikiTab(props: WorkspaceViewProps) {
     <div class="kn-pane-col">
       <div class="kn-pane-head">
         <div class="kn-chips" role="tablist" aria-label="Wiki 보기">
-          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'pages'} aria-pressed=${leftView === 'pages'} onClick=${() => setLeftView('pages')}>
+          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'pages'} onClick=${() => setLeftView('pages')}>
             Pages <span class="kn-chip-count">${wikiIndex?.pages_total ?? 0}</span>
           </button>
-          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'lint'} aria-pressed=${leftView === 'lint'} onClick=${() => setLeftView('lint')}>
+          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'lint'} onClick=${() => setLeftView('lint')}>
             Lint <span class="kn-chip-count">${wikiIndex?.lint.total_findings ?? 0}</span>
           </button>
-          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'log'} aria-pressed=${leftView === 'log'} onClick=${() => setLeftView('log')}>
+          <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'log'} onClick=${() => setLeftView('log')}>
             Log
           </button>
         </div>

@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconnect } from '../../core/observer'
 import { formatObserved, resourceCache, type Observed } from '../../core/resource-cache'
@@ -76,6 +77,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deleteModalRef = useRef<HTMLDivElement>(null)
   const deleteInputRef = useRef<HTMLInputElement>(null)
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeper.name)
@@ -87,6 +89,12 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       mountedRef.current = false
     }
   }, [])
+
+  useFocusScope({
+    containerRef: deleteModalRef,
+    active: deleteOpen,
+    initialFocus: () => deleteInputRef.current,
+  })
 
   const closeDeleteModal = () => {
     setDeleteOpen(false)
@@ -105,6 +113,12 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined') {
+          const otherModalOpen = Array.from(
+            document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+          ).some((el) => el !== deleteModalRef.current)
+          if (otherModalOpen) return
+        }
         event.preventDefault()
         event.stopPropagation()
         closeDeleteModal()
@@ -460,6 +474,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
 
       ${deleteOpen && html`
         <div
+          ref=${deleteModalRef}
           class="kp-modal-backdrop"
           role="dialog"
           aria-modal="true"

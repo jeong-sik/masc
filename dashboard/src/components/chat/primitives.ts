@@ -9,6 +9,7 @@ import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import { ringFocusClasses } from '../common/ring'
 import {
   ATTACHMENT_INPUT_ACCEPT,
@@ -997,19 +998,30 @@ export function ChatPreviewModal({
   onClose: () => void
   children: ComponentChildren
 }) {
+  const modalRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useFocusScope({ containerRef: modalRef, active: true })
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (isDismissEscape(e)) onClose()
+      if (isDismissEscape(e)) {
+        e.preventDefault()
+        e.stopPropagation()
+        onCloseRef.current()
+      }
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [onClose])
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [])
 
   // Keep the fixed overlay relative to the viewport, outside transcript row
   // layout/paint containment and the transcript scroll clip.
   return createPortal(html`
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      ref=${modalRef}
+      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick=${onClose}
       role="dialog"
       aria-modal="true"

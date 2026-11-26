@@ -127,11 +127,3 @@ export function createCommandSearcher<T extends CommandSearchItem>(
     },
   }
 }
-
-export function searchCommands<T extends CommandSearchItem>(
-  items: readonly T[],
-  query: string,
-  limit = 25,
-): readonly CommandSearchMatch<T>[] {
-  return createCommandSearcher(items).search(query, limit)
-}

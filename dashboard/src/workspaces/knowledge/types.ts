@@ -930,7 +930,7 @@ export function decodeWorldDiff(raw: unknown): Result<WorldDiffViewModel, string
       batchId: asString(r.batch_id, ''),
       factId: asString(r.fact_id, ''),
       recordedAt: asString(r.recorded_at, ''),
-      op: asString(r.op, 'added'),
+      op: asString(r.op, ''),
     })
   }
   return ok({

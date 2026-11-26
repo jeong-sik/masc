@@ -1744,13 +1744,28 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const input = e.currentTarget as HTMLInputElement
     const files = input.files
     if (!files || files.length === 0) return
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
+    const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
     const next: ChatAttachmentDraft[] = []
+    const rejected: string[] = []
     for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        rejected.push(`${file.name} (${Math.ceil(file.size / (1024 * 1024))}MB > 10MB)`)
+        continue
+      }
       const buf = await file.arrayBuffer()
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+        input.value = ''
+        return
+      }
       const bytes = new Uint8Array(buf)
-      let bin = ''
-      for (const b of bytes) bin += String.fromCharCode(b)
-      const base64 = typeof btoa === 'function' ? btoa(bin) : ''
+      const chunks: string[] = []
+      const CHUNK_SIZE = 0x8000
+      for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE)))
+      }
+      const base64 = typeof btoa === 'function' ? btoa(chunks.join('')) : ''
       next.push({
         id: randomUuid(),
         type: isWorkspaceRasterMime(file.type) ? 'image' : 'file',
@@ -1760,7 +1775,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         data: base64,
       })
     }
-    setAttachments((prev) => [...prev, ...next])
+    if (rejected.length > 0) {
+      setHistoryError(`첨부 크기 제한(10MB)을 초과한 파일은 제외되었습니다: ${rejected.join(', ')}`)
+    }
+    if (next.length > 0) {
+      setAttachments((prev) => [...prev, ...next])
+    }
     input.value = ''
   }
 
@@ -2345,7 +2365,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     <div class="kp-chat-shell" data-companion-open=${companionOpen ? 'true' : 'false'}>
       <div class="kp-chat-main">
         <div class="kp-chat-toolbar">
-          <div class="kp-pill-row kp-chat-toggles">
+          <div class="kp-pill-row">
             <span class="kp-pill" data-tone="info">Origin_bare · AG-UI SSE</span>
             <button
               type="button"

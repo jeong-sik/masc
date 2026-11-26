@@ -9,6 +9,8 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
+import { isEditableTarget } from '../../lib/keyboard'
 
 export type QuickPeekMode = 'auto' | 'push' | 'overlay'
 
@@ -37,6 +39,23 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(props.onClose)
   onCloseRef.current = props.onClose
+
+  const resolvedMode = props.mode === 'push'
+    ? 'push'
+    : props.mode === 'overlay'
+      ? 'overlay'
+      : isPushViewport
+        ? 'push'
+        : 'overlay'
+
+  const isOverlay = resolvedMode === 'overlay'
+
+  useFocusScope({
+    containerRef: drawerRef,
+    active: props.open && isOverlay,
+    initialFocus: () => closeBtnRef.current,
+    restoreFocus: false,
+  })
 
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = 0
@@ -75,11 +94,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
         return
       }
       if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
-        const target = event.target
-        if (
-          target instanceof HTMLElement
-          && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
-        ) {
+        if (isEditableTarget(event.target)) {
           return
         }
         if (typeof document !== 'undefined') {
@@ -100,16 +115,6 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   }, [props.open])
 
   if (!props.open) return null
-
-  const resolvedMode = props.mode === 'push'
-    ? 'push'
-    : props.mode === 'overlay'
-      ? 'overlay'
-      : isPushViewport
-        ? 'push'
-        : 'overlay'
-
-  const isOverlay = resolvedMode === 'overlay'
 
   return html`
     ${isOverlay && html`

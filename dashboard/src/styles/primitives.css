@@ -493,6 +493,22 @@
   font-size: var(--fs-12);
   color: var(--fg-2);
 }
+.chat-block-media-frame,
+.img-frame {
+  display: inline-block;
+  max-width: 100%;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  transition: border-color var(--t-fast) var(--ease);
+}
+.chat-block-media-frame:hover,
+.img-frame:hover,
+.chat-block-media-frame:focus-visible,
+.img-frame:focus-visible {
+  border-color: var(--line-2);
+}
 .chat-block-media-ph,
 .img-ph {
   display: inline-flex;
@@ -504,6 +520,24 @@
   background: var(--bg-2);
   color: var(--fg-2);
   font-size: var(--fs-12);
+}
+.think-block {
+  margin-block: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+}
+.think-block > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--fg-2);
+  user-select: none;
+}
+.think-block[open] > summary {
+  margin-bottom: var(--sp-2);
 }
 
 .markdown-content {

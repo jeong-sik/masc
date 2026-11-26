@@ -16,6 +16,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useFocusScope } from '../../design-system/headless-preact/use-focus-scope'
 import {
   authSession,
   bootstrapAuthSession,
@@ -408,8 +409,15 @@ export function CommandPalette(): VNode | null {
   const session = authSession.value
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  useFocusScope({
+    containerRef: dialogRef,
+    active: open,
+    initialFocus: () => inputRef.current,
+  })
 
   const commands = useMemo(
     () => buildPaletteCommands(session),
@@ -425,10 +433,6 @@ export function CommandPalette(): VNode | null {
 
   useEffect(() => {
     if (!open) return
-    const previousFocus =
-      typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
     setQuery('')
     setSelectedIdx(0)
     queueMicrotask(() => inputRef.current?.focus())
@@ -443,7 +447,6 @@ export function CommandPalette(): VNode | null {
     window.addEventListener('keydown', onWindowKeyDown, true)
     return () => {
       window.removeEventListener('keydown', onWindowKeyDown, true)
-      previousFocus?.focus?.()
     }
   }, [open])
 
@@ -495,6 +498,7 @@ export function CommandPalette(): VNode | null {
       }}
     >
       <div
+        ref=${dialogRef}
         class="ap-cmdk-dialog"
         role="dialog"
         aria-modal="true"

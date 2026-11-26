@@ -109,15 +109,6 @@ export function toggleRail(): void {
   } catch { /* storage unavailable */ }
 }
 
-export function setRailExpanded(expanded: boolean): void {
-  railPreferredExpanded.value = expanded
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(RAIL_STORAGE_KEY, expanded ? '1' : '0')
-    }
-  } catch { /* storage unavailable */ }
-}
-
 export function openInspectDrawer(payload: WorkspaceInspectPayload): void {
   activeOverlay.value = { kind: 'inspect', payload, epoch: currentSessionEpoch() }
 }

@@ -790,8 +790,10 @@ let find_and_execute_tool_with_index
            | result -> repair_utf8_tool_result result
            | exception (Eio.Cancel.Cancelled _ as cancelled) ->
              (* No result exists, so [post_tool_use] and the deferred observers
-                never run. Without this call the call leaves no trace at all,
-                although its effect may already have happened. *)
+                never run. Emit both the failure hook and a matching
+                [ToolCompleted] event under [Cancel.protect] so neither the
+                audit log nor the event-bus pending-tool counter leaks an
+                unpaired [ToolCalled]. *)
              let backtrace = Printexc.get_raw_backtrace () in
              let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
              Eio.Cancel.protect (fun () ->
@@ -807,7 +809,40 @@ let find_and_execute_tool_with_index
                    [ Log.S ("tool", name)
                    ; Log.S ("tool_use_id", id)
                    ; Log.S ("failure", deferred_failure_summary failure)
-                   ]));
+                   ]);
+               match publish_event_bus, event_bus with
+               | true, Some bus ->
+                 let cancelled_output : Types.tool_result =
+                   Error
+                     { Types.message = Printexc.to_string cancelled
+                     ; recoverable = false
+                     ; error_class = None
+                     }
+                 in
+                 (try
+                    Event_bus.publish
+                      bus
+                      (Event_bus.mk_event
+                         ?correlation_id
+                         ?run_id
+                         ?caused_by:tool_called_run_id
+                         (ToolCompleted
+                            { invocation
+                            ; agent_name
+                            ; tool_name = name
+                            ; output = cancelled_output
+                            }))
+                  with
+                  | exn ->
+                    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                    Log.error
+                      _log
+                      "cancelled tool ToolCompleted publish failed"
+                      [ Log.S ("tool", name)
+                      ; Log.S ("tool_use_id", id)
+                      ; Log.S ("error", Printexc.to_string exn)
+                      ])
+               | false, _ | true, None -> ());
              Printexc.raise_with_backtrace cancelled backtrace
          in
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
@@ -1096,10 +1131,38 @@ let execute_scheduled_tool
     ; failure = !first_failure
     }
   in
+  let started_observed = ref false in
+  let finished_observed = ref false in
   let observe_started ~tool_name ~input =
     match on_tool_execution_started with
-    | Some callback -> callback ~invocation ~tool_name ~input
+    | Some callback ->
+      callback ~invocation ~tool_name ~input;
+      started_observed := true
     | None -> ()
+  in
+  let notify_cancelled_finished ~tool_name cancelled =
+    if !started_observed && not !finished_observed then (
+      finished_observed := true;
+      match on_tool_execution_finished with
+      | None -> ()
+      | Some callback ->
+        Eio.Cancel.protect (fun () ->
+          try
+            callback
+              ~invocation
+              ~tool_name
+              ~content:(Printexc.to_string cancelled)
+              ~is_error:true
+          with
+          | exn ->
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
+            Log.error
+              _log
+              "cancelled tool finished observer failed"
+              [ Log.S ("tool", tool_name)
+              ; Log.S ("tool_use_id", id)
+              ; Log.S ("error", Printexc.to_string exn)
+              ]))
   in
   let begin_effect ~publish_event_bus ~tool_name ~input =
     let pending =
@@ -1130,6 +1193,7 @@ let execute_scheduled_tool
       (fun deferred -> record_failure (execution_failure_of_deferred deferred))
       dispatch.deferred_failure;
     observe_after_completion (fun () ->
+      finished_observed := true;
       match on_tool_execution_finished with
       | Some callback ->
         callback
@@ -1141,22 +1205,29 @@ let execute_scheduled_tool
     dispatch
   in
   let execute_durable durable_invocation =
-    match
-      Execution_agent_scope.execute_phased
-        durable_invocation
-        ~invoke:(fun ~start_child ~tool_name ~input ->
-          Execution_context.flush_bus_observations ();
-          observe_before_completion (fun () -> observe_started ~tool_name ~input);
-          Execution_context.with_child_scope_factory start_child (fun () ->
-            let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
-            ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
-            , fun () ->
-                Fun.protect
-                  ~finally:(fun () -> Execution_context.settle_tool_observers invocation)
-                  (fun () ->
-                    let (_ : tool_dispatch) = finish_effect pending ~tool_name in
-                    ()) )))
-    with
+    let phased =
+      try
+        Execution_agent_scope.execute_phased
+          durable_invocation
+          ~invoke:(fun ~start_child ~tool_name ~input ->
+            Execution_context.flush_bus_observations ();
+            observe_before_completion (fun () -> observe_started ~tool_name ~input);
+            Execution_context.with_child_scope_factory start_child (fun () ->
+              let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
+              ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
+              , fun () ->
+                  Fun.protect
+                    ~finally:(fun () -> Execution_context.settle_tool_observers invocation)
+                    (fun () ->
+                      let (_ : tool_dispatch) = finish_effect pending ~tool_name in
+                      ()) )))
+      with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        notify_cancelled_finished ~tool_name:name cancelled;
+        Printexc.raise_with_backtrace cancelled backtrace
+    in
+    match phased with
     | Error error ->
       (* The effect may already have returned, but without an atomic settlement
          there is no result authority to expose to the transcript. *)
@@ -1271,9 +1342,14 @@ let execute_scheduled_tool
           let dispatch =
             with_tool_span (fun () ->
               observe_before_completion (fun () -> observe_started ~tool_name:name ~input);
-              let pending = begin_effect ~publish_event_bus:true ~tool_name:name ~input in
-              finish_effect pending ~tool_name:name)
-
+              try
+                let pending = begin_effect ~publish_event_bus:true ~tool_name:name ~input in
+                finish_effect pending ~tool_name:name
+              with
+              | Eio.Cancel.Cancelled _ as cancelled ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                notify_cancelled_finished ~tool_name:name cancelled;
+                Printexc.raise_with_backtrace cancelled backtrace)
           in
           completed_dispatch := Some dispatch;
           outcome ()

@@ -1349,11 +1349,39 @@ let test_the_turn_text_ends_the_response () =
   Alcotest.(check string) "and keeps the last words" "final words" (current ()).text_tail
 ;;
 
+let test_parallel_anonymous_tools_stay_distinct_and_concrete_end_preserves_running_sibling () =
+  let keeper_name = "parallel-anon-tools" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  loop_attempt ~now:1. writer "glm";
+  Keeper_turn_preview.note_stream ~writer ~now:2. (tool_block 1 None "Execute");
+  Keeper_turn_preview.note_stream ~writer ~now:2. (tool_block 2 None "Execute");
+  Alcotest.(check int)
+    "two anonymous parallel requests remain two open entries"
+    2
+    (List.length (current ()).open_activities);
+  Keeper_turn_preview.note_tool_started ~writer ~now:3. ~tool_use_id:(Some "call-1")
+    ~tool_name:"Execute" ~cohort:None ~reach:None;
+  Keeper_turn_preview.note_tool_started ~writer ~now:3. ~tool_use_id:None
+    ~tool_name:"Execute" ~cohort:None ~reach:None;
+  Keeper_turn_preview.note_tool_finished ~writer ~now:4. ~tool_use_id:(Some "call-1")
+    ~tool_name:"Execute";
+  (* Duplicate finish for call-1 must not close the unrelated running anonymous sibling. *)
+  Keeper_turn_preview.note_tool_finished ~writer ~now:4.1 ~tool_use_id:(Some "call-1")
+    ~tool_name:"Execute";
+  Alcotest.(check int)
+    "running anonymous sibling survives duplicate concrete finish"
+    1
+    (List.length (current ()).open_activities)
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
       , [ Alcotest.test_case "preparation scopes are visible and keep their actual owner" `Quick
             test_preparation_scopes_are_visible_owned_and_do_not_dispatch
+        ; Alcotest.test_case "parallel anonymous tools stay distinct" `Quick
+            test_parallel_anonymous_tools_stay_distinct_and_concrete_end_preserves_running_sibling
         ; Alcotest.test_case "original preparation remains durable after a successor" `Quick
             test_original_preparation_is_durable_after_successor
         ; Alcotest.test_case "preparation reports preserve failure and cancellation" `Quick

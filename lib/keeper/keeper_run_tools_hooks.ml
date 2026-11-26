@@ -120,12 +120,13 @@ type ctx =
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; tool_result_commit_required : unit -> bool
   ; on_tool_result_ready :
-      (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) option
+      (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> is_error:bool option -> unit) option
   ; on_tool_stream_observation :
       (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; identity_tool_index : Keeper_identity_tool_index.t
+  ; tool_reach : string -> Keeper_tool_reach.t option
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   }
@@ -660,29 +661,6 @@ let assemble_hooks
               | OnStop _
               | OnError _
               | OnToolError _ -> Agent_core.Hooks.Continue)
-      ;
-        pre_tool_use =
-          Some
-            (fun event ->
-              match event with
-              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
-                Keeper_turn_preview.note_tool_started ~writer:preview
-                  ~now:(Time_compat.now ())
-                  ~tool_use_id:
-                    (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
-                  ~tool_name
-                  ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation))
-                  ~reach:(ctx.tool_reach tool_name);
-                Agent_core.Hooks.Continue
-              | BeforeTurn _
-              | BeforeTurnParams _
-              | AfterTurn _ | AfterRestoredTurn _
-              | PostToolUse _
-              | PostToolUseFailure _
-              | OnStop _
-              | OnError _
-              | OnToolError _ ->
-                Agent_core.Hooks.Continue)
       ; before_turn_params =
           Some
             (guard_repetition_before_turn_params repetition_execution (fun event ->
@@ -1179,7 +1157,46 @@ let assemble_hooks
               | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))
       }
     in
-    let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    let composed_hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    (* Clear any open preview entry when a pre_tool_use hook blocks execution,
+       since neither PostToolUse nor PostToolUseFailure runs for blocked calls. *)
+    let hooks =
+      match composed_hooks.pre_tool_use with
+      | None -> composed_hooks
+      | Some pre_hook ->
+        { composed_hooks with
+          pre_tool_use =
+            Some
+              (fun event ->
+                let decision = pre_hook event in
+                (match decision with
+                 | Agent_core.Hooks.Block _ ->
+                   (match event with
+                    | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                      Keeper_turn_preview.note_tool_finished
+                        ~writer:preview
+                        ~now:(Time_compat.now ())
+                        ~tool_use_id:
+                          (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+                        ~tool_name
+                    | Agent_core.Hooks.BeforeTurn _
+                    | Agent_core.Hooks.BeforeTurnParams _
+                    | Agent_core.Hooks.AfterTurn _
+                    | Agent_core.Hooks.AfterRestoredTurn _
+                    | Agent_core.Hooks.PostToolUse _
+                    | Agent_core.Hooks.PostToolUseFailure _
+                    | Agent_core.Hooks.OnStop _
+                    | Agent_core.Hooks.OnError _
+                    | Agent_core.Hooks.OnToolError _ -> ())
+                 | Agent_core.Hooks.Continue
+                 | Agent_core.Hooks.AdjustParams _
+                 | Agent_core.Hooks.ElicitInput _
+                 | Agent_core.Hooks.ElicitToolApproval _
+                 | Agent_core.Hooks.Nudge _
+                 | Agent_core.Hooks.HookFailed _ -> ());
+                decision)
+        }
+    in
     let model_input_projection messages =
       (* Stored Tool results are already the canonical provider-bound
          representation. Fetching their bytes here would undo externalization
@@ -1193,6 +1210,7 @@ let assemble_hooks
       { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
       ; identity_tool_index = ctx.identity_tool_index
+      ; tool_reach = ctx.tool_reach
       ; on_demand_tool_names = ctx.on_demand_tool_names
       ; result_bounds = ctx.result_bounds
       ; project_for_runtime = ctx.project_for_runtime

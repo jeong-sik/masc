@@ -129,12 +129,18 @@ let test_tool_result_ready_projection_has_exact_identity () =
              }
          ; tool_call_id = Some "tool-use-7"
          ; execution_id = Ids.Execution_id.of_string "exec-7"
+         ; is_error = Some true
          })
   in
   let ready = Ag_ui.event_to_json (projected_exn (state, ready)) in
   Alcotest.(check (option string)) "result-ready custom event"
     (Some "KEEPER_TOOL_RESULT_READY")
     (Yojson.Safe.Util.member "name" ready |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option bool)) "result-ready carries isError when known"
+    (Some true)
+    (Yojson.Safe.Util.member "value" ready
+     |> Yojson.Safe.Util.member "isError"
+     |> Yojson.Safe.Util.to_bool_option);
   Alcotest.(check (option string)) "exact tool identity"
     (Some "tool-use-7")
     (Yojson.Safe.Util.member "value" ready

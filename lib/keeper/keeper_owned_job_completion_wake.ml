@@ -109,11 +109,13 @@ type t =
   { config : Workspace.config
   ; on_result_ready : Store.record -> unit
   ; on_discovery : base_path:string -> (unit, Store.error) result -> unit
+  ; recovery_sem : Eio.Semaphore.t
   ; mutable active : Job_set.t
   ; mutable held_absent : Keeper_owned_job_runtime.held_absent Job_map.t
   ; mutable discovery_active : bool }
 let create ~config ?(on_result_ready=ignore) ?(on_discovery=log_discovery) () =
-  {config;on_result_ready;on_discovery;active=Job_set.empty;held_absent=Job_map.empty;
+  {config;on_result_ready;on_discovery;recovery_sem=Eio.Semaphore.make recovery_max_fibers;
+   active=Job_set.empty;held_absent=Job_map.empty;
    discovery_active=false}
 
 let discover_and_schedule ~sw supervisor =
@@ -135,14 +137,21 @@ let discover_and_schedule ~sw supervisor =
             (* Fork may enter the child first. Let discovery continue before
                recovery I/O; cancellation here still releases this reservation. *)
             Eio.Fiber.yield ();
-            match recover ~presence_round ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
-            | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s base_path=%S"
-                (Store.Job_id.to_string marker.job_id) (Store.error_to_string error) base_path
-            | Ok (Waiting None) -> ()
-            | Ok (Waiting (Some held)) ->
-                supervisor.held_absent <- Job_map.add marker.job_id held supervisor.held_absent
-            | Ok Delivered | Ok Retired -> Log.Server.info "owned job completion recovered job=%s base_path=%S"
-                (Store.Job_id.to_string marker.job_id) base_path))
+            (* Bound concurrent backend recovery probes to [recovery_max_fibers],
+               matching [reconcile] so a large Waiting set cannot fan out
+               unbounded CLI calls on each supervisor pulse. *)
+            Eio.Semaphore.acquire supervisor.recovery_sem;
+            Fun.protect
+              ~finally:(fun () -> Eio.Semaphore.release supervisor.recovery_sem)
+              (fun () ->
+                match recover ~presence_round ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
+                | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s base_path=%S"
+                    (Store.Job_id.to_string marker.job_id) (Store.error_to_string error) base_path
+                | Ok (Waiting None) -> ()
+                | Ok (Waiting (Some held)) ->
+                    supervisor.held_absent <- Job_map.add marker.job_id held supervisor.held_absent
+                | Ok Delivered | Ok Retired -> Log.Server.info "owned job completion recovered job=%s base_path=%S"
+                    (Store.Job_id.to_string marker.job_id) base_path)))
       with exn ->
         supervisor.active <- Job_set.remove marker.job_id supervisor.active;
         raise exn) in

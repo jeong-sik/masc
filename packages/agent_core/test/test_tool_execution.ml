@@ -1233,6 +1233,14 @@ let test_cancelled_handler_reaches_the_failure_hook () =
   @@ fun env ->
   let post_calls = ref 0 in
   let failure_stages = ref [] in
+  let started = ref 0 in
+  let finished_errors = ref [] in
+  let event_bus = Event_bus.create () in
+  let event_config =
+    Event_bus.subscription_config ~capacity:8 ~overflow:Event_bus.Drop_newest
+    |> Result.get_ok
+  in
+  let subscription = Event_bus.subscribe ~config:event_config event_bus in
   let hooks =
     { Hooks.empty with
       post_tool_use = Some (fun _ -> incr post_calls; Hooks.Continue)
@@ -1254,13 +1262,37 @@ let test_cancelled_handler_reaches_the_failure_hook () =
        env
        ~tools:[ cancelled_tool ]
        ~hooks
+       ~event_bus
+       ~on_tool_execution_started:(fun ~invocation:_ ~tool_name:_ ~input:_ -> incr started)
+       ~on_tool_execution_finished:(fun ~invocation:_ ~tool_name:_ ~content:_ ~is_error ->
+         finished_errors := is_error :: !finished_errors)
        [ ToolUse { id = "t1"; name = "cut"; input = `Assoc [] } ]
    with
    | exception Eio.Cancel.Cancelled Exit -> ()
    | _ -> fail "the cancellation did not reach the caller");
+  let events = Event_bus.drain subscription in
+  Event_bus.unsubscribe event_bus subscription;
+  let called_count =
+    List.length
+      (List.filter
+         (fun (ev : Event_bus.event) ->
+            match ev.payload with Event_bus.ToolCalled _ -> true | _ -> false)
+         events)
+  in
+  let completed_count =
+    List.length
+      (List.filter
+         (fun (ev : Event_bus.event) ->
+            match ev.payload with Event_bus.ToolCompleted { output = Error _; _ } -> true | _ -> false)
+         events)
+  in
   check int "no result reaches PostToolUse" 0 !post_calls;
   check bool "the failure hook saw the call end under cancellation" true
-    (!failure_stages = [ Hooks.Cancelled_during_execution ])
+    (!failure_stages = [ Hooks.Cancelled_during_execution ]);
+  check int "cancelled tool emitted ToolCalled" 1 called_count;
+  check int "cancelled tool emitted paired error ToolCompleted" 1 completed_count;
+  check int "started observer fired once" 1 !started;
+  check (list bool) "finished observer paired with is_error=true" [ true ] !finished_errors
 ;;
 
 let test_tool_exception_still_publishes_tool_completed () =

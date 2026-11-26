@@ -145,31 +145,31 @@ let same_tool ~tool_use_id ~tool_name (tool : open_tool) =
   | Some wanted, Some have -> String.equal wanted have
   | Some _, None | None, Some _ | None, None -> String.equal tool_name tool.tool_name
 
-let open_tool_of ~tool_use_id ~tool_name work =
-  match
-    List.find_opt
-      (function
-        | Tool_open tool -> same_tool ~tool_use_id ~tool_name tool
-        | Response_open _ -> false)
-      work
-  with
-  | Some (Tool_open tool) -> Some tool
-  | Some (Response_open _) | None -> None
-
-(* The model started calling the tool. Nothing says it runs yet. *)
-let tool_requested ~now ~tool_use_id ~tool_name work =
-  match open_tool_of ~tool_use_id ~tool_name work with
-  | Some _ -> work
-  | None ->
-      work
-      @ [ Tool_open
-            { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now
-            ; cohort = None; reach = None } ]
-
 (* The before-tool hook runs once the gates before it said yes, so this is
    where execution starts. Hearing it twice for one call changes nothing. *)
 let has_tool_id id (tool : open_tool) =
   Option.equal String.equal (Some id) tool.tool_use_id
+
+(* The model started calling the tool. Nothing says it runs yet.
+   Only deduplicate when a concrete [tool_use_id] is already open; distinct
+   anonymous ([None]) parallel calls of the same tool remain separate rows. *)
+let tool_requested ~now ~tool_use_id ~tool_name work =
+  let already_open =
+    match tool_use_id with
+    | Some id ->
+        List.exists
+          (function
+            | Tool_open tool -> has_tool_id id tool
+            | Response_open _ -> false)
+          work
+    | None -> false
+  in
+  if already_open then work
+  else
+    work
+    @ [ Tool_open
+          { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now
+          ; cohort = None; reach = None } ]
 
 let tool_executing ~now ~tool_use_id ~tool_name ~cohort ~reach work =
   let already_started id =
@@ -214,7 +214,9 @@ let tool_executing ~now ~tool_use_id ~tool_name ~cohort ~reach work =
               { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now
               ; cohort; reach } ]
 
-(* Match an identified return before trying the oldest anonymous call. *)
+(* Match an identified return before trying the oldest unpromoted anonymous
+   request. Never match an already-executing anonymous sibling when ending a
+   concrete [Some id] call. *)
 let tool_ended ~tool_use_id ~tool_name work =
   let end_first accepts =
     remove_first (function Tool_open tool -> accepts tool | Response_open _ -> false) work
@@ -224,7 +226,11 @@ let tool_ended ~tool_use_id ~tool_name work =
   | Some id ->
       let exact = end_first (has_tool_id id) in
       if exact != work then exact
-      else end_first (same_tool ~tool_use_id ~tool_name)
+      else
+        end_first (fun tool ->
+            Option.is_none tool.tool_use_id
+            && tool.stage = Tool_requested
+            && String.equal tool_name tool.tool_name)
 
 (* The host is running a call, so the model's message that called it is over.
    An official client's turn is one long message boundary around many model

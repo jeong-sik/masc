@@ -49,7 +49,9 @@ let () =
                   |> Tool_unified.tool_info_to_json in
                 let open Yojson.Safe.Util in
                 check int "fresh observation includes the later call" 2
-                  (current |> member "call_stats" |> member "call_count" |> to_int)));
+                  (current |> member "call_stats" |> member "call_count" |> to_int);
+                check int "call_stats exposes deferred_count" 0
+                  (current |> member "call_stats" |> member "deferred_count" |> to_int)));
           test_case "JSON has required fields" `Quick (fun () ->
               let info = Tool_unified.tool_info "masc_status" in
               let json = Tool_unified.tool_info_to_json info in
@@ -136,7 +138,9 @@ let () =
                     check string "top tool" "masc_status"
                       (first |> member "name" |> to_string);
                     check int "top count" 2
-                      (first |> member "call_count" |> to_int)
+                      (first |> member "call_count" |> to_int);
+                    check int "top deferred_count exposed" 0
+                      (first |> member "deferred_count" |> to_int)
                   | [] -> fail "expected one top tool"));
           test_case "every row carries the join key" `Quick (fun () ->
               (* The counters are keyed by the internal name, which is the one

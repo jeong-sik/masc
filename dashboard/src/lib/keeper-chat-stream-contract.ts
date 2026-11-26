@@ -248,7 +248,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_RESULT_READY'
-      value: KeeperToolStreamOccurrence & { executionId: string }
+      value: KeeperToolStreamOccurrence & { executionId: string; isError?: boolean }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED'; value: { deliveryKey: KeeperChatDeliveryKey; executionId: string; ordinal: number } }
   | {

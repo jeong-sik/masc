@@ -248,6 +248,7 @@ type keeper_chat_event =
       { occurrence : tool_stream_occurrence
       ; tool_call_id : string option
       ; execution_id : Ids.Execution_id.t
+      ; is_error : bool option
       }
       (** The exact tool result is durably readable from the tool-call store.
           [occurrence] is the streamed row authority, [tool_call_id] remains

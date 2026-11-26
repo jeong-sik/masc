@@ -377,6 +377,48 @@ let test_execution_scope_isolates_queue_tracker_and_fsm () =
         (EB.integrity_error b = None)))
 ;;
 
+let test_concurrent_drains_preserve_tool_order_and_count () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:env#net
+    ~clock:env#clock
+    ~mono_clock:env#mono_clock
+    ~sw
+  @@ fun () ->
+  let bus = Agent_core.Event_bus.create () in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~event_bus:bus ~keeper_name:"a" ~scope () in
+  let scoped_bus = Scope.bus bus ~scope in
+  Fun.protect
+    ~finally:(fun () -> EB.unsubscribe t)
+    (fun () ->
+       EB.start_background_drain ~clock:env#clock t;
+       Eio.Fiber.all
+         [ (fun () ->
+              for i = 1 to 60 do
+                let name = Printf.sprintf "tool-%d" i in
+                Agent_core.Event_bus.publish scoped_bus (tool_called name);
+                Eio.Fiber.yield ();
+                Agent_core.Event_bus.publish scoped_bus (tool_completed name)
+              done)
+         ; (fun () ->
+              for _ = 1 to 60 do
+                ignore (EB.drain ~site:"concurrent_test_a" t);
+                Eio.Fiber.yield ()
+              done)
+         ; (fun () ->
+              for _ = 1 to 60 do
+                ignore (EB.drain ~site:"concurrent_test_b" t);
+                Eio.Fiber.yield ()
+              done)
+         ];
+       EB.unsubscribe t;
+       check int "all 60 tool completions recorded" 60 (EB.tool_completed_count t);
+       check int "pending tool count settles to 0" 0 (EB.pending_tool_count t);
+       check bool "no unmatched completion integrity error" true (EB.integrity_error t = None))
+;;
+
 let () =
   Alcotest.run
     "keeper-unified-turn-event-bus"
@@ -395,6 +437,8 @@ let () =
     ; ( "concurrency"
       , [ test_case "execution scope isolates queue, tracker and FSM" `Quick
             test_execution_scope_isolates_queue_tracker_and_fsm
+        ; test_case "concurrent drains preserve tool order and count" `Quick
+            test_concurrent_drains_preserve_tool_order_and_count
         ; test_case "pure transitions under concurrent domains" `Quick
             test_state_pending_count_integrity_under_concurrent_updates
         ; test_case "event bus is intentionally process-wide" `Quick

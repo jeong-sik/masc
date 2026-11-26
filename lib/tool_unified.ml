@@ -64,6 +64,7 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
       `Assoc [
         ("call_count", `Int (s.call_count));
         ("success_count", `Int (s.success_count));
+        ("deferred_count", `Int (s.deferred_count));
         ("failure_count", `Int (s.failure_count));
         ("last_called_at", `Float (s.last_called_at));
         ("total_duration_ms", `Int (s.total_duration_ms));
@@ -117,6 +118,7 @@ let tool_stats_to_json ~public_names (stats : Tool_metrics.tool_stats) =
     ; "p99_ms", `Float stats.p99_ms
     ; "mean_ms", `Float stats.mean_ms
     ; "success_count", `Int stats.success_count
+    ; "deferred_count", `Int stats.deferred_count
     ; "failure_count", `Int stats.failure_count
     ]
 

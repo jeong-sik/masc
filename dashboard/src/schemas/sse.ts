@@ -712,6 +712,7 @@ function validateKeeperCustomPayload(
       'providerMessageId',
       'toolCallId',
       'executionId',
+      'isError',
     ],
   }
   const object = exactCustomObject(payload, name, allowedFields[name])
@@ -796,7 +797,13 @@ function validateKeeperCustomPayload(
     }
     case 'KEEPER_TOOL_RESULT_READY': {
       const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
-      return occurrence.success ? requiredString(value, 'executionId') : occurrence
+      if (!occurrence.success) return occurrence
+      const execId = requiredString(value, 'executionId')
+      if (!execId.success) return execId
+      if (value.isError !== undefined && typeof value.isError !== 'boolean') {
+        return fail('ag_ui_event.value.isError', 'Expected boolean')
+      }
+      return ok(true)
     }
     case 'KEEPER_TOOL_APPROVAL_REQUESTED': {
       const approvalId = requiredString(value, 'approval_id')

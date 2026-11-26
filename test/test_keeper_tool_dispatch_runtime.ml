@@ -1264,7 +1264,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~trace_id
                 ~keeper_turn_id:1
                 ~on_tool_result_ready:
-                  (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
+                  (fun ~tool_call_id ~turn ~planned_index ~execution_id ~is_error:_ ->
                      let execution_id = Ids.Execution_id.to_string execution_id in
                      let committed =
                        tool_call_rows

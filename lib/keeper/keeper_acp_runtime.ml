@@ -1395,7 +1395,7 @@ let make_stream_projection
     drain_events_if_owner should_drain
   in
   let on_acp_event = function
-    | Acp.Text_delta delta ->
+    | Acp.Text_delta { text = delta; message_id = _ } ->
       observe_activity ();
       agent_message_is_arriving (fun native_stops ->
           let prefix = ensure_message_started_locked () @ close_open_thought_locked () in

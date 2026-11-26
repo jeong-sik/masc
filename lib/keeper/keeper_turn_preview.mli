@@ -30,6 +30,9 @@ type open_tool =
           whether the batch runs at once. Copied from the before-tool hook's
           invocation. [None] until that hook names the call, and for a call
           whose loop plans no batches (an official client, a native run). *)
+  ; reach : Keeper_tool_reach.t option
+      (** Where the call reaches, from the tool's descriptor. [None] until the
+          before-tool hook names the call, and when no descriptor says. *)
   }
 
 type open_activity = Response_open of open_response | Tool_open of open_tool
@@ -149,6 +152,7 @@ val note_tool_started :
   tool_use_id:string option ->
   tool_name:string ->
   cohort:Agent_core.Tool_contract.schedule option ->
+  reach:Keeper_tool_reach.t option ->
   unit
 (** The before-tool hook ran, so the host is executing this call. A call the
     stream already opened moves from requested to executing; one it never

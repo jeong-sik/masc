@@ -128,7 +128,7 @@ let test_before_turn_shows_the_provider_wait () =
       ~turn_ref:None ~keeper_name ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty
   in
   Masc.Keeper_turn_preview.note_tool_started ~writer:(Some writer) ~now:2. ~tool_use_id:None
-    ~tool_name:"Execute" ~cohort:None;
+    ~tool_name:"Execute" ~cohort:None ~reach:None;
   let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-hook-before-turn" in
   let hooks =
     Masc.Keeper_hooks_agent_core.make_hooks

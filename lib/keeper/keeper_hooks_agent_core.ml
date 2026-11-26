@@ -301,6 +301,7 @@ let observe_refused_call ~tool_name ~duration_ms ~error =
 
 let make_hooks
     ?preview
+    ?(tool_reach = fun (_ : string) -> None)
     ?observation_token
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
@@ -369,7 +370,8 @@ let make_hooks
           ~tool_use_id:
             (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
           ~tool_name
-          ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation));
+          ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation))
+          ~reach:(tool_reach tool_name);
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 

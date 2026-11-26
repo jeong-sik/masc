@@ -5,8 +5,10 @@
  * `single_user` mode, causing HTTP 401 console errors on every keeper badge/card.
  * This cache loads portraits via mode-aware `fetch`:
  * - `single_user_local`: sends `Authorization: Bearer <token>` (when set) + `credentials: 'same-origin'`
- * - `multi_account_signed_in`: sends `credentials: 'same-origin'` (zero Bearer header)
- * - unauthenticated/probing sessions: returns `null` immediately (0× HTTP 401)
+ * - `multi_account_signed_in`: returns `null` immediately (0× HTTP); the portrait route is single-user
+ *   `CanReadState` and answers 404 in multi_account, so no request is made
+ * - single-user `player` role: returns `null` immediately (server answers 403)
+ * - unauthenticated/probing/other sessions: returns `null` immediately (0× HTTP 401)
  * - caches `401`/`404`/non-image misses per `(sessionEpoch, sessionKey, url)` to prevent retry storms
  * - revokes all cached `blob:` URLs via `URL.revokeObjectURL` whenever `sessionEpoch` advances.
  */

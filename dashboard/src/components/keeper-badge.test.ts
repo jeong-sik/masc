@@ -136,7 +136,7 @@ describe('KeeperBadge & authenticated portrait cache', () => {
     expect(revokeObjSpy).toHaveBeenCalledWith('blob:keeper-portrait-1')
   })
 
-  it('omits Authorization Bearer in multi_account mode and caches 404/401 misses without retry spam', async () => {
+  it('does not request portraits in multi_account mode (route is single-user only, 404 in multi_account)', async () => {
     authSession.value = {
       kind: 'multi_account_signed_in',
       mode: 'multi_account',
@@ -156,10 +156,30 @@ describe('KeeperBadge & authenticated portrait cache', () => {
     const second = await loadAuthenticatedPortrait(url, fetchMock as unknown as typeof fetch)
     expect(first).toBeNull()
     expect(second).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(0)
+  })
+
+  it('caches 404/401 misses in single_user mode without retry spam', async () => {
+    setSingleUserToken('tok-portrait-miss')
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+
+    const fetchMock = vi.fn(async () => new Response('not found', { status: 404 }))
+    const url = keeperPortraitUrl('codex-mcp-client', 64)
+
+    const first = await loadAuthenticatedPortrait(url, fetchMock as unknown as typeof fetch)
+    const second = await loadAuthenticatedPortrait(url, fetchMock as unknown as typeof fetch)
+    expect(first).toBeNull()
+    expect(second).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok-portrait-miss')
     expect(init.credentials).toBe('same-origin')
   })
 })

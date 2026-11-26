@@ -109,8 +109,7 @@ module For_testing : sig
   val effective_context_used : Runtime_acp_client.usage -> int option
 
   val held_context_of_usage
-    :  driver:Runtime_acp_client.driver
-    -> Runtime_acp_client.usage
+    :  Runtime_acp_client.usage
     -> Runtime_observation.request_context option
 
   val stop_reason_of_acp_stop_reason

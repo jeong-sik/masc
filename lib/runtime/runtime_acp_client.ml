@@ -140,17 +140,6 @@ type usage_channel =
   | Usage_over_acp
   | Usage_in_muse_session_journal
 
-type window_used_accounting =
-  | Newest_request_count
-      (** [usage_update.used] is the newest model request's input plus its
-          output, as the provider counted them (Antigravity, Kimi Code,
-          Mistral Vibe; checked against each host's request log on
-          2026-11-26). *)
-  | Host_prompt_estimate
-      (** [usage_update.used] is the host's own estimate of the next prompt
-          (Muse writes it as [estimated_prompt_tokens] beside the counted
-          request in its session journal). *)
-
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
   | Mcp_paren_wrapper
@@ -178,7 +167,6 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
-  ; window_used_accounting : window_used_accounting
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -215,7 +203,6 @@ let profile_of_driver = function
     ; input_accounting = Exclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
-    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "default"
@@ -240,7 +227,6 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
-    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = true
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "plan"
@@ -274,7 +260,6 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
-    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "ask"
     ; mode_for_native_read = "ask"
@@ -357,7 +342,6 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_in_muse_session_journal
-    ; window_used_accounting = Host_prompt_estimate
     ; supports_skills_dir_flag = false
     (* Modes advertised by session/new: allowAll, promptUnmatched, onRequest
        (default), denyUnmatched. Pinning "onRequest" on every session keeps a
@@ -551,7 +535,6 @@ type usage =
   ; total_tokens : int
   ; context_used : int option
   ; context_size : int option
-  ; last_request_input_tokens : int option
   }
 
 let empty_usage =
@@ -563,7 +546,6 @@ let empty_usage =
   ; total_tokens = 0
   ; context_used = None
   ; context_size = None
-  ; last_request_input_tokens = None
   }
 ;;
 
@@ -1882,7 +1864,6 @@ let parse_prompt_usage result_json =
     ; total_tokens
     ; context_used = None
     ; context_size = None
-    ; last_request_input_tokens = None
     }
 ;;
 
@@ -3975,6 +3956,14 @@ let fallback_session_info ~session_id json =
   }
 ;;
 
+(* What a Muse session holds after a model request, as the provider counted
+   it: that request's input plus its output, the number the other drivers send
+   as [usage_update.used]. *)
+let muse_held_tokens (request : Runtime_muse_session_log.counts) =
+  request.Runtime_muse_session_log.input_tokens
+  + request.Runtime_muse_session_log.output_tokens
+;;
+
 let attach_existing_session
       t
       ~method_name
@@ -4051,7 +4040,23 @@ let attach_existing_session
          | _ :: _, _ -> raw_info.config_options
          | [], Some opts -> opts
          | [], None -> [])
-    ; replayed_context_used = Atomic.get replayed_used
+    ; replayed_context_used =
+        (match t.usage_journal with
+         | No_usage_journal -> Atomic.get replayed_used
+         (* Muse replays its estimate: what the session holds is its newest
+            request's count, at the end of its journal. *)
+         | Muse_usage_journal root ->
+           (match
+              Result.bind root (fun root ->
+                Runtime_muse_session_log.last_request root ~session_id)
+            with
+            | Ok newest -> Option.map muse_held_tokens newest
+            | Error err ->
+              Log.Runtime_agent.warn
+                "Muse session %s: no count of what it holds, its journal is unreadable: %s"
+                session_id
+                (Runtime_muse_session_log.error_to_string err);
+              None))
     ; replayed_context_size = Atomic.get replayed_size
     }
   in
@@ -4113,11 +4118,12 @@ let resume_session
 
 (* The tokens of a prompt whose host reports none over ACP: its model requests,
    its approval reviews and its observers' requests, read from the host's
-   journals. [acp_usage] keeps
-   the context window and occupancy the host does report. The input of the
-   last request rides beside them as its own count: it is one dispatched
-   request, not the host's figure, and the input of the whole prompt adds up
-   the context of every request and is no occupancy. *)
+   journals. [acp_usage] keeps the context window the host does report. What
+   the session holds is the newest request's counted input plus output, the
+   number the other drivers send as [usage_update.used]; the host's own
+   [used] is its estimate of that request's prompt and is not kept, and the
+   input of the whole prompt adds up the context of every request and is no
+   occupancy. *)
 let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn) : usage =
   let total = Runtime_muse_session_log.total turn in
   let input_tokens = total.Runtime_muse_session_log.input_tokens in
@@ -4128,9 +4134,8 @@ let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn
   ; cached_write_tokens = Runtime_muse_session_log.total_cache_write_tokens turn
   ; thought_tokens = total.Runtime_muse_session_log.reasoning_tokens
   ; total_tokens = input_tokens + output_tokens
-  ; context_used = acp_usage.context_used
+  ; context_used = Option.map muse_held_tokens turn.Runtime_muse_session_log.last_request
   ; context_size = acp_usage.context_size
-  ; last_request_input_tokens = turn.Runtime_muse_session_log.last_request_input_tokens
   }
 ;;
 
@@ -4187,7 +4192,6 @@ let prompt
          ; total_tokens = Option.value total_tokens ~default:prev.total_tokens
          ; context_used = !last_context_used
          ; context_size = !last_context_size
-         ; last_request_input_tokens = None
          });
     on_event event
   in
@@ -4287,14 +4291,17 @@ let prompt
   match result with
   | Error _ as err -> err
   | Ok (stop_reason, acp_usage) ->
+    (* Without its journal a Muse prompt has no count of the session: the
+       [used] its frames carried is the host's estimate. *)
+    let without_journal = { acp_usage with context_used = None } in
     let usage, usage_source =
       match journal_mark with
       | None -> acp_usage, Usage_from_acp
-      | Some (Error err) -> acp_usage, Usage_unreadable err
+      | Some (Error err) -> without_journal, Usage_unreadable err
       | Some (Ok mark) ->
         (match Runtime_muse_session_log.read_turn mark with
          | Ok turn -> usage_of_muse_turn acp_usage turn, Usage_from_muse_journal turn
-         | Error err -> acp_usage, Usage_unreadable err)
+         | Error err -> without_journal, Usage_unreadable err)
     in
     Ok
       { session_id

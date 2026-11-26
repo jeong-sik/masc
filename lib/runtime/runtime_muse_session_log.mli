@@ -3,8 +3,13 @@
 
     [muse acp] 1.4.25 sends no token counts over ACP. The [session/prompt]
     result holds [stopReason] only, and [usage_update] holds the context
-    window's [used] and [size]. The host does write the counts of every model
-    request and of every approval review it runs to
+    window's [size] and, as [used], the host's estimate of its newest
+    request's prompt: the journal writes the same number as
+    [estimated_prompt_tokens] beside that request's counted [input_tokens],
+    0 to 967 tokens above it in a 49-request session on 2026-11-26.
+
+    The host does write the counts of every model request and of every
+    approval review it runs to
     [<data root>/muse/sessions/YYYY/MM/DD/<session id>/session.jsonl]: one JSON
     record per line, appended in order. A prompt's counts are what that file
     gained between {!mark}, taken before [session/prompt] is sent, and
@@ -26,9 +31,11 @@
 (* WORKAROUND: muse acp 1.4.25 sends no token counts over ACP, so the counts
    are read from the host's own journal, a file with no published schema.
    Root fix: the host reports usage in the session/prompt result, as the other
-   ACP drivers do. Then this module goes, [driver_profile.usage_channel] goes,
-   and the Muse profile uses [Usage_over_acp]. Until then a host version this
-   module was not checked against gives a typed error, never counts. *)
+   ACP drivers do, and counts [usage_update.used] as they do (its newest
+   request's input plus output, not an estimate). Then this module goes,
+   [driver_profile.usage_channel] goes, and the Muse profile uses
+   [Usage_over_acp]. Until then a host version this module was not checked
+   against gives a typed error, never counts. *)
 
 (** What the host counted for a set of model calls. [input_tokens] includes
     [cache_read_tokens] and [output_tokens] includes [reasoning_tokens];
@@ -70,9 +77,11 @@ type turn =
         (** Cache writes of those requests. A review record carries no
             cache-write count. *)
   ; main_requests : int
-  ; last_request_input_tokens : int option
-        (** [input_tokens] of the last request: the size of the context it was
-            sent. [None] when no request completed. *)
+  ; last_request : counts option
+        (** The counts of the prompt's last model request: its [input_tokens]
+            are the context it was sent, and with its [output_tokens] they are
+            what the session holds after it. [None] when no request
+            completed. *)
   ; review : counts
         (** The host's approval reviews, one [automated_review_completed]
             record per MCP tool call it checked. Each is a model call of its
@@ -163,3 +172,11 @@ val mark : root -> session_id:string -> (mark, error) result
     links observers of its own gives an {!Observer_journal} error for the whole
     turn: the prompt's own counts are not returned either. *)
 val read_turn : mark -> (turn, error) result
+
+(** [last_request root ~session_id] reads the end of the session's journal and
+    returns the counts of its newest model request: what the session held when
+    its last prompt ended. Records are decoded as {!read_turn} decodes them.
+    [Ok None] when the end it reads holds no request: the session never
+    completed one, or its newest one lies further back than the few megabytes
+    read. *)
+val last_request : root -> session_id:string -> (counts option, error) result

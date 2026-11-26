@@ -414,47 +414,32 @@ let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
       (Muse_log.error_to_string err)
 ;;
 
-(* The context the session holds after the turn, as the host reported it
-   ([usage_update.used]), labelled by what the driver's host puts there; else
-   the input of the last request the host's journal counted (Muse). The
-   turn's [inputTokens] is a sum over every model request (and, on Muse,
-   reviews and observers), so it never stands in for either. The window stays
-   the configured one: [usage_update.size] is the agent's model window, which
-   can be larger than the limit the operator declared for this lane. *)
-let held_context_of_usage ~driver (u : Acp.usage)
-  : Runtime_observation.request_context option
-  =
-  match u.context_used, u.last_request_input_tokens with
-  | Some used, _ when used > 0 ->
-    let provenance =
-      match (Acp.profile_of_driver driver).window_used_accounting with
-      | Acp.Newest_request_count -> Turn_input_provenance.Agent_held_context
-      | Acp.Host_prompt_estimate -> Turn_input_provenance.Context_estimate
-    in
-    Some
-      { Runtime_observation.input_tokens = used
-      ; cache = None
-      ; output_tokens = None
-      ; provenance
-      }
-  | (Some _ | None), Some input when input > 0 ->
-    Some
-      { Runtime_observation.input_tokens = input
-      ; cache = None
-      ; output_tokens = None
-      ; provenance = Turn_input_provenance.Measured_request
-      }
-  | (Some _ | None), (Some _ | None) -> None
+(* What the session holds after the turn, as the host counted it: ACP's
+   [usage_update.used] ("tokens currently in context"), or for Muse the newest
+   request's counted input plus output from its journal
+   ({!Runtime_acp_client.usage_channel}). The rollover rule, the ledger and the
+   gauge all read this count. The turn's [inputTokens] is no size: it sums
+   every model request of the turn (and, on Muse, reviews and observers), and
+   ACP keeps per-turn token accounting an open question apart from the
+   session's context (End-Turn Token Usage RFD, Draft). No count, no rollover. *)
+let effective_context_used (u : Acp.usage) =
+  match u.context_used with
+  | Some used when used > 0 -> Some used
+  | Some _ | None -> None
 ;;
 
-(* The size the rollover rule compares with the lane's limit: the host's
-   [usage_update.used], else the last request's counted input. No count, no
-   rollover: the turn's summed [inputTokens] is no size any request had. *)
-let effective_context_used (u : Acp.usage) =
-  match u.context_used, u.last_request_input_tokens with
-  | Some used, _ when used > 0 -> Some used
-  | (Some _ | None), Some input when input > 0 -> Some input
-  | (Some _ | None), (Some _ | None) -> None
+(* The gauge's reading of that count. The window stays the configured one:
+   [usage_update.size] is the agent's model window, which can be larger than
+   the limit the operator declared for this lane. *)
+let held_context_of_usage (u : Acp.usage) : Runtime_observation.request_context option =
+  Option.map
+    (fun used ->
+       { Runtime_observation.input_tokens = used
+       ; cache = None
+       ; output_tokens = None
+       ; provenance = Turn_input_provenance.Agent_held_context
+       })
+    (effective_context_used u)
 ;;
 
 let process_config_sha256
@@ -2965,11 +2950,12 @@ let run_without_lifecycle
         in
         (* A fresh session carried a range masc composed: write the agent's
            count for it, so the next start can read the size signal. The count
-           is [usage_update.used], the window the agent holds after the turn:
-           the range plus this turn's growth, which the next turn's input
-           carries at least. [usage.inputTokens] is not used: ACP reports it
-           per turn, summed over every model request (and, on Muse, over
-           reviews and observers), so it is no one request's input. A resumed
+           is the one the rollover reads ([effective_context_used]): the window
+           the agent holds after the turn, the range plus this turn's growth,
+           which the next turn's input carries at least. [usage.inputTokens]
+           is not used: ACP reports it per turn, summed over every model
+           request (and, on Muse, over reviews and observers), so it is no one
+           request's input. A resumed
            session sent no range, so its count describes nothing masc chose. *)
         (* No count, no write: an observation without usage would replace the
            count the ledger already holds for this pair. *)
@@ -2977,7 +2963,7 @@ let run_without_lifecycle
            ( resumed
            , !sent_start
            , Keeper_request_source.trace_id input_source
-           , prompt_res.usage.Acp.context_used )
+           , cur_used )
          with
          | false, Some sent, Some session_id, Some used when used > 0 ->
            let observation =
@@ -3460,7 +3446,7 @@ let run_without_lifecycle
             ~agent_core_internal_runtime_allowed:false
             ~usage_scope:Runtime_usage_scope.Turn_total
             ?request_context:
-              (held_context_of_usage ~driver:config.driver prompt_res.usage)
+              (held_context_of_usage prompt_res.usage)
             ()
         in
         Ok

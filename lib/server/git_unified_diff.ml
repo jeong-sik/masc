@@ -15,15 +15,22 @@ type row =
 let hunk_open = "@@ "
 let hunk_close = " @@"
 
+(* A line number or count is plain decimal digits. [int_of_string_opt] alone
+   would also take "-1", "+1", "0x1" and "1_0", and a negative count would
+   keep a hunk open past its end. *)
+let parse_natural s =
+  if String.equal s "" || not (String.for_all (fun c -> c >= '0' && c <= '9') s) then None
+  else int_of_string_opt s
+
 (* "-12,4" or "+12" (a missing count means one line). *)
 let parse_range ~sign token =
   let n = String.length token in
   if n < 2 || token.[0] <> sign then None
   else
     match String.split_on_char ',' (String.sub token 1 (n - 1)) with
-    | [ start ] -> Option.map (fun start -> (start, 1)) (int_of_string_opt start)
+    | [ start ] -> Option.map (fun start -> (start, 1)) (parse_natural start)
     | [ start; count ] -> (
-        match (int_of_string_opt start, int_of_string_opt count) with
+        match (parse_natural start, parse_natural count) with
         | Some start, Some count -> Some (start, count)
         | _ -> None)
     | _ -> None
@@ -90,29 +97,31 @@ let parse lines =
               (* File headers: diff --git, index, mode, ---, +++, Binary. *)
               go Between_hunks acc rest
         | In_hunk { old_line; new_line; old_left; new_left } -> (
-            match line.[0] with
-            | ' ' when old_left > 0 && new_left > 0 ->
+            (* An empty string has no marker; reading [line.[0]] would raise. *)
+            let marker = if String.equal line "" then None else Some line.[0] in
+            match marker with
+            | Some ' ' when old_left > 0 && new_left > 0 ->
                 go
                   (In_hunk
                      { old_line = old_line + 1; new_line = new_line + 1;
                        old_left = old_left - 1; new_left = new_left - 1 })
                   (Context { old_line; new_line; text = body_text line } :: acc)
                   rest
-            | '-' when old_left > 0 ->
+            | Some '-' when old_left > 0 ->
                 go
                   (In_hunk
                      { old_line = old_line + 1; new_line; old_left = old_left - 1; new_left })
                   (Deleted { old_line; text = body_text line } :: acc)
                   rest
-            | '+' when new_left > 0 ->
+            | Some '+' when new_left > 0 ->
                 go
                   (In_hunk
                      { old_line; new_line = new_line + 1; old_left; new_left = new_left - 1 })
                   (Added { new_line; text = body_text line } :: acc)
                   rest
             (* "\ No newline at end of file" belongs to the line before it. *)
-            | '\\' -> go state acc rest
-            | _ ->
+            | Some '\\' -> go state acc rest
+            | Some _ | None ->
                 (* The message never quotes the line: it is file content. *)
                 Error
                   (Printf.sprintf

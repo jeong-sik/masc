@@ -50,7 +50,11 @@ let is_error lines = match D.parse lines with Ok _ -> false | Error _ -> true
 let test_malformed_input_is_an_error () =
   check bool "malformed header" true (is_error [ "@@ -x +1 @@"; "+a" ]);
   check bool "body shorter than its header" true (is_error [ "@@ -1,2 +1,2 @@"; " a" ]);
-  check bool "line without a marker" true (is_error [ "@@ -1 +1 @@"; "?a" ])
+  check bool "line without a marker" true (is_error [ "@@ -1 +1 @@"; "?a" ]);
+  check bool "empty body line" true (is_error [ "@@ -1 +1 @@"; "" ]);
+  check bool "negative count" true (is_error [ "@@ -1,-2 +1 @@"; " a" ]);
+  check bool "negative start" true (is_error [ "@@ --1 +1 @@"; " a" ]);
+  check bool "signed number" true (is_error [ "@@ -+1 +1 @@"; " a" ])
 
 let test_json_kinds () =
   let json =

@@ -19,8 +19,9 @@ type row =
 val parse : string list -> (row list, string) result
 (** [parse lines] reads the lines of one unified diff. Each hunk body is read
     by its header's line counts, so a deleted line whose text starts with
-    [--] is a deletion and not a file header. A malformed hunk header or a
-    body line without a diff marker is an [Error]. The error never quotes
-    file content. *)
+    [--] is a deletion and not a file header. A malformed hunk header (a
+    line number or count that is not plain decimal digits included) or a
+    body line without a diff marker (an empty line included) is an
+    [Error]. The error never quotes file content. *)
 
 val row_to_json : row -> Yojson.Safe.t

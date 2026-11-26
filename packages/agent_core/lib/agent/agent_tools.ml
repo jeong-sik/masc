@@ -1225,6 +1225,8 @@ let execute_scheduled_tool
       | Eio.Cancel.Cancelled _ as cancelled ->
         let backtrace = Printexc.get_raw_backtrace () in
         notify_cancelled_finished ~tool_name:name cancelled;
+        Eio.Cancel.protect (fun () ->
+          Execution_context.settle_tool_observers invocation);
         Printexc.raise_with_backtrace cancelled backtrace
     in
     match phased with

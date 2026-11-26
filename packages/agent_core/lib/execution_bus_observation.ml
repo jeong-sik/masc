@@ -64,6 +64,29 @@ let project ~find_node event =
       observed (payload ~agent_name ~turn)
     | Agent_run _ | Provider_attempt _ | Output_block _ | Tool_invocation _ | Tool_attempt ->
       Error (Invalid_turn_fact node_id) in
+  let close_aborted_invocation node_id message =
+    let* view = read node_id in
+    match Event.node_kind view.node, view.materialized with
+    | Tool_invocation _, Tool_invocation_state {result=None;_} ->
+      let admitted = List.exists (fun (child:Event.node Journal.event_record) ->
+        match Event.node_kind child.value with Tool_attempt -> true
+        | Agent_run _ | Agent_turn _ | Provider_attempt _ | Output_block _ | Tool_invocation _ -> false)
+        view.children in
+      if not admitted then Ok None
+      else
+        let* agent_name,invocation,tool_name,_input=invocation view in
+        let output : Llm_provider.Types.tool_result =
+          Error { Llm_provider.Types.message; recoverable = false; error_class = None }
+        in
+        Ok (observed (ToolCompleted {agent_name;invocation;tool_name;output}))
+    | Tool_invocation _,
+        (Tool_invocation_state {result=Some _;_}
+        | Agent_run_state | Agent_turn_state | Provider_attempt_state _
+        | Output_block_state _ | Tool_attempt_state)
+    | (Agent_run _ | Agent_turn _ | Provider_attempt _ | Output_block _ | Tool_attempt),
+        (Agent_run_state | Agent_turn_state | Provider_attempt_state _
+        | Output_block_state _ | Tool_invocation_state _ | Tool_attempt_state) ->
+      Ok None in
   match Event.payload event with
   | Node_opened node ->
     (match Event.node_kind node with
@@ -116,6 +139,11 @@ let project ~find_node event =
      | Agent_turn _ ->
        turn_progress node_id (fun ~agent_name ~turn -> TurnCompleted {agent_name;turn})
      | Agent_run _ | Provider_attempt _ | Output_block _ | Tool_invocation _ | Tool_attempt -> Ok None)
+  | Node_closed {node_id;terminal=Failed {detail;_}} ->
+    close_aborted_invocation node_id detail
+  | Node_closed {node_id;terminal=Cancelled {reason;_}} ->
+    close_aborted_invocation node_id
+      (Option.value ~default:"tool execution cancelled" reason)
   | Node_updated {update=(Checkpoint_snapshot _ | Provider_event _ | Provider_request_snapshot _
-      | Output_delta _ | Output_snapshot _ | Tool_input_delta _ | Tool_input_snapshot _ | Tool_progress _);_}
-  | Node_closed {terminal=(Failed _ | Cancelled _);_} -> Ok None
+      | Output_delta _ | Output_snapshot _ | Tool_input_delta _ | Tool_input_snapshot _ | Tool_progress _);_} ->
+    Ok None

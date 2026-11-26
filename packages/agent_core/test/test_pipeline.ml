@@ -6241,6 +6241,145 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
   | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error)
 ;;
 
+let test_durable_cancelled_tool_emits_paired_bus_and_finished_observer () =
+  with_execution_test_dir "agent_core-tool-cancel-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let trace_path = Filename.temp_file "agent_core-cancel-trace-" ".jsonl" in
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists trace_path then Sys.remove trace_path);
+  let trace = unwrap_raw_trace (Raw_trace.create ~path:trace_path ()) in
+  let bus = Event_bus.create () in
+  let subscription =
+    Event_bus.subscribe
+      ~filter:Event_bus.filter_tools_only
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest))
+      bus
+  in
+  let locator = ref None in
+  let terminal_disposition = ref None in
+  let cancel_ref = ref (fun () -> ()) in
+  let tool =
+    Tool.create
+      ~name:"cancelled_durable_tool"
+      ~description:"cancels while running"
+      ~parameters:[]
+      (fun _ ->
+         !cancel_ref ();
+         Alcotest.fail "cancelled durable tool ignored cancellation")
+  in
+  let responses = ref [ durable_tool_response [ "cancel-id", "cancelled_durable_tool", `Assoc [] ] ] in
+  let next () =
+    match !responses with
+    | response :: rest ->
+      responses := rest;
+      Ok response
+    | [] -> Alcotest.fail "cancel provider fixture exhausted"
+  in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { complete_sync = (fun _ -> { Llm_provider.Llm_transport.response = next (); latency_ms = None })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> next ())
+      }
+  in
+  let agent =
+    Agent.create
+      ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:(Eio.Stdenv.net env)
+      ~tools:[ tool ]
+      ~config:{ (Types.default_config ~model:"test-model") with name = "durable-cancel-observation" }
+      ~options:
+        { Agent.default_options with
+          transport = Some transport
+        ; event_bus = Some bus
+        ; raw_trace = Some trace
+        ; provider_config = Some (Provider_mock.to_provider_config ())
+        }
+      ()
+  in
+  let store =
+    Agent.execution_store
+      ~runtime
+      ~dir
+      ~on_scope_ready:(fun value ->
+        locator := Some value;
+        Ok ())
+      ~on_terminal_disposition:(fun disposition ->
+        terminal_disposition := Some disposition;
+        Ok ())
+      ()
+  in
+  (match
+     Eio.Cancel.sub (fun context ->
+       cancel_ref := (fun () ->
+         Eio.Cancel.cancel context Native_parent_interrupt;
+         Eio.Fiber.yield ());
+       Agent.run ~sw ~execution_store:store agent "cancel during tool")
+   with
+   | exception Eio.Cancel.Cancelled Native_parent_interrupt -> ()
+   | exception exn ->
+     Alcotest.failf "unexpected cancellation exception: %s" (Printexc.to_string exn)
+   | Ok _ | Error _ -> Alcotest.fail "cancelled durable run returned normally");
+  check_terminal_disposition
+    ~outcome:"cancelled"
+    ~recovery:"operator_repair:effect_outcome_unknown"
+    !terminal_disposition;
+  let live_events = Event_bus.drain subscription in
+  let count_tool_events events =
+    List.fold_left
+      (fun (called, completed_err) (event : Event_bus.event) ->
+         match event.payload with
+         | ToolCalled _ -> called + 1, completed_err
+         | ToolCompleted { output = Error _; _ } -> called, completed_err + 1
+         | ToolCompleted { output = Ok _; _ }
+         | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _
+         | AgentFailed _ | TurnStarted _ | TurnReady _ | TurnCompleted _
+         | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
+         | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
+           called, completed_err)
+      (0, 0)
+      events
+  in
+  let live_called, live_completed_err = count_tool_events live_events in
+  Alcotest.(check int) "durable cancel emits one live ToolCalled" 1 live_called;
+  Alcotest.(check int)
+    "durable cancel emits one live error ToolCompleted"
+    1
+    live_completed_err;
+  let projection =
+    match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  let projected_events =
+    match
+      Agent.Execution_projection.read_tool_observations
+        projection
+        ~after:(Agent.Execution_projection.beginning_cursor projection)
+        ~limit:1024
+        ()
+    with
+    | Ok page -> List.map (fun (o : Agent.Execution_projection.tool_observation) -> o.event) page.observations
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  let proj_called, proj_completed_err = count_tool_events projected_events in
+  Alcotest.(check int) "canonical projection records one ToolCalled" 1 proj_called;
+  Alcotest.(check int)
+    "canonical projection records one error ToolCompleted"
+    1
+    proj_completed_err;
+  let records = unwrap_raw_trace (Raw_trace.read_all ~path:trace_path ()) in
+  let finished_errors =
+    List.filter
+      (fun (r : Raw_trace.record) ->
+         r.record_type = Raw_trace.Tool_execution_finished && r.tool_error = Some true)
+      records
+  in
+  Alcotest.(check int)
+    "durable cancel invokes on_tool_execution_finished once with is_error=true"
+    1
+    (List.length finished_errors)
+;;
+
 let prepare_deferred_agent_turn agent =
   let options = Agent.options agent in
   let defer_loading =
@@ -6759,6 +6898,10 @@ let () =
             (test_nested_tool_observation_audiences Shared_tool_bus ~concurrent:true)
         ; Alcotest.test_case "unattempted tools have no bus execution observation" `Quick
             test_unattempted_tool_has_no_bus_execution_observation
+        ; Alcotest.test_case
+            "durable cancelled tool emits paired error ToolCompleted and finished observer"
+            `Quick
+            test_durable_cancelled_tool_emits_paired_bus_and_finished_observer
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

@@ -1372,7 +1372,26 @@ let test_parallel_anonymous_tools_stay_distinct_and_concrete_end_preserves_runni
   Alcotest.(check int)
     "running anonymous sibling survives duplicate concrete finish"
     1
-    (List.length (current ()).open_activities)
+    (List.length (current ()).open_activities);
+  (* Also verify when the second anonymous sibling is STILL in Tool_requested
+     (not yet promoted to Tool_executing): a duplicate concrete finish for the
+     first call must be tombstoned and must NOT remove the unpromoted sibling. *)
+  let keeper_req = "parallel-anon-requested-sibling" in
+  let current_req () = Option.get (Keeper_turn_preview.current ~keeper_name:keeper_req) in
+  let writer_req = Some (reset keeper_req ~now:10.) in
+  loop_attempt ~now:10. writer_req "glm";
+  Keeper_turn_preview.note_stream ~writer:writer_req ~now:11. (tool_block 1 None "Execute");
+  Keeper_turn_preview.note_stream ~writer:writer_req ~now:11. (tool_block 2 None "Execute");
+  Keeper_turn_preview.note_tool_started ~writer:writer_req ~now:12. ~tool_use_id:(Some "call-a")
+    ~tool_name:"Execute" ~cohort:None ~reach:None;
+  Keeper_turn_preview.note_tool_finished ~writer:writer_req ~now:13. ~tool_use_id:(Some "call-a")
+    ~tool_name:"Execute";
+  Keeper_turn_preview.note_tool_finished ~writer:writer_req ~now:13.1 ~tool_use_id:(Some "call-a")
+    ~tool_name:"Execute";
+  Alcotest.(check int)
+    "unpromoted Tool_requested anonymous sibling survives duplicate concrete finish"
+    1
+    (List.length (current_req ()).open_activities)
 ;;
 
 let () =

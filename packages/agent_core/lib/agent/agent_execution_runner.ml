@@ -223,6 +223,7 @@ let close_after_exception scope on_terminal_disposition exn backtrace =
       match Execution_agent_scope.abort scope reason with
       | Error error -> Error (Execution_agent_scope.error_to_string error)
       | Ok () ->
+        Execution_context.flush_bus_observations ();
         let outcome =
           match exn with
           | Eio.Cancel.Cancelled _ -> Terminal_cancelled
@@ -254,6 +255,7 @@ let abort_error scope on_terminal_disposition detailed =
       (Execution_agent_scope.Failed (abort_failure_of_error detailed))
   with
   | Ok () ->
+    Execution_context.flush_bus_observations ();
     (match notify_terminal scope on_terminal_disposition Terminal_failed with
      | Ok () -> Error detailed
      | Error notification_error -> Error notification_error)

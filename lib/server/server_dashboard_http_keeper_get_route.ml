@@ -119,11 +119,12 @@ let of_path path =
    gates. [Raw_trace] requires [CanAdmin] because it returns hidden reasoning;
    [Trajectory] with [include_thinking] returns the same reasoning and once
    required nothing. Same data, same gate. *)
-let permission ?(include_thinking = false) = function
+let permission ?(include_thinking = false) =
+  ignore include_thinking;
+  function
   | Fleet_composite -> None
   | Keeper (route, _name) ->
     (match route with
-     | Trajectory -> if include_thinking then Some Masc_domain.CanAdmin else None
      | Turn_records | Metrics -> Some Masc_domain.CanReadState
      (* Counts, runtimes, times and byte sizes of two requests, the kind the
         turn records already serve, and no request content: the snapshot
@@ -134,9 +135,12 @@ let permission ?(include_thinking = false) = function
      | Github_identity
      | Raw_traces
      | Raw_trace
-     (* A part is an item of the request the list door describes. *)
+     (* A part is an item of the request the list door describes; last-prompt
+        and next-request expose assembled prompt and memory context. *)
      | Provider_input
      | Provider_input_part
+     | Last_prompt
+     | Next_request
      | Memory_journal
      (* The fact rows are the journal's committed content, read back as the
         current set. *)
@@ -146,9 +150,10 @@ let permission ?(include_thinking = false) = function
         is part of what the raw trace already holds. A lighter gate here would
         be a second door onto the first door's content. *)
      | File_changes
-     (* Both tail and exact execution lookup return raw tool arguments and
-        results, so query parameters cannot select a weaker door onto the same
-        bytes. *)
+     (* Trajectory, tool-calls tail, and exact execution lookup all return raw
+        tool arguments and results, so query parameters cannot select a weaker
+        door onto the same bytes. *)
+     | Trajectory
      | Tool_calls
      | Tool_result -> Some Masc_domain.CanAdmin
      | Board_attention_quarantines
@@ -161,8 +166,6 @@ let permission ?(include_thinking = false) = function
      | Waiting_inventory
      | Feedback
      | Operator_note
-     | Next_request
-     | Last_prompt
      | Turn_transcript
      | Transitions
      | Lifecycle

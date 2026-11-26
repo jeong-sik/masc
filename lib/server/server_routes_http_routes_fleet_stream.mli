@@ -20,6 +20,7 @@ val frame : Fleet_stream.event -> string
 val serve :
   ?scope_is_current:(unit -> bool) ->
   ?scope_replaced:unit Eio.Promise.t ->
+  ?request:Httpun.Request.t ->
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   subscribe:(on_event:(Fleet_stream.event -> unit) -> unit -> unit) ->

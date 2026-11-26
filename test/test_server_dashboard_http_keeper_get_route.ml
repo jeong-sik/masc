@@ -77,6 +77,18 @@ let test_not_a_route () =
   check routed "the prefix alone" None (R.of_path prefix)
 ;;
 
+let test_sensitive_routes_require_admin () =
+  let admin_gate = R.permission (R.Keeper (R.Raw_trace, "k")) in
+  check bool "raw-trace baseline gate is present" true (Option.is_some admin_gate);
+  let check_admin label route =
+    check bool label true
+      (R.permission ~include_thinking:false (R.Keeper (route, "k")) = admin_gate)
+  in
+  check_admin "trajectory without include_thinking still requires CanAdmin" R.Trajectory;
+  check_admin "last-prompt requires CanAdmin" R.Last_prompt;
+  check_admin "next-request requires CanAdmin" R.Next_request
+;;
+
 let () =
   run
     "keeper_get_route"
@@ -89,6 +101,7 @@ let () =
         ; test_case "keeper name" `Quick test_keeper_name
         ; test_case "composite" `Quick test_composite
         ; test_case "not a route" `Quick test_not_a_route
+        ; test_case "sensitive routes require admin" `Quick test_sensitive_routes_require_admin
         ] )
     ]
 ;;

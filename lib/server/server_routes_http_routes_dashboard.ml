@@ -141,6 +141,12 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            ~request:req
            inner_reqd
            "keeper path parameter is required"
+       | Some keeper_name when not (Keeper_config.validate_name keeper_name) ->
+         Keeper_api_types.respond_error
+           ~status:`Bad_request
+           ~request:req
+           inner_reqd
+           "invalid keeper name"
        | Some keeper_name ->
          let headers =
            Httpun.Headers.of_list
@@ -427,10 +433,13 @@ let add_routes ~sw ~clock router =
                  ~request_authority:(Server_request_authority.current_exn ())
                  ~base_path:scope.config.base_path
              in
+             let no_store_headers =
+               [ "cache-control", "no-store"; "pragma", "no-cache" ]
+             in
              begin
                match raw_result with
                | Ok token ->
-                 Http.Response.json_value ~request:req
+                 Http.Response.json_value ~request:req ~extra_headers:no_store_headers
                    (`Assoc
                       [ "token", `String token.raw
                       ; "actor", `String token.actor
@@ -454,6 +463,7 @@ let add_routes ~sw ~clock router =
                  Http.Response.json_value
                    ~status
                    ~request:req
+                   ~extra_headers:no_store_headers
                    (`Assoc
                       [ "error", `String message
                       ; "error_code", `String error_code
@@ -673,8 +683,19 @@ let add_routes ~sw ~clock router =
            (dashboard_memory_http_payload ~config ~reader ~actor req)
        ))
   |> Server_route.post (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/link-previews" (fun state req reqd ->
-           Http.Request.read_body_async reqd (fun body_str ->
-             handle_dashboard_link_previews state req reqd body_str))
+           let max_bytes = 65_536 in
+           Http.Request.read_body_async_with_limit reqd ~max_bytes
+             ~on_body:(fun body_str ->
+               handle_dashboard_link_previews state req reqd body_str)
+             ~on_error:(function
+               | Http.Request.Too_large limit ->
+                 Http.Response.json_value ~status:`Payload_too_large ~request:req
+                   (`Assoc [ "ok", `Bool false; "error", `String (Http.Request.too_large_body limit) ])
+                   reqd
+               | Http.Request.Internal exn ->
+                 Http.Response.json_value ~status:`Internal_server_error ~request:req
+                   (`Assoc [ "ok", `Bool false; "error", `String (Printexc.to_string exn) ])
+                   reqd))
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-ledger" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let status, json = match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->

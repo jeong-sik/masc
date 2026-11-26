@@ -289,6 +289,12 @@ let explicit_metadata : (string * metadata) list =
        quota. The two routes also keep separate keys: answering one held
        call (keeper_tool_approval_route) and disabling the whole gate
        (keeper_tool_approval_mode_route) are different weights of action. *)
+    ( "keeper_ask_answer_route",
+      hidden_runtime_tool
+        "Auth key for the keeper ask-answer HTTP route (answering a keeper's \
+         question to the operator); no schema, no dispatch path, route-authority \
+         only. Admin tier: a worker token must not forge operator answers."
+        admin_tool );
     ( "keeper_tool_approval_route",
       hidden_runtime_tool
         "Auth key for the tool-approval HTTP route (answering a held tool \

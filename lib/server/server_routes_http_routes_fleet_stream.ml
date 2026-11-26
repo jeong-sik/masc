@@ -9,9 +9,15 @@ let frame event =
 (* Httpun adds no Content-Length to a streaming body, so closing the writer is
    the only end of the response; advertising keep-alive would make a client
    wait for an end that cannot be framed (same as [keeper_chat_stream_request_headers]). *)
-let response_headers () =
+let response_headers ?request () =
+  let cors_headers =
+    match request with
+    | Some req -> Server_auth.public_read_cors_headers req
+    | None -> []
+  in
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()
+     @ cors_headers
      @ [ "content-type", "text/event-stream"
     ; "cache-control", "no-cache"
     ; "connection", "close"
@@ -19,11 +25,11 @@ let response_headers () =
     ])
 ;;
 
-let serve ?(scope_is_current = fun () -> true) ?scope_replaced
+let serve ?(scope_is_current = fun () -> true) ?scope_replaced ?request
     ~sw ~clock ~subscribe ~stalled_after_s ~max_queued_events reqd =
   let response =
     Server_sse_response.respond ~sw ~clock ~stalled_after_s ~flush_headers_immediately:true reqd
-      (Httpun.Response.create ~headers:(response_headers ()) `OK)
+      (Httpun.Response.create ~headers:(response_headers ?request ()) `OK)
   in
   let send data : Server_sse_response.outcome =
     if scope_is_current ()
@@ -101,6 +107,7 @@ let add_routes ~sw ~clock router =
           in
           serve ~scope_is_current
             ~scope_replaced:(Mcp_server.workspace_scope_replaced scope)
+            ~request
             ~sw
             ~clock
             ~subscribe

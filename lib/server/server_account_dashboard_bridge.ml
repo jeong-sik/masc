@@ -192,15 +192,45 @@ let observer_event_visible_to ~state caller payload =
   else (
     match non_empty_string_field "type" payload with
     | Some
-        ("keeper_chat_operation_event" | "keeper_chat_appended" | "keeper_turn_preview_changed") ->
+        ( "keeper_chat_operation_event"
+        | "keeper_chat_appended"
+        | "keeper_turn_preview_changed"
+        | "keeper_tool_call"
+        | "keeper_tool_approval_waits_changed"
+        | "keeper_lifecycle"
+        | "keeper_compaction"
+        | "keeper_handoff"
+        | "keeper_guardrail" ) ->
       (match event_keeper_name_of payload with
        | Some keeper -> List.mem keeper (owned_keeper_names ~state caller)
        | None -> false)
-    | Some ("operator_snapshot" | "operator_digest" | "operator_action_required") -> is_admin caller
+    | Some
+        ( "operator_snapshot"
+        | "operator_digest"
+        | "operator_action_required"
+        | "approval:pending"
+        | "approval:resolved"
+        | "approval:expired"
+        | "runtime_param_changed"
+        | "agent_core:relay_dropped" ) -> is_admin caller
     | Some "workspace_dataset_changed"
       when Option.equal String.equal (non_empty_string_field "dataset" payload) (Some "lane_addons")
       -> lane_addons_visibility_permitted ~state caller payload
-    | Some _ | None -> true)
+    | Some
+        ( "workspace_dataset_changed"
+        | "tui_v2_dataset_changed"
+        | "workspace_message_delivery_changed"
+        | "task_update"
+        | "agent_joined"
+        | "agent_left"
+        | "broadcast"
+        | "oas_heartbeat"
+        | "fusion_run_status"
+        | "verification_run_status"
+        | "goal_verification_run_status"
+        | "heartbeat"
+        | "connected" ) -> true
+    | Some _ | None -> false)
 ;;
 
 let project_observer_event ~state caller ~event_id ~frame ~payload =
@@ -667,31 +697,38 @@ let handle_workspace ~login ~engine_state req reqd =
 ;;
 
 let handle_tools ~login ~engine_state req reqd =
-  with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
-    let timing = Server_timing.create () in
-    let response =
-      Server_dashboard_snapshot_select.select_tools_response
-        ~timing
-        ?keeper:(Server_utils.query_param req "keeper")
-        (Mcp_server.workspace_config state)
-    in
-    let extra_headers = Server_timing.extra_header timing in
-    match response with
-    | Server_dashboard_snapshot_select.Tools_json json ->
-      Http.Response.json_value ~compress:true ~request:req ~extra_headers json reqd
-    | Server_dashboard_snapshot_select.Tools_prepared tools ->
-      let body, headers =
-        Http_response_payload.select_prepared
-          ~accept_encoding:(Httpun.Headers.get req.Httpun.Request.headers "accept-encoding")
-          tools.Dashboard_snapshot.encoded
+  with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state auth ->
+    let keeper_param = non_empty_trimmed_param req "keeper" in
+    match keeper_param with
+    | Some keeper when not (Keeper_config.validate_name keeper) ->
+      respond_json_error ~status:`Bad_request ~request:req reqd "invalid keeper name"
+    | Some keeper when not (can_read_keeper_sandbox ~state:auth.state auth.caller ~keeper) ->
+      respond_json_error ~status:`Forbidden ~request:req reqd "keeper access denied"
+    | Some _ | None ->
+      let timing = Server_timing.create () in
+      let response =
+        Server_dashboard_snapshot_select.select_tools_response
+          ~timing
+          ?keeper:keeper_param
+          (Mcp_server.workspace_config state)
       in
-      Http.Response.json_lazy
-        ~compress:false
-        ~request:req
-        ~etag:tools.Dashboard_snapshot.etag
-        ~extra_headers:(headers @ extra_headers)
-        (fun () -> body)
-        reqd)
+      let extra_headers = Server_timing.extra_header timing in
+      match response with
+      | Server_dashboard_snapshot_select.Tools_json json ->
+        Http.Response.json_value ~compress:true ~request:req ~extra_headers json reqd
+      | Server_dashboard_snapshot_select.Tools_prepared tools ->
+        let body, headers =
+          Http_response_payload.select_prepared
+            ~accept_encoding:(Httpun.Headers.get req.Httpun.Request.headers "accept-encoding")
+            tools.Dashboard_snapshot.encoded
+        in
+        Http.Response.json_lazy
+          ~compress:false
+          ~request:req
+          ~etag:tools.Dashboard_snapshot.etag
+          ~extra_headers:(headers @ extra_headers)
+          (fun () -> body)
+          reqd)
 ;;
 
 let handle_telemetry ~login ~engine_state req reqd =

@@ -152,21 +152,27 @@ let add_routes router =
                    request
                    reqd
                    (error_json message)))
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets"
-       (write_snapshot ~save:(fun ~base_path snapshot ->
-          Prompt_preset.save ~base_path snapshot
-          |> Result.map_error (fun message -> `Internal_server_error, message)))
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/create"
-       (write_snapshot ~save:(fun ~base_path snapshot ->
-          Prompt_preset.create ~base_path snapshot
-          |> Result.map_error (fun error ->
-            let status = match error with
-              | Prompt_preset.Invalid_name _ -> `Bad_request
-              | Prompt_preset.Already_exists _ -> `Conflict
-              | Prompt_preset.Failed _ -> `Internal_server_error
-            in
-            status, Prompt_preset.create_error_to_string error)))
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/restore" (fun state request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/presets"
+       (fun state _actor request reqd ->
+          write_snapshot
+            ~save:(fun ~base_path snapshot ->
+              Prompt_preset.save ~base_path snapshot
+              |> Result.map_error (fun message -> `Internal_server_error, message))
+            state request reqd)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/presets/create"
+       (fun state _actor request reqd ->
+          write_snapshot
+            ~save:(fun ~base_path snapshot ->
+              Prompt_preset.create ~base_path snapshot
+              |> Result.map_error (fun error ->
+                let status = match error with
+                  | Prompt_preset.Invalid_name _ -> `Bad_request
+                  | Prompt_preset.Already_exists _ -> `Conflict
+                  | Prompt_preset.Failed _ -> `Internal_server_error
+                in
+                status, Prompt_preset.create_error_to_string error))
+            state request reqd)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/presets/restore" (fun state _actor request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              match decode_name_request body with
              | Error message ->
@@ -185,7 +191,7 @@ let add_routes router =
                     request
                     reqd
                     (error_json message))))
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/delete" (fun state request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/presets/delete" (fun state _actor request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              match decode_name_request body with
              | Error message ->

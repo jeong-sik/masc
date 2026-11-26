@@ -295,6 +295,30 @@ let test_the_operator_note_stays_last () =
     (Block_id.cache_rank Block_id.Operator_note)
 ;;
 
+let test_secrets_are_redacted_before_persistence () =
+  with_workspace (fun config ->
+    let synthetic_token = "ghp_" ^ String.make 36 'a' in
+    let body = "Authorization: Bearer " ^ synthetic_token ^ "\n" in
+    Capture.write ~system_prompt:None ~config ~keeper ~trace_id:"trace-secret" ~absolute_turn:3
+      ~blocks:[ Block_id.Dynamic_context, body ]
+      ~assembled:(Some body);
+    match Capture.read ~config ~keeper with
+    | Error error -> Alcotest.failf "read failed: %s" (Capture.read_error_to_string error)
+    | Ok capture ->
+      let assembled = Option.value ~default:"" capture.assembled in
+      Alcotest.(check bool)
+        "assembled text does not persist raw token"
+        false
+        (Astring.String.is_infix ~affix:synthetic_token assembled);
+      List.iter
+        (fun (b : Capture.block) ->
+           Alcotest.(check bool)
+             "block text does not persist raw token"
+             false
+             (Astring.String.is_infix ~affix:synthetic_token b.text))
+        capture.blocks)
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -302,6 +326,8 @@ let () =
     [ ( "round trip"
       , [ Alcotest.test_case "text survives the round trip" `Quick
             test_text_survives_the_round_trip
+        ; Alcotest.test_case "secrets are redacted before persistence" `Quick
+            test_secrets_are_redacted_before_persistence
         ; Alcotest.test_case "system Goal observations retain a separate carrier" `Quick
             test_system_observation_has_a_separate_physical_capture
         ; Alcotest.test_case "no blocks is None, not empty string" `Quick

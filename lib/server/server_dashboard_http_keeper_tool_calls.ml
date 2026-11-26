@@ -61,23 +61,25 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
     error `Bad_request "invalid_execution_query"
       "execution_id and execution_ids cannot be combined"
   | [ _, [ encoded ] ], [] ->
+    let max_execution_ids_batch = 200 in
     let module Id_set = Set.Make (String) in
-    let rec decode seen kept = function
+    let rec decode count seen kept = function
       | [] -> Some (List.rev kept)
+      | _ when count >= max_execution_ids_batch -> None
       | `String id :: rest
         when String.trim id <> "" && not (Id_set.mem id seen) ->
-        decode (Id_set.add id seen) (id :: kept) rest
+        decode (count + 1) (Id_set.add id seen) (id :: kept) rest
       | _ :: _ -> None
     in
     let ids =
       match Yojson.Safe.from_string encoded with
-      | `List rows -> decode Id_set.empty [] rows
+      | `List rows -> decode 0 Id_set.empty [] rows
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
       | exception Yojson.Json_error _ -> None
     in
     (match ids with
      | None -> error `Bad_request "invalid_execution_ids"
-         "execution_ids must be a JSON array of distinct non-blank strings"
+         "execution_ids must be a JSON array of up to 200 distinct non-blank strings"
      | Some _ when not (Keeper_config.validate_name keeper_name) ->
        error `Bad_request "invalid_keeper_name" "invalid keeper name"
      | Some execution_ids ->

@@ -115,7 +115,7 @@ let handle_trajectory_get state req reqd name =
        let result_max_len =
          Server_utils.int_query_param req "result_max_len"
            ~default:2000
-         |> max 0 |> min 10000
+         |> max 1 |> min 10000
        in
        let include_thinking =
          Server_utils.bool_query_param req "include_thinking"

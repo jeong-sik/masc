@@ -203,14 +203,19 @@ let is_success_status code = code >= 200 && code < 300
 let is_redirect_status code =
   code = 301 || code = 302 || code = 303 || code = 307 || code = 308
 
-let fetch_response ~net ~url =
+let fetch_response ~clock ~net ~url =
   match normalize_request_url url with
   | Error _ as error -> error
   | Ok url ->
   match Outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
   | Error refusal -> Error (Outbound_address.host_refusal_to_string refusal)
   | Ok resolved_addresses ->
-  Masc_http_client.get_response_sync ~resolved_addresses ~url
+  Masc_http_client.get_response_sync
+    ~clock
+    ~timeout_sec:preview_timeout_sec
+    ~max_body_bytes:(max_html_chars * 2)
+    ~resolved_addresses
+    ~url
     ~headers:
       [
         ("Accept", "text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.1");
@@ -219,15 +224,15 @@ let fetch_response ~net ~url =
       ]
     ()
 
-let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
-  match fetch_response ~net ~url with
+let rec fetch_response_following_redirects ~clock ~net ~url ~remaining_redirects =
+  match fetch_response ~clock ~net ~url with
   | Error _ as error -> error
   | Ok response when is_redirect_status response.status && remaining_redirects > 0
     ->
       (match list_header_ci response.headers "location" with
        | Some location when Option.is_some (String_util.trim_nonempty location) ->
            let next_url = resolve_relative_url ~base_url:url location in
-           fetch_response_following_redirects ~net ~url:next_url
+           fetch_response_following_redirects ~clock ~net ~url:next_url
              ~remaining_redirects:(remaining_redirects - 1)
        | _ -> Ok response)
   | Ok response -> Ok response
@@ -275,7 +280,7 @@ let fetch_preview ~clock ~net url =
           else
             let run () =
               match
-                fetch_response_following_redirects ~net ~url:normalized_url
+                fetch_response_following_redirects ~clock ~net ~url:normalized_url
                   ~remaining_redirects:2
               with
               | Error message -> Error message

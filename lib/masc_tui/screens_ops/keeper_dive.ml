@@ -3736,18 +3736,21 @@ let render_logs_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       List.iter
         (fun ln ->
           if !y < bot then begin
-            let st =
-              if String.starts_with ~prefix:"──" ln then
-                Typography.status ~bg ~bold:true theme Theme.Status_active
-              else if String.starts_with ~prefix:"  stderr:" ln then
-                Typography.status ~bg theme Theme.Status_attention
-              else if String.starts_with ~prefix:"  stdout:" ln then
-                Typography.status ~bg theme Theme.Status_ok
-              else Typography.structure ~bg theme
-            in
-            ignore
-              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                 ~max_w:content.w ~style:st ln);
+            (match Card.legacy_rule_label ln with
+            | Some lbl ->
+                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                  ~y:!y ~theme
+            | None ->
+                let st =
+                  if String.starts_with ~prefix:"  stderr:" ln then
+                    Typography.status ~bg theme Theme.Status_attention
+                  else if String.starts_with ~prefix:"  stdout:" ln then
+                    Typography.status ~bg theme Theme.Status_ok
+                  else Typography.structure ~bg theme
+                in
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:st ln));
             incr y
           end)
         (Store_scroll.drop skip lines)
@@ -3772,31 +3775,38 @@ let render_identity_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         (fun ln ->
           if !y < bot then begin
             let is_sel = String.starts_with ~prefix:">" ln in
-            let row_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
-            let row_bg =
-              if is_sel then Color.of_rgb theme.selection_bg else bg
-            in
-            if is_sel then
+            if is_sel then begin
+              let row_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
+              let row_bg = Color.of_rgb theme.selection_bg in
               Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
                 ~style:
                   (Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
                 ();
-            let st =
-              if is_sel then Typography.anchor ~bg:row_bg theme
-              else if String.starts_with ~prefix:"──" ln then
-                Typography.status ~bg ~bold:true theme Theme.Status_active
-              else if
-                String.starts_with ~prefix:"  [CanAdmin" ln
-                || String.starts_with ~prefix:"  Error:" ln
-                || String.starts_with ~prefix:"  Effective error:" ln
-              then Typography.status ~bg theme Theme.Status_attention
-              else if String.starts_with ~prefix:"  One-time code:" ln then
-                Typography.status ~bg ~bold:true theme Theme.Status_ok
-              else Typography.structure ~bg theme
-            in
-            ignore
-              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                 ~max_w:content.w ~style:st ln);
+              ignore
+                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                   ~max_w:content.w
+                   ~style:(Typography.anchor ~bg:row_bg theme)
+                   ln)
+            end
+            else (
+              match Card.legacy_rule_label ln with
+              | Some lbl ->
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                    ~y:!y ~theme
+              | None ->
+                  let st =
+                    if
+                      String.starts_with ~prefix:"  [CanAdmin" ln
+                      || String.starts_with ~prefix:"  Error:" ln
+                      || String.starts_with ~prefix:"  Effective error:" ln
+                    then Typography.status ~bg theme Theme.Status_attention
+                    else if String.starts_with ~prefix:"  One-time code:" ln then
+                      Typography.status ~bg ~bold:true theme Theme.Status_ok
+                    else Typography.structure ~bg theme
+                  in
+                  ignore
+                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                       ~max_w:content.w ~style:st ln));
             incr y
           end)
         (Store_scroll.drop skip lines)
@@ -4067,8 +4077,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
           Some
             (Ops_common.say model
-               ~ko:"[e] 샌드박스 설정 · [v] 격리 복구 · [z] 확대"
-               ~en:"[e] Sandbox Cfg · [v] Quarantine · [z] Zoom")
+               ~ko:"[v] 격리 복구 · [z] 확대"
+               ~en:"[v] Quarantine · [z] Zoom")
         else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
           Some
             (Ops_common.say model
@@ -4110,8 +4120,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
       else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
         Some
           (Ops_common.say model
-             ~ko:"[e] 샌드박스 설정 · [v] 격리 복구 · [Esc] 목록"
-             ~en:"[e] Sandbox Cfg · [v] Quarantine · [Esc] Fleet")
+             ~ko:"[v] 격리 복구 · [Esc] 목록"
+             ~en:"[v] Quarantine · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model

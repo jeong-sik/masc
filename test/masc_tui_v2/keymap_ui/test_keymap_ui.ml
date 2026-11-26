@@ -2556,6 +2556,29 @@ let test_ratio_gauge_unreported_and_narrow_width () =
     (contains_sub ~needle:"/" ~haystack:mrow1
      && contains_sub ~needle:"? 미보고" ~haystack:mrow1)
 
+let test_card_legacy_rule_label () =
+  Alcotest.(check (option string))
+    "strips leading rule prefix" (Some "Top Tools")
+    (Card.legacy_rule_label "── Top Tools");
+  Alcotest.(check (option string))
+    "strips leading and trailing rule delimiters" (Some "User Input")
+    (Card.legacy_rule_label "── User Input ──");
+  Alcotest.(check (option string))
+    "trims inner/trailing whitespace" (Some "연관 로그")
+    (Card.legacy_rule_label "──  연관 로그  ──  ");
+  Alcotest.(check (option string))
+    "indented body line never spoofs section header" None
+    (Card.legacy_rule_label "  ── indented body ──");
+  Alcotest.(check (option string))
+    "bare 3-dash and 6-dash rules yield empty hairline label" (Some "")
+    (Card.legacy_rule_label "───");
+  Alcotest.(check (option string))
+    "bare 6-dash rule yields empty hairline label" (Some "")
+    (Card.legacy_rule_label "──────");
+  Alcotest.(check (option string))
+    "ordinary line returns None" None
+    (Card.legacy_rule_label "plain text line")
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2585,6 +2608,8 @@ let () =
             test_layout_breakpoints_and_collapse;
           Alcotest.test_case "Card rounded borders & 64-entry LRU cache" `Quick
             test_card_lru_cache;
+          Alcotest.test_case "Card.legacy_rule_label SSOT rule extraction" `Quick
+            test_card_legacy_rule_label;
         ] );
       ( "chart",
         [

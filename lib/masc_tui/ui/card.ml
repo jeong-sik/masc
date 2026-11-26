@@ -541,6 +541,24 @@ let draw_hairline ?(pad_x = 0) ?label ?(focused = true) ?(unicode = true) ?bg
               done
             end
 
+let legacy_rule_label s =
+  if not (String.starts_with ~prefix:"──" s) then None
+  else
+    let rec strip_leading_dashes str =
+      let t = String.trim str in
+      if String.starts_with ~prefix:"─" t then
+        strip_leading_dashes (String.sub t 3 (String.length t - 3))
+      else t
+    in
+    let rec strip_trailing_dashes str =
+      let t = String.trim str in
+      if String.ends_with ~suffix:"─" t then
+        strip_trailing_dashes (String.sub t 0 (String.length t - 3))
+      else t
+    in
+    let after = String.sub s 6 (String.length s - 6) in
+    Some (after |> strip_leading_dashes |> strip_trailing_dashes)
+
 let draw_v_hairline ?(unicode = true) ?bg grid ~x ~y ~h ~(theme : Theme.t) =
   if h <= 0 then ()
   else

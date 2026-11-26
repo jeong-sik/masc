@@ -5136,17 +5136,15 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
               (fun idx line ->
                 if idx >= skip && idx - skip < lc.h then
                   let py = lc.y + idx - skip in
-                  if String.starts_with ~prefix:"──" line then
-                    let lbl =
-                      String.sub line 6 (String.length line - 6) |> String.trim
-                    in
-                    Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:lc
-                      ~y:py ~theme
-                  else
-                    ignore
-                      (Cell_grid.put_text ~clip:lc grid ~x:lc.x ~y:py
-                         ~style:st_primary
-                         (Grapheme.truncate_to_width ~max_width:lc.w line)))
+                  match Card.legacy_rule_label line with
+                  | Some lbl ->
+                      Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:lc
+                        ~y:py ~theme
+                  | None ->
+                      ignore
+                        (Cell_grid.put_text ~clip:lc grid ~x:lc.x ~y:py
+                           ~style:st_primary
+                           (Grapheme.truncate_to_width ~max_width:lc.w line)))
               lines
       end;
       let keeper_names =
@@ -5314,17 +5312,15 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           (fun idx line ->
             if idx >= skip && idx - skip < rc.h then
               let py = rc.y + idx - skip in
-              if String.starts_with ~prefix:"──" line then
-                let lbl =
-                  String.sub line 6 (String.length line - 6) |> String.trim
-                in
-                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
-                  ~y:py ~theme
-              else
-                ignore
-                  (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
-                     ~style:st_primary
-                     (Grapheme.truncate_to_width ~max_width:rc.w line)))
+              match Card.legacy_rule_label line with
+              | Some lbl ->
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
+                    ~y:py ~theme
+              | None ->
+                  ignore
+                    (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                       ~style:st_primary
+                       (Grapheme.truncate_to_width ~max_width:rc.w line)))
           all_lines
       end
   | Runtime_store.Tools_prompts_presets ->
@@ -5762,17 +5758,15 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           (fun idx line ->
             if idx >= skip && idx - skip < rc.h then
               let py = rc.y + idx - skip in
-              if String.starts_with ~prefix:"──" line then
-                let lbl =
-                  String.sub line 6 (String.length line - 6) |> String.trim
-                in
-                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
-                  ~y:py ~theme
-              else
-                ignore
-                  (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
-                     ~style:st_primary
-                     (Grapheme.truncate_to_width ~max_width:rc.w line)))
+              match Card.legacy_rule_label line with
+              | Some lbl ->
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
+                    ~y:py ~theme
+              | None ->
+                  ignore
+                    (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                       ~style:st_primary
+                       (Grapheme.truncate_to_width ~max_width:rc.w line)))
           detail_lines
       end
 
@@ -7384,22 +7378,19 @@ let render_inspector
               List.iter
                 (fun ln ->
                   if !y < bot then begin
-                    if String.starts_with ~prefix:"──" ln then
-                      let lbl =
-                        String.sub ln 6 (String.length ln - 6) |> String.trim
-                      in
-                      Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
-                        ~rect:content ~y:!y ~theme
-                    else begin
-                      let st =
-                        if String.starts_with ~prefix:"  [DIAG]" ln then
-                          H.status_style ~theme Theme.Status_attention
-                        else H.text_style ~theme ()
-                      in
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                           ~max_w:content.w ~style:st ln)
-                    end;
+                    (match Card.legacy_rule_label ln with
+                    | Some lbl ->
+                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                          ~rect:content ~y:!y ~theme
+                    | None ->
+                        let st =
+                          if String.starts_with ~prefix:"  [DIAG]" ln then
+                            H.status_style ~theme Theme.Status_attention
+                          else H.text_style ~theme ()
+                        in
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w ~style:st ln));
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)
@@ -7479,16 +7470,14 @@ let render_inspector
               List.iter
                 (fun ln ->
                   if !y < bot then begin
-                    if String.starts_with ~prefix:"──" ln then
-                      let lbl =
-                        String.sub ln 6 (String.length ln - 6) |> String.trim
-                      in
-                      Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
-                        ~rect:content ~y:!y ~theme
-                    else
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                           ~max_w:content.w ~style:(H.text_style ~theme ()) ln);
+                    (match Card.legacy_rule_label ln with
+                    | Some lbl ->
+                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                          ~rect:content ~y:!y ~theme
+                    | None ->
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w ~style:(H.text_style ~theme ()) ln));
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)

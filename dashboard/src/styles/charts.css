@@ -159,9 +159,14 @@
 }
 
 /* A click on a series' marker or label hides it. The time's takes none, nor
-   does a value. */
+   does a value. The label also takes focus, and Enter or Space does the same. */
 .u-legend .u-series:not(:first-child) > th {
   cursor: pointer;
+}
+
+.u-legend .u-label:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 /* The time has no line to mark. */

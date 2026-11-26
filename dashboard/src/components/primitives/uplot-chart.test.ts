@@ -53,6 +53,14 @@ describe('components/primitives uplot chart legend', () => {
     }
   }
 
+  /** Row `seriesIdx` of the legend of chart `index`: the time is row 0. */
+  const legendRow = (index: number, seriesIdx: number) =>
+    container.querySelectorAll('.u-legend')[index]!.querySelectorAll<HTMLElement>('.u-series')[seriesIdx]!
+
+  /** Which rows of the legend of chart `index` are marked as hidden. */
+  const hidden = (index: number) =>
+    [...container.querySelectorAll('.u-legend')[index]!.querySelectorAll('.u-series')].map((row) => row.classList.contains('u-off'))
+
   /** Moves the pointer to `fraction` of the way across the plotting area of chart `index`. */
   const movePointer = (index: number, fraction: number) => {
     const over = container.querySelectorAll<HTMLElement>('.u-over')[index]!
@@ -131,5 +139,56 @@ describe('components/primitives uplot chart legend', () => {
 
     await vi.waitFor(() => expect(legend(0).values).toEqual([timeText(T0 + 11 * HOUR), '123.46 %']))
     expect(legend(0).widths[1]).toBe('8ch')
+  })
+
+  it('hides a series on a click of its legend cell and shows it again, on that chart only', async () => {
+    renderCharts(wholeData)
+    await vi.waitFor(() => expect(container.querySelectorAll('.u-legend')).toHaveLength(2))
+    const click = (target: Element) => target.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    click(legendRow(1, 1).querySelector('th')!)
+    expect(hidden(1)).toEqual([false, true, false])
+    // The marker sits in the same cell, so a click on it lands there too.
+    click(legendRow(1, 2).querySelector('.u-marker')!)
+    expect(hidden(1)).toEqual([false, true, true])
+
+    // The other chart follows this one's crosshair, not its hidden series.
+    expect(hidden(0)).toEqual([false, false])
+    // A hidden series keeps its row, its label and the width of its value.
+    expect(legend(1).labels).toEqual([LEGEND_TIME_LABEL, '요청', '오류'])
+    expect(legend(1).widths).toEqual([expect.stringMatching(/^1[78]ch$/), '4ch', '4ch'])
+
+    click(legendRow(1, 1).querySelector('th')!)
+    click(legendRow(1, 2).querySelector('th')!)
+    expect(hidden(1)).toEqual([false, false, false])
+  })
+
+  it('lets the keyboard hide and show a series from its name, which says whether the series shows', async () => {
+    renderCharts(wholeData)
+    await vi.waitFor(() => expect(container.querySelectorAll('.u-legend')).toHaveLength(2))
+    const name = legendRow(1, 1).querySelector<HTMLElement>('.u-label')!
+    const press = (key: string) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      name.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+
+    expect([name.tabIndex, name.getAttribute('role'), name.getAttribute('aria-pressed')]).toEqual([0, 'button', 'true'])
+    // The time is no series: it has nothing to hide and takes no focus.
+    expect(legendRow(1, 0).querySelector('.u-label')!.hasAttribute('role')).toBe(false)
+
+    expect(press('Enter')).toBe(true)
+    expect(hidden(1)).toEqual([false, true, false])
+    expect(name.getAttribute('aria-pressed')).toBe('false')
+
+    expect(press(' ')).toBe(true)
+    expect(hidden(1)).toEqual([false, false, false])
+    expect(name.getAttribute('aria-pressed')).toBe('true')
+
+    // Another key is left to the browser, and a click moves the same state.
+    expect(press('a')).toBe(false)
+    expect(hidden(1)).toEqual([false, false, false])
+    legendRow(1, 1).querySelector('th')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(name.getAttribute('aria-pressed')).toBe('false')
   })
 })

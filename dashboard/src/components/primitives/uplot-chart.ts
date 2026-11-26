@@ -19,7 +19,9 @@ import {
   legendPointIndex,
   legendText,
   legendValueColumns,
+  makeLegendTogglesReachable,
   pointerOnAny,
+  reflectLegendToggle,
   reserveLegendValueWidths,
 } from './uplot-legend'
 
@@ -224,6 +226,7 @@ export function UPlotChart(props: UPlotChartProps) {
           ],
           hooks: {
             setData: [reserveLegend],
+            setSeries: [reflectLegendToggle],
             setCursor: [
               (u) => {
                 const idx = u.cursor.idx
@@ -237,6 +240,7 @@ export function UPlotChart(props: UPlotChartProps) {
         mountRef.current.innerHTML = ''
         const plot = new UPlotCtor(opts, dataRef.current, mountRef.current)
         plotRef.current = plot
+        makeLegendTogglesReachable(plot)
         setLoadError(null)
 
         if (typeof ResizeObserver !== 'undefined') {

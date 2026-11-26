@@ -97,3 +97,44 @@ export function reserveLegendValueWidths(chartRoot: Element, columns: readonly n
     if (cell && width !== undefined) cell.style.minWidth = `${width}ch`
   })
 }
+
+/** The legend rows of a chart, in series order: the time first. */
+function legendRows(chartRoot: Element): HTMLElement[] {
+  return [...chartRoot.querySelectorAll<HTMLElement>('.u-legend .u-series')]
+}
+
+/** What the keyboard path needs of a chart: its element, which series show, and the switch. */
+export interface LegendToggleTarget {
+  readonly root: Element
+  readonly series: readonly { readonly show?: boolean }[]
+  setSeries(seriesIdx: number, opts: { show: boolean }): void
+}
+
+/**
+ * uPlot hides and shows a series on a click of its legend cell, and gives the
+ * keyboard no way to it. This makes each series name a toggle button: it takes
+ * focus, says whether its series shows, and Enter or Space flips it. The time
+ * row has no series to hide and is left alone.
+ */
+export function makeLegendTogglesReachable(chart: LegendToggleTarget): void {
+  legendRows(chart.root).forEach((row, seriesIdx) => {
+    const name = row.querySelector<HTMLElement>('.u-label')
+    if (seriesIdx === 0 || name === null) return
+    name.tabIndex = 0
+    name.setAttribute('role', 'button')
+    name.setAttribute('aria-pressed', String(chart.series[seriesIdx]?.show !== false))
+    name.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      chart.setSeries(seriesIdx, { show: chart.series[seriesIdx]?.show === false })
+    })
+  })
+}
+
+/** Says on a series' toggle whether the series shows now, after a click or a key flipped it. */
+export function reflectLegendToggle(chart: LegendToggleTarget, seriesIdx: number | null): void {
+  if (seriesIdx === null) return
+  legendRows(chart.root)[seriesIdx]
+    ?.querySelector('.u-label')
+    ?.setAttribute('aria-pressed', String(chart.series[seriesIdx]?.show !== false))
+}

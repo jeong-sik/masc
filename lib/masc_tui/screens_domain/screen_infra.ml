@@ -3273,20 +3273,25 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                && (match expected_path with
                   | Some exp -> String.equal exp path
                   | None -> true) ->
-            let p_lbl = if String.equal path "" then "working tree" else path in
             ignore
               (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
                  ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                 (Printf.sprintf "Git Diff · %s (%d lines)" p_lbl
-                    (List.length df.lines)));
-            if not df.has_changes && df.lines = [] then
+                 (Printf.sprintf "Git Diff · %s (%d lines)" path
+                    (List.length df.rows)));
+            if not df.has_changes then
               H.draw_empty_notice ~grid ~rect:vis_rect ~theme
                 (Say.resolve lang
                    (Say.make ~ko:"변경 사항 없음" ~en:"No working tree changes"))
             else
               let rows =
                 List.map
-                  (fun (ln : Wire_infra.git_diff_line) ->
+                  (function
+                    | Wire_infra.Hunk h ->
+                        ( Some Theme.Status_active
+                        , Printf.sprintf "@@ -%d,%d +%d,%d @@%s" h.old_start h.old_count
+                            h.new_start h.new_count
+                            (match h.section with Some s -> " " ^ s | None -> "") )
+                    | Wire_infra.Line ln ->
                     let sign, tone =
                       match ln.kind with
                       | `Add -> ("+", Some Theme.Status_ok)
@@ -3300,7 +3305,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       | None, None -> "     "
                     in
                     (tone, Printf.sprintf "%s%s %s" lno sign ln.text))
-                  df.lines
+                  df.rows
               in
               draw_plain_scrolled ~scroll:code.git_scroll_offset rows
         | Some _ | None ->

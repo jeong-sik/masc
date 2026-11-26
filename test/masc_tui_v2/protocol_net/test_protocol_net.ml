@@ -5446,9 +5446,16 @@ let test_wave3_live_wire_codecs () =
   let g_diff =
     expect_ok "decode_git_diff"
       (Wire_infra.decode_git_diff
-         (parse_json {|{ "has_changes": true, "unified": [{ "kind": "context", "oldLine": 1, "newLine": 1, "text": "let x = 1" }, { "kind": "add", "newLine": 2, "text": "let y = 2" }] }|}))
+         (parse_json {|{ "has_changes": true, "unified": [{ "kind": "hunk", "oldStart": 1, "oldCount": 1, "newStart": 1, "newCount": 2, "section": "let x" }, { "kind": "context", "oldLine": 1, "newLine": 1, "text": "let x = 1" }, { "kind": "add", "newLine": 2, "text": "let y = 2" }] }|}))
   in
-  Alcotest.(check int) "2 git diff lines" 2 (List.length g_diff.lines);
+  Alcotest.(check int) "hunk and 2 git diff lines" 3 (List.length g_diff.rows);
+  (match g_diff.rows with
+   | Wire_infra.Hunk { new_start = 1; new_count = 2; section = Some "let x"; _ } :: _ -> ()
+   | _ -> Alcotest.fail "first row is the hunk header");
+  Alcotest.(check bool) "unknown git diff row kind is rejected" true
+    (Result.is_error
+       (Wire_infra.decode_git_diff
+          (parse_json {|{ "has_changes": true, "unified": [{ "kind": "binary" }] }|})));
 
   (* Surface 4: Memory Health, Ledger, Context, Facts Tree, Journal *)
   let mhf =

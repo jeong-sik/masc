@@ -1347,75 +1347,6 @@ module For_testing_diff = struct
       (git_diff_target_of_params ~base_ref ~commit)
 end
 
-(* --- Diff parsing --- *)
-
-let parse_hunk_header line =
-  if not (String.starts_with ~prefix:"@@ -" line) then None
-  else
-    let rest = String.sub line 4 (String.length line - 4) in
-    let sp_idx =
-      let rec find i =
-        if i >= String.length rest then String.length rest
-        else if String.get rest i = ' ' then i
-        else find (i + 1)
-      in
-      find 0
-    in
-    if sp_idx >= String.length rest then None
-    else
-      let old_part = String.sub rest 0 sp_idx in
-      let new_rest = String.sub rest (sp_idx + 1) (String.length rest - sp_idx - 1) in
-      let plus_idx =
-        let rec find i =
-          if i >= String.length new_rest then String.length new_rest
-          else if String.get new_rest i = ' ' then i
-          else find (i + 1)
-        in
-        find 0
-      in
-      let new_part = String.sub new_rest 0 plus_idx in
-      let parse_start s =
-        match String.split_on_char ',' s with
-        | x :: _ -> Option.value (int_of_string_opt x) ~default:1
-        | [] -> 1
-      in
-      Some (parse_start old_part, parse_start new_part)
-
-let parse_unified_diff lines =
-  let rec go old_line new_line acc remaining =
-    match remaining with
-    | [] -> List.rev acc
-    | hd :: tl ->
-      if String.starts_with ~prefix:"@@" hd then
-        (match parse_hunk_header hd with
-         | Some (ol, nl) -> go ol nl acc tl
-         | None -> go old_line new_line acc tl)
-      else if String.starts_with ~prefix:"+++" hd
-           || String.starts_with ~prefix:"---" hd then
-        go old_line new_line acc tl
-      else if String.starts_with ~prefix:"+" hd then
-        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
-        let row = `Assoc [ ("kind", `String "add")
-                         ; ("oldLine", `Null); ("newLine", `Int new_line)
-                         ; ("text", `String text) ] in
-        go old_line (new_line + 1) (row :: acc) tl
-      else if String.starts_with ~prefix:"-" hd then
-        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
-        let row = `Assoc [ ("kind", `String "delete")
-                         ; ("oldLine", `Int old_line); ("newLine", `Null)
-                         ; ("text", `String text) ] in
-        go (old_line + 1) new_line (row :: acc) tl
-      else if String.starts_with ~prefix:" " hd then
-        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
-        let row = `Assoc [ ("kind", `String "context")
-                         ; ("oldLine", `Int old_line); ("newLine", `Int new_line)
-                         ; ("text", `String text) ] in
-        go (old_line + 1) (new_line + 1) (row :: acc) tl
-      else
-        go old_line new_line acc tl
-  in
-  go 1 1 [] lines
-
 (* --- Routes --- *)
 
 let handle_workspace_tree_get
@@ -2256,8 +2187,15 @@ let handle_git_diff_get
               | Ok [] ->
                 `Assoc [("unified", `List []); ("has_changes", `Bool false)]
               | Ok diff_lines ->
-                let unified = parse_unified_diff diff_lines in
-                `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
+                (match Git_unified_diff.parse diff_lines with
+                 | Error detail ->
+                   observe_workspace_route_failure
+                     ~site:"git_diff_parse" ~path:rel (Failure detail);
+                   `Null
+                 | Ok rows ->
+                   `Assoc
+                     [ ("unified", `List (List.map Git_unified_diff.row_to_json rows))
+                     ; ("has_changes", `Bool true) ])))
        in
        (match payload.json with
         | `Null ->

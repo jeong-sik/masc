@@ -31,12 +31,23 @@ export interface BlameBlock {
 
 export type DiffTone = 'context' | 'add' | 'delete'
 
-export interface UnifiedDiffRow {
+export interface UnifiedDiffLine {
   readonly kind: DiffTone
   readonly oldLine: number | null
   readonly newLine: number | null
   readonly text: string
 }
+
+export interface UnifiedDiffHunk {
+  readonly kind: 'hunk'
+  readonly oldStart: number
+  readonly oldCount: number
+  readonly newStart: number
+  readonly newCount: number
+  readonly section?: string
+}
+
+export type UnifiedDiffRow = UnifiedDiffLine | UnifiedDiffHunk
 
 // --- Workspace File ---
 

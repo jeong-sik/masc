@@ -1252,9 +1252,21 @@ type git_diff_line = {
   text : string;
 }
 
+type git_diff_hunk = {
+  old_start : int;
+  old_count : int;
+  new_start : int;
+  new_count : int;
+  section : string option;
+}
+
+type git_diff_row =
+  | Hunk of git_diff_hunk
+  | Line of git_diff_line
+
 type git_diff_snapshot = {
   has_changes : bool;
-  lines : git_diff_line list;
+  rows : git_diff_row list;
 }
 
 let decode_workspace_tree_node json =
@@ -1493,30 +1505,35 @@ let decode_git_log json =
   let* items = required_list_field body "commits" in
   decode_list "commits" decode_git_log_commit items
 
-let decode_git_diff_line json =
-  let* kind_str = required_nonblank_string json "kind" in
-  let* kind =
-    match kind_str with
-    | "add" -> Ok `Add
-    | "delete" -> Ok `Delete
-    | "context" -> Ok `Context
-    | other -> Error (Printf.sprintf "unknown git diff line kind %S" other)
-  in
+let decode_git_diff_line ~kind json =
   let* old_line = optional_int_field json "oldLine" in
   let* new_line = optional_int_field json "newLine" in
   let* text = required_string_field json "text" in
-  Ok { kind; old_line; new_line; text }
+  Ok (Line { kind; old_line; new_line; text })
+
+let decode_git_diff_hunk json =
+  let* old_start = required_int_field json "oldStart" in
+  let* old_count = required_int_field json "oldCount" in
+  let* new_start = required_int_field json "newStart" in
+  let* new_count = required_int_field json "newCount" in
+  let* section = optional_string_field json "section" in
+  Ok (Hunk { old_start; old_count; new_start; new_count; section })
+
+let decode_git_diff_row json =
+  let* kind = required_nonblank_string json "kind" in
+  match kind with
+  | "hunk" -> decode_git_diff_hunk json
+  | "add" -> decode_git_diff_line ~kind:`Add json
+  | "delete" -> decode_git_diff_line ~kind:`Delete json
+  | "context" -> decode_git_diff_line ~kind:`Context json
+  | other -> Error (Printf.sprintf "unknown git diff row kind %S" other)
 
 let decode_git_diff json =
   let* _, body = unwrap_v2_or_raw json in
-  let has_changes =
-    match optional_bool_field body "has_changes" with
-    | Ok (Some b) -> b
-    | Ok None | Error _ -> false
-  in
-  let* items = optional_list_field body "unified" in
-  let* lines = decode_list "unified" decode_git_diff_line items in
-  Ok { has_changes; lines }
+  let* has_changes = required_bool_field body "has_changes" in
+  let* items = required_list_field body "unified" in
+  let* rows = decode_list "unified" decode_git_diff_row items in
+  Ok { has_changes; rows }
 
 (* --- Repository Open Pull Requests & Per-Repo Git Observation --- *)
 

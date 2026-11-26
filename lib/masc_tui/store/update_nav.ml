@@ -8569,7 +8569,7 @@ let code_right_pane_line_count (m : Model.t) : int =
              && (match expected_path with
                 | Some exp -> String.equal exp path
                 | None -> true) ->
-          List.length df.lines
+          List.length df.rows
       | Some _ | None -> 0)
 
 let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)

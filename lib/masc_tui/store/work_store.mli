@@ -192,6 +192,10 @@ val goals_read : t -> Wire_work.goal list Observed.t
 val goals : t -> Wire_work.goal list
 val filtered_goals : t -> Wire_work.goal list
 val tasks : t -> Wire_work.task list
+val task_matches_status : task_status_filter -> Wire_work.task -> bool
+(** Whether a task row belongs under a status chip. [filtered_tasks] and the
+    chip counts both use it, so a chip shows as many rows as it says. *)
+
 val filtered_tasks : t -> Wire_work.task list
 (** Tasks in [task_status_filter] whose title or id contains [filter_query]. *)
 val verifications_list : t -> Wire_work.verification_request list

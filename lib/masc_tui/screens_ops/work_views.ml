@@ -2462,51 +2462,22 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     else
     let bg = Color.of_rgb theme.surface_0 in
     let all_tasks = Work_store.tasks model.work in
-    let eff_counts = Work_store.effective_task_counts model.work in
     let v_pass, v_rej, v_wait = Work_store.verification_pass_summary model.work in
-    let active_n, verify_n, todo_n, done_n =
-      match eff_counts with
-      | Some c ->
-          ( c.claimed + c.in_progress + c.awaiting_verification
-          , c.awaiting_verification
-          , c.todo
-          , c.done_total )
-      | None ->
-          let act =
-            List.fold_left
-              (fun a (tk : Wire_work.task) ->
-                if Ops_common.task_is_active tk.status then a + 1 else a)
-              0 all_tasks
-          in
-          let ver =
-            List.fold_left
-              (fun a (tk : Wire_work.task) ->
-                if Ops_common.task_is_awaiting_verification tk.status then a + 1
-                else a)
-              0 all_tasks
-          in
-          let td =
-            List.fold_left
-              (fun a (tk : Wire_work.task) ->
-                match tk.status with
-                | Wire_work.Todo -> a + 1
-                | Wire_work.Claimed _
-                | Wire_work.InProgress _
-                | Wire_work.AwaitingVerification _
-                | Wire_work.Done _
-                | Wire_work.Cancelled _ ->
-                    a)
-              0 all_tasks
-          in
-          let dn =
-            List.fold_left
-              (fun a (tk : Wire_work.task) ->
-                if Ops_common.task_is_done tk.status then a + 1 else a)
-              0 all_tasks
-          in
-          (act, ver, td, dn)
+    (* Each chip counts the rows it would show: the same list and the same
+       predicate as the rows below. The planning read also carries totals for
+       the whole backlog. The task list is a separate read and can hold fewer
+       rows, so mixing the two put "All 648" next to "Done 664". *)
+    let count_status status =
+      List.fold_left
+        (fun n (tk : Wire_work.task) ->
+          if Work_store.task_matches_status status tk then n + 1 else n)
+        0 all_tasks
     in
-    let unlinked_n = Work_store.unlinked_task_count model.work in
+    let active_n = count_status Work_store.Status_active in
+    let verify_n = count_status Work_store.Status_awaiting_verification in
+    let todo_n = count_status Work_store.Status_todo in
+    let unlinked_n = count_status Work_store.Status_unlinked in
+    let done_n = count_status Work_store.Status_done in
     let pill_rect, body_rect = Rect.split_v rect ~top_h:1 in
     let status = model.work.task_status_filter in
     let is_status f = Work_store.equal_task_status_filter status f in

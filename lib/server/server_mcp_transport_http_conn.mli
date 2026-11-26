@@ -4,8 +4,9 @@
     Per-session SSE connection registry with rate-limit guard.
     All access to global registries is internally protected by
     atomic CAS loops.  A connection's response belongs to the domain
-    that runs the connection: only {!send_raw} and the {!run_sse_pumps}
-    supervisor touch it, both on that domain.
+    that runs the connection: only {!send_raw}, the response's own
+    keepalive ({!session_idle}) and the {!run_sse_pumps} supervisor touch
+    it, all on that domain.
 
     Open'd by sibling modules (`server_mcp_transport_http`,
     `server_mcp_transport_http_agui`) — all top-level bindings
@@ -162,23 +163,22 @@ val send_raw : sse_conn_info -> string -> Server_sse_response.outcome
 
 val drain_sse :
   sse_conn_info ->
-  clock:_ Eio.Time.clock ->
   prime:string ->
   replay:Sse.delivery list ->
   frame_of:(Sse.delivery -> string) ->
   send:(string -> Server_sse_response.outcome) ->
   Sse.delivery_stream ->
   Server_sse_pump.ending
-(** [drain_sse info ~clock ~prime ~replay ~frame_of ~send stream] is the
+(** [drain_sse info ~prime ~replay ~frame_of ~send stream] is the
     drain of an MCP GET, AG-UI or presence connection:
     {!Server_sse_pump.run} over [prime], then the [replay] deliveries,
     then the live deliveries of [stream], each live or replayed one
     written as [frame_of] makes it.  The frames already waiting go out
     in one [send], within {!Server_sse_pump.max_batch_bytes}, so a burst
     waits for the client once per batch.  A live delivery the replay
-    carried is skipped.  It writes nothing on a quiet stream (the ping
-    pump writes the keepalive) and ends with [Source_stopped] once
-    [info] is stopped.
+    carried is skipped.  It writes nothing on a quiet stream (the
+    response writes the keepalive, {!session_idle}) and ends with
+    [Source_stopped] once [info] is stopped.
 
     [send] is {!send_raw} on [info], or a wrapper that refuses when the
     connection's workspace scope ended.  Run it as the [drain] of
@@ -195,24 +195,32 @@ val make_sse_conn :
     [stop_promise]/[resolve_stop] pair.  All SSE handlers construct connections
     through this so the stop promise is never omitted. *)
 
+val session_idle : session_id:string -> unit -> Server_sse_response.idle
+(** The [idle] a session's response is opened with
+    ({!Server_sse_response.respond}): it marks the session's client seen
+    with {!Sse.touch}, as {!send_raw} does for a delivery, and answers
+    [Keepalive]. A session whose client reads a quiet stream is then not
+    evicted as idle ({!Sse.cleanup_stale}). *)
+
 val run_sse_pumps :
   sw:Eio.Switch.t ->
+  ?renew:(unit -> unit) ->
   sse_conn_info ->
   drain:(unit -> unit) ->
-  ping:(unit -> unit) ->
   unit
-(** [run_sse_pumps ~sw info ~drain ~ping] forks the [drain] and [ping]
-    pumps under a switch scoped to the connection rather than directly on the
-    server-lifetime [sw].  A supervisor forked on [sw] opens a child switch,
-    runs both pumps as daemons, and blocks on [info.stop_promise]; resolving
-    that promise ({!close_sse_conn} does) releases the child switch and
-    cancels both pumps — including a drain fiber blocked in
-    [Eio.Stream.take] or in a waiting send (#21548).  A pump that returns
-    before the stop (one that logged an exception it caught, such as a prime
-    or replay send that raised) stops the connection the same way, so a
-    stream never stays open with one pump.
+(** [run_sse_pumps ~sw ?renew info ~drain] forks [drain], and [renew] when
+    given, under a switch scoped to the connection rather than directly on
+    the server-lifetime [sw].  A supervisor forked on [sw] opens a child
+    switch, runs them as daemons, and blocks on [info.stop_promise];
+    resolving that promise ({!close_sse_conn} does) releases the child switch
+    and cancels them — including a drain fiber blocked in [Eio.Stream.take]
+    or in a waiting send (#21548).  [renew] is work the connection repeats
+    while it lives, such as a play seat's renewal.  One that returns before
+    the stop (one that logged an exception it caught, such as a prime or
+    replay send that raised) stops the connection the same way, so a stream
+    never stays open with half its work.
 
-    When both pumps have ended, the switch's release hook removes [info]
+    When they have ended, the switch's release hook removes [info]
     from the registry with {!stop_sse_conn_if_current} and closes
     [info.response].  It runs on the domain that called [run_sse_pumps],
     so call it from the connection's domain.  The hook also runs when

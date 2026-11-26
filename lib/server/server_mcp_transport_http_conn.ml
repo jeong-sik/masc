@@ -23,8 +23,8 @@ type sse_conn_info = {
   stop : bool Atomic.t;
   closed : bool Atomic.t;
   (* Resolved exactly once by [close_sse_conn]. [run_sse_pumps] forks the
-     drain/ping pumps under a per-connection switch and awaits this promise;
-     resolving it releases that switch, cancelling both pumps — including a
+     drain (and a renewal loop) under a per-connection switch and awaits this
+     promise; resolving it releases that switch, cancelling them — including a
      drain fiber blocked in [Eio.Stream.take] that the [stop] flag alone
      cannot interrupt (#21548). *)
   stop_promise : unit Eio.Promise.t;
@@ -264,6 +264,15 @@ let send_raw info data : Server_sse_response.outcome =
       close_sse_conn info;
       refused
 
+(* The idle answer of a session's response. Its keepalive keeps the
+   session's client as fresh as a delivery written with [send_raw] does:
+   [Sse.cleanup_stale] evicts a client that took no frame for its idle age.
+   The mark comes as the keepalive is due. One that is not taken closes the
+   response, and the drain then stops the connection. *)
+let session_idle ~session_id () =
+  Sse.touch session_id;
+  Server_sse_response.Keepalive
+
 (* What a drain writes, in order. *)
 type drain_item =
   | Prime of string
@@ -296,7 +305,7 @@ let drain_source info ~prime ~replay event_stream : drain_item Server_sse_pump.s
   ; stopped = (fun () -> Atomic.get info.stop || Atomic.get info.closed)
   }
 
-let drain_sse info ~clock ~prime ~replay ~frame_of ~send event_stream =
+let drain_sse info ~prime ~replay ~frame_of ~send event_stream =
   (* Every replayed delivery goes in the handoff: one that is not written
      ends the stream, so no live delivery is taken after it. *)
   let handoff = Sse.create_replay_handoff replay in
@@ -307,26 +316,23 @@ let drain_sse info ~clock ~prime ~replay ~frame_of ~send event_stream =
       | Replayed delivery -> Send (frame_of delivery)
       | Live delivery ->
         if Sse.accept_live_delivery handoff delivery then Send (frame_of delivery) else Skip)
-    (* The ping pump writes the keepalive. *)
-    ~idle:(fun () -> Server_sse_pump.Quiet)
-    ~clock
-    ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
     ~closed:(fun () -> Server_sse_response.await_closed info.response)
     ~send
 
-(* Run the SSE drain + ping pumps for a connection under a switch scoped to
-   that connection's lifetime, rather than directly on the server-lifetime
-   [sw]. A child [conn_sw] holds both pumps as daemons; the supervisor blocks
-   on [info.stop_promise]. [close_sse_conn] resolves that promise (the single
-   chokepoint for every stop path: disconnect, eviction, server shutdown),
-   which returns the supervisor, releases [conn_sw], and cancels both pumps —
-   including a drain fiber blocked in [Eio.Stream.take] or in a send that
-   waits for the socket. Previously both pumps were forked directly on the
-   server switch and a stopped session's drain fiber parked forever (#21548).
+(* Run the SSE drain, and the [renew] loop when there is one, for a
+   connection under a switch scoped to that connection's lifetime, rather
+   than directly on the server-lifetime [sw]. A child [conn_sw] holds them as
+   daemons; the supervisor blocks on [info.stop_promise]. [close_sse_conn]
+   resolves that promise (the single chokepoint for every stop path:
+   disconnect, eviction, server shutdown), which returns the supervisor,
+   releases [conn_sw], and cancels both — including a drain fiber blocked in
+   [Eio.Stream.take] or in a send that waits for the socket. Previously the
+   pumps were forked directly on the server switch and a stopped session's
+   drain fiber parked forever (#21548).
 
    The release hook is the one place the response is closed. It runs after
-   both pumps have ended, on the connection's domain, and also when [sw] is
-   cancelled before anyone closed [info]. If [info] is already closed
+   the drain and [renew] have ended, on the connection's domain, and also
+   when [sw] is cancelled before anyone closed [info]. If [info] is already closed
    (connection torn down before the pumps started), the promise is already
    resolved and the supervisor returns immediately.
 
@@ -338,24 +344,25 @@ let release_sse_conn info =
   stop_sse_conn_if_current info;
   Server_sse_response.close info.response
 
-let run_sse_pumps ~sw info ~(drain : unit -> unit) ~(ping : unit -> unit) =
+let run_sse_pumps ~sw ?renew info ~(drain : unit -> unit) =
   match Eio.Switch.get_error sw with
   | Some (_ : exn) -> release_sse_conn info
   | None ->
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Switch.run (fun conn_sw ->
         Eio.Switch.on_release conn_sw (fun () -> release_sse_conn info);
-        (* A pump returns on its own only after the stop, or after it logged
-           an exception it caught (a prime or replay send that raised). The
-           connection then has no drain or no ping, so it ends there. *)
-        Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
-          drain ();
-          stop_sse_conn_if_current info;
-          `Stop_daemon);
-        Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
-          ping ();
-          stop_sse_conn_if_current info;
-          `Stop_daemon);
+        (* The drain and [renew] return on their own only after the stop, or
+           after they logged an exception they caught (a prime or replay send
+           that raised). The connection then lacks one of them, so it ends
+           there. *)
+        let beside work =
+          Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
+            work ();
+            stop_sse_conn_if_current info;
+            `Stop_daemon)
+        in
+        beside drain;
+        Option.iter beside renew;
         Eio.Promise.await info.stop_promise))
 
 let prune_connect_times ~now ~window_s times =

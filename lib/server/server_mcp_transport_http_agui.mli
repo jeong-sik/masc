@@ -3,7 +3,7 @@
     Single public entry point: {!handle_ag_ui_events} services
     [GET /ag-ui/events] by binding a per-session SSE stream to the
     MASC event bus, converting each MASC event to the AG-UI SSE wire
-    format, and managing two background fibers (drain + ping).
+    format, and running its drain fiber.
 
     The internal surface is deliberately narrow.  All helpers
     (`ag_ui_event_of_masc_event`, `sse_stream_headers` re-export) stay
@@ -37,23 +37,19 @@ val handle_ag_ui_events :
        {!Sse.replay_after_for_session}, each converted from its canonical
        typed delivery to the AG-UI wire format. Replay/live overlap is removed
        by exact event id.
-    9. Spawn two fibers under the runtime switch:
-       - drain: pulls typed deliveries from the per-session stream, converts
-         each original JSON payload to the AG-UI wire format, writes to client,
-         and self-terminates on send failure. Raw MASC frames never cross this
-         endpoint's wire boundary.
-       - ping: sleeps 30s, writes ": ping\\n\\n" comment frame to
-         keep middleboxes from idling out the connection.
+    9. Run the drain under the runtime switch: it pulls typed deliveries
+       from the per-session stream, converts each original JSON payload to
+       the AG-UI wire format, writes to client, and self-terminates on send
+       failure. Raw MASC frames never cross this endpoint's wire boundary.
+       The response writes the keepalive comment while no delivery comes
+       ({!Server_mcp_transport_http_conn.session_idle}).
 
     {1 Cancellation contract}
 
-    Both fibers re-raise [Eio.Cancel.Cancelled] from every level so
-    a switch teardown propagates immediately.  Any other exception
-    is logged at {!Log.Server.error} or {!Log.Server.warn}; the fiber
-    that raised stops the session via
-    {!stop_sse_session_preserve_guard}.  A transient send failure on
-    one fiber does not necessarily kill the other — the second fiber
-    notices [info.stop = true] on its next iteration.
+    The drain re-raises [Eio.Cancel.Cancelled] so a switch teardown
+    propagates immediately.  Any other exception is logged at
+    {!Log.Server.error}, and the drain's end stops the connection
+    ({!Server_mcp_transport_http_conn.run_sse_pumps}).
 
     {1 Boot-time fast path}
 
@@ -64,13 +60,13 @@ val handle_ag_ui_events :
     and any replay events but no live updates.  The client SDK is
     expected to retry on stream end.
 
-    {1 Ping interval}
+    {1 Keepalive interval}
 
     {!Server_mcp_transport_http_headers.sse_ping_interval_s}, the
-    keepalive interval of the SSE routes apart from the execute-output
-    stream. Its stall bound,
+    keepalive interval of every SSE response. Its stall bound,
     {!Server_mcp_transport_http_headers.sse_stalled_after_s}, is three of
-    those intervals, and clients count missed pings by the same value. *)
+    those intervals, and clients count missed keepalives by the same
+    value. *)
 
 val handle_presence_events :
   deps:Server_mcp_transport_http_types.deps ->

@@ -102,9 +102,9 @@ let handle_ag_ui_events ~deps request reqd =
                       Http_reqd.respond_with_string reqd response ""
                   | Ok runtime ->
                   let response =
-                    Server_sse_response.respond ~clock:runtime.clock
+                    Server_sse_response.respond ~sw:runtime.sw ~clock:runtime.clock
                       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
-                      reqd response
+                      ~idle:(session_idle ~session_id) reqd response
                   in
                   let info = make_sse_conn ~session_id ~client_id ~response () in
                   register_sse_conn ~session_id ~info;
@@ -114,7 +114,6 @@ let handle_ag_ui_events ~deps request reqd =
                       |> event_to_sse)
                   in
                       let sw = runtime.sw in
-                      let clock = runtime.clock in
                       (* The drain sends the prime and the replay too, under
                          the supervisor, so a stop cancels one that waits for
                          the socket. *)
@@ -131,7 +130,7 @@ let handle_ag_ui_events ~deps request reqd =
                                    ~client_id ~session_id ~kind:Sse.Observer last_id).Sse.deliveries
                               | None -> []
                             in
-                            drain_sse info ~clock ~prime ~replay
+                            drain_sse info ~prime ~replay
                               ~frame_of:ag_ui_event_of_masc_event ~send:(send_raw info)
                               event_stream
                           with
@@ -142,32 +141,7 @@ let handle_ag_ui_events ~deps request reqd =
                           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                           | exception exn ->
                             Log.Server.error "ag-ui drain loop error: %s"
-                              (Printexc.to_string exn))
-                        ~ping:(fun () ->
-                          let rec loop () =
-                            if not (Atomic.get info.stop) then (
-                              (try Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s
-                               with Eio.Cancel.Cancelled _ as exn -> raise exn
-                                  | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
-                              (try
-                                 if Atomic.get info.closed then
-                                   stop_sse_session_preserve_guard info.session_id
-                                 else if not (Atomic.get info.stop) then
-                                   (match send_raw info ": ping\n\n" with
-                                    | Written -> ()
-                                    | Closed | Stalled ->
-                                      Log.Server.debug "ag-ui ping send failed for session %s"
-                                        info.session_id)
-                               with Eio.Cancel.Cancelled _ as exn -> raise exn
-                                  | exn ->
-                                      Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
-                                      stop_sse_session_preserve_guard info.session_id);
-                              loop ())
-                          in
-                          try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
-                            | exn ->
-                                Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
-                                stop_sse_session_preserve_guard info.session_id)))))
+                              (Printexc.to_string exn))))))
 
 let handle_presence_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in
@@ -234,20 +208,19 @@ let handle_presence_events ~deps request reqd =
               Http_reqd.respond_with_string reqd response ""
           | Ok runtime ->
           let response =
-            Server_sse_response.respond ~clock:runtime.clock
+            Server_sse_response.respond ~sw:runtime.sw ~clock:runtime.clock
               ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
-              reqd response
+              ~idle:(session_idle ~session_id) reqd response
           in
           let info = make_sse_conn ~session_id ~client_id ~response () in
           register_sse_conn ~session_id ~info;
               let sw = runtime.sw in
-              let clock = runtime.clock in
               (* The drain sends the prime too, under the supervisor, so a
                  stop cancels it while it waits for the socket. *)
               run_sse_pumps ~sw info
                 ~drain:(fun () ->
                   match
-                    drain_sse info ~clock
+                    drain_sse info
                       ~prime:
                         (Server_mcp_transport_http_headers.sse_comment_with_retry
                            ~comment:"presence-stream")
@@ -261,40 +234,4 @@ let handle_presence_events ~deps request reqd =
                   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                   | exception exn ->
                     Log.Server.error "presence drain loop error: %s"
-                      (Printexc.to_string exn))
-                ~ping:(fun () ->
-                  let rec loop () =
-                    if not (Atomic.get info.stop) then (
-                      (try Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s
-                       with
-                       | Eio.Cancel.Cancelled _ as e -> raise e
-                       | exn ->
-                           Log.Server.debug
-                             "presence ping sleep interrupted: %s"
-                             (Printexc.to_string exn));
-                      (try
-                         if Atomic.get info.closed then
-                           stop_sse_session_preserve_guard info.session_id
-                         else if not (Atomic.get info.stop) then
-                           (match send_raw info ": ping\n\n" with
-                            | Written -> ()
-                            | Closed | Stalled ->
-                              Log.Server.debug
-                                "presence ping send failed for session %s"
-                                info.session_id)
-                       with
-                       | Eio.Cancel.Cancelled _ as e -> raise e
-                       | exn ->
-                           Log.Server.warn
-                             "presence ping send failed for session %s: %s"
-                             info.session_id (Printexc.to_string exn);
-                           stop_sse_session_preserve_guard info.session_id);
-                      loop ())
-                  in
-                  try loop ()
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                      Log.Server.error
-                        "presence ping loop exited for session %s: %s"
-                        info.session_id (Printexc.to_string exn))))
+                      (Printexc.to_string exn))))

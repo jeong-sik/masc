@@ -22,8 +22,10 @@ let layout_bp ~(model : Model.t) ~(rect : Rect.t) =
 let body_rect ~bp (rect : Rect.t) =
   if rect.x = 0 then Layout.inset_body bp rect else rect
 
+let pad_x ~bp (inner : Rect.t) = Layout.card_pad_x_for_width bp inner.w
+
 let pad_content ~bp ?(pad_y = 0) (inner : Rect.t) =
-  Card.pad_inner ~pad_x:(Layout.card_pad_x_for_width bp inner.w) ~pad_y inner
+  Card.pad_inner ~pad_x:(pad_x ~bp inner) ~pad_y inner
 
 let clamp_index = Text_util.clamp_index
 
@@ -112,6 +114,38 @@ let put_right ~grid ~clip ~right_x ~y ~max_w ~style text =
     let fw = Grapheme.display_width fitted in
     let x = Int.max clip.x (right_x - fw) in
     Cell_grid.put_text ~clip grid ~x ~y ~style fitted
+
+let put_left_right ~grid ~clip ~x ~right_x ~y ?(gap = 2) ?(min_left = 4)
+    ~left_style ~right_style ~left ~right () =
+  let gap = Int.max 0 gap in
+  let min_left = Int.max 0 min_left in
+  let avail = Int.max 0 (right_x - x) in
+  if avail <= 0 || Rect.is_empty clip then ()
+  else
+    let right_clean = sanitize_single_line right in
+    let rw = Grapheme.display_width right_clean in
+    if rw <= 0 then
+      ignore (put_clipped ~grid ~clip ~x ~y ~max_w:avail ~style:left_style left)
+    else if avail >= min_left + gap + rw then begin
+      let left_w = avail - rw - gap in
+      ignore
+        (put_clipped ~grid ~clip ~x ~y ~max_w:left_w ~style:left_style left);
+      ignore
+        (put_right ~grid ~clip ~right_x ~y ~max_w:rw ~style:right_style
+           right_clean)
+    end
+    else if avail >= min_left + gap + 3 then begin
+      let left_w = Int.max min_left ((avail - gap) / 2) in
+      let rw_fit = Int.max 0 (avail - left_w - gap) in
+      ignore
+        (put_clipped ~grid ~clip ~x ~y ~max_w:left_w ~style:left_style left);
+      if rw_fit > 0 then
+        ignore
+          (put_right ~grid ~clip ~right_x ~y ~max_w:rw_fit ~style:right_style
+             right_clean)
+    end
+    else
+      ignore (put_clipped ~grid ~clip ~x ~y ~max_w:avail ~style:left_style left)
 
 let put_link ~grid ~clip ~x ~y ~max_w ~style ~uri text =
   if max_w <= 0 || Rect.is_empty clip then 0

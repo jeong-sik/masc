@@ -2186,8 +2186,32 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
         badge;
         hotkey =
           Some
-            (Ops_common.say model ~ko:"[x] 취소 · [g] 목표 연결 · [Space] JSON · [z/Esc] 뒤로"
-               ~en:"[x] Cancel · [g] Link Goal · [Space] JSON · [z/Esc] Back");
+            (let can_link_goal =
+               match sel_task with
+               | Some (tk : Wire_work.task) -> (
+                   match tk.status, tk.goal_link with
+                   | (Wire_work.Done _ | Wire_work.Cancelled _), _ -> false
+                   | ( Wire_work.Todo
+                     | Wire_work.Claimed _
+                     | Wire_work.InProgress _
+                     | Wire_work.AwaitingVerification _ ),
+                     Wire_work.Unlinked ->
+                       true
+                   | ( Wire_work.Todo
+                     | Wire_work.Claimed _
+                     | Wire_work.InProgress _
+                     | Wire_work.AwaitingVerification _ ),
+                     Wire_work.Linked _ ->
+                       false)
+               | None -> false
+             in
+             if can_link_goal then
+               Ops_common.say model
+                 ~ko:"[x] 취소 · [g] 목표 연결 · [Space] JSON · [z/Esc] 뒤로"
+                 ~en:"[x] Cancel · [g] Link Goal · [Space] JSON · [z/Esc] Back"
+             else
+               Ops_common.say model ~ko:"[x] 취소 · [Space] JSON · [z/Esc] 뒤로"
+                 ~en:"[x] Cancel · [Space] JSON · [z/Esc] Back");
         focused = task_main_focused;
       }
     in
@@ -2598,8 +2622,8 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[v/Space] 상태 · [x] 취소 · [h] 재정의 · [Enter/z] 확대"
-                 ~en:"[v/Space] Status · [x] Cancel · [h] Overrule · [Enter/z] Zoom");
+              (Ops_common.say model ~ko:"[v/Space] 상태 · [h] 재정의"
+                 ~en:"[v/Space] Status · [h] Overrule");
           focused = Model.pane_focused model 0;
         }
       in
@@ -3221,7 +3245,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
              ~title:(Ops_common.say model ~ko:"일정 상세" ~en:"Schedule Detail"))
           with
           badge = d_badge;
-          hotkey = Some (Ops_common.say model ~ko:"[n] 새 일정" ~en:"[n] New");
+          hotkey = Some (Ops_common.say model ~ko:"[↑↓] 스크롤" ~en:"[↑↓] Scroll");
           focused = Model.detail_pane_focused ~detail_index:1 model;
         }
       in
@@ -4248,9 +4272,7 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
                    ~en:"Uncertain Late-Approval Attempts (HITL Recovery)")
                 (List.length late_rows)))
         with
-        hotkey =
-          Some
-            "/gate ack-uncertain <keeper> <consume_id> · /gate restore-late";
+        hotkey = Some "/gate ack-uncertain · /gate restore-late";
       }
     in
     let b_inner = Card.draw ~cache grid ~rect:bot_rect ~theme b_spec in
@@ -5883,7 +5905,10 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 ~en:"Harness Health & Verdicts"))
         with
         badge = status_badge;
-        hotkey = Some "[y] Approve · [n] Reject · [H] Hash";
+        hotkey =
+          Some
+            (Ops_common.say model ~ko:"[y] 승인 · [n] 반려 · [H] 해시"
+               ~en:"[y] Approve · [n] Reject · [H] Hash");
         focused = Model.pane_focused model 0;
       }
     in
@@ -5999,12 +6024,12 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         hotkey =
           Some
             (if Model.is_zoomed_active model then
-               Ops_common.say model ~ko:"[↑↓] 스크롤 · [y] 승인 · [n] 반려"
-                 ~en:"[↑↓] Scroll · [y] Approve · [n] Reject"
-             else
                Ops_common.say model
-                 ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"
-                 ~en:"[→/Tab] Scroll Detail · [y] Approve · [n] Reject");
+                 ~ko:"[↑↓] 스크롤 · [y] 승인 · [n] 반려 · [z/Esc] 뒤로"
+                 ~en:"[↑↓] Scroll · [y] Approve · [n] Reject · [z/Esc] Back"
+             else
+               Ops_common.say model ~ko:"[Tab] 상세 스크롤 · [z] 확대"
+                 ~en:"[Tab] Scroll · [z] Zoom");
         focused = Model.detail_pane_focused ~detail_index:1 model;
       }
     in

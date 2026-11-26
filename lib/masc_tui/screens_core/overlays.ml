@@ -5257,12 +5257,17 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      (Say.make
                         ~ko:
                           (Printf.sprintf
-                             "[v] 문서/원본 · [r] 재조회 · [y] %s 복사 · [e] %s 저장 · [o] 열기 · [H] SHA · [Esc]"
+                             "[v] 문서/원본 · [y] %s 복사 · [e] %s 저장 · [Esc]"
                              fmt_tok ext_tok)
                         ~en:
                           (Printf.sprintf
-                             "[v] Doc/Raw · [r] Retry · [y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc]"
+                             "[v] Doc/Raw · [y] Copy %s · [e] Export %s · [Esc]"
                              fmt_tok ext_tok)));
+              footer_hint =
+                Some
+                  (Say.resolve lang
+                     (Say.make ~ko:"[r] 재조회 · [o] 열기 · [H] SHA"
+                        ~en:"[r] Retry · [o] Open · [H] SHA"));
               focused = true;
               elevated = true;
             }

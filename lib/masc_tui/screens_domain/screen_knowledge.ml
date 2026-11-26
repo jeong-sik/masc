@@ -163,7 +163,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                   age
               in
               let header = Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1 in
-              Card.draw_section_band ~pad_x:(Layout.card_pad_x bp) grid
+              Card.draw_section_band ~pad_x:(H.pad_x ~bp inner) grid
                 ~rect:header ~theme ~left_title:author ~right_meta:meta ();
               let content =
                 Knowledge_store.board_comment_reading_rect ~bp k rect
@@ -225,12 +225,12 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
            (Say.resolve lang
               (if zoomed then
                  Say.make
-                   ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
-                   ~en:"[v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"
+                   ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · +/- 투표"
+                   ~en:"[v] Comments · < / > Step · [c] Reply · +/- Vote"
                else
                  Say.make
-                   ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
-                   ~en:"[Enter/z] Zoom · [v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"))
+                   ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글"
+                   ~en:"[Enter/z] Zoom · [v] Comments · < / > Step"))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -240,7 +240,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
           ~lang k.board
     | Some p ->
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = H.pad_x ~bp inner in
         let eff_ts =
           match p.updated_at_unix with
           | Some u when u > p.created_at_unix -> u
@@ -536,16 +536,11 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                       if !y < bottom then begin
                         Card.draw_left_rail ~color:theme.border_inactive grid
                           ~x:content.x ~y:!y ~h:1 ~theme;
-                        let aw = Grapheme.display_width c_age in
-                        ignore
-                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
-                             ~y:!y ~max_w:(Int.max 6 (content.w - aw - 4))
-                             ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                             hdr);
-                        ignore
-                          (H.put_right ~grid ~clip:content
-                             ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                             ~style:(H.whisper_style ~theme ()) c_age);
+                        H.put_left_right ~grid ~clip:content ~x:(content.x + 2)
+                          ~right_x:(Rect.right content) ~y:!y ~min_left:6
+                          ~left_style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                          ~right_style:(H.whisper_style ~theme ()) ~left:hdr
+                          ~right:c_age ();
                         incr y
                       end
                   | `Body (indent, body) ->
@@ -753,7 +748,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
            list_title)
     in
     if not (Rect.is_empty list_inner) then begin
-      let pad_x = Layout.card_pad_x bp in
+      let pad_x = H.pad_x ~bp list_inner in
       let live_hearths =
         match Observed.to_option k.board_hearths with
         | Some hs when hs <> [] ->
@@ -1091,13 +1086,13 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                    ~en:"[e] Edit · [Ctrl+E] $EDITOR · [z/Esc] Unzoom"
                else
                  Say.make
-                   ~ko:"[→/Tab] 스크롤 · [Enter/z] 확대 · [e] 편집 · [Ctrl+E] $EDITOR"
-                   ~en:"[→/Tab] Scroll · [Enter/z] Zoom · [e] Edit · [Ctrl+E] $EDITOR"))
+                   ~ko:"[Enter/z] 확대 · [e] 편집 · [^E] $EDITOR"
+                   ~en:"[Enter/z] Zoom · [e] Edit · [^E] $EDITOR"))
          title)
   in
   if Rect.is_empty inner then ()
   else
-    let pad_x = Layout.card_pad_x bp in
+    let pad_x = H.pad_x ~bp inner in
     (
         match page_detail with
         | Some d ->
@@ -1613,7 +1608,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                  ~en:"Wiki Topic Tree · log.md")))
     in
     if not (Rect.is_empty left_inner) then begin
-      let pad_x = Layout.card_pad_x bp in
+      let pad_x = H.pad_x ~bp left_inner in
       let log_entries =
         match Observed.to_option k.wiki_log with
         | Some log -> log.entries
@@ -1707,14 +1702,11 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                          (Glyph.to_utf8 Glyph.Expand_open) topic
                      in
                      let cnt_s = Printf.sprintf "(%d)" cnt in
-                     ignore
-                       (H.put_clipped ~grid ~clip:r_rect ~x:(list_area.x + 2)
-                          ~y:py ~max_w:(Int.max 6 (right_edge - list_area.x - 8))
-                          ~style:(H.secondary_style ~theme ~attrs:Attr.bold ())
-                          hdr);
-                     ignore
-                       (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
-                          ~max_w:6 ~style:(H.whisper_style ~theme ()) cnt_s)
+                     H.put_left_right ~grid ~clip:r_rect ~x:(list_area.x + 2)
+                       ~right_x:right_edge ~y:py ~min_left:6
+                       ~left_style:(H.secondary_style ~theme ~attrs:Attr.bold ())
+                       ~right_style:(H.whisper_style ~theme ())
+                       ~left:hdr ~right:cnt_s ()
                  | `Page (p, is_sel) ->
                      let left_focused = Model.pane_focused model 0 in
                      let row_bg =
@@ -1730,20 +1722,16 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                          (Glyph.to_utf8 Glyph.External_arrow)
                          p.backlink_count p.revision
                      in
-                     let mw = Grapheme.display_width meta in
                      let tx = list_area.x + 4 in
                      let title_style =
                        H.row_text_style ~theme ~selected:is_sel
                          ~focused:left_focused ~bg:row_bg
                      in
-                     ignore
-                       (H.put_clipped ~grid ~clip:r_rect ~x:tx ~y:py
-                          ~max_w:(Int.max 4 (right_edge - tx - mw - 2))
-                          ~style:title_style p.title);
-                     ignore
-                       (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
-                          ~max_w:mw ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                          meta)
+                     H.put_left_right ~grid ~clip:r_rect ~x:tx
+                       ~right_x:right_edge ~y:py ~min_left:4
+                       ~left_style:title_style
+                       ~right_style:(H.whisper_style ~theme ~bg:row_bg ())
+                       ~left:p.title ~right:meta ()
                end
              done
        | ( Observed.Loading _
@@ -1806,15 +1794,10 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
           (fun (e : Wire_knowledge.wiki_log_entry) ->
             if !ly < l_bot then begin
               let age = H.format_age ~now_unix e.written_at_unix in
-              let aw = Grapheme.display_width age in
               let line = Printf.sprintf "r%d %s %s" e.revision e.action e.page in
-              ignore
-                (H.put_clipped ~grid ~clip:log_rect ~x:tx ~y:!ly
-                   ~max_w:(Int.max 4 (right_e - tx - aw - 2))
-                   ~style:(H.secondary_style ~theme ()) line);
-              ignore
-                (H.put_right ~grid ~clip:log_rect ~right_x:right_e ~y:!ly
-                   ~max_w:aw ~style:(H.whisper_style ~theme ()) age);
+              H.put_left_right ~grid ~clip:log_rect ~x:tx ~right_x:right_e
+                ~y:!ly ~min_left:4 ~left_style:(H.secondary_style ~theme ())
+                ~right_style:(H.whisper_style ~theme ()) ~left:line ~right:age ();
               incr ly
             end)
           (H.safe_take (log_rows - 1) log_entries)
@@ -1909,7 +1892,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         let content = H.pad_content ~bp inner in
         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
     | Some a ->
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = H.pad_x ~bp inner in
         let title_s =
           if String.trim a.title <> "" then a.title else a.id
         in
@@ -2266,12 +2249,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (if zoomed then
-               Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL"
-                 ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL"
-             else
-               Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
-                 ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
+            (Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL"
+               ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL"))
        pills);
   let sel_art = Knowledge_store.selected_artifact k in
   if zoomed then
@@ -2875,9 +2854,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                             (Glyph.to_utf8 g) w.keeper (Say.resolve lang lbl)
                             snap_s
                         in
-                        let aw = Grapheme.display_width acts_s in
                         let tx = content.x + 2 in
-                        let tw = Int.max 0 (content.w - 2) in
                         let st =
                           if is_sel then
                             H.row_text_style ~theme ~selected:true ~focused
@@ -2887,18 +2864,11 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                               ~attrs:(if is_active then Attr.bold else Attr.none)
                               tone
                         in
-                        ignore
-                          (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                             ~max_w:
-                               (if aw > 0 then Int.max 10 (tw - aw - 2)
-                                else tw)
-                             ~style:st left_s);
-                        if aw > 0 then
-                          ignore
-                            (H.put_right ~grid ~clip:content
-                               ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                               ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                               acts_s));
+                        H.put_left_right ~grid ~clip:content ~x:tx
+                          ~right_x:(Rect.right content) ~y:!y ~min_left:10
+                          ~left_style:st
+                          ~right_style:(H.whisper_style ~theme ~bg:row_bg ())
+                          ~left:left_s ~right:acts_s ());
                     incr y
                   end)
                 (Store_scroll.drop start_s scope_entries |> H.safe_take max_w);

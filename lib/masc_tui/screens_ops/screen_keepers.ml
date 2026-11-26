@@ -1268,7 +1268,8 @@ let render_with_history_rows
                        text = Int.to_string (counts.working + counts.healthy);
                        tone = Some Theme.Status_ok;
                      });
-              hotkey = Some "/Filter";
+              hotkey =
+                Some (Ops_common.say model ~ko:"[/] 필터" ~en:"[/] Filter");
               footer_hint =
                 Some
                   (match model.keeper_stop_armed with

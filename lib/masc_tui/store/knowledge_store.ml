@@ -939,7 +939,8 @@ let board_comment_reading_rect ~bp t rect =
     | Some (Vote_post _, _) | None -> 0
   in
   Rect.inset ~top:(1 + vote_row) card
-  |> Masc_tui_ui.Card.pad_inner ~pad_x:(Masc_tui_ui.Layout.card_pad_x bp)
+  |> Masc_tui_ui.Card.pad_inner
+       ~pad_x:(Masc_tui_ui.Layout.card_pad_x_for_width bp card.w)
 
 let step_thread_comment ~post_id ~delta t =
   let comments = thread_comments ~post_id t in

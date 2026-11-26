@@ -76,8 +76,9 @@ type turn_response_channel = Channel_none | Channel_thinking | Channel_text
 
 type turn_tool_stage = Tool_requested | Tool_executing
 
-(** Where agent core planned a call: its batch in the turn, how many calls
-    the batch holds, and whether they run at once. *)
+(** Where agent core planned a call: its batch within one model response
+    (each response numbers its batches from 0), how many calls the batch
+    holds, and whether they run at once. *)
 type turn_tool_cohort = { batch_index : int; batch_size : int; concurrent : bool }
 
 (** Where a call reaches: MASC's own state, the Keeper sandbox or host

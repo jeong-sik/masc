@@ -60,7 +60,7 @@ related: ["turn-activity-is-open-work"]
 
 ```ocaml
 type cohort =
-  { batch_index : int   (* 턴 안의 몇 번째 묶음인가 *)
+  { batch_index : int   (* 한 모델 응답 안의 몇 번째 묶음인가. 응답마다 0부터 센다 *)
   ; batch_size : int    (* 그 묶음에 계획된 호출 수 *)
   ; concurrent : bool   (* 묶음을 동시에 돌리는가: execution_mode = Concurrent *)
   }

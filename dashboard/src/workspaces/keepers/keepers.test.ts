@@ -10,6 +10,7 @@ import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTe
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { setStoredToken } from '../../lib/dashboard-bearer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
+import { navigate, resetRouterForTests } from '../../routes/router'
 import {
   buildChatStreamRequestBody,
   buildPortraitPreviewUrl,
@@ -2293,5 +2294,174 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
 
     releaseFirstStream()
     await waitFor(() => expect(getActiveViewStreamKey()).toBeNull())
+  })
+
+  it('honors ?section=sandbox on KeeperConfigTab initial load without snapping back after reload or CAS save', async () => {
+    navigate('/keepers/code-reviewer-sister/config?section=sandbox')
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    let schemaCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/v1/config/schema')) {
+        schemaCalls += 1
+        return json({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 1,
+          data: {
+            target: 'keeper:code-reviewer-sister',
+            keeper: 'code-reviewer-sister',
+            file_exists: true,
+            file_sha256: `sha-${schemaCalls}`,
+            categories: [
+              {
+                id: 'autonomy',
+                title: 'Autonomy',
+                field_count: 1,
+                fields: [{
+                  table: 'keeper',
+                  key: 'activation_mode',
+                  full_key: 'keeper.activation_mode',
+                  type: 'string',
+                  current_value: schemaCalls >= 3 ? 'autonomous' : 'manual',
+                  default_value: 'manual',
+                  provenance: 'toml',
+                  reload_scope: 'next_turn',
+                  secret: false,
+                  writable: true,
+                  description: 'Activation mode',
+                  enum_values: ['manual', 'autonomous'],
+                }],
+              },
+              {
+                id: 'sandbox_infra',
+                title: 'Sandbox, microVM & SSH',
+                field_count: 1,
+                fields: [{
+                  table: 'keeper',
+                  key: 'sandbox_backend',
+                  full_key: 'keeper.sandbox_backend',
+                  type: 'string',
+                  current_value: 'remote_ssh',
+                  default_value: 'apple_container',
+                  provenance: 'toml',
+                  reload_scope: 'restart_required',
+                  secret: false,
+                  writable: true,
+                  description: 'Sandbox backend',
+                  enum_values: ['apple_container', 'remote_ssh'],
+                }],
+              },
+            ],
+          },
+        })
+      }
+      if (url.includes('/api/v1/config/patch') && init?.method === 'POST') {
+        return json({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 2,
+          data: {
+            applied: true,
+            dry_run: false,
+            target: 'keeper:code-reviewer-sister',
+            changed: true,
+            before_sha256: 'sha-2',
+            new_sha256: 'sha-3',
+            snapshot_id: 'snap-1',
+            reload_scope: 'next_turn',
+            unified_diff: '-activation_mode = "manual"\n+activation_mode = "autonomous"',
+            validation_warnings: [],
+          },
+        })
+      }
+      if (url.includes('/api/v1/keepers/oauth/attached-tools')) {
+        return json({ providers: [] })
+      }
+      return json({})
+    }))
+
+    try {
+      const cfg = render(html`<${KeeperConfigTab} keeperName="code-reviewer-sister" onMutated=${vi.fn()} />`)
+      // Initial mount with ?section=sandbox selects sandbox_infra
+      await waitFor(() => {
+        expect(cfg.getByRole('tab', { name: /Sandbox, microVM & SSH/ }).getAttribute('aria-selected')).toBe('true')
+      })
+
+      // User manually switches to Autonomy tab
+      fireEvent.click(cfg.getByRole('tab', { name: /Autonomy/ }))
+      await waitFor(() => {
+        expect(cfg.getByRole('tab', { name: /Autonomy/ }).getAttribute('aria-selected')).toBe('true')
+      })
+
+      // Manual schema reload MUST stay on Autonomy (must NOT snap back to sandbox_infra)
+      fireEvent.click(cfg.getByRole('button', { name: '스키마 다시 읽기' }))
+      await waitFor(() => expect(cfg.container.textContent).toContain('sha-2'))
+      expect(schemaCalls).toBe(2)
+      expect(cfg.getByRole('tab', { name: /Autonomy/ }).getAttribute('aria-selected')).toBe('true')
+
+      // Saving a CAS patch on Autonomy MUST also stay on Autonomy
+      const select = cfg.getByLabelText('keeper.activation_mode') as HTMLSelectElement
+      select.value = 'autonomous'
+      fireEvent(select, new Event('change', { bubbles: true }))
+      await waitFor(() => {
+        expect((cfg.getByRole('button', { name: 'CAS 설정 적용 (expected_sha256)' }) as HTMLButtonElement).disabled).toBe(false)
+      })
+      fireEvent.click(cfg.getByRole('button', { name: 'CAS 설정 적용 (expected_sha256)' }))
+      await waitFor(() => expect(cfg.container.textContent).toContain('sha-3'))
+      expect(schemaCalls).toBe(3)
+      expect(cfg.getByRole('tab', { name: /Autonomy/ }).getAttribute('aria-selected')).toBe('true')
+    } finally {
+      resetRouterForTests()
+    }
+  })
+
+  it('wires KeeperWorkSandboxTab sandbox config shortcut with URL encoding and hides admin-only links for multi-account workers', async () => {
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/infra/sandboxes/')) {
+        return json({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 1,
+          data: { keeper: 'wkbl/front', probe_state: { kind: 'fresh' }, sandbox: { backend: 'remote_ssh' } },
+        })
+      }
+      return json({ tasks: [], entries: [], tools: [] })
+    }))
+
+    const navCalls: string[] = []
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    const adminView = render(html`<${KeeperWorkSandboxTab} keeperName="wkbl/front" onNavigate=${(p: string) => navCalls.push(p)} onInspect=${vi.fn()} />`)
+    const cfgBtn = adminView.getByTestId('keeper-sandbox-config-btn') as HTMLButtonElement
+    fireEvent.click(cfgBtn)
+    expect(navCalls).toEqual(['/keepers/wkbl%2Ffront/config?section=sandbox'])
+    adminView.unmount()
+
+    // Non-admin worker in multi_account mode MUST NOT see admin-only sandbox config / Infra buttons
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-w',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-w',
+      workspaceId: 'default',
+      authMethods: { google: true, github: true, dev_token: false },
+    }
+    const workerView = render(html`<${KeeperWorkSandboxTab} keeperName="wkbl/front" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(workerView.queryByTestId('keeper-sandbox-config-btn')).toBeNull()
+    expect(workerView.queryByTestId('keeper-sandbox-infra-btn')).toBeNull()
+    resetAuthStateForTests()
   })
 })

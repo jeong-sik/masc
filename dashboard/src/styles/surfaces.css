@@ -267,6 +267,32 @@
   color: var(--warn-fg);
 }
 
+.v2-probe-btn {
+  min-width: 124px;
+}
+
+.v2-sandbox-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.v2-sandbox-keeper-links {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.v2-sandbox-keeper-chip,
+.v2-sandbox-row-btn {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-11);
+}
+
 .v2-logs-table-header,
 .v2-logs-line {
   display: grid;
@@ -290,6 +316,13 @@
 
 .v2-logs-row:hover {
   background: var(--bg-3);
+}
+
+.v2-logs-head-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
 }
 
 /* Settings surface */

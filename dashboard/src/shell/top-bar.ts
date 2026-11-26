@@ -11,7 +11,7 @@
  */
 
 import { html } from 'htm/preact'
-import type { VNode } from 'preact'
+import { Fragment, type VNode } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   activeWorkspaceId,
@@ -512,13 +512,19 @@ export function TopBar(): VNode {
     const subtabBadge = route.workspace === 'work' && tab.id === 'inbox'
       ? formattedBadge
       : null
+    const subtabLabel = tab.locked
+      ? `${tab.label} (관리자 전용)`
+      : subtabBadge !== null
+        ? `${tab.label} (${pendingLabel})`
+        : undefined
     return html`
       <a
         key=${tab.id}
         href=${`#${tab.path}`}
         class=${`ap-subtab${tab.active ? ' is-active' : ''}${tab.locked ? ' is-locked' : ''}`}
         aria-current=${tab.active ? 'page' : undefined}
-        aria-label=${subtabBadge !== null ? `${tab.label} (${pendingLabel})` : undefined}
+        aria-label=${subtabLabel}
+        title=${subtabLabel}
         data-subtab=${tab.id}
         data-rbac-locked=${tab.locked ? 'true' : undefined}
         onClick=${(event: MouseEvent) => {
@@ -542,7 +548,8 @@ export function TopBar(): VNode {
   }
 
   return html`
-    <header class="ap-topbar" role="banner">
+    <${Fragment}>
+      <header class="ap-topbar" role="banner">
       <div class="ap-topbar-left">
         <${AccountWorkspaceSwitcher} />
       </div>
@@ -646,14 +653,15 @@ export function TopBar(): VNode {
         `}
       </div>
     </header>
-    ${mobile && subtabs.length > 0 && html`
-      <nav
-        class="ap-mobile-subtabs"
-        aria-label=${`${navDef.label} 하위 탭`}
-        data-testid="mobile-subtabs"
-      >
-        ${subtabs.map(renderSubtabLink)}
-      </nav>
-    `}
+      ${mobile && subtabs.length > 0 && html`
+        <nav
+          class="ap-mobile-subtabs"
+          aria-label=${`${navDef.label} 하위 탭`}
+          data-testid="mobile-subtabs"
+        >
+          ${subtabs.map(renderSubtabLink)}
+        </nav>
+      `}
+    <//>
   `
 }

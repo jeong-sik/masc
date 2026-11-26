@@ -114,6 +114,14 @@ export interface InfraSshPool {
   readonly status?: string
 }
 
+export interface InfraSshUnboundKeeper {
+  readonly keeper?: string
+  readonly backend?: string
+  readonly binding_state?: string
+  readonly remote_endpoint?: string | null
+  readonly tool_metrics_24h?: unknown
+}
+
 export interface InfraDockerKeeper {
   readonly keeper?: string
   readonly backend?: string
@@ -144,7 +152,7 @@ export interface InfraSandboxesData {
   readonly shim_parity: InfraShimParity
   readonly microvm_guests: readonly InfraMicroVmGuest[]
   readonly ssh_pools: readonly InfraSshPool[]
-  readonly ssh_unbound_keepers: readonly unknown[]
+  readonly ssh_unbound_keepers?: readonly InfraSshUnboundKeeper[]
   readonly docker_keepers: readonly InfraDockerKeeper[]
   readonly volume_gc_report: Record<string, unknown> | null
   readonly host_storage: Record<string, unknown> | null

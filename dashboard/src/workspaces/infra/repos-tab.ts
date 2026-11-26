@@ -10,6 +10,7 @@
 
 import { html } from 'htm/preact'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
+import { pushShellToast } from '../../shell/shell-state'
 import { createTwoFilesPatch } from 'diff'
 import { useEffect, useState } from 'preact/hooks'
 import {
@@ -72,7 +73,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const [newBranch, setNewBranch] = useState('main')
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   const repos = reposObs.kind === 'value' ? reposObs.data : []
@@ -121,7 +122,7 @@ export function ReposTab(props: WorkspaceViewProps) {
     ev.preventDefault()
     if (!newName.trim() || !newUrl.trim()) return
     setBusy('add')
-    setBanner(null)
+    setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/repositories', {
       name: newName.trim(),
       url: newUrl.trim(),
@@ -131,10 +132,10 @@ export function ReposTab(props: WorkspaceViewProps) {
     })
     setBusy(null)
     if (!res.ok) {
-      setBanner({ kind: 'err', text: `저장소 등록 실패: ${res.error.message}` })
+      setErrorBanner(`저장소 등록 실패: ${res.error.message}`)
       return
     }
-    setBanner({ kind: 'ok', text: `저장소 '${newName.trim()}' 등록 완료.` })
+    pushShellToast(`저장소 '${newName.trim()}' 등록 완료.`, 'success')
     setNewName('')
     setNewUrl('')
     setShowAddForm(false)
@@ -143,14 +144,14 @@ export function ReposTab(props: WorkspaceViewProps) {
 
   const handleSyncRepo = async (repoId: string) => {
     setBusy(`sync:${repoId}`)
-    setBanner(null)
+    setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', `/api/v1/repositories/${encodeURIComponent(repoId)}/sync`, {})
     setBusy(null)
     if (!res.ok) {
-      setBanner({ kind: 'err', text: `동기화 실패: ${res.error.message}` })
+      setErrorBanner(`동기화 실패: ${res.error.message}`)
       return
     }
-    setBanner({ kind: 'ok', text: `${repoId} 동기화 완료.` })
+    pushShellToast(`${repoId} 동기화 완료.`, 'success')
     loadActivity(repoId, 'manual')
   }
 
@@ -335,13 +336,9 @@ export function ReposTab(props: WorkspaceViewProps) {
         </div>
       </header>
 
-      ${banner && html`
-        <div
-          role="status"
-          class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
-        >
-          ${banner.text}
+      ${errorBanner && html`
+        <div role="alert" class="ap-error">
+          ${errorBanner}
         </div>
       `}
 

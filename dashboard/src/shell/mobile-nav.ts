@@ -192,13 +192,13 @@ export function MobileNav(): VNode {
         type="button"
         class=${`ap-mobile-tab ap-touch-target${moreOpen || inMore ? ' is-active' : ''}`}
         aria-expanded=${moreOpen ? 'true' : 'false'}
-        aria-label="더 보기"
+        aria-label=${unreadInc > 0 ? `더 보기 (읽지 않은 장애 ${unreadInc}건)` : '더 보기'}
         data-testid="mobile-more-trigger"
         onClick=${() => { mobileMoreOpen.value = !moreOpen }}
       >
         <${ShellIcon} name="more" size=${18} />
         <span>More</span>
-        ${unreadInc > 0 && html`<span class="ap-mobile-badge tnum">${unreadInc}</span>`}
+        ${unreadInc > 0 && html`<span class="ap-mobile-badge tnum" aria-hidden="true">${unreadInc}</span>`}
       </button>
     </nav>
   `

@@ -27,7 +27,11 @@ import {
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { expectOptionalArrayField, expectWireRecord } from '../../lib/wire-decode'
+import {
+  expectOptionalArrayField,
+  expectOptionalRecordArrayField,
+  expectWireRecord,
+} from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
@@ -45,19 +49,19 @@ function decodeLaneAddonsPayload(raw: unknown): LaneAddonsPayload {
   const rec = expectWireRecord(raw, ctx)
   return {
     ...(rec as unknown as LaneAddonsPayload),
-    instances: expectOptionalArrayField<LaneAddonInstanceRow>(rec, 'instances', ctx),
-    rows: expectOptionalArrayField<Record<string, unknown>>(rec, 'rows', ctx),
-    coverage: expectOptionalArrayField<Record<string, unknown>>(rec, 'coverage', ctx),
+    instances: expectOptionalRecordArrayField<LaneAddonInstanceRow>(rec, 'instances', ctx),
+    rows: expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'rows', ctx),
+    coverage: expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'coverage', ctx),
   }
 }
 
 function decodeLaneAddonAsksResponse(raw: unknown): LaneAddonAsksResponse {
   const ctx = 'GET /api/v1/lane-addons/asks'
   const rec = expectWireRecord(raw, ctx)
-  const rawAsks = expectOptionalArrayField<LaneAddonAskRow>(rec, 'asks', ctx)
+  const rawAsks = expectOptionalArrayField<unknown>(rec, 'asks', ctx)
   const asks = rawAsks.map((ask, idx) => {
     const askRec = expectWireRecord(ask, `${ctx} asks[${idx}]`)
-    const questions = expectOptionalArrayField<LaneAddonAskRow['questions'][number]>(
+    const questions = expectOptionalRecordArrayField<LaneAddonAskRow['questions'][number]>(
       askRec,
       'questions',
       `${ctx} asks[${idx}]`,
@@ -72,7 +76,7 @@ function decodePackageCatalogPayload(raw: unknown): PackageCatalogPayload {
   const rec = expectWireRecord(raw, ctx)
   return {
     ...(rec as unknown as PackageCatalogPayload),
-    entries: expectOptionalArrayField<PackageCatalogPayload['entries'][number]>(rec, 'entries', ctx),
+    entries: expectOptionalRecordArrayField<PackageCatalogPayload['entries'][number]>(rec, 'entries', ctx),
   }
 }
 
@@ -81,8 +85,8 @@ function decodeBrowserClientsPayload(raw: unknown): BrowserClientsPayload {
   const rec = expectWireRecord(raw, ctx)
   return {
     ...(rec as unknown as BrowserClientsPayload),
-    clients: expectOptionalArrayField<BrowserClientRow>(rec, 'clients', ctx),
-    inventoryIssues: expectOptionalArrayField<BrowserClientsPayload['inventoryIssues'][number]>(
+    clients: expectOptionalRecordArrayField<BrowserClientRow>(rec, 'clients', ctx),
+    inventoryIssues: expectOptionalRecordArrayField<BrowserClientsPayload['inventoryIssues'][number]>(
       rec,
       'inventoryIssues',
       ctx,
@@ -95,9 +99,9 @@ function decodeBrowserTabsResponse(raw: unknown): readonly BrowserTabRow[] {
   const rec = expectWireRecord(raw, ctx)
   if ('data' in rec && rec.data !== undefined) {
     const dataRec = expectWireRecord(rec.data, `${ctx} data`)
-    return expectOptionalArrayField<BrowserTabRow>(dataRec, 'tabs', ctx)
+    return expectOptionalRecordArrayField<BrowserTabRow>(dataRec, 'tabs', ctx)
   }
-  return expectOptionalArrayField<BrowserTabRow>(rec, 'tabs', ctx)
+  return expectOptionalRecordArrayField<BrowserTabRow>(rec, 'tabs', ctx)
 }
 
 interface PackageCatalogPayload {

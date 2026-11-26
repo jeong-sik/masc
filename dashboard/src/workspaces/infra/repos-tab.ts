@@ -26,6 +26,9 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import {
   describeWireType,
   expectOptionalArrayField,
+  expectOptionalRecordArrayField,
+  expectRecordElements,
+  expectRequiredStringField,
   expectWireRecord,
   isJsonRecord,
 } from '../../lib/wire-decode'
@@ -40,25 +43,34 @@ import {
 } from './types'
 
 function decodeRepoList(raw: unknown): readonly InfraRepository[] {
+  const ctx = 'GET /api/v1/repositories'
   let rows: readonly unknown[]
+  let field = 'repositories'
   if (Array.isArray(raw)) {
     rows = raw
   } else if (isJsonRecord(raw)) {
     if ('repositories' in raw && raw.repositories !== undefined) {
-      rows = expectOptionalArrayField<unknown>(raw, 'repositories', 'GET /api/v1/repositories')
+      rows = expectOptionalArrayField<unknown>(raw, 'repositories', ctx)
     } else if (raw.ok === true && 'data' in raw && raw.data !== undefined) {
-      rows = expectOptionalArrayField<unknown>(raw, 'data', 'GET /api/v1/repositories')
+      field = 'data'
+      rows = expectOptionalArrayField<unknown>(raw, 'data', ctx)
     } else {
       rows = []
     }
   } else {
-    throw new Error(`GET /api/v1/repositories: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
+    throw new Error(`${ctx}: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
   }
-  return rows
-    .filter((r): r is Record<string, unknown> => isJsonRecord(r))
-    .map((r) => ({
-      id: typeof r.id === 'string' ? r.id : '',
-      name: typeof r.name === 'string' ? r.name : '',
+  const records = expectRecordElements<Record<string, unknown>>(rows, field, ctx)
+  return records.map((r, idx) => {
+    const rowCtx = `${ctx} ${field}[${idx}]`
+    const id = expectRequiredStringField(r, 'id', rowCtx).trim()
+    const name = expectRequiredStringField(r, 'name', rowCtx).trim()
+    if (id === '' || name === '') {
+      throw new Error(`${rowCtx}: "id"와 "name" 필드는 비어 있을 수 없습니다.`)
+    }
+    return {
+      id,
+      name,
       url: typeof r.url === 'string' ? r.url : '',
       codebase: typeof r.codebase === 'string' ? r.codebase : null,
       local_path: typeof r.local_path === 'string' ? r.local_path : '',
@@ -66,13 +78,14 @@ function decodeRepoList(raw: unknown): readonly InfraRepository[] {
       status: typeof r.status === 'string' ? r.status : 'unknown',
       auto_sync: r.auto_sync === true,
       sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
-    }))
-    .filter((r) => r.id !== '' && r.name !== '')
+    }
+  })
 }
 
 function decodeRepoActivityData(raw: unknown): RepoActivityData {
-  const rec = expectWireRecord(raw, 'GET /api/v1/ide/repository-activity')
-  const changes = expectOptionalArrayField<RepoActivityChange>(rec, 'changes', 'GET /api/v1/ide/repository-activity')
+  const ctx = 'GET /api/v1/ide/repository-activity'
+  const rec = expectWireRecord(raw, ctx)
+  const changes = expectOptionalRecordArrayField<RepoActivityChange>(rec, 'changes', ctx)
   return {
     ...(rec as unknown as RepoActivityData),
     repo_id: typeof rec.repo_id === 'string' ? rec.repo_id : '',

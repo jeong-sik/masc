@@ -24,7 +24,7 @@ import { apiMutate } from '../core/transport'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { currentRoute, navigate, resetRouterForTests } from '../routes/router'
-import { App } from '../app'
+import { App, ShellToastHost } from '../app'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
 import { IncidentsOverlayBody } from './incidents-overlay'
@@ -50,6 +50,7 @@ import {
   pendingGateApprovals,
   pendingGoalConfirmations,
   pendingVerifications,
+  pushShellToast,
   railExpanded,
   recordIncident,
   refreshPendingHitl,
@@ -1410,5 +1411,82 @@ describe('Proposal A+ Shell components', () => {
     expect(currentRoute.value.path).toBe('/work/inbox')
     expect(window.location.hash).not.toContain('/infra')
     expect(shellToasts.value.some((t) => t.tone === 'info' && t.message.includes('Infra') && t.message.includes('관리자 전용'))).toBe(true)
+  })
+
+  it('pauses shell toast auto-dismiss while keyboard focus or hover is inside the toast and resumes on leave', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        render(h(ShellToastHost, {}), container)
+      })
+      const toastId = pushShellToast('설정 저장 완료', 'success', 4000)
+      await act(async () => {
+        render(h(ShellToastHost, {}), container)
+      })
+
+      const toastEl = container.querySelector<HTMLElement>(`[data-toast-id="${toastId}"]`)
+      const closeBtn = toastEl?.querySelector<HTMLButtonElement>('button.ap-toast-close')
+      expect(toastEl).not.toBeNull()
+      expect(closeBtn).not.toBeNull()
+
+      // Advance 1.5s, then move keyboard focus into the toast close button
+      await act(async () => {
+        vi.advanceTimersByTime(1500)
+      })
+      closeBtn!.focus()
+      await act(async () => {
+        fireEvent.focusIn(closeBtn!)
+      })
+
+      // Well past the 4s TTL, toast must stay mounted and preserve keyboard focus
+      await act(async () => {
+        vi.advanceTimersByTime(6000)
+      })
+      expect(shellToasts.value.some((t) => t.id === toastId)).toBe(true)
+      expect(container.querySelector(`[data-toast-id="${toastId}"]`)).not.toBeNull()
+      expect(document.activeElement).toBe(closeBtn)
+
+      // Mouse enter/leave while keyboard focus remains inside must NOT prematurely resume dismiss
+      await act(async () => {
+        fireEvent.mouseEnter(toastEl!)
+        fireEvent.mouseLeave(toastEl!)
+        vi.advanceTimersByTime(5000)
+      })
+      expect(shellToasts.value.some((t) => t.id === toastId)).toBe(true)
+      expect(document.activeElement).toBe(closeBtn)
+
+      // Leaving focus resumes the remaining ~2.5s budget
+      await act(async () => {
+        fireEvent.focusOut(closeBtn!, { relatedTarget: document.body })
+        vi.advanceTimersByTime(2000)
+      })
+      expect(shellToasts.value.some((t) => t.id === toastId)).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(600)
+      })
+      expect(shellToasts.value.some((t) => t.id === toastId)).toBe(false)
+      expect(container.querySelector(`[data-toast-id="${toastId}"]`)).toBeNull()
+
+      // Standalone hover pause/resume also holds past 4s and dismisses after mouseLeave
+      const hoverId = pushShellToast('저장소 동기화 완료', 'success', 4000)
+      await act(async () => {
+        render(h(ShellToastHost, {}), container)
+      })
+      const hoverEl = container.querySelector<HTMLElement>(`[data-toast-id="${hoverId}"]`)!
+      await act(async () => {
+        vi.advanceTimersByTime(1000)
+        fireEvent.mouseEnter(hoverEl)
+        vi.advanceTimersByTime(6000)
+      })
+      expect(shellToasts.value.some((t) => t.id === hoverId)).toBe(true)
+      await act(async () => {
+        fireEvent.mouseLeave(hoverEl)
+        vi.advanceTimersByTime(3100)
+      })
+      expect(shellToasts.value.some((t) => t.id === hoverId)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -946,5 +946,24 @@ describe('workspaces/infra', () => {
       expect(container.textContent).toContain('샌드박스 조회 실패')
       expect(container.textContent).toContain('microvm_guests[0]')
     })
+
+    // Reject malformed null or missing-id/name rows in /api/v1/repositories instead of silently filtering to 0
+    for (const badRepos of [
+      { repositories: [null] },
+      { repositories: [{ id: 'repo-only-id' }] },
+    ]) {
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === '/api/v1/repositories') return jsonResponse(badRepos)
+        return jsonResponse({})
+      }) as typeof fetch
+      render(null, container)
+      resourceCache.clearAll()
+      render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await vi.waitFor(() => {
+        const alert = container.querySelector('[role="alert"]')
+        expect(alert?.textContent).toContain('저장소 조회 실패')
+        expect(alert?.textContent).toContain('repositories[0]')
+      })
+    }
   })
 })

@@ -923,6 +923,7 @@ export async function submitFastToolApproval(
 // ── Shell Toast Notifications ───────────────────────────────────────────
 
 export type ShellToastTone = 'success' | 'warning' | 'error' | 'info'
+export type ShellToastPauseReason = 'hover' | 'focus'
 
 export interface ShellToast {
   readonly id: number
@@ -930,9 +931,68 @@ export interface ShellToast {
   readonly tone: ShellToastTone
 }
 
+interface ShellToastTimer {
+  remainingMs: number
+  startedAt: number
+  timerId: ReturnType<typeof setTimeout> | null
+  readonly pauseReasons: Set<ShellToastPauseReason>
+}
+
 let toastSeq = 0
 const toastsSignal = signal<readonly ShellToast[]>([])
+const shellToastTimers = new Map<number, ShellToastTimer>()
 export const shellToasts: ReadonlySignal<readonly ShellToast[]> = toastsSignal
+
+function clearShellToastTimer(id: number): void {
+  const timer = shellToastTimers.get(id)
+  if (!timer) return
+  if (timer.timerId !== null) {
+    clearTimeout(timer.timerId)
+  }
+  shellToastTimers.delete(id)
+}
+
+function scheduleShellToastDismiss(id: number, ms: number): void {
+  const existing = shellToastTimers.get(id)
+  if (existing && existing.timerId !== null) {
+    clearTimeout(existing.timerId)
+  }
+  const pauseReasons = existing ? existing.pauseReasons : new Set<ShellToastPauseReason>()
+  const timerId = setTimeout(() => dismissShellToast(id), ms)
+  shellToastTimers.set(id, {
+    remainingMs: ms,
+    startedAt: Date.now(),
+    timerId,
+    pauseReasons,
+  })
+}
+
+export function pauseShellToastTimer(id: number, reason: ShellToastPauseReason = 'focus'): void {
+  const timer = shellToastTimers.get(id)
+  if (!timer) return
+  const wasPaused = timer.pauseReasons.size > 0
+  timer.pauseReasons.add(reason)
+  if (wasPaused) return
+  if (timer.timerId !== null) {
+    clearTimeout(timer.timerId)
+    timer.timerId = null
+  }
+  const elapsed = Math.max(0, Date.now() - timer.startedAt)
+  timer.remainingMs = Math.max(0, timer.remainingMs - elapsed)
+  timer.startedAt = 0
+}
+
+export function resumeShellToastTimer(id: number, reason: ShellToastPauseReason = 'focus'): void {
+  const timer = shellToastTimers.get(id)
+  if (!timer) return
+  timer.pauseReasons.delete(reason)
+  if (timer.pauseReasons.size > 0 || timer.timerId !== null) return
+  if (timer.remainingMs <= 0) {
+    dismissShellToast(id)
+    return
+  }
+  scheduleShellToastDismiss(id, timer.remainingMs)
+}
 
 export function pushShellToast(
   message: string,
@@ -940,15 +1000,20 @@ export function pushShellToast(
   durationMs = 4000,
 ): number {
   const id = ++toastSeq
-  const next = [...toastsSignal.peek(), { id, message, tone }].slice(-MAX_TOASTS)
-  toastsSignal.value = next
+  const combined = [...toastsSignal.peek(), { id, message, tone }]
+  const evictedCount = Math.max(0, combined.length - MAX_TOASTS)
+  for (let i = 0; i < evictedCount; i += 1) {
+    clearShellToastTimer(combined[i]!.id)
+  }
+  toastsSignal.value = combined.slice(-MAX_TOASTS)
   if (durationMs > 0) {
-    setTimeout(() => dismissShellToast(id), durationMs)
+    scheduleShellToastDismiss(id, durationMs)
   }
   return id
 }
 
 export function dismissShellToast(id: number): void {
+  clearShellToastTimer(id)
   toastsSignal.value = toastsSignal.peek().filter((t) => t.id !== id)
 }
 
@@ -1068,6 +1133,9 @@ export function resetShellStateForTests(): void {
   pendingVerifications.value = []
   hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
   hitlLoading.value = false
+  for (const id of [...shellToastTimers.keys()]) {
+    clearShellToastTimer(id)
+  }
   toastsSignal.value = []
   buildConnectionInfo.value = {
     version: null,

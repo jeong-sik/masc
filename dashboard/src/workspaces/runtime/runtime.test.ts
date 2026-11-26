@@ -2020,4 +2020,68 @@ describe('workspaces/runtime', () => {
       expect(container.textContent).toContain('integrations')
     })
   })
+
+  it('rejects malformed null elements in /api/v1/setup/inventory integrations and /api/v1/lane-addons instances with explicit alert', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/setup/inventory') {
+        return jsonResponse({ integrations: [null], account_emails: [] })
+      }
+      if (url === '/api/v1/runtime/config/raw') {
+        return jsonResponse({ source_revision: 'rev-1' })
+      }
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: null,
+          default_runtime: null,
+          runtimes: [],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      if (url === '/api/v1/lane-addons') {
+        return jsonResponse({ instances: [null], rows: [], coverage: [] })
+      }
+      if (url === '/api/v1/lane-addons/asks') {
+        return jsonResponse({ asks: [] })
+      }
+      if (url === '/api/v1/dashboard/browser-lane/clients') {
+        return jsonResponse({ ok: true, data: { clients: [null], inventoryIssues: [] } })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    // 1. Setup inventory integrations: [null] must NOT crash render; must surface role="alert"
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="provider-inventory-toggle"]')).not.toBeNull()
+    })
+    container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!.click()
+    await vi.waitFor(() => {
+      const alert = container.querySelector('[role="alert"]')
+      expect(alert?.textContent).toContain('제공자 자격 증명 조회 실패')
+      expect(alert?.textContent).toContain('integrations[0]')
+    })
+
+    // 2. Lane-addons instances: [null] and browser clients: [null] surface decode errors without crashing
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('instances[0]')
+      expect(container.textContent).toContain('clients[0]')
+    })
+  })
 })

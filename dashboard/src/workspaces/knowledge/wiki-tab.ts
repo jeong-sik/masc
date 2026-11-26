@@ -22,7 +22,9 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
 import {
   expectOptionalArrayField,
+  expectOptionalRecordArrayField,
   expectOptionalRecordField,
+  expectOptionalStringArrayField,
   expectRequiredNumberField,
   expectRequiredRecordField,
   expectRequiredStringField,
@@ -52,26 +54,26 @@ import {
 function decodeWikiIndexData(raw: unknown): WikiIndexData {
   const ctx = 'GET /api/v1/wiki'
   const rec = expectWireRecord(raw, ctx)
-  const pages = expectOptionalArrayField<WikiPageSummary>(rec, 'pages', ctx)
-  const unreadable_pages = expectOptionalArrayField<{ readonly file: string; readonly reason: string }>(
+  const pages = expectOptionalRecordArrayField<WikiPageSummary>(rec, 'pages', ctx)
+  const unreadable_pages = expectOptionalRecordArrayField<{ readonly file: string; readonly reason: string }>(
     rec,
     'unreadable_pages',
     ctx,
   )
-  const tags = expectOptionalArrayField<{ readonly tag: string; readonly count: number }>(rec, 'tags', ctx)
+  const tags = expectOptionalRecordArrayField<{ readonly tag: string; readonly count: number }>(rec, 'tags', ctx)
   const sources = expectOptionalRecordField(rec, 'sources', ctx) as Readonly<Record<string, number>>
   const lintRec = expectOptionalRecordField(rec, 'lint', ctx)
   const lint = {
     total_findings: typeof lintRec.total_findings === 'number' ? lintRec.total_findings : 0,
     counts: expectOptionalRecordField(lintRec, 'counts', `${ctx} lint`) as Readonly<Record<string, number>>,
     log_hole_suppressed: lintRec.log_hole_suppressed === true,
-    orphans: expectOptionalArrayField<string>(lintRec, 'orphans', `${ctx} lint`),
-    duplicate_title_candidates: expectOptionalArrayField<WikiDuplicateCandidate>(
+    orphans: expectOptionalStringArrayField(lintRec, 'orphans', `${ctx} lint`),
+    duplicate_title_candidates: expectOptionalRecordArrayField<WikiDuplicateCandidate>(
       lintRec,
       'duplicate_title_candidates',
       `${ctx} lint`,
     ),
-    findings: expectOptionalArrayField<WikiLintFinding>(lintRec, 'findings', `${ctx} lint`),
+    findings: expectOptionalRecordArrayField<WikiLintFinding>(lintRec, 'findings', `${ctx} lint`),
   }
   return {
     ...(rec as unknown as WikiIndexData),
@@ -92,8 +94,8 @@ function decodeWikiLintData(raw: unknown): WikiLintData {
   return {
     ...(rec as unknown as WikiLintData),
     counts: expectOptionalRecordField(rec, 'counts', ctx) as Readonly<Record<string, number>>,
-    duplicate_title_candidates: expectOptionalArrayField<WikiDuplicateCandidate>(rec, 'duplicate_title_candidates', ctx),
-    findings: expectOptionalArrayField<WikiLintFinding>(rec, 'findings', ctx),
+    duplicate_title_candidates: expectOptionalRecordArrayField<WikiDuplicateCandidate>(rec, 'duplicate_title_candidates', ctx),
+    findings: expectOptionalRecordArrayField<WikiLintFinding>(rec, 'findings', ctx),
   }
 }
 
@@ -102,19 +104,21 @@ function decodeWikiLogData(raw: unknown): WikiLogData {
   const rec = expectWireRecord(raw, ctx)
   return {
     ...(rec as unknown as WikiLogData),
-    entries: expectOptionalArrayField<WikiLogEntry>(rec, 'entries', ctx),
+    entries: expectOptionalRecordArrayField<WikiLogEntry>(rec, 'entries', ctx),
   }
 }
 
 function decodeWikiSearchData(raw: unknown): WikiSearchData {
   const ctx = 'GET /api/v1/wiki/search'
   const rec = expectWireRecord(raw, ctx)
-  const results = expectOptionalArrayField<WikiSearchResultItem>(rec, 'results', ctx)
-  for (const item of results) {
-    const itemRec = expectWireRecord(item, `${ctx} result`)
-    expectOptionalArrayField(itemRec, 'snippets', `${ctx} result`)
-    expectOptionalArrayField(itemRec, 'tags', `${ctx} result`)
-  }
+  const rawResults = expectOptionalArrayField<unknown>(rec, 'results', ctx)
+  const results = rawResults.map((item, idx) => {
+    const itemCtx = `${ctx} results[${idx}]`
+    const itemRec = expectWireRecord(item, itemCtx)
+    const snippets = expectOptionalRecordArrayField<WikiSearchResultItem['snippets'][number]>(itemRec, 'snippets', itemCtx)
+    const tags = expectOptionalStringArrayField(itemRec, 'tags', itemCtx)
+    return { ...(itemRec as unknown as WikiSearchResultItem), snippets, tags }
+  })
   return {
     ...(rec as unknown as WikiSearchData),
     results,
@@ -130,10 +134,10 @@ function decodeWikiPageData(raw: unknown): WikiPageData {
   const fmRec = expectRequiredRecordField(rec, 'frontmatter', ctx)
   const title = expectRequiredStringField(fmRec, 'title', `${ctx} frontmatter`)
   const revision = expectRequiredNumberField(fmRec, 'revision', `${ctx} frontmatter`)
-  const tags = expectOptionalArrayField<string>(fmRec, 'tags', `${ctx} frontmatter`)
-  const backlinks = expectOptionalArrayField<string>(rec, 'backlinks', ctx)
-  const outgoing_links = expectOptionalArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
-  const lint_findings = expectOptionalArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
+  const tags = expectOptionalStringArrayField(fmRec, 'tags', `${ctx} frontmatter`)
+  const backlinks = expectOptionalStringArrayField(rec, 'backlinks', ctx)
+  const outgoing_links = expectOptionalRecordArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
+  const lint_findings = expectOptionalRecordArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
   return {
     ...(rec as unknown as WikiPageData),
     slug,

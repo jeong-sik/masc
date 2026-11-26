@@ -2220,5 +2220,32 @@ describe('workspaces/knowledge', () => {
       expect(alert?.textContent).toContain('undefined')
       expect(container.textContent).not.toContain('Stable initial body')
     })
+
+    // Wiki index pages: [null] must surface explicit decode alert instead of crashing or coercing to empty
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430005,
+          data: {
+            pages: [null],
+            unreadable_pages: [],
+            tags: [],
+            sources: {},
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      const alert = container.querySelector('[role="alert"]')
+      expect(alert?.textContent).toContain('pages[0]')
+    })
   })
 })

@@ -109,3 +109,33 @@ export function expectRecordElements<T>(
   }
   return items as readonly T[]
 }
+
+export function expectStringElements(
+  items: readonly unknown[],
+  field: string,
+  context: string,
+): readonly string[] {
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i]
+    if (typeof item !== 'string') {
+      throw new Error(`${context}: "${field}[${i}]" 항목은 문자열이어야 합니다 (${describeWireType(item)} 수신).`)
+    }
+  }
+  return items as readonly string[]
+}
+
+export function expectOptionalRecordArrayField<T>(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): readonly T[] {
+  return expectRecordElements<T>(expectOptionalArrayField<unknown>(record, field, context), field, context)
+}
+
+export function expectOptionalStringArrayField(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): readonly string[] {
+  return expectStringElements(expectOptionalArrayField<unknown>(record, field, context), field, context)
+}

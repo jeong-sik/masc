@@ -775,6 +775,16 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
   check int "one global row" 1 (json_int_member "global_row_count" json);
   check bool "a reservation whose time has not come has no waiting age" true
     (U.member "oldest_age_seconds" json = `Null);
+  (* The per-source age metric reads the same wait as the summary: a
+     reservation whose time has not come adds no age in either scope. *)
+  check_metric_float "keeper schedule age metric"
+    Otel_metric_store.metric_keeper_waiting_age_seconds
+    ~labels:[ "scope", "keeper"; "source", "schedule_waiting" ]
+    0.0;
+  check_metric_float "global schedule age metric"
+    Otel_metric_store.metric_keeper_waiting_age_seconds
+    ~labels:[ "scope", "global"; "source", "schedule_waiting" ]
+    0.0;
   (match find_keeper json keeper_name with
    | None -> fail "keeper row missing"
    | Some keeper ->
@@ -796,6 +806,10 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
           (json_string_member "next_action" row);
         check string "keeper schedule id" "sched-owned"
           U.(row |> member "detail" |> member "schedule_id" |> to_string);
+        check bool "nothing waits on the reservation yet, so it has no since" true
+          (U.member "since" row = `Null);
+        check (float 0.0) "the request time stays in the detail" 100.0
+          U.(row |> member "detail" |> member "requested_at" |> to_number);
         check string "schedule sentence names the schedule" "예약 실행 · sched-owned"
           (json_string_member "what" row)
       | rows -> failf "expected one keeper schedule row, got %d" (List.length rows)));
@@ -837,8 +851,13 @@ let test_due_schedule_waits_from_its_due_time () =
     check string "due schedule row" "schedule_waiting" (json_string_member "source" row);
     check (float 0.0) "a due reservation waits from its due time" 200.0
       U.(row |> member "since" |> to_number);
-    check bool "a due reservation has a waiting age" true
-      (U.member "oldest_age_seconds" json <> `Null)
+    let summary_age = U.(json |> member "oldest_age_seconds" |> to_number) in
+    check bool "a due reservation has a waiting age" true (summary_age > 0.0);
+    (* One row, one clock: the per-source metric reads the same wait. *)
+    check (float 0.0) "the schedule age metric counts from the due time" summary_age
+      (metric_value
+         Otel_metric_store.metric_keeper_waiting_age_seconds
+         ~labels:[ "scope", "keeper"; "source", "schedule_waiting" ])
   | rows -> failf "expected one due schedule row, got %d" (List.length rows)
 ;;
 

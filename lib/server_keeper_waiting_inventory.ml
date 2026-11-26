@@ -981,11 +981,15 @@ let schedule_rows ?keeper_name ~keeper_names state =
          | Scheduled | Due | Running -> Schedule_runner
          | Succeeded | Failed | Cancelled | Expired -> Schedule_store)
     ; since =
-        (* A reservation waits from its due time. Before that it is listed
-           since it was requested; a recurring one keeps its first request
-           time across occurrences, which is weeks old. *)
+        (* A reservation waits from its due time. Before that nothing waits on
+           it, so it has no [since]: every reader that counts an age from
+           [since] (the oldest-wait summary, the per-source age metric, the
+           dashboard's waiting groups and lane strips) leaves it out. The
+           request time is in [detail.requested_at]; a recurring reservation
+           keeps its first request time across occurrences, which is weeks
+           old. *)
         (match request.status with
-         | Scheduled -> Some request.requested_at
+         | Scheduled -> None
          | Due | Running | Succeeded | Failed | Cancelled | Expired -> Some request.due_at)
     ; due_at = Some request.due_at
     ; next_action = schedule_next_action request
@@ -993,6 +997,7 @@ let schedule_rows ?keeper_name ~keeper_names state =
         `Assoc
           [ "schedule_instance_id", `String request.schedule_instance_id
           ; "schedule_id", `String request.schedule_id
+          ; "requested_at", `Float request.requested_at
           ; "keeper_participants",
             `List (List.map (fun name -> `String name)
               (Schedule_payload_projection.keeper_participants request))
@@ -1093,6 +1098,18 @@ let holds_state (row : waiting_row) =
   | Listed_only -> false
 ;;
 
+(* The start of the oldest wait among [rows]: the earliest [since] of a row
+   something waits on. The dashboard's oldest-wait summary and the per-source
+   age metric both read it, so the two report the same wait. *)
+let oldest_waiting_since rows =
+  rows
+  |> List.filter holds_state
+  |> List.filter_map (fun (row : waiting_row) -> row.since)
+  |> List.fold_left
+       (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (Float.min cur ts))
+       None
+;;
+
 let row_state rows =
   let holding = List.filter holds_state rows in
   if List.exists defers holding
@@ -1162,17 +1179,11 @@ let count_rows_for_source source rows =
        0
 ;;
 
+(* A gauge has no "none": a source with no row something waits on reads 0. *)
 let oldest_age_seconds_for_source ~now source rows =
-  rows
-  |> List.fold_left
-       (fun oldest row ->
-          if row.source <> source
-          then oldest
-          else
-            match row.since with
-            | None -> oldest
-            | Some since -> max oldest (max 0.0 (now -. since)))
-       0.0
+  match oldest_waiting_since (List.filter (fun (row : waiting_row) -> row.source = source) rows) with
+  | None -> 0.0
+  | Some since -> Float.max 0.0 (now -. since)
 ;;
 
 let metric_scope_labels ~scope source =
@@ -1676,18 +1687,7 @@ let dashboard_json_of_snapshot snapshot =
      array. The nested arrays stay for the per-keeper view; this is the same
      rows, not a second summary. *)
   let all_rows = all_keeper_rows @ global_rows in
-  (* The oldest wait is the oldest row something waits on. A reservation whose
-     time has not come is listed only: its [since] is when it was requested,
-     and a recurring reservation requested weeks ago would otherwise read as a
-     wait of weeks. *)
-  let oldest_since =
-    all_rows
-    |> List.filter holds_state
-    |> List.filter_map (fun row -> row.since)
-    |> List.fold_left
-         (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts))
-         None
-  in
+  let oldest_since = oldest_waiting_since all_rows in
   let oldest_age_seconds =
     match oldest_since with
     | None -> `Null

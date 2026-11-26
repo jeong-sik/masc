@@ -928,11 +928,13 @@ let test_the_wire_carries_the_open_work () =
          [ `Assoc
              [ "kind", `String "tool"; "tool_use_id", `String "toolu_a"
              ; "name", `String "Execute"; "stage", `String "executing"
-             ; "started_at_unix", `Float 3.; "since_unix", `Float 5. ]
+             ; "started_at_unix", `Float 3.; "since_unix", `Float 5.
+             ; "cohort", `Null ]
          ; `Assoc
              [ "kind", `String "tool"; "tool_use_id", `Null
              ; "name", `String "Search"; "stage", `String "requested"
-             ; "started_at_unix", `Float 4.5; "since_unix", `Float 4.5 ] ]);
+             ; "started_at_unix", `Float 4.5; "since_unix", `Float 4.5
+             ; "cohort", `Null ] ]);
   Alcotest.(check string) "the status names them in order"
     "tool running: Execute · tool called: Search · last observed tool: Execute"
     (Yojson.Safe.Util.(member "status_text" json |> to_string))

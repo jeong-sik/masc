@@ -2,7 +2,6 @@ open Alcotest
 module Listen = Server_mcp_listen_stream
 
 let stalled_after_s = 100.0
-let ping_interval_s = 30.0
 let max_queued_events = 4
 
 (* More than the stream's queue holds, plus the one its sender is writing. *)
@@ -35,7 +34,7 @@ let open_stream ~sw ~clock ~id =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Eio.Fiber.fork ~sw (fun () ->
-        Listen.serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events
+        Listen.serve ~clock ~stalled_after_s ~max_queued_events
           ~subscription_id:(`Int id) ~filter
           ~headers:(Httpun.Headers.of_list [ "content-type", "text/event-stream" ])
           (Masc.Http_reqd.of_httpun reqd)))

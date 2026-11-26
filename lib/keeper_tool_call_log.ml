@@ -1565,32 +1565,40 @@ let read_window_result ?keeper_name ~(window_hours : float) () :
     match store () with
     | None -> Error (Index_unavailable "keeper tool-call log store is not initialized")
     | Some store ->
-      (match Dated_jsonl.month_dir_paths_newest_first_result store with
-       | Error detail ->
-         Error (Index_unavailable (Dated_jsonl.read_error_to_string detail))
-       | Ok _ ->
-         let now = Time_compat.now () in
-         let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
-         let since_date = iso_date_of_unix since_ts in
-         let until_date = iso_date_of_unix now in
-         let keeper_matches name json =
-           match Safe_ops.json_string_opt "keeper" json with
-           | Some k -> String.equal k name
-           | None -> false
-         in
-         Ok
-           (Dated_jsonl.read_range store ~since:since_date ~until:until_date
-            |> List.filter (fun json ->
-              let in_window =
-                match ts_of_entry json with
-                | Some ts -> ts >= since_ts
-                | None -> false
-              in
-              in_window
-              &&
-              match keeper_name with
-              | None -> true
-              | Some name -> keeper_matches name json))))
+      let now = Time_compat.now () in
+      let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
+      let since_date = iso_date_of_unix since_ts in
+      let until_date = iso_date_of_unix now in
+      let keeper_matches name json =
+        match Safe_ops.json_string_opt "keeper" json with
+        | Some k -> String.equal k name
+        | None -> false
+      in
+      let acc = ref [] in
+      match
+        Dated_jsonl.iter_range_entries_result
+          store
+          ~since:since_date
+          ~until:until_date
+          (fun entry ->
+             match entry with
+             | Dated_jsonl.Malformed_json _ -> ()
+             | Dated_jsonl.Parsed json ->
+               let in_window =
+                 match ts_of_entry json with
+                 | Some ts -> ts >= since_ts
+                 | None -> false
+               in
+               let matches_keeper =
+                 match keeper_name with
+                 | None -> true
+                 | Some name -> keeper_matches name json
+               in
+               if in_window && matches_keeper then acc := json :: !acc)
+      with
+      | Ok () -> Ok (List.rev !acc)
+      | Error detail ->
+        Error (Index_unavailable (Dated_jsonl.read_error_to_string detail)))
 ;;
 
 let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =

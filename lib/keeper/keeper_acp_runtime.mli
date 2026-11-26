@@ -189,11 +189,13 @@ module For_testing : sig
       once a compaction commits, holding the list both compact. *)
   type next_start
 
-  (** The handoff list when it holds anything, kept to its most recent atoms.
-      Else [history], which the start then leaves for the anchor alone, so the
-      summary takes all of it. When the canonical turn store cannot be read,
-      [history] again, which the start sends itself. [Error] when the
-      compaction store cannot be read, which the compaction would hit too. *)
+  (** The handoff list, kept to its most recent atoms, when a summary applies
+      or its rows reach back to the first atom of [history]. Else [history]
+      through the last atom before the first row's turn, all of it when there
+      is no row: no row holds those turns, so the summary takes them and the
+      start holds it and every row. When the canonical turn store cannot be
+      read, all of [history] as well. [Error] when the compaction store cannot
+      be read, which the compaction would hit too. *)
   val next_start_list
     :  keepers_dir:string
     -> keeper_id:string

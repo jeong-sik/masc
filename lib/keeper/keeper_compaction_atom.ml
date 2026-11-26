@@ -332,8 +332,9 @@ let place_over ~written_over ~read_in through atoms =
   | Message_history, Canonical_turns ->
     (match through with
      | Some (Through_turn { turn; extent = Up_to _ }) ->
-       (* The history stopped inside [turn], before its final answer: of the
-          turn, only a user message is covered. *)
+       (* The history may stop inside [turn] before its final answer: of the
+          turn, only a user message counts as covered, and a final answer the
+          history did reach is summarized again. *)
        (match first_index_naming atoms turn with
         | None -> Not_in_list
         | Some first when opens_with_user_message atoms.(first) -> Covers_through first

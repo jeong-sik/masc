@@ -135,12 +135,16 @@ val latest_over : frame -> latest -> coverage option
 (** How far the summary has reached in a list. *)
 type front =
   | Front of int
-      (** Both kinds' latest boundaries land in the list: the summary holds
-          its atoms through this index ([-1]: none), and of the later ones
-          only those a boundary archived past itself ([beyond]). *)
+      (** Both kinds' latest boundaries land in the list: they cover its atoms
+          through this index ([-1]: none), and of the later ones only those a
+          boundary archived past itself ([beyond]). Read over the other kind,
+          a boundary covers by turn: a canonical turn list boundary covers its
+          turns' tool rounds in the message history, which its summary does
+          not hold. *)
   | Front_at_least of int
-      (** A latest boundary names a turn the list does not hold: the summary
-          holds the atoms through this index and may hold later ones. *)
+      (** A latest boundary names a turn the list does not hold: the
+          boundaries cover the atoms through this index and may cover later
+          ones. *)
 
 val front_index : front -> int
 
@@ -157,9 +161,10 @@ val front : frame:frame -> latest -> atom array -> front
 
     - A canonical turn list boundary is a whole turn or a turn's user message,
       the turn's first atom in the message history too.
-    - A message-history boundary inside a turn did not reach the final answer.
-      In the canonical turn list it covers the turn's user message, or only
-      the turns before when the turn has no user message there. *)
+    - A message-history boundary inside a turn may stop before the final
+      answer. In the canonical turn list it covers the turn's user message, or
+      only the turns before when the turn has no user message there; a final
+      answer the boundary did reach is summarized again. *)
 
 (** Atoms a producer dropped from its list: every atom before [prefix], and
     [later] atoms at or past [prefix]. *)

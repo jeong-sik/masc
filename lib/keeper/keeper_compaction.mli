@@ -204,11 +204,12 @@ val prefix_eviction_of_window
       request is no newer than the summary's. Observations of tool rounds
       still archived past a boundary ([beyond]) do not count, because the
       summary has not taken their turn's request.
-    - When no atom of [messages] belongs to a turn an observation names,
-      nothing holds the active intent back. A canonical turn list whose
-      covered rows were pruned holds only newer turns, but when every row
-      the summary holds still keeps its ACP turn id (#55026), an older
-      request can become the active intent.
+
+    When no atom of [messages] belongs to a turn an observation names, nothing
+    holds the active intent back. A canonical turn list whose covered rows
+    were pruned holds only newer turns, but when every row the summary holds
+    still keeps its ACP turn id (#55026), an older request can become the
+    active intent.
 
     The new atoms are secret-redacted and archived verbatim. The committed
     anchor is always bounded via {!bound_anchor_to_budget} (falling back to

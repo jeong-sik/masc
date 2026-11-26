@@ -272,9 +272,9 @@ endpoint registry and display the server's last shim/dispatch observations.
 An empty registry and an unreadable registry are different states. Reading
 settings does not connect to the endpoint or establish current readiness.
 
-Repo checkout materialization is not inferred from the host filesystem. Until
-the typed inventory in masc#31460 lands, provision required checkouts through
-an explicit operator-approved repository workflow.
+Repo checkout materialization is not inferred from the host filesystem, and
+masc does not provision repository checkouts on an endpoint. A Keeper creates
+the source copies it works in on the endpoint itself.
 
 ### What one endpoint separates, and what it does not
 

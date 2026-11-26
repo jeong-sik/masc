@@ -127,8 +127,8 @@ than picking a conversation for you.
 
 **An unbound conversation leaves no trace.** Messages.app holds the operator's
 whole personal correspondence, so a conversation nobody bound is dropped
-without a log line. The cost is that a group chat's opaque `chat_identifier`
-cannot be discovered from masc — see #30596.
+without a log line. The cost is that masc does not list a group chat's opaque
+`chat_identifier`: binding a group chat needs that identifier from outside masc.
 
 #### Checking that it works
 

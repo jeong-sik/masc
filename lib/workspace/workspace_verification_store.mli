@@ -84,8 +84,9 @@ val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
 val withheld_artifact_references : submitted_evidence_item list -> string list
 (** References of the complete text artifacts the judge-transport projection
     leaves out for the aggregate evidence cap, in submission order. Their whole
-    content is in the submitted record, and the review offers its record reader
-    for exactly these. *)
+    content is in the submitted record. The review offers its record reader when
+    this list is not empty; the reader itself serves any complete artifact in
+    the record. *)
 
 val evidence_read_failure_code : evidence_read_failure -> string
 (** Stable bounded code for diagnostics and metadata. *)

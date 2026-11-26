@@ -601,9 +601,13 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   check string "an artifact inside the cap is served whole" "SMALL_BODY_9a0f"
     (member "content" whole |> to_string);
   (* One cursor belongs to one observation of one artifact. *)
+  let large_cursor = `Assoc ["source_sha256", `String digest; "byte_offset", `Int 10] in
   denied surface name
-    (cursor_args (`Assoc ["source_sha256", `String digest; "byte_offset", `Int 10]))
+    (`Assoc ["reference", `String "artifact:small.txt"; "cursor", large_cursor])
     "verification_source_unavailable";
+  let continued = read surface name (cursor_args large_cursor) in
+  check int "the same cursor resumes its own artifact at its byte offset" 10
+    (member "byte_offset" continued |> to_int);
   denied surface name (artifact_args "artifact:oversize.txt") "verification_source_unavailable";
   denied surface name (artifact_args "artifact:missing.txt") "verification_source_access_denied";
   denied surface name (artifact_args "note:run attached") "verification_source_access_denied";
@@ -625,9 +629,12 @@ let test_record_reader_is_offered_only_for_a_withheld_artifact () = with_fixture
           (restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ]));
   check bool "a carried artifact needs no record reader" false
     (offers surface "keeper_artifact_read");
-  match call surface "keeper_artifact_read" (artifact_args "artifact:small.txt") with
-  | Tool_result.Failed _ -> ()
-  | Tool_result.Completed _ -> fail "a reader the review does not offer answered")
+  (match call surface "keeper_artifact_read" (artifact_args "artifact:small.txt") with
+   | Tool_result.Failed _ as result ->
+     check bool "an unoffered reader is an unknown tool" true
+       (String_util.contains_substring (Tool_result.message result) "unknown tool")
+   | (Tool_result.Completed _ | Tool_result.Deferred _) ->
+     fail "a reader the review does not offer answered"))
 
 let () = run "Verifier submitted collaboration sources" ["submission", [
   test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;

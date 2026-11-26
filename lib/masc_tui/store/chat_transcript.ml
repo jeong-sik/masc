@@ -20,13 +20,15 @@ let is_unquoted_val_char = function
   | ',' | ';' | '}' | ']' | '"' | '\'' | '\\' | ' ' | '\t' | '\n' | '\r' -> false
   | _ -> true
 
-let scan_cookie_header_value raw start =
+let scan_cookie_header_value ~enclosed_in_double_quote ~enclosed_in_single_quote
+    raw start =
   let len = String.length raw in
   let rec skip_quoted q k =
     if k >= len then len
     else
       match raw.[k] with
       | '\n' | '\r' -> k
+      | '"' when enclosed_in_double_quote && not (Char.equal q '"') -> k
       | '\\'
         when k + 1 < len
              && (not (Char.equal raw.[k + 1] '\n'))
@@ -41,6 +43,18 @@ let scan_cookie_header_value raw start =
   let rec next_non_horiz_ws p =
     if p < len && is_horiz_ws raw.[p] then next_non_horiz_ws (p + 1) else p
   in
+  let opens_pair_value j =
+    let prev_pos = prev_non_horiz_ws (j - 1) in
+    prev_pos >= start
+    && Char.equal raw.[prev_pos] '='
+    &&
+    let next_pos = next_non_horiz_ws (j + 1) in
+    next_pos < len
+    &&
+    match raw.[next_pos] with
+    | ',' | '}' | ']' | '\n' | '\r' -> false
+    | _ -> true
+  in
   let rec loop j =
     if j >= len then len
     else
@@ -52,20 +66,24 @@ let scan_cookie_header_value raw start =
                  || Char.equal raw.[j + 1] '\''
                  || Char.equal raw.[j + 1] '\\') ->
           loop (j + 2)
-      | ('"' | '\'') as q ->
-          let prev_pos = prev_non_horiz_ws (j - 1) in
-          let opens_pair_value =
-            prev_pos >= start
-            && Char.equal raw.[prev_pos] '='
-            &&
+      | '"' ->
+          if opens_pair_value j then loop (skip_quoted '"' (j + 1)) else j
+      | '\'' ->
+          if opens_pair_value j then loop (skip_quoted '\'' (j + 1))
+          else if enclosed_in_single_quote then
             let next_pos = next_non_horiz_ws (j + 1) in
-            next_pos < len
-            &&
-            match raw.[next_pos] with
-            | ',' | '}' | ']' | '\n' | '\r' -> false
-            | _ -> true
-          in
-          if opens_pair_value then loop (skip_quoted q (j + 1)) else j
+            if
+              next_pos >= len
+              ||
+              match raw.[next_pos] with
+              | ',' | '}' | ']' | '\n' | '\r' -> true
+              | _ -> false
+            then j
+            else loop (j + 1)
+          else
+            (* RFC 6265 §4.1.1: apostrophe (%x27) is a valid unquoted
+               cookie-octet; keep scanning the rest of the header value. *)
+            loop (j + 1)
       | _ -> loop (j + 1)
   in
   loop start
@@ -266,7 +284,16 @@ let scrub_secrets_in_text_with ~replacement raw =
                     else if
                       Char.equal raw.[sep_pos] ':' && is_cookie_header_key key
                     then begin
-                      let val_end = scan_cookie_header_value raw val_start in
+                      let enclosed_in_double_quote =
+                        i > 0 && Char.equal raw.[i - 1] '"'
+                      in
+                      let enclosed_in_single_quote =
+                        i > 0 && Char.equal raw.[i - 1] '\''
+                      in
+                      let val_end =
+                        scan_cookie_header_value ~enclosed_in_double_quote
+                          ~enclosed_in_single_quote raw val_start
+                      in
                       if val_end = val_start then loop val_start
                       else begin
                         Buffer.add_string buf replacement;

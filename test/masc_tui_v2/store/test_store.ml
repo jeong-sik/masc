@@ -6327,6 +6327,21 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       ( "scrub spaced double/single-quoted Cookie pairs completely"
       , {|Cookie: session= "abc123"; csrf = 'xyz987'|}
       , "Cookie: [redacted]" );
+      ( "scrub unquoted RFC 6265 apostrophe Cookie values completely"
+      , "Cookie: session=abc'def456; csrf=xyz987"
+      , "Cookie: [redacted]" );
+      ( "scrub unquoted RFC 6265 apostrophe Set-Cookie value with attributes"
+      , "Set-Cookie: sid=it's; HttpOnly"
+      , "Set-Cookie: [redacted]" );
+      ( "preserve outer JSON delimiter after apostrophe Cookie value"
+      , {|{"detail":"Cookie: session=abc'def456", "other":"ok"}|}
+      , {|{"detail":"Cookie: [redacted]", "other":"ok"}|} );
+      ( "preserve outer JSON delimiter after leading-apostrophe Cookie value"
+      , {|{"detail":"Cookie: a='bc", "other":"ok"}|}
+      , {|{"detail":"Cookie: [redacted]", "other":"ok"}|} );
+      ( "preserve outer single quote wrapping Cookie header"
+      , "{'detail': 'Cookie: session=abc', 'other': 'ok'}"
+      , "{'detail': 'Cookie: [redacted]', 'other': 'ok'}" );
       ( "scrub RFC quoted Set-Cookie value with attributes"
       , {|Set-Cookie: sid="secret999"; HttpOnly|}
       , "Set-Cookie: [redacted]" );

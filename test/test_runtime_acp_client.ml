@@ -329,21 +329,35 @@ command = "vibe-acp"
 is-non-interactive = true
 timeout-s = 120.0
 
+[providers.agy_test]
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+args = ["acp"]
+is-non-interactive = true
+timeout-s = 120.0
+
 [models.m_kimi]
 api-name = "kimi-code/k3.1-pro"
 max-context = 400000
 agent-compaction-threshold = 0.95
 
 [models.m_vibe]
-api-name = "mistral-medium-3.5"
-max-context = 262144
+api-name = "mistral-large-4"
+max-context = 400000
+agent-compaction-threshold = 0.95
+
+[models.m_agy]
+api-name = "gemini-4-neon-high"
+max-context = 400000
 agent-compaction-threshold = 0.95
 
 [kimi_test.m_kimi]
 [vibe_test.m_vibe]
+[agy_test.m_agy]
 
 [runtime]
-default = "vibe_test.m_vibe"
+default = "agy_test.m_agy"
 |}
   in
   let cfg =
@@ -355,13 +369,18 @@ default = "vibe_test.m_vibe"
            (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
   in
   let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
-  check (list string) "vibe takes the point"
-    [ "vibe_test.m_vibe" ]
+  check (list string) "agy takes the point"
+    [ "agy_test.m_agy" ]
     (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes);
-  check (list string) "kimi is dropped with the reason"
+  check (list string) "kimi and vibe are dropped with the reason"
     [ "model \"m_kimi\" declares agent-compaction-threshold, but the kimi_code host takes \
-       no compaction point" ]
-    (List.map (fun (_, reason) -> Runtime_config_error.string_of_drop_reason reason) dropped)
+       no compaction point"
+    ; "model \"m_vibe\" declares agent-compaction-threshold, but the mistral_vibe host takes \
+       no compaction point"
+    ]
+    (List.sort
+       String.compare
+       (List.map (fun (_, reason) -> Runtime_config_error.string_of_drop_reason reason) dropped))
 ;;
 
 (* ── Muse Code (muse acp 1.4.25, live-verified 2026-11-24) ────────────────── *)
@@ -470,24 +489,24 @@ let test_compaction_point_reaches_the_host () =
       ~extra_strip_env:[]
       ~agent_compaction
   in
-  check (option string) "vibe takes the token count over an inherited value" (Some "380000")
-    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:point Mistral_vibe));
   check (option string) "agy takes the token count over an inherited value" (Some "380000")
     (find_env "AGY_CLI_AUTO_COMPACT_OVERRIDE" (env ~agent_compaction:point Antigravity));
-  check (option string) "without a point vibe keeps the inherited value" (Some "1000")
-    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:None Mistral_vibe));
+  check (option string) "without a point agy keeps the inherited value" (Some "80%")
+    (find_env "AGY_CLI_AUTO_COMPACT_OVERRIDE" (env ~agent_compaction:None Antigravity));
+  check (option string) "vibe is never given its global threshold" (Some "1000")
+    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:point Mistral_vibe));
   check (array string) "muse takes the point as settings, not a variable"
     (env ~agent_compaction:None Runtime_acp_client.Muse_code)
     (env ~agent_compaction:point Runtime_acp_client.Muse_code);
   check int "the count is rounded down to stay at or below the point" 380_000
     (Runtime_acp_client.For_testing.compaction_tokens
        { Runtime_acp_client.limit_tokens = 400_001; threshold = 0.95 });
-  check bool "kimi takes no compaction point" false
-    (Runtime_acp_client.takes_compaction_point Kimi_code);
-  check bool "muse, vibe and agy take one" true
+  check bool "kimi and vibe take no compaction point" false
+    (List.exists Runtime_acp_client.takes_compaction_point [ Kimi_code; Mistral_vibe ]);
+  check bool "muse and agy take one" true
     (List.for_all
        Runtime_acp_client.takes_compaction_point
-       [ Runtime_acp_client.Muse_code; Mistral_vibe; Antigravity ])
+       [ Runtime_acp_client.Muse_code; Antigravity ])
 ;;
 
 let test_muse_argv_and_environment () =

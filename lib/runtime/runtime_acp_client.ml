@@ -155,7 +155,7 @@ type bridge_naming =
   | Per_owner_name of string
 
 (* How a host takes the point at which it compacts its own session, checked on
-   2026-11-26 against Antigravity 1.5.16, Kimi Code 2.7.2, Mistral Vibe 3.1.0
+   2026-11-26 against Antigravity 1.5.18, Kimi Code 2.7.2, Mistral Vibe 3.1.0
    and Muse Code 1.4.25. *)
 type compaction_point_channel =
   | Compaction_tokens_env of string
@@ -218,8 +218,9 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
     ; effort_config_id = Some "thought_level"
-    (* The binary's help text takes a token count, a K or M shorthand, or a
-       percentage of the model's window. MASC passes a token count. *)
+    (* The binary's changelog: the variable applies to all eligible models and
+       takes a token count, a K or M shorthand, or a percentage of the model's
+       window. MASC passes a token count. *)
     ; compaction_point = Compaction_tokens_env "AGY_CLI_AUTO_COMPACT_OVERRIDE"
     }
   | Kimi_code ->
@@ -283,9 +284,11 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto-approve"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
-    (* The settings' environment layer, above the user's config.toml, fills
-       [auto_compact_threshold] for a model without its own. *)
-    ; compaction_point = Compaction_tokens_env "VIBE_AUTO_COMPACT_THRESHOLD"
+    (* [VIBE_AUTO_COMPACT_THRESHOLD] fills only a model without a threshold of
+       its own, and the model catalog gives mistral-large-4-0-3 400,000 of its
+       own; the settings' environment layer refuses a per-model value. A point
+       passed through it could go unused without a word. *)
+    ; compaction_point = No_compaction_point
     }
   | Muse_code ->
     { driver = Muse_code

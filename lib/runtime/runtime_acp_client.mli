@@ -186,17 +186,18 @@ type bridge_naming =
     during a turn (checked 2026-11-26). *)
 type compaction_point_channel =
   | Compaction_tokens_env of string
-      (** An environment variable that takes a token count:
-          [VIBE_AUTO_COMPACT_THRESHOLD] (Mistral Vibe 3.1.0, read by the
-          settings' environment layer above the user's config.toml) and
-          [AGY_CLI_AUTO_COMPACT_OVERRIDE] (Antigravity 1.5.16). *)
+      (** An environment variable that takes a token count for every model the
+          host can compact: [AGY_CLI_AUTO_COMPACT_OVERRIDE] (Antigravity
+          1.5.18). *)
   | Muse_compaction_settings
       (** [-c context_compaction.*] settings (Muse Code 1.4.25): the limit as
           [provider_context_limit_tokens], the point as [soft_threshold], and
           [hard_threshold] at the whole limit, since the soft fraction must
           stay below the hard one (0.9 unless set). *)
   | No_compaction_point
-      (** The host takes none per process (Kimi Code 2.7.2). *)
+      (** The host takes none per process for every model: Kimi Code 2.7.2,
+          and Mistral Vibe 3.1.0, whose [VIBE_AUTO_COMPACT_THRESHOLD] fills
+          only a model without a threshold of its own. *)
 
 type driver_profile =
   { driver : driver

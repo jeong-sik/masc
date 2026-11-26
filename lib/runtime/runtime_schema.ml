@@ -427,9 +427,10 @@ type model_spec =
   ; agent_compaction_threshold : float option
     (** [agent-compaction-threshold] — the fraction of the lane's declared
         limit at which an ACP host compacts its own session during a turn,
-        in (0, 1). MASC passes it when it starts the host. A driver whose host
-        takes no compaction point refuses it at load. [None] leaves the host's
-        own default. *)
+        in (0, 1). MASC passes it when it starts the host (Muse Code,
+        Antigravity). A driver whose host takes no compaction point (Kimi
+        Code, Mistral Vibe) refuses it at load. [None] leaves the host's own
+        default. *)
   ; turn_timeout_s : float option
     (** [turn-timeout-s] — per-model liveness window for one official-client
         turn, in seconds. Codex, Claude, and Antigravity reset it on every

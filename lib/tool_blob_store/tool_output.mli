@@ -198,8 +198,7 @@ val encode_for_agent_core : t -> string
 
 val encode_structured_handle : t -> string
 (** Encode a typed JSON structured blob handle ([{"_blob": {...}}]) with zero
-    text-sentinel parsing ambiguity. Preferred by compaction and microcompaction
-    callers. *)
+    text-sentinel parsing ambiguity. *)
 
 (** Exact decode outcome. [Invalid_marker] means the input starts with
     {!marker_prefix} (or is a malformed structured [_blob] handle) and fails

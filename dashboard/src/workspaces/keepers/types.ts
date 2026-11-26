@@ -18,9 +18,48 @@ export interface KeeperRosterTurnSlot {
   readonly failed: number
 }
 
+/** Which part of a model response is still arriving. */
+export type TurnResponseChannel = 'none' | 'thinking' | 'text'
+
+/** Where agent core planned a call: its batch within one model response,
+ *  how many calls that batch holds, and whether they run at once. */
+export interface TurnToolCohort {
+  readonly batch_index: number
+  readonly batch_size: number
+  readonly concurrent: boolean
+}
+
+/** Where a call reaches: MASC state, the Keeper sandbox, the network or a
+ *  model provider. */
+export type TurnToolReach = 'masc_state' | 'sandbox' | 'network' | 'model_provider'
+
+/** One piece of work still open in a running turn (server
+ *  `Keeper_turn_preview.open_activity_to_json`). `since_unix` is when it
+ *  entered its current stage. */
+export type TurnOpenActivity =
+  | {
+      readonly kind: 'response'
+      readonly channel: TurnResponseChannel
+      readonly started_at_unix: number
+      readonly since_unix: number
+    }
+  | {
+      readonly kind: 'tool'
+      readonly tool_use_id: string | null
+      readonly name: string
+      readonly stage: 'requested' | 'executing'
+      readonly started_at_unix: number
+      readonly since_unix: number
+      readonly cohort: TurnToolCohort | null
+      readonly reach: TurnToolReach | null
+    }
+
 export interface KeeperActiveTurnPreview {
   readonly status_text: string
   readonly activity: 'preparing' | 'waiting' | 'streaming' | 'tool' | 'failed' | string
+  /** The turn's open work, one entry each. `null` when the server did not
+   *  send the list or sent one this dashboard cannot read. */
+  readonly open_activities: readonly TurnOpenActivity[] | null
   readonly text_tail: string
   readonly last_tool: string | null
   readonly updated_at_unix: number

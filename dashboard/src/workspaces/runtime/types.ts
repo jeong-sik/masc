@@ -815,7 +815,8 @@ export function formatIsoTime(iso: string | null | undefined): string {
 export function formatResetCountdown(resetsAtUnix: number | null | undefined, nowUnix = Date.now() / 1000): string {
   if (typeof resetsAtUnix !== 'number' || !Number.isFinite(resetsAtUnix) || resetsAtUnix <= 0) return '없음'
   const diff = Math.max(0, Math.round(resetsAtUnix - nowUnix))
-  if (diff === 0) return '리셋됨'
+  // The one line that shows this starts with "리셋": the word is not said twice.
+  if (diff === 0) return '지남'
   const hours = Math.floor(diff / 3600)
   const mins = Math.floor((diff % 3600) / 60)
   if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`

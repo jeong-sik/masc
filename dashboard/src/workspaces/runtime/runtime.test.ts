@@ -28,7 +28,17 @@ import {
   quotaRestCauseMeta,
   stripProviderPrefix,
 } from './quota-rest-groups'
-import { classifyQuotaScope, formatIsoTime, localUtcOffsetMin, maxUtilizationPct, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
+import {
+  classifyQuotaScope,
+  formatIsoTime,
+  formatResetCountdown,
+  localUtcOffsetMin,
+  maxUtilizationPct,
+  openViewSseStream,
+  partitionQuotaScopes,
+  type ProviderUsageScope,
+  type RuntimeResolution,
+} from './types'
 import { decodeToolsCatalogPayload } from './tools-tab'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -2359,5 +2369,12 @@ describe('workspaces/runtime', () => {
     })
     expect(onInspect).not.toHaveBeenCalled()
     expect(container.textContent).not.toContain('열린 탭 없음')
+  })
+
+  it('says a passed window reset in one word, for the card line that starts with 리셋', () => {
+    const now = 1_800_000_000
+    expect(formatResetCountdown(now - 60, now)).toBe('지남')
+    expect(formatResetCountdown(now + 2 * 86_400 + 3600, now)).toBe('2d 1h')
+    expect(formatResetCountdown(null, now)).toBe('없음')
   })
 })

@@ -1403,11 +1403,48 @@ let test_parallel_anonymous_tools_stay_distinct_and_concrete_end_preserves_runni
     (List.length (current_req ()).open_activities)
 ;;
 
+let test_previews_are_scoped_to_their_workspace () =
+  let keeper_name = "workspace-scoped-preview" in
+  let owner_a = Keeper_interrupt_token.fresh () in
+  let owner_b = Keeper_interrupt_token.fresh () in
+  let writer_a =
+    Keeper_turn_preview_owner.with_owner ~interrupt_token:owner_a
+      ~observation:(Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
+        Keeper_turn_preview.reset ~base_path:"/ws/a" ~keeper_name
+          ~execution_scope:None ~turn_ref:None ~now:1.
+          ~redaction:Keeper_secret_redaction.empty)
+  in
+  let writer_b =
+    Keeper_turn_preview_owner.with_owner ~interrupt_token:owner_b
+      ~observation:(Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
+        Keeper_turn_preview.reset ~base_path:"/ws/b" ~keeper_name
+          ~execution_scope:None ~turn_ref:None ~now:2.
+          ~redaction:Keeper_secret_redaction.empty)
+  in
+  Keeper_turn_preview.note_text ~writer:(Some writer_a) ~now:3. "workspace-a-text";
+  Keeper_turn_preview.note_text ~writer:(Some writer_b) ~now:4. "workspace-b-text";
+  Alcotest.(check (option string)) "workspace a keeps its own preview"
+    (Some "workspace-a-text")
+    (Keeper_turn_preview.current_for_turn ~base_path:"/ws/a" ~keeper_name
+       ~interrupt_token:owner_a
+     |> Option.map (fun (p : Keeper_turn_preview.t) -> p.text_tail));
+  Alcotest.(check (option string)) "workspace b keeps its own preview"
+    (Some "workspace-b-text")
+    (Keeper_turn_preview.current_for_turn ~base_path:"/ws/b" ~keeper_name
+       ~interrupt_token:owner_b
+     |> Option.map (fun (p : Keeper_turn_preview.t) -> p.text_tail));
+  Alcotest.(check bool) "workspace a cannot read workspace b's owner" true
+    (Keeper_turn_preview.current_for_turn ~base_path:"/ws/a" ~keeper_name
+       ~interrupt_token:owner_b = None)
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
       , [ Alcotest.test_case "preparation scopes are visible and keep their actual owner" `Quick
             test_preparation_scopes_are_visible_owned_and_do_not_dispatch
+        ; Alcotest.test_case "previews are scoped to their workspace" `Quick
+            test_previews_are_scoped_to_their_workspace
         ; Alcotest.test_case "parallel anonymous tools stay distinct" `Quick
             test_parallel_anonymous_tools_stay_distinct_and_concrete_end_preserves_running_sibling
         ; Alcotest.test_case "original preparation remains durable after a successor" `Quick

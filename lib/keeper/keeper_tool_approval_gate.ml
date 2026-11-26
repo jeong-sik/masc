@@ -93,13 +93,46 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
                answered this call". *)
             "remembered_" ^ Registry.decision_to_string remembered )
       | None -> (
+          let published_requested = ref false in
           let outcome =
-            Registry.await registry ~clock
-              ~on_registered:(fun () -> publish requested)
-              ~keeper_name ~tool_call_id ~approval_id
-              ~tool_name:request.tool_name
-              ~args ~question ~because
-              ~timeout_sec
+            try
+              Registry.await ~base_path
+                ~on_timed_out:(fun () ->
+                  (* Timing out blocks this call, not the turn: Agent Core turns
+                     [Hooks.Timed_out] into a blocked tool result carrying
+                     "Tool execution approval timed out" and reports
+                     [Continue_after_batch], so the Keeper reads that result and
+                     carries on. Recording the expired ask inside [on_timed_out]
+                     keeps any racing [settle] waiting until the ask is durable
+                     so a late answer is never discarded. *)
+                  Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
+                    ~base_path ~keeper_name ~tool_call_id ~approval_id
+                    ~tool_name:request.tool_name ~args:request.input ())
+                registry ~clock
+                ~on_registered:(fun () ->
+                  publish requested;
+                  published_requested := true)
+                ~keeper_name ~tool_call_id ~approval_id
+                ~tool_name:request.tool_name
+                ~args ~question ~because
+                ~timeout_sec
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              if !published_requested then
+                Eio.Cancel.protect (fun () ->
+                  publish
+                    (Keeper_chat_events.Tool_approval_settled
+                       { tool_call_id; approval_id; outcome = "cancelled" }));
+              Printexc.raise_with_backtrace exn backtrace
+            | exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              if !published_requested then
+                Eio.Cancel.protect (fun () ->
+                  publish
+                    (Keeper_chat_events.Tool_approval_settled
+                       { tool_call_id; approval_id; outcome = "failed" }));
+              Printexc.raise_with_backtrace exn backtrace
           in
           match outcome with
           | Registry.Answered Registry.Approve ->
@@ -107,16 +140,6 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
           | Registry.Answered Registry.Deny ->
               (Agent_core.Hooks.Denied, Registry.decision_to_string Registry.Deny)
           | Registry.Timed_out ->
-              (* Timing out blocks this call, not the turn: Agent Core turns
-                 [Hooks.Timed_out] into a blocked tool result carrying
-                 "Tool execution approval timed out" and reports
-                 [Continue_after_batch], so the Keeper reads that result and
-                 carries on. The ask's description is kept so an operator's
-                 late answer is not discarded: it settles the identical call
-                 once, whenever that call comes back. *)
-              Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
-                ~base_path ~keeper_name ~tool_call_id ~approval_id
-                ~tool_name:request.tool_name ~args:request.input ();
               (Agent_core.Hooks.Timed_out, "timed_out")
           (* Two waits claimed one call id, so neither answer can be trusted to be
              about this call. Denying is the conservative reading: the call the

@@ -156,7 +156,9 @@ let execute_prepared_flow_with_queue_ops_current
   | Eio.Cancel.Cancelled _ as cancellation ->
     let cancellation_backtrace = Printexc.get_raw_backtrace () in
     let cancelled_uncertain detail =
-      (match mark_persistence_uncertain prepared.entry with
+      (match
+         Eio.Cancel.protect (fun () -> mark_persistence_uncertain prepared.entry)
+       with
        | Ok _ -> ()
        | Error marker_error ->
          log_exact_error
@@ -193,7 +195,9 @@ let execute_prepared_flow_with_queue_ops_current
        Printexc.raise_with_backtrace cancellation cancellation_backtrace
      | Cancellation_exact_settlement_failed
          (Exact_settlement_identity_unbound _) ->
-       (match persist_identity_unbound prepared.entry with
+       (match
+          Eio.Cancel.protect (fun () -> persist_identity_unbound prepared.entry)
+        with
         | Ok () ->
           raise
             (Cancelled_identity_unbound
@@ -336,6 +340,7 @@ let spawn_with
     let registry = Exact_lane_run_registry.global () in
     let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
     let started_at = Time_compat.now () in
+    let started_mono = Mtime_clock.now () in
     let observed_summary = ref None in
     let observed_outcome = ref None in
     let selected_slot = ref None in
@@ -423,12 +428,15 @@ let spawn_with
     let observed_usage = ref None in
     let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge) () in
     let complete ?usage outcome output =
+      let elapsed_s =
+        Mtime.Span.to_float_ns (Mtime.span started_mono (Mtime_clock.now ())) /. 1e9
+      in
       match
         Exact_lane_run_registry.mark_completed
           registry
           ~run_id
           ~outcome
-          ~elapsed_s:(Time_compat.now () -. started_at)
+          ~elapsed_s
           ~selected_slot:!selected_slot
           ?usage
           ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
@@ -442,6 +450,12 @@ let spawn_with
           "HITL exact-run observation completion failed run_id=%s: %s"
           run_id
           (Exact_lane_run_registry.completion_error_to_string error)
+    in
+    let finish_run ?usage ~finish_outcome outcome output =
+      Eio.Cancel.protect (fun () ->
+        Fun.protect
+          ~finally:(fun () -> on_finish finish_outcome)
+          (fun () -> complete ?usage outcome output))
     in
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
@@ -501,53 +515,60 @@ let spawn_with
       let outcome, output = run_outcome_of_observed_summary
           ~last_outcome:!observed_outcome
           !observed_summary in
-      complete ?usage:!observed_usage outcome output;
-      on_finish Conclusive_terminalization
+      finish_run ?usage:!observed_usage ~finish_outcome:Conclusive_terminalization outcome output
     | `Cancelled (cancellation, cancellation_backtrace) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_persistence_uncertain;
+      finish_run
+        ~finish_outcome:Terminalization_persistence_uncertain
+        Exact_lane_run_registry.Cancelled
+        `Null;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_uncertain
         (cancellation, cancellation_backtrace, _detail) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_persistence_uncertain;
+      finish_run
+        ~finish_outcome:Terminalization_persistence_uncertain
+        Exact_lane_run_registry.Cancelled
+        `Null;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_identity_unbound
         (cancellation, cancellation_backtrace) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_identity_unbound;
+      finish_run
+        ~finish_outcome:Terminalization_identity_unbound
+        Exact_lane_run_registry.Cancelled
+        `Null;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_rejected
         (cancellation, cancellation_backtrace, _rejection) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_rejected;
+      finish_run
+        ~finish_outcome:Terminalization_rejected
+        Exact_lane_run_registry.Cancelled
+        `Null;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Identity_unbound ->
-      complete
+      finish_run
+        ~finish_outcome:Terminalization_identity_unbound
         (Exact_lane_run_registry.Failed
            { code = "terminalization_identity_unbound"
            ; detail = "exact attempt identity was not durably bound"
            })
-        `Null;
-      on_finish Terminalization_identity_unbound
+        `Null
     | `Rejected rejection ->
       let detail =
         Keeper_approval_queue_result.exact_attempt_error_to_string
           (Exact_attempt_rejected rejection)
       in
-      complete
+      finish_run
+        ~finish_outcome:Terminalization_rejected
         (Exact_lane_run_registry.Failed
            { code = "terminalization_rejected"; detail })
-        `Null;
-      on_finish Terminalization_rejected
+        `Null
     | `Uncertain uncertainty ->
-      complete
+      finish_run
+        ~finish_outcome:Terminalization_persistence_uncertain
         (Exact_lane_run_registry.Failed
            { code = "terminalization_persistence_uncertain"
            ; detail = Printexc.to_string uncertainty
            })
         `Null;
-      on_finish Terminalization_persistence_uncertain;
       raise uncertainty);
     Ok Worker_forked
 ;;

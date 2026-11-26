@@ -130,15 +130,21 @@ type store_transition_lock =
   ; mutable users : int
   }
 
+type lane_waiter =
+  { mutable granted : bool
+  ; mutable cancelled : bool
+  ; wake : unit Eio.Promise.u
+  }
+
 (** Per-Keeper lane gate, deliberately distinct from [store_transition_lock].
-    The gate is an [Eio.Semaphore] with one token so admission can be bounded
-    by a deadline: [Eio.Semaphore.acquire] is cancellation-safe (a cancelled
-    waiter returns its token via the [Sem_state] handoff protocol) and resumes
-    waiters FIFO. [Eio.Mutex.lock] offers no bounded wait at all, which is how
-    a hung durable write used to leak the lane permanently and hang every
-    later submit for that keeper (#25398). *)
+    A single-token FIFO gate guarded by [gate_mu] so immediate try-acquire
+    never races a check-then-block gap, contended admission stays bounded by a
+    deadline without hanging when no clock or zero budget is available, and
+    cancelled waiters hand any already-granted token onward (#25398). *)
 type lane_gate =
-  { sem : Eio.Semaphore.t
+  { gate_mu : Stdlib.Mutex.t
+  ; mutable held : bool
+  ; waiters : lane_waiter Queue.t
   ; mutable users : int
   }
 

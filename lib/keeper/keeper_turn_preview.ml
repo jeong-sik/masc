@@ -388,15 +388,15 @@ type writer = entry ref
 
 let preparation_parent_key : (writer * preparation_scope_id) Eio.Fiber.key = Eio.Fiber.create_key ()
 
-(* The displayed preview points at the latest installed writer. Callbacks
-   retain their own writer and never look it up in this table. *)
-let table : (string, writer) Hashtbl.t = Hashtbl.create 16
+(* The displayed preview points at the latest installed writer per
+   [(base_path, keeper_name)] so two workspaces running a keeper with the same
+   name never overwrite each other. Callbacks retain their own writer and never
+   look it up in this table. *)
+let table : (string * string, writer) Hashtbl.t = Hashtbl.create 16
 
 let mutex = Mutex.create ()
 
-let with_lock f =
-  Mutex.lock mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+let with_lock f = Stdlib.Mutex.protect mutex f
 
 (* The same lock orders reads and writes, even when a writer is replaced. *)
 let revision = ref 0
@@ -410,7 +410,8 @@ let next_revision () =
    ([current_for_turn]), so a writer installed without an owner shows
    nothing. *)
 let displayed writer =
-  match Hashtbl.find_opt table (!writer).shown_as.keeper_name with
+  let { base_path; keeper_name } = (!writer).shown_as in
+  match Hashtbl.find_opt table (base_path, keeper_name) with
   | Some shown -> shown == writer && Option.is_some (!writer).owner
   | None -> false
 
@@ -439,16 +440,31 @@ let note_work_context ~writer work_context =
       };
     shown_after_write writer))
 
+let current_for_workspace ~base_path ~keeper_name =
+  with_lock (fun () ->
+    Option.map
+      (fun writer -> (!writer).preview)
+      (Hashtbl.find_opt table (base_path, keeper_name)))
+
 let current ~keeper_name =
   with_lock (fun () ->
-    Option.map (fun writer -> (!writer).preview) (Hashtbl.find_opt table keeper_name))
+    Hashtbl.fold
+      (fun (_, name) writer best ->
+        if not (String.equal name keeper_name) then best
+        else
+          let snapshot = (!writer).preview in
+          match best with
+          | Some prev when prev.revision >= snapshot.revision -> best
+          | Some _ | None -> Some snapshot)
+      table
+      None)
 
 let snapshot writer = with_lock (fun () -> (!writer).preview)
 
-let current_for_turn_with_revision ~keeper_name ~interrupt_token =
+let current_for_turn_with_revision ~base_path ~keeper_name ~interrupt_token =
   with_lock (fun () ->
     let preview =
-      match Hashtbl.find_opt table keeper_name with
+      match Hashtbl.find_opt table (base_path, keeper_name) with
       | Some writer when Option.exists (Keeper_interrupt_token.equal interrupt_token) (!writer).owner ->
         Some (!writer).preview
       | Some _ | None -> None
@@ -458,8 +474,8 @@ let current_for_turn_with_revision ~keeper_name ~interrupt_token =
     in
     observed_through, preview)
 
-let current_for_turn ~keeper_name ~interrupt_token =
-  snd (current_for_turn_with_revision ~keeper_name ~interrupt_token)
+let current_for_turn ~base_path ~keeper_name ~interrupt_token =
+  snd (current_for_turn_with_revision ~base_path ~keeper_name ~interrupt_token)
 
 (* [f] returns [None] when the note changes nothing, which leaves
    [updated_at] where it was. Every write takes its [activity] from what is
@@ -572,7 +588,7 @@ let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
         tools = Tool_indexes.empty; ended_tool_ids = Tool_id_set.empty;
         preparations = []; next_preparation_scope_id = 0;
         owner; original_turn_ref = turn_ref; shown_as; loop = None } in
-      Hashtbl.replace table keeper_name writer;
+      Hashtbl.replace table (base_path, keeper_name) writer;
       writer, shown_after_write writer)
   in
   announce shown;

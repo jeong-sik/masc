@@ -272,6 +272,21 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
           Alcotest.fail
             ("unclassified tool should ask, got: " ^ decision_to_string other))
 
+let test_cancellation_publishes_settled_cancelled_event () =
+  with_gate ~timeout_sec:5.0 (fun ~clock ~registry ~events ~gate ->
+      Eio.Fiber.first
+        (fun () ->
+          ignore
+            (gate.Gate.tool_approval
+               (request ~tool_name:"Edit" ~input:(`Assoc []))))
+        (fun () -> wait_until_pending registry ~clock);
+      check int "wait is removed after cancellation" 0
+        (List.length (Registry.pending registry));
+      check (list string) "cancellation emits settled(cancelled) so UI prompt clears"
+        [ "requested(call-1,Run it?,policy: needs an operator's eye)"
+        ; "settled(call-1,cancelled)" ]
+        (event_labels events))
+
 let () =
   run "keeper_tool_approval_gate"
     [ ( "deciding whether to ask"
@@ -293,6 +308,8 @@ let () =
             test_nobody_answering_does_not_admit_the_call
         ; test_case "the settled event is sent on every path" `Quick
             test_the_settled_event_is_sent_on_every_path
+        ; test_case "cancellation emits settled(cancelled)" `Quick
+            test_cancellation_publishes_settled_cancelled_event
         ; test_case "the listing carries what the gate published" `Quick
             test_the_listing_carries_what_the_gate_published
         ] )

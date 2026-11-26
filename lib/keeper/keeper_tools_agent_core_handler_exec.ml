@@ -438,11 +438,25 @@ let execute_with_observers_with_authority
       ; terminal_effect_receipt = None
       }
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as e ->
+    raise e
   | exn ->
     let ts = Time_compat.now () in
-    let duration_ms = int_of_float ((ts -. Tool_timing.started_at t0) *. 1000.0) in
-    let error_text = Printexc.to_string exn in
+    let duration_ms =
+      max 0 (int_of_float ((ts -. Tool_timing.started_at t0) *. 1000.0))
+    in
+    let error_text =
+      Printexc.to_string exn
+      |> Observability_redact.redact_preview
+           ~max_len:Common.max_tool_result_wire_bytes
+      |> Safe_ops.sanitize_text_utf8
+    in
+    Option.iter
+      (fun invocation ->
+         Keeper_tool_call_log.set_disposition
+           ~invocation
+           ~disposition:(Tool_result.Failed Tool_result.Runtime_failure))
+      agent_core_invocation;
     let exception_result =
       Tool_result.make_err
         ~class_:Tool_result.Runtime_failure
@@ -462,6 +476,8 @@ let execute_with_observers_with_authority
       ~tool_name:name
       ~disposition:exception_result
       ~duration_ms;
+    Tool_dispatch.run_dispatch_observers
+      Dispatch_outcome.Handled (Some exception_result);
     (* Tool-call observability via AGENT_CORE Event_bus. See above. *)
     broadcast_keeper_tool_call_event
       ~keeper_name:meta.name

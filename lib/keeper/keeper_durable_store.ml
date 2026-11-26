@@ -475,9 +475,9 @@ let event_queue_store =
   }
 ;;
 
-(* The three position stores the Librarian lifecycle writes per keeper (RFC
-   librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
-   and the two memory OS sidecars beside the Memory snapshot
+(* The per-Keeper stores the Librarian lifecycle reads and writes (RFC
+   librarian-lifecycle section 4.6: the turn log, the Memory commit log and
+   the official-client turn fragments), and the two memory OS sidecars beside the Memory snapshot
    decode field-exact, and nothing read them before a deploy (#37019). Each
    entry reads with the module's own decoder. A JSONL line a
    store reports as [Incomplete_line] is an append a crash cut short, which the

@@ -1677,8 +1677,7 @@ trigger_policy = "mention_or_thread"
 moderators = ["e-masc-the-leader"]
 
 # ── Fusion 패널+심판 심의 ────────────────────────────────────────────
-# masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
-# harness 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.
+# masc_fusion 도구의 out-of-band 심의 루프 설정. 이 seed 는 기본으로 켠다.
 # [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.
 #
@@ -2098,14 +2097,13 @@ max-context = 1000000
 tools-support = true
 thinking-support = true
 streaming = true
-# No effort ladder is expressible from runtime.toml (the adapter never sets
-# accepted_reasoning_efforts), so a declared effort is rejected before
-# dispatch. Uncontrolled: the gateway default decides.
+# This row declares no accepted-reasoning-efforts. Reasoning is uncontrolled:
+# the gateway default decides.
 reasoning-uncontrolled = true
 
 [models.opencode-go-deepseek-flash.capabilities]
 max-output-tokens = 384000
-# No effort ladder is expressible from runtime.toml, and a bare
+# This row declares no effort ladder, and a bare
 # enable_thinking has no encoding under the Reasoning_effort dialect, so no
 # control is declared at all. Default-on reasoning verified by probe
 # (reasoning_content without any effort param, 2026-11-04): the
@@ -2318,11 +2316,11 @@ models = [
   { model = "codex-gpt-6-1-terra", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
 ]
 
-# ── Unified Persistent ACP v1 Official Runtimes ──────────────────────────────
-# Persistent per-Keeper ACP v1 JSON-RPC 2.0 stdio runtimes for Antigravity
-# (`agy acp`), Kimi Code (`kimi acp`), and Mistral Vibe (`vibe-acp`).
-# Each Keeper owns an isolated persistent child + loopback HTTP MCP bridge so
-# MASC internal/builtin tools and skills run with zero cross-Keeper blast radius.
+# ── ACP v1 runtimes ──────────────────────────────────────────────────────────
+# One ACP v1 JSON-RPC 2.0 stdio runtime per Keeper: Antigravity (`agy acp`),
+# Kimi Code (`kimi acp`), and Mistral Vibe (`vibe-acp`).
+# Each Keeper has its own child process and its own loopback HTTP MCP bridge.
+# MASC built-in tools and skills run inside that Keeper's child process.
 
 [providers.antigravity_acp]
 display-name = "Antigravity ACP"

@@ -105,8 +105,8 @@ let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
            (Say.resolve lang
               (Say.make
-                 ~ko:(Printf.sprintf "%d 쿨다운" cooldown_n)
-                 ~en:(Printf.sprintf "%d cooldown" cooldown_n))))
+                 ~ko:(Printf.sprintf "%d 일시 중지" cooldown_n)
+                 ~en:(Printf.sprintf "%d paused" cooldown_n))))
     else
       Some
         (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
@@ -401,6 +401,185 @@ let standing_restricts_readiness ~now_unix ~(rt : Runtime_store.t) rid =
   | Some st -> Wire_runtime.standing_restricts_readiness ~now_unix st
   | None -> false
 
+let quota_rest_cause_presentation ~lang cause =
+  match String.trim cause with
+  | "provider_quota_refused" ->
+      ( Glyph.Live_paused
+      , Theme.Status_attention
+      , Say.resolve lang (Say.make ~ko:"한도 초과" ~en:"Quota limit") )
+  | "payment_refused" ->
+      ( Glyph.Live_failing
+      , Theme.Status_critical
+      , Say.resolve lang (Say.make ~ko:"결제 거절" ~en:"Payment refused") )
+  | "usage_read" ->
+      ( Glyph.Live_paused
+      , Theme.Status_attention
+      , Say.resolve lang (Say.make ~ko:"사용량 100%" ~en:"Usage 100%") )
+  | other ->
+      let lbl =
+        if String.equal other "" then
+          Say.resolve lang (Say.make ~ko:"일시 중지" ~en:"Paused")
+        else
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "일시 중지 (%s)" other)
+               ~en:(Printf.sprintf "Paused (%s)" other))
+      in
+      (Glyph.Live_paused, Theme.Status_attention, lbl)
+
+let format_local_release_clock ~tz_offset_sec ~now_unix ts =
+  if
+    (not (Float.is_finite now_unix))
+    || (not (Float.is_finite ts))
+    || now_unix <= 0.0
+    || ts <= 0.0
+  then None
+  else
+    let off = Float.of_int tz_offset_sec in
+    let now_s = Wire_common.format_unix_rfc3339 (now_unix +. off) in
+    let ts_s = Wire_common.format_unix_rfc3339 (ts +. off) in
+    if String.length now_s >= 16 && String.length ts_s >= 16 then
+      let hhmm = String.sub ts_s 11 5 in
+      if String.equal (String.sub now_s 0 10) (String.sub ts_s 0 10) then
+        Some hhmm
+      else
+        Some
+          (Printf.sprintf "%s/%s %s"
+             (String.sub ts_s 5 2) (String.sub ts_s 8 2) hhmm)
+    else None
+
+type quota_rest_provider_group = {
+  provider_id : string;
+  paused_count : int;
+  total_count : int;
+  primary_cause : string;
+  soonest_until : float option;
+  soonest_reset_stated : bool;
+}
+
+let active_quota_rest_cause ~now_unix (st : Wire_runtime.runtime_standing) =
+  match (st.credential_refused_at_unix, st.quota_rest_cause) with
+  | Some _, _ -> None
+  | None, Some cause -> (
+      match st.quota_rest_until_unix with
+      | None -> Some cause
+      | Some u when u > now_unix -> Some cause
+      | Some _ -> None)
+  | None, None -> None
+
+let compare_opt_until a b =
+  match (a, b) with
+  | Some x, Some y -> Float.compare x y
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+
+let provider_disambiguator provider_id =
+  let trimmed = String.trim provider_id in
+  let raw =
+    match String.rindex_opt trimmed '_' with
+    | Some idx when idx + 1 < String.length trimmed ->
+        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+    | Some _ | None -> trimmed
+  in
+  let len = String.length raw in
+  if len <= 8 then raw else String.sub raw (len - 8) 8
+
+let group_active_quota_rest_standings ~now_unix ~runtimes ~runtimes_tbl
+    (degraded : (string * Wire_runtime.runtime_standing) list) =
+  let provider_totals : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (r : Wire_runtime.runtime_option) ->
+      let cur =
+        match Hashtbl.find_opt provider_totals r.provider_id with
+        | Some n -> n
+        | None -> 0
+      in
+      Hashtbl.replace provider_totals r.provider_id (cur + 1))
+    runtimes;
+  let grouped : (string, quota_rest_provider_group) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let paused_runtimes_n = ref 0 in
+  let others_rev = ref [] in
+  List.iter
+    (fun ((rid, st) as entry) ->
+      match active_quota_rest_cause ~now_unix st with
+      | None -> others_rev := entry :: !others_rev
+      | Some cause ->
+          incr paused_runtimes_n;
+          let provider_id =
+            match Hashtbl.find_opt runtimes_tbl rid with
+            | Some (r : Wire_runtime.runtime_option) -> r.provider_id
+            | None -> rid
+          in
+          let until_opt =
+            match st.quota_rest_until_unix with
+            | Some u when Float.is_finite u && u > 0.0 -> Some u
+            | Some _ | None -> None
+          in
+          let total_for_prov =
+            match Hashtbl.find_opt provider_totals provider_id with
+            | Some n -> n
+            | None -> 1
+          in
+          let next =
+            match Hashtbl.find_opt grouped provider_id with
+            | None ->
+                {
+                  provider_id;
+                  paused_count = 1;
+                  total_count = Int.max 1 total_for_prov;
+                  primary_cause = cause;
+                  soonest_until = until_opt;
+                  soonest_reset_stated = st.quota_rest_reset_stated;
+                }
+            | Some cur ->
+                let paused_count = cur.paused_count + 1 in
+                let total_count = Int.max paused_count cur.total_count in
+                let soonest_until, soonest_reset_stated =
+                  match (cur.soonest_until, until_opt) with
+                  | Some a, Some b ->
+                      if b < a then (Some b, st.quota_rest_reset_stated)
+                      else if Float.equal a b then
+                        (Some a, cur.soonest_reset_stated || st.quota_rest_reset_stated)
+                      else (Some a, cur.soonest_reset_stated)
+                  | None, Some b -> (Some b, st.quota_rest_reset_stated)
+                  | Some a, None -> (Some a, cur.soonest_reset_stated)
+                  | None, None ->
+                      (None, cur.soonest_reset_stated && st.quota_rest_reset_stated)
+                in
+                let primary_cause =
+                  if String.equal (String.trim cur.primary_cause) "payment_refused" then
+                    cur.primary_cause
+                  else if String.equal (String.trim cause) "payment_refused" then
+                    cause
+                  else cur.primary_cause
+                in
+                {
+                  provider_id;
+                  paused_count;
+                  total_count;
+                  primary_cause;
+                  soonest_until;
+                  soonest_reset_stated;
+                }
+          in
+          Hashtbl.replace grouped provider_id next)
+    degraded;
+  let groups =
+    Hashtbl.to_seq_values grouped
+    |> List.of_seq
+    |> List.sort (fun a b ->
+           let c = compare_opt_until a.soonest_until b.soonest_until in
+           if c <> 0 then c
+           else
+             let c2 = Int.compare b.paused_count a.paused_count in
+             if c2 <> 0 then c2
+             else String.compare a.provider_id b.provider_id)
+  in
+  (!paused_runtimes_n, groups, List.rev !others_rev)
+
 let standing_override_for ~now_unix ~lang ~(rt : Runtime_store.t) rid =
   match Runtime_store.standing_for ~runtime_id:rid rt with
   | Some st when Wire_runtime.standing_is_degraded ~now_unix st -> (
@@ -413,21 +592,19 @@ let standing_override_for ~now_unix ~lang ~(rt : Runtime_store.t) rid =
             , "" )
       | None -> (
           match st.quota_rest_cause with
-          | Some _
+          | Some cause
             when match st.quota_rest_until_unix with
                  | None -> true
                  | Some u -> u > now_unix ->
+              let glyph, tone, cause_lbl =
+                quota_rest_cause_presentation ~lang cause
+              in
               let eta =
                 match st.quota_rest_until_unix with
                 | Some ts -> " " ^ H.format_countdown ~now_unix ts
                 | None -> ""
               in
-              Some
-                ( Glyph.Live_paused
-                , Theme.Status_attention
-                , Say.resolve lang (Say.make ~ko:"쿼터 휴식" ~en:"Quota rest")
-                  ^ eta
-                , "" )
+              Some (glyph, tone, cause_lbl ^ eta, "")
           | Some _ | None ->
               if
                 st.rate_limited
@@ -477,7 +654,7 @@ let is_probe_effectively_failed ~now_unix ~rt ~runtimes_tbl ~usage_windows
     | None -> false
 
 let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
+    ~bp ~lang ~now_unix ~tz_offset_sec ~(rt : Runtime_store.t)
     (part : Runtime_store.partitioned_accounts) =
   let buckets = compute_quota_health_buckets part in
   let exhausted_n = buckets.exhausted in
@@ -486,12 +663,13 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
   let healthy_n = buckets.healthy in
   let unreported_n = buckets.unreported in
   let active_probes, _ = Runtime_store.active_and_outside_probes rt in
+  let runtimes = Runtime_store.runtime_options rt in
   let runtimes_tbl : (string, Wire_runtime.runtime_option) Hashtbl.t =
     Hashtbl.create 32
   in
   List.iter
     (fun (r : Wire_runtime.runtime_option) -> Hashtbl.replace runtimes_tbl r.id r)
-    (Runtime_store.runtime_options rt);
+    runtimes;
   let usage_windows = Observed.to_option rt.usage_windows in
   let active_ok =
     List.fold_left
@@ -513,6 +691,16 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
       active_probes
   in
   let degraded_standings = Runtime_store.degraded_standings ~now_unix rt in
+  let paused_runtimes_n, quota_rest_groups, other_degraded_standings =
+    group_active_quota_rest_standings ~now_unix ~runtimes ~runtimes_tbl
+      degraded_standings
+  in
+  let has_payment_refused =
+    List.exists
+      (fun (g : quota_rest_provider_group) ->
+        String.equal (String.trim g.primary_cause) "payment_refused")
+      quota_rest_groups
+  in
   let any_failed =
     Observed.is_failed rt.runtime_resolved
     || Observed.is_failed rt.runtime_probe
@@ -546,8 +734,16 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
       + List.length degraded_standings
     in
     if alerts > 0 then
+      let tone =
+        if has_payment_refused then Theme.Status_critical
+        else Theme.Status_attention
+      in
+      let glyph =
+        if has_payment_refused then Glyph.Live_failing
+        else Glyph.Action_required
+      in
       Some
-        (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
+        (H.make_badge ~glyph ~tone
            (Say.resolve lang
               (Say.make
                  ~ko:(Printf.sprintf "%d 경고" alerts)
@@ -579,8 +775,8 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge
          (Say.resolve lang
-            (Say.make ~ko:"쿨다운 · 프로바이더 헬스 & 24h 요약"
-               ~en:"Cooldowns · Provider Health & 24h")))
+            (Say.make ~ko:"일시 중지 · 프로바이더 헬스 & 24h 요약"
+               ~en:"Paused · Provider Health & 24h")))
   in
   let content = H.pad_content ~bp inner in
   if Rect.is_empty content then ()
@@ -603,7 +799,7 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
                     ( Say.make ~ko:"정상" ~en:"OK"
                     , float_of_int healthy_n
                     , Theme.Status_ok );
-                    ( Say.make ~ko:"쿨다운" ~en:"Cool"
+                    ( Say.make ~ko:"일시 중지" ~en:"Paused"
                     , float_of_int cooldown_only_n
                     , Theme.Status_attention );
                     ( Say.make ~ko:"소진" ~en:"Full"
@@ -623,13 +819,25 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
            ~show_title:false spec);
       y := !y + 2
     end;
-    (* 2. Active Cooldowns & Exhausted Alerts *)
+    (* 2. Paused Runtimes & Exhausted Alerts *)
     if !y < bottom then begin
-      H.draw_divider ~grid ~rect:content ~y:!y ~theme
-        ~label:
-          (Say.resolve lang
-             (Say.make ~ko:"활성 쿨다운 · 한도 경고" ~en:"Cooldowns & Alerts"))
-        ();
+      let total_runtimes_n = List.length runtimes in
+      let alerts_label =
+        if paused_runtimes_n > 0 && total_runtimes_n > 0 then
+          let avail_n = Int.max 0 (total_runtimes_n - paused_runtimes_n) in
+          Say.resolve lang
+            (Say.make
+               ~ko:
+                 (Printf.sprintf "일시 중지 · 한도 경고 (%d/%d · 가용 %d)"
+                    paused_runtimes_n total_runtimes_n avail_n)
+               ~en:
+                 (Printf.sprintf "Paused & Alerts (%d/%d · %d avail)"
+                    paused_runtimes_n total_runtimes_n avail_n))
+        else
+          Say.resolve lang
+            (Say.make ~ko:"일시 중지 · 한도 경고" ~en:"Paused & Alerts")
+      in
+      H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:alerts_label ();
       incr y
     end;
     if cooldown_accts = [] && active_bad = [] && degraded_standings = [] then begin
@@ -663,8 +871,8 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
             ( Theme.Status_ok
             , Glyph.Live_healthy
             , Say.resolve lang
-                (Say.make ~ko:"활성 쿨다운 없음 · 보고된 모든 계정 정상"
-                   ~en:"No active cooldowns · all reported accounts healthy") )
+                (Say.make ~ko:"일시 중지 없음 · 보고된 모든 계정 정상"
+                   ~en:"No paused runtimes · all reported accounts healthy") )
         in
         ignore
           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
@@ -674,12 +882,22 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
       end
     end
     else begin
-      let max_alerts = Int.max 1 (Int.min 4 (bottom - !y - 4)) in
+      let total_alert_rows =
+        List.length other_degraded_standings
+        + List.length quota_rest_groups
+        + List.length cooldown_accts
+        + List.length active_http_bad
+      in
+      let alert_budget = Int.max 1 (Int.min 6 (bottom - !y - 5)) in
+      let has_overflow = total_alert_rows > alert_budget in
+      let max_alerts =
+        if has_overflow && alert_budget >= 2 then alert_budget - 1
+        else alert_budget
+      in
       let shown = ref 0 in
       List.iter
         (fun (rid, (st : Wire_runtime.runtime_standing)) ->
           if !y < bottom && !shown < max_alerts then begin
-            let runtimes = Runtime_store.runtime_options rt in
             let lbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
             let glyph, tone, detail =
               match st.credential_refused_at_unix with
@@ -687,47 +905,30 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
                   ( Glyph.Live_failing
                   , Theme.Status_critical
                   , Say.resolve lang (Say.make ~ko:"인증 거부" ~en:"Cred refused") )
-              | None -> (
-                  match st.quota_rest_cause with
-                  | Some cause
-                    when match st.quota_rest_until_unix with
-                         | None -> true
-                         | Some u -> u > now_unix ->
-                      let eta =
-                        match st.quota_rest_until_unix with
-                        | Some ts -> " " ^ H.format_countdown ~now_unix ts
-                        | None -> ""
-                      in
-                      ( Glyph.Live_paused
-                      , Theme.Status_attention
-                      , Printf.sprintf "%s (%s)%s"
-                          (Say.resolve lang
-                             (Say.make ~ko:"쿼터 휴식" ~en:"Quota rest"))
-                          cause eta )
-                  | Some _ | None ->
-                      if
-                        st.rate_limited
-                        && match st.rate_limit_resets_at_unix with
-                           | None -> true
-                           | Some u -> u > now_unix
-                      then
-                        let eta =
-                          match st.rate_limit_resets_at_unix with
-                          | Some ts -> " " ^ H.format_countdown ~now_unix ts
-                          | None -> ""
-                        in
+              | None ->
+                  if
+                    st.rate_limited
+                    && match st.rate_limit_resets_at_unix with
+                       | None -> true
+                       | Some u -> u > now_unix
+                  then
+                    let eta =
+                      match st.rate_limit_resets_at_unix with
+                      | Some ts -> " " ^ H.format_countdown ~now_unix ts
+                      | None -> ""
+                    in
+                    ( Glyph.Live_paused
+                    , Theme.Status_attention
+                    , Printf.sprintf "HTTP 429%s" eta )
+                  else
+                    match st.failed_attempt_failure with
+                    | Some f ->
+                        (Glyph.Warning_triangle, Theme.Status_attention, f)
+                    | None ->
                         ( Glyph.Live_paused
                         , Theme.Status_attention
-                        , Printf.sprintf "HTTP 429%s" eta )
-                      else
-                        match st.failed_attempt_failure with
-                        | Some f ->
-                            (Glyph.Warning_triangle, Theme.Status_attention, f)
-                        | None ->
-                            ( Glyph.Live_paused
-                            , Theme.Status_attention
-                            , Say.resolve lang
-                                (Say.make ~ko:"런타임 저하" ~en:"Degraded") ))
+                        , Say.resolve lang
+                            (Say.make ~ko:"런타임 저하" ~en:"Degraded") )
             in
             Card.draw_left_rail ~bg ~tone grid ~x:content.x ~y:!y ~h:1 ~theme;
             ignore
@@ -740,7 +941,98 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
             incr y;
             incr shown
           end)
-        degraded_standings;
+        other_degraded_standings;
+      let group_label_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (grp : quota_rest_provider_group) ->
+          let base =
+            Wire_runtime.human_provider_id_label ~runtimes grp.provider_id
+          in
+          let n =
+            match Hashtbl.find_opt group_label_counts base with
+            | Some k -> k
+            | None -> 0
+          in
+          Hashtbl.replace group_label_counts base (n + 1))
+        quota_rest_groups;
+      List.iter
+        (fun (grp : quota_rest_provider_group) ->
+          if !y < bottom && !shown < max_alerts then begin
+            let base_lbl =
+              Wire_runtime.human_provider_id_label ~runtimes grp.provider_id
+            in
+            let disambig_suffix =
+              match Hashtbl.find_opt group_label_counts base_lbl with
+              | Some n when n > 1 ->
+                  let suffix = provider_disambiguator grp.provider_id in
+                  if String.equal suffix "" then "" else " #" ^ suffix
+              | Some _ | None -> ""
+            in
+            let prov_lbl = base_lbl ^ disambig_suffix in
+            let glyph, tone, cause_lbl =
+              quota_rest_cause_presentation ~lang grp.primary_cause
+            in
+            let eta_s =
+              match grp.soonest_until with
+              | Some ts ->
+                  let dur =
+                    match format_cooldown_duration ~now_unix ts with
+                    | Some d -> d
+                    | None -> H.format_countdown ~now_unix ts
+                  in
+                  let est_prefix =
+                    if grp.soonest_reset_stated then "" else "~"
+                  in
+                  let clock =
+                    match format_local_release_clock ~tz_offset_sec ~now_unix ts with
+                    | Some c -> Printf.sprintf " (%s)" c
+                    | None -> ""
+                  in
+                  Printf.sprintf " · %s%s%s" est_prefix dur clock
+              | None -> ""
+            in
+            let text_x = content.x + 2 in
+            let text_w = Int.max 0 (content.w - 2) in
+            let glyph_s = Glyph.to_utf8 glyph ^ " " in
+            let ratio_s =
+              Printf.sprintf " (%d/%d)" grp.paused_count grp.total_count
+            in
+            let right_detail = Printf.sprintf "%s%s" cause_lbl eta_s in
+            let full_row =
+              Printf.sprintf "%s%s%s · %s" glyph_s prov_lbl ratio_s right_detail
+            in
+            let row_text =
+              if Grapheme.display_width full_row <= text_w then full_row
+              else
+                let fixed_w =
+                  Grapheme.display_width glyph_s
+                  + Grapheme.display_width ratio_s
+                  + 3
+                  + Grapheme.display_width right_detail
+                in
+                let max_prov_w = text_w - fixed_w in
+                if max_prov_w >= 6 then
+                  let fitted_prov =
+                    let suf_w = Grapheme.display_width disambig_suffix in
+                    if suf_w > 0 && max_prov_w >= suf_w + 4 then
+                      Grapheme.truncate_to_width ~max_width:(max_prov_w - suf_w)
+                        base_lbl
+                      ^ disambig_suffix
+                    else
+                      Grapheme.truncate_to_width ~max_width:max_prov_w prov_lbl
+                  in
+                  Printf.sprintf "%s%s%s · %s" glyph_s fitted_prov ratio_s
+                    right_detail
+                else full_row
+            in
+            Card.draw_left_rail ~bg ~tone grid ~x:content.x ~y:!y ~h:1 ~theme;
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:text_x ~y:!y
+                 ~max_w:text_w ~style:(H.status_style ~theme tone) row_text);
+            incr y;
+            incr shown
+          end)
+        quota_rest_groups;
       List.iter
         (fun (a : Wire_runtime.account_usage) ->
           if !y < bottom && !shown < max_alerts then begin
@@ -793,7 +1085,6 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
       List.iter
         (fun (p : Wire_runtime.provider_probe_row) ->
           if !y < bottom && !shown < max_alerts then begin
-            let runtimes = Runtime_store.runtime_options rt in
             let lbl = Wire_runtime.human_runtime_slot_label ~runtimes p.runtime_id in
             let reason =
               match p.http_status, p.error with
@@ -814,7 +1105,21 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
             incr y;
             incr shown
           end)
-        active_http_bad
+        active_http_bad;
+      let hidden_alerts = Int.max 0 (total_alert_rows - !shown) in
+      if hidden_alerts > 0 && !y < bottom - 4 then begin
+        let more_txt =
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "+%d개 더" hidden_alerts)
+               ~en:(Printf.sprintf "+%d more" hidden_alerts))
+        in
+        ignore
+          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+             ~max_w:(Int.max 0 (content.w - 2))
+             ~style:(H.whisper_style ~theme ()) more_txt);
+        incr y
+      end
     end;
     (* 3. Failover Lane Reachability & 24h Telemetry Summary *)
     if !y < bottom then begin
@@ -1457,7 +1762,7 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
            {
              H.label =
                Printf.sprintf "%d %s" buckets.cooldown
-                 (Say.resolve lang (Say.make ~ko:"쿨다운" ~en:"Cooldown"));
+                 (Say.resolve lang (Say.make ~ko:"일시 중지" ~en:"Paused"));
              active = buckets.exhausted = 0;
              tone = Some Theme.Status_attention;
              glyph = Some Glyph.Action_required;
@@ -1519,7 +1824,7 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~now_unix ~rt sub_rows rt.usage_windows ~focused:(Model.pane_focused model 0);
   if not (Rect.is_empty health_rect) then
     draw_cooldown_health_summary ~grid ~cache ~rect:health_rect ~theme ~bp ~lang
-      ~now_unix ~rt part;
+      ~now_unix ~tz_offset_sec:model.tz_offset_sec ~rt part;
   draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~now_unix
     ~rt part rt.usage_windows ~focused:(Model.pane_focused model 1)
 

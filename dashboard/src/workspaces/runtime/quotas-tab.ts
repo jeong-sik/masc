@@ -29,6 +29,14 @@ import {
 } from '../../core'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives'
 import {
+  formatReleaseSummary,
+  groupRestingRuntimes,
+  quotaRestCauseMeta,
+  stripProviderPrefix,
+  type QuotaRestCauseFilter,
+  type QuotaRestSortKey,
+} from './quota-rest-groups'
+import {
   classifyQuotaScope,
   formatResetCountdown,
   formatUnixTime,
@@ -42,6 +50,7 @@ import {
   type ProviderUsageHistoryPoint,
   type ProviderUsageHistoryResponse,
   type ProviderUsageScope,
+  type RuntimeQuotaRest,
   type RuntimeResolvedPayload,
   type SetupAccountEmail,
   type SetupIntegration,
@@ -51,8 +60,8 @@ import {
 
 const HISTORY_SERIES: readonly UPlotSeriesSpec[] = [
   { label: '평균 사용률 (%)', colorToken: '--info-fg', width: 2, fillAlpha: 0.14, unit: '%' },
-  { label: '최대 피크 / 429 근접 (%)', colorToken: '--warn-fg', width: 1.75, unit: '%' },
-  { label: '429 / 소진 쿨다운 수', colorToken: '--err-fg', width: 1.75, dash: [4, 3] },
+  { label: '최대 피크 사용률 (%)', colorToken: '--warn-fg', width: 1.75, unit: '%' },
+  { label: '일시 중지·소진 수', colorToken: '--err-fg', width: 1.75, dash: [4, 3] },
 ]
 
 export function buildUsageHistoryChartData(
@@ -161,6 +170,18 @@ function costBadgeStyle(kind: ReturnType<typeof classifyQuotaScope>['kind']) {
   }
 }
 
+function causeBadgeStyle(tone: 'warn' | 'bad') {
+  return tone === 'bad'
+    ? { background: 'var(--err-soft)', border: '1px solid var(--err-border)', color: 'var(--err-fg)' }
+    : { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
+}
+
+const KNOWN_CAUSE_FILTERS: readonly RuntimeQuotaRest['cause'][] = [
+  'payment_refused',
+  'provider_quota_refused',
+  'usage_read',
+]
+
 export function QuotasTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
   const providerDays = timeWindowProviderDays(win)
@@ -174,6 +195,10 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
   const [tier3Expanded, setTier3Expanded] = useState(false)
+  const [pausedPanelOpen, setPausedPanelOpen] = useState(true)
+  const [pausedSortBy, setPausedSortBy] = useState<QuotaRestSortKey>('release')
+  const [pausedCauseFilter, setPausedCauseFilter] = useState<QuotaRestCauseFilter>('all')
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
   const [credForm, setCredForm] = useState<CredentialFormState | null>(null)
   const [verifyModelInput, setVerifyModelInput] = useState<string>('')
   const [loginReceipt, setLoginReceipt] = useState<LoginReceiptState | null>(null)
@@ -241,15 +266,31 @@ export function QuotasTab(props: WorkspaceViewProps) {
     [resolvedData, restingProviders],
   )
 
-  const restingRuntimes = useMemo(
-    () => (resolvedData?.runtimes ?? []).filter((r) => r.quota_rest !== null),
-    [resolvedData],
+  const accountEmails = useMemo(
+    () => new Map<string, SetupAccountEmail>(
+      inventoryObs.kind === 'value' && 'account_emails' in inventoryObs.data && Array.isArray(inventoryObs.data.account_emails)
+        ? inventoryObs.data.account_emails.map((row) => [row.integration_id, row] as const)
+        : [],
+    ),
+    [inventoryObs],
   )
 
-  const accountEmails = new Map<string, SetupAccountEmail>(
-    inventoryObs.kind === 'value' && 'account_emails' in inventoryObs.data && Array.isArray(inventoryObs.data.account_emails)
-      ? inventoryObs.data.account_emails.map((row) => [row.integration_id, row] as const)
-      : [],
+  const integrations: readonly SetupIntegration[] = useMemo(
+    () => (inventoryObs.kind === 'value' && 'integrations' in inventoryObs.data && Array.isArray(inventoryObs.data.integrations)
+      ? inventoryObs.data.integrations
+      : []),
+    [inventoryObs],
+  )
+
+  const multiAccounts: readonly MultiAccountProviderAccount[] = useMemo(
+    () => (inventoryObs.kind === 'value'
+      ? ('provider_accounts' in inventoryObs.data && Array.isArray(inventoryObs.data.provider_accounts)
+          ? inventoryObs.data.provider_accounts
+          : 'accounts' in inventoryObs.data && Array.isArray(inventoryObs.data.accounts)
+            ? inventoryObs.data.accounts
+            : [])
+      : []),
+    [inventoryObs],
   )
 
   const historyState = useMemo(():
@@ -273,10 +314,75 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
   }, [historyObs])
 
-  const personIntegrations: readonly MultiAccountIntegration[] =
-    personIntegObs.kind === 'value' && Array.isArray(personIntegObs.data.integrations)
+  const personIntegrations: readonly MultiAccountIntegration[] = useMemo(
+    () => (personIntegObs.kind === 'value' && Array.isArray(personIntegObs.data.integrations)
       ? personIntegObs.data.integrations
-      : []
+      : []),
+    [personIntegObs],
+  )
+
+  const providerDisplayNames = useMemo(() => {
+    const names = new Map<string, string>()
+    for (const acc of multiAccounts) {
+      const pid = acc.integration_id ?? acc.provider
+      const label = acc.display_name ?? acc.label
+      if (pid && label && !names.has(pid)) names.set(pid, label)
+    }
+    for (const integ of personIntegrations) {
+      if (integ.integration_id && integ.display_name) {
+        names.set(integ.integration_id, integ.display_name)
+      }
+    }
+    for (const integ of integrations) {
+      if (integ.id && integ.display_name) {
+        names.set(integ.id, integ.display_name)
+      }
+    }
+    for (const scope of resolvedData?.provider_usage_windows ?? []) {
+      for (const p of scope.providers) {
+        if (p.id && p.display_name) {
+          names.set(p.id, p.display_name)
+        }
+      }
+    }
+    return names
+  }, [resolvedData, integrations, personIntegrations, multiAccounts])
+
+  const basePausedGrouped = useMemo(
+    () => groupRestingRuntimes(resolvedData?.runtimes ?? [], {
+      providerDisplayNames,
+      accountEmails,
+      sortBy: pausedSortBy,
+      causeFilter: 'all',
+    }),
+    [resolvedData, providerDisplayNames, accountEmails, pausedSortBy],
+  )
+
+  const effectiveCauseFilter: QuotaRestCauseFilter =
+    pausedCauseFilter !== 'all' && (basePausedGrouped.summary.causeCounts[pausedCauseFilter] ?? 0) > 0
+      ? pausedCauseFilter
+      : 'all'
+
+  const pausedGrouped = useMemo(
+    () => (effectiveCauseFilter === 'all'
+      ? basePausedGrouped
+      : groupRestingRuntimes(resolvedData?.runtimes ?? [], {
+          providerDisplayNames,
+          accountEmails,
+          sortBy: pausedSortBy,
+          causeFilter: effectiveCauseFilter,
+        })),
+    [basePausedGrouped, effectiveCauseFilter, resolvedData, providerDisplayNames, accountEmails, pausedSortBy],
+  )
+
+  const togglePausedGroup = (provider: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(provider)) next.delete(provider)
+      else next.add(provider)
+      return next
+    })
+  }
 
   const resolveModelForIntegration = (integrationId: string): string => {
     const manual = verifyModelInput.trim()
@@ -674,28 +780,26 @@ export function QuotasTab(props: WorkspaceViewProps) {
     `
   }
 
-  const integrations: readonly SetupIntegration[] =
-    inventoryObs.kind === 'value' && 'integrations' in inventoryObs.data && Array.isArray(inventoryObs.data.integrations)
-      ? inventoryObs.data.integrations
-      : []
-
-  const multiAccounts: readonly MultiAccountProviderAccount[] =
-    inventoryObs.kind === 'value'
-      ? ('provider_accounts' in inventoryObs.data && Array.isArray(inventoryObs.data.provider_accounts)
-          ? inventoryObs.data.provider_accounts
-          : 'accounts' in inventoryObs.data && Array.isArray(inventoryObs.data.accounts)
-            ? inventoryObs.data.accounts
-            : [])
-      : []
-
   const totalScopes = (resolvedData?.provider_usage_windows ?? []).length
+  const pausedSummary = pausedGrouped.summary
+  const pausedGroups = pausedGrouped.groups
+  const presentCauses = KNOWN_CAUSE_FILTERS.filter((c) => (pausedSummary.causeCounts[c] ?? 0) > 0)
+  const allVisibleExpanded = pausedGroups.length > 0 && pausedGroups.every((g) => expandedGroups.has(g.provider))
+  const globalSoonestRelease = pausedSummary.soonestUntil !== null
+    ? formatReleaseSummary(pausedSummary.soonestUntil, pausedSummary.soonestResetStated)
+    : null
+  const pausedKpiTone = pausedSummary.hasPaymentRefused
+    ? 'bad'
+    : pausedSummary.restingCount > 0
+      ? 'warn'
+      : 'ok'
 
   return html`
     <div class="ov" data-testid="runtime-quotas-tab">
       <header class="ov-head">
         <div>
           <span class="ov-eyebrow">5 RUNTIME · QUOTAS & RATE LIMITS</span>
-          <h1>제공자 할당량 · 429 쿨다운 · 자격 증명</h1>
+          <h1>제공자 할당량 · 일시 중지 · 자격 증명</h1>
           <p class="ov-sub">
             $0 Sub / $0 Exhausted / ? Unreported 정직 분류 · 조회 창 ${win} (Provider History ${providerDays}d)
           </p>
@@ -745,22 +849,352 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <div class="ov-kpi-k">Tier 3 미보고 (? Unreported)</div>
           <div class="ov-kpi-v">${partitioned.tier3Unreported.length}</div>
         </div>
-        <div class="ov-kpi">
-          <div class="ov-kpi-k">429 쿨다운 중 런타임</div>
-          <div class=${`ov-kpi-v ${restingRuntimes.length > 0 ? 'warn' : ''}`}>${restingRuntimes.length}</div>
+        <div class="ov-kpi" data-testid="kpi-paused-runtimes">
+          <div class="ov-kpi-k">일시 중지 런타임</div>
+          <div class=${`ov-kpi-v ${pausedKpiTone}`}>
+            ${pausedSummary.totalRegistered > 0
+              ? `${pausedSummary.restingCount} / ${pausedSummary.totalRegistered}`
+              : String(pausedSummary.restingCount)}
+          </div>
+          ${pausedSummary.totalRegistered > 0 && html`
+            <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', marginTop: 'var(--sp-0)' }}>
+              전체 ${pausedSummary.totalRegistered} · 가용 ${pausedSummary.availableCount}
+            </div>
+          `}
         </div>
       </section>
 
-      ${restingRuntimes.length > 0 && html`
-        <section class="ap-error sev-warn" aria-label="429 쿨다운 런타임">
-          <strong>쿨다운(Quota Rest) 활성 런타임 (${restingRuntimes.length}):</strong>
-          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
-            ${restingRuntimes.map((rt) => html`
-              <span key=${rt.id} class="mono tnum" style=${{ fontSize: 'var(--fs-12)', padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--warn-border)' }}>
-                ${rt.id} (${rt.quota_rest?.cause}) · 해제 ${formatResetCountdown(rt.quota_rest?.until)}
+      ${pausedSummary.restingCount > 0 && html`
+        <section
+          class="wka-card"
+          data-testid="paused-runtimes-panel"
+          aria-label="일시 중지 런타임"
+          style=${{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--sp-2)',
+            borderColor: pausedSummary.hasPaymentRefused ? 'var(--err-border)' : 'var(--warn-border)',
+            background: pausedSummary.hasPaymentRefused ? 'var(--err-soft)' : 'var(--warn-soft)',
+          }}
+        >
+          <button
+            type="button"
+            data-testid="paused-panel-toggle"
+            aria-expanded=${pausedPanelOpen}
+            onClick=${() => setPausedPanelOpen((v) => !v)}
+            style=${{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-2)',
+              flexWrap: 'wrap',
+              width: '100%',
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--fg-1)',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-13)', fontWeight: 600 }}>
+              <span aria-hidden="true">${pausedPanelOpen ? '▾' : '▸'}</span>
+              ${pausedPanelOpen
+                ? html`
+                    <span>일시 중지 런타임 (${pausedSummary.restingCount}/${pausedSummary.totalRegistered})</span>
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 500, color: 'var(--fg-2)' }}>
+                      ${pausedSummary.groupCount}개 계정 · 가용 ${pausedSummary.availableCount}
+                    </span>
+                  `
+                : html`
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-12)' }}>
+                      일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease
+                        ? ` · 가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}`
+                        : ''}
+                    </span>
+                  `}
+            </span>
+            ${pausedPanelOpen && globalSoonestRelease && html`
+              <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: globalSoonestRelease.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
+                가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}
               </span>
-            `)}
-          </div>
+            `}
+          </button>
+
+          ${pausedPanelOpen && html`
+            <p style=${{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+              할당량 소진·결제 거절로 자동 우회 중인 런타임입니다. 해제 시각이 지나면 자동으로 다시 호출됩니다.
+            </p>
+
+            <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <div class="ap-viewseg" role="group" aria-label="정렬 기준">
+                  <button
+                    type="button"
+                    data-testid="paused-sort-release"
+                    class=${`ap-viewbtn ${pausedSortBy === 'release' ? 'on' : ''}`}
+                    aria-pressed=${pausedSortBy === 'release'}
+                    onClick=${() => setPausedSortBy('release')}
+                  >
+                    해제 임박순
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="paused-sort-count"
+                    class=${`ap-viewbtn ${pausedSortBy === 'count' ? 'on' : ''}`}
+                    aria-pressed=${pausedSortBy === 'count'}
+                    onClick=${() => setPausedSortBy('count')}
+                  >
+                    런타임 많은순
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="paused-sort-name"
+                    class=${`ap-viewbtn ${pausedSortBy === 'name' ? 'on' : ''}`}
+                    aria-pressed=${pausedSortBy === 'name'}
+                    onClick=${() => setPausedSortBy('name')}
+                  >
+                    이름순
+                  </button>
+                </div>
+
+                ${presentCauses.length >= 2 && html`
+                  <div role="group" aria-label="일시 중지 사유 필터" style=${{ display: 'inline-flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      data-testid="paused-filter-all"
+                      class="btn-ghost"
+                      aria-pressed=${effectiveCauseFilter === 'all'}
+                      onClick=${() => setPausedCauseFilter('all')}
+                      style=${{
+                        padding: 'var(--sp-0) var(--sp-2)',
+                        fontSize: 'var(--fs-11)',
+                        ...(effectiveCauseFilter === 'all'
+                          ? { background: 'var(--bg-4)', borderColor: 'var(--line-2)', color: 'var(--fg-1)', fontWeight: 600 }
+                          : {}),
+                      }}
+                    >
+                      전체 (${pausedSummary.restingCount})
+                    </button>
+                    ${presentCauses.map((cause) => {
+                      const meta = quotaRestCauseMeta(cause)
+                      const count = pausedSummary.causeCounts[cause] ?? 0
+                      const active = effectiveCauseFilter === cause
+                      return html`
+                        <button
+                          key=${cause}
+                          type="button"
+                          data-testid=${`paused-filter-${cause}`}
+                          class="btn-ghost"
+                          aria-pressed=${active}
+                          onClick=${() => setPausedCauseFilter(cause)}
+                          style=${{
+                            padding: 'var(--sp-0) var(--sp-2)',
+                            fontSize: 'var(--fs-11)',
+                            ...(active ? { ...causeBadgeStyle(meta.tone), fontWeight: 600 } : {}),
+                          }}
+                        >
+                          ${meta.shortLabel} (${count})
+                        </button>
+                      `
+                    })}
+                  </div>
+                `}
+              </div>
+
+              <button
+                type="button"
+                class="btn-ghost"
+                data-testid="paused-expand-all-toggle"
+                style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+                onClick=${() => {
+                  if (allVisibleExpanded) {
+                    setExpandedGroups(new Set())
+                  } else {
+                    setExpandedGroups(new Set(pausedGroups.map((g) => g.provider)))
+                  }
+                }}
+              >
+                ${allVisibleExpanded ? '모두 접기' : '모두 펼치기'}
+              </button>
+            </div>
+
+            <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+              ${pausedGroups.map((group) => {
+                const isOpen = expandedGroups.has(group.provider)
+                const rel = formatReleaseSummary(group.soonestUntil, group.soonestResetStated)
+                const hasPayment = group.causes.includes('payment_refused')
+                const showEstimated = rel.isEstimated
+                return html`
+                  <div
+                    key=${group.provider}
+                    data-testid=${`paused-group-${group.provider}`}
+                    style=${{
+                      border: `1px solid ${hasPayment ? 'var(--err-border)' : 'var(--line-1)'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-1)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded=${isOpen}
+                      onClick=${() => togglePausedGroup(group.provider)}
+                      style=${{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 'var(--sp-2)',
+                        flexWrap: 'wrap',
+                        width: '100%',
+                        padding: 'var(--sp-2) var(--sp-3)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--fg-1)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
+                        <span aria-hidden="true" style=${{ color: 'var(--fg-3)' }}>${isOpen ? '▾' : '▸'}</span>
+                        <span style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${group.displayName}</span>
+                        ${group.displayName !== group.provider && html`
+                          <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${group.provider}</span>
+                        `}
+                        ${group.accountLineText && html`
+                          <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${group.accountLineText}</span>
+                        `}
+                        ${group.causes.map((cause) => {
+                          const meta = quotaRestCauseMeta(cause)
+                          return html`
+                            <span
+                              key=${cause}
+                              style=${{
+                                ...causeBadgeStyle(meta.tone),
+                                padding: '1px var(--sp-2)',
+                                borderRadius: 'var(--radius-pill)',
+                                fontSize: 'var(--fs-11)',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              ${meta.label}
+                            </span>
+                          `
+                        })}
+                      </span>
+
+                      <span class="mono tnum" style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-12)' }}>
+                        <span style=${{ color: 'var(--fg-2)', fontWeight: 600 }}>
+                          ${group.restingCount}/${group.totalInProvider} 중지
+                        </span>
+                        <span style=${{ color: rel.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
+                          ${rel.isSoon ? `곧 해제 · ${rel.countdown}` : rel.countdown}${rel.localTime ? ` (${rel.localTime})` : ''}
+                        </span>
+                        ${showEstimated && html`
+                          <span
+                            title="제공자가 정확한 리셋 시각을 명시하지 않아 서버 재시도 예정 시각을 표시합니다."
+                            style=${{
+                              padding: '1px var(--sp-1)',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--line-2)',
+                              background: 'var(--bg-2)',
+                              color: 'var(--fg-3)',
+                              fontSize: 'var(--fs-11)',
+                            }}
+                          >
+                            예상
+                          </span>
+                        `}
+                      </span>
+                    </button>
+
+                    ${isOpen && html`
+                      <div
+                        data-testid=${`paused-group-body-${group.provider}`}
+                        style=${{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--sp-1)',
+                          padding: 'var(--sp-2) var(--sp-3)',
+                          borderTop: '1px solid var(--line-1)',
+                          background: 'var(--bg-2)',
+                        }}
+                      >
+                        ${group.runtimes.map((rt) => {
+                          const rMeta = quotaRestCauseMeta(rt.quota_rest.cause)
+                          const rRel = formatReleaseSummary(rt.quota_rest.until, rt.quota_rest.reset_stated)
+                          const shortId = stripProviderPrefix(rt.id, group.provider)
+                          return html`
+                            <div
+                              key=${rt.id}
+                              style=${{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 'var(--sp-2)',
+                                flexWrap: 'wrap',
+                                padding: 'var(--sp-1) var(--sp-2)',
+                                borderRadius: 'var(--radius-sm)',
+                                background: 'var(--bg-1)',
+                                border: '1px solid var(--line-1)',
+                              }}
+                            >
+                              <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
+                                <span style=${{ fontWeight: 600, fontSize: 'var(--fs-12)' }}>${rt.model || shortId}</span>
+                                <span class="mono" title=${rt.id} style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                  ${shortId}
+                                </span>
+                                ${rt.is_default && html`
+                                  <span style=${{ padding: '1px var(--sp-1)', borderRadius: 'var(--radius-pill)', background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)', fontSize: 'var(--fs-11)', fontWeight: 600 }}>
+                                    기본
+                                  </span>
+                                `}
+                              </span>
+                              <span class="mono tnum" style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-11)' }}>
+                                <span style=${{ ...causeBadgeStyle(rMeta.tone), padding: '1px var(--sp-2)', borderRadius: 'var(--radius-pill)', fontWeight: 600 }}>
+                                  ${rMeta.shortLabel}
+                                </span>
+                                <span style=${{ color: rRel.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
+                                  ${rRel.countdown}${rRel.localTime ? ` (${rRel.localTime})` : ''}
+                                </span>
+                                ${rRel.isEstimated && html`
+                                  <span style=${{ padding: '1px var(--sp-1)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--fg-3)' }}>
+                                    예상
+                                  </span>
+                                `}
+                              </span>
+                            </div>
+                          `
+                        })}
+
+                        <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', paddingTop: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            class="btn-ghost"
+                            style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+                            onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(group.provider)}`)}
+                          >
+                            설정 열기
+                          </button>
+                          ${hasPayment && html`
+                            <button
+                              type="button"
+                              class="btn-primary"
+                              style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+                              onClick=${() => setCredForm({ providerId: group.provider, secret: '', mode: 'api_key' })}
+                            >
+                              API 키 등록
+                            </button>
+                          `}
+                        </div>
+                      </div>
+                    `}
+                  </div>
+                `
+              })}
+            </div>
+          `}
         </section>
       `}
 
@@ -790,7 +1224,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         ${historyState.kind === 'ready' && html`
           <${UPlotChart}
             id="runtime-quotas-history"
-            title=${`제공자 사용량 이력 & 429 쿨다운 추이 (${historyState.days}일 · ${historyState.pointsCount}포인트)`}
+            title=${`제공자 사용량 이력 & 일시 중지 추이 (${historyState.days}일 · ${historyState.pointsCount}포인트)`}
             subtitle=${historyState.unreadable > 0
               ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>판독 불가 보고서 ${historyState.unreadable}건</span>`
               : html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>days=${providerDays}</span>`}

@@ -9,6 +9,7 @@
  */
 
 import { html } from 'htm/preact'
+import { isEditableTarget } from '../lib/keyboard'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { activeWorkspaceId, isAuthenticated, sessionEpoch } from '../core/auth'
@@ -29,12 +30,6 @@ import {
   toggleQueueContextOverlay,
   uncheckedHitlStatusLabel,
 } from './shell-state'
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
-}
 
 export function FastApprovalStrip(): VNode | null {
   const approvals = pendingApprovals.value

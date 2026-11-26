@@ -13,6 +13,7 @@ import { ok, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
 import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
+import { decodeKeeperLaneFailures, decodeKeeperPathRest } from '../../api/keeper-diagnostics'
 import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
 import type {
@@ -116,69 +117,12 @@ function decodeTurnSlots(raw: unknown): { known_since: number; slots: PulseTurnS
   return { known_since: knownSince, slots }
 }
 
-function formatPulseUnixOrIso(v: unknown): string | null {
-  const s = asStr(v)
-  if (s) return s
-  const n = asNum(v)
-  if (n === null) return null
-  const ms = n < 1_000_000_000_000 ? n * 1000 : n
-  const d = new Date(ms)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
-}
-
 function decodePulsePathRest(raw: unknown): PulseKeeperPathRest | null {
-  if (!isRecord(raw)) return null
-  const st = asStr(raw.status)?.toLowerCase()
-  if (st !== 'serving' && st !== 'resting') return null
-  return {
-    status: st,
-    runtime_id: asStr(raw.runtime_id),
-    release_at: formatPulseUnixOrIso(raw.release_at) ?? formatPulseUnixOrIso(raw.release_at_unix),
-    release_basis: asStr(raw.release_basis),
-  }
-}
-
-function decodeSinglePulseLaneFailure(row: unknown): PulseKeeperLaneFailure | null {
-  if (!isRecord(row)) return null
-  const summary = asStr(row.summary)
-    ?? (isRecord(row.failure) && isRecord(row.failure.cause) ? asStr(row.failure.cause.detail) : null)
-    ?? asStr(row.detail)
-  if (!summary) return null
-  const faultKind = isRecord(row.api_candidate_fault)
-    ? asStr(row.api_candidate_fault.fact) ?? asStr(row.api_candidate_fault.kind)
-    : isRecord(row.failure) && isRecord(row.failure.cause)
-      ? asStr(row.failure.cause.kind)
-      : null
-  const failureCause = isRecord(row.failure) && isRecord(row.failure.cause) ? row.failure.cause : null
-  return {
-    runtime_id: asStr(row.runtime_id),
-    summary,
-    fault_kind: faultKind,
-    attempt: typeof row.attempt === 'number' && Number.isFinite(row.attempt) ? Math.trunc(row.attempt) : null,
-    dispatch: asStr(row.dispatch),
-    failure_kind: failureCause ? asStr(failureCause.kind) : null,
-    failure_detail: failureCause ? asStr(failureCause.detail) : null,
-    provider: failureCause ? asStr(failureCause.provider) : null,
-    network_kind: failureCause ? asStr(failureCause.network_kind) : null,
-  }
+  return decodeKeeperPathRest(raw)
 }
 
 function decodePulseLaneFailures(raw: unknown): readonly PulseKeeperLaneFailure[] {
-  if (!isRecord(raw)) return []
-  const evidence = isRecord(raw.evidence) ? raw.evidence : raw
-  const failuresRaw = Array.isArray(evidence.failures) ? evidence.failures : []
-  const out: PulseKeeperLaneFailure[] = []
-  for (const row of failuresRaw) {
-    const parsed = decodeSinglePulseLaneFailure(row)
-    if (parsed) out.push(parsed)
-  }
-  if (isRecord(evidence.terminal) && asStr(evidence.terminal.kind) === 'candidate') {
-    const term = decodeSinglePulseLaneFailure(evidence.terminal)
-    if (term && !out.some((f) => f.runtime_id === term.runtime_id && f.summary === term.summary)) {
-      out.push(term)
-    }
-  }
-  return out
+  return decodeKeeperLaneFailures(raw)
 }
 
 export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {

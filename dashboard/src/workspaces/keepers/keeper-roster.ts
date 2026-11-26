@@ -10,6 +10,7 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import {
   fetchConfigSchemaApi,
+  patchOpForField,
   postConfigPatchApi,
   type ConfigPatchChange,
   type ConfigPatchResult,
@@ -269,19 +270,8 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
     for (const field of editableFields) {
       const raw = draftValues[field.full_key]
       if (raw === undefined || raw.trim() === '') continue
-      let value: unknown = raw.trim()
-      if (field.type === 'bool' || field.type === 'boolean') {
-        value = raw === 'true'
-      } else if (field.type === 'int' || field.type === 'integer') {
-        const n = Number.parseInt(raw, 10)
-        if (!Number.isNaN(n)) value = n
-      } else if (field.type === 'float' || field.type === 'number') {
-        const n = Number.parseFloat(raw)
-        if (Number.isFinite(n)) value = n
-      } else if (field.type.includes('array') || field.type.includes('list')) {
-        value = raw.split(',').map((s) => s.trim()).filter(Boolean)
-      }
-      changes.push({ op: 'set', table: field.table, key: field.key, value })
+      const change = patchOpForField(field, raw.trim(), false, ',')
+      if (change) changes.push(change)
     }
     return changes
   }

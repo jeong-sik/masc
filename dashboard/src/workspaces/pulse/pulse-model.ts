@@ -4,6 +4,7 @@
  */
 
 import type uPlot from 'uplot'
+import { formatMilliCandleObserved, isKeeperHealthFailing } from '../../api/keeper-diagnostics'
 import {
   observedAbsent,
   observedFailed,
@@ -86,19 +87,7 @@ export function formatCompactUsd(usd: number): string {
  * Returns `Observed<string>` so missing data is `"없음"` and `"0"` is `"0.000"`.
  */
 export function formatMilliCandle(raw: string | number | null | undefined): Observed<string> {
-  if (raw === null || raw === undefined) return observedAbsent()
-  const text = typeof raw === 'number'
-    ? (Number.isFinite(raw) ? String(Math.trunc(raw)) : '')
-    : raw.trim()
-  if (!/^-?\d+$/.test(text)) return observedAbsent('invalid_milli')
-
-  const negative = text.startsWith('-')
-  const digits = negative ? text.slice(1) : text
-  const padded = digits.padStart(4, '0')
-  const wholeRaw = padded.slice(0, padded.length - 3)
-  const frac = padded.slice(padded.length - 3)
-  const wholeFormatted = wholeRaw.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return observedValue(`${negative ? '-' : ''}${wholeFormatted}.${frac}`)
+  return formatMilliCandleObserved(raw)
 }
 
 /**
@@ -158,16 +147,7 @@ export function isKeeperActive(keeper: PulseKeeperRow): boolean {
 }
 
 export function isKeeperFailing(keeper: PulseKeeperRow): boolean {
-  if (keeper.directory_issue) return true
-  const h = keeper.health.toLowerCase()
-  const s = keeper.status.toLowerCase()
-  return h === 'failing'
-    || h === 'failed'
-    || h === 'degraded'
-    || h === 'error'
-    || h === 'crashed'
-    || s === 'error'
-    || keeper.runtime_blocker_summary !== null
+  return isKeeperHealthFailing(keeper)
 }
 
 /**

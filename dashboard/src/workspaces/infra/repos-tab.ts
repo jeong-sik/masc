@@ -9,6 +9,7 @@
  */
 
 import { html } from 'htm/preact'
+import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { createTwoFilesPatch } from 'diff'
 import { useEffect, useState } from 'preact/hooks'
 import {
@@ -61,40 +62,7 @@ export function buildUnifiedChangeDiff(change: RepoActivityChange): string {
 }
 
 function renderDiffLines(patchText: string, maxLines = 40) {
-  const allLines = patchText.split('\n')
-  const truncated = allLines.length > maxLines
-  const lines = truncated ? allLines.slice(0, maxLines) : allLines
-
-  return html`
-    <pre
-      class="mono"
-      style=${{
-        margin: 0,
-        padding: 'var(--sp-2)',
-        background: 'var(--bg-0)',
-        border: '1px solid var(--line-1)',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: 'var(--fs-11)',
-        overflowX: 'auto',
-        lineHeight: 1.45,
-      }}
-    >
-      ${lines.map((line, i) => {
-        const isAdd = line.startsWith('+') && !line.startsWith('+++')
-        const isDel = line.startsWith('-') && !line.startsWith('---')
-        const isHunk = line.startsWith('@@')
-        const style = isAdd
-          ? { display: 'block', background: 'var(--ok-soft)', color: 'var(--ok-fg)' }
-          : isDel
-            ? { display: 'block', background: 'var(--err-soft)', color: 'var(--err-fg)' }
-            : isHunk
-              ? { display: 'block', color: 'var(--info-fg)' }
-              : { display: 'block', color: 'var(--fg-2)' }
-        return html`<span key=${i} style=${style}>${line}</span>`
-      })}
-      ${truncated && html`<span style=${{ display: 'block', color: 'var(--fg-3)', marginTop: 'var(--sp-1)' }}>… (${allLines.length - maxLines}줄 생략 · [⤢] 전체 보기 클릭)</span>`}
-    </pre>
-  `
+  return html`<${UnifiedDiffView} diffText=${patchText} maxLines=${maxLines} padding="var(--sp-2)" />`
 }
 
 export function ReposTab(props: WorkspaceViewProps) {

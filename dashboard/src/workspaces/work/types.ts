@@ -15,6 +15,7 @@
 
 import type { ComponentChildren } from 'preact'
 import { decodeGoalProof } from '../../api/goal-proof'
+import { formatMilliCandleObserved } from '../../api/keeper-diagnostics'
 import type { GoalProof } from '../../types/core'
 import { ok, err, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
@@ -1019,13 +1020,9 @@ export function parseCandleMilli(raw: unknown): number | null {
 }
 
 export function formatMilliCandles(raw: unknown): string {
-  const milli = parseCandleMilli(raw)
-  if (milli === null) return '없음'
-  const candles = milli / 1000
-  return candles.toLocaleString('en-US', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  })
+  const input = typeof raw === 'string' || typeof raw === 'number' ? raw : null
+  const obs = formatMilliCandleObserved(input)
+  return obs.kind === 'value' ? obs.data : '없음'
 }
 
 export interface CandleBalanceRow {

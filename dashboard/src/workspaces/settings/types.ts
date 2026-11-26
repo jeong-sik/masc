@@ -1,9 +1,11 @@
-import type {
-  ConfigCategorySpec as ConfigCategory,
-  ConfigFieldSpec as ConfigField,
-  ConfigPatchChange,
-  ConfigReloadScope as ReloadScope,
+import {
+  patchOpForField,
+  type ConfigCategorySpec as ConfigCategory,
+  type ConfigFieldSpec as ConfigField,
+  type ConfigReloadScope as ReloadScope,
 } from '../../api/config-schema'
+
+export { patchOpForField }
 
 export interface WorldConfigExportResponse {
   readonly ok: boolean
@@ -91,31 +93,4 @@ export function reloadScopeNotice(scope: ReloadScope): { label: string; detail: 
         tone: 'warn',
       }
   }
-}
-
-export function patchOpForField(field: ConfigField, nextValue: unknown, remove = false): ConfigPatchChange | null {
-  if (remove) {
-    return { op: 'remove', table: field.table, key: field.key, full_key: field.full_key }
-  }
-  const t = field.type.toLowerCase()
-  if (t === 'bool' || t === 'boolean') {
-    return { op: 'set_bool', table: field.table, key: field.key, full_key: field.full_key, value: Boolean(nextValue) }
-  }
-  if (t === 'int' || t === 'integer') {
-    const n = typeof nextValue === 'number' ? nextValue
-      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
-    return Number.isSafeInteger(n) ? { op: 'set_int', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
-  }
-  if (t === 'float' || t === 'number') {
-    const n = typeof nextValue === 'number' ? nextValue
-      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
-    return Number.isFinite(n) ? { op: 'set_float', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
-  }
-  if (t === 'string_array' || t === 'string_list' || Array.isArray(nextValue)) {
-    const arr = Array.isArray(nextValue)
-      ? nextValue.map((x) => String(x))
-      : String(nextValue).split('\n').map((s) => s.trim()).filter(Boolean)
-    return { op: 'set_string_array', table: field.table, key: field.key, full_key: field.full_key, value: arr }
-  }
-  return { op: 'set_string', table: field.table, key: field.key, full_key: field.full_key, value: String(nextValue ?? '') }
 }

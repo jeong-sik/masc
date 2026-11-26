@@ -30,3 +30,10 @@ export function isSubmitEnter(event: KeyboardEvent): boolean {
 export function isDismissEscape(event: KeyboardEvent): boolean {
   return event.key === 'Escape' && !event.defaultPrevented && !isImeComposing(event)
 }
+
+/** True when a keyboard event originated inside a text-editable form control. */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+}

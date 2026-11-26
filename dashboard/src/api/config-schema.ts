@@ -46,6 +46,43 @@ export interface ConfigPatchChange {
   readonly value?: unknown
 }
 
+/**
+ * Shared typed `ConfigPatchChange` builder (SSOT across Settings, Keeper Config, and Create Keeper).
+ * Rejects invalid int/float strings (`null`) instead of silently submitting unparsed text.
+ */
+export function patchOpForField(
+  field: Pick<ConfigFieldSpec, 'table' | 'key' | 'full_key' | 'type'>,
+  nextValue: unknown,
+  remove = false,
+  arrayDelimiter: '\n' | ',' = '\n',
+): ConfigPatchChange | null {
+  if (remove) {
+    return { op: 'remove', table: field.table, key: field.key, full_key: field.full_key }
+  }
+  const t = field.type.trim().toLowerCase()
+  if (t === 'bool' || t === 'boolean') {
+    const b = typeof nextValue === 'boolean' ? nextValue : String(nextValue).trim().toLowerCase() === 'true'
+    return { op: 'set_bool', table: field.table, key: field.key, full_key: field.full_key, value: b }
+  }
+  if (t === 'int' || t === 'integer') {
+    const n = typeof nextValue === 'number' ? nextValue
+      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
+    return Number.isSafeInteger(n) ? { op: 'set_int', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
+  }
+  if (t === 'float' || t === 'number') {
+    const n = typeof nextValue === 'number' ? nextValue
+      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
+    return Number.isFinite(n) ? { op: 'set_float', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
+  }
+  if (t === 'string_array' || t === 'string_list' || Array.isArray(nextValue)) {
+    const arr = Array.isArray(nextValue)
+      ? nextValue.map((x) => String(x))
+      : String(nextValue).split(arrayDelimiter).map((s) => s.trim()).filter(Boolean)
+    return { op: 'set_string_array', table: field.table, key: field.key, full_key: field.full_key, value: arr }
+  }
+  return { op: 'set_string', table: field.table, key: field.key, full_key: field.full_key, value: String(nextValue ?? '') }
+}
+
 export interface ConfigPatchResult {
   readonly applied: boolean
   readonly dry_run: boolean

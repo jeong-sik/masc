@@ -842,4 +842,71 @@ describe('workspaces/infra', () => {
     await flushUi(40)
     expect(container.textContent).toContain('변경 0건')
   })
+
+  it('surfaces explicit decode errors for malformed non-array Repos activity and Sandboxes payloads', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/repositories') {
+        return jsonResponse({
+          repositories: [{
+            id: 'repo-masc',
+            name: 'masc',
+            url: 'https://github.com/jeong-sik/masc',
+            local_path: '/workspace/masc',
+            default_branch: 'main',
+            status: 'active',
+            auto_sync: true,
+            sync_interval: 300,
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/ide/repository-activity')) {
+        return jsonResponse({ ok: true, data: { repo_id: 'repo-masc', changes: {} } })
+      }
+      if (url === '/api/v1/infra/sandboxes') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-bad',
+          generated_at_unix: 1_700_000_000,
+          data: {
+            probe_state: { kind: 'fresh', measured_at_unix: 1_700_000_000 },
+            summary: {
+              microvm_declared: 0,
+              microvm_running: 0,
+              microvm_sockets_present: 0,
+              microvm_shim_mismatch: 0,
+              ssh_pools: 0,
+              ssh_keepers: 0,
+              ssh_unbound_keepers: 0,
+              ssh_active_sessions: null,
+              ssh_max_sessions: 0,
+              docker_keepers: 0,
+            },
+            shim_parity: { status: 'matched' },
+            microvm_guests: 'oops',
+            ssh_pools: [],
+            docker_keepers: [],
+            volume_gc_report: null,
+            host_storage: null,
+            unobserved_reasons: [],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(40)
+    expect(container.textContent).toContain('변경 이력 조회 실패')
+    expect(container.textContent).toContain('changes')
+    expect(container.textContent).not.toContain('변경 0건')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(40)
+    expect(container.textContent).toContain('샌드박스 조회 실패')
+    expect(container.textContent).toContain('microvm_guests')
+    expect(container.textContent).not.toContain('선언된 MicroVM 게스트 없음')
+  })
 })

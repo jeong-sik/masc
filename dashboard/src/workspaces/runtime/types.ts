@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact'
 import { isWindowCurrentlySpent } from '../../lib/quota-window'
 import { readSse } from '../../lib/sse-reader'
 import type { Result } from '../../lib/result'
+import { expectOptionalArrayField, expectWireRecord, isJsonRecord } from '../../lib/wire-decode'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
   apiGet,
@@ -836,6 +837,120 @@ export function localUtcOffsetMin(): number {
   return Math.max(-840, Math.min(840, Math.trunc(raw)))
 }
 
+// ── Strict Wire Decoders (distinguish omitted optional fields from malformed non-arrays) ──
+
+export function decodeModelsMetricsPayload(raw: unknown): ModelsMetricsPayload {
+  const ctx = 'GET /api/v1/models/metrics'
+  const rec = expectWireRecord(raw, ctx)
+  const rawModels = expectOptionalArrayField<ModelMetricsRow>(rec, 'models', ctx)
+  const models = rawModels.map((m, idx) => {
+    const mRec = expectWireRecord(m, `${ctx} models[${idx}]`)
+    const buckets = expectOptionalArrayField<ModelMetricsBucket>(mRec, 'buckets', `${ctx} models[${idx}]`)
+    return { ...(mRec as unknown as ModelMetricsRow), buckets }
+  })
+  return { ...(rec as unknown as ModelsMetricsPayload), models }
+}
+
+export function decodeToolMetricsSeriesPayload(raw: unknown): ToolMetricsSeriesPayload {
+  const ctx = 'GET /api/v1/tool-metrics/series'
+  const rec = expectWireRecord(raw, ctx)
+  const buckets = expectOptionalArrayField<ToolMetricsSeriesPayload['buckets'][number]>(rec, 'buckets', ctx)
+  const top_by_time = expectOptionalArrayField<NonNullable<ToolMetricsSeriesPayload['top_by_time']>[number]>(
+    rec,
+    'top_by_time',
+    ctx,
+  )
+  return { ...(rec as unknown as ToolMetricsSeriesPayload), buckets, top_by_time }
+}
+
+export function decodeKeeperCostsPayload(raw: unknown): KeeperCostsPayload {
+  const ctx = 'GET /api/v1/dashboard/keeper-costs'
+  const rec = expectWireRecord(raw, ctx)
+  const keepers = expectOptionalArrayField<KeeperCostRow>(rec, 'keepers', ctx)
+  return { ...(rec as unknown as KeeperCostsPayload), keepers }
+}
+
+export function decodeKeeperEfficiencyPayload(raw: unknown): KeeperEfficiencyPayload {
+  const ctx = 'GET /api/v1/keeper-efficiency'
+  const rec = expectWireRecord(raw, ctx)
+  const keepers = expectOptionalArrayField<KeeperEfficiencyRow>(rec, 'keepers', ctx)
+  return { ...(rec as unknown as KeeperEfficiencyPayload), keepers }
+}
+
+export function decodeRuntimeProbePayload(raw: unknown): RuntimeProbePayload {
+  const ctx = 'GET /api/v1/dashboard/runtime-probe'
+  const rec = expectWireRecord(raw, ctx)
+  if (rec.probe === undefined) {
+    return {
+      ...(rec as unknown as RuntimeProbePayload),
+      probe: {
+        status: 'unavailable',
+        probe_ok: false,
+        checked_at: '',
+        summary: { runtimes: 0, probed: 0, reachable: 0, failed: 0, skipped: 0, default_runtime_id: null },
+        providers: [],
+        errors: [],
+        observations: [],
+        limitations: [],
+      },
+    }
+  }
+  const probeRec = expectWireRecord(rec.probe, `${ctx} probe`)
+  const providers = expectOptionalArrayField<RuntimeProbeProviderRow>(probeRec, 'providers', `${ctx} probe`)
+  const errors = expectOptionalArrayField<string>(probeRec, 'errors', `${ctx} probe`)
+  const observations = expectOptionalArrayField<string>(probeRec, 'observations', `${ctx} probe`)
+  const limitations = expectOptionalArrayField<string>(probeRec, 'limitations', `${ctx} probe`)
+  return {
+    ...(rec as unknown as RuntimeProbePayload),
+    probe: {
+      ...(probeRec as unknown as RuntimeProbePayload['probe']),
+      providers,
+      errors,
+      observations,
+      limitations,
+    },
+  }
+}
+
+export function decodeSetupInventoryPayload(raw: unknown): SetupInventoryPayload {
+  const ctx = 'GET /api/v1/setup/inventory'
+  const rec = expectWireRecord(raw, ctx)
+  const integrations = expectOptionalArrayField<SetupIntegration>(rec, 'integrations', ctx)
+  const account_emails = expectOptionalArrayField<SetupAccountEmail>(rec, 'account_emails', ctx)
+  return { ...(rec as unknown as SetupInventoryPayload), integrations, account_emails }
+}
+
+export function decodeMultiAccountProviderAccounts(raw: unknown): MultiAccountProviderAccountsResponse {
+  const ctx = 'GET /api/v1/auth/provider-accounts'
+  const rec = expectWireRecord(raw, ctx)
+  const provider_accounts = 'provider_accounts' in rec && rec.provider_accounts !== undefined
+    ? expectOptionalArrayField<MultiAccountProviderAccount>(rec, 'provider_accounts', ctx)
+    : undefined
+  const accounts = 'accounts' in rec && rec.accounts !== undefined
+    ? expectOptionalArrayField<MultiAccountProviderAccount>(rec, 'accounts', ctx)
+    : undefined
+  const runtimes = expectOptionalArrayField<NonNullable<MultiAccountProviderAccountsResponse['runtimes']>[number]>(
+    rec,
+    'runtimes',
+    ctx,
+  )
+  return { ...(rec as unknown as MultiAccountProviderAccountsResponse), provider_accounts, accounts, runtimes }
+}
+
+export function decodeMultiAccountIntegrations(raw: unknown): MultiAccountIntegrationsResponse {
+  const ctx = 'GET /api/v1/auth/integrations'
+  const rec = expectWireRecord(raw, ctx)
+  const rawIntegrations = expectOptionalArrayField<MultiAccountIntegration>(rec, 'integrations', ctx)
+  const integrations = rawIntegrations.map((item, idx) => {
+    if (!isJsonRecord(item)) {
+      throw new Error(`${ctx} integrations[${idx}]: 객체여야 합니다.`)
+    }
+    const connect = expectOptionalArrayField<string>(item, 'connect', `${ctx} integrations[${idx}]`)
+    const models = expectOptionalArrayField<string>(item, 'models', `${ctx} integrations[${idx}]`)
+    return { ...(item as unknown as MultiAccountIntegration), connect, models }
+  })
+  return { ...(rec as unknown as MultiAccountIntegrationsResponse), integrations }
+}
 // ── Single-user view SSE ──
 
 const VIEW_SSE_RECONNECT_BASE_MS = 1_000

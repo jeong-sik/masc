@@ -52,6 +52,7 @@ import {
 } from './lane-toml-editor'
 import {
   FUSION_TOPOLOGIES,
+  decodeRuntimeProbePayload,
   formatMs,
   formatUnixTime,
   loadLaneRun,
@@ -270,7 +271,7 @@ export function LanesTab(props: WorkspaceViewProps) {
         'runtime:probe',
         (signal) => apiGet<RuntimeProbePayload>(
           `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
-          { signal },
+          { signal, decode: decodeRuntimeProbePayload },
         ),
         { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
       ),
@@ -1589,9 +1590,13 @@ export function LanesTab(props: WorkspaceViewProps) {
                 ariaLabel="런타임 프로브 목록"
                 getItemKey=${(r: ProbePartitionRow) => `${r.scopeBand}:${r.runtime_id}`}
                 empty=${html`
-                  <div class="dtable-absent" style=${{ padding: 'var(--sp-4)' }}>
-                    ${probeObs.kind === 'loading' ? '프로브 불러오는 중…' : '표시할 런타임 프로브가 없습니다.'}
-                  </div>
+                  ${probeObs.kind === 'failed'
+                    ? html`<div class="ap-error" role="alert" style=${{ margin: 'var(--sp-3)' }}>런타임 프로브 조회 실패: ${probeObs.error.message}</div>`
+                    : html`
+                        <div class="dtable-absent" style=${{ padding: 'var(--sp-4)' }}>
+                          ${probeObs.kind === 'loading' ? '프로브 불러오는 중…' : '표시할 런타임 프로브가 없습니다.'}
+                        </div>
+                      `}
                 `}
                 renderItem=${(r: ProbePartitionRow) => {
                   const rt = runtimeById.get(r.runtime_id)

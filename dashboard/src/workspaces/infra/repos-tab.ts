@@ -24,6 +24,12 @@ import {
 import { MasterDetail } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
+  describeWireType,
+  expectOptionalArrayField,
+  expectWireRecord,
+  isJsonRecord,
+} from '../../lib/wire-decode'
+import {
   extractChangeBeforeAfter,
   extractChangePath,
   formatUnixTs,
@@ -33,16 +39,23 @@ import {
   type WorkspaceViewProps,
 } from './types'
 
-function normalizeRepoList(raw: unknown): readonly InfraRepository[] {
-  let rows: unknown[] = []
-  if (Array.isArray(raw)) rows = raw
-  else if (raw && typeof raw === 'object') {
-    const rec = raw as Record<string, unknown>
-    if (Array.isArray(rec.repositories)) rows = rec.repositories
-    else if (rec.ok === true && Array.isArray(rec.data)) rows = rec.data
+function decodeRepoList(raw: unknown): readonly InfraRepository[] {
+  let rows: readonly unknown[]
+  if (Array.isArray(raw)) {
+    rows = raw
+  } else if (isJsonRecord(raw)) {
+    if ('repositories' in raw && raw.repositories !== undefined) {
+      rows = expectOptionalArrayField<unknown>(raw, 'repositories', 'GET /api/v1/repositories')
+    } else if (raw.ok === true && 'data' in raw && raw.data !== undefined) {
+      rows = expectOptionalArrayField<unknown>(raw, 'data', 'GET /api/v1/repositories')
+    } else {
+      rows = []
+    }
+  } else {
+    throw new Error(`GET /api/v1/repositories: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
   }
   return rows
-    .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null)
+    .filter((r): r is Record<string, unknown> => isJsonRecord(r))
     .map((r) => ({
       id: typeof r.id === 'string' ? r.id : '',
       name: typeof r.name === 'string' ? r.name : '',
@@ -55,6 +68,19 @@ function normalizeRepoList(raw: unknown): readonly InfraRepository[] {
       sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
     }))
     .filter((r) => r.id !== '' && r.name !== '')
+}
+
+function decodeRepoActivityData(raw: unknown): RepoActivityData {
+  const rec = expectWireRecord(raw, 'GET /api/v1/ide/repository-activity')
+  const changes = expectOptionalArrayField<RepoActivityChange>(rec, 'changes', 'GET /api/v1/ide/repository-activity')
+  return {
+    ...(rec as unknown as RepoActivityData),
+    repo_id: typeof rec.repo_id === 'string' ? rec.repo_id : '',
+    window_hours: typeof rec.window_hours === 'number' ? rec.window_hours : 24,
+    incomplete: typeof rec.incomplete === 'number' ? rec.incomplete : 0,
+    unattributed: typeof rec.unattributed === 'number' ? rec.unattributed : 0,
+    changes,
+  }
 }
 
 export function buildUnifiedChangeDiff(change: RepoActivityChange): string {
@@ -89,10 +115,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   const loadRepos = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<readonly InfraRepository[]>(
       'infra:repositories',
-      async (signal) => {
-        const res = await apiGet<unknown>('/api/v1/repositories', { signal })
-        return res.ok ? { ok: true, value: normalizeRepoList(res.value) } : res
-      },
+      (signal) => apiGet<readonly InfraRepository[]>('/api/v1/repositories', { signal, decode: decodeRepoList }),
       { ttlMs: 20_000, topics: ['repositories'], reason },
     )
   }
@@ -104,6 +127,7 @@ export function ReposTab(props: WorkspaceViewProps) {
         method: 'GET',
         path: `/api/v1/ide/repository-activity?repo_id=${encodeURIComponent(repoId)}&window_hours=24`,
         envelope: 'ok_data',
+        decode: decodeRepoActivityData,
         signal,
       }),
       { ttlMs: 20_000, topics: ['repository_activity'], reason },
@@ -194,7 +218,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const activityData = activityObs.kind === 'value' ? activityObs.data : null
-  const activityChanges = activityData?.changes ?? []
+  const activityChanges = activityData ? activityData.changes : []
   const selectedRepo = repos.find((r) => r.id === effectiveRepoId) ?? null
 
   const masterPane = html`

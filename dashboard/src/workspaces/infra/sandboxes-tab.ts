@@ -19,6 +19,7 @@ import {
 } from '../../core'
 import { DataTable, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { expectOptionalArrayField, expectWireRecord, isJsonRecord } from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   formatUnixTs,
@@ -238,6 +239,37 @@ export function summarizeJsonMetrics(raw: Record<string, unknown> | null): strin
   return pairs.length > 3 ? `${head} (+${pairs.length - 3})` : head
 }
 
+function decodeInfraSandboxesData(raw: unknown): InfraSandboxesData {
+  const ctx = 'GET /api/v1/infra/sandboxes'
+  const rec = expectWireRecord(raw, ctx)
+  if (!isJsonRecord(rec.probe_state)) {
+    throw new Error(`${ctx}: "probe_state" 필드는 객체여야 합니다.`)
+  }
+  if (!isJsonRecord(rec.summary)) {
+    throw new Error(`${ctx}: "summary" 필드는 객체여야 합니다.`)
+  }
+  if (!isJsonRecord(rec.shim_parity)) {
+    throw new Error(`${ctx}: "shim_parity" 필드는 객체여야 합니다.`)
+  }
+  const unobserved_reasons = expectOptionalArrayField<{ readonly scope: string; readonly reason: string }>(
+    rec,
+    'unobserved_reasons',
+    ctx,
+  )
+  const microvm_guests = expectOptionalArrayField<InfraMicroVmGuest>(rec, 'microvm_guests', ctx)
+  const ssh_pools = expectOptionalArrayField<InfraSshPool>(rec, 'ssh_pools', ctx)
+  const docker_keepers = expectOptionalArrayField<InfraDockerKeeper>(rec, 'docker_keepers', ctx)
+  const ssh_unbound_keepers = expectOptionalArrayField<InfraSshUnboundKeeper>(rec, 'ssh_unbound_keepers', ctx)
+  return {
+    ...(rec as unknown as InfraSandboxesData),
+    unobserved_reasons,
+    microvm_guests,
+    ssh_pools,
+    docker_keepers,
+    ssh_unbound_keepers,
+  }
+}
+
 export function SandboxesTab(props: WorkspaceViewProps) {
   const obs = resourceCache.observe<InfraSandboxesData>('infra:sandboxes').value
   const [probing, setProbing] = useState(false)
@@ -254,7 +286,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   const loadSandboxes = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<InfraSandboxesData>(
       'infra:sandboxes',
-      (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', { signal }),
+      (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', {
+        signal,
+        decode: decodeInfraSandboxesData,
+      }),
       { ttlMs: 15_000, topics: ['infra_sandboxes', 'sandboxes'], reason },
     )
   }
@@ -542,14 +577,12 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   ], [openKeeperSandboxConfig])
 
   const data = obs.kind === 'value' ? obs.data : null
-  const unobservedReasons = Array.isArray(data?.unobserved_reasons) ? data.unobserved_reasons : []
-  const microvmGuests = Array.isArray(data?.microvm_guests) ? data.microvm_guests : []
-  const sshPools = Array.isArray(data?.ssh_pools) ? data.ssh_pools : []
-  const dockerKeepers = Array.isArray(data?.docker_keepers) ? data.docker_keepers : []
+  const unobservedReasons = data ? data.unobserved_reasons : []
+  const microvmGuests = data ? data.microvm_guests : []
+  const sshPools = data ? data.ssh_pools : []
+  const dockerKeepers = data ? data.docker_keepers : []
   const unboundKeepers = useMemo(
-    () => Array.isArray(data?.ssh_unbound_keepers)
-      ? data.ssh_unbound_keepers.filter((r): r is InfraSshUnboundKeeper => Boolean(r && typeof r === 'object'))
-      : [],
+    () => (data?.ssh_unbound_keepers ?? []).filter((r): r is InfraSshUnboundKeeper => isJsonRecord(r)),
     [data?.ssh_unbound_keepers],
   )
   const activeSshObs = data

@@ -45,6 +45,10 @@ import {
   buildUsageHistoryChartData,
 } from './quotas-tab'
 import {
+  decodeKeeperCostsPayload,
+  decodeKeeperEfficiencyPayload,
+  decodeModelsMetricsPayload,
+  decodeToolMetricsSeriesPayload,
   formatCompactNumber,
   formatMs,
   formatPercent,
@@ -182,7 +186,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         modelsKey,
         (signal) => apiGet<ModelsMetricsPayload>(
           `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
-          { signal },
+          { signal, decode: decodeModelsMetricsPayload },
         ),
         { ttlMs: 20_000, topics: ['model_metrics', 'telemetry'], reason },
       ),
@@ -195,7 +199,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         toolSeriesKey,
         (signal) => apiGet<ToolMetricsSeriesPayload>(
           `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=${utcOffsetMin}`,
-          { signal },
+          { signal, decode: decodeToolMetricsSeriesPayload },
         ),
         { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
       ),
@@ -211,12 +215,18 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
       resourceCache.fetch<KeeperCostsPayload>(
         costsKey,
-        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', { signal }),
+        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', {
+          signal,
+          decode: decodeKeeperCostsPayload,
+        }),
         { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
       ),
       resourceCache.fetch<KeeperEfficiencyPayload>(
         effKey,
-        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', { signal }),
+        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
+          signal,
+          decode: decodeKeeperEfficiencyPayload,
+        }),
         { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
       ),
     ]).then(() => {
@@ -643,7 +653,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           series=${TOOL_EXACT_SERIES}
           height=${190}
           syncCrosshair=${true}
-          emptyLabel="도구 오류 시계열 없음"
+          emptyLabel=${toolSeriesObs.kind === 'failed'
+            ? `도구 시계열 조회 실패: ${toolSeriesObs.error.message}`
+            : '도구 오류 시계열 없음'}
         />
       </section>
 
@@ -655,6 +667,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             비용은 24h 상한 창 · 미보고 구독 비용은 0이 아닌 "미보고"로 표기
           </span>
         </div>
+        ${(costsObs.kind === 'failed' || effObs.kind === 'failed') && html`
+          <div class="ap-error" role="alert">
+            ${costsObs.kind === 'failed' ? `Keeper 비용 조회 실패: ${costsObs.error.message}` : ''}
+            ${costsObs.kind === 'failed' && effObs.kind === 'failed' ? ' · ' : ''}
+            ${effObs.kind === 'failed' ? `Keeper 효율 조회 실패: ${effObs.error.message}` : ''}
+          </div>
+        `}
         <${DataTable}
           data=${joinedKeepers}
           columns=${keeperColumns}

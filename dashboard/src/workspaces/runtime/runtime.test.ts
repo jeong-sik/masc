@@ -889,6 +889,13 @@ describe('workspaces/runtime', () => {
 
     // Single-user credential save MUST NOT fabricate source_revision: 'latest' when config/raw lacks revision
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resourceCache.clearAll()
     const singleUserPosts: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1682,5 +1689,197 @@ describe('workspaces/runtime', () => {
     render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await flushUi(25)
     expect(container.textContent).toContain('Lane-Addons 인스턴스 (0)')
+  })
+
+  it('preserves multi_account worker Manage_own_provider OAuth while gating single-user setup routes and aborting on sign-out/epoch change', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    const seenUrls: string[] = []
+    const loginSignals: AbortSignal[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/auth/provider-accounts')) {
+        return jsonResponse({
+          provider_accounts: [{
+            provider_account_id: 'pa-worker-1',
+            integration_id: 'openai_codex',
+            kind: 'login',
+          }],
+          runtimes: [],
+        })
+      }
+      if (url.startsWith('/api/v1/auth/integrations')) {
+        return jsonResponse({
+          integrations: [{
+            integration_id: 'openai_codex',
+            display_name: 'OpenAI Codex',
+            connect: ['login', 'key'],
+            models: ['gpt-5-codex'],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: null,
+          default_route: null,
+          default_runtime: null,
+          runtimes: [],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      if (url === '/api/v1/setup/accounts/login?auth_hints=1' && init?.method === 'POST') {
+        const signal = init.signal!
+        loginSignals.push(signal)
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(
+              `event: started\ndata: ${JSON.stringify({ login_id: 'worker-login-1', integration_id: 'openai_codex', status: 'running' })}\n\n`,
+            ))
+            signal.addEventListener('abort', () => controller.close(), { once: true })
+          },
+        })
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+
+    // Multi-account worker never hits single-user setup/inventory or runtime/config/raw
+    expect(seenUrls.some((u) => u.includes('/api/v1/setup/inventory'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/runtime/config/raw'))).toBe(false)
+
+    // Worker CAN start own-provider OAuth via Manage_own_provider (server_login_http.ml:592)
+    const invToggle = container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!
+    invToggle.click()
+    await flushUi(15)
+    const reAuthBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Re-auth') as HTMLButtonElement
+    expect(reAuthBtn).toBeDefined()
+    reAuthBtn.click()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="setup-login-panel"]')?.textContent).toContain('worker-login-1')
+    })
+    expect(loginSignals).toHaveLength(1)
+    expect(loginSignals[0]!.aborted).toBe(false)
+
+    // Sign-out / epoch change immediately aborts the active login stream, clears loginReceipt, and hides triggers
+    authSession.value = {
+      kind: 'multi_account_signed_out',
+      mode: 'multi_account',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    bumpSessionEpoch()
+    await flushUi(30)
+    expect(loginSignals[0]!.aborted).toBe(true)
+    expect(container.querySelector('[data-testid="setup-login-panel"]')).toBeNull()
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('+ API 키 등록'))).toBe(false)
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Re-auth')).toBe(false)
+
+    // Signed-out / probing mount NEVER hits /api/v1/setup/inventory, /api/v1/runtime/config/raw, or /api/v1/setup/accounts/login
+    const signedOutSeen: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      signedOutSeen.push(String(input))
+      return jsonResponse({})
+    }) as typeof fetch
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(signedOutSeen).toEqual([])
+  })
+
+  it('surfaces explicit decode errors for malformed non-array Runtime wire payloads instead of empty defaults', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/lane-addons/asks')) {
+        return jsonResponse({ asks: 'not-an-array' })
+      }
+      if (url.startsWith('/api/v1/lane-addons')) {
+        return jsonResponse({ instances: 'oops' })
+      }
+      if (url.startsWith('/api/v1/dashboard/browser-lane/clients')) {
+        return jsonResponse({ ok: true, data: { clients: {}, inventoryComplete: true, inventoryIssues: [] } })
+      }
+      if (url.startsWith('/api/v1/models/metrics')) {
+        return jsonResponse({ models: 'broken' })
+      }
+      if (url.startsWith('/api/v1/dashboard/keeper-costs')) {
+        return jsonResponse({ keepers: {} })
+      }
+      if (url.startsWith('/api/v1/keeper-efficiency')) {
+        return jsonResponse({ keepers: 'bad' })
+      }
+      if (url.startsWith('/api/v1/dashboard/runtime-probe')) {
+        return jsonResponse({ probe: { providers: 'not-an-array' } })
+      }
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: null,
+          default_runtime: null,
+          runtimes: [],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      if (url.startsWith('/api/v1/setup/inventory')) {
+        return jsonResponse({ integrations: 'oops' })
+      }
+      if (url.startsWith('/api/v1/tool-metrics/series')) {
+        return jsonResponse({ buckets: {} })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(container.textContent).toContain('Lane-Addons 조회 실패')
+    expect(container.textContent).toContain('instances')
+    expect(container.textContent).toContain('Browser Lane 조회 실패')
+    expect(container.textContent).toContain('clients')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(container.textContent).toContain('모델 지표 조회 실패')
+    expect(container.textContent).toContain('Keeper 비용 조회 실패')
+    expect(container.textContent).toContain('도구 시계열 조회 실패')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(container.textContent).toContain('런타임 프로브 조회 실패')
+    expect(container.textContent).toContain('providers')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!.click()
+    await flushUi(15)
+    expect(container.textContent).toContain('제공자 자격 증명 조회 실패')
+    expect(container.textContent).toContain('integrations')
   })
 })

@@ -184,8 +184,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     if (provRes.ok) {
       setProviders(provRes.value.providers)
       setOauthCallbackUrl(provRes.value.callbackUrl)
+      setOauthError(null)
     } else if (provRes.error.kind !== 'aborted' && provRes.error.kind !== 'epoch_stale') {
-      setOauthStatus(`OAuth 연결 조회 실패: ${provRes.error.message}`)
+      setOauthError(`OAuth 연결 조회 실패: ${provRes.error.message}`)
     }
   }, [keeperName, adminLocked])
 

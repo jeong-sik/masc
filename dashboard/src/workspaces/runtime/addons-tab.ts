@@ -27,6 +27,7 @@ import {
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { expectOptionalArrayField, expectWireRecord, isJsonRecord } from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
@@ -38,6 +39,65 @@ import type {
   LaneAddonsPayload,
   WorkspaceViewProps,
 } from './types'
+
+function decodeLaneAddonsPayload(raw: unknown): LaneAddonsPayload {
+  const ctx = 'GET /api/v1/lane-addons'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as LaneAddonsPayload),
+    instances: expectOptionalArrayField<LaneAddonInstanceRow>(rec, 'instances', ctx),
+    rows: expectOptionalArrayField<Record<string, unknown>>(rec, 'rows', ctx),
+    coverage: expectOptionalArrayField<Record<string, unknown>>(rec, 'coverage', ctx),
+  }
+}
+
+function decodeLaneAddonAsksResponse(raw: unknown): LaneAddonAsksResponse {
+  const ctx = 'GET /api/v1/lane-addons/asks'
+  const rec = expectWireRecord(raw, ctx)
+  const rawAsks = expectOptionalArrayField<LaneAddonAskRow>(rec, 'asks', ctx)
+  const asks = rawAsks.map((ask, idx) => {
+    const askRec = expectWireRecord(ask, `${ctx} asks[${idx}]`)
+    const questions = expectOptionalArrayField<LaneAddonAskRow['questions'][number]>(
+      askRec,
+      'questions',
+      `${ctx} asks[${idx}]`,
+    )
+    return { ...(askRec as unknown as LaneAddonAskRow), questions }
+  })
+  return { ...(rec as unknown as LaneAddonAsksResponse), asks }
+}
+
+function decodePackageCatalogPayload(raw: unknown): PackageCatalogPayload {
+  const ctx = 'GET /api/v1/lane-addons/package-catalog'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as PackageCatalogPayload),
+    entries: expectOptionalArrayField<PackageCatalogPayload['entries'][number]>(rec, 'entries', ctx),
+  }
+}
+
+function decodeBrowserClientsPayload(raw: unknown): BrowserClientsPayload {
+  const ctx = 'GET /api/v1/dashboard/browser-lane/clients'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as BrowserClientsPayload),
+    clients: expectOptionalArrayField<BrowserClientRow>(rec, 'clients', ctx),
+    inventoryIssues: expectOptionalArrayField<BrowserClientsPayload['inventoryIssues'][number]>(
+      rec,
+      'inventoryIssues',
+      ctx,
+    ),
+  }
+}
+
+function decodeBrowserTabsResponse(raw: unknown): readonly BrowserTabRow[] {
+  const ctx = 'POST /api/v1/dashboard/browser-lane/read'
+  const rec = expectWireRecord(raw, ctx)
+  if (isJsonRecord(rec.data) && 'tabs' in rec.data) {
+    return expectOptionalArrayField<BrowserTabRow>(rec.data, 'tabs', ctx)
+  }
+  return expectOptionalArrayField<BrowserTabRow>(rec, 'tabs', ctx)
+}
 
 interface PackageCatalogPayload {
   readonly directory: string
@@ -87,12 +147,18 @@ export function AddonsTab(props: WorkspaceViewProps) {
     void Promise.all([
       resourceCache.fetch<LaneAddonsPayload>(
         'runtime:lane-addons',
-        (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', { signal }),
+        (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', {
+          signal,
+          decode: decodeLaneAddonsPayload,
+        }),
         { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_exports_changed'], reason },
       ),
       resourceCache.fetch<LaneAddonAsksResponse>(
         'runtime:lane-addons-asks',
-        (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', { signal }),
+        (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', {
+          signal,
+          decode: decodeLaneAddonAsksResponse,
+        }),
         { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_asks_changed'], reason },
       ),
     ]).then(() => {
@@ -110,6 +176,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       method: 'GET',
       path: '/api/v1/dashboard/browser-lane/clients',
       envelope: 'ok_data',
+      decode: decodeBrowserClientsPayload,
       signal: ctrl.signal,
     })
     if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
@@ -134,7 +201,10 @@ export function AddonsTab(props: WorkspaceViewProps) {
     catalogAbortRef.current = ctrl
     const startEpoch = currentSessionEpoch()
     const query = directory ? `?directory=${encodeURIComponent(directory)}` : ''
-    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`, { signal: ctrl.signal })
+    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`, {
+      signal: ctrl.signal,
+      decode: decodePackageCatalogPayload,
+    })
     if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
     if (res.ok) setCatalog(res.value)
     else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
@@ -337,21 +407,17 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const handleReadOpenTabs = async (client: BrowserClientRow) => {
     const startEpoch = currentSessionEpoch()
     setReadingClient(client.clientId)
-    const res = await apiMutate<{
-      readonly ok?: boolean
-      readonly data?: { readonly tabs?: readonly BrowserTabRow[] }
-      readonly tabs?: readonly BrowserTabRow[]
-    }>('POST', '/api/v1/dashboard/browser-lane/read', {
+    const res = await apiMutate<readonly BrowserTabRow[]>('POST', '/api/v1/dashboard/browser-lane/read', {
       lane: 'live',
       clientId: client.clientId,
-    })
+    }, { decode: decodeBrowserTabsResponse })
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setReadingClient((cur) => (cur === client.clientId ? null : cur))
     if (!res.ok) {
       setBanner({ kind: 'err', text: `탭 읽기 실패 (${client.clientId}): ${res.error.message}` })
       return
     }
-    const tabs = res.value.data?.tabs ?? res.value.tabs ?? []
+    const tabs = res.value
     setTabsByClient((prev) => ({ ...prev, [client.clientId]: tabs }))
     props.onInspect({
       title: `Browser Tabs · ${client.clientId}`,
@@ -383,9 +449,11 @@ export function AddonsTab(props: WorkspaceViewProps) {
         </div>
       </div>
 
-      ${instances.length === 0
-        ? html`<div class="dtable-absent">${addonsObs.kind === 'loading' ? '불러오는 중…' : '연결된 Lane-Addon 인스턴스가 없습니다.'}</div>`
-        : html`
+      ${addonsObs.kind === 'failed'
+        ? html`<div class="ap-error" role="alert">Lane-Addons 조회 실패: ${addonsObs.error.message}</div>`
+        : instances.length === 0
+          ? html`<div class="dtable-absent">${addonsObs.kind === 'loading' ? '불러오는 중…' : '연결된 Lane-Addon 인스턴스가 없습니다.'}</div>`
+          : html`
             <${VirtualList}
               items=${instances}
               estimateSize=${64}
@@ -462,6 +530,10 @@ export function AddonsTab(props: WorkspaceViewProps) {
             </div>
           `}
         </div>
+      `}
+
+      ${asksObs.kind === 'failed' && html`
+        <div class="ap-error" role="alert">Lane-Addon 질문 조회 실패: ${asksObs.error.message}</div>
       `}
 
       ${asksObs.kind === 'value' && (asksObs.data.asks?.length ?? 0) > 0 && html`
@@ -592,8 +664,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
       `}
 
       ${browserState.kind === 'ready' && (() => {
-        const browserClients = browserState.data.clients ?? []
-        const inventoryIssues = browserState.data.inventoryIssues ?? []
+        const browserClients = browserState.data.clients
+        const inventoryIssues = browserState.data.inventoryIssues
         return html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
           <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>

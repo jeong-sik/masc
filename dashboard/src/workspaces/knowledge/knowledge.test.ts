@@ -1913,4 +1913,57 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('등록된 Wiki 페이지가 없습니다.')
     expect(container.textContent).not.toContain('+ 새 페이지')
   })
+
+  it('surfaces explicit decode errors for malformed non-array Wiki payloads instead of showing empty states', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki/lint')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: { findings: { bad: true } },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki/log')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: { entries: 'not-an-array' },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki?') || url === '/api/v1/wiki') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: { pages: 'oops' },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(5)
+    const indexAlert = container.querySelector('[role="alert"]')
+    expect(indexAlert?.textContent).toContain('pages')
+    expect(container.textContent).not.toContain('등록된 Wiki 페이지가 없습니다.')
+
+    const lintTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.includes('Lint'))!
+    lintTab.click()
+    await flushUi(5)
+    expect(container.textContent).toContain('Lint 보고서 조회 실패')
+    expect(container.textContent).toContain('findings')
+    expect(container.textContent).not.toContain('Lint 경고가 없습니다')
+
+    const logTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.includes('Log'))!
+    logTab.click()
+    await flushUi(5)
+    expect(container.textContent).toContain('Wiki 로그 조회 실패')
+    expect(container.textContent).toContain('entries')
+    expect(container.textContent).not.toContain('기록된 Wiki 로그가 없습니다.')
+  })
 })

@@ -20,22 +20,125 @@ import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import {
+  expectOptionalArrayField,
+  expectOptionalRecordField,
+  expectWireRecord,
+  isJsonRecord,
+} from '../../lib/wire-decode'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   WIKI_SOURCES,
   computeMarkdownLineDiff,
   formatRelativeTime,
+  type WikiDuplicateCandidate,
   type WikiIndexData,
   type WikiLintData,
+  type WikiLintFinding,
   type WikiLogData,
+  type WikiLogEntry,
   type WikiPageData,
   type WikiPageSummary,
   type WikiPutRespData,
   type WikiSearchData,
+  type WikiSearchResultItem,
   type WikiSource,
   type WorkspaceViewProps,
 } from './types'
+
+function decodeWikiIndexData(raw: unknown): WikiIndexData {
+  const ctx = 'GET /api/v1/wiki'
+  const rec = expectWireRecord(raw, ctx)
+  const pages = expectOptionalArrayField<WikiPageSummary>(rec, 'pages', ctx)
+  const unreadable_pages = expectOptionalArrayField<{ readonly file: string; readonly reason: string }>(
+    rec,
+    'unreadable_pages',
+    ctx,
+  )
+  const tags = expectOptionalArrayField<{ readonly tag: string; readonly count: number }>(rec, 'tags', ctx)
+  const sources = expectOptionalRecordField(rec, 'sources', ctx) as Readonly<Record<string, number>>
+  const lintRec = expectOptionalRecordField(rec, 'lint', ctx)
+  const lint = {
+    total_findings: typeof lintRec.total_findings === 'number' ? lintRec.total_findings : 0,
+    counts: expectOptionalRecordField(lintRec, 'counts', `${ctx} lint`) as Readonly<Record<string, number>>,
+    log_hole_suppressed: lintRec.log_hole_suppressed === true,
+    orphans: expectOptionalArrayField<string>(lintRec, 'orphans', `${ctx} lint`),
+    duplicate_title_candidates: expectOptionalArrayField<WikiDuplicateCandidate>(
+      lintRec,
+      'duplicate_title_candidates',
+      `${ctx} lint`,
+    ),
+    findings: expectOptionalArrayField<WikiLintFinding>(lintRec, 'findings', `${ctx} lint`),
+  }
+  return {
+    ...(rec as unknown as WikiIndexData),
+    pages_total: typeof rec.pages_total === 'number' ? rec.pages_total : pages.length,
+    pages_readable: typeof rec.pages_readable === 'number' ? rec.pages_readable : pages.length,
+    pages_unreadable: typeof rec.pages_unreadable === 'number' ? rec.pages_unreadable : unreadable_pages.length,
+    pages,
+    unreadable_pages,
+    tags,
+    sources,
+    lint,
+  }
+}
+
+function decodeWikiLintData(raw: unknown): WikiLintData {
+  const ctx = 'GET /api/v1/wiki/lint'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as WikiLintData),
+    counts: expectOptionalRecordField(rec, 'counts', ctx) as Readonly<Record<string, number>>,
+    duplicate_title_candidates: expectOptionalArrayField<WikiDuplicateCandidate>(rec, 'duplicate_title_candidates', ctx),
+    findings: expectOptionalArrayField<WikiLintFinding>(rec, 'findings', ctx),
+  }
+}
+
+function decodeWikiLogData(raw: unknown): WikiLogData {
+  const ctx = 'GET /api/v1/wiki/log'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as WikiLogData),
+    entries: expectOptionalArrayField<WikiLogEntry>(rec, 'entries', ctx),
+  }
+}
+
+function decodeWikiSearchData(raw: unknown): WikiSearchData {
+  const ctx = 'GET /api/v1/wiki/search'
+  const rec = expectWireRecord(raw, ctx)
+  const results = expectOptionalArrayField<WikiSearchResultItem>(rec, 'results', ctx)
+  for (const item of results) {
+    if (isJsonRecord(item)) {
+      expectOptionalArrayField(item, 'snippets', `${ctx} result`)
+      expectOptionalArrayField(item, 'tags', `${ctx} result`)
+    }
+  }
+  return {
+    ...(rec as unknown as WikiSearchData),
+    results,
+  }
+}
+
+function decodeWikiPageData(raw: unknown): WikiPageData {
+  const ctx = 'GET /api/v1/wiki/:slug'
+  const rec = expectWireRecord(raw, ctx)
+  const fmRec = expectOptionalRecordField(rec, 'frontmatter', ctx)
+  const tags = expectOptionalArrayField<string>(fmRec, 'tags', `${ctx} frontmatter`)
+  const backlinks = expectOptionalArrayField<string>(rec, 'backlinks', ctx)
+  const outgoing_links = expectOptionalArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
+  const lint_findings = expectOptionalArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
+  return {
+    ...(rec as unknown as WikiPageData),
+    frontmatter: {
+      ...(fmRec as unknown as WikiPageData['frontmatter']),
+      tags,
+    },
+    backlinks,
+    outgoing_links,
+    lint_findings,
+  }
+}
 
 type WikiLeftView = 'pages' | 'lint' | 'log'
 
@@ -118,7 +221,10 @@ export function WikiTab(props: WorkspaceViewProps) {
     if (sourceFilter) params.set('source', sourceFilter)
     const obs = await resourceCache.fetch<WikiIndexData>(
       `kn:wiki:index:${params.toString()}`,
-      (signal) => apiGetV2<WikiIndexData>(`/api/v1/wiki?${params.toString()}`, { signal }),
+      (signal) => apiGetV2<WikiIndexData>(`/api/v1/wiki?${params.toString()}`, {
+        signal,
+        decode: decodeWikiIndexData,
+      }),
       { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason },
     )
     if (!mountedRef.current || indexSeqRef.current !== seq || !isEpochCurrent(startEpoch)) return
@@ -127,12 +233,13 @@ export function WikiTab(props: WorkspaceViewProps) {
       setWikiIndex(obs.data)
       markViewSynced()
       setSelectedSlug((prev) => {
-        const pages = obs.data.pages ?? []
+        const pages = obs.data.pages
         if (props.entityId && pages.some((p) => p.slug === props.entityId)) return props.entityId
         if (prev && pages.some((p) => p.slug === prev)) return prev
         return pages[0]?.slug ?? null
       })
     } else if (obs.kind === 'failed') {
+      if (obs.error.kind === 'decode') setWikiIndex(null)
       setLoadError(obs.error.message)
     }
   }, [sort, tagFilter, sourceFilter, props.entityId])
@@ -144,14 +251,14 @@ export function WikiTab(props: WorkspaceViewProps) {
   const loadLint = useCallback((reason: 'mount' | 'manual') => {
     void resourceCache.fetch(
       'kn:wiki:lint',
-      (signal) => apiGetV2<WikiLintData>('/api/v1/wiki/lint', { signal }),
+      (signal) => apiGetV2<WikiLintData>('/api/v1/wiki/lint', { signal, decode: decodeWikiLintData }),
       { reason, topics: ['wiki', 'wiki_updated'] },
     )
   }, [])
   const loadLog = useCallback((reason: 'mount' | 'manual') => {
     void resourceCache.fetch(
       'kn:wiki:log',
-      (signal) => apiGetV2<WikiLogData>('/api/v1/wiki/log?limit=100', { signal }),
+      (signal) => apiGetV2<WikiLogData>('/api/v1/wiki/log?limit=100', { signal, decode: decodeWikiLogData }),
       { reason, topics: ['wiki', 'wiki_updated'] },
     )
   }, [])
@@ -176,7 +283,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     setSearching(true)
     const res = await apiGetV2<WikiSearchData>(
       `/api/v1/wiki/search?q=${encodeURIComponent(q)}&limit=30`,
-      { signal: ctrl.signal },
+      { signal: ctrl.signal, decode: decodeWikiSearchData },
     )
     if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) return
     setSearching(false)
@@ -184,6 +291,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       setLoadError(null)
       setSearchResult(res.value)
     } else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
+      if (res.error.kind === 'decode') setSearchResult(null)
       setLoadError(`위키 검색 실패: ${res.error.message}`)
     }
   }, [])
@@ -191,7 +299,10 @@ export function WikiTab(props: WorkspaceViewProps) {
   const loadPage = useCallback(async (slug: string, signal?: AbortSignal) => {
     const startEpoch = currentSessionEpoch()
     setPageError(null)
-    const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`, { signal })
+    const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`, {
+      signal,
+      decode: decodeWikiPageData,
+    })
     if (!mountedRef.current || signal?.aborted || !isEpochCurrent(startEpoch)) return null
     if (!res.ok) {
       setPageError(res.error.message)
@@ -291,8 +402,10 @@ export function WikiTab(props: WorkspaceViewProps) {
 
     if (!res.ok) {
       if (res.error.kind === 'conflict_cas' || res.error.status === 409 || res.error.code === 'conflict_cas') {
-        // Explicit 409 conflict_cas reload-and-diff recovery!
-        const latestRes = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(targetSlug)}`)
+        // Explicit 409 conflict_cas reload-and-diff recovery
+        const latestRes = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(targetSlug)}`, {
+          decode: decodeWikiPageData,
+        })
         if (latestRes.ok) {
           setCasConflict({
             serverPage: latestRes.value,
@@ -351,7 +464,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     return computeMarkdownLineDiff(casConflict.serverPage.body_markdown, casConflict.localBody)
   }, [casConflict])
 
-  const displayedPages = wikiIndex?.pages ?? []
+  const displayedPages = wikiIndex ? wikiIndex.pages : []
 
   const masterPane = html`
     <div class="kn-pane-col">
@@ -491,9 +604,11 @@ export function WikiTab(props: WorkspaceViewProps) {
             `
           : loading && !wikiIndex
             ? html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 인덱스 불러오는 중…</span></div>`
-            : html`
-                <${VirtualList}
-                  items=${displayedPages}
+            : loadError && !wikiIndex
+              ? null
+              : html`
+                  <${VirtualList}
+                    items=${displayedPages}
                   estimateSize=${76}
                   height="100%"
                   ariaLabel="Wiki 페이지 목록"

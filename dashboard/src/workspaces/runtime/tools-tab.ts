@@ -41,6 +41,7 @@ import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } fro
 import { KeeperBadge } from '../../components/keeper-badge'
 import { pushShellToast } from '../../shell/shell-state'
 import {
+  decodeToolMetricsSeriesPayload,
   formatCompactNumber,
   formatIsoTime,
   formatMs,
@@ -345,7 +346,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       seriesKey,
       (signal) => apiGet<ToolMetricsSeriesPayload>(
         `/api/v1/tool-metrics/series?since_hours=${sinceHours}&bucket=${bucket}&utc_offset_min=${utcOffsetMin}`,
-        { signal },
+        { signal, decode: decodeToolMetricsSeriesPayload },
       ),
       { ttlMs: 15_000, topics: ['tool_metrics', 'tools'], reason },
     )

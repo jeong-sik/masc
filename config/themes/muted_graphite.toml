@@ -1,0 +1,24 @@
+# Muted Graphite — neutral graphite with a soft blue accent.
+# See midnight.toml for the format. Floors: down-tone (shared stops).
+surface_0 = "#161718"
+surface_1 = "#1C1D1E"
+surface_2 = "#232526"
+border_subtle = "#2C2E30"
+border_inactive = "#424446"
+border_focused = "#70A4D0"
+text_bright = "#D0D2D3"
+text_primary = "#BEC0C1"
+text_secondary = "#A8ABAD"
+text_muted = "#979B9E"
+status_ok = "#70B08B"
+status_active = "#74A7D3"
+status_attention = "#C09D5A"
+status_critical = "#E08B8D"
+status_ai = "#B297D2"
+status_historical = "#9BA3AB"
+accent = "#74A7D3"
+selection_bg = "#2B3035"
+selection_fg = "#D0D2D3"
+cool_stops = ["#69AABA", "#7DB1DD", "#AFD4EA"]
+warm_stops = ["#A693C9", "#D494B8", "#EFBBC2"]
+ai_stops = ["#9F92C8", "#B89DD9", "#DBC8EA"]

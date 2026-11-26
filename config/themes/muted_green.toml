@@ -1,0 +1,24 @@
+# Muted Green — moss gray-green with a teal accent.
+# See midnight.toml for the format. Floors: down-tone (shared stops).
+surface_0 = "#121916"
+surface_1 = "#171F1C"
+surface_2 = "#1D2723"
+border_subtle = "#25312C"
+border_inactive = "#374841"
+border_focused = "#62ADAD"
+text_bright = "#CCD5D1"
+text_primary = "#B9C3BE"
+text_secondary = "#9FAFA8"
+text_muted = "#8BA097"
+status_ok = "#82AE78"
+status_active = "#63AFAE"
+status_attention = "#C19E5B"
+status_critical = "#E18B8D"
+status_ai = "#B397D3"
+status_historical = "#90A89D"
+accent = "#63AFAE"
+selection_bg = "#21342B"
+selection_fg = "#CCD5D1"
+cool_stops = ["#69AABA", "#7DB1DD", "#AFD4EA"]
+warm_stops = ["#A693C9", "#D494B8", "#EFBBC2"]
+ai_stops = ["#9F92C8", "#B89DD9", "#DBC8EA"]

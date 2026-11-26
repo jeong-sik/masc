@@ -1,0 +1,24 @@
+# Arcade Hi — High-Contrast Neon Midnight (v2.5 verified WCAG 2.1 AA)
+# See midnight.toml for the format. Floors: standard.
+surface_0 = "#070810"
+surface_1 = "#0E1020"
+surface_2 = "#171A32"
+border_subtle = "#252A4A"
+border_inactive = "#363E69"
+border_focused = "#38E8FF"
+text_bright = "#F6F8FF"
+text_primary = "#E0E5FA"
+text_secondary = "#A8B1D9"
+text_muted = "#8F99C4"
+status_ok = "#34F58C"
+status_active = "#38E8FF"
+status_attention = "#FFBF3C"
+status_critical = "#FF6B8A"
+status_ai = "#D28EFF"
+status_historical = "#97A1CA"
+accent = "#38E8FF"
+selection_bg = "#1D254A"
+selection_fg = "#F6F8FF"
+cool_stops = ["#00C2E0", "#38E8FF", "#CCF8FF"]
+warm_stops = ["#B86BFF", "#FF55CC", "#FFB3E6"]
+ai_stops = ["#B86BFF", "#D28EFF", "#F2D4FF"]

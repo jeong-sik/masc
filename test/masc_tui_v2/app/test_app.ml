@@ -82,6 +82,7 @@ let test_cli_info_flags () =
               "--base-path";
               "--url";
               "--theme";
+              "--themes-dir";
               "muted_graphite";
               "solarized_dark";
               "catppuccin_mocha";
@@ -675,6 +676,7 @@ let test_cmd_executor_auth_and_headers () =
           base_path = tmp;
           workspace = "test";
           theme = Theme.Midnight;
+          themes_dir = None;
           lang = Say.Lang_en;
           theme_explicit = false;
           lang_explicit = false;
@@ -779,6 +781,7 @@ let test_cmd_executor_dispatch_and_cancellation () =
       base_path = "/tmp";
       workspace = "test";
       theme = Theme.Midnight;
+      themes_dir = None;
       lang = Say.Lang_en;
       theme_explicit = false;
       lang_explicit = false;
@@ -2736,6 +2739,7 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
           base_path = fake_base;
           workspace = "test";
           theme = Theme.Midnight;
+          themes_dir = None;
           lang = Say.Lang_en;
           theme_explicit = false;
           lang_explicit = false;
@@ -3170,6 +3174,7 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
              base_path = "/tmp/masc-tui-async-wiki-test";
              workspace = "test";
              theme = Theme.Midnight;
+             themes_dir = None;
              lang = Say.Lang_en;
              theme_explicit = false;
              lang_explicit = false;

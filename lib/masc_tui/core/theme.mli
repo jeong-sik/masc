@@ -134,8 +134,80 @@ val preset_of_name : string -> preset option
 val equal_preset : preset -> preset -> bool
 
 val of_preset : preset -> t
+(** The theme of [preset]: built from its TOML override palette when one is
+    installed and from [builtin_palette] otherwise. The theme is built when
+    the overrides change, so a call returns a stored value and does no color
+    math. *)
+
 val default : t
-(** [of_preset Midnight]. *)
+(** Built-in Midnight, ignoring overrides. Live rendering must use
+    [of_preset] so a TOML override applies. *)
+
+module Palette : sig
+  type t = {
+    surface_0 : rgb;
+    surface_1 : rgb;
+    surface_2 : rgb;
+    border_subtle : rgb;
+    border_inactive : rgb;
+    border_focused : rgb;
+    text_bright : rgb;
+    text_primary : rgb;
+    text_secondary : rgb;
+    text_muted : rgb;
+    status_ok : rgb;
+    status_active : rgb;
+    status_attention : rgb;
+    status_critical : rgb;
+    status_ai : rgb;
+    status_historical : rgb;
+    accent : rgb;
+    selection_bg : rgb;
+    selection_fg : rgb;
+    cool_stops : rgb * rgb * rgb;
+    warm_stops : rgb * rgb * rgb;
+    ai_stops : rgb * rgb * rgb;
+  }
+end
+(** The raw palette of one preset before Oklab lifting. The field names are
+    the TOML key names in [config/themes/<preset>.toml]; a present key
+    overrides the built-in color, a missing key keeps it. The type lives in
+    its own module because [t] above has fields with the same names: declared
+    next to [t], these fields would hide the labels of [t]. *)
+
+val rgb_of_hex : string -> (rgb, string) result
+(** Parse ["#RRGGBB"] or ["RRGGBB"] (case-insensitive, surrounding blanks
+    ignored) into packed RGB. Anything else is [Error] with a reason; never
+    a default color. *)
+
+val rgb_to_hex : rgb -> string
+(** Uppercase ["#RRGGBB"] for [rgb]. *)
+
+val builtin_palette : preset -> Palette.t
+(** The compiled-in palette for [preset]. The seed files in
+    [config/themes/] carry the same values in TOML form; the file is the
+    editable copy and this value is the fallback when the file is absent. *)
+
+val of_palette : preset -> Palette.t -> t
+(** Build a theme from an explicit [palette], lifting text, status and
+    accent colors to the preset's WCAG floors ([text_floors]) exactly as
+    [of_preset] does for the built-in palette. *)
+
+val equal_palette : Palette.t -> Palette.t -> bool
+
+val set_palette_overrides : (preset * Palette.t) list -> unit
+(** Replace the TOML override registry with [overrides] and build the theme
+    of each overridden preset. A later entry for the same preset replaces an
+    earlier one. Call it after loading theme files; [of_preset] returns the
+    built theme from then on. An [of_preset] call that runs at the same time
+    returns the theme from before this call or from after it. *)
+
+val palette_override : preset -> Palette.t option
+(** The override currently installed for [preset], if any. *)
+
+val clear_palette_overrides : unit -> unit
+(** Empty the registry; [of_preset] returns to [builtin_palette] for every
+    preset. Intended for tests. *)
 
 val tier_fg : t -> typography_tier -> rgb
 (** Foreground RGB ink for the given 4-tier typographic role. *)

@@ -1,0 +1,24 @@
+# Muted — slate blue-gray, Midnight family with lower chroma and dimmer text.
+# See midnight.toml for the format. Floors: down-tone (shared stops).
+surface_0 = "#13181D"
+surface_1 = "#181D23"
+surface_2 = "#1F252C"
+border_subtle = "#272F37"
+border_inactive = "#3B4550"
+border_focused = "#70A4D0"
+text_bright = "#CDD3D8"
+text_primary = "#BAC0C8"
+text_secondary = "#A2ACB7"
+text_muted = "#8F9CAB"
+status_ok = "#70B08B"
+status_active = "#74A7D4"
+status_attention = "#C19D5A"
+status_critical = "#E08B8D"
+status_ai = "#B297D2"
+status_historical = "#94A4B4"
+accent = "#74A7D4"
+selection_bg = "#23313E"
+selection_fg = "#CDD3D8"
+cool_stops = ["#69AABA", "#7DB1DD", "#AFD4EA"]
+warm_stops = ["#A693C9", "#D494B8", "#EFBBC2"]
+ai_stops = ["#9F92C8", "#B89DD9", "#DBC8EA"]

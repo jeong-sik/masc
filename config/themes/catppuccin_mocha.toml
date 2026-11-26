@@ -1,0 +1,24 @@
+# Catppuccin Mocha — Catppuccin, MIT: https://github.com/catppuccin/palette
+# See midnight.toml for the format. Floors: aa. Colors below AA are lifted.
+surface_0 = "#1E1E2E"
+surface_1 = "#232333"
+surface_2 = "#28293A"
+border_subtle = "#313244"
+border_inactive = "#585B70"
+border_focused = "#B4BEFE"
+text_bright = "#CDD6F4"
+text_primary = "#BAC2DE"
+text_secondary = "#A6ADC8"
+text_muted = "#9399B2"
+status_ok = "#A6E3A1"
+status_active = "#89B4FA"
+status_attention = "#F9E2AF"
+status_critical = "#F38BA8"
+status_ai = "#CBA6F7"
+status_historical = "#7F849C"
+accent = "#89B4FA"
+selection_bg = "#343547"
+selection_fg = "#CDD6F4"
+cool_stops = ["#74C7EC", "#89B4FA", "#ABC5F8"]
+warm_stops = ["#CBA6F7", "#F5C2E7", "#F2CDCD"]
+ai_stops = ["#B4BEFE", "#CBA6F7", "#F5C2E7"]

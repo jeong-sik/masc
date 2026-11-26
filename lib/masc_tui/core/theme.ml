@@ -71,6 +71,33 @@ type t = {
   gradient_ai_flow : rgb array;
 }
 
+module Palette = struct
+  type t = {
+    surface_0 : rgb;
+    surface_1 : rgb;
+    surface_2 : rgb;
+    border_subtle : rgb;
+    border_inactive : rgb;
+    border_focused : rgb;
+    text_bright : rgb;
+    text_primary : rgb;
+    text_secondary : rgb;
+    text_muted : rgb;
+    status_ok : rgb;
+    status_active : rgb;
+    status_attention : rgb;
+    status_critical : rgb;
+    status_ai : rgb;
+    status_historical : rgb;
+    accent : rgb;
+    selection_bg : rgb;
+    selection_fg : rgb;
+    cool_stops : rgb * rgb * rgb;
+    warm_stops : rgb * rgb * rgb;
+    ai_stops : rgb * rgb * rgb;
+  }
+end
+
 let clamp_byte v = Int.max 0 (Int.min 255 v)
 
 let make_rgb ~r ~g ~b =
@@ -79,6 +106,34 @@ let make_rgb ~r ~g ~b =
 let red c = (c lsr 16) land 0xFF
 let green c = (c lsr 8) land 0xFF
 let blue c = c land 0xFF
+
+let rgb_to_hex color = Printf.sprintf "#%06X" (color land 0xFFFFFF)
+
+let hex_nibble = function
+  | '0'..'9' as ch -> Char.code ch - Char.code '0'
+  | 'a'..'f' as ch -> 10 + (Char.code ch - Char.code 'a')
+  | 'A'..'F' as ch -> 10 + (Char.code ch - Char.code 'A')
+  | _ -> -1
+
+let rgb_of_hex raw =
+  let s = String.trim raw in
+  let hex =
+    if String.length s > 0 && Char.equal s.[0] '#'
+    then String.sub s 1 (String.length s - 1)
+    else s
+  in
+  if String.length hex <> 6 then
+    Error (Printf.sprintf "expected #RRGGBB, got %S" raw)
+  else
+    let nibbles = Array.init 6 (fun i -> hex_nibble hex.[i]) in
+    if Array.exists (fun n -> n < 0) nibbles then
+      Error (Printf.sprintf "non-hex digit in %S" raw)
+    else
+      let digit i = nibbles.(i) in
+      Ok
+        ((digit 0 * 16 + digit 1) lsl 16
+        lor ((digit 2 * 16 + digit 3) lsl 8)
+        lor (digit 4 * 16 + digit 5))
 
 let channel_max = 255.
 let of_byte value = float_of_int value /. channel_max
@@ -366,257 +421,312 @@ let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
     gradient_ai_flow;
   }
 
-(* Preset 1: Midnight — Linear Dark x Obsidian Slate (v2.5 verified WCAG 2.1 AA) *)
-let midnight_theme =
-  build_theme
-    ~preset:Midnight
-    ~surface_0:0x0B0E14
-    ~surface_1:0x11161F
-    ~surface_2:0x18202C
-    ~border_subtle:0x232D3D
-    ~border_inactive:0x323F54
-    ~border_focused:0x58A6FF
-    ~text_bright:0xF3F6FA
-    ~text_primary:0xDCE3EC
-    ~text_secondary:0xA4B5C9
-    ~text_muted:0x8698AE
-    ~status_ok:0x34D399
-    ~status_active:0x60B5FF
-    ~status_attention:0xFBBF24
-    ~status_critical:0xFB7185
-    ~status_ai:0xC084FC
-    ~status_historical:0x8E9FB5
-    ~accent:0x60B5FF
-    ~selection_bg:0x1D2C42
-    ~selection_fg:0xF3F6FA
-    ~cool_stops:(0x38BDF8, 0x60B5FF, 0xBAE6FD)
-    ~warm_stops:(0xA78BFA, 0xE879F9, 0xFDA4AF)
-    ~ai_stops:(0xA78BFA, 0xC084FC, 0xE9D5FF)
+let of_palette preset (palette : Palette.t) =
+  let open Palette in
+  build_theme ~preset
+    ~surface_0:palette.surface_0
+    ~surface_1:palette.surface_1
+    ~surface_2:palette.surface_2
+    ~border_subtle:palette.border_subtle
+    ~border_inactive:palette.border_inactive
+    ~border_focused:palette.border_focused
+    ~text_bright:palette.text_bright
+    ~text_primary:palette.text_primary
+    ~text_secondary:palette.text_secondary
+    ~text_muted:palette.text_muted
+    ~status_ok:palette.status_ok
+    ~status_active:palette.status_active
+    ~status_attention:palette.status_attention
+    ~status_critical:palette.status_critical
+    ~status_ai:palette.status_ai
+    ~status_historical:palette.status_historical
+    ~accent:palette.accent
+    ~selection_bg:palette.selection_bg
+    ~selection_fg:palette.selection_fg
+    ~cool_stops:palette.cool_stops
+    ~warm_stops:palette.warm_stops
+    ~ai_stops:palette.ai_stops
 
-(* Preset 2: Arcade_hi — High-Contrast Neon Midnight (v2.5 verified WCAG 2.1 AA) *)
-let arcade_hi_theme =
-  build_theme
-    ~preset:Arcade_hi
-    ~surface_0:0x070810
-    ~surface_1:0x0E1020
-    ~surface_2:0x171A32
-    ~border_subtle:0x252A4A
-    ~border_inactive:0x363E69
-    ~border_focused:0x38E8FF
-    ~text_bright:0xF6F8FF
-    ~text_primary:0xE0E5FA
-    ~text_secondary:0xA8B1D9
-    ~text_muted:0x8F99C4
-    ~status_ok:0x34F58C
-    ~status_active:0x38E8FF
-    ~status_attention:0xFFBF3C
-    ~status_critical:0xFF6B8A
-    ~status_ai:0xD28EFF
-    ~status_historical:0x97A1CA
-    ~accent:0x38E8FF
-    ~selection_bg:0x1D254A
-    ~selection_fg:0xF6F8FF
-    ~cool_stops:(0x00C2E0, 0x38E8FF, 0xCCF8FF)
-    ~warm_stops:(0xB86BFF, 0xFF55CC, 0xFFB3E6)
-    ~ai_stops:(0xB86BFF, 0xD28EFF, 0xF2D4FF)
+let equal_palette (a : Palette.t) (b : Palette.t) =
+  let open Palette in
+  Int.equal a.surface_0 b.surface_0
+  && Int.equal a.surface_1 b.surface_1
+  && Int.equal a.surface_2 b.surface_2
+  && Int.equal a.border_subtle b.border_subtle
+  && Int.equal a.border_inactive b.border_inactive
+  && Int.equal a.border_focused b.border_focused
+  && Int.equal a.text_bright b.text_bright
+  && Int.equal a.text_primary b.text_primary
+  && Int.equal a.text_secondary b.text_secondary
+  && Int.equal a.text_muted b.text_muted
+  && Int.equal a.status_ok b.status_ok
+  && Int.equal a.status_active b.status_active
+  && Int.equal a.status_attention b.status_attention
+  && Int.equal a.status_critical b.status_critical
+  && Int.equal a.status_ai b.status_ai
+  && Int.equal a.status_historical b.status_historical
+  && Int.equal a.accent b.accent
+  && Int.equal a.selection_bg b.selection_bg
+  && Int.equal a.selection_fg b.selection_fg
+  && (let c, c1, c2 = a.cool_stops and d, d1, d2 = b.cool_stops in
+      Int.equal c d && Int.equal c1 d1 && Int.equal c2 d2)
+  && (let c, c1, c2 = a.warm_stops and d, d1, d2 = b.warm_stops in
+      Int.equal c d && Int.equal c1 d1 && Int.equal c2 d2)
+  && (let c, c1, c2 = a.ai_stops and d, d1, d2 = b.ai_stops in
+      Int.equal c d && Int.equal c1 d1 && Int.equal c2 d2)
 
-(* Preset 3: Paper_light — Daylight Editorial (v2.5 verified WCAG 2.1 AA) *)
-let paper_light_theme =
-  build_theme
-    ~preset:Paper_light
-    ~surface_0:0xF7F8FA
-    ~surface_1:0xFFFFFF
-    ~surface_2:0xECEFF5
-    ~border_subtle:0xDDE3EC
-    ~border_inactive:0xBCC6D6
-    ~border_focused:0x0369A1
-    ~text_bright:0x0B1220
-    ~text_primary:0x1E293B
-    ~text_secondary:0x435064
-    ~text_muted:0x556275
-    ~status_ok:0x0F7645
-    ~status_active:0x0369A1
-    ~status_attention:0xA15206
-    ~status_critical:0xBE123C
-    ~status_ai:0x7C3AED
-    ~status_historical:0x556275
-    ~accent:0x0369A1
-    ~selection_bg:0xE2ECF9
-    ~selection_fg:0x0B1220
-    ~cool_stops:(0x075985, 0x0369A1, 0x0284C7)
-    ~warm_stops:(0x6D28D9, 0xA21CAF, 0xBE123C)
-    ~ai_stops:(0x5B21B6, 0x7C3AED, 0x9333EA)
-
-(* Preset 4: Mono — Pure Typographic Grayscale (v2.5 verified WCAG 2.1 AA) *)
-let mono_theme =
-  build_theme
-    ~preset:Mono
-    ~surface_0:0x0A0A0B
-    ~surface_1:0x121214
-    ~surface_2:0x1B1B1F
-    ~border_subtle:0x2A2A30
-    ~border_inactive:0x3D3D46
-    ~border_focused:0xE4E4E7
-    ~text_bright:0xFAFAFA
-    ~text_primary:0xE4E4E7
-    ~text_secondary:0xB4B4BC
-    ~text_muted:0x9898A3
-    ~status_ok:0xE4E4E7
-    ~status_active:0xD4D4DC
-    ~status_attention:0xF4F4F5
-    ~status_critical:0xFFFFFF
-    ~status_ai:0xC8C8D2
-    ~status_historical:0x9A9AA5
-    ~accent:0xFAFAFA
-    ~selection_bg:0x24242A
-    ~selection_fg:0xFAFAFA
-    ~cool_stops:(0xA1A1AA, 0xD4D4D8, 0xFAFAFA)
-    ~warm_stops:(0xB4B4BC, 0xE4E4E7, 0xFFFFFF)
-    ~ai_stops:(0x9A9AA5, 0xC8C8D2, 0xF4F4F5)
-
-(* Presets 5 to 9: the down-tone family. All five use [down_tone_floors] and
-   differ in the hue of surfaces, borders, text and accent. Gradient stops carry
-   a meaning (cool, warm, AI flow) and no surface tint, so the family shares
-   them. *)
+(* Built-in palettes. The editable copies live in [config/themes/<preset>.toml]
+   with the same values; this is the fallback when the file is absent. *)
 let down_tone_cool_stops = (0x69AABA, 0x7DB1DD, 0xAFD4EA)
 let down_tone_warm_stops = (0xA693C9, 0xD494B8, 0xEFBBC2)
 let down_tone_ai_stops = (0x9F92C8, 0xB89DD9, 0xDBC8EA)
 
-(* Preset 5: Muted: slate blue-gray, the Midnight family with lower chroma and
-   dimmer text. *)
-let muted_theme =
-  build_theme
-    ~preset:Muted
-    ~surface_0:0x13181D
-    ~surface_1:0x181D23
-    ~surface_2:0x1F252C
-    ~border_subtle:0x272F37
-    ~border_inactive:0x3B4550
-    ~border_focused:0x70A4D0
-    ~text_bright:0xCDD3D8
-    ~text_primary:0xBAC0C8
-    ~text_secondary:0xA2ACB7
-    ~text_muted:0x8F9CAB
-    ~status_ok:0x70B08B
-    ~status_active:0x74A7D4
-    ~status_attention:0xC19D5A
-    ~status_critical:0xE08B8D
-    ~status_ai:0xB297D2
-    ~status_historical:0x94A4B4
-    ~accent:0x74A7D4
-    ~selection_bg:0x23313E
-    ~selection_fg:0xCDD3D8
-    ~cool_stops:down_tone_cool_stops
-    ~warm_stops:down_tone_warm_stops
-    ~ai_stops:down_tone_ai_stops
+let builtin_palette =
+  let open Palette in
+  function
+  (* Preset 1: Midnight — Linear Dark x Obsidian Slate (v2.5 verified WCAG 2.1 AA) *)
+  | Midnight ->
+      {
+        surface_0 = 0x0B0E14;
+        surface_1 = 0x11161F;
+        surface_2 = 0x18202C;
+        border_subtle = 0x232D3D;
+        border_inactive = 0x323F54;
+        border_focused = 0x58A6FF;
+        text_bright = 0xF3F6FA;
+        text_primary = 0xDCE3EC;
+        text_secondary = 0xA4B5C9;
+        text_muted = 0x8698AE;
+        status_ok = 0x34D399;
+        status_active = 0x60B5FF;
+        status_attention = 0xFBBF24;
+        status_critical = 0xFB7185;
+        status_ai = 0xC084FC;
+        status_historical = 0x8E9FB5;
+        accent = 0x60B5FF;
+        selection_bg = 0x1D2C42;
+        selection_fg = 0xF3F6FA;
+        cool_stops = (0x38BDF8, 0x60B5FF, 0xBAE6FD);
+        warm_stops = (0xA78BFA, 0xE879F9, 0xFDA4AF);
+        ai_stops = (0xA78BFA, 0xC084FC, 0xE9D5FF);
+      }
+  (* Preset 2: Arcade_hi — High-Contrast Neon Midnight (v2.5 verified WCAG 2.1 AA) *)
+  | Arcade_hi ->
+      {
+        surface_0 = 0x070810;
+        surface_1 = 0x0E1020;
+        surface_2 = 0x171A32;
+        border_subtle = 0x252A4A;
+        border_inactive = 0x363E69;
+        border_focused = 0x38E8FF;
+        text_bright = 0xF6F8FF;
+        text_primary = 0xE0E5FA;
+        text_secondary = 0xA8B1D9;
+        text_muted = 0x8F99C4;
+        status_ok = 0x34F58C;
+        status_active = 0x38E8FF;
+        status_attention = 0xFFBF3C;
+        status_critical = 0xFF6B8A;
+        status_ai = 0xD28EFF;
+        status_historical = 0x97A1CA;
+        accent = 0x38E8FF;
+        selection_bg = 0x1D254A;
+        selection_fg = 0xF6F8FF;
+        cool_stops = (0x00C2E0, 0x38E8FF, 0xCCF8FF);
+        warm_stops = (0xB86BFF, 0xFF55CC, 0xFFB3E6);
+        ai_stops = (0xB86BFF, 0xD28EFF, 0xF2D4FF);
+      }
+  (* Preset 3: Paper_light — Daylight Editorial (v2.5 verified WCAG 2.1 AA) *)
+  | Paper_light ->
+      {
+        surface_0 = 0xF7F8FA;
+        surface_1 = 0xFFFFFF;
+        surface_2 = 0xECEFF5;
+        border_subtle = 0xDDE3EC;
+        border_inactive = 0xBCC6D6;
+        border_focused = 0x0369A1;
+        text_bright = 0x0B1220;
+        text_primary = 0x1E293B;
+        text_secondary = 0x435064;
+        text_muted = 0x556275;
+        status_ok = 0x0F7645;
+        status_active = 0x0369A1;
+        status_attention = 0xA15206;
+        status_critical = 0xBE123C;
+        status_ai = 0x7C3AED;
+        status_historical = 0x556275;
+        accent = 0x0369A1;
+        selection_bg = 0xE2ECF9;
+        selection_fg = 0x0B1220;
+        cool_stops = (0x075985, 0x0369A1, 0x0284C7);
+        warm_stops = (0x6D28D9, 0xA21CAF, 0xBE123C);
+        ai_stops = (0x5B21B6, 0x7C3AED, 0x9333EA);
+      }
+  (* Preset 4: Mono — Pure Typographic Grayscale (v2.5 verified WCAG 2.1 AA) *)
+  | Mono ->
+      {
+        surface_0 = 0x0A0A0B;
+        surface_1 = 0x121214;
+        surface_2 = 0x1B1B1F;
+        border_subtle = 0x2A2A30;
+        border_inactive = 0x3D3D46;
+        border_focused = 0xE4E4E7;
+        text_bright = 0xFAFAFA;
+        text_primary = 0xE4E4E7;
+        text_secondary = 0xB4B4BC;
+        text_muted = 0x9898A3;
+        status_ok = 0xE4E4E7;
+        status_active = 0xD4D4DC;
+        status_attention = 0xF4F4F5;
+        status_critical = 0xFFFFFF;
+        status_ai = 0xC8C8D2;
+        status_historical = 0x9A9AA5;
+        accent = 0xFAFAFA;
+        selection_bg = 0x24242A;
+        selection_fg = 0xFAFAFA;
+        cool_stops = (0xA1A1AA, 0xD4D4D8, 0xFAFAFA);
+        warm_stops = (0xB4B4BC, 0xE4E4E7, 0xFFFFFF);
+        ai_stops = (0x9A9AA5, 0xC8C8D2, 0xF4F4F5);
+      }
 
-(* Preset 6: Muted Warm: warm gray-brown with a teal accent *)
-let muted_warm_theme =
-  build_theme
-    ~preset:Muted_warm
-    ~surface_0:0x1B1611
-    ~surface_1:0x211C16
-    ~surface_2:0x2A231C
-    ~border_subtle:0x342C24
-    ~border_inactive:0x4C4136
-    ~border_focused:0x62ACB5
-    ~text_bright:0xD5D0CA
-    ~text_primary:0xC4BDB7
-    ~text_secondary:0xB2A89C
-    ~text_muted:0xA59889
-    ~status_ok:0x6FAF8A
-    ~status_active:0x62ADB5
-    ~status_attention:0xBF9C59
-    ~status_critical:0xDF8A8C
-    ~status_ai:0xB196D1
-    ~status_historical:0xAF9F8E
-    ~accent:0x62ADB5
-    ~selection_bg:0x3A2C1F
-    ~selection_fg:0xD5D0CA
-    ~cool_stops:down_tone_cool_stops
-    ~warm_stops:down_tone_warm_stops
-    ~ai_stops:down_tone_ai_stops
+  (* Presets 5 to 9: the down-tone family. All five use [down_tone_floors] and
+     differ in the hue of surfaces, borders, text and accent. Gradient stops carry
+     a meaning (cool, warm, AI flow) and no surface tint, so the family shares
+     them. *)
+  (* Preset 5: Muted: slate blue-gray, the Midnight family with lower chroma and
+     dimmer text. *)
+  | Muted ->
+      {
+        surface_0 = 0x13181D;
+        surface_1 = 0x181D23;
+        surface_2 = 0x1F252C;
+        border_subtle = 0x272F37;
+        border_inactive = 0x3B4550;
+        border_focused = 0x70A4D0;
+        text_bright = 0xCDD3D8;
+        text_primary = 0xBAC0C8;
+        text_secondary = 0xA2ACB7;
+        text_muted = 0x8F9CAB;
+        status_ok = 0x70B08B;
+        status_active = 0x74A7D4;
+        status_attention = 0xC19D5A;
+        status_critical = 0xE08B8D;
+        status_ai = 0xB297D2;
+        status_historical = 0x94A4B4;
+        accent = 0x74A7D4;
+        selection_bg = 0x23313E;
+        selection_fg = 0xCDD3D8;
+        cool_stops = down_tone_cool_stops;
+        warm_stops = down_tone_warm_stops;
+        ai_stops = down_tone_ai_stops;
+      }
+  (* Preset 6: Muted Warm: warm gray-brown with a teal accent *)
+  | Muted_warm ->
+      {
+        surface_0 = 0x1B1611;
+        surface_1 = 0x211C16;
+        surface_2 = 0x2A231C;
+        border_subtle = 0x342C24;
+        border_inactive = 0x4C4136;
+        border_focused = 0x62ACB5;
+        text_bright = 0xD5D0CA;
+        text_primary = 0xC4BDB7;
+        text_secondary = 0xB2A89C;
+        text_muted = 0xA59889;
+        status_ok = 0x6FAF8A;
+        status_active = 0x62ADB5;
+        status_attention = 0xBF9C59;
+        status_critical = 0xDF8A8C;
+        status_ai = 0xB196D1;
+        status_historical = 0xAF9F8E;
+        accent = 0x62ADB5;
+        selection_bg = 0x3A2C1F;
+        selection_fg = 0xD5D0CA;
+        cool_stops = down_tone_cool_stops;
+        warm_stops = down_tone_warm_stops;
+        ai_stops = down_tone_ai_stops;
+      }
 
-(* Preset 7: Muted Green: moss gray-green with a teal accent *)
-let muted_green_theme =
-  build_theme
-    ~preset:Muted_green
-    ~surface_0:0x121916
-    ~surface_1:0x171F1C
-    ~surface_2:0x1D2723
-    ~border_subtle:0x25312C
-    ~border_inactive:0x374841
-    ~border_focused:0x62ADAD
-    ~text_bright:0xCCD5D1
-    ~text_primary:0xB9C3BE
-    ~text_secondary:0x9FAFA8
-    ~text_muted:0x8BA097
-    ~status_ok:0x82AE78
-    ~status_active:0x63AFAE
-    ~status_attention:0xC19E5B
-    ~status_critical:0xE18B8D
-    ~status_ai:0xB397D3
-    ~status_historical:0x90A89D
-    ~accent:0x63AFAE
-    ~selection_bg:0x21342B
-    ~selection_fg:0xCCD5D1
-    ~cool_stops:down_tone_cool_stops
-    ~warm_stops:down_tone_warm_stops
-    ~ai_stops:down_tone_ai_stops
+  (* Preset 7: Muted Green: moss gray-green with a teal accent *)
+  | Muted_green ->
+      {
+        surface_0 = 0x121916;
+        surface_1 = 0x171F1C;
+        surface_2 = 0x1D2723;
+        border_subtle = 0x25312C;
+        border_inactive = 0x374841;
+        border_focused = 0x62ADAD;
+        text_bright = 0xCCD5D1;
+        text_primary = 0xB9C3BE;
+        text_secondary = 0x9FAFA8;
+        text_muted = 0x8BA097;
+        status_ok = 0x82AE78;
+        status_active = 0x63AFAE;
+        status_attention = 0xC19E5B;
+        status_critical = 0xE18B8D;
+        status_ai = 0xB397D3;
+        status_historical = 0x90A89D;
+        accent = 0x63AFAE;
+        selection_bg = 0x21342B;
+        selection_fg = 0xCCD5D1;
+        cool_stops = down_tone_cool_stops;
+        warm_stops = down_tone_warm_stops;
+        ai_stops = down_tone_ai_stops;
+      }
 
-(* Preset 8: Muted Dusk: purple-gray with a periwinkle accent *)
-let muted_dusk_theme =
-  build_theme
-    ~preset:Muted_dusk
-    ~surface_0:0x18161C
-    ~surface_1:0x1E1B22
-    ~surface_2:0x26232B
-    ~border_subtle:0x302C35
-    ~border_inactive:0x47414E
-    ~border_focused:0x829FD4
-    ~text_bright:0xD2CFD6
-    ~text_primary:0xC0BDC5
-    ~text_secondary:0xADA7B4
-    ~text_muted:0x9E97A8
-    ~status_ok:0x6FAE8A
-    ~status_active:0x84A2D7
-    ~status_attention:0xBF9C59
-    ~status_critical:0xDF898C
-    ~status_ai:0xB196D1
-    ~status_historical:0xA69EB1
-    ~accent:0x84A2D7
-    ~selection_bg:0x312C3C
-    ~selection_fg:0xD2CFD6
-    ~cool_stops:down_tone_cool_stops
-    ~warm_stops:down_tone_warm_stops
-    ~ai_stops:down_tone_ai_stops
+  (* Preset 8: Muted Dusk: purple-gray with a periwinkle accent *)
+  | Muted_dusk ->
+      {
+        surface_0 = 0x18161C;
+        surface_1 = 0x1E1B22;
+        surface_2 = 0x26232B;
+        border_subtle = 0x302C35;
+        border_inactive = 0x47414E;
+        border_focused = 0x829FD4;
+        text_bright = 0xD2CFD6;
+        text_primary = 0xC0BDC5;
+        text_secondary = 0xADA7B4;
+        text_muted = 0x9E97A8;
+        status_ok = 0x6FAE8A;
+        status_active = 0x84A2D7;
+        status_attention = 0xBF9C59;
+        status_critical = 0xDF898C;
+        status_ai = 0xB196D1;
+        status_historical = 0xA69EB1;
+        accent = 0x84A2D7;
+        selection_bg = 0x312C3C;
+        selection_fg = 0xD2CFD6;
+        cool_stops = down_tone_cool_stops;
+        warm_stops = down_tone_warm_stops;
+        ai_stops = down_tone_ai_stops;
+      }
 
-(* Preset 9: Muted Graphite: neutral graphite with a soft blue accent *)
-let muted_graphite_theme =
-  build_theme
-    ~preset:Muted_graphite
-    ~surface_0:0x161718
-    ~surface_1:0x1C1D1E
-    ~surface_2:0x232526
-    ~border_subtle:0x2C2E30
-    ~border_inactive:0x424446
-    ~border_focused:0x70A4D0
-    ~text_bright:0xD0D2D3
-    ~text_primary:0xBEC0C1
-    ~text_secondary:0xA8ABAD
-    ~text_muted:0x979B9E
-    ~status_ok:0x70B08B
-    ~status_active:0x74A7D3
-    ~status_attention:0xC09D5A
-    ~status_critical:0xE08B8D
-    ~status_ai:0xB297D2
-    ~status_historical:0x9BA3AB
-    ~accent:0x74A7D3
-    ~selection_bg:0x2B3035
-    ~selection_fg:0xD0D2D3
-    ~cool_stops:down_tone_cool_stops
-    ~warm_stops:down_tone_warm_stops
-    ~ai_stops:down_tone_ai_stops
+  (* Preset 9: Muted Graphite: neutral graphite with a soft blue accent *)
+  | Muted_graphite ->
+      {
+        surface_0 = 0x161718;
+        surface_1 = 0x1C1D1E;
+        surface_2 = 0x232526;
+        border_subtle = 0x2C2E30;
+        border_inactive = 0x424446;
+        border_focused = 0x70A4D0;
+        text_bright = 0xD0D2D3;
+        text_primary = 0xBEC0C1;
+        text_secondary = 0xA8ABAD;
+        text_muted = 0x979B9E;
+        status_ok = 0x70B08B;
+        status_active = 0x74A7D3;
+        status_attention = 0xC09D5A;
+        status_critical = 0xE08B8D;
+        status_ai = 0xB297D2;
+        status_historical = 0x9BA3AB;
+        accent = 0x74A7D3;
+        selection_bg = 0x2B3035;
+        selection_fg = 0xD0D2D3;
+        cool_stops = down_tone_cool_stops;
+        warm_stops = down_tone_warm_stops;
+        ai_stops = down_tone_ai_stops;
+      }
 
 (* Presets 10 to 14: palettes published by their authors. Each color is the
    author's hex value, or an Oklab mix of two of them for a role the palette
@@ -635,146 +745,146 @@ let muted_graphite_theme =
    by [build_theme], so the color on screen can be lighter than the one written
    here. *)
 
-(* Preset 10: Solarized Dark. The text tiers are base2, base1, base0 and base01,
-   one step brighter than Solarized's own roles (base1 emphasis, base0 body,
-   base01 comments). Solarized's body and comment colors are below AA on the
-   lighter surfaces, so [build_theme] lifts primary, secondary and muted to
-   about 4.5:1 and the three end up close in brightness. *)
-let solarized_dark_theme =
-  build_theme
-    ~preset:Solarized_dark
-    ~surface_0:0x002B36 (* base03 *)
-    ~surface_1:0x012E39 (* base03 to base02, 25% *)
-    ~surface_2:0x03313D (* base03 to base02, 55% *)
-    ~border_subtle:0x234651 (* base02 to base01, 30% *)
-    ~border_inactive:0x586E75 (* base01 *)
-    ~border_focused:0x268BD2 (* blue *)
-    ~text_bright:0xEEE8D5 (* base2 *)
-    ~text_primary:0x93A1A1 (* base1 *)
-    ~text_secondary:0x839496 (* base0 *)
-    ~text_muted:0x586E75 (* base01 *)
-    ~status_ok:0x859900 (* green *)
-    ~status_active:0x268BD2 (* blue *)
-    ~status_attention:0xB58900 (* yellow *)
-    ~status_critical:0xDC322F (* red *)
-    ~status_ai:0x6C71C4 (* violet *)
-    ~status_historical:0x657B83 (* base00 *)
-    ~accent:0x268BD2 (* blue *)
-    ~selection_bg:0x093E4F (* base02 to blue, 10% *)
-    ~selection_fg:0xEEE8D5 (* base2 *)
-    ~cool_stops:(0x2AA198, 0x268BD2, 0x93BBD7) (* cyan; blue; blue to base2, 50% *)
-    ~warm_stops:(0x6C71C4, 0xD33682, 0xEA7D6B) (* violet; magenta; red to base2, 35% *)
-    ~ai_stops:(0x6C71C4, 0xA55EA4, 0xA3A7CF) (* violet; violet to magenta, 50%; violet to base2, 45% *)
+  (* Preset 10: Solarized Dark. The text tiers are base2, base1, base0 and base01,
+     one step brighter than Solarized's own roles (base1 emphasis, base0 body,
+     base01 comments). Solarized's body and comment colors are below AA on the
+     lighter surfaces, so [build_theme] lifts primary, secondary and muted to
+     about 4.5:1 and the three end up close in brightness. *)
+  | Solarized_dark ->
+      {
+        surface_0 = 0x002B36 (* base03 *);
+        surface_1 = 0x012E39 (* base03 to base02, 25% *);
+        surface_2 = 0x03313D (* base03 to base02, 55% *);
+        border_subtle = 0x234651 (* base02 to base01, 30% *);
+        border_inactive = 0x586E75 (* base01 *);
+        border_focused = 0x268BD2 (* blue *);
+        text_bright = 0xEEE8D5 (* base2 *);
+        text_primary = 0x93A1A1 (* base1 *);
+        text_secondary = 0x839496 (* base0 *);
+        text_muted = 0x586E75 (* base01 *);
+        status_ok = 0x859900 (* green *);
+        status_active = 0x268BD2 (* blue *);
+        status_attention = 0xB58900 (* yellow *);
+        status_critical = 0xDC322F (* red *);
+        status_ai = 0x6C71C4 (* violet *);
+        status_historical = 0x657B83 (* base00 *);
+        accent = 0x268BD2 (* blue *);
+        selection_bg = 0x093E4F (* base02 to blue, 10% *);
+        selection_fg = 0xEEE8D5 (* base2 *);
+        cool_stops = (0x2AA198, 0x268BD2, 0x93BBD7); (* cyan; blue; blue to base2, 50% *)
+        warm_stops = (0x6C71C4, 0xD33682, 0xEA7D6B); (* violet; magenta; red to base2, 35% *)
+        ai_stops = (0x6C71C4, 0xA55EA4, 0xA3A7CF); (* violet; violet to magenta, 50%; violet to base2, 45% *)
+      }
 
-(* Preset 11: Nord. Polar Night surfaces, Snow Storm text, Frost and Aurora accents. *)
-let nord_theme =
-  build_theme
-    ~preset:Nord
-    ~surface_0:0x2E3440 (* nord0 *)
-    ~surface_1:0x313744 (* nord0 to nord1, 25% *)
-    ~surface_2:0x353C4A (* nord0 to nord1, 55% *)
-    ~border_subtle:0x434C5E (* nord2 *)
-    ~border_inactive:0x4C566A (* nord3 *)
-    ~border_focused:0x88C0D0 (* nord8 *)
-    ~text_bright:0xECEFF4 (* nord6 *)
-    ~text_primary:0xD8DEE9 (* nord4 *)
-    ~text_secondary:0xBDC4D1 (* nord4 to nord3, 18% *)
-    ~text_muted:0xA0A8B7 (* nord4 to nord3, 38% *)
-    ~status_ok:0xA3BE8C (* nord14 *)
-    ~status_active:0x88C0D0 (* nord8 *)
-    ~status_attention:0xEBCB8B (* nord13 *)
-    ~status_critical:0xBF616A (* nord11 *)
-    ~status_ai:0xB48EAD (* nord15 *)
-    ~status_historical:0x8F97A7 (* nord4 to nord3, 50% *)
-    ~accent:0x88C0D0 (* nord8 *)
-    ~selection_bg:0x3F4758 (* nord1 to nord2, 50% *)
-    ~selection_fg:0xECEFF4 (* nord6 *)
-    ~cool_stops:(0x8FBCBB, 0x88C0D0, 0xBBD8E2) (* nord7; nord8; nord8 to nord6, 50% *)
-    ~warm_stops:(0xB48EAD, 0xBF616A, 0xD08770) (* nord15; nord11; nord12 *)
-    ~ai_stops:(0x5E81AC, 0xB48EAD, 0xCEB9CD) (* nord10; nord15; nord15 to nord6, 45% *)
+  (* Preset 11: Nord. Polar Night surfaces, Snow Storm text, Frost and Aurora accents. *)
+  | Nord ->
+      {
+        surface_0 = 0x2E3440 (* nord0 *);
+        surface_1 = 0x313744 (* nord0 to nord1, 25% *);
+        surface_2 = 0x353C4A (* nord0 to nord1, 55% *);
+        border_subtle = 0x434C5E (* nord2 *);
+        border_inactive = 0x4C566A (* nord3 *);
+        border_focused = 0x88C0D0 (* nord8 *);
+        text_bright = 0xECEFF4 (* nord6 *);
+        text_primary = 0xD8DEE9 (* nord4 *);
+        text_secondary = 0xBDC4D1 (* nord4 to nord3, 18% *);
+        text_muted = 0xA0A8B7 (* nord4 to nord3, 38% *);
+        status_ok = 0xA3BE8C (* nord14 *);
+        status_active = 0x88C0D0 (* nord8 *);
+        status_attention = 0xEBCB8B (* nord13 *);
+        status_critical = 0xBF616A (* nord11 *);
+        status_ai = 0xB48EAD (* nord15 *);
+        status_historical = 0x8F97A7 (* nord4 to nord3, 50% *);
+        accent = 0x88C0D0 (* nord8 *);
+        selection_bg = 0x3F4758 (* nord1 to nord2, 50% *);
+        selection_fg = 0xECEFF4 (* nord6 *);
+        cool_stops = (0x8FBCBB, 0x88C0D0, 0xBBD8E2); (* nord7; nord8; nord8 to nord6, 50% *)
+        warm_stops = (0xB48EAD, 0xBF616A, 0xD08770); (* nord15; nord11; nord12 *)
+        ai_stops = (0x5E81AC, 0xB48EAD, 0xCEB9CD); (* nord10; nord15; nord15 to nord6, 45% *)
+      }
 
-(* Preset 12: Dracula. The comment color is below AA, so muted text and the
-   historical status are lifted. *)
-let dracula_theme =
-  build_theme
-    ~preset:Dracula
-    ~surface_0:0x282A36 (* background *)
-    ~surface_1:0x2D303D (* background to current_line, 20% *)
-    ~surface_2:0x333544 (* background to current_line, 40% *)
-    ~border_subtle:0x3D4051 (* background to current_line, 75% *)
-    ~border_inactive:0x4E5673 (* current_line to comment, 35% *)
-    ~border_focused:0xBD93F9 (* purple *)
-    ~text_bright:0xF8F8F2 (* foreground *)
-    ~text_primary:0xE1E1DD (* foreground to background, 10% *)
-    ~text_secondary:0xB1BAD0 (* foreground to comment, 45% *)
-    ~text_muted:0x7E8CB4 (* comment to foreground, 20% *)
-    ~status_ok:0x50FA7B (* green *)
-    ~status_active:0x8BE9FD (* cyan *)
-    ~status_attention:0xFFB86C (* orange *)
-    ~status_critical:0xFF5555 (* red *)
-    ~status_ai:0xBD93F9 (* purple *)
-    ~status_historical:0x7E8CB4 (* comment to foreground, 20% *)
-    ~accent:0x8BE9FD (* cyan *)
-    ~selection_bg:0x404354 (* background to current_line, 85% *)
-    ~selection_fg:0xF8F8F2 (* foreground *)
-    ~cool_stops:(0x72B5C7, 0x8BE9FD, 0xC6F1F8) (* cyan to background, 25%; cyan; cyan to foreground, 50% *)
-    ~warm_stops:(0xBD93F9, 0xFF79C6, 0xFF9C9F) (* purple; pink; pink to orange, 50% *)
-    ~ai_stops:(0xA582D9, 0xBD93F9, 0xD7C1F8) (* purple to background, 15%; purple; purple to foreground, 45% *)
+  (* Preset 12: Dracula. The comment color is below AA, so muted text and the
+     historical status are lifted. *)
+  | Dracula ->
+      {
+        surface_0 = 0x282A36 (* background *);
+        surface_1 = 0x2D303D (* background to current_line, 20% *);
+        surface_2 = 0x333544 (* background to current_line, 40% *);
+        border_subtle = 0x3D4051 (* background to current_line, 75% *);
+        border_inactive = 0x4E5673 (* current_line to comment, 35% *);
+        border_focused = 0xBD93F9 (* purple *);
+        text_bright = 0xF8F8F2 (* foreground *);
+        text_primary = 0xE1E1DD (* foreground to background, 10% *);
+        text_secondary = 0xB1BAD0 (* foreground to comment, 45% *);
+        text_muted = 0x7E8CB4 (* comment to foreground, 20% *);
+        status_ok = 0x50FA7B (* green *);
+        status_active = 0x8BE9FD (* cyan *);
+        status_attention = 0xFFB86C (* orange *);
+        status_critical = 0xFF5555 (* red *);
+        status_ai = 0xBD93F9 (* purple *);
+        status_historical = 0x7E8CB4 (* comment to foreground, 20% *);
+        accent = 0x8BE9FD (* cyan *);
+        selection_bg = 0x404354 (* background to current_line, 85% *);
+        selection_fg = 0xF8F8F2 (* foreground *);
+        cool_stops = (0x72B5C7, 0x8BE9FD, 0xC6F1F8); (* cyan to background, 25%; cyan; cyan to foreground, 50% *)
+        warm_stops = (0xBD93F9, 0xFF79C6, 0xFF9C9F); (* purple; pink; pink to orange, 50% *)
+        ai_stops = (0xA582D9, 0xBD93F9, 0xD7C1F8); (* purple to background, 15%; purple; purple to foreground, 45% *)
+      }
 
-(* Preset 13: Gruvbox Dark (medium contrast). Surfaces are dark0, dark0_soft and
-   dark1, text is light0 to light3. *)
-let gruvbox_dark_theme =
-  build_theme
-    ~preset:Gruvbox_dark
-    ~surface_0:0x282828 (* dark0 *)
-    ~surface_1:0x32302F (* dark0_soft *)
-    ~surface_2:0x3C3836 (* dark1 *)
-    ~border_subtle:0x504945 (* dark2 *)
-    ~border_inactive:0x665C54 (* dark3 *)
-    ~border_focused:0xFE8019 (* bright_orange *)
-    ~text_bright:0xFBF1C7 (* light0 *)
-    ~text_primary:0xEBDBB2 (* light1 *)
-    ~text_secondary:0xD5C4A1 (* light2 *)
-    ~text_muted:0xBDAE93 (* light3 *)
-    ~status_ok:0xB8BB26 (* bright_green *)
-    ~status_active:0x83A598 (* bright_blue *)
-    ~status_attention:0xFABD2F (* bright_yellow *)
-    ~status_critical:0xFB4934 (* bright_red *)
-    ~status_ai:0xD3869B (* bright_purple *)
-    ~status_historical:0xBDAE93 (* light3 *)
-    ~accent:0x83A598 (* bright_blue *)
-    ~selection_bg:0x46403D (* dark1 to dark2, 50% *)
-    ~selection_fg:0xFBF1C7 (* light0 *)
-    ~cool_stops:(0x8EC07C, 0x83A598, 0xB8C7AD) (* bright_aqua; bright_blue; bright_blue to light0, 45% *)
-    ~warm_stops:(0xD3869B, 0xFB4934, 0xFE8019) (* bright_purple; bright_red; bright_orange *)
-    ~ai_stops:(0xD3869B, 0xDBA0A2, 0xE9BBB1) (* bright_purple; bright_purple to light1, 30%; bright_purple to light0, 50% *)
+  (* Preset 13: Gruvbox Dark (medium contrast). Surfaces are dark0, dark0_soft and
+     dark1, text is light0 to light3. *)
+  | Gruvbox_dark ->
+      {
+        surface_0 = 0x282828 (* dark0 *);
+        surface_1 = 0x32302F (* dark0_soft *);
+        surface_2 = 0x3C3836 (* dark1 *);
+        border_subtle = 0x504945 (* dark2 *);
+        border_inactive = 0x665C54 (* dark3 *);
+        border_focused = 0xFE8019 (* bright_orange *);
+        text_bright = 0xFBF1C7 (* light0 *);
+        text_primary = 0xEBDBB2 (* light1 *);
+        text_secondary = 0xD5C4A1 (* light2 *);
+        text_muted = 0xBDAE93 (* light3 *);
+        status_ok = 0xB8BB26 (* bright_green *);
+        status_active = 0x83A598 (* bright_blue *);
+        status_attention = 0xFABD2F (* bright_yellow *);
+        status_critical = 0xFB4934 (* bright_red *);
+        status_ai = 0xD3869B (* bright_purple *);
+        status_historical = 0xBDAE93 (* light3 *);
+        accent = 0x83A598 (* bright_blue *);
+        selection_bg = 0x46403D (* dark1 to dark2, 50% *);
+        selection_fg = 0xFBF1C7 (* light0 *);
+        cool_stops = (0x8EC07C, 0x83A598, 0xB8C7AD); (* bright_aqua; bright_blue; bright_blue to light0, 45% *)
+        warm_stops = (0xD3869B, 0xFB4934, 0xFE8019); (* bright_purple; bright_red; bright_orange *)
+        ai_stops = (0xD3869B, 0xDBA0A2, 0xE9BBB1); (* bright_purple; bright_purple to light1, 30%; bright_purple to light0, 50% *)
+      }
 
-(* Preset 14: Catppuccin Mocha. The canvas is base, the published background. *)
-let catppuccin_mocha_theme =
-  build_theme
-    ~preset:Catppuccin_mocha
-    ~surface_0:0x1E1E2E (* base *)
-    ~surface_1:0x232333 (* base to surface0, 25% *)
-    ~surface_2:0x28293A (* base to surface0, 55% *)
-    ~border_subtle:0x313244 (* surface0 *)
-    ~border_inactive:0x585B70 (* surface2 *)
-    ~border_focused:0xB4BEFE (* lavender *)
-    ~text_bright:0xCDD6F4 (* text *)
-    ~text_primary:0xBAC2DE (* subtext1 *)
-    ~text_secondary:0xA6ADC8 (* subtext0 *)
-    ~text_muted:0x9399B2 (* overlay2 *)
-    ~status_ok:0xA6E3A1 (* green *)
-    ~status_active:0x89B4FA (* blue *)
-    ~status_attention:0xF9E2AF (* yellow *)
-    ~status_critical:0xF38BA8 (* red *)
-    ~status_ai:0xCBA6F7 (* mauve *)
-    ~status_historical:0x7F849C (* overlay1 *)
-    ~accent:0x89B4FA (* blue *)
-    ~selection_bg:0x343547 (* surface0 to surface1, 15% *)
-    ~selection_fg:0xCDD6F4 (* text *)
-    ~cool_stops:(0x74C7EC, 0x89B4FA, 0xABC5F8) (* sapphire; blue; blue to text, 50% *)
-    ~warm_stops:(0xCBA6F7, 0xF5C2E7, 0xF2CDCD) (* mauve; pink; flamingo *)
-    ~ai_stops:(0xB4BEFE, 0xCBA6F7, 0xF5C2E7) (* lavender; mauve; pink *)
+  (* Preset 14: Catppuccin Mocha. The canvas is base, the published background. *)
+  | Catppuccin_mocha ->
+      {
+        surface_0 = 0x1E1E2E (* base *);
+        surface_1 = 0x232333 (* base to surface0, 25% *);
+        surface_2 = 0x28293A (* base to surface0, 55% *);
+        border_subtle = 0x313244 (* surface0 *);
+        border_inactive = 0x585B70 (* surface2 *);
+        border_focused = 0xB4BEFE (* lavender *);
+        text_bright = 0xCDD6F4 (* text *);
+        text_primary = 0xBAC2DE (* subtext1 *);
+        text_secondary = 0xA6ADC8 (* subtext0 *);
+        text_muted = 0x9399B2 (* overlay2 *);
+        status_ok = 0xA6E3A1 (* green *);
+        status_active = 0x89B4FA (* blue *);
+        status_attention = 0xF9E2AF (* yellow *);
+        status_critical = 0xF38BA8 (* red *);
+        status_ai = 0xCBA6F7 (* mauve *);
+        status_historical = 0x7F849C (* overlay1 *);
+        accent = 0x89B4FA (* blue *);
+        selection_bg = 0x343547 (* surface0 to surface1, 15% *);
+        selection_fg = 0xCDD6F4 (* text *);
+        cool_stops = (0x74C7EC, 0x89B4FA, 0xABC5F8); (* sapphire; blue; blue to text, 50% *)
+        warm_stops = (0xCBA6F7, 0xF5C2E7, 0xF2CDCD); (* mauve; pink; flamingo *)
+        ai_stops = (0xB4BEFE, 0xCBA6F7, 0xF5C2E7); (* lavender; mauve; pink *)
+      }
 
 let all_presets =
   [
@@ -874,23 +984,91 @@ let preset_index = function
 
 let equal_preset a b = Int.equal (preset_index a) (preset_index b)
 
-let of_preset = function
-  | Midnight -> midnight_theme
-  | Arcade_hi -> arcade_hi_theme
-  | Paper_light -> paper_light_theme
-  | Mono -> mono_theme
-  | Muted -> muted_theme
-  | Muted_warm -> muted_warm_theme
-  | Muted_green -> muted_green_theme
-  | Muted_dusk -> muted_dusk_theme
-  | Muted_graphite -> muted_graphite_theme
-  | Solarized_dark -> solarized_dark_theme
-  | Nord -> nord_theme
-  | Dracula -> dracula_theme
-  | Gruvbox_dark -> gruvbox_dark_theme
-  | Catppuccin_mocha -> catppuccin_mocha_theme
+(* The theme of every preset together with the TOML palette it was built from,
+   when there is one. [of_preset] runs on every frame, so the Oklab work in
+   [of_palette] happens when the overrides change and a call only reads the
+   result. The registry is an immutable lookup behind an [Atomic.t]:
+   [set_palette_overrides] publishes a whole new one, so a reader in any
+   domain sees the lookup from before the call or from after it, and no lock
+   is needed. *)
+type resolved = {
+  override : Palette.t option;
+  theme : t;
+}
 
-let default = midnight_theme
+let resolve ~override preset =
+  let palette =
+    match override with
+    | Some palette -> palette
+    | None -> builtin_palette preset
+  in
+  { override; theme = of_palette preset palette }
+
+(* One [let] and one case per preset: a new preset is a compile error here
+   until it is listed. *)
+let lookup_of (resolve_preset : preset -> resolved) =
+  let midnight = resolve_preset Midnight in
+  let arcade_hi = resolve_preset Arcade_hi in
+  let paper_light = resolve_preset Paper_light in
+  let mono = resolve_preset Mono in
+  let muted = resolve_preset Muted in
+  let muted_warm = resolve_preset Muted_warm in
+  let muted_green = resolve_preset Muted_green in
+  let muted_dusk = resolve_preset Muted_dusk in
+  let muted_graphite = resolve_preset Muted_graphite in
+  let solarized_dark = resolve_preset Solarized_dark in
+  let nord = resolve_preset Nord in
+  let dracula = resolve_preset Dracula in
+  let gruvbox_dark = resolve_preset Gruvbox_dark in
+  let catppuccin_mocha = resolve_preset Catppuccin_mocha in
+  function
+  | Midnight -> midnight
+  | Arcade_hi -> arcade_hi
+  | Paper_light -> paper_light
+  | Mono -> mono
+  | Muted -> muted
+  | Muted_warm -> muted_warm
+  | Muted_green -> muted_green
+  | Muted_dusk -> muted_dusk
+  | Muted_graphite -> muted_graphite
+  | Solarized_dark -> solarized_dark
+  | Nord -> nord
+  | Dracula -> dracula
+  | Gruvbox_dark -> gruvbox_dark
+  | Catppuccin_mocha -> catppuccin_mocha
+
+let builtin_lookup = lookup_of (resolve ~override:None)
+let registry = Atomic.make builtin_lookup
+
+let of_preset preset =
+  let lookup = Atomic.get registry in
+  (lookup preset).theme
+
+let palette_override preset =
+  let lookup = Atomic.get registry in
+  (lookup preset).override
+
+let set_palette_overrides overrides =
+  (* A later entry for the same preset replaces an earlier one. *)
+  let override_of preset =
+    List.fold_left
+      (fun found (candidate, palette) ->
+        if equal_preset candidate preset then Some palette else found)
+      None overrides
+  in
+  let resolve_preset preset =
+    match override_of preset with
+    | None -> builtin_lookup preset
+    | Some palette -> resolve ~override:(Some palette) preset
+  in
+  Atomic.set registry (lookup_of resolve_preset)
+
+let clear_palette_overrides () = Atomic.set registry builtin_lookup
+
+(* Built-in Midnight, ignoring overrides. Live rendering must use [of_preset]
+   so a TOML override applies; this value exists for callers that need a
+   compile-time sample theme. *)
+let default = (builtin_lookup Midnight).theme
 
 let tier_fg theme = function
   | Tier_anchor -> theme.text_bright

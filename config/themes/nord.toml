@@ -1,0 +1,24 @@
+# Nord — Sven Greb, MIT: https://github.com/nordtheme/nord
+# See midnight.toml for the format. Floors: aa. Colors below AA are lifted.
+surface_0 = "#2E3440"
+surface_1 = "#313744"
+surface_2 = "#353C4A"
+border_subtle = "#434C5E"
+border_inactive = "#4C566A"
+border_focused = "#88C0D0"
+text_bright = "#ECEFF4"
+text_primary = "#D8DEE9"
+text_secondary = "#BDC4D1"
+text_muted = "#A0A8B7"
+status_ok = "#A3BE8C"
+status_active = "#88C0D0"
+status_attention = "#EBCB8B"
+status_critical = "#BF616A"
+status_ai = "#B48EAD"
+status_historical = "#8F97A7"
+accent = "#88C0D0"
+selection_bg = "#3F4758"
+selection_fg = "#ECEFF4"
+cool_stops = ["#8FBCBB", "#88C0D0", "#BBD8E2"]
+warm_stops = ["#B48EAD", "#BF616A", "#D08770"]
+ai_stops = ["#5E81AC", "#B48EAD", "#CEB9CD"]

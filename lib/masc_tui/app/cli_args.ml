@@ -11,6 +11,7 @@ type config = {
   base_path : string;
   workspace : string;
   theme : Theme.preset;
+  themes_dir : string option;
   lang : Say.lang;
   theme_explicit : bool;
   lang_explicit : bool;
@@ -56,6 +57,8 @@ let help_text =
       ^ String.concat "|" (List.map theme_cli_name Theme.all_presets)
       ^ ">";
       "                                Color theme preset (default: midnight)";
+      "  --themes-dir <path>           Directory of <preset>.toml palette files";
+      "                                (default: <base-path>/.masc/config/themes)";
       "  --lang <ko|en>                UI language (default: ko)";
       "  --no-auto-start               Do not auto-start a local masc server when offline";
       "  --version                     Print build version (and short commit SHA) and exit";
@@ -195,6 +198,7 @@ type draft = {
   base_path : string option;
   workspace : string option;
   theme : Theme.preset option;
+  themes_dir : string option;
   lang : Say.lang option;
   auto_start : bool;
 }
@@ -208,6 +212,7 @@ let empty_draft =
     base_path = None;
     workspace = None;
     theme = None;
+    themes_dir = None;
     lang = None;
     auto_start = true;
   }
@@ -314,6 +319,15 @@ let parse ?(version = Build_version.current)
                         (Printf.sprintf
                            "invalid --theme %S: expected midnight, arcade, paper, or mono"
                            raw))))
+        | "--themes-dir" -> (
+            match take_value flag inline_opt rest with
+            | Error msg -> Error (`Err msg)
+            | Ok (raw, tail) ->
+                let trimmed = String.trim raw in
+                if String.equal trimmed "" then
+                  Error (`Err "--themes-dir must not be empty")
+                else
+                  loop { acc with themes_dir = Some (expand_tilde ~env trimmed) } tail)
         | "--lang" -> (
             match take_value flag inline_opt rest with
             | Error msg -> Error (`Err msg)
@@ -399,6 +413,7 @@ let parse ?(version = Build_version.current)
               base_path;
               workspace;
               theme;
+              themes_dir = d.themes_dir;
               lang;
               theme_explicit = Option.is_some d.theme;
               lang_explicit = Option.is_some d.lang;

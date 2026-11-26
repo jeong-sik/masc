@@ -386,9 +386,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Company Fleet · 24h Activity</h2>
-                ${bundle.keepers.kind === 'value' && bundle.keepers.stale && html`
-                  <span class="pulse-pill" data-tone="warn">지연됨</span>
-                `}
+                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.keepers.kind === 'value' && bundle.keepers.stale ? 'true' : 'false'} aria-hidden=${bundle.keepers.kind === 'value' && bundle.keepers.stale ? undefined : 'true'}>지연됨</span>
               </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/keepers')}>
                 전체 Keeper →
@@ -490,6 +488,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                                       </div>
                                       <span
                                         class="pulse-pill"
+                                        data-ctx="true"
                                         data-tone=${keeperCtxTone(ctxObs)}
                                         title=${ctxTitle}
                                       >
@@ -523,9 +522,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Team Handoff & Succession Pulse</h2>
-                ${bundle.board.kind === 'value' && bundle.board.stale && html`
-                  <span class="pulse-pill" data-tone="warn">지연됨</span>
-                `}
+                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.board.kind === 'value' && bundle.board.stale ? 'true' : 'false'} aria-hidden=${bundle.board.kind === 'value' && bundle.board.stale ? undefined : 'true'}>지연됨</span>
               </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/knowledge/board')}>
                 Board 열기 →
@@ -572,7 +569,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Attention Queue</h2>
-                ${attentionStale && html`<span class="pulse-pill" data-tone="warn">지연됨</span>`}
+                <span class="pulse-pill" data-tone="warn" data-stale=${attentionStale ? 'true' : 'false'} aria-hidden=${attentionStale ? undefined : 'true'}>지연됨</span>
               </div>
               <div class="pulse-header-meta">
                 <span class="pulse-pill" data-tone=${attentionPillTone}>
@@ -655,9 +652,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Active Goals</h2>
-                ${bundle.goals.kind === 'value' && bundle.goals.stale && html`
-                  <span class="pulse-pill" data-tone="warn">지연됨</span>
-                `}
+                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.goals.kind === 'value' && bundle.goals.stale ? 'true' : 'false'} aria-hidden=${bundle.goals.kind === 'value' && bundle.goals.stale ? undefined : 'true'}>지연됨</span>
               </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/goals')}>
                 Goals →

@@ -1,7 +1,7 @@
 ---
 rfc: "tui-code-review-surface"
 title: "TUI 에서 키퍼가 바꾼 코드를 훑고 바로 연다"
-status: Draft
+status: Accepted
 created: 2026-11-26
 updated: 2026-11-26
 author: claude
@@ -12,7 +12,7 @@ related: []
 
 # RFC tui-code-review-surface: TUI 에서 키퍼가 바꾼 코드를 훑고 바로 연다
 
-- 상태: **초안.** 운영자가 범위를 1~4단계로 골랐다(2026-11-26). `$EDITOR` 편집(5단계)은 이 RFC 밖이다.
+- 상태: **승인(2026-11-26).** 운영자가 범위를 1~4단계로 골랐고(2026-11-26), 이 초안대로 진행하라고 했다(「go on」). `$EDITOR` 편집(5단계)은 이 RFC 밖이다.
 - 계기: 운영자가 코딩 에이전트 Pi 의 확장 화면(diff 보기, 소스 떠 있는 창, vim 으로 잠깐 편집)을 보고 「masc 도 그렇게 개선 가능?」이라고 물었다.
 - 헌법 로드맵 `IDE` 항목(「Keeper 작업이 그대로 투영되고 … 코드와 결합해 상태를 관측」)의 첫 조각이다.
 - 코드 좌표는 `origin/main` `db1f64b19da0d` 에서 읽었다.

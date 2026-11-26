@@ -53,6 +53,8 @@ interface OptionalField<A> {
   readonly schema: WireSchema<A>
   readonly mode: 'undefined' | 'option' | 'default'
   readonly defaultFn?: () => A
+  /** Only a missing key is omitted; a key holding undefined goes to [schema]. */
+  readonly exact: boolean
 }
 
 type FieldSpec = WireSchema<unknown> | OptionalField<unknown>
@@ -275,7 +277,7 @@ export const Schema = {
   },
 
   optional<A>(schema: WireSchema<A>): OptionalField<A> & { readonly _mode: 'undefined'; readonly _valueType: A } {
-    return { _tag: 'OptionalField', schema, mode: 'undefined', _mode: 'undefined', _valueType: undefined as unknown as A }
+    return { _tag: 'OptionalField', schema, mode: 'undefined', exact: false, _mode: 'undefined', _valueType: undefined as unknown as A }
   },
 
   optionalWith<A, O extends { readonly as?: 'Option'; readonly exact?: boolean; readonly default?: () => A }>(
@@ -291,6 +293,7 @@ export const Schema = {
         _tag: 'OptionalField',
         schema: schema as WireSchema<unknown>,
         mode: 'option',
+        exact: options.exact === true,
         _mode: 'option',
         _valueType: undefined as unknown as A,
       } as never
@@ -301,6 +304,7 @@ export const Schema = {
         schema,
         mode: 'default',
         defaultFn: options.default,
+        exact: options.exact === true,
         _mode: 'default',
         _valueType: undefined as unknown as A,
       } as never
@@ -309,6 +313,7 @@ export const Schema = {
       _tag: 'OptionalField',
       schema,
       mode: 'undefined',
+      exact: options.exact === true,
       _mode: 'undefined',
       _valueType: undefined as unknown as A,
     } as never
@@ -333,7 +338,8 @@ export const Schema = {
 
       for (const key of fieldKeys) {
         const spec = fields[key]!
-        const present = Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined
+        const present = Object.prototype.hasOwnProperty.call(input, key)
+          && (input[key] !== undefined || (spec._tag === 'OptionalField' && spec.exact))
         if (spec._tag === 'OptionalField') {
           if (!present) {
             if (spec.mode === 'option') out[key] = Option.none()

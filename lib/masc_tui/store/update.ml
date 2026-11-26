@@ -302,10 +302,13 @@ let step_raw ~now (m : Model.t) = function
           Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_health };
           Cmd.Voice_cmd Cmd.Probe_capabilities;
         ] )
-  | Msg.Key_event ev -> Update_input.apply_key_event ~now m ev
-  | Msg.Paste_text text -> Update_input.apply_paste ~now m text
+  | Msg.Key_event ev ->
+      Update_input.apply_key_event ~now (Model.clear_mouse_selection m) ev
+  | Msg.Paste_text text ->
+      Update_input.apply_paste ~now (Model.clear_mouse_selection m) text
   | Msg.Mouse_event ev -> Update_input.apply_mouse ~now m ev
-  | Msg.Resize { cols; rows } -> apply_resize ~now m ~cols ~rows
+  | Msg.Resize { cols; rows } ->
+      apply_resize ~now (Model.clear_mouse_selection m) ~cols ~rows
   | Msg.Tick { wall_unix } ->
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
          update voice recording elapsed seconds, and advance active unsettled

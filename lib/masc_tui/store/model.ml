@@ -213,6 +213,13 @@ type toast = {
   expires_at : Clock.Mono.t;
 }
 
+type cell_pos = { x : int; y : int }
+
+type mouse_selection_state =
+  | No_selection
+  | Dragging of { anchor : cell_pos; cursor : cell_pos }
+  | Settled of { anchor : cell_pos; cursor : cell_pos; copied : bool }
+
 type t = {
   epoch : Epoch.t;
   viewport : viewport;
@@ -247,7 +254,95 @@ type t = {
   keeper_resume_op_ids : (string * string * int) list;
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
+  mouse_selection : mouse_selection_state;
 }
+
+let equal_cell_pos (a : cell_pos) (b : cell_pos) =
+  Int.equal a.x b.x && Int.equal a.y b.y
+
+let equal_mouse_selection_state (a : mouse_selection_state)
+    (b : mouse_selection_state) =
+  match a, b with
+  | No_selection, No_selection -> true
+  | Dragging r1, Dragging r2 ->
+      equal_cell_pos r1.anchor r2.anchor
+      && equal_cell_pos r1.cursor r2.cursor
+  | Settled r1, Settled r2 ->
+      equal_cell_pos r1.anchor r2.anchor
+      && equal_cell_pos r1.cursor r2.cursor
+      && Bool.equal r1.copied r2.copied
+  | No_selection, (Dragging _ | Settled _)
+  | Dragging _, (No_selection | Settled _)
+  | Settled _, (No_selection | Dragging _) ->
+      false
+
+let clear_mouse_selection (m : t) =
+  match m.mouse_selection with
+  | No_selection -> m
+  | Dragging _ | Settled _ -> { m with mouse_selection = No_selection }
+
+let clamp_cell ~cols ~rows ~x ~y : cell_pos =
+  let max_x = Int.max 0 (cols - 1) in
+  let max_y = Int.max 0 (rows - 1) in
+  { x = Int.max 0 (Int.min max_x x); y = Int.max 0 (Int.min max_y y) }
+
+let begin_mouse_selection ~x ~y (m : t) =
+  let pos = clamp_cell ~cols:m.viewport.cols ~rows:m.viewport.rows ~x ~y in
+  { m with mouse_selection = Dragging { anchor = pos; cursor = pos } }
+
+let extend_mouse_selection ~x ~y (m : t) =
+  match m.mouse_selection with
+  | Dragging { anchor; _ } ->
+      let cursor =
+        clamp_cell ~cols:m.viewport.cols ~rows:m.viewport.rows ~x ~y
+      in
+      { m with mouse_selection = Dragging { anchor; cursor } }
+  | No_selection | Settled _ -> m
+
+let settle_mouse_selection (m : t) =
+  match m.mouse_selection with
+  | Dragging { anchor; cursor } ->
+      if equal_cell_pos anchor cursor then
+        { m with mouse_selection = No_selection }
+      else
+        { m with mouse_selection = Settled { anchor; cursor; copied = false } }
+  | No_selection | Settled _ -> m
+
+let mark_mouse_selection_copied (m : t) =
+  match m.mouse_selection with
+  | Settled { anchor; cursor; copied = false } ->
+      { m with mouse_selection = Settled { anchor; cursor; copied = true } }
+  | No_selection | Dragging _ | Settled { copied = true; _ } -> m
+
+let mouse_selection_rect (m : t) : Rect.t option =
+  let anchor_cursor =
+    match m.mouse_selection with
+    | Dragging { anchor; cursor } | Settled { anchor; cursor; _ } ->
+        Some (anchor, cursor)
+    | No_selection -> None
+  in
+  Option.bind anchor_cursor (fun (anchor, cursor) ->
+      if equal_cell_pos anchor cursor then None
+      else begin
+        let x0 = Int.min anchor.x cursor.x in
+        let y0 = Int.min anchor.y cursor.y in
+        let x1 = Int.max anchor.x cursor.x in
+        let y1 = Int.max anchor.y cursor.y in
+        let rect =
+          Rect.make ~x:x0 ~y:y0 ~w:(x1 - x0 + 1) ~h:(y1 - y0 + 1)
+        in
+        let viewport_rect =
+          Rect.make ~x:0 ~y:0 ~w:m.viewport.cols ~h:m.viewport.rows
+        in
+        let clamped = Rect.intersect rect viewport_rect in
+        if Rect.is_empty clamped then None else Some clamped
+      end)
+
+let mouse_selection_is_pending_copy (m : t) =
+  match m.mouse_selection with
+  | Settled { anchor; cursor; copied } ->
+      not copied && not (equal_cell_pos anchor cursor)
+  | No_selection | Dragging _ -> false
 
 let quit_arm_window_s = 2.5
 
@@ -510,6 +605,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     keeper_resume_op_ids = [];
     keeper_lifecycle_seq = 1;
     modal_submission_seq = 1;
+    mouse_selection = No_selection;
   }
 
 let active_inspector m = m.nav.inspector

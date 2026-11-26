@@ -2364,11 +2364,12 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
   in
   Alcotest.(check string) "ffmpeg honors explicit device" ":1" argv_dev.(7);
 
-  (* 3. P1-13 / P2-7d: Mouse capture OFF by default, no ?1002h hijack, guarded [m] toggle *)
+  (* 3. P1-13 / P2-7d: Mouse capture OFF by default for native drag-select,
+     ON adds ?1002h drag tracking for app-internal drag-select, guarded [m]. *)
   Alcotest.(check bool) "mouse capture defaults OFF for native drag-select" false
     App.default_mouse_capture;
-  Alcotest.(check string) "mouse ON enables ?1000h?1006h without ?1002h"
-    "\x1b[?1000h\x1b[?1006h" (App.mouse_capture_seq true);
+  Alcotest.(check string) "mouse ON enables ?1000h?1002h?1006h drag-select"
+    "\x1b[?1000h\x1b[?1002h\x1b[?1006h" (App.mouse_capture_seq true);
   Alcotest.(check string) "mouse OFF disables ?1000l?1002l?1006l"
     "\x1b[?1000l\x1b[?1002l\x1b[?1006l" (App.mouse_capture_seq false);
   let bare_m : Masc_tui_term.Input_decoder.key_event =

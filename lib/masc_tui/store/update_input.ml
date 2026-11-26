@@ -3201,9 +3201,148 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
         { m with config = Config_store.cancel_edit_field m.config }
       else m
     in
+    let apply_left_press (m : Model.t) (gx : int) (gy : int) =
+      if
+        Option.is_some m.nav.overlay
+        || Model.equal_breakpoint m.breakpoint Model.Micro
+      then (m, [])
+      else
+        let m = m |> cancel_edit |> Model.disarm_keeper_stop in
+        (* 1. Top Rail clickable [b] Menu toggle at cols 1..4, row 0 *)
+        if gy = 0 && gx >= 1 && gx <= 4 then
+          Update_actions.execute_action ~now m Keymap.Toggle_sidebar
+        else
+          match Model.sidebar_rect m with
+          | Some sr when Rect.contains sr ~x:gx ~y:gy ->
+              let inner =
+                Rect.make ~x:(sr.x + 1) ~y:(sr.y + 1)
+                  ~w:(Int.max 0 (sr.w - 2))
+                  ~h:(Int.max 0 (sr.h - 2))
+              in
+              if gy >= inner.y && gy < Rect.bottom inner then
+                let effective_cursor =
+                  if Model.sidebar_has_focus m then m.nav.sidebar_cursor
+                  else Nav.menu_item_index (Model.active_menu_target m)
+                in
+                let start =
+                  Model.sidebar_viewport_start ~inner_h:inner.h
+                    ~scroll:m.nav.sidebar_scroll ~cursor:effective_cursor
+                in
+                if
+                  Model.sidebar_has_below_overflow ~inner_h:inner.h ~start
+                  && gy = Rect.bottom inner - 1
+                then
+                  let total_rows = List.length Model.sidebar_visual_rows in
+                  let max_scroll = Int.max 0 (total_rows - inner.h) in
+                  let step = Int.max 4 (inner.h / 2) in
+                  let sidebar_scroll =
+                    Store_scroll.clamp_scroll ~max_scroll (start + step)
+                  in
+                  let m_focused = Update_nav.enter_sidebar_focus m in
+                  let next_cursor =
+                    if sidebar_scroll >= max_scroll then
+                      let rec last_item acc = function
+                        | [] -> acc
+                        | Model.Sidebar_item { index; _ } :: rest ->
+                            last_item index rest
+                        | Model.Sidebar_section _ :: rest -> last_item acc rest
+                      in
+                      last_item m_focused.nav.sidebar_cursor
+                        Model.sidebar_visual_rows
+                    else
+                      let min_vis_idx = sidebar_scroll + 1 in
+                      let rec first_item_from idx = function
+                        | [] -> m_focused.nav.sidebar_cursor
+                        | Model.Sidebar_item { index; _ } :: _
+                          when idx >= min_vis_idx ->
+                            index
+                        | (Model.Sidebar_section _ | Model.Sidebar_item _)
+                          :: rest ->
+                            first_item_from (idx + 1) rest
+                      in
+                      first_item_from 0 Model.sidebar_visual_rows
+                  in
+                  ( {
+                      m_focused with
+                      nav =
+                        {
+                          m_focused.nav with
+                          sidebar_cursor = next_cursor;
+                          sidebar_scroll;
+                        };
+                    }
+                  , [] )
+                else
+                  let vis_idx = start + (gy - inner.y) in
+                  match List.nth_opt Model.sidebar_visual_rows vis_idx with
+                  | Some (Model.Sidebar_item { index; item }) ->
+                      let m_sel =
+                        {
+                          m with
+                          nav =
+                            {
+                              m.nav with
+                              sidebar_cursor = index;
+                              sidebar_scroll = start;
+                            };
+                        }
+                      in
+                      Update_nav.navigate_menu_target ~keep_sidebar_focus:false
+                        m_sel item.target
+                  | Some (Model.Sidebar_section _) | None ->
+                      (Update_nav.enter_sidebar_focus m, [])
+              else (Update_nav.enter_sidebar_focus m, [])
+          | Some _ | None ->
+              if Model.sidebar_drawer_open m then
+                (Update_nav.exit_sidebar_focus m, [])
+              else
+                let body_r = Model.body_rect m in
+                if Rect.contains body_r ~x:gx ~y:gy then
+                  let m0 =
+                    let exited = Update_nav.exit_sidebar_focus m in
+                    {
+                      exited with
+                      nav = { exited.nav with filter_focused = false };
+                      drafts = Drafts.set_focus false m.drafts;
+                    }
+                  in
+                  let panes = Model.focusable_pane_count m0 in
+                  let rects = Model.pane_rects m0 in
+                  let hit_pane =
+                    let rec find i = function
+                      | [] -> None
+                      | r :: rest ->
+                          if Rect.contains r ~x:gx ~y:gy then Some i
+                          else find (i + 1) rest
+                    in
+                    find 0 rects
+                  in
+                  let next_pane =
+                    match hit_pane with
+                    | Some idx -> Int.min (Int.max 0 (panes - 1)) idx
+                    | None ->
+                        if panes <= 1 || body_r.w <= 0 then 0
+                        else if gx < body_r.x + (body_r.w / 2) then 0
+                        else Int.min (panes - 1) 1
+                  in
+                  ( Update_nav.clamp_for_pane
+                      { m0 with nav = { m0.nav with pane_index = next_pane } }
+                  , [] )
+                else
+                  match Model.composer_rect m with
+                  | Some cr when Rect.contains cr ~x:gx ~y:gy ->
+                      let m0 = Update_nav.exit_sidebar_focus m in
+                      ( {
+                          m0 with
+                          nav = { m0.nav with filter_focused = false };
+                          drafts = Drafts.set_focus true m0.drafts;
+                        }
+                      , [] )
+                  | Some _ | None -> (m, [])
+    in
     match ev with
     | Keymap.Input.Wheel { dir; col; row } -> (
-        let m = Model.disarm_keeper_stop m in
+        let m = m |> Model.disarm_keeper_stop |> Model.clear_mouse_selection in
         let gx = col - 1 in
         let gy = row - 1 in
         let move_dir =
@@ -3292,138 +3431,30 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
           || Model.equal_breakpoint m.breakpoint Model.Micro
         then (m, [])
         else
-          let m = m |> cancel_edit |> Model.disarm_keeper_stop in
           let gx = col - 1 in
           let gy = row - 1 in
-          (* 1. Top Rail clickable [b] Menu toggle at cols 1..4, row 0 *)
-          if gy = 0 && gx >= 1 && gx <= 4 then
-            Update_actions.execute_action ~now m Keymap.Toggle_sidebar
-          else
-            match Model.sidebar_rect m with
-            | Some sr when Rect.contains sr ~x:gx ~y:gy ->
-                let inner =
-                  Rect.make ~x:(sr.x + 1) ~y:(sr.y + 1)
-                    ~w:(Int.max 0 (sr.w - 2))
-                    ~h:(Int.max 0 (sr.h - 2))
-                in
-                if gy >= inner.y && gy < Rect.bottom inner then
-                  let effective_cursor =
-                    if Model.sidebar_has_focus m then m.nav.sidebar_cursor
-                    else Nav.menu_item_index (Model.active_menu_target m)
-                  in
-                  let start =
-                    Model.sidebar_viewport_start ~inner_h:inner.h
-                      ~scroll:m.nav.sidebar_scroll ~cursor:effective_cursor
-                  in
-                  if
-                    Model.sidebar_has_below_overflow ~inner_h:inner.h ~start
-                    && gy = Rect.bottom inner - 1
-                  then
-                    let total_rows = List.length Model.sidebar_visual_rows in
-                    let max_scroll = Int.max 0 (total_rows - inner.h) in
-                    let step = Int.max 4 (inner.h / 2) in
-                    let sidebar_scroll =
-                      Store_scroll.clamp_scroll ~max_scroll (start + step)
-                    in
-                    let m_focused = Update_nav.enter_sidebar_focus m in
-                    let next_cursor =
-                      if sidebar_scroll >= max_scroll then
-                        let rec last_item acc = function
-                          | [] -> acc
-                          | Model.Sidebar_item { index; _ } :: rest ->
-                              last_item index rest
-                          | Model.Sidebar_section _ :: rest -> last_item acc rest
-                        in
-                        last_item m_focused.nav.sidebar_cursor
-                          Model.sidebar_visual_rows
-                      else
-                        let min_vis_idx = sidebar_scroll + 1 in
-                        let rec first_item_from idx = function
-                          | [] -> m_focused.nav.sidebar_cursor
-                          | Model.Sidebar_item { index; _ } :: _
-                            when idx >= min_vis_idx ->
-                              index
-                          | (Model.Sidebar_section _ | Model.Sidebar_item _)
-                            :: rest ->
-                              first_item_from (idx + 1) rest
-                        in
-                        first_item_from 0 Model.sidebar_visual_rows
-                    in
-                    ( {
-                        m_focused with
-                        nav =
-                          {
-                            m_focused.nav with
-                            sidebar_cursor = next_cursor;
-                            sidebar_scroll;
-                          };
-                      }
-                    , [] )
-                  else
-                    let vis_idx = start + (gy - inner.y) in
-                    match List.nth_opt Model.sidebar_visual_rows vis_idx with
-                    | Some (Model.Sidebar_item { index; item }) ->
-                        let m_sel =
-                          {
-                            m with
-                            nav =
-                              {
-                                m.nav with
-                                sidebar_cursor = index;
-                                sidebar_scroll = start;
-                              };
-                          }
-                        in
-                        Update_nav.navigate_menu_target ~keep_sidebar_focus:false
-                          m_sel item.target
-                    | Some (Model.Sidebar_section _) | None ->
-                        (Update_nav.enter_sidebar_focus m, [])
-                else (Update_nav.enter_sidebar_focus m, [])
-            | Some _ | None ->
-                if Model.sidebar_drawer_open m then
-                  (Update_nav.exit_sidebar_focus m, [])
-                else
-                  let body_r = Model.body_rect m in
-                  if Rect.contains body_r ~x:gx ~y:gy then
-                    let m0 =
-                      let exited = Update_nav.exit_sidebar_focus m in
-                      {
-                        exited with
-                        nav = { exited.nav with filter_focused = false };
-                        drafts = Drafts.set_focus false m.drafts;
-                      }
-                    in
-                    let panes = Model.focusable_pane_count m0 in
-                    let rects = Model.pane_rects m0 in
-                    let hit_pane =
-                      let rec find i = function
-                        | [] -> None
-                        | r :: rest ->
-                            if Rect.contains r ~x:gx ~y:gy then Some i
-                            else find (i + 1) rest
-                      in
-                      find 0 rects
-                    in
-                    let next_pane =
-                      match hit_pane with
-                      | Some idx -> Int.min (Int.max 0 (panes - 1)) idx
-                      | None ->
-                          if panes <= 1 || body_r.w <= 0 then 0
-                          else if gx < body_r.x + (body_r.w / 2) then 0
-                          else Int.min (panes - 1) 1
-                    in
-                    ( Update_nav.clamp_for_pane
-                        { m0 with nav = { m0.nav with pane_index = next_pane } }
-                    , [] )
-                  else
-                    match Model.composer_rect m with
-                    | Some cr when Rect.contains cr ~x:gx ~y:gy ->
-                        let m0 = Update_nav.exit_sidebar_focus m in
-                        ( {
-                            m0 with
-                            nav = { m0.nav with filter_focused = false };
-                            drafts = Drafts.set_focus true m0.drafts;
-                          }
-                        , [] )
-                    | Some _ | None -> (m, []))
-    | Keymap.Input.Left_drag _ | Keymap.Input.Left_release _ -> (m, [])
+          let same_view (m1 : Model.t) (m2 : Model.t) =
+            Nav.equal_workspace m1.nav.workspace m2.nav.workspace
+            && Option.equal Nav.equal_inspector m1.nav.inspector m2.nav.inspector
+            && Option.equal Nav.equal_overlay m1.nav.overlay m2.nav.overlay
+            && Option.equal Bool.equal m1.nav.sidebar_open m2.nav.sidebar_open
+            && Bool.equal m1.nav.sidebar_focused m2.nav.sidebar_focused
+            && Int.equal m1.nav.pane_index m2.nav.pane_index
+          in
+          let m_nav, cmds = apply_left_press m gx gy in
+          (* Keep click semantics identical to before: the press navigates
+             immediately. A drag then selects on top, unless the press
+             itself switched views (stale coords would extract wrong text). *)
+          if same_view m m_nav then
+            (Model.begin_mouse_selection ~x:gx ~y:gy m_nav, cmds)
+          else (Model.clear_mouse_selection m_nav, cmds))
+    | Keymap.Input.Left_drag { col; row } -> (
+        (Model.extend_mouse_selection ~x:(col - 1) ~y:(row - 1) m, []))
+    | Keymap.Input.Left_release { col; row } -> (
+        match m.mouse_selection with
+        | Model.Dragging { anchor; cursor } ->
+            if Model.equal_cell_pos anchor cursor then
+              (Model.clear_mouse_selection m, [])
+            else (Model.settle_mouse_selection m, [])
+        | Model.Settled _ -> (m, [])
+        | Model.No_selection -> apply_left_press m (col - 1) (row - 1))

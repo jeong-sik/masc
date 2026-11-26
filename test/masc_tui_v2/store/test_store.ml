@@ -23621,7 +23621,11 @@ let test_open_work_of_preview_names_the_call_that_runs () =
     (phrase [ open_tool "Write" Wire_fleet.Tool_requested 3.0; open_tool "Execute" Wire_fleet.Tool_executing 4.0 ]);
   Alcotest.(check (option (pair string string))) "with nothing running the first call is named"
     (Some ("도구 실행 전 · Write 외 1건", "Calling Write +1 more"))
-    (phrase [ open_tool "Write" Wire_fleet.Tool_requested 3.0; open_tool "Skill" Wire_fleet.Tool_requested 4.0 ])
+    (phrase [ open_tool "Write" Wire_fleet.Tool_requested 3.0; open_tool "Skill" Wire_fleet.Tool_requested 4.0 ]);
+  let shared = open_tool "Read" Wire_fleet.Tool_executing 3.0 in
+  Alcotest.(check (option (pair string string))) "two open calls that are one value are still two"
+    (Some ("도구 실행 중 · Read 외 1건", "Running Read +1 more"))
+    (phrase [ shared; shared ])
 ;;
 
 let test_chat_status_uses_the_same_words_for_every_turn () =

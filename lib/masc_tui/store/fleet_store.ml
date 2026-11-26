@@ -280,6 +280,17 @@ let is_running = function
   | Wire_fleet.Open_response _ ->
       false
 
+(* The place of the first open call that runs, and 0 when none does. The
+   named call is left out of the count by its place, never by its value: two
+   open calls can look the same and are still two. *)
+let running_index tools =
+  let rec look index = function
+    | [] -> 0
+    | activity :: _ when is_running activity -> index
+    | _ :: rest -> look (index + 1) rest
+  in
+  look 0 tools
+
 let open_work_of_preview (p : Wire_fleet.turn_preview) =
   let reported =
     match p.activity with
@@ -310,9 +321,10 @@ let open_work_of_preview (p : Wire_fleet.turn_preview) =
             ; phrase = open_activity_phrase first
             ; since_unix = Some (open_activity_since first)
             }
-      | first_tool :: _ as tools ->
-          let named = Option.value (List.find_opt is_running tools) ~default:first_tool in
-          let others = List.filter (fun activity -> not (activity == named)) tools in
+      | _ :: _ as tools ->
+          let at = running_index tools in
+          let named = List.nth tools at in
+          let others = List.filteri (fun index _ -> index <> at) tools in
           let phrase =
             match others with
             | [] -> open_activity_phrase named

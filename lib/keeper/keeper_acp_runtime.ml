@@ -1810,10 +1810,9 @@ let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message li
     without_preamble, max 1 (atom_count - keep_recent))
 ;;
 
-(* [messages] without synthetic preambles, and how many of its atoms come
-   before the first atom whose turn has one of [rows]: all of them when none
-   has. *)
-let split_before_rows
+(* [messages] without synthetic preambles, and the index of its first atom
+   whose turn has one of [rows]. *)
+let first_atom_with_row
       ~(rows : Keeper_canonical_turn_store.canonical_turn list)
       (messages : Agent_core.Types.message list)
   =
@@ -1830,41 +1829,51 @@ let split_before_rows
       Hashtbl.mem row_turns (Ids.Turn_id.to_string turn)
     | Keeper_compaction_atom.Leading _ -> false
   in
-  without_preamble, Option.value (Array.find_index has_row atoms) ~default:(Array.length atoms)
+  without_preamble, Array.find_index has_row atoms, Array.length atoms
 ;;
 
 (* What the fresh session after a rollover or an overflow retry starts from
-   once a compaction commits, and the list both ACP producers compact for it.
-   That start sends the handoff list when it holds anything, else the run's
-   message history ({!hydrate_start_messages}). The history is
-   [initial_messages], never a projected start window: a boundary covers
-   everything before it, so the turns in front of the window would count as
-   archived and the watermark would prune their rows. *)
+   decides the list both ACP producers compact. That start sends the handoff
+   list when it holds anything, else the run's message history
+   ({!hydrate_start_messages}). The history is [initial_messages], never a
+   projected start window: a boundary covers everything before it, so the
+   turns in front of the window would count as archived and the watermark
+   would prune their rows. *)
 type next_start =
   | Handoff_list of Agent_core.Types.message list
   (* The handoff list, when a summary applies or its rows reach back to the
      history's first atom. The start holds the new summary and the rows past
-     the new boundary, so the most recent atoms stay whole. *)
+     its settled turn, so the most recent atoms stay whole. *)
   | History_before_rows of
       { history : Agent_core.Types.message list
       ; before_rows : int
+      ; rows_follow : bool
       }
   (* No summary applies yet, and the first [before_rows] atoms of [history]
-     belong to turns no row holds, such as the turns before a Fresh state; all
-     of its atoms when there is no row, or when the canonical turn store
-     cannot be read. The summary takes them. Its settled turn has no row, so
-     the watermark prunes none, and the start holds the summary and every row.
-     While the store stays unreadable the start sends the history instead. *)
+     belong to turns the handoff list does not hold, such as the turns before
+     a Fresh state. The summary takes them. Its settled turn has no row, so
+     the watermark prunes none and the handoff list then holds the summary and
+     every row. When [rows_follow], the next atom's turn has a row, and that
+     handoff list is compacted next, as with a summary. Otherwise
+     [before_rows] counts every atom: there is no row, or no row's turn is in
+     the history, such as a row that still carries the current turn's ACP
+     turn id. *)
+  | History_list of Agent_core.Types.message list
+  (* The canonical turn store cannot be read, and this is the history. The
+     start sends it while the store stays unreadable, so the most recent
+     atoms stay whole. *)
 
 let next_start_list ~keepers_dir ~keeper_id ~history =
   match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
   | Ok { Keeper_canonical_turn_store.anchor = Some _; messages; turns_after_anchor = _ } ->
     Ok (Handoff_list messages)
   | Ok { Keeper_canonical_turn_store.anchor = None; messages; turns_after_anchor = rows } ->
-    let history, before_rows = split_before_rows ~rows history in
-    if before_rows = 0
-    then Ok (Handoff_list messages)
-    else Ok (History_before_rows { history; before_rows })
+    (match first_atom_with_row ~rows history with
+     | _, Some 0, _ | _, None, 0 -> Ok (Handoff_list messages)
+     | history, Some before_rows, _ ->
+       Ok (History_before_rows { history; before_rows; rows_follow = true })
+     | history, None, atom_count ->
+       Ok (History_before_rows { history; before_rows = atom_count; rows_follow = false }))
   | Error (Keeper_canonical_turn_store.Compaction_store err) ->
     (* The compaction would fail on the same store. *)
     Error err
@@ -1876,20 +1885,10 @@ let next_start_list ~keepers_dir ~keeper_id ~history =
       ~keeper_name:keeper_id
       "ACP compaction uses the message history; handoff list unreadable: %s"
       (Keeper_canonical_turn_store.store_error_to_string err);
-    let history, before_rows = split_before_rows ~rows:[] history in
-    Ok (History_before_rows { history; before_rows })
+    Ok (History_list history)
 ;;
 
-let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
-  let* start = next_start_list ~keepers_dir ~keeper_id ~history in
-  let frame, messages, prefix =
-    match start with
-    | Handoff_list source ->
-      let messages, prefix = split_older_for_rollover ?keep_ratio source in
-      Keeper_compaction_atom.Canonical_turns, messages, prefix
-    | History_before_rows { history; before_rows } ->
-      Keeper_compaction_atom.Message_history, history, before_rows
-  in
+let compact_prefix ~keepers_dir ~keeper_id ~trigger ~frame ~messages ~prefix =
   if prefix = 0
   then Ok None
   else
@@ -1901,6 +1900,60 @@ let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~histor
       ~messages
       ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
       ()
+;;
+
+let compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source =
+  let messages, prefix = split_older_for_rollover ?keep_ratio source in
+  compact_prefix
+    ~keepers_dir
+    ~keeper_id
+    ~trigger
+    ~frame:Keeper_compaction_atom.Canonical_turns
+    ~messages
+    ~prefix
+;;
+
+let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
+  let* start = next_start_list ~keepers_dir ~keeper_id ~history in
+  match start with
+  | Handoff_list source ->
+    compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source
+  | History_list source ->
+    let messages, prefix = split_older_for_rollover ?keep_ratio source in
+    compact_prefix
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~frame:Keeper_compaction_atom.Message_history
+      ~messages
+      ~prefix
+  | History_before_rows { history; before_rows; rows_follow } ->
+    let* summary =
+      compact_prefix
+        ~keepers_dir
+        ~keeper_id
+        ~trigger
+        ~frame:Keeper_compaction_atom.Message_history
+        ~messages:history
+        ~prefix:before_rows
+    in
+    (match summary, rows_follow with
+     | Some _, true ->
+       (match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
+        | Ok { Keeper_canonical_turn_store.anchor = Some _; messages; turns_after_anchor = _ } ->
+          let* later =
+            compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger messages
+          in
+          Ok (if Option.is_some later then later else summary)
+        | Ok { Keeper_canonical_turn_store.anchor = None; messages = _; turns_after_anchor = _ }
+          -> Ok summary
+        | Error err ->
+          Log.Keeper.warn
+            ~keeper_name:keeper_id
+            "ACP compaction kept every row after its summary; handoff list unreadable: %s"
+            (Keeper_canonical_turn_store.store_error_to_string err);
+          Ok summary)
+     | Some _, false | None, (true | false) -> Ok summary)
 ;;
 
 let compact_for_rollover

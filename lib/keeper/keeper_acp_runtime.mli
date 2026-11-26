@@ -185,17 +185,19 @@ module For_testing : sig
     -> Agent_core.Types.message list
     -> Agent_core.Types.message list * int
 
-  (** What a fresh session after a rollover or an overflow retry starts from
-      once a compaction commits, holding the list both compact. *)
+  (** The list both ACP producers compact, picked by what a fresh session
+      after a rollover or an overflow retry starts from. *)
   type next_start
 
   (** The handoff list, kept to its most recent atoms, when a summary applies
       or its rows reach back to the first atom of [history]. Else [history]
-      through the last atom before the first row's turn, all of it when there
-      is no row: no row holds those turns, so the summary takes them and the
-      start holds it and every row. When the canonical turn store cannot be
-      read, all of [history] as well. [Error] when the compaction store cannot
-      be read, which the compaction would hit too. *)
+      through the last atom before the first atom whose turn has a row, all
+      of it when no row's turn is in [history]: the handoff list does not hold
+      those turns, so the summary takes them, then the handoff list is kept
+      to its most recent atoms when a row's turn followed. When the canonical
+      turn store cannot be read, [history] kept to its most recent atoms,
+      which the start sends while the store stays unreadable. [Error] when the
+      compaction store cannot be read, which the compaction would hit too. *)
   val next_start_list
     :  keepers_dir:string
     -> keeper_id:string

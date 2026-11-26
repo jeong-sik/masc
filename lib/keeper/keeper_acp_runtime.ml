@@ -1924,11 +1924,26 @@ type start_compaction =
   | Start_compacted
   (* That list is compacted as far as a compaction takes it. *)
   | Nothing_new
-  (* No epoch committed: no atom of that list was left to compact. *)
+  (* No epoch committed: the atoms a compaction would take were too few or
+     already archived. *)
   | Rows_kept_whole
-  (* The history before the rows was summarized, but the handoff list that
-     holds that summary and every row was not compacted after it, so the
-     start still holds every row. The cause is logged where it happened. *)
+  (* The history before the rows was summarized, but no row was compacted
+     after it: the handoff list could not be read or compacted. The cause is
+     logged where it happened. *)
+  | History_cleared
+  (* The history before the rows was summarized, and the history was cleared
+     before the handoff list was read, so that summary does not apply. This
+     run's history is from before the clear. *)
+
+(* Whether an overflow retry counts its run compacted, so that it compacts
+   nothing more in that run: when the start's list is compacted as far as it
+   goes, and after a clear, since compacting this run's history again would
+   put atoms from before the clear into a summary that applies. Otherwise the
+   next shrink compacts the list it then starts from. *)
+let run_compacted = function
+  | Start_compacted | History_cleared -> true
+  | Nothing_new | Rows_kept_whole -> false
+;;
 
 let compacted_or_nothing_new = function
   | Some (_ : Keeper_compaction.compaction_anchor) -> Start_compacted
@@ -1952,7 +1967,11 @@ let compact_rows_after_summary ?keep_ratio ~keepers_dir ~keeper_id ~trigger hand
      | Ok (Some _ | None) -> Start_compacted
      | Error err -> rows_kept (Keeper_compaction.store_error_to_string err))
   | Ok { Keeper_canonical_turn_store.anchor = None; messages = _; turns_after_anchor = _ } ->
-    rows_kept "the summary it committed does not apply"
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "ACP compaction summarized the history before the rows, and the history was \
+       cleared after it";
+    History_cleared
   | Error err -> rows_kept (Keeper_canonical_turn_store.store_error_to_string err)
 ;;
 
@@ -2013,7 +2032,7 @@ let compact_for_rollover
       ~history:initial_messages
       ()
   with
-  | Ok (Start_compacted | Nothing_new | Rows_kept_whole) -> ()
+  | Ok (Start_compacted | Nothing_new | Rows_kept_whole | History_cleared) -> ()
   | Error err ->
     Log.Keeper.warn
       ~keeper_name:keeper_id
@@ -3857,11 +3876,7 @@ let compact_once_for_overflow_with
         ~history:initial_messages
         ()
     with
-    | Ok Start_compacted -> already_compacted := true
-    | Ok (Nothing_new | Rows_kept_whole) ->
-      (* The start did not shrink, so the next shrink compacts the list it
-         then starts from. *)
-      ()
+    | Ok outcome -> if run_compacted outcome then already_compacted := true
     | Error err ->
       Log.Keeper.warn
         ~keeper_name:keeper_id
@@ -4109,7 +4124,9 @@ module For_testing = struct
     | Start_compacted
     | Nothing_new
     | Rows_kept_whole
+    | History_cleared
 
+  let run_compacted = run_compacted
   let compact_rows_after_summary = compact_rows_after_summary
 
   let compact_for_rollover ~keepers_dir ~keeper_id ~used_tokens ~limit_tokens ~initial_messages =

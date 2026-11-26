@@ -1658,7 +1658,8 @@ let test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request () =
    and summarizing them again could make an older request the last one.
    When the handoff list cannot be read or compacted after the history
    summary, every row stays and the start does not count as compacted, so an
-   overflow retry compacts again on its next shrink. With the canonical turn
+   overflow retry compacts again on its next shrink; when the history was
+   cleared meanwhile, the run compacts nothing more. With the canonical turn
    store
    unreadable they compact the history, leaving its most recent atoms for
    the start, which sends it. An unreadable compaction store skips the
@@ -1706,8 +1707,10 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
             ~refused_sent_bytes:None
             ~capacity:200_000
             ~initial_messages:history;
+          (* No scenario here keeps the rows whole or clears the history, so
+             the start is compacted exactly when an epoch commits. *)
           check bool
-            (Printf.sprintf "%s after %d epochs: the run counts as compacted when an epoch commits"
+            (Printf.sprintf "%s after %d epochs: the run counts as compacted when its start is"
                keeper_id epochs_before)
             (epoch_count keeper_id > epochs_before) !already_compacted )
     ]
@@ -1873,20 +1876,28 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
     | R.Start_compacted -> "start compacted"
     | R.Nothing_new -> "nothing new"
     | R.Rows_kept_whole -> "rows kept whole"
+    | R.History_cleared -> "history cleared"
   in
   let rows_of_stale_ids = Store.load_handoff_context ~keepers_dir ~keeper_id:"rollover-acp-turn-id-rows" in
   check string "after the summary, a handoff list that compacts shrinks the start" "start compacted"
     (after_summary "after-summary-compacts" rows_of_stale_ids);
+  check (list string) "after the summary, that compaction commits over the canonical turn list"
+    [ "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:"after-summary-compacts");
   check string "after the summary, a compaction that fails keeps every row" "rows kept whole"
     (after_summary broken rows_of_stale_ids);
   check string "after the summary, an unreadable handoff list keeps every row" "rows kept whole"
     (after_summary
        "after-summary-unreadable"
        (Error (Store.Sqlite_error { operation = "load_handoff_context"; detail = "busy" })));
-  check string "after the summary, a summary that does not apply keeps every row" "rows kept whole"
+  check string "after the summary, a summary that does not apply means a clear" "history cleared"
     (after_summary
        "after-summary-not-applied"
-       (Ok { Store.anchor = None; turns_after_anchor = []; messages = [] }))
+       (Ok { Store.anchor = None; turns_after_anchor = []; messages = [] }));
+  check (list bool) "an overflow run stops compacting after a compacted start or a clear"
+    [ true; false; false; true ]
+    (List.map
+       R.run_compacted
+       [ R.Start_compacted; R.Nothing_new; R.Rows_kept_whole; R.History_cleared ])
 ;;
 
 let test_canonical_turn_store_compaction_watermark_and_failover () =

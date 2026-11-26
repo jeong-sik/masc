@@ -22,7 +22,6 @@ let frames_per_run = 20_000
 let runs = 3
 let frame_sizes = [ 256; 4096 ]
 let stalled_after_s = 600.0
-let ping_interval_s = 30.0
 let last_frame = "data: end\n\n"
 
 exception Server_stopped
@@ -57,7 +56,8 @@ let serve_once ~sw env ~on_response =
 let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream"; "connection", "close" ]
 
 let waits ~clock frame reqd =
-  let response = Sse.respond ~clock ~stalled_after_s reqd (Httpun.Response.create ~headers `OK) in
+  Eio.Switch.run @@ fun sw ->
+  let response = Sse.respond ~sw ~clock ~stalled_after_s reqd (Httpun.Response.create ~headers `OK) in
   let queue = Pump.Queue.create ~max_queued_events:(frames_per_run + 1) in
   for _ = 1 to frames_per_run do
     Pump.Queue.push queue `Frame
@@ -66,8 +66,6 @@ let waits ~clock frame reqd =
   (match
      Pump.run ~source:(Pump.Queue.source queue)
        ~step:(function `Frame -> Pump.Send frame | `Last -> Pump.Send_last last_frame)
-       ~idle:(fun () -> Pump.Finish)
-       ~clock ~ping_interval_s
        ~closed:(fun () -> Sse.await_closed response)
        ~send:(Sse.send response)
    with
@@ -89,7 +87,8 @@ let flush_only frame reqd =
 ;;
 
 let send_only ~clock frame reqd =
-  let response = Sse.respond ~clock ~stalled_after_s reqd (Httpun.Response.create ~headers `OK) in
+  Eio.Switch.run @@ fun sw ->
+  let response = Sse.respond ~sw ~clock ~stalled_after_s reqd (Httpun.Response.create ~headers `OK) in
   for _ = 1 to frames_per_run do
     ignore (Sse.send response frame : Sse.outcome)
   done;

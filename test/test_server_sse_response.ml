@@ -81,7 +81,8 @@ let start_server ?response_clock ~sw env ~stalled_after_s ~on_response =
                  [ "content-type", "text/event-stream"; "connection", "close" ]
              in
              let response =
-               Sse.respond ~clock:response_clock ~stalled_after_s (Masc.Http_reqd.of_gluten gluten_reqd)
+               Sse.respond ~sw:server_sw ~clock:response_clock ~stalled_after_s
+                 (Masc.Http_reqd.of_gluten gluten_reqd)
                  (Httpun.Response.create ~headers `OK)
              in
              Eio.Fiber.fork ~sw:server_sw (fun () -> on_response response)))
@@ -253,7 +254,8 @@ let test_a_frame_answered_as_the_time_runs_out_is_written () =
         Httpun.Server_connection.create (fun reqd ->
           let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream" ] in
           let response =
-            Sse.respond ~clock ~stalled_after_s:mock_stalled_after_s (Masc.Http_reqd.of_httpun reqd)
+            Sse.respond ~sw ~clock ~stalled_after_s:mock_stalled_after_s
+              (Masc.Http_reqd.of_httpun reqd)
               (Httpun.Response.create ~headers `OK)
           in
           Eio.Fiber.fork ~sw (fun () ->
@@ -420,6 +422,230 @@ let test_a_producer_that_raises_ends_the_response_only () =
   serve_twice ~after_frame:(fun () -> failwith "fixture producer failure")
 ;;
 
+(* The keepalive's clock: the mock clock, counting the sleeps started on it.
+   What it reads is the mock time less [set_back_s], as a wall clock set back
+   by that much reads, and a sleep lasts the difference to the reading when
+   it starts, as the server's clock sleeps (eio_posix time.ml). *)
+module Counted_clock = struct
+  type t =
+    { mock : Eio_mock.Clock.t
+    ; mutable sleeps : int
+    ; mutable set_back_s : float
+    }
+
+  type time = float
+
+  let now t = Eio.Time.now t.mock -. t.set_back_s
+
+  let sleep_until t time =
+    t.sleeps <- t.sleeps + 1;
+    Eio.Time.sleep_until t.mock (time +. t.set_back_s)
+end
+
+let counted_clock () =
+  let counted = { Counted_clock.mock = Eio_mock.Clock.make (); sleeps = 0; set_back_s = 0.0 } in
+  let clock : float Eio.Time.clock_ty Eio.Resource.t =
+    Eio.Resource.T (counted, Eio.Time.Pi.clock (module Counted_clock))
+  in
+  counted, clock
+;;
+
+let keepalive_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
+
+(* Scheduler turns a keepalive test gives the response's fibers before it
+   says something did not happen. *)
+let settle_turns = 256
+
+let yield_until what ready =
+  let rec go turns_left =
+    if not (ready ())
+    then if turns_left = 0 then failf "%s did not happen" what
+      else (
+        Eio.Fiber.yield ();
+        go (turns_left - 1))
+  in
+  go settle_turns
+;;
+
+(* What the client got: the bytes, which the test hands over as the response
+   writes them. [sleeps_at_last_write] is the clock's count when the last
+   bytes were handed over: a frame starts its stall wait before its bytes
+   can reach the client, and the keepalive starts its next wait only after
+   its send returned. *)
+type wire =
+  { bytes : Buffer.t
+  ; mutable sleeps_at_last_write : int
+  }
+
+let keepalives wire =
+  let text = Buffer.contents wire.bytes and frame = Sse.keepalive_frame in
+  let size = String.length frame in
+  let rec count at found =
+    if at + size > String.length text
+    then found
+    else if String.equal (String.sub text at size) frame
+    then count (at + size) (found + 1)
+    else count (at + 1) found
+  in
+  count 0 0
+;;
+
+let carry counted connection wire =
+  let rec loop () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let written =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string wire.bytes (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+             total + iov.len)
+          0 iovecs
+      in
+      wire.sleeps_at_last_write <- counted.Counted_clock.sleeps;
+      Httpun.Server_connection.report_write_result connection (`Ok written);
+      loop ()
+    | `Yield ->
+      let more, wake = Eio.Promise.create () in
+      Httpun.Server_connection.yield_writer connection (Eio.Promise.resolve wake);
+      Eio.Promise.await more;
+      loop ()
+    | `Close _ -> ()
+  in
+  loop ()
+;;
+
+(* A response on an in-memory HTTP/1.1 connection whose client takes every
+   byte at once. Nothing but the response itself writes to it. *)
+let open_quiet_response ~sw ~counted ~clock ?idle () =
+  let wire = { bytes = Buffer.create 256; sleeps_at_last_write = 0 } in
+  let opened, resolve = Eio.Promise.create () in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream" ] in
+      Eio.Promise.resolve resolve
+        (Sse.respond ~sw ~clock ~stalled_after_s:mock_stalled_after_s ?idle
+           (Masc.Http_reqd.of_httpun reqd) (Httpun.Response.create ~headers `OK)))
+  in
+  let raw = "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read connection input ~off:0 ~len:(String.length raw) : int);
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    carry counted connection wire;
+    `Stop_daemon);
+  Eio.Promise.await opened, wire
+;;
+
+(* Moves the time to [time] and waits until the keepalive waits again. *)
+let move_to counted time =
+  let slept = counted.Counted_clock.sleeps in
+  Eio_mock.Clock.set_time counted.Counted_clock.mock time;
+  yield_until "the keepalive's next wait" (fun () -> counted.Counted_clock.sleeps > slept)
+;;
+
+(* Waits until [n] keepalives arrived and the keepalive waits again after
+   the last. *)
+let await_keepalives counted wire n =
+  yield_until (Printf.sprintf "keepalive %d" n) (fun () ->
+    keepalives wire = n && counted.Counted_clock.sleeps > wire.sleeps_at_last_write)
+;;
+
+let with_mock f = Eio_mock.Backend.run (fun () -> Eio.Switch.run f)
+
+(* Nobody writes: the response keeps itself alive, once an interval. *)
+let test_a_quiet_response_keeps_itself_alive () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let (_ : Sse.t), wire = open_quiet_response ~sw ~counted ~clock () in
+    Eio_mock.Clock.set_time counted.Counted_clock.mock (keepalive_interval_s -. 1.0);
+    for _ = 1 to settle_turns do Eio.Fiber.yield () done;
+    check int "none before an interval passed" 0 (keepalives wire);
+    move_to counted keepalive_interval_s;
+    await_keepalives counted wire 1;
+    move_to counted (2.0 *. keepalive_interval_s);
+    await_keepalives counted wire 2)
+;;
+
+(* A frame starts the interval again: the keepalive is due an interval after
+   it, not after the response opened. *)
+let test_a_frame_puts_the_keepalive_off () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let response, wire = open_quiet_response ~sw ~counted ~clock () in
+    Eio_mock.Clock.set_time counted.Counted_clock.mock 20.0;
+    check outcome_t "the frame is written" Sse.Written (Sse.send response "data: one\n\n");
+    move_to counted keepalive_interval_s;
+    check int "none an interval after the response opened" 0 (keepalives wire);
+    move_to counted (20.0 +. keepalive_interval_s);
+    await_keepalives counted wire 1)
+;;
+
+(* [Quiet] writes nothing and the next interval starts at the answer. *)
+let test_quiet_writes_nothing_and_asks_again () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let asked = ref 0 in
+    let idle () =
+      incr asked;
+      if !asked = 1 then Sse.Quiet else Sse.Keepalive
+    in
+    let (_ : Sse.t), wire = open_quiet_response ~sw ~counted ~clock ~idle () in
+    move_to counted keepalive_interval_s;
+    check int "asked once" 1 !asked;
+    check int "the quiet interval writes nothing" 0 (keepalives wire);
+    move_to counted (2.0 *. keepalive_interval_s);
+    await_keepalives counted wire 1;
+    check int "asked again" 2 !asked)
+;;
+
+let test_finish_closes_the_response_without_a_frame () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let response, wire = open_quiet_response ~sw ~counted ~clock ~idle:(fun () -> Sse.Finish) () in
+    Eio_mock.Clock.set_time counted.Counted_clock.mock keepalive_interval_s;
+    yield_until "the close" (fun () -> Sse.is_closed response);
+    check int "no keepalive" 0 (keepalives wire))
+;;
+
+(* The wall clock is set back an hour after a frame, while the keepalive
+   sleeps. The frame's time is a reading from before the step, and a sleep
+   until its interval ended would last the hour longer. The keepalive sleeps
+   one interval at most, so it comes an interval after the wake that saw the
+   frame. *)
+let test_a_clock_set_back_holds_the_keepalive_one_interval_at_most () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let response, wire = open_quiet_response ~sw ~counted ~clock () in
+    Eio_mock.Clock.set_time counted.Counted_clock.mock 10.0;
+    check outcome_t "the frame is written" Sse.Written (Sse.send response "data: one\n\n");
+    Eio_mock.Clock.set_time counted.Counted_clock.mock 20.0;
+    counted.Counted_clock.set_back_s <- 3600.0;
+    move_to counted keepalive_interval_s;
+    check int "none at the wake" 0 (keepalives wire);
+    Eio_mock.Clock.set_time counted.Counted_clock.mock (2.0 *. keepalive_interval_s);
+    await_keepalives counted wire 1)
+;;
+
+(* A closed response asks nothing and writes nothing, however long it
+   stays. *)
+let test_the_keepalive_ends_with_the_response () =
+  with_mock (fun sw ->
+    let counted, clock = counted_clock () in
+    let asked = ref 0 in
+    let idle () =
+      incr asked;
+      Sse.Keepalive
+    in
+    let response, wire = open_quiet_response ~sw ~counted ~clock ~idle () in
+    Sse.close response;
+    List.iter
+      (fun intervals ->
+         Eio_mock.Clock.set_time counted.Counted_clock.mock (float_of_int intervals *. keepalive_interval_s);
+         for _ = 1 to settle_turns do Eio.Fiber.yield () done)
+      [ 1; 2; 3 ];
+    check int "never asked" 0 !asked;
+    check int "no keepalive" 0 (keepalives wire))
+;;
+
 let () =
   run "Server SSE response"
     [ ( "loopback"
@@ -435,6 +661,19 @@ let () =
         ; test_case "the stall bound counts from each send" `Quick
             test_the_stall_bound_counts_from_each_send
         ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
+        ] )
+    ; ( "keepalive"
+      , [ test_case "a quiet response keeps itself alive" `Quick
+            test_a_quiet_response_keeps_itself_alive
+        ; test_case "a frame puts the keepalive off" `Quick test_a_frame_puts_the_keepalive_off
+        ; test_case "Quiet writes nothing and asks again" `Quick
+            test_quiet_writes_nothing_and_asks_again
+        ; test_case "Finish closes the response without a frame" `Quick
+            test_finish_closes_the_response_without_a_frame
+        ; test_case "a clock set back holds the keepalive one interval at most" `Quick
+            test_a_clock_set_back_holds_the_keepalive_one_interval_at_most
+        ; test_case "the keepalive ends with the response" `Quick
+            test_the_keepalive_ends_with_the_response
         ] )
     ; ( "producer scope"
       , [ test_case "a producer that returns ends the response" `Quick

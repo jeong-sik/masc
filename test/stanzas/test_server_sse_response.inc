@@ -3,7 +3,9 @@
 ; Stalled, a frame waiting when the client goes away ends at the stall bound,
 ; a frame answered as the time runs out is Written, close ends every waiting
 ; send, the stall bound counts from each send, and a waiting send can be
-; cancelled.
+; cancelled. A response nobody writes to keeps itself alive: once an interval,
+; put off by a frame, as [idle] answers, at most an interval late on a clock
+; set back, and never after its close.
 
 (test
  (name test_server_sse_response)

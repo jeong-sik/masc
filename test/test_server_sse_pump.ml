@@ -5,7 +5,6 @@ module Grade = Masc.Keeper_fleet_grade
 module Pump = Server_sse_pump
 module Sse = Server_sse_response
 
-let ping_interval_s = 30.0
 let queue_bound = 3
 
 let proactive_interval =
@@ -102,7 +101,7 @@ let new_hub () =
    return until the gate opens, from the [gate_from]th frame on, which is a
    client that stopped reading. The harness subscribes the hub to the queue as
    a route does: before [run], with the removal on the stream's switch. [live]
-   counts the subscriptions it holds. [step] and [idle] default to the fleet
+   counts the subscriptions it holds. [step] defaults to the fleet
    stream's. *)
 type served =
   { frames : string Eio.Stream.t
@@ -110,7 +109,6 @@ type served =
   }
 
 let fleet_step event = Pump.Send (Server_routes_http_routes_fleet_stream.frame event)
-let always_keepalive () = Pump.Keepalive
 
 (* A stub response that never closes: the stream ends through [send]. *)
 let never_closes () : unit = Eio.Fiber.await_cancel ()
@@ -139,8 +137,8 @@ let split_frames bytes =
   go 0 []
 ;;
 
-let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1)
-    ?(step = fleet_step) ?(idle = always_keepalive) ?(closed = never_closes) hub =
+let serve ~sw ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1)
+    ?(step = fleet_step) ?(closed = never_closes) hub =
   let frames = Eio.Stream.create max_int in
   let ending, resolve_ending = Eio.Promise.create () in
   let sent = ref 0 in
@@ -158,8 +156,7 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate
     Eio.Promise.resolve
       resolve_ending
       (with_subscribed_queue ~live hub (fun queue ->
-         Pump.run ~source:(Pump.Queue.source queue) ~step ~idle ~clock ~ping_interval_s ~closed
-           ~send)));
+         Pump.run ~source:(Pump.Queue.source queue) ~step ~closed ~send)));
   { frames; ending }
 ;;
 
@@ -169,28 +166,13 @@ let take_frames served count =
   |> read_frames
 ;;
 
-(* Scheduler turns the pump may need after a [send] returned before it sets
-   the timer of its next keepalive. *)
-let max_turns_to_next_timer = 16
-
-(* Moves the mock clock to the pump's next timer. *)
-let advance clock =
-  let rec go turns_left =
-    Eio.Fiber.yield ();
-    if not (Eio_mock.Clock.try_advance clock)
-    then if turns_left = 0 then fail "the pump set no timer" else go (turns_left - 1)
-  in
-  go max_turns_to_next_timer
-;;
-
 let test_the_first_frame_is_the_snapshot_the_hub_holds () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:1 hub in
+      let served = serve ~sw ~live ~stop_after:1 hub in
       check ending_t "the client left after one frame" Pump.Client_gone (Eio.Promise.await served.ending);
       check
         (list frame_t)
@@ -202,12 +184,11 @@ let test_the_first_frame_is_the_snapshot_the_hub_holds () =
 
 let test_events_follow_in_order_numbered_by_revision () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:4 hub in
+      let served = serve ~sw ~live ~stop_after:4 hub in
       let first = take_frames served 1 in
       Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
       Hub.note_degraded hub ~since:25.0 F.Scan_failed;
@@ -228,12 +209,11 @@ let test_events_follow_in_order_numbered_by_revision () =
 
 let test_initial_failure_frame_and_first_reading_are_ordered () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.note_degraded hub ~since:5.0 F.Scan_failed;
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:2 hub in
+      let served = serve ~sw ~live ~stop_after:2 hub in
       let first_bytes = Eio.Stream.take served.frames in
       (match Sse_wire.feed (Sse_wire.create_decoder ()) first_bytes with
        | [ frame ] ->
@@ -255,11 +235,10 @@ let test_initial_failure_frame_and_first_reading_are_ordered () =
 
 let test_a_client_that_connects_before_the_first_reading_gets_it_as_the_snapshot () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:1 hub in
+      let served = serve ~sw ~live ~stop_after:1 hub in
       Eio.Fiber.yield ();
       check int "subscribed and waiting" 1 !live;
       check bool "nothing is sent before a reading" true (Eio.Stream.is_empty served.frames);
@@ -273,84 +252,23 @@ let test_a_client_that_connects_before_the_first_reading_gets_it_as_the_snapshot
       check int "the subscription is removed" 0 !live))
 ;;
 
-let test_an_idle_connection_gets_a_keepalive_that_readers_ignore () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ());
-    Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:3 hub in
-      ignore (take_frames served 1 : _ list);
-      advance clock;
-      check string "after one interval" Pump.keepalive_frame (Eio.Stream.take served.frames);
-      advance clock;
-      check string "and after the next" Pump.keepalive_frame (Eio.Stream.take served.frames);
-      check
-        (list frame_t)
-        "the SSE decoder yields no event for a keepalive"
-        []
-        (read_frames Pump.keepalive_frame);
-      check ending_t "the client left after three frames" Pump.Client_gone (Eio.Promise.await served.ending)))
-;;
-
-let test_the_interval_counts_from_the_last_frame () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
-    Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:3 hub in
-      ignore (take_frames served 1 : _ list);
-      Eio_mock.Clock.set_time clock 20.0;
-      Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
-      check
-        (list frame_t)
-        "a change at second 20"
-        [ Some "2", changed ~revision:2 ~measured_at:20.0 (fleet ~running:2 ()) ]
-        (take_frames served 1);
-      (* The next timer is the one set after the change. One counted from the
-         first frame would have fallen due at second 30. *)
-      advance clock;
-      check
-        (float 0.0)
-        "the keepalive falls due 30 seconds after the change"
-        (20.0 +. ping_interval_s)
-        (Eio.Time.now clock);
-      check string "and it is a keepalive" Pump.keepalive_frame (Eio.Stream.take served.frames)))
-;;
-
-let test_an_event_that_arrives_with_a_due_keepalive_is_sent_not_the_keepalive () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
-    Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:2 hub in
-      ignore (take_frames served 1 : _ list);
-      Eio.Fiber.yield ();
-      (* The keepalive falls due and the event arrives before the pump runs
-         again, so both of its wake-ups are queued. *)
-      Eio_mock.Clock.set_time clock ping_interval_s;
-      Hub.observe hub ~measured_at:30.0 (fleet ~running:2 ());
-      check
-        (list frame_t)
-        "the event"
-        [ Some "2", changed ~revision:2 ~measured_at:30.0 (fleet ~running:2 ()) ]
-        (take_frames served 1);
-      check ending_t "the client left" Pump.Client_gone (Eio.Promise.await served.ending)))
+(* The response writes the keepalive (Server_sse_response.respond). A fleet
+   reader takes it as no event. *)
+let test_the_keepalive_frame_is_no_event_for_a_reader () =
+  check
+    (list frame_t)
+    "the SSE decoder yields no event for a keepalive"
+    []
+    (read_frames Sse.keepalive_frame)
 ;;
 
 let stalled_client ~hub ~changes =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
     Eio.Switch.run (fun sw ->
       let gate, open_gate = Eio.Promise.create () in
-      let served = serve ~sw ~clock ~live ~stop_after:(1 + queue_bound) ~gate hub in
+      let served = serve ~sw ~live ~stop_after:(1 + queue_bound) ~gate hub in
       (* The Snapshot is in [send], which has not returned. *)
       ignore (take_frames served 1 : _ list);
       for index = 1 to changes do
@@ -379,29 +297,13 @@ let test_a_client_exactly_at_the_bound_keeps_every_event () =
    A [Stalled] answer ends the pump. *)
 let test_a_send_answered_stalled_ends_the_pump () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:1 ~refusal:Sse.Stalled hub in
+      let served = serve ~sw ~live ~stop_after:1 ~refusal:Sse.Stalled hub in
       ignore (take_frames served 1 : _ list);
       check ending_t "stalled" Pump.Stalled (Eio.Promise.await served.ending);
-      check int "the subscription is removed" 0 !live))
-;;
-
-let test_a_keepalive_answered_stalled_ends_the_pump () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ());
-    Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~stop_after:2 ~refusal:Sse.Stalled hub in
-      ignore (take_frames served 1 : _ list);
-      advance clock;
-      check string "the keepalive was sent" Pump.keepalive_frame (Eio.Stream.take served.frames);
-      check ending_t "the keepalive's answer ends it" Pump.Stalled (Eio.Promise.await served.ending);
       check int "the subscription is removed" 0 !live))
 ;;
 
@@ -409,13 +311,12 @@ let test_a_keepalive_answered_stalled_ends_the_pump () =
    until [send] returns. Its answer is what ends this connection. *)
 let test_a_pile_up_behind_a_stalled_send_ends_as_stalled () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
     Eio.Switch.run (fun sw ->
       let gate, open_gate = Eio.Promise.create () in
-      let served = serve ~sw ~clock ~live ~stop_after:1 ~refusal:Sse.Stalled ~gate hub in
+      let served = serve ~sw ~live ~stop_after:1 ~refusal:Sse.Stalled ~gate hub in
       ignore (take_frames served 1 : _ list);
       for index = 1 to queue_bound + 1 do
         Hub.observe hub ~measured_at:(10.0 +. float_of_int index) (fleet ~running:(1 + index) ())
@@ -432,13 +333,12 @@ let revision_is n event = F.Revision.to_int (F.revision_of_event event) = n
 
 let test_a_skipped_event_writes_nothing () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
     Eio.Switch.run (fun sw ->
       let step event = if revision_is 2 event then Pump.Skip else fleet_step event in
-      let served = serve ~sw ~clock ~live ~stop_after:2 ~step hub in
+      let served = serve ~sw ~live ~stop_after:2 ~step hub in
       Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
       Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
       check (list frame_t) "the Snapshot, then the change after the skipped one"
@@ -451,7 +351,6 @@ let test_a_skipped_event_writes_nothing () =
 
 let test_a_last_frame_ends_the_stream_once_written () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
@@ -461,7 +360,7 @@ let test_a_last_frame_ends_the_stream_once_written () =
         then Pump.Send_last (Server_routes_http_routes_fleet_stream.frame event)
         else fleet_step event
       in
-      let served = serve ~sw ~clock ~live ~step hub in
+      let served = serve ~sw ~live ~step hub in
       Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
       Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
       check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
@@ -471,63 +370,17 @@ let test_a_last_frame_ends_the_stream_once_written () =
 
 let test_a_stop_ends_the_stream_without_a_frame () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
     Eio.Switch.run (fun sw ->
       let step event = if revision_is 2 event then Pump.Stop else fleet_step event in
-      let served = serve ~sw ~clock ~live ~step hub in
+      let served = serve ~sw ~live ~step hub in
       Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
       Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
       check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
       check int "only the Snapshot, nothing for the stop or after it" 1
         (Eio.Stream.length served.frames);
-      check int "the subscription is removed" 0 !live))
-;;
-
-let test_a_quiet_interval_writes_nothing_and_asks_again () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ());
-    Eio.Switch.run (fun sw ->
-      let asked = ref 0 in
-      let idle () =
-        incr asked;
-        if !asked = 1 then Pump.Quiet else Pump.Keepalive
-      in
-      let served = serve ~sw ~clock ~live ~stop_after:2 ~idle hub in
-      ignore (take_frames served 1 : _ list);
-      advance clock;
-      let rec until_asked turns_left =
-        if !asked = 0 && turns_left > 0
-        then (
-          Eio.Fiber.yield ();
-          until_asked (turns_left - 1))
-      in
-      until_asked max_turns_to_next_timer;
-      check int "asked once" 1 !asked;
-      check int "a quiet interval writes nothing" 0 (Eio.Stream.length served.frames);
-      advance clock;
-      check string "the next interval writes the keepalive" Pump.keepalive_frame
-        (Eio.Stream.take served.frames);
-      check ending_t "the client left" Pump.Client_gone (Eio.Promise.await served.ending)))
-;;
-
-let test_an_idle_finish_ends_the_stream_without_a_frame () =
-  Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
-    let hub = new_hub () in
-    let live = ref 0 in
-    Hub.observe hub ~measured_at:10.0 (fleet ());
-    Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~idle:(fun () -> Pump.Finish) hub in
-      ignore (take_frames served 1 : _ list);
-      advance clock;
-      check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
-      check int "nothing written after the Snapshot" 0 (Eio.Stream.length served.frames);
       check int "the subscription is removed" 0 !live))
 ;;
 
@@ -537,13 +390,12 @@ let frame_for ?(size = 16) n = Printf.sprintf "data: %d%s\n\n" n (String.make si
 
 let sends_of ?(capacity = 64) ?(on_send = fun _ _ -> ()) ~step events =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let queue = Pump.Queue.create ~max_queued_events:capacity in
     List.iter (Pump.Queue.push queue) events;
     let sends = ref [] in
     let ending =
-      Pump.run ~source:(Pump.Queue.source queue) ~step:(step queue) ~idle:(fun () -> Pump.Finish)
-        ~clock ~ping_interval_s ~closed:never_closes
+      Pump.run ~source:(Pump.Queue.source queue) ~step:(step queue)
+        ~closed:never_closes
         ~send:(fun bytes ->
           sends := split_frames bytes :: !sends;
           on_send queue (List.length !sends);
@@ -591,9 +443,9 @@ let test_a_batch_stops_at_a_pile_up () =
 ;;
 
 (* A producer on another domain can mark the queue behind at any moment,
-   also between the pump taking an event (or asking [idle]) and the send.
-   Here [step] and [idle] mark it at that moment, in the pump's own fiber, so
-   the order is fixed. The look right before the send sees the pile-up. *)
+   also between the pump taking an event and the send. Here [step] marks it
+   at that moment, in the pump's own fiber, so the order is fixed. The look
+   right before the send sees the pile-up. *)
 let test_a_pile_up_marked_before_a_send_writes_nothing () =
   let overflow queue = List.iter (Pump.Queue.push queue) [ 2; 3; 4 ] in
   let step queue n =
@@ -602,26 +454,7 @@ let test_a_pile_up_marked_before_a_send_writes_nothing () =
   in
   let ending, sends = sends_of ~capacity:2 ~step [ 1 ] in
   check ending_t "a last frame: the client fell behind" Pump.Source_stopped ending;
-  check (list (list string)) "the last frame is not written" [] sends;
-  let ending, sends =
-    Eio_mock.Backend.run_full (fun env ->
-      let queue = Pump.Queue.create ~max_queued_events:2 in
-      let sends = ref [] in
-      let ending =
-        Pump.run ~source:(Pump.Queue.source queue)
-          ~step:(fun n -> Pump.Send (frame_for n))
-          ~idle:(fun () ->
-            overflow queue;
-            Pump.Keepalive)
-          ~clock:(Eio.Stdenv.clock env) ~ping_interval_s ~closed:never_closes
-          ~send:(fun bytes ->
-            sends := bytes :: !sends;
-            Sse.Written)
-      in
-      ending, !sends)
-  in
-  check ending_t "a keepalive: the client fell behind" Pump.Source_stopped ending;
-  check (list string) "the keepalive is not written" [] sends
+  check (list (list string)) "the last frame is not written" [] sends
 ;;
 
 let producer_domains = 4
@@ -663,8 +496,7 @@ let test_producers_on_several_domains_lose_no_event () =
                taken := n :: !taken;
                incr count;
                if !count = total then Pump.Send_last "" else Pump.Send "")
-             ~idle:(fun () -> Pump.Finish)
-             ~clock ~ping_interval_s ~closed:never_closes
+             ~closed:never_closes
              ~send:(fun _ -> Sse.Written))
         (fun () -> push_from_every_domain fits ~each:pushes_per_domain)
     in
@@ -682,20 +514,18 @@ let test_producers_on_several_domains_lose_no_event () =
        | Error `Timeout -> fail "a push past the bound waited");
       check ending_t "past the bound the client is behind" Pump.Source_stopped
         (Pump.run ~source:(Pump.Queue.source overflow) ~step:(fun _ -> Pump.Send "")
-           ~idle:(fun () -> Pump.Finish)
-           ~clock ~ping_interval_s ~closed:never_closes ~send:(fun _ -> Sse.Written))
+           ~closed:never_closes ~send:(fun _ -> Sse.Written))
     done)
 ;;
 
 let test_cancelling_a_connection_removes_its_subscription () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
     (match
        Eio.Switch.run (fun sw ->
-         let served = serve ~sw ~clock ~live hub in
+         let served = serve ~sw ~live hub in
          ignore (take_frames served 1 : _ list);
          check int "subscribed while it waits" 1 !live;
          Eio.Switch.fail sw Exit)
@@ -707,14 +537,13 @@ let test_cancelling_a_connection_removes_its_subscription () =
 
 let test_a_send_that_raises_removes_the_subscription_and_propagates () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
     (match
        with_subscribed_queue ~live hub (fun queue ->
-         Pump.run ~source:(Pump.Queue.source queue) ~step:fleet_step ~idle:always_keepalive
-           ~clock ~ping_interval_s ~closed:never_closes
+         Pump.run ~source:(Pump.Queue.source queue) ~step:fleet_step
+           ~closed:never_closes
            ~send:(fun _ -> failwith "socket write failed"))
      with
      | (_ : Pump.ending) -> fail "the failure should propagate"
@@ -727,13 +556,12 @@ let test_a_send_that_raises_removes_the_subscription_and_propagates () =
    was waiting for an event and ends without a frame. *)
 let test_a_response_that_closes_while_the_pump_waits_ends_it () =
   Eio_mock.Backend.run (fun () ->
-    let clock = Eio_mock.Clock.make () in
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
     let closed, close = Eio.Promise.create () in
     Eio.Switch.run (fun sw ->
-      let served = serve ~sw ~clock ~live ~closed:(fun () -> Eio.Promise.await closed) hub in
+      let served = serve ~sw ~live ~closed:(fun () -> Eio.Promise.await closed) hub in
       ignore (take_frames served 1 : _ list);
       check bool "the pump waits for an event" false (Eio.Promise.is_resolved served.ending);
       Eio.Promise.resolve close ();
@@ -756,12 +584,8 @@ let () =
             test_a_client_that_connects_before_the_first_reading_gets_it_as_the_snapshot
         ] )
     ; ( "keepalive"
-      , [ test_case "an idle connection gets a keepalive readers ignore" `Quick
-            test_an_idle_connection_gets_a_keepalive_that_readers_ignore
-        ; test_case "the interval counts from the last frame" `Quick
-            test_the_interval_counts_from_the_last_frame
-        ; test_case "an event that arrives with a due keepalive is sent" `Quick
-            test_an_event_that_arrives_with_a_due_keepalive_is_sent_not_the_keepalive
+      , [ test_case "the keepalive frame is no event for a reader" `Quick
+            test_the_keepalive_frame_is_no_event_for_a_reader
         ] )
     ; ( "slow client"
       , [ test_case "a client that stops reading is closed once the queue is full" `Quick
@@ -772,8 +596,6 @@ let () =
     ; ( "stalled client"
       , [ test_case "a send answered Stalled ends the pump" `Quick
             test_a_send_answered_stalled_ends_the_pump
-        ; test_case "a keepalive answered Stalled ends the pump" `Quick
-            test_a_keepalive_answered_stalled_ends_the_pump
         ; test_case "a pile-up behind a stalled send ends as stalled" `Quick
             test_a_pile_up_behind_a_stalled_send_ends_as_stalled
         ] )
@@ -794,10 +616,6 @@ let () =
         ; test_case "a batch stops at a pile-up" `Quick test_a_batch_stops_at_a_pile_up
         ; test_case "a pile-up marked before a send writes nothing" `Quick
             test_a_pile_up_marked_before_a_send_writes_nothing
-        ; test_case "a quiet interval writes nothing and asks again" `Quick
-            test_a_quiet_interval_writes_nothing_and_asks_again
-        ; test_case "an idle finish ends the stream without a frame" `Quick
-            test_an_idle_finish_ends_the_stream_without_a_frame
         ] )
     ; ( "queue"
       , [ test_case "producers on several domains lose no event" `Quick

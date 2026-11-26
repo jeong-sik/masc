@@ -264,6 +264,23 @@ let chat_speaker_of_request payload =
         speaker_name = None;
         speaker_authority = Keeper_chat_store.Owner }
 
+(* Who started the turn decides whether a held tool call has someone to
+   answer it. With no gate, a call the approval policy would ask about runs,
+   as it does in an autonomous cycle.
+   - The operator: the request is the operator's own, and the operator
+     answers on its stream or from the list of open waits.
+   - A person on a connector: the operator answers from the list of open
+     waits, and a call nobody answers is denied, so that person's word alone
+     does not run a held call.
+   - A Keeper: the request is Keeper work, as an autonomous cycle is, so it
+     gets no gate either. With one, nobody answered: every held call waited
+     out the timeout and was then denied. *)
+let approval_gate_for_speaker (speaker : Keeper_chat_store.speaker) ~create =
+  match speaker.speaker_authority with
+  | Keeper_chat_store.Owner -> Some (create ())
+  | Keeper_chat_store.External -> Some (create ())
+  | Keeper_chat_store.Keeper -> None
+
 (* The same three cases as [chat_speaker_of_request], as the typed speaker the
    turn stamps on the User message it creates. The Librarian
    reads the conversation, not the chat store, so the speaker has to travel
@@ -1745,20 +1762,17 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
         detail;
       failwith ("tool execution occurrence join rejected: " ^ detail)
   in
-  (* A gate only for turns an operator started here: this request is open,
-     someone is reading it, and the answer has somewhere to come back to. An
-     autonomous cycle gets none -- nobody is watching it, so every call it
-     made would wait out the timeout and then be denied. *)
   let approval_gate =
-    Keeper_tool_approval_gate.create
-      ~registry:(Keeper_tool_approval_registry.shared ())
-      ~late_approvals:(Keeper_late_approval.shared ())
-      ~publish:(fun event -> push_worker_event (Stream_chat_event event))
-      ~redact_text
-      ~clock
-      ~base_path
-      ~keeper_name:payload.name
-      ~timeout_sec:(Keeper_config.keeper_tool_approval_timeout_sec ())
+    approval_gate_for_speaker chat_speaker ~create:(fun () ->
+      Keeper_tool_approval_gate.create
+        ~registry:(Keeper_tool_approval_registry.shared ())
+        ~late_approvals:(Keeper_late_approval.shared ())
+        ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+        ~redact_text
+        ~clock
+        ~base_path
+        ~keeper_name:payload.name
+        ~timeout_sec:(Keeper_config.keeper_tool_approval_timeout_sec ()))
   in
   let accumulated_media_blocks () =
     match
@@ -1905,7 +1919,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
                 ~input_speaker:(input_speaker_of_request payload) ~on_event
                 ~on_tool_stream_observation
                 ~on_tool_result_ready
-                ~approval_gate
+                ?approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
                 ~operation_id ~admission_token
             in
@@ -3602,6 +3616,7 @@ module For_testing = struct
   let message_for_request = message_for_request
   let chat_surface_of_request = chat_surface_of_request
   let chat_speaker_of_request = chat_speaker_of_request
+  let approval_gate_for_speaker = approval_gate_for_speaker
   let input_speaker_of_request = input_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let direct_message_of_request = direct_message_of_request

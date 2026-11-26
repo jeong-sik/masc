@@ -1133,7 +1133,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   }
 }
 
-function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
+export function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw) || !hasExactKeys(raw, [
     'keeper',
     'count',

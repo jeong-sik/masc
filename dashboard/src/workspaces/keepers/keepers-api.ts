@@ -18,6 +18,7 @@ import {
   isKeeperHealthFailing,
 } from '../../api/keeper-diagnostics'
 import { err, ok, type Result } from '../../lib/result'
+import { decodeTurnRecordsResponse, type TurnRecordsResponse } from '../../api/dashboard-turn-records'
 import {
   authSession,
   currentSessionEpoch,
@@ -109,7 +110,6 @@ import type {
   KeeperToolCallsData,
   KeeperToolSource,
   KeeperToolStatsData,
-  KeeperTurnRecordsData,
   KeeperWaitingSummary,
   KeeperWaitingUnavailable,
   MemoryActPayload,
@@ -121,8 +121,6 @@ import type {
   RawTraceTurnItem,
   RosterMode,
   SourceBoundMemoryBranch,
-  TurnRecordItem,
-  TurnRecordPromptBlock,
 } from './types'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -2072,95 +2070,16 @@ export async function transcribeVoiceAudio(
 
 // ── Debug Companion: Turn Records, Tool Calls, Prompt, Provider Input, Raw Traces, Checkpoints ──
 
-function decodePromptBlock(b: unknown): TurnRecordPromptBlock | null {
-  if (!isRecord(b)) return null
-  return {
-    block: asStr(b.block) ?? asStr(b.id) ?? 'block',
-    bytes: asNum(b.bytes) ?? 0,
-    digest: asStr(b.digest) ?? '',
-  }
-}
-
-function decodePromptBlocks(raw: unknown): TurnRecordPromptBlock[] {
-  if (!Array.isArray(raw)) return []
-  const out: TurnRecordPromptBlock[] = []
-  for (const b of raw) {
-    const decoded = decodePromptBlock(b)
-    if (decoded) out.push(decoded)
-  }
-  return out
-}
-
-function decodeChangedPromptBlocks(raw: unknown): { readonly prev: TurnRecordPromptBlock; readonly next: TurnRecordPromptBlock }[] {
-  if (!Array.isArray(raw)) return []
-  const out: { readonly prev: TurnRecordPromptBlock; readonly next: TurnRecordPromptBlock }[] = []
-  for (const item of raw) {
-    if (!isRecord(item)) continue
-    const prev = decodePromptBlock(item.prev)
-    const next = decodePromptBlock(item.next)
-    if (prev && next) out.push({ prev, next })
-  }
-  return out
-}
-
-export function fetchKeeperTurnRecordsApi(keeper: string, limit = 60): Promise<Result<KeeperTurnRecordsData, ApiError>> {
-  return apiGet<KeeperTurnRecordsData>(
+export function fetchKeeperTurnRecordsApi(keeper: string, limit = 60): Promise<Result<TurnRecordsResponse, ApiError>> {
+  return apiGet<TurnRecordsResponse>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/turn-records?limit=${limit}`,
     {
+      // The turn inspector's decoder: one reading of the record the server
+      // writes, with its usage scope and input provenance.
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const rawEntries = Array.isArray(rec.entries) ? rec.entries : []
-        const entries: KeeperTurnRecordsData['entries'][number][] = []
-        for (const e of rawEntries) {
-          if (!isRecord(e) || !isRecord(e.record)) continue
-          const r = e.record
-          const refRaw = isRecord(r.raw_trace_run_ref) ? r.raw_trace_run_ref : null
-          const item: TurnRecordItem = {
-            trace_id: asStr(r.trace_id) ?? '',
-            absolute_turn: asNum(r.absolute_turn) ?? 0,
-            turn_ref: asStr(r.turn_ref) ?? '',
-            turn_kind: r.turn_kind === 'direct' ? 'direct' : 'autonomous',
-            runtime_profile: asStr(r.runtime_profile) ?? 'default',
-            selected_model: asStr(r.selected_model) ?? undefined,
-            finish_reason: asStr(r.finish_reason) ?? undefined,
-            context_window: asNum(r.context_window) ?? undefined,
-            provider_context_window: asNum(r.provider_context_window) ?? undefined,
-            request_latency_ms: asNum(r.request_latency_ms) ?? undefined,
-            ttfrc_ms: asNum(r.ttfrc_ms) ?? undefined,
-            input_tokens: asNum(r.input_tokens) ?? undefined,
-            cache_creation_input_tokens: asNum(r.cache_creation_input_tokens) ?? undefined,
-            cache_read_input_tokens: asNum(r.cache_read_input_tokens) ?? undefined,
-            output_tokens: asNum(r.output_tokens) ?? undefined,
-            ts: asNum(r.ts) ?? 0,
-            blocks: decodePromptBlocks(r.blocks),
-            raw_trace_run_ref: refRaw && asStr(refRaw.path)
-              ? {
-                  worker_run_id: asStr(refRaw.worker_run_id) ?? '',
-                  path: asStr(refRaw.path)!,
-                  start_seq: asNum(refRaw.start_seq) ?? 0,
-                  end_seq: asNum(refRaw.end_seq) ?? 0,
-                }
-              : null,
-          }
-          const diffRaw = isRecord(e.diff_vs_prev) ? e.diff_vs_prev : null
-          entries.push({
-            record: item,
-            diff_vs_prev: diffRaw
-              ? {
-                  added: decodePromptBlocks(diffRaw.added),
-                  removed: decodePromptBlocks(diffRaw.removed),
-                  changed: decodeChangedPromptBlocks(diffRaw.changed),
-                }
-              : null,
-          })
-        }
-        return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          count: asNum(rec.count) ?? entries.length,
-          live_turn_in_progress: rec.live_turn_in_progress === true,
-          health: asStr(rec.health) ?? 'unknown',
-          entries,
-        }
+        const decoded = decodeTurnRecordsResponse(raw)
+        if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
+        return decoded
       },
     },
   )

@@ -391,53 +391,6 @@ export interface BtwQueryState {
 
 // ── Turn Records, Tool Calls, Prompt & Provider Input (#36) ──────────────
 
-export interface TurnRecordPromptBlock {
-  readonly block: string
-  readonly bytes: number
-  readonly digest: string
-}
-
-export interface TurnRecordItem {
-  readonly trace_id: string
-  readonly absolute_turn: number
-  readonly turn_ref: string
-  readonly turn_kind: 'autonomous' | 'direct'
-  readonly runtime_profile: string
-  readonly selected_model?: string
-  readonly finish_reason?: string
-  readonly context_window?: number
-  readonly provider_context_window?: number
-  readonly request_latency_ms?: number
-  readonly ttfrc_ms?: number
-  readonly input_tokens?: number
-  readonly cache_creation_input_tokens?: number
-  readonly cache_read_input_tokens?: number
-  readonly output_tokens?: number
-  readonly ts: number
-  readonly blocks: readonly TurnRecordPromptBlock[]
-  readonly raw_trace_run_ref: {
-    readonly worker_run_id: string
-    readonly path: string
-    readonly start_seq: number
-    readonly end_seq: number
-  } | null
-}
-
-export interface KeeperTurnRecordsData {
-  readonly keeper: string
-  readonly count: number
-  readonly live_turn_in_progress: boolean
-  readonly health: string
-  readonly entries: readonly {
-    readonly record: TurnRecordItem
-    readonly diff_vs_prev: {
-      readonly added: readonly TurnRecordPromptBlock[]
-      readonly removed: readonly TurnRecordPromptBlock[]
-      readonly changed: readonly { readonly prev: TurnRecordPromptBlock; readonly next: TurnRecordPromptBlock }[]
-    } | null
-  }[]
-}
-
 export interface KeeperToolCallEntry {
   readonly ts: number
   readonly record_kind: 'tool_call' | 'composition_run' | 'lifecycle_event'

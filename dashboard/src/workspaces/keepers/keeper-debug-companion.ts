@@ -15,6 +15,8 @@ import { activeWorkspaceId } from '../../core/auth'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
+import type { TurnRecordEntry, TurnRecordsResponse } from '../../api/dashboard-turn-records'
+import { turnContextWindow } from '../../lib/turn-context-window'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -43,11 +45,9 @@ import type {
   KeeperMemoryFactsData,
   KeeperMemoryJournalData,
   KeeperToolCallsData,
-  KeeperTurnRecordsData,
   MemoryActPayload,
   ProviderInputData,
   RawTraceTurnItem,
-  TurnRecordItem,
 } from './types'
 
 export interface PromptCacheSegments {
@@ -59,7 +59,7 @@ export interface PromptCacheSegments {
   readonly cacheHitPct: number | null
 }
 
-export function computePromptCacheSegments(record: TurnRecordItem | null): PromptCacheSegments {
+export function computePromptCacheSegments(record: TurnRecordEntry | null): PromptCacheSegments {
   if (!record) {
     return { cacheRead: 0, cacheCreate: 0, uncachedInput: 0, output: 0, total: 0, cacheHitPct: null }
   }
@@ -76,8 +76,11 @@ export function computePromptCacheSegments(record: TurnRecordItem | null): Promp
 
 /**
  * Builds 60-turn `uPlot.AlignedData` for Context Fill % and detects compaction drops (>25% drop).
+ * A turn is a point only when the inspectors read its input as a fill
+ * ({@link turnContextWindow}); a turn total, an input above its window or a
+ * row the reading does not count is a gap, not a point at the ceiling.
  */
-export function buildContextFillSeries(records: readonly TurnRecordItem[]): {
+export function buildContextFillSeries(records: readonly TurnRecordEntry[]): {
   readonly data: uPlot.AlignedData
   readonly compactionTurns: readonly number[]
 } {
@@ -89,11 +92,10 @@ export function buildContextFillSeries(records: readonly TurnRecordItem[]): {
 
   for (const r of ordered) {
     const ts = r.ts > 0 ? r.ts : r.absolute_turn
-    const win = r.provider_context_window ?? r.context_window ?? 0
     // `input_tokens` already includes cached tokens (lib/types/turn_record.mli:52-58);
     // do not double-count `cache_read_input_tokens` + `cache_creation_input_tokens`.
-    const inp = Math.max(0, r.input_tokens ?? 0)
-    const pct = win > 0 && inp > 0 ? Math.min(100, Math.round((inp / win) * 100)) : null
+    const fill = turnContextWindow(r).percent
+    const pct = fill === null ? null : Math.round(fill)
     if (prevPct !== null && pct !== null && prevPct - pct >= 25) {
       compactionTurns.push(r.absolute_turn)
     }
@@ -102,6 +104,8 @@ export function buildContextFillSeries(records: readonly TurnRecordItem[]): {
     ys.push(pct)
   }
 
+  // Gaps alone draw an empty frame; with no fill the chart shows its empty label.
+  if (ys.every((y) => y === null)) return { data: [[], []], compactionTurns }
   return { data: [xs, ys], compactionTurns }
 }
 
@@ -121,7 +125,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const [tab, setTab] = useState<DebugCompanionTab>('trace')
 
   // Trace state
-  const [turns, setTurns] = useState<KeeperTurnRecordsData | null>(null)
+  const [turns, setTurns] = useState<TurnRecordsResponse | null>(null)
   const [toolCalls, setToolCalls] = useState<KeeperToolCallsData | null>(null)
   const [rawTraces, setRawTraces] = useState<readonly RawTraceTurnItem[]>([])
   const [rawTracePage, setRawTracePage] = useState<Record<string, unknown> | null>(null)

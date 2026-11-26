@@ -322,9 +322,6 @@ let transport_error_of_failure ?path ?(streaming = false) = function
       | Masc_http_client.Pool.Invalid_request _ ->
           Health.Protocol_error (Masc_http_client.Pool.request_error_to_string err))
 
-let should_autostart_server ~contact ~already_attempted =
-  Masc_server_lifecycle.start_due ~contact ~already_attempted
-
 let default_raw_timeout_sec = 10.0
 
 let request_raw ~io ~clock ~timeout_sec ~max_body_bytes ?extra_headers
@@ -446,27 +443,6 @@ let post_json ~io ~clock ?timeout_sec ep ~path ~body ~decode =
   match
     send_raw ~io ~clock ?timeout_sec ~content_type:"application/json"
       ~method_:`POST ~body:body_str ep ~path
-  with
-  | Error _ as err -> err
-  | Ok resp_body -> decode_body ~decode resp_body
-
-let put_json ~io ~clock ?timeout_sec ep ~path ~body ~decode =
-  let body_str = Yojson.Safe.to_string body in
-  match
-    send_raw ~io ~clock ?timeout_sec ~content_type:"application/json"
-      ~method_:`PUT ~body:body_str ep ~path
-  with
-  | Error _ as err -> err
-  | Ok resp_body -> decode_body ~decode resp_body
-
-let delete_json ~io ~clock ?timeout_sec ?body ep ~path ~decode =
-  let body_str = Option.map Yojson.Safe.to_string body in
-  let content_type =
-    match body_str with Some _ -> Some "application/json" | None -> None
-  in
-  match
-    send_raw ~io ~clock ?timeout_sec ?content_type ~method_:`DELETE
-      ?body:body_str ep ~path
   with
   | Error _ as err -> err
   | Ok resp_body -> decode_body ~decode resp_body

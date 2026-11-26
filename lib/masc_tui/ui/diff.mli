@@ -33,9 +33,6 @@ val preview : context:int -> max_rows:int -> row list -> row list * int
 val number : old_start:int -> new_start:int option -> row list -> numbered list
 (** Attach old/new file line coordinates to each diff row. *)
 
-val preview_numbered :
-  context:int -> max_rows:int -> numbered list -> numbered list * int
-
 val parse_unified : string -> numbered list
 (** Parse a unified diff string (skipping [diff --git]/[index]/[---]/[+++]
     headers and tracking [@@] hunk line numbers) into {!numbered} rows. *)

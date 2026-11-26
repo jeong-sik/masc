@@ -449,13 +449,8 @@ val company_spend_rollups : t -> company_spend_row list
 
 val set_fusion_prompt : string -> t -> t
 val set_fusion_keeper : string option -> t -> t
-val set_fusion_preset : string option -> t -> t
-val set_fusion_topology : Wire_runtime.fusion_topology option -> t -> t
-val toggle_fusion_web_tools : t -> t
 val set_fusion_submitting : bool -> t -> t
 val clear_fusion_draft : t -> t
-val to_fusion_launch_request :
-  t -> (string * Wire_runtime.fusion_launch_request, string) result
 
 val filtered_lanes : t -> Wire_runtime.failover_lane list
 val filtered_tools : t -> Wire_runtime.tool_summary list
@@ -467,7 +462,6 @@ val filtered_fusion_runs : t -> Wire_runtime.fusion_run list
 val selected_fusion_run : t -> Wire_runtime.fusion_run option
 val filtered_connectors : t -> Wire_runtime.connector_row list
 val filtered_mcp_clients : t -> Wire_runtime.mcp_client_row list
-val selected_mcp_client : t -> Wire_runtime.mcp_client_row option
 val filtered_addon_instances : t -> Wire_runtime.addon_instance list
 val declaration_for_addon :
   Wire_runtime.addon_instance -> t -> Wire_runtime.addon_declaration option

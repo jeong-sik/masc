@@ -132,13 +132,27 @@ type goal_confirmation_request = {
   expected_runtime_instance_id : string;
 }
 
+type goal_confirmation_proof_state =
+  | Proof_proven
+  | Human_confirmed
+  | Proof_pending
+  | Proof_no_record
+  | Proof_state_other of string
+
+let goal_confirmation_proof_state_to_string = function
+  | Proof_proven -> "proof_proven"
+  | Human_confirmed -> "human_confirmed"
+  | Proof_pending -> "proof_pending"
+  | Proof_no_record -> "no_record"
+  | Proof_state_other s -> s
+
 type goal_confirmation_proof = {
   goal_id : string;
   criterion_revision : string;
   request_id : string option;
   verification_run_id : string option;
   inspection_operator_id : string;
-  state : string;
+  state : goal_confirmation_proof_state;
 }
 
 let goal_phase_to_string = function
@@ -391,30 +405,34 @@ let decode_goal_confirmation json =
   in
   let state, request_id, verification_run_id =
     match verification_json with
-    | `Null -> ("no_record", None, None)
+    | `Null -> (Proof_no_record, None, None)
     | `Assoc _ as v -> (
         let completion =
           match member "completion" v with `Assoc _ as c -> c | _ -> v
         in
         match optional_nonblank_string completion "state" with
         | Ok (Some (("proof_proven" | "human_confirmed") as raw_state)) -> (
+            let parsed_state =
+              if String.equal raw_state "proof_proven" then Proof_proven
+              else Human_confirmed
+            in
             match member "verdict" completion with
             | `Assoc _ as verdict ->
                 let rid = optional_nonblank_string verdict "request_id" in
                 let run =
                   optional_nonblank_string verdict "verification_run_id"
                 in
-                ( raw_state
+                ( parsed_state
                 , (match rid with Ok r -> r | Error _ -> None)
                 , (match run with Ok r -> r | Error _ -> None) )
-            | _ -> (raw_state, None, None))
+            | _ -> (parsed_state, None, None))
         | Ok (Some "proof_pending") ->
             let rid = optional_nonblank_string completion "request_id" in
-            ("proof_pending", (match rid with Ok r -> r | Error _ -> None), None)
-        | Ok (Some state) -> (state, None, None)
-        | Ok None -> ("unknown", None, None)
-        | Error _ -> ("unknown", None, None))
-    | _ -> ("unknown", None, None)
+            (Proof_pending, (match rid with Ok r -> r | Error _ -> None), None)
+        | Ok (Some state) -> (Proof_state_other state, None, None)
+        | Ok None -> (Proof_state_other "unknown", None, None)
+        | Error _ -> (Proof_state_other "unknown", None, None))
+    | _ -> (Proof_state_other "unknown", None, None)
   in
   Ok
     {

@@ -150,12 +150,6 @@ let number ~old_start ~new_start xs =
           n)
     xs
 
-let preview_numbered ~context ~max_rows xs =
-  let before, changed, after =
-    split_around_change ~is_context:(fun n -> is_context n.nrow) xs
-  in
-  window ~context ~max_rows ~before ~changed ~after
-
 let line_number_cell = function
   | None -> "    -"
   | Some line -> Printf.sprintf "%5d" line

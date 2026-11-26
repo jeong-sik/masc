@@ -155,34 +155,9 @@ let draft_for ~keeper t =
 
 let current_draft t = draft_for ~keeper:(target_keeper_key t) t
 
-let clamp_cursor s c =
-  let len = String.length s in
-  if c < 0 then 0 else if c > len then len else c
-
-let is_utf8_cont b = b land 0xC0 = 0x80
-
-let prev_utf8_boundary s idx =
-  let i = clamp_cursor s idx in
-  if i <= 0 then 0
-  else
-    let rec step p =
-      if p <= 0 then 0
-      else if is_utf8_cont (Char.code s.[p]) then step (p - 1)
-      else p
-    in
-    step (i - 1)
-
-let next_utf8_boundary s idx =
-  let len = String.length s in
-  let i = clamp_cursor s idx in
-  if i >= len then len
-  else
-    let rec step p =
-      if p >= len then len
-      else if is_utf8_cont (Char.code s.[p]) then step (p + 1)
-      else p
-    in
-    step (i + 1)
+let clamp_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
+let prev_utf8_boundary = Masc_tui_core.Text_util.prev_utf8_boundary
+let next_utf8_boundary = Masc_tui_core.Text_util.next_utf8_boundary
 
 let with_current_draft ?(reset_popup = true) f t =
   let key = target_keeper_key t in

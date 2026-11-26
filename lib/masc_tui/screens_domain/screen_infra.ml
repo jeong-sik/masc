@@ -1750,10 +1750,14 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
               let g, tone, st = repo_status_display ~lang r.status in
               let pr_suffix =
                 match Infra_store.pulls_entry_for ~repo_id:r.id inf with
-                | Some e when String.equal e.state "read" && e.pulls <> [] ->
-                    Printf.sprintf " · %dPR" (List.length e.pulls)
-                | Some e when String.equal e.state "failed" -> " · PR!"
-                | Some _ | None -> ""
+                | Some e -> (
+                    match Wire_infra.classify_pr_entry_state e.state with
+                    | Wire_infra.Pr_entry_read when e.pulls <> [] ->
+                        Printf.sprintf " · %dPR" (List.length e.pulls)
+                    | Wire_infra.Pr_entry_failed -> " · PR!"
+                    | Wire_infra.Pr_entry_read | Wire_infra.Pr_entry_other _ ->
+                        "")
+                | None -> ""
               in
               let dirty_suffix =
                 match

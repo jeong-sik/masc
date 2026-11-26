@@ -2538,11 +2538,8 @@ let rec execute_get t ~epoch req =
           raise exn
 
 let is_terminal_setup_login_status status =
-  match String.lowercase_ascii (String.trim status) with
-  | "complete" | "completed" | "failed" | "canceled" | "cancelled"
-  | "interrupted" ->
-      true
-  | _ -> false
+  Wire_runtime.is_terminal_setup_login_status
+    (Wire_runtime.classify_setup_login_status status)
 
 let run_setup_login_stream
     ?(on_output = fun ~text:_ ~auth_url:_ ~device_code:_ -> ())

@@ -8411,12 +8411,14 @@ let apply_http_reply ~now (m : Model.t) reply =
               in
               let error =
                 match proof.state with
-                | "proof_proven" | "human_confirmed" -> None
-                | state ->
+                | Wire_work.Proof_proven | Wire_work.Human_confirmed -> None
+                | ( Wire_work.Proof_pending
+                  | Wire_work.Proof_no_record
+                  | Wire_work.Proof_state_other _ ) as state ->
                     Some
                       (Printf.sprintf
                          "서버 검증 상태가 %s 입니다. 수동 입력으로 확인하세요."
-                         state)
+                         (Wire_work.goal_confirmation_proof_state_to_string state))
               in
               let modal = { modal with fields; error } in
               ({ m with inline_modal = Some modal }, []))

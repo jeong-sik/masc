@@ -1980,36 +1980,9 @@ let begin_edit_keeper_selected ?lang t =
   | None -> Error "No configuration field selected"
   | Some f -> begin_edit_field ~step_enum:true f t
 
-let is_utf8_cont b = b land 0xC0 = 0x80
-
-let clamp_edit_cursor s c =
-  let len = String.length s in
-  let c = max 0 (min len c) in
-  let rec align i =
-    if i <= 0 || i >= len then i
-    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
-    else i
-  in
-  align c
-
-let prev_utf8_boundary s c =
-  let c = clamp_edit_cursor s c in
-  if c <= 0 then 0
-  else
-    let rec back i =
-      if i <= 0 then 0
-      else if is_utf8_cont (Char.code s.[i]) then back (i - 1)
-      else i
-    in
-    back (c - 1)
-
-let next_utf8_boundary s c =
-  let len = String.length s in
-  let c = clamp_edit_cursor s c in
-  if c >= len then len
-  else
-    let d = String.get_utf_8_uchar s c in
-    min len (c + max 1 (Uchar.utf_decode_length d))
+let clamp_edit_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
+let prev_utf8_boundary = Masc_tui_core.Text_util.prev_utf8_boundary
+let next_utf8_boundary = Masc_tui_core.Text_util.next_utf8_boundary
 
 let update_edit_buffer editing_buffer t =
   {

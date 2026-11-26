@@ -1445,13 +1445,6 @@ let toggle_verification_view t =
     verif_scroll_offset = 0;
   }
 
-let toggle_expanded id t =
-  let expanded_ids =
-    if String_set.mem id t.expanded_ids then String_set.remove id t.expanded_ids
-    else String_set.add id t.expanded_ids
-  in
-  { t with expanded_ids }
-
 let mark_stale_all t =
   let t = invalidate_verifications t in
   {
@@ -1744,11 +1737,3 @@ let hitl_status t =
   match Observed.to_option t.gate_snapshot with
   | Some snap -> snap.hitl
   | None -> None
-
-let tool_approval_mode_for ~keeper t =
-  match Observed.to_option t.tool_approval_modes with
-  | None -> Wire_work.Approval_auto
-  | Some snap -> (
-      match List.assoc_opt keeper snap.overrides with
-      | Some m -> m
-      | None -> snap.default_mode)

@@ -2,51 +2,10 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
-let is_utf8_cont b = b land 0xC0 = 0x80
-
-let drop_last_utf8 s =
-  let len = String.length s in
-  if len <= 0 then ""
-  else
-    let rec prev i =
-      if i <= 0 then 0
-      else if is_utf8_cont (Char.code s.[i]) then prev (i - 1)
-      else i
-    in
-    String.sub s 0 (prev (len - 1))
-
-let clamp_utf8_cursor s idx =
-  let len = String.length s in
-  let c = max 0 (min len idx) in
-  let rec align i =
-    if i <= 0 || i >= len then i
-    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
-    else i
-  in
-  align c
-
-let prev_utf8_boundary s idx =
-  let i = clamp_utf8_cursor s idx in
-  if i <= 0 then 0
-  else
-    let rec walk p =
-      if p <= 0 then 0
-      else if is_utf8_cont (Char.code s.[p]) then walk (p - 1)
-      else p
-    in
-    walk (i - 1)
-
-let next_utf8_boundary s idx =
-  let len = String.length s in
-  let i = clamp_utf8_cursor s idx in
-  if i >= len then len
-  else
-    let rec walk p =
-      if p >= len then len
-      else if is_utf8_cont (Char.code s.[p]) then walk (p + 1)
-      else p
-    in
-    walk (i + 1)
+let drop_last_utf8 = Text_util.drop_last_utf8
+let clamp_utf8_cursor = Text_util.clamp_utf8_cursor
+let prev_utf8_boundary = Text_util.prev_utf8_boundary
+let next_utf8_boundary = Text_util.next_utf8_boundary
 
 let insert_at_cursor ~text ~cursor ~insert =
   let len = String.length text in
@@ -8767,13 +8726,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
                     (Masc_tui_ui.Html_doc.render_lines ~width:(max 1 content.w)
                        ~theme ~lang:m.lang raw_body)
               | `Document, `Markdown ->
-                  let is_json =
-                    String.starts_with ~prefix:"application/json"
-                      (String.lowercase_ascii (String.trim a.body.mime))
-                    || Filename.check_suffix
-                         (String.lowercase_ascii (String.trim a.title))
-                         ".json"
-                  in
+                  let is_json = Knowledge_store.is_json_artifact a in
                   if is_json then
                     match Yojson.Safe.from_string raw_body with
                     | json ->

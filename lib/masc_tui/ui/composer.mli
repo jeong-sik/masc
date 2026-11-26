@@ -105,19 +105,6 @@ val backspace : state -> state
 val kill_word : state -> state
 val move_cursor : [ `Left | `Right | `Home | `End ] -> state -> state
 
-val render_voice_waveform :
-  ?clip:Rect.t ->
-  Cell_grid.t ->
-  x:int ->
-  y:int ->
-  width:int ->
-  theme:Theme.t ->
-  bg:Masc_tui_term.Color.t ->
-  float array ->
-  int
-(** Paint live Voice PTT microphone levels directly via
-    {!Masc_tui_term.Cell_grid.put_braille} (zero string allocations). *)
-
 val draw_popup :
   Cell_grid.t ->
   anchor:Rect.t ->

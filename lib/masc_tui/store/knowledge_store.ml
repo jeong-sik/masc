@@ -1435,16 +1435,7 @@ let memory_successor_source ~lang = function
     Some (reading_say lang ~ko:"보관 이력에서 찾은 후속 사실" ~en:"Successor body from the archive")
   | Some (Same_commit | Held_before) | None -> None
 
-let reading_format_age ~now_unix ts_unix =
-  if
-    (not (Float.is_finite now_unix))
-    || (not (Float.is_finite ts_unix))
-    || now_unix <= 0.0
-    || ts_unix <= 0.0
-  then Glyph.to_utf8 Glyph.Missing_absent
-  else
-    let delta = Float.max 0.0 (now_unix -. ts_unix) in
-    if delta < 5.0 then "now" else Format_val.format_duration_s delta
+let reading_format_age = Format_val.format_age_short
 
 let reading_activity_kind_spec ~lang = function
   | Wire_knowledge.Activity_created ->
@@ -2137,15 +2128,6 @@ let artifact_by_id t id =
         items
   | None -> None
 
-let find_artifact_by_id_or_sha target t =
-  let items =
-    match Observed.to_option t.artifacts with Some xs -> xs | None -> []
-  in
-  List.find_opt
-    (fun (a : Wire_knowledge.artifact_entry) ->
-      String.equal a.id target || String.equal a.body.sha256 target)
-    items
-
 let artifact_detail_for_entry (a : Wire_knowledge.artifact_entry) t =
   match Observed.to_option t.active_artifact_detail with
   | Some detail
@@ -2278,22 +2260,6 @@ let filtered_memory_conflicts t =
                | Some s -> contains_ci ~needle:q s
                | None -> false)
              c.competing_claims)
-      all
-
-let filtered_memory_claims t =
-  let all =
-    match Observed.to_option t.world_memory with
-    | Some w -> w.claims
-    | None -> []
-  in
-  let q = String.trim t.filter_query in
-  if String.equal q "" then all
-  else
-    List.filter
-      (fun (c : Wire_knowledge.world_claim) ->
-        contains_ci ~needle:q c.claim
-        || contains_ci ~needle:q c.claim_id
-        || List.exists (contains_ci ~needle:q) c.supporting_keepers)
       all
 
 let filtered_librarian_writers t =
@@ -2968,9 +2934,6 @@ let cycle_keeper_memory_subview t =
     | Kmem_journal -> Kmem_diff_flow
   in
   set_keeper_memory_subview next t
-
-let apply_memory_health_fleet ~observed_at fleet t =
-  apply_keeper_memory_health ~observed_at fleet t
 
 let keeper_matches_slot ~active_keeper ~keeper slot t =
   let expected =

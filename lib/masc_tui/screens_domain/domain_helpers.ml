@@ -417,16 +417,7 @@ let draw_observed_placeholder ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?b
                    ~style:(Typography.status ~bg:bg_color theme Theme.Status_ok)
                    line))
 
-let format_age ~now_unix ts_unix =
-  if
-    (not (Float.is_finite now_unix))
-    || (not (Float.is_finite ts_unix))
-    || now_unix <= 0.0
-    || ts_unix <= 0.0
-  then Glyph.to_utf8 Glyph.Missing_absent
-  else
-    let delta = Float.max 0.0 (now_unix -. ts_unix) in
-    if delta < 5.0 then "now" else Format_val.format_duration_s delta
+let format_age = Format_val.format_age_short
 
 let format_countdown ~now_unix resets_at_unix =
   if

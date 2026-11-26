@@ -326,17 +326,7 @@ let format_due_delta ~now_unix ts ~lang =
     | Say.Lang_en -> dur ^ " late"
 
 let format_hhmm ?(tz_offset_sec = 0) ts =
-  if (not (Float.is_finite ts)) || ts <= 0.0 then "--:--"
-  else
-    let secs = Int64.add (Int64.of_float (Float.floor ts)) (Int64.of_int tz_offset_sec) in
-    let day_secs = Int64.rem secs 86400L in
-    let day_secs =
-      if Int64.compare day_secs 0L < 0 then Int64.add day_secs 86400L
-      else day_secs
-    in
-    let h = Int64.to_int (Int64.div day_secs 3600L) in
-    let m = Int64.to_int (Int64.div (Int64.rem day_secs 3600L) 60L) in
-    Printf.sprintf "%02d:%02d" h m
+  Option.value ~default:"--:--" (Format_val.format_hhmm_opt ~tz_offset_sec ts)
 
 let samples_of_floats xs =
   Array.of_list

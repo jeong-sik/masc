@@ -110,7 +110,6 @@ val sync_streams :
     on {!Io_domain}. Each new stream keeps its own [on_event] through reconnect
     and unsubscribe so callers can capture the stream's workspace epoch. *)
 
-val active_streams : t -> Stream_spec.t list
 val shutdown : t -> unit
 (** Fence and cancel all active streams and emit {!Health.Disconnected}
     freshness. *)

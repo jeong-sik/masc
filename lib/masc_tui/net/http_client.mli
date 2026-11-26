@@ -92,10 +92,6 @@ val transport_error_of_failure :
     {!Health.Timeout_stream_header}; otherwise it maps to
     {!Health.Timeout_response}. *)
 
-val should_autostart_server :
-  contact:Masc_server_lifecycle.contact -> already_attempted:bool -> bool
-(** Delegate to {!Masc_server_lifecycle.start_due}. *)
-
 (** {1 Async HTTP Calls on [Io_domain]} *)
 
 val get_raw :
@@ -187,25 +183,5 @@ val post_json :
   endpoint ->
   path:string ->
   body:Yojson.Safe.t ->
-  decode:(Yojson.Safe.t -> ('a, string) result) ->
-  ('a, http_error) result
-
-val put_json :
-  io:Io_domain.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_sec:float ->
-  endpoint ->
-  path:string ->
-  body:Yojson.Safe.t ->
-  decode:(Yojson.Safe.t -> ('a, string) result) ->
-  ('a, http_error) result
-
-val delete_json :
-  io:Io_domain.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_sec:float ->
-  ?body:Yojson.Safe.t ->
-  endpoint ->
-  path:string ->
   decode:(Yojson.Safe.t -> ('a, string) result) ->
   ('a, http_error) result

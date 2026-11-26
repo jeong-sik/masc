@@ -476,9 +476,6 @@ let sync_streams t ~on_event desired =
       List.iter (emit_disconnected ~now) unsubscribed_entries;
       Ok diff
 
-let active_streams t =
-  Eio.Mutex.use_ro t.mu (fun () -> List.map (fun e -> e.spec) t.active)
-
 let shutdown t =
   let entries =
     Eio.Mutex.use_rw ~protect:true t.mu (fun () ->

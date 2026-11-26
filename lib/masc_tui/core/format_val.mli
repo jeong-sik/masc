@@ -40,3 +40,11 @@ val format_delta_pct : float -> string
 
 val format_duration_s : float -> string
 (** Compact human duration (e.g. ["42s"], ["1h58m"], ["3d4h"]). *)
+
+val format_age_short : now_unix:float -> float -> string
+(** Compact relative age from [ts_unix] to [now_unix]: ["now"] under 5s,
+    otherwise {!format_duration_s}, or {!Glyph.Missing_absent} when invalid. *)
+
+val format_hhmm_opt : ?tz_offset_sec:int -> float -> string option
+(** Format Unix seconds as ["HH:MM"] in the given UTC offset (default [0]),
+    returning [None] for non-finite or non-positive timestamps. *)

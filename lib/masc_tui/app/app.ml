@@ -1766,8 +1766,3 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             1
       end
       else exit_code
-
-let run_argv ?argv ~render_frame () =
-  match Cli_args.parse_and_dispatch ?argv () with
-  | Cli_args.Exit code -> code
-  | Cli_args.Start cli -> run ~cli ~render_frame ()

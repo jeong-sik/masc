@@ -281,16 +281,7 @@ let keeper_health_glyph_and_tone = function
   | Wire_fleet.Keeper_paused -> (Glyph.Live_paused, Theme.Status_historical)
 
 let format_hhmm_with_offset ~tz_offset_sec ts =
-  if (not (Float.is_finite ts)) || ts <= 0.0 then None
-  else
-    let secs = Int64.add (Int64.of_float (Float.floor ts)) (Int64.of_int tz_offset_sec) in
-    let day_s =
-      let r = Int64.rem secs 86400L in
-      Int64.to_int (if Int64.compare r 0L < 0 then Int64.add r 86400L else r)
-    in
-    let h = day_s / 3600 in
-    let m = (day_s mod 3600) / 60 in
-    Some (Printf.sprintf "%02d:%02d" h m)
+  Format_val.format_hhmm_opt ~tz_offset_sec ts
 
 let format_hhmm_utc ts = format_hhmm_with_offset ~tz_offset_sec:0 ts
 

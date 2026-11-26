@@ -1,8 +1,6 @@
 (** What an official-client turn left in the history files of its trace (RFC
     librarian-lifecycle §10-3).
 
-    An official-client turn saves no AGENT_CORE checkpoint, so its end line in
-    the turn-boundary log says [No_atom_history] and carries no cut point.
     What the turn said, and which tools it called, are lines under
     [<session_dir>/history.jsonl] and [<session_dir>/history.internal.jsonl],
     each naming its turn ([turn_ref]) and its [kind]

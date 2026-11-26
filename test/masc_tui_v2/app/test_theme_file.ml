@@ -150,33 +150,34 @@ let test_cli_themes_dir () =
   | Cli_args.Run _ | Cli_args.Info _ ->
       Alcotest.fail "missing --themes-dir value must fail")
 
-let test_load_overrides_files () =
-  let dir =
-    let base = Filename.temp_file "theme-file" ".toml" in
-    Sys.remove base;
-    Unix.mkdir base 0o755;
-    base
-  in
+(* Runs [f] with an empty temporary directory. Afterwards the directory and
+   whatever [f] installed in the override registry are removed. *)
+let with_themes_dir f =
+  let dir = Filename.temp_dir "theme-file" "" in
   Fun.protect
     ~finally:(fun () ->
-      (try Sys.remove (Filename.concat dir "midnight.toml") with Sys_error _ -> ());
-      (try Sys.remove (Filename.concat dir "nord.toml") with Sys_error _ -> ());
-      (try Unix.rmdir dir with Unix.Unix_error _ -> ());
-      Theme.clear_palette_overrides ())
-    (fun () ->
+      Theme.clear_palette_overrides ();
+      try
+        Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
+        Unix.rmdir dir
+      with Sys_error _ | Unix.Unix_error _ -> ())
+    (fun () -> f dir)
+
+let write_file dir name text =
+  let oc = open_out (Filename.concat dir name) in
+  output_string oc text;
+  close_out oc
+
+let test_load_overrides_files () =
+  with_themes_dir (fun dir ->
       (* An absent directory is quiet: no warnings, built-in kept. *)
       let missing_warnings =
         Theme_file.load_overrides ~base_path:"/tmp/masc-theme-file-missing" ~themes_dir:None
       in
       Alcotest.(check (list string)) "absent dir is quiet" [] missing_warnings;
       (* One valid file overrides midnight only; a broken nord file warns. *)
-      let write name text =
-        let oc = open_out (Filename.concat dir name) in
-        output_string oc text;
-        close_out oc
-      in
-      write "midnight.toml" "surface_0 = \"#010203\"\n";
-      write "nord.toml" "foo = \"#000000\"\n";
+      write_file dir "midnight.toml" "surface_0 = \"#010203\"\n";
+      write_file dir "nord.toml" "foo = \"#000000\"\n";
       let warnings =
         Theme_file.load_overrides ~base_path:"/tmp/ignored"
           ~themes_dir:(Some dir)
@@ -192,6 +193,18 @@ let test_load_overrides_files () =
         "/tmp/ws/.masc/config/themes"
         (Theme_file.default_dir ~base_path:"/tmp/ws"))
 
+let test_load_overrides_duplicate_key () =
+  with_themes_dir (fun dir ->
+      write_file dir "midnight.toml"
+        "surface_0 = \"#010203\"\nsurface_0 = \"#040506\"\n";
+      let warnings =
+        Theme_file.load_overrides ~base_path:"/tmp/ignored" ~themes_dir:(Some dir)
+      in
+      Alcotest.(check int) "duplicate key warns once" 1 (List.length warnings);
+      match Theme.palette_override Theme.Midnight with
+      | None -> ()
+      | Some _ -> Alcotest.fail "a file with a duplicate key must keep the built-in palette")
+
 let () =
   Alcotest.run "theme_file"
     [
@@ -204,5 +217,7 @@ let () =
             test_of_preset_returns_stored_theme;
           Alcotest.test_case "cli themes dir" `Quick test_cli_themes_dir;
           Alcotest.test_case "load overrides files" `Quick test_load_overrides_files;
+          Alcotest.test_case "load overrides duplicate key" `Quick
+            test_load_overrides_duplicate_key;
         ] );
     ]

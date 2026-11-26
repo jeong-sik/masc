@@ -84,6 +84,19 @@ let parse_palette_text ~preset ~text =
   | Error detail -> Error detail
   | Ok document -> palette_of_toml ~preset document
 
+let read_text path =
+  match In_channel.with_open_bin path In_channel.input_all with
+  | text -> Ok text
+  | exception Sys_error reason -> Error reason
+
+(* A file is read as text and parsed by [parse_palette_text].
+   [Otoml.Parser.from_file] and [from_file_result] let [Otoml.Duplicate_key]
+   escape as an exception, while [from_string_result] returns it as an
+   [Error]. *)
+let load_palette ~preset path =
+  let* text = read_text path in
+  parse_palette_text ~preset ~text
+
 let load_overrides ~base_path ~themes_dir =
   let dir = themes_dir_of_cli ~base_path themes_dir in
   let overrides = ref [] in
@@ -92,17 +105,10 @@ let load_overrides ~base_path ~themes_dir =
     (fun preset ->
       let path = Filename.concat dir (Theme.preset_name preset ^ ".toml") in
       if Sys.file_exists path then
-        (match Otoml.Parser.from_file path with
-        | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
-        | exception Otoml.Parse_error (_, msg) ->
-            warnings := Printf.sprintf "%s: %s (kept built-in)" path msg :: !warnings
-        | exception Sys_error msg ->
-            warnings := Printf.sprintf "%s: %s (kept built-in)" path msg :: !warnings
-        | document -> (
-            match palette_of_toml ~preset document with
-            | Ok palette -> overrides := (preset, palette) :: !overrides
-            | Error reason ->
-                warnings := Printf.sprintf "%s: %s (kept built-in)" path reason :: !warnings)))
+        (match load_palette ~preset path with
+        | Ok palette -> overrides := (preset, palette) :: !overrides
+        | Error reason ->
+            warnings := Printf.sprintf "%s: %s (kept built-in)" path reason :: !warnings))
     Theme.all_presets;
   Theme.set_palette_overrides (List.rev !overrides);
   List.rev !warnings

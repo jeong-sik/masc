@@ -199,6 +199,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           runtime_profile: 'local',
           selected_model: 'deepseek-v4-flash',
           finish_reason: 'completed',
+          input_provenance: 'measured_request',
           input_tokens: 2400,
           output_tokens: 280,
           context_window: 203000,
@@ -988,6 +989,26 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect.soft(metadata.get('usage scope')).toBe(label)
     expect.soft(metadata.get('ctx window')).toBe(`${context} / 200,000`)
     expect.soft(metadata.get('est. cost')).toBe(cost)
+  })
+
+  it.each([
+    { provenance: 'measured_request', context: '25.0%' },
+    { provenance: 'agent_held_context', context: '25.0%' },
+    { provenance: 'context_estimate', context: '~25.0%' },
+    { provenance: undefined, context: '미상' },
+  ] as const)('reads a $provenance input as the server context projection does', async ({ provenance, context }) => {
+    const response = turnRecordsWithMemoryOs()
+    const record = response.entries[1]!.record
+    Object.assign(record, { usage_scope: 'per_request', input_tokens: 50_000, context_window: 200_000 })
+    if (provenance === undefined) delete record.input_provenance
+    else record.input_provenance = provenance
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+    await waitFor(() => expect(container.textContent).toContain('T42'))
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy())
+    const bar = container.querySelector('[data-testid="turn-token-bar"]')!
+    expect(bar.querySelector('.ctxpct')?.textContent).toBe(`설정 기준 컨텍스트 ${context} / 200K`)
   })
 
   it.each([

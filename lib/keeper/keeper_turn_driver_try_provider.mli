@@ -498,6 +498,15 @@ type try_provider_ctx =
         (** Called only when [AfterTurn] joins a typed provider response to the
             exact Agent Core request range that produced it. Later unanswered
             attempts do not replace this fact. *)
+  ; on_request_composed : transmitted_bytes:int -> unit
+        (** Called on every Keeper composition with its
+            [composed.transmitted_bytes]: the [measure_message_bytes] sum of
+            the carried messages, system prompt and tools left out, the value
+            the carried range line prints for the first request. An in-run
+            candidate that is composed and then not offered also calls it, so
+            the last call is the attempt's last composition (RFC-0521 §4.3).
+            A completion review composes no Keeper request and never calls
+            it. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

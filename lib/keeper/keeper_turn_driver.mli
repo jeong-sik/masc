@@ -71,6 +71,18 @@ type resumed_member =
   | Retry_of_tried
   | Failed_last
 
+(** The request a candidate composed last in one walk attempt, counted as the
+    carried range line counts it: the [measure_message_bytes] sum of the
+    carried messages, system prompt and tools left out (RFC-0521 §4.3). An
+    official client sends its own request and a candidate refused before its
+    projection ran composed none: both are [Not_composed]. *)
+type composed_request =
+  | Composed of { transmitted_bytes : int }
+  | Not_composed
+
+(** The bytes, or ["not_composed"]. *)
+val composed_request_to_string : composed_request -> string
+
 (** The candidate error a runtime walk returned as the lane's error, with the
     candidate that produced it. [origin_runtime_id] can differ from the
     candidate the walk ended on: on an exhausted lane a typed context overflow
@@ -84,6 +96,8 @@ type lane_terminal_error =
   ; origin_attempt : int
   ; lane_error : Agent_core.Error.t
   ; checkpoint_after : Agent_core.Checkpoint.t option
+  ; last_composed_request : composed_request
+    (** What [origin_attempt] composed last, read when that attempt ended. *)
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
@@ -891,6 +905,7 @@ module For_testing : sig
       Agent_core.Error.t ->
       unit) ->
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
+    ?composed_request_of:(attempt:int -> composed_request) ->
     ?provider_answered:('result -> bool) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->

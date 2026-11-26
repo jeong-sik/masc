@@ -262,6 +262,7 @@ let test_terminal_error_origin_can_differ_from_the_last_dispatched () =
         ; origin_attempt = 0
         ; checkpoint_after = None
         ; lane_error = overflow
+        ; last_composed_request = Driver.Not_composed
         }
       [ dispatched ~runtime_id:"glm-coding.glm-5.3" ~error:overflow
       ; dispatched ~runtime_id:"ollama_cloud.deepseek-v4-flash" ~error:rate_limited

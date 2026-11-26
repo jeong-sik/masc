@@ -29,13 +29,21 @@ export function isUtilizationSpent(u: QuotaUtilizationLike): boolean | null {
 }
 
 /**
- * Whether a quota window reading is still refusing calls at `nowSec`.
- * A spent reading whose `resets_at` timestamp has already passed has reset.
+ * Whether a quota window reading is still refusing calls at `nowSec`
+ * (mirrors the server's `gating_reading` in
+ * `lib/runtime/runtime_provider_usage_window.ml`). A spent reading whose
+ * `resets_at` timestamp has already passed has reset — unless the reading
+ * itself was taken at or after that reset (`observed_at >= resets_at`):
+ * we saw it spent after its own reset, so it still refuses and its return
+ * time is unknown. A stale reading (`observed_at < resets_at <= nowSec`)
+ * predates the reset and must not speak for now.
  */
 export function isWindowCurrentlySpent(
-  window: { readonly utilization: QuotaUtilizationLike; readonly resets_at: number | null },
+  window: { readonly utilization: QuotaUtilizationLike; readonly resets_at: number | null; readonly observed_at: number },
   nowSec: number = Date.now() / 1000,
 ): boolean {
   if (isUtilizationSpent(window.utilization) !== true) return false
-  return window.resets_at === null || window.resets_at > nowSec
+  if (window.resets_at === null) return true
+  if (window.resets_at > nowSec) return true
+  return window.observed_at >= window.resets_at
 }

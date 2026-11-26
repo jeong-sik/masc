@@ -142,6 +142,18 @@ let test_read_failure_is_kept_as_failed () =
      | Observed.Failed _ -> true
      | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false)
 
+let test_esc_returns_to_the_row () =
+  let before = tool_calls_model (edit_row ^ "," ^ shell_row) in
+  let m, _ = press_o before in
+  let m, _ = Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Escape)) in
+  Alcotest.(check bool) "inspector closed" true (Option.is_none (Model.active_inspector m));
+  Alcotest.(check bool) "still in Keepers" true (Nav.equal_workspace m.nav.workspace Nav.Keepers);
+  Alcotest.(check int) "same pane" before.nav.pane_index m.nav.pane_index;
+  Alcotest.(check bool) "still on Tool calls" true
+    (Keeper_context_store.equal_trace_section
+       (Keeper_context_store.get_keeper ~keeper:"alpha" m.keeper_context).trace_section
+       Keeper_context_store.Trace_tool_calls)
+
 let test_enter_opens_the_file_in_code () =
   let m, _ = opened () in
   let m, cmds = Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Enter)) in
@@ -162,6 +174,7 @@ let () =
           Alcotest.test_case "reply fills only the shown file" `Quick
             test_reply_fills_only_the_shown_file;
           Alcotest.test_case "read failure" `Quick test_read_failure_is_kept_as_failed;
+          Alcotest.test_case "esc returns to the row" `Quick test_esc_returns_to_the_row;
           Alcotest.test_case "enter opens Code" `Quick test_enter_opens_the_file_in_code;
         ] );
     ]

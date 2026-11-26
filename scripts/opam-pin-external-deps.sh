@@ -106,7 +106,12 @@ if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
 fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
-readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
+# 9ec21f9 = grpc-direct #77, stacked on #72 (d7269eb, the h2c startup banner
+# at INFO). It drops mirage-crypto-rng-eio, which mirage-crypto 2.0.0 removed,
+# and requires mirage-crypto-rng >= 2.4.1, so the lock can leave mirage-crypto
+# 1.2.0 for 2.4.1 (OSEC-2026-12, -13, -14, -15, -17). Move this to a main
+# commit once #72 and #77 land there.
+readonly GRPC_DIRECT_SHA="9ec21f97d174a31af5d3a3398325cab850b01ce5"
 # d812d6f = ws-direct v0.2.0 (Endpoint.Wsd.send_text_bigstring).
 readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for

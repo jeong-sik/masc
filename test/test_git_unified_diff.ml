@@ -33,7 +33,7 @@ let test_two_hunks_keep_headers_and_coordinates () =
 
 let test_a_deleted_dash_dash_line_is_a_deletion () =
   check (list string) "rows"
-    [ "hunk -3,2 +3,1 -"; "del 3 -- note"; "ctx 4 4 select 1;" ]
+    [ "hunk -3,2 +3,1 -"; "del 3 -- note"; "ctx 4 3 select 1;" ]
     (parse_ok [ "--- a/q.sql"; "+++ b/q.sql"; "@@ -3,2 +3,1 @@"; "--- note"; " select 1;" ])
 
 let test_an_added_plus_plus_line_is_an_addition () =

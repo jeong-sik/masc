@@ -279,6 +279,25 @@ let test_an_addon_tool_reaches_where_its_open_world_hint_says () =
     (show (reach_of None))
 ;;
 
+(* One handler from each place a call can reach. A tool that moves to the
+   wrong place changes what the operator reads as an outside call. *)
+let test_a_handler_reaches_where_it_runs () =
+  let show handler =
+    Option.map Keeper_tool_reach.to_wire (Keeper_tool_descriptor.reach_of_handler handler)
+  in
+  let open Keeper_tool_descriptor in
+  Alcotest.(check (option string)) "a shell command stays in the sandbox" (Some "sandbox")
+    (show Tool_execute);
+  Alcotest.(check (option string)) "a page fetch goes to the network" (Some "network")
+    (show Tool_web_fetch);
+  Alcotest.(check (option string)) "fusion asks a model provider" (Some "model_provider")
+    (show Tool_masc_fusion_dispatch);
+  Alcotest.(check (option string)) "a task call stays in MASC" (Some "masc_state")
+    (show Tool_masc_task_dispatch);
+  Alcotest.(check (option string)) "a surface post depends on its target" None
+    (show Tool_surface_post)
+;;
+
 (* A call that validation rejects never opens, so it is only the last observed
    tool. Two calls that overlap stay open one by one: A returning says nothing
    about B. *)
@@ -1353,6 +1372,8 @@ let () =
             `Quick test_a_running_tool_carries_its_planned_batch
         ; Alcotest.test_case "an add-on tool reaches where its openWorldHint says"
             `Quick test_an_addon_tool_reaches_where_its_open_world_hint_says
+        ; Alcotest.test_case "a handler reaches where it runs" `Quick
+            test_a_handler_reaches_where_it_runs
         ; Alcotest.test_case "a tool is open from its call to its return" `Quick
             test_a_tool_is_open_from_its_call_to_its_return
         ; Alcotest.test_case "reasoning and answer are two channels of one response"

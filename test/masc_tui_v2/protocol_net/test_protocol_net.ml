@@ -4758,7 +4758,8 @@ let test_wave2_live_wire_codecs () =
             "input": { "cmd": "ls" },
             "output": "",
             "result_bytes": 0,
-            "truncated_to": null
+            "truncated_to": null,
+            "file_target": { "path": "lib/a.ml", "lines": { "start_line": 12, "end_line": 40 } }
           }
         ]
       }|}
@@ -4788,6 +4789,29 @@ let test_wave2_live_wire_codecs () =
     None tc_shell.ok;
   Alcotest.(check (option string)) "live disposition='deferred' preserved"
     (Some "deferred") tc_shell.disposition;
+  Alcotest.(check (option (pair string (option (pair int int)))))
+    "file_target decodes path and touched lines"
+    (Some ("lib/a.ml", Some (12, 40)))
+    (Option.map
+       (fun (t : Wire_keeper_context.tool_file_target) -> (t.path, t.lines))
+       tc_shell.file_target);
+  Alcotest.(check bool) "a row without file_target has none" true
+    (Option.is_none tc_post.file_target);
+  let page_with_target target =
+    parse_json
+      (Printf.sprintf
+         {|{"keeper":"alpha","count":1,"coverage_gaps":[],"entries":[{"ts":1.0,"tool":"read_file","input":{},"output":"","file_target":%s}]}|}
+         target)
+  in
+  Alcotest.(check bool) "file_target lines starting at 0 are rejected" true
+    (Result.is_error
+       (Wire_keeper_context.decode_keeper_tool_calls
+          (page_with_target
+             {|{"path":"a.ml","lines":{"start_line":0,"end_line":3}}|})));
+  Alcotest.(check bool) "file_target without a path is rejected" true
+    (Result.is_error
+       (Wire_keeper_context.decode_keeper_tool_calls
+          (page_with_target {|{"lines":{"start_line":1,"end_line":3}}|})));
   Alcotest.(check string) "keeper_tool_calls_path deduplicates execution_ids"
     "/api/v1/keepers/alpha/tool-calls?execution_ids=%5B%22e1%22%2C%22e2%22%5D"
     (Wire_keeper_context.keeper_tool_calls_path

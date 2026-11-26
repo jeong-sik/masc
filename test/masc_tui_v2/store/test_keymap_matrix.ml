@@ -83,6 +83,8 @@ let render_full ~(model : Model.t) =
     | Some (Nav.Exact_run_inspector run_id) ->
         Screen_runtime.render_inspector ~target:(`Exact_run run_id) ~model
           ~cache ~rect g
+    | Some (Nav.File_inspector peek) ->
+        Screen_file_peek.render ~peek ~model ~cache ~rect g
     | None -> (
         match model.nav.workspace with
         | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect g
@@ -6513,6 +6515,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
             output = "{}";
             original_bytes = Some 512;
             truncated_to = None;
+            file_target = None;
             raw = `Null;
           };
         ];

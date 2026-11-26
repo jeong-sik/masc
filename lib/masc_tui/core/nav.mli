@@ -54,11 +54,15 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
+type file_peek = { keeper : string; path : string; line : int }
+(** A file in a Keeper's workspace, opened at [line] (1-based). *)
+
 type inspector =
   | Verification_inspector of string
   | Tool_inspector of string
   | Skill_inspector of string
   | Exact_run_inspector of string
+  | File_inspector of file_peek
 
 type settings_tab =
   | Settings_general_ui

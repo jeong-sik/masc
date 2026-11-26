@@ -21104,6 +21104,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
             output = "{}";
             original_bytes = Some 512;
             truncated_to = None;
+            file_target = None;
             raw = `Null;
           };
         ];
@@ -27929,6 +27930,7 @@ let () =
                   output = "truncated";
                   original_bytes = Some 40000;
                   truncated_to = Some 1024;
+                  file_target = None;
                   raw = `Assoc [];
                 }
               in

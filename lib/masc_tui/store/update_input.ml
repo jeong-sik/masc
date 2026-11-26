@@ -1100,7 +1100,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ ) ->
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with

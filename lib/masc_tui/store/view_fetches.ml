@@ -636,6 +636,23 @@ let fetches_for_inspector ~force (m : Model.t) =
             needs_fetch ~force m.runtime.exact_run_detail
       in
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
+  | Some (Nav.File_inspector peek) ->
+      let needed =
+        match m.infra.file_peek with
+        | Observed.Value { data = keeper, path, _; stale = false; _ } ->
+            force
+            || not (String.equal keeper peek.keeper && String.equal path peek.path)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.infra.file_peek
+      in
+      []
+      |> add_if needed
+           (Cmd.Get_workspace_file
+              { scope = Wire_infra.Ws_keeper peek.keeper; path = peek.path })
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
    the slot already holds it fresh. A dive covers the tab, and a Wiki dive
@@ -1487,7 +1504,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
       | Some
           ( Nav.Verification_inspector _
           | Nav.Skill_inspector _
-          | Nav.Exact_run_inspector _ ) ->
+          | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -1565,7 +1582,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     | Some
         ( Nav.Verification_inspector _
         | Nav.Tool_inspector _
-        | Nav.Exact_run_inspector _ )
+        | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
     | None ->
         []
   in

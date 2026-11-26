@@ -51,3 +51,14 @@
   masc_tui_protocol
   masc_tui_store
   alcotest))
+
+(test
+ (name test_file_peek)
+ (modules test_file_peek)
+ (libraries
+  masc_tui_core
+  masc_tui_keymap
+  masc_tui_protocol
+  masc_tui_store
+  yojson
+  alcotest))

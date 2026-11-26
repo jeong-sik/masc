@@ -123,6 +123,9 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
+  file_peek :
+    (string * string * Wire_infra.workspace_file_content) Observed.t;
+      (** The File inspector's read: Keeper, path, content. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -359,6 +362,25 @@ val code_review_active : t -> bool
 val step_review_hunk : cols:int -> delta:int -> t -> t
 (** Scroll the Review diff to the next ([delta > 0]) or previous hunk header.
     Unchanged when there is none that way. *)
+
+val file_peek_content :
+  keeper:string -> path:string -> t -> Wire_infra.workspace_file_content option
+(** The File inspector's content when it is for this Keeper and path. *)
+
+val apply_file_peek :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  path:string ->
+  Wire_infra.workspace_file_content ->
+  t ->
+  t
+
+val fail_file_peek :
+  failure:
+    ((string * string * Wire_infra.workspace_file_content) Observed.t ->
+    (string * string * Wire_infra.workspace_file_content) Observed.t) ->
+  t ->
+  t
 
 val apply_git_status :
   observed_at:Clock.Mono.t ->

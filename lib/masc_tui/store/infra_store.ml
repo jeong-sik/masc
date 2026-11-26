@@ -140,6 +140,9 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
+  file_peek :
+    (string * string * Wire_infra.workspace_file_content) Observed.t;
+      (** The File inspector's read: Keeper, path, content. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -176,6 +179,7 @@ let empty =
     acting_selected_index = 0;
     runtime_trace = Observed.absent;
     code = empty_code_state;
+    file_peek = Observed.unreported;
     show_raw_json = false;
     pending_sandbox_keeper = None;
     selected_index = 0;
@@ -1721,6 +1725,17 @@ let step_review_hunk ~cols ~delta t =
   with
   | Some git_scroll_offset -> { t with code = { t.code with git_scroll_offset } }
   | None -> t
+
+let file_peek_content ~keeper ~path t =
+  match Observed.to_option t.file_peek with
+  | Some (k, p, content) when String.equal k keeper && String.equal p path ->
+      Some content
+  | Some _ | None -> None
+
+let apply_file_peek ~observed_at ~keeper ~path content t =
+  { t with file_peek = Observed.value ~observed_at (keeper, path, content) }
+
+let fail_file_peek ~failure t = { t with file_peek = failure t.file_peek }
 
 let apply_git_status ~observed_at ~scope snap t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t

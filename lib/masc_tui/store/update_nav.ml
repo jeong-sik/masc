@@ -1606,7 +1606,7 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
     match insp with
     | Nav.Verification_inspector _ ->
         Work_store.set_verification_dive_tab Work_store.Verif_tab_evidence m.work
-    | Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ ->
+    | Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _ ->
         m.work
   in
   let drafts =
@@ -1660,7 +1660,7 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
         in
         { m.runtime with exact_run_detail }
     | Nav.Tool_inspector _ -> { m.runtime with scroll_offset = 0 }
-    | Nav.Verification_inspector _ -> m.runtime
+    | Nav.Verification_inspector _ | Nav.File_inspector _ -> m.runtime
   in
   let ask_modal =
     if Model.has_preserved_ask_return nav then m.ask_modal else None
@@ -10149,6 +10149,14 @@ let dive_max_scroll (m : Model.t) active =
             in
             max 0 (total - max 1 content.h)
         | None -> 0)
+  | Nav.File_inspector peek -> (
+      let content = ui_card_inner br |> ui_pad_content ~bp in
+      match Infra_store.file_peek_content ~keeper:peek.keeper ~path:peek.path m.infra with
+      | Some c ->
+          (* One header row above the numbered lines. *)
+          max 0
+            (List.length (String.split_on_char '\n' c.content) - max 1 (content.h - 1))
+      | None -> 0)
   | Nav.Verification_inspector req_id -> (
       match
         List.find_opt
@@ -11138,7 +11146,7 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
     | Some
         ( Nav.Tool_inspector _
         | Nav.Skill_inspector _
-        | Nav.Exact_run_inspector _ ) ->
+        | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
         None
     | None -> (
         match m.nav.workspace, m.work.active_tab with
@@ -12248,7 +12256,7 @@ let apply_move (m : Model.t) dir =
                   in
                   ({ m with nav = { m.nav with inspector_scroll_offset } }, [])
             | Some
-                ((Nav.Skill_inspector _ | Nav.Exact_run_inspector _) as active) ->
+                ((Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
                 let inspector_scroll_offset =

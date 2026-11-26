@@ -1182,7 +1182,7 @@ let dive_work_json_pane_index m =
     match active_inspector m with
     | Some (Nav.Verification_inspector _) ->
         if inner_body_width m < 88 then Some 0 else Some 1
-    | Some (Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _) ->
+    | Some (Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
         None
     | None ->
         if
@@ -1270,7 +1270,7 @@ let focusable_pane_count m =
         | Some (Nav.Verification_inspector _) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some (Nav.Tool_inspector _) -> 2
-        | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _) -> 1
+        | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) -> 1
         | None ->
             if m.nav.zoomed && can_zoom_current_view m then
               match m.nav.workspace with
@@ -1451,7 +1451,7 @@ let pane_rects m =
         let top_h = if br.h >= 20 then 9 else 6 in
         let t, b = split_v_fixed ~gap:gap_v br top_h in
         [ t; b ]
-    | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _) ->
+    | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
         [ br ]
     | None -> (
         if m.nav.zoomed && can_zoom_current_view m then
@@ -1772,6 +1772,8 @@ let active_focus_label m =
             Say.make ~ko:("스킬 · " ^ ref_s) ~en:("SKILL · " ^ ref_s)
         | Some (Nav.Exact_run_inspector run_id) ->
             Say.make ~ko:("실행 · " ^ run_id) ~en:("RUN · " ^ run_id)
+        | Some (Nav.File_inspector peek) ->
+            Say.make ~ko:("파일 · " ^ peek.path) ~en:("FILE · " ^ peek.path)
         | None -> (
             match m.nav.workspace with
             | Nav.Pulse -> (
@@ -4322,7 +4324,7 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.skills;
               ];
         }
-  | Some (Nav.Exact_run_inspector _) ->
+  | Some (Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;

@@ -288,6 +288,11 @@ type keeper_tool_stats = {
   timeline : keeper_tool_hourly_bucket list;
 }
 
+type tool_file_target = {
+  path : string;  (** Relative to the Keeper's workspace root. *)
+  lines : (int * int) option;  (** Touched lines, 1-based inclusive. *)
+}
+
 type tool_call_entry = {
   ts_unix : float;
   tool : string;
@@ -306,6 +311,9 @@ type tool_call_entry = {
   output : string;
   original_bytes : int option;
   truncated_to : int option;
+  file_target : tool_file_target option;
+      (** The file a filesystem tool resolved when it ran; [None] for other
+          tools. *)
   raw : Yojson.Safe.t;
 }
 

@@ -205,7 +205,7 @@ let verification_evidence_matches_active (m : Model.t) verification_id =
   | Some
       ( Nav.Tool_inspector _
       | Nav.Skill_inspector _
-      | Nav.Exact_run_inspector _ )
+      | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
   | None ->
       true
 
@@ -389,6 +389,18 @@ let finish_fleet_sandboxes infra (m : Model.t) =
     else []
   in
   (next, cmds)
+
+(* The File inspector shows this Keeper workspace file. *)
+let file_peek_matches (m : Model.t) ~scope ~path =
+  match Model.active_inspector m, scope with
+  | Some (Nav.File_inspector peek), Wire_infra.Ws_keeper keeper ->
+      String.equal peek.keeper keeper && String.equal peek.path path
+  | ( Some
+        ( Nav.File_inspector _ | Nav.Verification_inspector _ | Nav.Tool_inspector _
+        | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ )
+    | None ),
+    _ ->
+      false
 
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
@@ -4334,7 +4346,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             []
       in
@@ -5998,18 +6010,31 @@ let apply_http_reply ~now (m : Model.t) reply =
                    };
                }))
         ~source:Health.Source_client_http ~ko:"코드 검색" ~en:"Code search" err
-  | Msg.Reply_workspace_file { scope; path; result = Ok content }
-    when Option.equal String.equal (Some path) m.infra.code.active_file_path ->
+  | Msg.Reply_workspace_file { scope; path; result = Ok content } ->
       let infra =
-        Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
-          m.infra
+        if Option.equal String.equal (Some path) m.infra.code.active_file_path then
+          Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
+            m.infra
+        else m.infra
+      in
+      let infra =
+        if file_peek_matches m ~scope ~path then
+          match scope with
+          | Wire_infra.Ws_keeper keeper ->
+              Infra_store.apply_file_peek ~observed_at:now ~keeper ~path content infra
+          | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> infra
+        else infra
       in
       ({ m with infra }, [])
-  | Msg.Reply_workspace_file { result = Ok _; _ } -> (m, [])
   | Msg.Reply_workspace_file { scope; path; result = Error err } ->
+      let peek = file_peek_matches m ~scope ~path in
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
+               let x =
+                 if peek then Infra_store.fail_file_peek ~failure:(failed_slot err) x
+                 else x
+               in
                if Wire_infra.equal_workspace_scope scope x.code.scope
                   && Option.equal String.equal (Some path) x.code.active_file_path
                then
@@ -7101,7 +7126,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -7120,7 +7145,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -7160,7 +7185,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -8253,7 +8278,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Skill_inspector _ )
+            | Nav.Skill_inspector _
+            | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -8274,7 +8300,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Skill_inspector _ )
+            | Nav.Skill_inspector _
+            | Nav.File_inspector _ )
         | None ->
             false
       in

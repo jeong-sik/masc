@@ -568,8 +568,6 @@ type turn_flow = {
   keeper : string;
   trace_id : string;
   turn_id : int;
-  manifest_total_rows : int;
-  manifest_total_rows_exact : bool option;
   intake : turn_intake_state;
   outcomes : turn_source_outcomes;
   events : turn_flow_event list;

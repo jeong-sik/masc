@@ -369,7 +369,6 @@ type runtime_trace_snapshot = {
   turn_id : int option;
   health : string;
   stale_reason : string option;
-  manifest_total_rows : int;
   manifest_returned_rows : int;
   receipt_returned_rows : int;
   raw : Yojson.Safe.t;

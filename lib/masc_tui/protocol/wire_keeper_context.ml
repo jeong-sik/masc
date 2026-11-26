@@ -1667,8 +1667,6 @@ type turn_flow = {
   keeper : string;
   trace_id : string;
   turn_id : int;
-  manifest_total_rows : int;
-  manifest_total_rows_exact : bool option;
   intake : turn_intake_state;
   outcomes : turn_source_outcomes;
   events : turn_flow_event list;
@@ -1742,8 +1740,6 @@ let decode_turn_flow ~keeper ~trace_id ~turn_id json =
       (Printf.sprintf "runtime-trace mismatch: expected %s %s#%d" keeper
          trace_id turn_id)
   else
-    let* manifest_total_rows_opt = optional_int_field body "manifest_total_rows" in
-    let manifest_total_rows = Option.value ~default:0 manifest_total_rows_opt in
     let* manifest_total_rows_exact =
       optional_bool_field body "manifest_total_rows_exact"
     in
@@ -1867,8 +1863,6 @@ let decode_turn_flow ~keeper ~trace_id ~turn_id json =
         keeper;
         trace_id;
         turn_id;
-        manifest_total_rows;
-        manifest_total_rows_exact;
         intake;
         outcomes;
         events;

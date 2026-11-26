@@ -1123,7 +1123,6 @@ type runtime_trace_snapshot = {
   turn_id : int option;
   health : string;
   stale_reason : string option;
-  manifest_total_rows : int;
   manifest_returned_rows : int;
   receipt_returned_rows : int;
   raw : Yojson.Safe.t;
@@ -1154,7 +1153,6 @@ let decode_runtime_trace json =
       turn_id;
       health;
       stale_reason;
-      manifest_total_rows = int_or_zero_infra body "manifest_total_rows";
       manifest_returned_rows = int_or_zero_infra body "manifest_returned_rows";
       receipt_returned_rows = int_or_zero_infra body "receipt_returned_rows";
       raw = body;

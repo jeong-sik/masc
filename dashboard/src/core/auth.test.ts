@@ -20,6 +20,7 @@ import {
   bumpSessionEpoch,
   canAccessAdmin,
   canAccessMemberWorkspace,
+  canAccessTokenAdmin,
   canUseSingleUserTokenAdmin,
   canUseSingleUserTokenRead,
   currentSessionEpoch,
@@ -951,5 +952,129 @@ describe('core/auth', () => {
       dispose()
       wipeTransientSecrets()
     }
+  })
+
+  it('fails closed on missing shell.auth, null/malformed shell body, HTML 200 captive portal, and probeShell:false', async () => {
+    // 1. Omitted auth ({ auth: undefined } / {}) -> lowest capability worker, never admin
+    const omittedAuthFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ auth: undefined })
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const omittedSession = await bootstrapAuthSession({ fetchImpl: omittedAuthFetch as unknown as typeof fetch })
+    expect(omittedSession).toMatchObject({
+      kind: 'single_user_local',
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(omittedSession)).toBe(false)
+    expect(canAccessTokenAdmin(omittedSession)).toBe(false)
+    expect(canUseSingleUserTokenAdmin(omittedSession)).toBe(false)
+    expect(canUseSingleUserTokenRead(omittedSession)).toBe(false)
+
+    const verifyOmitted = await verifyAndApplySingleUserToken('tok-omitted-auth', {
+      fetchImpl: omittedAuthFetch as unknown as typeof fetch,
+    })
+    expect(verifyOmitted.ok).toBe(true)
+    if (verifyOmitted.ok) {
+      expect(verifyOmitted.session).toMatchObject({
+        role: 'worker',
+        canTokenAdmin: false,
+        canTokenRead: false,
+      })
+      expect(canAccessAdmin(verifyOmitted.session)).toBe(false)
+      expect(canAccessTokenAdmin(verifyOmitted.session)).toBe(false)
+    }
+
+    // 2. Malformed non-object auth ({ auth: null }, { auth: 'admin' }) -> unavailable / rejected
+    for (const badAuthPayload of [{ auth: null }, { auth: 'admin' }, { auth: [] }]) {
+      resetAuthStateForTests()
+      const badAuthFetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+        if (url === '/api/v1/dashboard/shell') return jsonResponse(badAuthPayload)
+        throw new Error(`unexpected url: ${url}`)
+      })
+      const session = await bootstrapAuthSession({ fetchImpl: badAuthFetch as unknown as typeof fetch })
+      expect(session.kind).toBe('unavailable')
+      expect(isAuthenticated.value).toBe(false)
+      expect(canAccessAdmin(session)).toBe(false)
+
+      const verifyRes = await verifyAndApplySingleUserToken('tok-bad-auth', {
+        fetchImpl: badAuthFetch as unknown as typeof fetch,
+      })
+      expect(verifyRes.ok).toBe(false)
+      expect(getSingleUserToken()).toBeNull()
+    }
+
+    // 3. JSON null body -> unavailable / rejected
+    resetAuthStateForTests()
+    const nullBodyFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse(null)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const nullSession = await bootstrapAuthSession({ fetchImpl: nullBodyFetch as unknown as typeof fetch })
+    expect(nullSession).toEqual({
+      kind: 'unavailable',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    })
+    expect(isAuthenticated.value).toBe(false)
+    expect(canAccessAdmin(nullSession)).toBe(false)
+    const verifyNull = await verifyAndApplySingleUserToken('tok-null-body', {
+      fetchImpl: nullBodyFetch as unknown as typeof fetch,
+    })
+    expect(verifyNull.ok).toBe(false)
+    expect(getSingleUserToken()).toBeNull()
+
+    // 4. HTML 200 captive portal / proxy page -> unavailable / rejected (never elevates to admin)
+    resetAuthStateForTests()
+    const html200Fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return new Response('<!doctype html><html><body>Captive Portal</body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const htmlSession = await bootstrapAuthSession({ fetchImpl: html200Fetch as unknown as typeof fetch })
+    expect(htmlSession).toEqual({
+      kind: 'unavailable',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    })
+    expect(isAuthenticated.value).toBe(false)
+    expect(canAccessAdmin(htmlSession)).toBe(false)
+    expect(canAccessTokenAdmin(htmlSession)).toBe(false)
+    const verifyHtml = await verifyAndApplySingleUserToken('tok-html-200', {
+      fetchImpl: html200Fetch as unknown as typeof fetch,
+    })
+    expect(verifyHtml.ok).toBe(false)
+    expect(getSingleUserToken()).toBeNull()
+
+    // 5. bootstrapAuthSession({ probeShell: false }) defaults to lowest capability worker/false/false
+    resetAuthStateForTests()
+    const noProbeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const noProbeSession = await bootstrapAuthSession({
+      fetchImpl: noProbeFetch as unknown as typeof fetch,
+      probeShell: false,
+    })
+    expect(noProbeSession).toMatchObject({
+      kind: 'single_user_local',
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(noProbeSession)).toBe(false)
+    expect(canAccessTokenAdmin(noProbeSession)).toBe(false)
+    expect(canUseSingleUserTokenRead(noProbeSession)).toBe(false)
   })
 })

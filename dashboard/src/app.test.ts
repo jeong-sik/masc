@@ -173,7 +173,18 @@ describe('Proposal A+ Application Shell (src/app.ts)', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       if (url === '/health') return jsonResponse({ version: '0.81.0', auth_methods: { dev_token: false } })
-      if (url === '/api/v1/dashboard/shell') return jsonResponse({ counts: { keepers: 3, tasks: 5 } })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          counts: { keepers: 3, tasks: 5 },
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: true,
+            effective_role: 'admin',
+            effective_admin: true,
+          },
+        })
+      }
       if (url === '/api/v1/keepers/tool-approvals') return jsonResponse({ pending: [] })
       if (url === '/api/v1/keepers/asks') return jsonResponse({ asks: [] })
       return jsonResponse({}, 404)

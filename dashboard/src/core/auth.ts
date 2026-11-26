@@ -474,6 +474,7 @@ type ParsedSingleUserShellAuth =
       readonly canTokenRead: boolean
     }
   | { readonly kind: 'auth_required'; readonly reason: string }
+  | { readonly kind: 'malformed'; readonly reason: string }
 
 function parseSingleUserRoleValue(raw: unknown): SingleUserRole | null {
   const val = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
@@ -487,19 +488,35 @@ function parseSingleUserRoleValue(raw: unknown): SingleUserRole | null {
  * Parses `shell.auth` returned by single-user `GET /api/v1/dashboard/shell`
  * (`lib/server/server_dashboard_http_core.ml:628-760`).
  *
- * Critical non-strict loopback rule (`server_auth.ml:1359-1366`):
- * When `enabled && require_token && !token_valid`, loopback `Public_read` returns
- * HTTP 200 with `token_valid=false, effective_role=null`. Reject it as `auth_required`
- * instead of accepting the unauthenticated/invalid token.
+ * Fail-closed rules:
+ * - Non-object response body (`null` from HTML 200 / JSON parse failure, array,
+ *   primitive) or malformed non-undefined `auth` field returns `malformed`,
+ *   preventing captive portals or broken proxies from opening the dashboard.
+ * - Omitted `auth` (`rec.auth === undefined`) falls back to lowest capability
+ *   (`worker`, `canTokenAdmin: false`, `canTokenRead: false`) and never elevates
+ *   to admin.
+ * - Non-strict loopback rule (`server_auth.ml:1359-1366`):
+ *   When `enabled && require_token && !token_valid`, loopback `Public_read` returns
+ *   HTTP 200 with `token_valid=false, effective_role=null`. Reject it as `auth_required`
+ *   instead of accepting the unauthenticated/invalid token.
  */
 function parseSingleUserShellAuth(body: unknown): ParsedSingleUserShellAuth {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { kind: 'ok', role: 'admin', canTokenAdmin: true, canTokenRead: true }
+    return {
+      kind: 'malformed',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    }
   }
   const rec = body as Record<string, unknown>
   const rawAuth = rec.auth
+  if (rawAuth === undefined) {
+    return { kind: 'ok', role: 'worker', canTokenAdmin: false, canTokenRead: false }
+  }
   if (typeof rawAuth !== 'object' || rawAuth === null || Array.isArray(rawAuth)) {
-    return { kind: 'ok', role: 'admin', canTokenAdmin: true, canTokenRead: true }
+    return {
+      kind: 'malformed',
+      reason: 'GET /api/v1/dashboard/shell returned malformed auth metadata',
+    }
   }
   const auth = rawAuth as Record<string, unknown>
   const enabled = auth.enabled === true
@@ -803,6 +820,12 @@ export async function verifyAndApplySingleUserToken(
         error: `토큰 인증 실패 (${parsedShellAuth.reason}) — 유효한 토큰인지 확인하세요.`,
       }
     }
+    if (parsedShellAuth.kind === 'malformed') {
+      return {
+        ok: false,
+        error: parsedShellAuth.reason,
+      }
+    }
 
     const next: Extract<AuthSession, { readonly kind: 'single_user_local' }> = {
       kind: 'single_user_local',
@@ -949,9 +972,9 @@ export async function bootstrapAuthSession(
     }
 
     if (!ownsCredential()) return authSession.peek()
-    let resolvedRole: SingleUserRole = 'admin'
-    let resolvedCanTokenAdmin = true
-    let resolvedCanTokenRead = true
+    let resolvedRole: SingleUserRole = 'worker'
+    let resolvedCanTokenAdmin = false
+    let resolvedCanTokenRead = false
     if (opts.probeShell !== false) {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (singleUserBearerToken) headers.Authorization = `Bearer ${singleUserBearerToken}`
@@ -994,6 +1017,14 @@ export async function bootstrapAuthSession(
           kind: 'single_user_auth_required',
           mode: 'single_user',
           authMethods,
+          reason: parsedShellAuth.reason,
+        }
+        authSession.value = next
+        return next
+      }
+      if (parsedShellAuth.kind === 'malformed') {
+        const next: AuthSession = {
+          kind: 'unavailable',
           reason: parsedShellAuth.reason,
         }
         authSession.value = next

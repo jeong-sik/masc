@@ -80,6 +80,7 @@ val draw :
 val draw_hairline :
   ?pad_x:int ->
   ?label:string ->
+  ?focused:bool ->
   ?unicode:bool ->
   ?bg:Color.t ->
   Cell_grid.t ->
@@ -91,7 +92,9 @@ val draw_hairline :
     (default [0]). Unlabeled dividers paint [─] in [theme.border_subtle];
     when a non-empty [label] is given, paints a left-aligned section header
     ([▸ Label ──────────]) with an accent caret, Tier 1 ([text_bright] Bold)
-    title, and trailing rule in [theme.border_inactive]. Replaces nested
+    title, and trailing rule in [theme.border_inactive] when [focused] is
+    [true] (default), or a muted dot, Tier 3 ([text_secondary]) title, and
+    [theme.border_subtle] rule when [focused] is [false]. Replaces nested
     boxes-inside-boxes. *)
 
 val draw_v_hairline :

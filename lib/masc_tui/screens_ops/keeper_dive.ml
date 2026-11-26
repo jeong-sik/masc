@@ -1588,9 +1588,15 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
                   | None -> Ops_common.keeper_turn_summary ~lang:model.lang k
                 in
                 let tr =
-                  Format_val.format_observed Format_val.Count
-                    (Observed.map Float.of_int k.total_turns)
-                    ~lang:model.lang
+                  let s =
+                    Format_val.format_observed Format_val.Count
+                      (Observed.map Float.of_int k.total_turns)
+                      ~lang:model.lang
+                  in
+                  if Observed.is_value k.total_turns then
+                    s ^ " "
+                    ^ Ops_common.say model ~ko:"누적 턴" ~en:"total turns"
+                  else s
                 in
                 ( k.company
                 , rt
@@ -1655,10 +1661,7 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
             Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg
               ~label_w:14
               ~key:(Ops_common.say model ~ko:"누적 턴 · 캔들" ~en:"Total · Candle")
-              ~value:
-                (Printf.sprintf "%s %s  ·  %s" turns_s
-                   (Ops_common.say model ~ko:"누적 턴" ~en:"total turns")
-                   candle_s)
+              ~value:(Printf.sprintf "%s  ·  %s" turns_s candle_s)
               ~val_fg:theme.status_ai ();
             incr y
           end;

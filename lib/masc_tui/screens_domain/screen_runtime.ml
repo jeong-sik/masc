@@ -1151,12 +1151,16 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
         else if active_ok > 0 then Theme.Status_attention
         else Theme.Status_critical
       in
-      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w ~theme
+      let bar_w = 8 in
+      let draw_bar = total_p > 0 && content.w >= 44 in
+      let kv_max_w =
+        if draw_bar then Int.max 0 (content.w - bar_w - 1) else content.w
+      in
+      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:kv_max_w ~theme
         ~key_w:11 ~key:lane_lbl
         ~value_style:(H.status_style ~theme ~attrs:Attr.bold lane_tone)
         lane_val;
-      if total_p > 0 && content.w >= 44 then begin
-        let bar_w = 8 in
+      if draw_bar then begin
         let bx = Rect.right content - bar_w in
         ignore
           (Chart.draw_ratio_bar_run ~clip:content grid ~x:bx ~y:!y ~width:bar_w
@@ -2303,11 +2307,12 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
         let peak_usd =
           Format_val.format_observed Format_val.Usd lpk ~lang
         in
+        let peak_unit = if Observed.is_value lpk then "/h" else "" in
         ( Say.make ~ko:"24h 처리량 · 비용 (이중 반전)"
             ~en:"24h Throughput & Cost (Dual-Mirror)"
         , Say.make
-            ~ko:(Printf.sprintf "최대 %s/h" peak_usd)
-            ~en:(Printf.sprintf "peak %s/h" peak_usd)
+            ~ko:(Printf.sprintf "최대 %s%s" peak_usd peak_unit)
+            ~en:(Printf.sprintf "peak %s%s" peak_usd peak_unit)
         , Chart.Scale.Dual_independent
             { top_min = 0.0; top_max; bot_min = 0.0; bot_max }
         , {
@@ -3831,15 +3836,21 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     @ (Observed.to_option rt.exact_lane_runs |> Option.map exact_pill |> Option.to_list)
     @ preset_pill
   in
+  let zoomed_fusion = Model.is_zoomed_active model in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[Enter/z] 확대 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
-               ~en:"[Enter/z] Zoom · [e] Evidence · [f] Launch · [Tab] Scroll"))
+            (if zoomed_fusion then
+               Say.make ~ko:"[Enter/e] 보드 증거 · [f] 실행"
+                 ~en:"[Enter/e] Evidence · [f] Launch"
+             else
+               Say.make
+                 ~ko:"[Enter/z] 확대 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
+                 ~en:"[Enter/z] Zoom · [e] Evidence · [f] Launch · [Tab] Scroll"))
        pills);
   let left_rect, right_rect =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if zoomed_fusion then
       (Rect.empty, body_rect)
     else
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
@@ -3967,13 +3978,12 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~theme ~lang obs
   end;
   let det_inner =
-    let zoomed_fusion = model.nav.zoomed && Model.can_zoom_current_view model in
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:
            (Say.resolve lang
               (if zoomed_fusion then
-                 Say.make ~ko:"[Enter/e] 보드 증거 · [z/Esc] 축소"
+                 Say.make ~ko:"[Enter/e] 보드 증거 · [z/Esc] 확대 해제"
                    ~en:"[Enter/e] Evidence · [z/Esc] Unzoom"
                else
                  Say.make ~ko:"[Enter/z] 확대 · [e] 증거"
@@ -6130,10 +6140,15 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
       ]
     else []
   in
+  let zoomed_catalog = rt.addon_catalog_mode && Model.is_zoomed_active model in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
-         (if rt.addon_catalog_mode then
+         (if zoomed_catalog then
+            Say.resolve lang
+              (Say.make ~ko:"[↑↓] 스크롤 · [p] 런타임 복귀"
+                 ~en:"[↑↓] Scroll · [p] Runtime view")
+          else if rt.addon_catalog_mode then
             Say.resolve lang
               (Say.make ~ko:"[Enter] 열기/미리보기 · [Tab] 좌/우 · [p] 런타임 복귀"
                  ~en:"[Enter] Open/Preview · [Tab] Pane · [p] Runtime view")
@@ -6143,7 +6158,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~en:"[n] Attach · [c] Act/Interact · [O] Obs/Scene · [p] Catalog"))
        pills);
   let left_rect, right_rect =
-    if rt.addon_catalog_mode && model.nav.zoomed && Model.can_zoom_current_view model
+    if zoomed_catalog
     then (Rect.empty, body_rect)
     else
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
@@ -6301,8 +6316,12 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
         (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[→/Tab] 스크롤 · [↑↓] 이동 · [p] 런타임"
-                   ~en:"[→/Tab] Scroll · [↑↓] Move · [p] Runtime"))
+                (if Model.is_zoomed_active model then
+                   Say.make ~ko:"[↑↓] 스크롤 · [p] 런타임"
+                     ~en:"[↑↓] Scroll · [p] Runtime"
+                 else
+                   Say.make ~ko:"[→/Tab] 스크롤 · [↑↓] 이동 · [p] 런타임"
+                     ~en:"[→/Tab] Scroll · [↑↓] Move · [p] Runtime"))
            (Say.resolve lang
               (Say.make ~ko:"패키지 미리보기" ~en:"Package Preview")))
     in

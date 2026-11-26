@@ -202,29 +202,34 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
                 ~theme ~lang thread
   else
+  let zoomed = Model.is_zoomed_active model in
+  let preview_title =
+    if zoomed then Say.resolve lang (Say.make ~ko:"타래 읽기" ~en:"Thread Reader")
+    else Say.resolve lang (Say.make ~ko:"타래 미리보기" ~en:"Thread Preview")
+  in
   let title, subtitle, badge =
     match post_opt with
-    | None ->
-        ( Say.resolve lang (Say.make ~ko:"타래 미리보기" ~en:"Thread Preview")
-        , None
-        , None )
+    | None -> (preview_title, None, None)
     | Some p ->
         let karma_b =
           H.make_badge ~glyph:Glyph.Delta_up ~tone:Theme.Status_ok
             (format_karma_badge ~lang p)
         in
-        ( Say.resolve lang (Say.make ~ko:"타래 미리보기" ~en:"Thread Preview")
-        , Some (chain_subtitle p)
-        , Some karma_b )
+        (preview_title, Some (chain_subtitle p), Some karma_b)
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?subtitle ?badge
          ~hotkey:
            (Say.resolve lang
-              (Say.make
-                 ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
-                 ~en:"[Enter/z] Zoom · [v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"))
+              (if zoomed then
+                 Say.make
+                   ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
+                   ~en:"[v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"
+               else
+                 Say.make
+                   ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글 · [c] 답글 · + / - 투표(2회)"
+                   ~en:"[Enter/z] Zoom · [v] Comments · < / > Step · [c] Reply · + / - Vote (2x)"))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -1074,7 +1079,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
          ~hotkey:
            (Say.resolve lang
               (if zoomed then
-                 Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [z/Esc] 축소"
+                 Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [z/Esc] 확대 해제"
                    ~en:"[e] Edit · [Ctrl+E] $EDITOR · [z/Esc] Unzoom"
                else
                  Say.make
@@ -2243,15 +2248,20 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
       };
     ]
   in
+  let zoomed = Model.is_zoomed_active model in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
-               ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
+            (if zoomed then
+               Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL"
+                 ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL"
+             else
+               Say.make ~ko:"< / > 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
+                 ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
        pills);
   let sel_art = Knowledge_store.selected_artifact k in
-  if Model.is_zoomed_active model then
+  if zoomed then
     draw_rich_artifact_pane ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
       ~scroll:k.detail_scroll_offset ~show_published_fallback:true
       ~focused:(Model.body_has_focus model) sel_art

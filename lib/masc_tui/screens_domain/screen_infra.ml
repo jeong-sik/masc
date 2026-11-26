@@ -318,17 +318,28 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
              in
              let active_opt = Observed.to_option pool.active_sessions in
              let sess_txt =
-               Printf.sprintf "%s/%d"
-                 (Format_val.format_observed Format_val.Count
-                    (Observed.map float_of_int pool.active_sessions)
-                    ~lang)
-                 pool.max_sessions
+               let active_s =
+                 Format_val.format_observed Format_val.Count
+                   (Observed.map float_of_int pool.active_sessions)
+                   ~lang
+               in
+               if Observed.is_value pool.active_sessions then
+                 Printf.sprintf "%s/%d" active_s pool.max_sessions
+               else if pool.max_sessions > 0 then
+                 Printf.sprintf "%s (max %d)" active_s pool.max_sessions
+               else active_s
              in
-             H.put_kv ~grid ~clip:content ~x:body_x ~y:!y ~max_w:body_w
+             let bw = 10 in
+             let draw_bar =
+               Option.is_some active_opt && pool.max_sessions > 0 && body_w >= 38
+             in
+             let kv_max_w =
+               if draw_bar then Int.max 0 (body_w - bw - 1) else body_w
+             in
+             H.put_kv ~grid ~clip:content ~x:body_x ~y:!y ~max_w:kv_max_w
                ~theme ~key_w ~key:sess_lbl sess_txt;
              (match active_opt with
-              | Some a when pool.max_sessions > 0 && body_w >= 34 ->
-                  let bw = 10 in
+              | Some a when draw_bar ->
                   ignore
                     (Chart.draw_ratio_bar_run ~clip:content grid
                        ~x:(Rect.right content - bw) ~y:!y ~width:bw ~theme ~bg
@@ -1022,11 +1033,16 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                        (Glyph.Transport_reconnecting, Theme.Status_active, "probe")
                  in
                  let sess_s =
-                   Printf.sprintf "%s/%d"
-                     (Format_val.format_observed Format_val.Count
-                        (Observed.map float_of_int p.active_sessions)
-                        ~lang)
-                     p.max_sessions
+                   let obs_s =
+                     Format_val.format_observed Format_val.Count
+                       (Observed.map float_of_int p.active_sessions)
+                       ~lang
+                   in
+                   if Observed.is_value p.active_sessions then
+                     Printf.sprintf "%s/%d" obs_s p.max_sessions
+                   else if p.max_sessions > 0 && i2.w >= 40 then
+                     Printf.sprintf "%s (max %d)" obs_s p.max_sessions
+                   else obs_s
                  in
                  let sess_ratio_opt =
                    match Observed.to_option p.active_sessions with
@@ -1034,23 +1050,35 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                        Some (float_of_int active /. float_of_int p.max_sessions)
                    | Some _ | None -> None
                  in
-                 let bar_w =
-                   if i2.w >= 34 && Option.is_some sess_ratio_opt then 5 else 0
-                 in
                  let stats_txt = Printf.sprintf "%s · %s" rtt_s sess_s in
                  let stats_w = Grapheme.display_width stats_txt in
+                 let bar_w =
+                   if i2.w >= 34 && Option.is_some sess_ratio_opt
+                      && i2.w - (stats_w + 6) >= 7
+                   then 5
+                   else 0
+                 in
                  let right_block =
                    stats_w + if bar_w > 0 then bar_w + 1 else 0
                  in
-                 let name_w = Int.max 6 (i2.w - right_block - 1) in
+                 let min_name_w = Int.min 6 i2.w in
+                 let name_w = Int.max min_name_w (i2.w - right_block - 1) in
                  ignore
                    (H.put_clipped ~grid ~clip:i2 ~x:i2.x ~y:!y ~max_w:name_w
                       ~style:(H.status_style ~theme rt_tok)
                       (Printf.sprintf "%s %s" (Glyph.to_utf8 rg) p.pool_name));
-                 let stats_x = Rect.right i2 - right_block in
-                 ignore
-                   (H.put_clipped ~grid ~clip:i2 ~x:stats_x ~y:!y ~max_w:stats_w
-                      ~style:(H.anchor_style ~theme ()) stats_txt);
+                 let stats_x =
+                   Int.max (i2.x + name_w + 1) (Rect.right i2 - right_block)
+                 in
+                 let bar_reserve = if bar_w > 0 then bar_w + 1 else 0 in
+                 let avail_stats_w =
+                   Int.max 0 (Rect.right i2 - bar_reserve - stats_x)
+                 in
+                 if avail_stats_w > 0 then
+                   ignore
+                     (H.put_clipped ~grid ~clip:i2 ~x:stats_x ~y:!y
+                        ~max_w:(Int.min stats_w avail_stats_w)
+                        ~style:(H.anchor_style ~theme ()) stats_txt);
                  (match sess_ratio_opt with
                   | Some ratio when bar_w > 0 ->
                       ignore
@@ -2950,6 +2978,9 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (if reviewing then
                  Say.make ~ko:"[{/}] 덩어리 · [</>] 파일 · [Enter] 이 줄 열기 · [v] Git"
                    ~en:"[{/}] Hunk · [</>] File · [Enter] Open line · [v] Git"
+               else if Model.is_zoomed_active model then
+                 Say.make ~ko:"[↑↓] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
+                   ~en:"[↑↓] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"
                else
                  Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
                    ~en:"[→/Tab] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"))

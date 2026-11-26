@@ -1,6 +1,6 @@
 ---
 rfc: "retained-tool-results-wait-and-resend"
-title: "Retained tool results: retire spent queue rows in one pass, and stop resending results a resumed session already holds"
+title: "Retained tool results: read the outbox once per turn entry, and stop resending results a resumed session already holds"
 status: Draft
 created: 2026-11-26
 updated: 2026-11-26
@@ -8,10 +8,10 @@ author: claude-main
 related: ["tool-results-age-out-of-context", "uncollected-provider-turn-is-not-resumed"]
 ---
 
-# RFC: 남은 도구 결과의 대기 행은 한 번에 지우고, 이어 쓰는 세션에는 이미 받은 결과를 다시 싣지 않는다
+# RFC: 턴 시작은 남은 도구 결과를 한 번만 읽고, 이어 쓰는 세션에는 이미 받은 결과를 다시 싣지 않는다
 
 - 관련: #54930(대시보드가 대기 행을 종류별로 묶음)
-- 결정(운영자, 2026-11-26): 두 문제를 한 RFC 에 담는다. 대기 행 정리(5.1)는 RFC 뒤 바로 구현하고, 재전송(5.2·5.3)은 이 RFC 의 측정을 채운 뒤 구현한다.
+- 결정(운영자, 2026-11-26): 두 문제를 한 RFC 에 담는다. 턴 시작 읽기(5.1)는 RFC 뒤 바로 구현하고, 재전송(5.2·5.3)은 이 RFC 의 측정을 채운 뒤 구현한다.
 - 범위:
   - 턴 시작 때 쓴 `Tool_result_ready` 행을 지우는 자리(`keeper_heartbeat_stimulus_intake.ml`).
   - ACP 실행이 남은 결과 묶음(carrier)을 요청에 붙이는 자리(`keeper_acp_runtime.ml`).
@@ -88,14 +88,14 @@ related: ["tool-results-age-out-of-context", "uncollected-provider-turn-is-not-r
 
 ## 5. 제안
 
-### 5.1 턴 시작 때 쓴 행을 한 번에 지운다
+### 5.1 턴 시작 때 outbox 를 한 번만 읽는다
 
-- 턴 시작에서 `Tool_result_ready` 행들을 한 묶음으로 본다. outbox 를 한 번 읽는다.
-- receipt 가 없는 행은 모두 한 번의 queue 저장으로 지운다. 로그는 지운 수를 한 줄로 남긴다.
-- receipt 가 남은 행은 지금처럼 받아들인다.
-- 행 구조, receipt id, 깨우기 규칙은 그대로다. 저장 형식 변경은 없다.
+- 턴 시작은 meta 와 unowned outbox 를 한 번 읽고, 그 결과로 모든 `Tool_result_ready` 행을 본다. 지금은 행마다 둘을 다시 읽는다.
+- 순서가 이 읽기를 안전하게 만든다. 행은 receipt 를 남긴 뒤에 들어가고(`notify`), 턴 시작은 행 목록을 읽은 뒤에 outbox 를 읽는다. 그래서 각 행의 receipt 는 「남아 있음」 아니면 「이미 정리됨」이다. 읽은 뒤에 정리된 receipt 는 남은 것으로 보이고, 그 행은 턴에 들어갔다가 다음 턴 시작에 지워진다.
+- receipt 가 없는 행은 지금처럼 행마다 하나씩 queue 에 저장해 지운다. queue 는 transition 기록 칸이 하나뿐이라(`keeper_registry_event_queue.ml` 의 single-slot transition outbox), 여러 행을 한 번에 지우려면 queue 저장 형식을 바꿔야 한다. 이 RFC 는 그것을 하지 않는다.
+- 행 구조, receipt id, 깨우기 규칙, 저장 형식은 그대로다.
 
-확인: outbox 에 없는 receipt 행 N 개가 queue 에 있을 때, 턴 시작이 outbox 를 한 번 읽고 queue 를 한 번 저장하는지 시험한다. receipt 가 남은 행이 지워지지 않는 것도 같은 시험에서 본다.
+확인: 같은 읽기를 쓰는 동안 receipt 를 정리하면 그 행이 지워지지 않고, 새 읽기는 그 행을 지우는지 시험한다. 이것이 「한 번 읽어 같이 쓴다」를 보여 준다.
 
 ### 5.2 resume 하는 세션에는 그 세션이 받은 host 결과를 싣지 않는다
 
@@ -120,7 +120,6 @@ related: ["tool-results-age-out-of-context", "uncollected-provider-turn-is-not-r
 | 값 | 원본 |
 |---|---|
 | 「retired inactive tool result hint」 줄 수 | `system_log_*.jsonl` |
-| 턴 시작 때 outbox 를 읽은 횟수 | 5.1 의 한 줄 로그 |
 | resume / 새 세션 수와 새 세션 이유 | 5.3 의 기록 |
 | 요청마다 실린 묶음 바이트 | `raw-traces/*.jsonl` 의 `MASC dynamic-tool receipts retained` 텍스트 |
 

@@ -2305,7 +2305,16 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
     ; conv_msg Assistant [ Text "a3" ]
     ]
   in
-  let evicted = Keeper_acp_runtime.For_testing.split_older_for_rollover rollover_input in
+  let rollover_messages, evicted_atoms =
+    Keeper_acp_runtime.For_testing.split_older_for_rollover rollover_input
+  in
+  check int "the rollover evicts atoms 0 and 1" 2 evicted_atoms;
+  let evicted =
+    Keeper_compaction_atom.atoms_of_messages rollover_messages
+    |> Array.to_list
+    |> List.filteri (fun index _ -> index < evicted_atoms)
+    |> List.concat_map (fun (atom : Keeper_compaction_atom.atom) -> atom.messages)
+  in
   check bool "existing compaction anchor is never evicted by split_older_for_rollover" false
     (List.exists
        (fun (m : message) -> Runtime_model_input_tail_window.is_compaction_anchor m)
@@ -2843,13 +2852,13 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
         ~capacity:(50_000 / attempt)
         ~initial_messages
     done;
-    let epochs =
-      Masc.Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"k-shrink"
+    let stats =
+      Masc.Keeper_compaction.inspect_stats ~keepers_dir ~keeper_id:"k-shrink"
       |> Result.get_ok
     in
     check int "overflow shrink emits exactly 1 compaction epoch across 3 retries"
-      1 (List.length epochs);
-    let anchor = List.hd epochs in
+      1 stats.epoch_count;
+    let anchor = Option.get stats.latest_anchor in
     let hydrated_retry =
       Keeper_acp_runtime.For_testing.hydrate_start_messages
         ~keepers_dir ~keeper_id:"k-shrink" ~prefer_handoff:true initial_messages

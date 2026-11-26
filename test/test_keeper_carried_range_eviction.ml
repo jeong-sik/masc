@@ -1123,7 +1123,8 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
              ~keepers_dir
              ~keeper_id:"p0-1b-keeper"
              ~trigger:(Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             ~evicted_messages:(tool_round 1)
+             ~messages:closed_messages
+             ~eviction:{ Masc.Keeper_compaction_atom.prefix = 0; later = droppable_step1 }
              ()
          with
          | Ok (Some anchor) -> anchor
@@ -1235,7 +1236,8 @@ let test_p1_6_token_to_byte_conversion_and_mixed_size_first_failover_anchor () =
              ~keepers_dir
              ~keeper_id
              ~trigger:(Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             ~evicted_messages:(List.filteri (fun i _ -> i < 6) history)
+             ~messages:history
+             ~eviction:{ Masc.Keeper_compaction_atom.prefix = 6; later = [] }
              ()
          with
          | Ok (Some anchor) -> anchor

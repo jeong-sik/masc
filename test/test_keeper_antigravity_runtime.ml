@@ -3492,14 +3492,13 @@ fi
                 let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
                 match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
                 | Ok (Some anchor) ->
-                  let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
-                  let expected_prefix = Printf.sprintf "atom-%d-" (dropped_atoms - 1) in
                   check bool
-                    (Printf.sprintf "covers_through_turn (%s) covers strictly the evicted prefix (%s*)"
-                       covers expected_prefix)
+                    (Printf.sprintf "coverage (%s) ends at the last evicted atom (leading/%d)"
+                       (Keeper_compaction_atom.coverage_to_string anchor.coverage)
+                       (dropped_atoms - 1))
                     true
-                    (String.equal covers (Printf.sprintf "atom-%d" (dropped_atoms - 1))
-                     || String.starts_with ~prefix:expected_prefix covers);
+                    (anchor.coverage.through
+                     = Some (Keeper_compaction_atom.Through_leading (dropped_atoms - 1)));
                   let anchor_text =
                     Agent_core.Types.text_of_message (Keeper_compaction.anchor_to_message anchor)
                   in

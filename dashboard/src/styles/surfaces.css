@@ -186,6 +186,66 @@
   background: var(--bg-2);
 }
 
+.v2-sync-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 32px;
+  min-width: 0;
+}
+
+.v2-sync-toolbar > button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.v2-sync-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.v2-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-11);
+  line-height: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.v2-sync-pill-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v2-sync-pill--info {
+  border-color: var(--info-border);
+  background: var(--info-soft);
+  color: var(--info-fg);
+}
+
+.v2-sync-pill--warn {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+}
+
 .v2-logs-table-header,
 .v2-logs-line {
   display: grid;

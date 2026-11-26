@@ -62,7 +62,12 @@ interface VerificationListRead {
   readonly recovery: string | null
 }
 
-type ConfirmationRead = { readonly goalId: string; readonly source: Observed<GoalListRead> } & (
+type ConfirmationRead = {
+  readonly epoch: number
+  readonly goalId: string
+  readonly source: Observed<GoalListRead>
+  readonly evidence: GoalConfirmationEvidence | null
+} & (
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed'; readonly message: string }
   | { readonly kind: 'ready'; readonly evidence: GoalConfirmationEvidence }
@@ -179,14 +184,36 @@ function useLastRead<T>(observation: Observed<T>): T | null {
   return observation.kind === 'value' ? observation.data : last.current
 }
 
-function showReadStatus(label: string, observation: Observed<unknown>, retained: boolean) {
+interface SyncPillState {
+  readonly tone: 'info' | 'warn'
+  readonly text: string
+}
+
+function readSyncPill(label: string, observation: Observed<unknown>): SyncPillState | null {
+  if (observation.kind === 'loading') {
+    return { tone: 'info', text: `${label} 불러오는 중…` }
+  }
+  if (observation.kind === 'value' && observation.stale) {
+    return { tone: 'warn', text: `${label} · 마지막 조회` }
+  }
+  return null
+}
+
+function renderSyncPill(pill: SyncPillState | null) {
+  if (!pill) return null
+  return html`
+    <span class=${`wk-status-pill wk-status-pill--${pill.tone}`} role="status" title=${pill.text}>
+      ${pill.tone === 'info' && html`<${InlineSpinner} size="xs" />`}
+      <span class="wk-status-pill-text">${pill.text}</span>
+    </span>
+  `
+}
+
+function showReadAlert(label: string, observation: Observed<unknown>, retained: boolean) {
   switch (observation.kind) {
     case 'loading':
-      return html`<div class="wk-notice wk-notice--info" role="status"><${InlineSpinner} /> ${label} 불러오는 중…</div>`
     case 'value':
-      return observation.stale
-        ? html`<div class="wk-notice wk-notice--warn" role="status">${label} · 마지막 조회</div>`
-        : null
+      return null
     case 'failed':
     case 'unreported':
     case 'absent': {
@@ -355,10 +382,11 @@ export function GoalsTab(props: WorkspaceViewProps) {
   }, [selectedGoalId, selectedGoal, goalsCurrent])
   const taskLinksIncomplete = selectedGoal !== null
     && (goalRead?.incompleteTaskLinks.has(selectedGoal.id) === true || !!verificationRead?.recovery)
-  const selectedConfirmationRead = confirmationRead?.goalId === selectedGoal?.id
-    && confirmationRead?.source === goalObservation ? confirmationRead : null
-  const currentConfirmation = selectedConfirmationRead?.kind === 'ready'
-    ? selectedConfirmationRead.evidence : null
+  const selectedConfirmationRead = confirmationRead?.epoch === epoch
+    && confirmationRead.goalId === selectedGoal?.id ? confirmationRead : null
+  const currentConfirmation = selectedConfirmationRead?.evidence ?? null
+  const confirmationCurrent = selectedConfirmationRead?.kind === 'ready'
+    && selectedConfirmationRead.source === goalObservation && goalsCurrent
 
   useEffect(() => subscribeObserverFrames((frame) => {
     if (!currentConfirmation || !isEpochCurrent(epoch)) return
@@ -383,14 +411,24 @@ export function GoalsTab(props: WorkspaceViewProps) {
     const controller = new AbortController()
     confirmAbortRef.current = controller
     const { signal } = controller
-    const owner = { goalId, source }
+    const owner = { epoch, goalId, source }
+    const retainEvidence = (previous: ConfirmationRead | null): GoalConfirmationEvidence | null =>
+      previous?.epoch === epoch && previous.goalId === goalId ? previous.evidence : null
+    const isTransientFailure = (kind: string): boolean =>
+      kind === 'network' || kind === 'timeout' || kind === 'server'
 
-    setConfirmationRead({ ...owner, kind: 'loading' })
+    setConfirmationRead((previous) => ({ ...owner, kind: 'loading', evidence: retainEvidence(previous) }))
 
     const wsRes = await readWorkspacePrecondition()
     if (signal.aborted || !isEpochCurrent(epoch)) return
     if (!wsRes.ok) {
-      setConfirmationRead({ ...owner, kind: 'failed', message: wsRes.error.message })
+      const keep = isTransientFailure(wsRes.error.kind)
+      setConfirmationRead((previous) => ({
+        ...owner,
+        kind: 'failed',
+        message: wsRes.error.message,
+        evidence: keep ? retainEvidence(previous) : null,
+      }))
       return
     }
     const params = new URLSearchParams({
@@ -401,12 +439,23 @@ export function GoalsTab(props: WorkspaceViewProps) {
     const res = await apiGet<unknown>(`/api/v1/goals/confirmation?${params.toString()}`, { signal })
     if (signal.aborted || !isEpochCurrent(epoch)) return
     if (!res.ok) {
-      setConfirmationRead({ ...owner, kind: 'failed', message: res.error.message })
+      const keep = isTransientFailure(res.error.kind)
+      setConfirmationRead((previous) => ({
+        ...owner,
+        kind: 'failed',
+        message: res.error.message,
+        evidence: keep ? retainEvidence(previous) : null,
+      }))
       return
     }
     const decoded = decodeGoalConfirmation(res.value, goalId, wsRes.value)
     if (!decoded.ok) {
-      setConfirmationRead({ ...owner, kind: 'failed', message: decoded.error })
+      setConfirmationRead({
+        ...owner,
+        kind: 'failed',
+        message: decoded.error,
+        evidence: null,
+      })
       return
     }
     setConfirmationRead({ ...owner, kind: 'ready', evidence: decoded.value })
@@ -517,7 +566,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
 
   const handleConfirmCompletion = async () => {
     const confirmation = currentConfirmation
-    if (!confirmation || !isEpochCurrent(epoch) || !goalsCurrent || actionBusy !== null
+    if (!confirmation || !confirmationCurrent || !isEpochCurrent(epoch) || actionBusy !== null
         || resourceCache.peek(goalListKey) !== goalObservation
         || selectedGoalRef.current !== confirmation.goalId
         || liveConfirmRev !== confirmation.criterionRevision) return
@@ -607,10 +656,23 @@ export function GoalsTab(props: WorkspaceViewProps) {
     return `태스크 ${total}개 · 완료 ${done} · 검증 대기 ${awaiting} · 취소 ${cancelled} · 그 외 ${rest}`
   }, [selectedGoal])
 
+  const goalSyncPill = readSyncPill('목표 목록', goalObservation)
+  const verifSyncPill = !multiAccount ? readSyncPill('검증 목록', verificationObservation) : null
+  const confirmationSyncPill: SyncPillState | null = !multiAccount && currentConfirmation !== null
+    ? selectedConfirmationRead?.kind === 'loading'
+      ? { tone: 'info', text: '증거 확인 중…' }
+      : !confirmationCurrent
+        ? { tone: 'warn', text: '증거 · 마지막 조회' }
+        : null
+    : null
+
   const masterPane = html`
     <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">Goals <span class="wk-chip-count">(${goalCountsKnown ? filteredGoals.length : '—'})</span></h2>
+        <div class="wk-pane-status-slot">
+          ${renderSyncPill(goalSyncPill)}
+        </div>
         <div class="wk-actions">
           ${!multiAccount && html`
             <button type="button" class="btn-primary" onClick=${() => setShowCreate((v) => !v)}>
@@ -775,7 +837,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
       `}
 
       ${createSuccess && html`<div class="wk-notice wk-notice--ok wk-inset">${createSuccess}</div>`}
-      ${showReadStatus('목표 목록', goalObservation, goalRead !== null)}
+      ${showReadAlert('목표 목록', goalObservation, goalRead !== null)}
 
       ${goalRead && html`
             <${VirtualList}
@@ -925,7 +987,9 @@ export function GoalsTab(props: WorkspaceViewProps) {
                 복사
               </button>
               ${selectedGoal.phase === 'Awaiting_confirmation' && currentConfirmation && html`
-                <span class="wk-muted-sm">최신 증거는 아래 Goal Completion Confirmation 참조 (기준 ${currentConfirmation.criterionRevision})</span>
+                <span class="wk-muted-sm">
+                  ${confirmationCurrent ? '최신 증거' : '마지막 조회 증거'}는 아래 Goal Completion Confirmation 참조 (기준 ${currentConfirmation.criterionRevision})
+                </span>
               `}
             </div>
             <${MarkdownContent} class="wk-prose" text=${selectedGoal.procedure || '측정 절차 없음'} />
@@ -970,6 +1034,9 @@ export function GoalsTab(props: WorkspaceViewProps) {
             <section class="wk-section" aria-label="목표 최종 완료 확인">
               <div class="wk-section-head">
                 <h3 class="wk-section-title">Goal Completion Confirmation</h3>
+                <div class="wk-pane-status-slot">
+                  ${renderSyncPill(confirmationSyncPill)}
+                </div>
                 ${currentConfirmation && html`
                   <button
                     type="button"
@@ -988,7 +1055,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
                 `}
               </div>
               ${multiAccount && html`<div class="wk-notice wk-notice--info">이 세션에서는 완료 확인 증거를 조회할 수 없습니다.</div>`}
-              ${selectedConfirmationRead?.kind === 'loading' && html`
+              ${!currentConfirmation && selectedConfirmationRead?.kind === 'loading' && html`
                 <span class="dtable-absent" role="status"><${InlineSpinner} /> Verifier 증명 증거 불러오는 중…</span>
               `}
               ${selectedConfirmationRead?.kind === 'failed' && html`
@@ -1008,12 +1075,15 @@ export function GoalsTab(props: WorkspaceViewProps) {
                   }}
                   currentRevision=${liveConfirmRev ?? currentConfirmation.criterionRevision}
                   lockedEpoch=${epoch}
-                  onRefresh=${() => void loadConfirmation(selectedGoal.id, goalObservation)}
+                  onRefresh=${() => {
+                    if (goalsCurrent) void loadConfirmation(selectedGoal.id, goalObservation)
+                    else void loadData('manual')
+                  }}
                 >
                   <button
                     type="button"
                     class="wk-btn-ok"
-                    disabled=${actionBusy !== null || !goalsCurrent}
+                    disabled=${actionBusy !== null || !confirmationCurrent}
                     onClick=${() => void handleConfirmCompletion()}
                   >
                     ${actionBusy === 'confirm' ? '확정 중…' : '최종 완료 확정 (Confirm Completion)'}
@@ -1086,7 +1156,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
 
           <section class="wk-section" aria-label="연결 태스크 검증 판정">
             <div class="wk-section-head">
-              <h3 class="wk-section-title">Verification Verdicts (${relatedVerificationsKnown ? relatedVerifications.length : '—'})</h3>
+              <h3 class="wk-section-title">Verification Verdicts <span class="wk-chip-count">(${relatedVerificationsKnown ? relatedVerifications.length : '—'})</span></h3>
+              <div class="wk-pane-status-slot">
+                ${renderSyncPill(verifSyncPill)}
+              </div>
               ${!multiAccount && html`
                 <button type="button" class="btn-ghost" onClick=${() => void refreshVerificationList('manual')}>검증 다시 읽기</button>
               `}
@@ -1094,7 +1167,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
             ${multiAccount
               ? html`<div class="wk-notice wk-notice--info">이 세션에서는 검증 대기열을 조회할 수 없습니다.</div>`
               : html`
-                  ${showReadStatus('검증 목록', verificationObservation, verificationRead !== null)}
+                  ${showReadAlert('검증 목록', verificationObservation, verificationRead !== null)}
                   ${verificationRead?.recovery && html`
                     <div class="wk-notice wk-notice--warn" role="status">현재 검증 목록 조회 불가 · 복구 스냅샷 표시 중</div>
                   `}

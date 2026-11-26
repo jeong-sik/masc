@@ -77,6 +77,7 @@ type GoalEvidenceRead = {
   readonly epoch: number
   readonly goalId: string
   readonly planning: Observed<readonly GoalItem[]>
+  readonly evidence: GoalConfirmationEvidence | null
 } & (
   | { readonly kind: 'loading' }
   | { readonly kind: 'value'; readonly evidence: GoalConfirmationEvidence }
@@ -584,8 +585,10 @@ export function InboxTab(props: WorkspaceViewProps) {
   )
   const selectedGoal = selectedEntry?.kind === 'goal_confirmation' ? selectedEntry.goal : null
   const selectedGoalRead = goalRead?.epoch === epoch && goalRead.goalId === selectedGoal?.id
-    && goalRead.planning === goalsObs ? goalRead : null
-  const goalConfEvidence = selectedGoalRead?.kind === 'value' ? selectedGoalRead.evidence : null
+    ? goalRead : null
+  const goalConfEvidence = selectedGoalRead?.evidence ?? null
+  const goalConfCurrent = selectedGoalRead?.kind === 'value'
+    && selectedGoalRead.planning === goalsObs && isCurrent(goalsObs)
 
   const loadGoalConf = useCallback(async (goalId: string, planning: Observed<readonly GoalItem[]>, explicit = false) => {
     if (multiAccount || !isEpochCurrent(epoch) || !isCurrent(planning)) return
@@ -596,12 +599,22 @@ export function InboxTab(props: WorkspaceViewProps) {
     const owner = { epoch, goalId, planning }
     const key = `goal:${goalId}`
     const revisionAtStart = liveRevisionRef.current[key]
+    const retainEvidence = (previous: GoalEvidenceRead | null): GoalConfirmationEvidence | null =>
+      previous?.epoch === epoch && previous.goalId === goalId ? previous.evidence : null
+    const isTransientFailure = (kind: string): boolean =>
+      kind === 'network' || kind === 'timeout' || kind === 'server'
 
-    setGoalRead({ ...owner, kind: 'loading' })
+    setGoalRead((previous) => ({ ...owner, kind: 'loading', evidence: retainEvidence(previous) }))
     const wsRes = await readWorkspacePrecondition()
     if (signal.aborted || !isEpochCurrent(epoch)) return
     if (!wsRes.ok) {
-      setGoalRead({ ...owner, kind: 'failed', reason: wsRes.error.message })
+      const keep = isTransientFailure(wsRes.error.kind)
+      setGoalRead((previous) => ({
+        ...owner,
+        kind: 'failed',
+        reason: wsRes.error.message,
+        evidence: keep ? retainEvidence(previous) : null,
+      }))
       return
     }
     const params = new URLSearchParams({
@@ -612,12 +625,23 @@ export function InboxTab(props: WorkspaceViewProps) {
     const res = await apiGet<unknown>(`/api/v1/goals/confirmation?${params.toString()}`, { signal })
     if (signal.aborted || !isEpochCurrent(epoch)) return
     if (!res.ok) {
-      setGoalRead({ ...owner, kind: 'failed', reason: res.error.message })
+      const keep = isTransientFailure(res.error.kind)
+      setGoalRead((previous) => ({
+        ...owner,
+        kind: 'failed',
+        reason: res.error.message,
+        evidence: keep ? retainEvidence(previous) : null,
+      }))
       return
     }
     const decoded = decodeGoalConfirmation(res.value, goalId, wsRes.value)
     if (!decoded.ok) {
-      setGoalRead({ ...owner, kind: 'failed', reason: decoded.error })
+      setGoalRead({
+        ...owner,
+        kind: 'failed',
+        reason: decoded.error,
+        evidence: null,
+      })
       return
     }
     setGoalRead({ ...owner, kind: 'value', evidence: decoded.value })
@@ -1177,16 +1201,29 @@ export function InboxTab(props: WorkspaceViewProps) {
                 <span class="wk-badge wk-badge--warn">Goal Confirmation</span>
                 <h2 class="wk-heading">${selectedEntry.goal.title}</h2>
               </div>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(selectedEntry.goal.id)}`)}
-              >
-                목표 상세로 이동 →
-              </button>
+              <div class="wk-actions">
+                ${!multiAccount && goalConfEvidence && selectedGoalRead?.kind === 'loading' && html`
+                  <span class="wk-status-pill wk-status-pill--info" role="status" title="확인 근거 확인 중…">
+                    <${InlineSpinner} size="xs" />
+                    <span class="wk-status-pill-text">증거 확인 중…</span>
+                  </span>
+                `}
+                ${!multiAccount && goalConfEvidence && selectedGoalRead?.kind !== 'loading' && !goalConfCurrent && html`
+                  <span class="wk-status-pill wk-status-pill--warn" role="status" title="확인 근거 · 마지막 조회">
+                    <span class="wk-status-pill-text">증거 · 마지막 조회</span>
+                  </span>
+                `}
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(selectedEntry.goal.id)}`)}
+                >
+                  목표 상세로 이동 →
+                </button>
+              </div>
             </div>
             ${multiAccount && html`<div class="wk-notice" role="note">이 연결에서는 Goal 목록과 상세를 열 수 있습니다.</div>`}
-            ${selectedGoalRead?.kind === 'loading' && html`
+            ${!goalConfEvidence && selectedGoalRead?.kind === 'loading' && html`
               <div class="wk-notice wk-notice--info" role="status"><${InlineSpinner} /> 확인 근거 불러오는 중…</div>
             `}
             ${selectedGoalRead?.kind === 'failed' && html`
@@ -1203,9 +1240,12 @@ export function InboxTab(props: WorkspaceViewProps) {
                 }}
                 currentRevision=${liveRevisionByKey[selectedEntry.key] ?? goalConfEvidence.criterionRevision}
                 lockedEpoch=${epoch}
-                onRefresh=${() => void loadGoalConf(selectedEntry.goal.id, goalsObs, true)}
+                onRefresh=${() => {
+                  if (isCurrent(goalsObs)) void loadGoalConf(selectedEntry.goal.id, goalsObs, true)
+                  else void loadInbox('manual', ['goal_confirmation'])
+                }}
               >
-                <button type="button" class="wk-btn-ok" disabled=${actionDisabled} onClick=${() => void handleConfirmGoal(goalConfEvidence)}>
+                <button type="button" class="wk-btn-ok" disabled=${actionDisabled || !goalConfCurrent} onClick=${() => void handleConfirmGoal(goalConfEvidence)}>
                   목표 완료 최종 확정 (Confirm)
                 </button>
               <//>

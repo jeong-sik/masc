@@ -236,7 +236,54 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-height: 36px;
   min-width: 0;
+}
+
+.kn-toolbar-status-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.kn-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-11);
+  line-height: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.kn-status-pill-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kn-status-pill--info {
+  border-color: var(--info-border);
+  background: var(--info-soft);
+  color: var(--info-fg);
+}
+
+.kn-status-pill--warn {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
 }
 
 .kn-chips {
@@ -306,6 +353,9 @@
 }
 
 .kn-chip-count {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums slashed-zero;
   font-size: var(--fs-11);

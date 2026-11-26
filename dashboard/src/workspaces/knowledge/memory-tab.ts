@@ -331,6 +331,34 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         : diffData.retracted
     : []
 
+  const syncPill = (() => {
+    const worldLoading = worldObs.kind === 'loading'
+    const diffLoading = diffObs.kind === 'loading'
+    const worldStale = worldObs.kind === 'value' && worldObs.stale
+    const diffStale = diffObs.kind === 'value' && diffObs.stale
+    const parts: string[] = []
+    if (worldLoading && diffLoading) {
+      parts.push('World Memory · Diff 불러오는 중…')
+    } else if (worldLoading) {
+      parts.push('World Memory 불러오는 중…')
+    } else if (diffLoading) {
+      parts.push(`${activeWin} 메모리 Diff 불러오는 중…`)
+    }
+    if (worldStale && diffStale) {
+      parts.push('마지막 조회')
+    } else if (worldStale) {
+      parts.push('World Memory · 마지막 조회')
+    } else if (diffStale) {
+      parts.push(`${activeWin} Diff · 마지막 조회`)
+    }
+    if (parts.length === 0) return null
+    return {
+      tone: (worldStale || diffStale ? 'warn' : 'info') as 'warn' | 'info',
+      loading: worldLoading || diffLoading,
+      text: parts.join(' · '),
+    }
+  })()
+
   return html`
     <div class="kn-scroll-body">
       <div class="kn-toolbar">
@@ -345,6 +373,14 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           ${world?.ledgerSha256 && html`
             <span class="mono kn-sub-id">
               sha256:${world.ledgerSha256.slice(0, 12)}
+            </span>
+          `}
+        </div>
+        <div class="kn-toolbar-status-slot">
+          ${syncPill && html`
+            <span class=${`kn-status-pill kn-status-pill--${syncPill.tone}`} role="status" title=${syncPill.text}>
+              ${syncPill.loading && html`<${InlineSpinner} size="xs" />`}
+              <span class="kn-status-pill-text">${syncPill.text}</span>
             </span>
           `}
         </div>
@@ -367,13 +403,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       </div>
 
       ${worldObs.kind === 'failed' && html`<div class="kn-notice kn-notice--err" role="alert">World Memory 조회 실패. ${worldObs.error.message}</div>`}
-      ${worldObs.kind === 'loading' && html`<span role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />World Memory 불러오는 중…</span>`}
-      ${worldObs.kind === 'value' && worldObs.stale && html`<p role="status" class="kn-notice kn-notice--warn">마지막으로 확인한 World Memory입니다.</p>`}
       ${(worldObs.kind === 'absent' || worldObs.kind === 'unreported') && html`<p role="status">서버에서 World Memory를 확인할 수 없습니다.</p>`}
 
       ${diffObs.kind === 'failed' && html`<div class="kn-notice kn-notice--err" role="alert">${activeWin} 메모리 Diff 조회 실패. ${diffObs.error.message}</div>`}
-      ${diffObs.kind === 'loading' && html`<span role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />${activeWin} 메모리 Diff 불러오는 중…</span>`}
-      ${diffObs.kind === 'value' && diffObs.stale && html`<p role="status" class="kn-notice kn-notice--warn">마지막으로 확인한 ${activeWin} 메모리 Diff입니다.</p>`}
       ${(diffObs.kind === 'absent' || diffObs.kind === 'unreported') && html`<p role="status">서버에서 ${activeWin} 메모리 Diff를 확인할 수 없습니다.</p>`}
 
       ${(world || diffData) && html`
@@ -517,13 +549,13 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             <div class="kn-toolbar">
               <div class="kn-chips" role="group" aria-label="Diff 유형">
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'added'} onClick=${() => setDiffSubTab('added')}>
-                  Added ${diffData && html`<span class="kn-chip-count">${diffData.counts.added}</span>`}
+                  Added <span class="kn-chip-count">${diffData ? diffData.counts.added : '—'}</span>
                 </button>
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'updated'} onClick=${() => setDiffSubTab('updated')}>
-                  Updated ${diffData && html`<span class="kn-chip-count">${diffData.counts.updated}</span>`}
+                  Updated <span class="kn-chip-count">${diffData ? diffData.counts.updated : '—'}</span>
                 </button>
                 <button type="button" class="kn-chip" aria-pressed=${diffSubTab === 'retracted'} onClick=${() => setDiffSubTab('retracted')}>
-                  Retracted ${diffData && html`<span class="kn-chip-count">${diffData.counts.retracted}</span>`}
+                  Retracted <span class="kn-chip-count">${diffData ? diffData.counts.retracted : '—'}</span>
                 </button>
               </div>
               ${diffData && (diffData.counts.incompleteBatches > 0 || diffData.counts.abortedBatches > 0) && html`

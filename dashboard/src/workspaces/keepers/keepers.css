@@ -879,6 +879,45 @@
   overflow-wrap: anywhere;
 }
 
+/* RFC open-tool-carries-cohort-and-reach D4: one row per open piece of work. */
+.kp-open-work {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  min-width: 0;
+}
+
+.kp-open-work-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kp-open-work-glyph { color: var(--brass-1); }
+.kp-open-work-row[data-tone="thinking"] .kp-open-work-glyph { color: var(--info-fg); }
+.kp-open-work-phrase { overflow-wrap: anywhere; }
+.kp-open-work-reach { color: var(--fg-3); }
+.kp-open-work-row[data-leaves-masc="true"] .kp-open-work-reach { color: var(--warn-fg); }
+.kp-open-work-elapsed { margin-left: auto; color: var(--fg-3); }
+
+.kp-open-work-batch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.kp-open-work-batch-head { color: var(--brass-1); font-weight: 600; }
+.kp-open-work-batch > .kp-open-work {
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--line-1);
+}
+
 .kp-waiting-strip {
   padding: var(--sp-2) var(--sp-3);
   border-top: 1px solid var(--line-1);

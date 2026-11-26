@@ -57,6 +57,7 @@ import {
   formatNativeCompletionSummary,
   formatNativeProgressLabel,
 } from './chat-blocks'
+import { decodeOpenActivities } from './turn-open-work'
 import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
@@ -296,6 +297,7 @@ function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
   return {
     status_text: statusText,
     activity,
+    open_activities: decodeOpenActivities(raw.open_activities),
     text_tail: textTail,
     last_tool: lastTool,
     updated_at_unix: updatedAt,

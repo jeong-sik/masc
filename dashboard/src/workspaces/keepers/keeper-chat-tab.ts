@@ -73,6 +73,13 @@ import {
 } from './chat-blocks'
 import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
 import {
+  openActivityLeavesMasc,
+  openActivityPhrase,
+  openActivityReachLabel,
+  openActivityTone,
+  openWorkPieces,
+} from './turn-open-work'
+import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
   applyToolResultError,
@@ -94,6 +101,7 @@ import type {
   KeeperRosterItem,
   KeeperWaitingInventoryData,
   QueuedChatOperation,
+  TurnOpenActivity,
 } from './types'
 
 const LazyKeeperDebugCompanion = lazy(async () => ({
@@ -130,6 +138,48 @@ function KeeperTurnElapsed({ startedAt, observedAt, live }: {
   const elapsedAt = live ? Math.max(now, observedAt) : observedAt
   const seconds = (elapsedAt - startedAt) / 1000
   return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`
+}
+
+/** RFC open-tool-carries-cohort-and-reach D4: the turn's open work, one row
+ *  each, with how long it has been in its current stage. */
+function OpenWorkRows({ activities, live }: {
+  readonly activities: readonly TurnOpenActivity[]
+  readonly live: boolean
+}) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!live) return
+    setNow(Date.now())
+    const interval = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [live])
+  const row = (activity: TurnOpenActivity, key: string) => {
+    const reach = openActivityReachLabel(activity)
+    const seconds = Math.max(0, (now - activity.since_unix * 1000) / 1000)
+    return html`
+      <li class="kp-open-work-row" key=${key} data-tone=${openActivityTone(activity)}
+        data-leaves-masc=${openActivityLeavesMasc(activity) ? 'true' : 'false'}>
+        <span class="kp-open-work-glyph" aria-hidden="true">${activity.kind === 'tool' ? '▪' : '✦'}</span>
+        <span class="kp-open-work-phrase">${openActivityPhrase(activity)}</span>
+        ${reach && html`<span class="kp-open-work-reach">${reach}</span>`}
+        ${live && html`<span class="kp-turn-elapsed kp-open-work-elapsed">${formatElapsedCompact(seconds)}</span>`}
+      </li>
+    `
+  }
+  return html`
+    <ul class="kp-open-work" data-testid="chat-open-work" aria-label="진행 중인 일">
+      ${openWorkPieces(activities).map((piece, index) => piece.kind === 'single'
+        ? row(piece.activity, `s${index}`)
+        : html`
+          <li class="kp-open-work-batch" key=${`b${index}`}>
+            <span class="kp-open-work-batch-head">동시 실행 ${piece.members.length}개</span>
+            <ul class="kp-open-work">
+              ${piece.members.map((member, memberIndex) => row(member, `b${index}:${memberIndex}`))}
+            </ul>
+          </li>
+        `)}
+    </ul>
+  `
 }
 
 type ChatRead = 'history' | 'queue' | 'waiting'
@@ -1746,6 +1796,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
   const matchedPreview = previewForObservedTurn(turnPreviews, activeTurn, snapshot?.updatedAt, snapshot?.retiredOwners)
   const effectivePreview = matchedPreview?.preview ?? activeTurn?.preview ?? null
+  const openWork = effectivePreview?.open_activities ?? null
   const hasTurnObservation = activeTurn !== null || effectivePreview !== null
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
@@ -2496,7 +2547,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                         ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
                           ${blocks.bodyText
                             ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
-                            : html`<div class="kp-msg-body">응답 생성 중…</div>`}
+                            : openWork !== null && openWork.length > 0
+                              ? html`<${OpenWorkRows} activities=${openWork} live=${turnAnimating} />`
+                              : html`<div class="kp-msg-body">응답 생성 중…</div>`}
                         `}
                         ${msg.retainedImages?.map((image, index) => html`
                           <${WorkspaceChatImage} key=${`${index}:${image.path}`}
@@ -2538,6 +2591,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   `}
                   ${effectivePreview?.status_text && html`
                     <div class="kp-live-turn-status">${effectivePreview.status_text}</div>
+                  `}
+                  ${openWork !== null && openWork.length > 0 && html`
+                    <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
                   `}
                   ${effectivePreview?.text_tail && html`
                     <div class="kp-live-turn-tail">… ${effectivePreview.text_tail}</div>

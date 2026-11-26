@@ -318,14 +318,12 @@ driver = "kimi_code"
 command = "kimi"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.vibe_test]
 protocol = "acp"
 driver = "mistral_vibe"
 command = "vibe-acp"
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.agy_test]
 protocol = "acp"
@@ -333,7 +331,6 @@ driver = "antigravity"
 command = "agy"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.muse_test]
 protocol = "acp"
@@ -341,7 +338,6 @@ driver = "muse_code"
 command = "muse"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.http_test]
 protocol = "openai-compatible-http"

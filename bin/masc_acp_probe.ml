@@ -393,16 +393,27 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
               mcp_server_name
               nonce
           in
-          let t1_start = now_ms () in
-          let turn1_res =
-            Runtime_acp_client.prompt
-              client
-              ~session_id
-              ~blocks:[ Runtime_acp_client.Text_block turn1_prompt ]
-              ~timeout_s:(Some timeout_s)
-              ~permission_policy
-              ()
+          (* A probe answers "does this driver work", so each turn gets a
+             whole-turn deadline; the ACP prompt itself has none. *)
+          let prompt_within_deadline text =
+            match
+              Eio.Time.with_timeout (Eio.Stdenv.clock env) timeout_s (fun () ->
+                Ok
+                  (Runtime_acp_client.prompt
+                     client
+                     ~session_id
+                     ~blocks:[ Runtime_acp_client.Text_block text ]
+                     ~permission_policy
+                     ()))
+            with
+            | Ok result -> result
+            | Error `Timeout ->
+              Error
+                (Runtime_acp_client.Timeout
+                   (Runtime_timeout_payload.of_acp ~stage:"session/prompt" ~timeout_s))
           in
+          let t1_start = now_ms () in
+          let turn1_res = prompt_within_deadline turn1_prompt in
           let t1_ms = max 0 (now_ms () - t1_start) in
           (match turn1_res with
            | Error err ->
@@ -446,15 +457,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
                  target_skill_name
              in
              let t2_start = now_ms () in
-             let turn2_res =
-               Runtime_acp_client.prompt
-                 client
-                 ~session_id
-                 ~blocks:[ Runtime_acp_client.Text_block turn2_prompt ]
-                 ~timeout_s:(Some timeout_s)
-                 ~permission_policy
-                 ()
-             in
+             let turn2_res = prompt_within_deadline turn2_prompt in
              let t2_ms = max 0 (now_ms () - t2_start) in
              let mcp_phase =
                mcp_phase_to_string (Runtime_official_client_mcp_http.client_phase bridge)
@@ -684,7 +687,7 @@ let () =
       , Arg.Set_string drivers_arg
       , "Comma-separated ACP drivers (default: every driver)" )
     ; "--cwd", Arg.Set_string cwd_arg, "Working directory with .agents/skills (default: cwd)"
-    ; "--timeout-s", Arg.Set_float timeout_s_arg, "Per-turn idle timeout in seconds (default: 120)"
+    ; "--timeout-s", Arg.Set_float timeout_s_arg, "Per-turn deadline in seconds (default: 120)"
     ; "--model", Arg.Set_string model_arg, "Optional model override for all selected drivers"
     ; ( "--posture"
       , Arg.Set_string posture_arg

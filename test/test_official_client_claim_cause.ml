@@ -99,7 +99,6 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
         ~host:acp_host
         ~configured_reasoning_effort:None
-        ~turn_timeout_s:None
         ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })

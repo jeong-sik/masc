@@ -3135,7 +3135,7 @@ let test_acp_failure_advances_timeout_standing_and_exception_handling () =
     (can_advance
        (F.Acp_failure
           (Acp.Timeout (Runtime_timeout_payload.of_acp ~stage:"prompt" ~timeout_s:30.0))));
-  assert (can_advance (F.Acp_failure (Acp.Process_exited { detail = "exited 1"; stderr_tail = "" })));
+  assert (can_advance (F.Acp_failure (Acp.Process_exited { detail = "exited 1"; stderr_tail = ""; last_activity = None })));
   assert (can_advance (F.Acp_failure Acp.Client_closed));
   let acp ?(code = -32000) ?data message =
     F.Acp_failure (Acp.rpc_error ~method_name:"session/prompt" ~code ~message ~data)

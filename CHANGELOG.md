@@ -1,5 +1,87 @@
 ## [Unreleased]
 
+## [0.83.3] - 2026-11-26
+
+### Added
+
+- TUI: five more theme presets built from well-known palettes, `solarized_dark`, `nord`, `dracula`, `gruvbox_dark` and `catppuccin_mocha`. `/theme <name>`, `--theme <name>` and `tui.theme = "<name>"` select them, and `/theme` without an argument now steps through them after `muted_graphite` and returns to `midnight`. Every text color keeps at least 4.5:1 contrast on all four surfaces, so a published color below that is lightened and can look brighter than in the author's terminal. Existing presets keep their colors (#54775).
+- Carry confirmed Discord account references with external observations into Librarian questions, alongside the original conversation and message coordinates. (#54778)
+- Include the verified Discord account and exact conversation scope in Librarian observations. (#54794)
+- Store personal Memory facts with verified Discord account and conversation scope, while keeping ordinary Memory views separate. (#54797)
+- Let Librarian propose a personal memory from one verified original Discord message shown in its question. (#54799)
+- Use verified personal memories in supported Discord replies within the original account and conversation scope. (#54800)
+- Recall verified personal memories on fresh Discord mentions in supported runtimes. (#54802)
+- Add an operator API that replies to a recorded Discord message and returns the new Discord message ID when delivery is confirmed (#54808).
+- Reply to a recorded Discord message from Keeper Chat and reopen the delivery receipt after a reload (#54810).
+- Reply to a recorded Discord message and check its delivery receipt from Keeper Chat in the TUI (#54815).
+- Add `admission-timeout-s` for ACP providers (initialize admission budget in seconds, default `30.0`), validated positive-finite and rejected on every non-ACP protocol (#54816).
+- `contributor-mode = "on"` or `"off"` for `muse_code` runtimes in `runtime.toml`. The value is passed as `--contributor-mode` on every host start (#54827).
+
+### Changed
+
+- ACP lanes (Antigravity, Kimi Code, Mistral Vibe, Muse Code) size by the declared `max-context` and the agent's own `usage_update.used`; the 262,144-token default and the tokens x4 byte estimate are gone, and a fresh session's start range is written to the model-input ledger so `past_max_context` moves the next start (#54767).
+- Remove `Dive_keeper` in MASC TUI and unify Keeper chat and inspection into `4 Keepers` with Focus Mode (`[z]`/`[Enter]`), eliminating the duplicate Keeper tab bar (#54771).
+- Consolidate MASC TUI Keeper tabs from 9 to 6 (`Chat`, `Trace`, `Memory`, `Work & Sandbox`, `Config`, `Identity`), absorb `Runtime_trace_dive` into `Keeper_trace`, and remove `Dive_infra` (#54772).
+- TUI: store direct persistent tool-result map/set references in `Keeper_dive.history_layout` instead of allocating a per-frame snapshot list and rebuilding maps on cache misses (#54792).
+- TUI: promoted 8 inline modal forms out of `Nav.Board_new_post` into first-class `Nav.inline_action_kind` variants and removed duplicated field-key sniffing classifiers (#54805)
+- TUI: removed ~770 lines of dead shadowed hotkey arms and duplicated modal helpers from `update_input.ml` and unified Memory `[A]` / Wiki `Ctrl+E` delegation onto `Update_actions` (#54809)
+- Remove `Dive_knowledge` (`Thread_dive`, `Wiki_dive`, `Artifact_dive`) from MASC TUI and promote Board thread, Wiki editing/reading, and Artifact in-document search and actions directly into `3 Knowledge` split detail and `[z]` zoom (#54820).
+- Remove `Goal_dive` and `Task_dive` from MASC TUI and promote Goal/Task detail, linked verification checklists/diffs, and opt-in `[Space]` Raw JSON directly into `2 Work` (`Goals` / `Tasks`) split detail and `[z]` zoom (#54821).
+- Replace unbounded `dive_stack`/`dive_return_stack` navigation in MASC TUI with a flat depth-1 `Nav.inspector` (`Verification`, `Tool`, `Skill`, `Exact_run`) and split `dive_scroll_offset` into independent `inspector_scroll_offset` and `keeper_detail_scroll_offset` (#54822).
+- A `muse_code` runtime that does not declare `contributor-mode` runs its host with Contributor mode off, even when the operator turned it on in Muse. In this mode the plan grants less usage, and Meta does not train on the content (#54827).
+
+### Removed
+
+- Config: the 54 base16 color schemes in `config/themes` are no longer shipped in the binary or seeded into `.masc/config/themes`. Nothing has read them since the legacy TUI was removed in #54402; the v2.5 TUI chooses from its compiled-in presets. A workspace that already has the folder keeps it (#54806).
+
+### Fixed
+
+- Hydrate live and persisted Keeper chat tool results on expand, unify `Ctrl+O`/`Space`/`/tools` controls without deadlock, and support multi-page `/tool-result` pagination with `409`/binary/epoch recovery in the TUI (#54742).
+- Fusion shows the current stage, terminal duration, or last observed result in the TUI and dashboard. Failed Fusion and Exact Output reads in the dashboard show an error (#54747).
+- The dashboard keeps World Memory and the selected period's Diff visible when the other request fails, and changes the Diff window without re-reading World Memory (#54748).
+- Dashboard Work shows available task and schedule rows as each source responds. Delayed, failed and retained reads have their own status, and refreshing a source keeps the operator's selection when its row is still available (#54754).
+- TUI Infra Code shows the selected file and elapsed time while reading. Failed reads report the matching file, and a failed refresh keeps the last content for the same file (#54755).
+- TUI: resolve P1 shortcut collisions and SSOT drift (`[d]` on Memory Explorer now switches to Diff instead of opening Keeper purge confirmation, `[D]` on diff-flow pins the range and disarms stop-arm, Approval Strip `[Y]`/`[N]`/`[J]` takes priority on Artifacts/Goal dive, collapsed company rows no longer target hidden keepers, `[D] Exact Detail` hint case, `Work > Tasks` `[v]` filter cycle, 3-pane `Keepers` sub-tab bar, and `Wiki_dive` `Ctrl+E`), classify `keeper.tool_exec`/`keeper.turn_*` activity backfill wire kinds accurately, and unify `/score` alphaTex fence extraction with CommonMark (`Cmarkit`) (#54761).
+- The TUI Keeper chat status, the turn header and the roster's working detail say what the turn is doing now, from the work the server reports as open: a tool that runs, a call the model is still making, reasoning, the answer, or nothing open, each with how long it has been open. A message the operator sent that waits behind a running turn says why it waits, first in the line (#54762).
+- Show Work Inbox approvals, questions and Goal confirmations as their responses arrive. Keep slow reads, unavailable sources and partial decision history visible (#54763).
+- Show Work Inbox source status while reads are pending. Keep Goal confirmations visible if task enrichment fails and label previously read Gate decisions and partial history (#54764).
+- Dashboard: fix macOS `Option(Alt)+Y/N/T` via `event.code` and allow `Shift+Y/N/J` on the Fast Approval Strip, fix `CommandPalette` / `QuickPeekDrawer` `Escape` z-order layering and focus restoration, classify `remembered_approve` and real `fraction`/`percent` subscription usage windows with closed sets, display `runtime_path_rest` in Pulse Attention Queue preview with attempt-scoped lane keys, and align retained chat image limit (50 MiB) and placeholder/retry button CSS (#54766).
+- Show Dashboard Goals before verification finishes loading. Label incomplete, recovered and failed verifier reads and keep decisions attached to the current Goal and read (#54769).
+- Show TUI Goals before linked Tasks finish loading. Preserve the last Task read during a failed refresh, scope verification replies to their filter and base progress on the shown Task rows (#54770).
+- Clear the Goal selection when a Pipeline refresh removes it so the next action requires selecting a remaining Goal (#54770).
+- Show verification backlog recovery, missing records, read failures, and page coverage in the TUI. Refresh awaiting membership after Task changes and recheck the current read before a verdict (#54770).
+- Show Keeper tasks, Sandbox, operator notes, tool activity, and Memory reads as each result arrives, with scoped retry and draft preservation (#54776).
+- Preserve Keeper operator-note drafts through TUI reads and saves, and show the active request in the editor (#54779).
+- Server/TUI/Dashboard: align `strip_entity_prefix` with `claim-`/`conflict-` IDs, remove duplicate unreachable Settings `[d]` handler in TUI, replace Dashboard Settings `title.includes('ui')` with canonical ID / word-boundary matching, classify Memory act refusals via HTTP 409 status instead of response substring scanning, use closed sets for Memory flow ops, and deduplicate `.wk-body-pre` CSS (#54781).
+- Dashboard: scope `KeeperChatTab` messages atomically to the active keeper so switching keepers never flashes the previous keeper's transcript or fires cross-keeper `/tool-result` auto-hydration requests (#54782).
+- Open the Dashboard Keeper Chat Debug Companion on demand so diagnostic requests stay off the initial chat load (#54783).
+- Withhold Discord account evidence from forwarded messages and keep external observations readable when their account key format is unsupported. (#54784)
+- TUI: replaced hardcoded quit/keeper-stop toast string matching with typed `Model.toast_tag`, preserved `Shift` across Korean 2-bulsik IME replay (`J`/`K`/`M`/`D`), and aligned `Esc` footer hints and Help overlay shortcut docs (#54786)
+- Show live Keeper turn progress, elapsed time, and the latest confirmed success beside the Dashboard chat composer (#54788).
+- Show current Keeper activity in the TUI preview header and preserve the recent successful turn in the chat status strip (#54789).
+- Dashboard: unified HITL tool-approval/ask wire decoders across Shell, Pulse, and Work Inbox (filtering closed asks from Pulse), extracted `<think>` blocks for the Thinking toggle, and opened external links in document Markdown safely in a new tab (#54791)
+- Give Librarian a Discord account as authorship evidence only after the original message has been verified. Historical observations remain readable. (#54793)
+- Keep the TUI Harness verdict selected across refreshes and clear its action target when the verdict disappears or is filtered out (#54796).
+- Show Harness reads in progress and keep the last verdict sample and its coverage visible when a refresh fails (#54796).
+- Show Keeper Sandbox request, absence, failure, and source information in Dashboard and TUI, and refresh detail independently from the fleet list (#54798).
+- Preserve current TUI reads, partial results, and live status when older workspace replies arrive after reconnect. Keep workspace mismatch receipts until the UI can restart the handshake (#54801).
+- Show verification queue recovery, missing records, and partial pages in Dashboard Quick Peek. Task details now show when verification history is loading, partial, or unavailable (#54803).
+- Deliver Discord Keeper replies and their rich blocks to the original message in the routed channel or thread. (#54804)
+- Use one read-worker job to load and encode the latest Keeper chat history page (#54807).
+- Keep the previous Artifact inventory marked as stale when a change arrives during its TUI read (#54813).
+- TUI: prioritize `Artifact_dive` active search `[N]` (`Search_prev_match`) over Approval Strip `Fast_deny_top` via single-SSOT `Model.is_artifact_dive_search_active`, advertise `[Alt+N]` on the Approval Strip deny cue while search owns bare `[N]`, and keep empty-search `[N]` routing to `Fast_deny_top` (#54814).
+- Share active schedule observations across the Dashboard calendar and preview, retaining the last available page on refresh failure (#54817).
+- The Keeper chat status line no longer shows a model wait or an answer counted from the turn's first request between two tool calls of an official client turn (Codex, Claude Code, Antigravity, ACP). A tool run ends the response that called it, and the last tool's return starts the next wait (#54824).
+- A tool the official client runs itself (a native tool such as `self.sleep` or `bash`) shows as running for exactly as long as it runs. It used to stay "about to run" until the turn ended and hid the calls that were running (#54824).
+- A turn that ended at a tool boundary, or whose run has returned, leaves no open work in the preview (#54824).
+- Restore the TUI build after the operator note readback used the old read key form (#54825).
+- A `muse_code` host no longer takes its Contributor mode from the operator's Muse settings. With that setting on, a Muse Ember runtime failed every turn with `model muse-ember-1.0 does not exist or you lack access`, because the host asked for `muse-ember-1.0-contributor` (#54827).
+- Preserve the last Dashboard log observation and reconnect when the live log stream stops (#54828).
+
+### Performance
+
+- Reduce main-domain work when restoring the live Keeper history after compaction (#54812).
+
 ## [0.83.2] - 2026-11-25
 
 ### Upgrade notes

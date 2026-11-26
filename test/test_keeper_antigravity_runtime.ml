@@ -1773,29 +1773,28 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
-(* The Start range the lane composes, then the source projection, in the order
+(* The Start range the lane composes, finished by the source projection, as
    [Keeper_antigravity_runtime] runs them. Capacity is unbounded so a test
    sees only where the range starts. *)
 let carried_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     source : Keeper_history_projection.t =
   fun messages ->
-  Result.bind
-    (Keeper_official_client_host.start_range_projection
-       ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
-       ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
-       ~capacity_bytes:max_int
-       ~unbounded_capacity_bytes:max_int
-       ~reserved_bytes:0
-       ?on_model_input_window_observation
-       ?carried_front_seed
-       ?librarian_front
-       ?on_carried_front
-       ~turn_start
-       ~keeper_name:"alpha"
-       ~runtime_id:"antigravity_subscription.gemini"
-       messages)
-    (Keeper_official_client_host.project_source source)
+  Keeper_official_client_host.start_range_projection
+    ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+    ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
+    ~capacity_bytes:max_int
+    ~unbounded_capacity_bytes:max_int
+    ~reserved_bytes:0
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ~keeper_name:"alpha"
+    ~runtime_id:"antigravity_subscription.gemini"
+    ~finish:(Keeper_official_client_host.project_source source)
+    messages
 ;;
 
 (* The Gate replay reference the source projection appends goes out after the
@@ -2545,6 +2544,46 @@ module Argument_start_fixture = struct
     | Ok (Some _) -> fail "Resume materialized the newly eligible argument"
     | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 end
+
+(* The window and the start are published only for an input the lane
+   finished. A refused [finish] returns its error and leaves neither behind;
+   a finished input publishes each once. *)
+let test_projection_refusal_emits_no_carried_observations () =
+  let module F = Argument_start_fixture in
+  let run finish =
+    let finished = ref 0 and windows = ref 0 and fronts = ref 0 in
+    let result =
+      Keeper_official_client_host.start_range_projection
+        ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
+        ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
+        ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+        ~on_model_input_window_observation:(fun _ -> incr windows)
+        ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr fronts)
+        ~librarian_front:F.librarian_front
+        ~turn_start:(F.boundary F.seed)
+        ~keeper_name:"refusal-fixture" ~runtime_id:"antigravity.gemini"
+        ~finish:(fun messages -> incr finished; finish messages)
+        F.history
+    in
+    result, !finished, !windows, !fronts
+  in
+  let refused, finished, windows, fronts =
+    run (fun _ -> Error (Agent_core.Error.Internal "projection refused"))
+  in
+  (match refused with
+   | Error (Agent_core.Error.Internal "projection refused") -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "the refused input came back as sent");
+  check int "finish runs once" 1 finished;
+  check int "a refused input publishes no window" 0 windows;
+  check int "a refused input publishes no start" 0 fronts;
+  let accepted, _, windows, fronts = run Result.ok in
+  (match accepted with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "a finished input publishes its window once" 1 windows;
+  check int "a finished input publishes its start once" 1 fronts
+;;
 
 let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
   let module F = Argument_start_fixture in
@@ -3828,7 +3867,8 @@ let () =
         , [test_case "original result survives vendor session replacement" `Quick
              test_original_result_survives_a_vendor_session_change])
     ; ( "lifecycle"
-        , [ test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+        , [ test_case "projection refusal publishes no range" `Quick test_projection_refusal_emits_no_carried_observations
+          ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
           ; test_case "native policy failure releases its claim" `Quick
             test_native_policy_failure_releases_claim
           ; test_case

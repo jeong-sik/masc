@@ -944,10 +944,10 @@ let start_range_projection ~input_source ?argument_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
-    messages =
+    ~finish messages =
   let messages = Runtime_model_input_tail_window.for_compaction_replay messages in
   match input_source with
-  | Keeper_request_source.Completion_review -> Ok messages
+  | Keeper_request_source.Completion_review -> finish messages
   | Keeper_request_source.Keeper_history _ ->
   let librarian_front =
     Option.value librarian_front ~default:Keeper_turn_driver_try_provider.No_read_end
@@ -1028,6 +1028,9 @@ let start_range_projection ~input_source ?argument_projection
       (* Failed and unselected slots are raw again. Repeat the whole summary
          and range decision, with no second materialization or invented refs. *)
       select actual_messages in
+  (* The range is published only for an input the lane finished: a refused
+     [finish] leaves no window and no start behind. *)
+  let* finished = finish selected.selected_messages in
   observe_window selected.selected_projection;
   Option.iter
     (fun observe ->
@@ -1042,7 +1045,7 @@ let start_range_projection ~input_source ?argument_projection
                 ~first_atom:
                   selected.selected_projection.Runtime_model_input_tail_window.dropped_atoms)))
     on_carried_front;
-  Ok selected.selected_messages
+  Ok finished
 ;;
 
 let render_start_messages ~started_at messages =

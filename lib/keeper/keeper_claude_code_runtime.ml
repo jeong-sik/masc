@@ -194,80 +194,81 @@ let model_input_projection_for_capacity ~input_source
     ~runtime_id
     source_projection
     messages =
-  let* windowed =
-    if minimal_anchor_only
-    then Ok (minimal_anchor_only_messages messages)
-    else
-      Host.start_range_projection
-        ~input_source
-        ?argument_projection
-        ~measure_message_bytes:measure_model_input_message_bytes
-        ~capacity_bytes
-        ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
-        ~reserved_bytes:0
-        ?on_model_input_window_observation
-        ?carried_front_seed
-        ?librarian_front
-        ?on_carried_front
-        ~turn_start
-        ~keeper_name
-        ~runtime_id
-        messages
+  let finish windowed =
+    let windowed =
+      match session_mode with
+      | Runtime_claude_code.Start ->
+        attach_rollover_anchor_if_needed
+          ~rollover_anchor
+          ~commit_evicted_prefix
+          ~minimal_anchor_only
+          ~offered:messages
+          ~windowed
+      | Runtime_claude_code.Resume _ -> windowed
+    in
+    let () =
+      match session_mode with
+      | Runtime_claude_code.Start ->
+        if minimal_anchor_only
+        then (
+          observed_next_shrink_capacity_bytes := None;
+          observed_floor_capacity_bytes := None)
+        else
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            let measured =
+              Runtime_model_input_tail_window.measure_history
+                ~measure_message_bytes:measure_model_input_message_bytes windowed
+            in
+            let target_capacity_bytes =
+              if capacity_bytes = unbounded_model_input_capacity_bytes
+              then
+                Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                  ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
+              else
+                Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                  ~capacity:capacity_bytes
+            in
+            observed_next_shrink_capacity_bytes :=
+              Runtime_model_input_tail_window.next_shrink_capacity_bytes
+                ~allow_empty_history:true
+                ~target_capacity_bytes
+                measured;
+            observed_floor_capacity_bytes :=
+              Runtime_model_input_tail_window.minimum_capacity_bytes
+                measured)
+      | Runtime_claude_code.Resume _ ->
+        (* A Resume sent none of this range, so its overflow says nothing about
+           the range's size: the vendor session it resumed is what was full.
+           Mirror [Keeper_codex_runtime]: always offer the ladder's own halved
+           step even with 0 local checkpoint atoms so [on_shrink_retry] resolves
+           into [Restart_fresh] instead of aborting. *)
+        observed_next_shrink_capacity_bytes :=
+          Some
+            (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+               ~capacity:capacity_bytes);
+        observed_floor_capacity_bytes := None
+    in
+    Host.project_source source_projection windowed
   in
-  let windowed =
-    match session_mode with
-    | Runtime_claude_code.Start ->
-      attach_rollover_anchor_if_needed
-        ~rollover_anchor
-        ~commit_evicted_prefix
-        ~minimal_anchor_only
-        ~offered:messages
-        ~windowed
-    | Runtime_claude_code.Resume _ -> windowed
-  in
-  let () =
-    match session_mode with
-    | Runtime_claude_code.Start ->
-      if minimal_anchor_only
-      then (
-        observed_next_shrink_capacity_bytes := None;
-        observed_floor_capacity_bytes := None)
-      else
-        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-          let measured =
-            Runtime_model_input_tail_window.measure_history
-              ~measure_message_bytes:measure_model_input_message_bytes windowed
-          in
-          let target_capacity_bytes =
-            if capacity_bytes = unbounded_model_input_capacity_bytes
-            then
-              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-                ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
-            else
-              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-                ~capacity:capacity_bytes
-          in
-          observed_next_shrink_capacity_bytes :=
-            Runtime_model_input_tail_window.next_shrink_capacity_bytes
-              ~allow_empty_history:true
-              ~target_capacity_bytes
-              measured;
-          observed_floor_capacity_bytes :=
-            Runtime_model_input_tail_window.minimum_capacity_bytes
-              measured)
-    | Runtime_claude_code.Resume _ ->
-      (* A Resume sent none of this range, so its overflow says nothing about
-         the range's size: the vendor session it resumed is what was full.
-         Mirror [Keeper_codex_runtime]: always offer the ladder's own halved
-         step even with 0 local checkpoint atoms so [on_shrink_retry] resolves
-         into [Restart_fresh] instead of aborting. *)
-      observed_next_shrink_capacity_bytes :=
-        Some
-          (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-             ~capacity:capacity_bytes);
-      observed_floor_capacity_bytes := None
-  in
-  Host.project_source source_projection windowed
+  if minimal_anchor_only
+  then finish (minimal_anchor_only_messages messages)
+  else
+    Host.start_range_projection
+      ~input_source
+      ?argument_projection
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      ~finish
+      messages
 ;;
 
 (* Keep the account scope selected at turn start. Config may be reloaded while

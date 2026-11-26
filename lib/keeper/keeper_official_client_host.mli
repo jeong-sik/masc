@@ -691,6 +691,7 @@ val start_range_projection :
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
   runtime_id:string ->
+  finish:Keeper_history_projection.t ->
   Agent_core.Types.message list ->
   (Agent_core.Types.message list, Agent_core.Error.t) result
 (** Capacity-first Start projection shared by Codex, Claude Code, Antigravity
@@ -700,8 +701,15 @@ val start_range_projection :
     composed. [on_carried_front] gets the front once, with the range's bytes
     and where the request starts in the history
     ({!Keeper_request_start.sends_from}).
-    Source-specific projection runs after this range. Without
-    [librarian_front] the turn has no read end.
+    Without [librarian_front] the turn has no read end.
+
+    [finish] is the rest of the lane's input: its rollover anchor, its
+    overflow step and its source projection. It runs on the selected range,
+    and its result is what this function returns. [on_model_input_window_observation]
+    and [on_carried_front] are called only after [finish] returns [Ok], so a
+    refused input publishes no range. Both keep the range's durable-history
+    coordinates: what [finish] appends, such as a Gate replay reference,
+    never becomes a front. A [Completion_review] input is [finish] alone.
 
     With [argument_projection], verified closed raw-seed arguments and
     finished-turn tool results are planned before measuring capacity. A result
@@ -720,8 +728,7 @@ val start_range_projection :
     selection is pure with respect to blobs; only retained slots are
     materialized once. Actual success/failure outcomes are replayed, every
     unmaterialized slot is restored, and the full range/summary decision is
-    repeated without I/O. Custom source projection must run after this
-    function returns. *)
+    repeated without I/O. *)
 
 type framed_delivery =
   | Framed_start of { started_at : float }

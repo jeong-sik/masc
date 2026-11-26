@@ -312,27 +312,25 @@ let carried_model_input_projection ~input_source
               ~capacity:capacity_bytes));
     Host.project_source source_projection sent
   in
-  let* sent =
-    if minimal_anchor_only
-    then Ok (minimal_anchor_only_messages messages)
-    else
-      Host.start_range_projection
-        ~input_source
-        ?argument_projection
-        ~measure_message_bytes
-        ~capacity_bytes
-        ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
-        ~reserved_bytes:0
-        ?on_model_input_window_observation
-        ?carried_front_seed
-        ?librarian_front
-        ?on_carried_front
-        ~turn_start
-        ~keeper_name
-        ~runtime_id
-        messages
-  in
-  finish sent
+  if minimal_anchor_only
+  then finish (minimal_anchor_only_messages messages)
+  else
+    Host.start_range_projection
+      ~input_source
+      ?argument_projection
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      ~finish
+      messages
 ;;
 
 let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion

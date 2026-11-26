@@ -316,70 +316,71 @@ let model_input_projection_for_capacity ~input_source
     observed_floor_capacity_bytes := None;
     Host.project_source source_projection messages
   | Runtime_antigravity.Start ->
-    let* windowed =
+    let finish windowed =
+      let windowed =
+        attach_rollover_anchor_if_needed
+          ~rollover_anchor
+          ~commit_evicted_prefix
+          ~minimal_anchor_only
+          ~offered:messages
+          ~windowed
+      in
       if minimal_anchor_only
-      then
-        let labelled, _ = Runtime_model_input_tail_window.annotate messages in
-        Ok
-          (List.filter_map
-             (fun (msg, label) ->
-                match label with
-                | Runtime_model_input_tail_window.Pinned -> Some msg
-                | Runtime_model_input_tail_window.Atom _ -> None)
-             labelled)
+      then (
+        observed_next_shrink_capacity_bytes := None;
+        observed_floor_capacity_bytes := None)
       else
-        Host.start_range_projection
-          ~input_source
-          ?argument_projection
-          ~measure_message_bytes:measure_model_input_message_bytes
-          ~capacity_bytes
-          ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
-          ~reserved_bytes:0
-          ?on_model_input_window_observation
-          ?carried_front_seed
-          ?librarian_front
-          ?on_carried_front
-          ~turn_start
-          ~keeper_name
-          ~runtime_id
-          messages
-    in
-    let windowed =
-      attach_rollover_anchor_if_needed
-        ~rollover_anchor
-        ~commit_evicted_prefix
-        ~minimal_anchor_only
-        ~offered:messages
-        ~windowed
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+          let measured =
+            Runtime_model_input_tail_window.measure_history
+              ~measure_message_bytes:measure_model_input_message_bytes windowed
+          in
+          let target_capacity_bytes =
+            if capacity_bytes = unbounded_model_input_capacity_bytes
+            then
+              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
+            else
+              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                ~capacity:capacity_bytes
+          in
+          observed_next_shrink_capacity_bytes :=
+            Runtime_model_input_tail_window.next_shrink_capacity_bytes
+              ~allow_empty_history:true
+              ~target_capacity_bytes
+              measured;
+          observed_floor_capacity_bytes :=
+            Runtime_model_input_tail_window.minimum_capacity_bytes
+              measured);
+      Host.project_source source_projection windowed
     in
     if minimal_anchor_only
     then (
-      observed_next_shrink_capacity_bytes := None;
-      observed_floor_capacity_bytes := None)
+      let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+      finish
+        (List.filter_map
+           (fun (msg, label) ->
+              match label with
+              | Runtime_model_input_tail_window.Pinned -> Some msg
+              | Runtime_model_input_tail_window.Atom _ -> None)
+           labelled))
     else
-      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-        let measured =
-          Runtime_model_input_tail_window.measure_history
-            ~measure_message_bytes:measure_model_input_message_bytes windowed
-        in
-        let target_capacity_bytes =
-          if capacity_bytes = unbounded_model_input_capacity_bytes
-          then
-            Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-              ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
-          else
-            Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-              ~capacity:capacity_bytes
-        in
-        observed_next_shrink_capacity_bytes :=
-          Runtime_model_input_tail_window.next_shrink_capacity_bytes
-            ~allow_empty_history:true
-            ~target_capacity_bytes
-            measured;
-        observed_floor_capacity_bytes :=
-          Runtime_model_input_tail_window.minimum_capacity_bytes
-            measured);
-    Host.project_source source_projection windowed
+      Host.start_range_projection
+        ~input_source
+        ?argument_projection
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+        ~reserved_bytes:0
+        ?on_model_input_window_observation
+        ?carried_front_seed
+        ?librarian_front
+        ?on_carried_front
+        ~turn_start
+        ~keeper_name
+        ~runtime_id
+        ~finish
+        messages
 ;;
 
 let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id () =

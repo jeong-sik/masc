@@ -140,6 +140,9 @@ describe('Proposal A+ Application Shell (src/app.ts)', () => {
     await act(async () => {
       render(h(App, {}), container)
     })
+    await waitFor(() => {
+      expect(authSession.value.kind).toBe('single_user_local')
+    })
 
     expect(railExpanded.value).toBe(true)
     await act(async () => {

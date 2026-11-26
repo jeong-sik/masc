@@ -11,11 +11,11 @@
  */
 
 import { signal, type ReadonlySignal } from '@preact/signals'
-import type { AuthSession } from '../core/auth'
+import { canAccessTokenAdmin, canReadSuOrMaAdmin, type AuthSession } from '../core/auth'
 import type { ViewProvenance } from '../core/observer'
 import type { WorkspaceId } from '../workspaces/types'
 
-export type RouteAccess = 'public' | 'member' | 'admin'
+export type RouteAccess = 'public' | 'member' | 'su_read_ma_admin' | 'admin'
 
 export interface L1SubTab {
   readonly id: string
@@ -184,12 +184,12 @@ export const WORKSPACE_NAV: readonly WorkspaceNavDef[] = Object.freeze([
     shortcut: '6',
     section: 'trunk',
     defaultPath: '/infra/sandboxes',
-    access: 'admin',
+    access: 'su_read_ma_admin',
     defaultProvenance: 'SYNCED',
     subtabs: [
-      { id: 'sandboxes', label: 'Sandboxes', path: '/infra/sandboxes', access: 'admin', defaultProvenance: 'SYNCED' },
-      { id: 'repos', label: 'Repos', path: '/infra/repos', access: 'admin', defaultProvenance: 'SNAPSHOT' },
-      { id: 'logs', label: 'Logs', path: '/infra/logs', access: 'admin', defaultProvenance: 'LIVE SSE' },
+      { id: 'sandboxes', label: 'Sandboxes', path: '/infra/sandboxes', access: 'su_read_ma_admin', defaultProvenance: 'SYNCED' },
+      { id: 'repos', label: 'Repos', path: '/infra/repos', access: 'su_read_ma_admin', defaultProvenance: 'SNAPSHOT' },
+      { id: 'logs', label: 'Logs', path: '/infra/logs', access: 'su_read_ma_admin', defaultProvenance: 'LIVE SSE' },
     ],
   },
   {
@@ -252,9 +252,9 @@ export const ROUTE_MANIFEST: readonly APlusRouteEntry[] = Object.freeze([
   { id: 'runtime-lanes', workspace: 'runtime', subroute: 'lanes', path: '/runtime/lanes', label: '5 Runtime → Lanes, Exact Output & Fusion', keywords: ['lane', 'failover', 'exact', 'fusion', 'model', '레인'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
   { id: 'runtime-tools', workspace: 'runtime', subroute: 'tools', path: '/runtime/tools', label: '5 Runtime → Tools, Skills & Connectors', keywords: ['tool', 'skill', 'connector', 'discord', 'slack', '도구'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'LIVE SSE' },
   { id: 'runtime-addons', workspace: 'runtime', subroute: 'addons', path: '/runtime/addons', label: '5 Runtime → Lane Add-ons & Browser Lane', keywords: ['addon', 'browser', 'plugin', '애드온'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
-  { id: 'infra-sandboxes', workspace: 'infra', subroute: 'sandboxes', path: '/infra/sandboxes', label: '6 Infra → Sandboxes (MicroVM / SSH / Docker)', keywords: ['sandbox', 'microvm', 'ssh', 'docker', '샌드박스'], access: 'admin', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
-  { id: 'infra-repos', workspace: 'infra', subroute: 'repos', path: '/infra/repos', label: '6 Infra → Repositories & 24h Diffs', keywords: ['repo', 'git', 'diff', '저장소'], access: 'admin', supportsTimeWindow: false, defaultProvenance: 'SNAPSHOT' },
-  { id: 'infra-logs', workspace: 'infra', subroute: 'logs', path: '/infra/logs', label: '6 Infra → Live SSE Logs', keywords: ['log', 'logs', 'stream', '로그'], access: 'admin', supportsTimeWindow: false, defaultProvenance: 'LIVE SSE' },
+  { id: 'infra-sandboxes', workspace: 'infra', subroute: 'sandboxes', path: '/infra/sandboxes', label: '6 Infra → Sandboxes (MicroVM / SSH / Docker)', keywords: ['sandbox', 'microvm', 'ssh', 'docker', '샌드박스'], access: 'su_read_ma_admin', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
+  { id: 'infra-repos', workspace: 'infra', subroute: 'repos', path: '/infra/repos', label: '6 Infra → Repositories & 24h Diffs', keywords: ['repo', 'git', 'diff', '저장소'], access: 'su_read_ma_admin', supportsTimeWindow: false, defaultProvenance: 'SNAPSHOT' },
+  { id: 'infra-logs', workspace: 'infra', subroute: 'logs', path: '/infra/logs', label: '6 Infra → Live SSE Logs', keywords: ['log', 'logs', 'stream', '로그'], access: 'su_read_ma_admin', supportsTimeWindow: false, defaultProvenance: 'LIVE SSE' },
   { id: 'settings', workspace: 'settings', subroute: 'runtime', path: '/settings', label: 'Settings — Schema Config & TOML Patch', keywords: ['setting', 'config', 'toml', 'schema', '설정'], access: 'admin', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
   { id: 'account-profile', workspace: 'account', subroute: 'profile', path: '/account/profile', label: 'Account: Profile, Sessions & Workspaces', keywords: ['account', 'profile', 'login', 'logout', 'workspace', 'bearer', '계정'], access: 'public', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
   { id: 'account-pats', workspace: 'account', subroute: 'pats', path: '/account/pats', label: 'Account: Personal Access Tokens (PATs)', keywords: ['account', 'pat', 'token', 'mcp', '토큰'], access: 'member', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
@@ -436,7 +436,7 @@ export function resolveRoute(rawInput: string): ResolvedRoute {
       workspace: 'infra',
       subroute: tab.id,
       query,
-      access: 'admin',
+      access: tab.access,
       supportsTimeWindow: false,
       defaultProvenance: tab.defaultProvenance ?? 'SYNCED',
     }
@@ -490,7 +490,8 @@ export type RouteGuardDecision =
 /**
  * Judges whether the current `AuthSession` may mount a route with `access`.
  * - `public` routes (e.g. `/account`) always mount.
- * - `single_user_local` operators have full local access (`member` + `admin`).
+ * - `single_user_local`: Admin unlocks `member` + `admin`; verified `worker`/`player`
+ *   receive `admin_only` WITHOUT mounting or firing speculative 403 requests.
  * - `multi_account_signed_in`: `role === 'admin'` unlocks `admin`; `worker`/`viewer`
  *   receive `admin_only` WITHOUT mounting or firing speculative 403 requests.
  */
@@ -511,9 +512,18 @@ export function evaluateRouteAccess(
     case 'single_user_auth_required':
       return { allowed: false, reason: 'auth_required' }
     case 'single_user_local':
+      if (access === 'su_read_ma_admin' && !canReadSuOrMaAdmin(session)) {
+        return { allowed: false, reason: 'admin_only' }
+      }
+      if (access === 'admin' && !canAccessTokenAdmin(session)) {
+        return { allowed: false, reason: 'admin_only' }
+      }
       return { allowed: true }
     case 'multi_account_signed_in':
-      if (access === 'admin' && session.role !== 'admin') {
+      if (access === 'su_read_ma_admin' && !canReadSuOrMaAdmin(session)) {
+        return { allowed: false, reason: 'admin_only' }
+      }
+      if (access === 'admin' && !canAccessTokenAdmin(session)) {
         return { allowed: false, reason: 'admin_only' }
       }
       return { allowed: true }
@@ -521,11 +531,9 @@ export function evaluateRouteAccess(
 }
 
 export function isAdminLockedForSession(access: RouteAccess, session: AuthSession): boolean {
-  return (
-    access === 'admin'
-    && session.kind === 'multi_account_signed_in'
-    && session.role !== 'admin'
-  )
+  if (access === 'su_read_ma_admin') return !canReadSuOrMaAdmin(session)
+  if (access === 'admin') return !canAccessTokenAdmin(session)
+  return false
 }
 
 // ── Reactive Hash Router ────────────────────────────────────────────────

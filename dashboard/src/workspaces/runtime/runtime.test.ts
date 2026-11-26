@@ -300,9 +300,9 @@ describe('workspaces/runtime', () => {
   })
 
   it.each([
-    { subroute: 'tools', source: '/api/v1/tool-metrics/series', badge: 'tools-stream-badge', data: { buckets: [], total: { call_count: 0, failure_count: 0, p95_ms: null } } },
-    { subroute: 'efficiency', source: '/api/v1/models/metrics', badge: 'efficiency-stream-badge', data: { models: [] } },
-  ])('respects the account-mode snapshot contract for $subroute', async ({ subroute, source, badge, data }) => {
+    { subroute: 'tools', unbridgedPrefix: '/api/v1/tool-metrics/series', bridgedPrefix: '/api/v1/dashboard/tools', badge: 'tools-stream-badge' },
+    { subroute: 'efficiency', unbridgedPrefix: '/api/v1/models/metrics', bridgedPrefix: '/api/v1/dashboard/cache-stats', badge: 'efficiency-stream-badge' },
+  ])('skips unbridged single-user series and SSE in multi_account mode for $subroute (0x 404)', async ({ subroute, unbridgedPrefix, bridgedPrefix, badge }) => {
     authSession.value = {
       kind: 'multi_account_signed_in',
       mode: 'multi_account',
@@ -316,26 +316,24 @@ describe('workspaces/runtime', () => {
     }
     setObserverSseInstanceId('account-observer.1')
     const urls: string[] = []
-    let snapshotStatus = 404
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       urls.push(url)
-      if (url.startsWith(source + '?') && snapshotStatus === 200) return jsonResponse(data)
-      return jsonResponse({ error: 'Metrics route unavailable' }, 404)
+      if (url.startsWith('/api/v1/dashboard/tools')) return jsonResponse({ tools: [] })
+      if (url.startsWith('/api/v1/dashboard/cache-stats')) return jsonResponse({ hit_ratio: 0.5, entries: 1, max_entries: 10, fresh: 1 })
+      return jsonResponse({ error: 'unexpected unbridged route' }, 404)
     }) as typeof fetch
 
     render(html`<${RuntimeWorkspace} subroute=${subroute} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await vi.waitFor(() => {
-      expect(container.querySelector(`[data-testid="${badge}"]`)?.textContent).toContain('UNAVAILABLE')
-      expect(container.textContent).toContain('Metrics route unavailable')
+      expect(container.querySelector(`[data-testid="${badge}"]`)?.textContent).toContain('SINGLE-USER ONLY')
     })
 
-    snapshotStatus = 200
     setTimeWindow('7d')
-    await vi.waitFor(() => {
-      expect(container.querySelector(`[data-testid="${badge}"]`)?.textContent).toContain('SNAPSHOT (7d)')
-    })
+    await flushUi(20)
     expect(activeViewStreamKey.value).toBeNull()
+    expect(urls.some((url) => url.startsWith(bridgedPrefix))).toBe(true)
+    expect(urls.some((url) => url.startsWith(unbridgedPrefix))).toBe(false)
     expect(urls.some((url) => url.includes('/stream'))).toBe(false)
   })
 
@@ -1684,7 +1682,24 @@ describe('workspaces/runtime', () => {
     )
     expect(settingsBtns).toHaveLength(0)
 
-    // 4. Addons tab tolerates omitted wire arrays ({}) without crashing
+    // 4. Addons tab skips unbridged single-user routes in multi_account mode (0x 404),
+    //    and tolerates omitted wire arrays ({}) in single_user mode without crashing
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.querySelector('[data-testid="addons-mode-notice"]')).not.toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/lane-addons') || u.includes('/api/v1/dashboard/browser-lane'))).toBe(false)
+
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     render(null, container)
     resourceCache.clearAll()
     render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
@@ -2020,7 +2035,6 @@ describe('workspaces/runtime', () => {
       expect(container.textContent).toContain('integrations')
     })
   })
-
   it('rejects malformed null elements in /api/v1/setup/inventory integrations and /api/v1/lane-addons instances with explicit alert', async () => {
     authSession.value = {
       kind: 'single_user_local',
@@ -2083,5 +2097,138 @@ describe('workspaces/runtime', () => {
       expect(container.textContent).toContain('instances[0]')
       expect(container.textContent).toContain('clients[0]')
     })
+  })
+
+  it('enforces multi-account admin 0x 404 across Lanes/Quotas/Tools and single-user worker CanAdmin boundaries across Quotas/Tools/Addons', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'primary',
+          default_runtime: null,
+          runtimes: [],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/exact-lane-runs')) {
+        return jsonResponse({ runs: [], total: 0, has_more: false })
+      }
+      if (url.startsWith('/api/v1/auth/provider-accounts')) return jsonResponse({ accounts: [] })
+      if (url.startsWith('/api/v1/auth/integrations')) return jsonResponse({ integrations: [] })
+      if (url.startsWith('/api/v1/dashboard/tools')) return jsonResponse({ tools: [] })
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      if (url.startsWith('/api/v1/skills')) {
+        return jsonResponse({
+          state: 'ready',
+          snapshot: {
+            snapshot_revision: 'rev-1',
+            skills: [{ identity: { source_id: 'local', package_id: 'core', name: 'audit' }, content_revision: 'c1', description: 'Audit', body_bytes: 42 }],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/gate/keepers')) return jsonResponse({ keepers: [{ name: 'sangsu' }] })
+      if (url.startsWith('/api/v1/keepers/oauth/attached-tools')) {
+        return jsonResponse({
+          providers: [{ provider: 'github', provider_label: 'GitHub', attached: true, enabled: true, tools: ['pr'] }],
+        })
+      }
+      if (url.startsWith('/api/v1/lane-addons/asks')) {
+        return jsonResponse({
+          asks: [{ declaration_id: 'decl-1', ask_id: 'ask-1', title: 'Operator Quiz', questions: [{ id: 'q1', prompt: 'Approve?' }] }],
+        })
+      }
+      if (url.startsWith('/api/v1/lane-addons')) return jsonResponse({ instances: [] })
+      if (url.startsWith('/api/v1/dashboard/browser-lane/clients')) {
+        return jsonResponse({ ok: true, data: { clients: [], inventoryComplete: true, inventoryIssues: [] } })
+      }
+      return jsonResponse({ error: 'unexpected unbridged route' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin on Lanes, Quotas, Tools: 0x SU-only 404s, keeps bridged routes
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'admin-rt',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-rt',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    const fusionTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.trim() === 'Fusion')!
+    fusionTab.click()
+    await flushUi(15)
+    expect(container.querySelector('[data-testid="fusion-mode-notice"]')).not.toBeNull()
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.querySelector('[data-testid="provider-usage-mode-notice"]')).not.toBeNull()
+
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/runtime-probe'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/runtime/config/raw'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/fusion-runs'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/provider-usage-history'))).toBe(false)
+
+    // 2. Single-user Worker: Quotas skips CanAdmin setup/inventory & raw config; Tools keeps OAuth Public_read while locking mutations & Skills editor; Addons locks CanAdmin ask-answer
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(seenUrls.some((u) => u.includes('/api/v1/setup/inventory'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/runtime/config/raw'))).toBe(false)
+    expect(container.textContent).not.toContain('+ API 키 등록')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="tools" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(20)
+    const skillsTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.includes('Skills'))!
+    skillsTab.click()
+    await flushUi(20)
+    expect(container.querySelector('[data-testid="tools-skills-admin-locked"]')).not.toBeNull()
+
+    const oauthTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.includes('Keeper OAuth'))!
+    oauthTab.click()
+    await vi.waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/keepers/oauth/attached-tools'))).toBe(true)
+    })
+    expect(container.querySelector('[data-testid="tools-oauth-admin-locked"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('연결 해제')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="addon-ask-admin-locked"]')).not.toBeNull()
+    })
+    const submitBtns = [...container.querySelectorAll('button')].filter((b) =>
+      b.textContent?.includes('질문 응답 제출'),
+    )
+    expect(submitBtns).toHaveLength(0)
   })
 })

@@ -470,9 +470,15 @@ export function readPulseBundle(win: TimeWindow): PulseLoadBundle {
   const isMultiAccount = authSession.value.kind === 'multi_account_signed_in'
   return {
     shell: resourceCache.observe<PulseShellSnapshot>(PULSE_CACHE_KEYS.shell).value,
-    keepers: resourceCache.observe<readonly PulseKeeperRow[]>(PULSE_CACHE_KEYS.keepers).value,
-    costs: resourceCache.observe<readonly PulseKeeperCostRow[]>(PULSE_CACHE_KEYS.costs).value,
-    usage: resourceCache.observe<PulseProviderUsageSnapshot>(PULSE_CACHE_KEYS.usage(win)).value,
+    keepers: isMultiAccount
+      ? observedAbsent<readonly PulseKeeperRow[]>('multi_account_unbridged')
+      : resourceCache.observe<readonly PulseKeeperRow[]>(PULSE_CACHE_KEYS.keepers).value,
+    costs: isMultiAccount
+      ? observedAbsent<readonly PulseKeeperCostRow[]>('multi_account_unbridged')
+      : resourceCache.observe<readonly PulseKeeperCostRow[]>(PULSE_CACHE_KEYS.costs).value,
+    usage: isMultiAccount
+      ? observedAbsent<PulseProviderUsageSnapshot>('multi_account_unbridged')
+      : resourceCache.observe<PulseProviderUsageSnapshot>(PULSE_CACHE_KEYS.usage(win)).value,
     approvals: isMultiAccount
       ? observedAbsent<readonly PulseApprovalItem[]>('multi_account_unbridged')
       : resourceCache.observe<readonly PulseApprovalItem[]>(PULSE_CACHE_KEYS.approvals).value,
@@ -499,21 +505,27 @@ export async function loadPulseBundle(
       (signal) => wrapResult(apiGet('/api/v1/dashboard/shell', { signal, decode: decodeShell })),
       { ttlMs: 15_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'task', 'goal', 'goal_projection_changed', 'shell'], reason },
     ),
-    resourceCache.fetch<readonly PulseKeeperRow[]>(
-      PULSE_CACHE_KEYS.keepers,
-      (signal) => wrapResult(apiGet('/api/v1/gate/keepers?detailed=true', { signal, decode: decodePulseKeepers })),
-      { ttlMs: 12_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'keeper_turn_complete', 'provider_standing', 'keeper_turn', 'keeper_lifecycle'], reason },
-    ),
-    resourceCache.fetch<readonly PulseKeeperCostRow[]>(
-      PULSE_CACHE_KEYS.costs,
-      (signal) => wrapResult(apiGet(`/api/v1/dashboard/keeper-costs?window=${KEEPER_COSTS_MAX_WINDOW_MINUTES}`, { signal, decode: decodeCosts })),
-      { ttlMs: 30_000, topics: ['keeper_turn', 'keeper_turn_complete', 'cost'], reason },
-    ),
-    resourceCache.fetch<PulseProviderUsageSnapshot>(
-      PULSE_CACHE_KEYS.usage(win),
-      (signal) => wrapResult(apiGet(`/api/v1/dashboard/provider-usage-history?days=${usageDays}`, { signal, decode: decodeProviderUsage })),
-      { ttlMs: 60_000, topics: ['provider', 'provider_standing', 'provider_usage', 'quota'], reason },
-    ),
+    isMultiAccount
+      ? Promise.resolve(observedAbsent<readonly PulseKeeperRow[]>('multi_account_unbridged'))
+      : resourceCache.fetch<readonly PulseKeeperRow[]>(
+          PULSE_CACHE_KEYS.keepers,
+          (signal) => wrapResult(apiGet('/api/v1/gate/keepers?detailed=true', { signal, decode: decodePulseKeepers })),
+          { ttlMs: 12_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'keeper_turn_complete', 'provider_standing', 'keeper_turn', 'keeper_lifecycle'], reason },
+        ),
+    isMultiAccount
+      ? Promise.resolve(observedAbsent<readonly PulseKeeperCostRow[]>('multi_account_unbridged'))
+      : resourceCache.fetch<readonly PulseKeeperCostRow[]>(
+          PULSE_CACHE_KEYS.costs,
+          (signal) => wrapResult(apiGet(`/api/v1/dashboard/keeper-costs?window=${KEEPER_COSTS_MAX_WINDOW_MINUTES}`, { signal, decode: decodeCosts })),
+          { ttlMs: 30_000, topics: ['keeper_turn', 'keeper_turn_complete', 'cost'], reason },
+        ),
+    isMultiAccount
+      ? Promise.resolve(observedAbsent<PulseProviderUsageSnapshot>('multi_account_unbridged'))
+      : resourceCache.fetch<PulseProviderUsageSnapshot>(
+          PULSE_CACHE_KEYS.usage(win),
+          (signal) => wrapResult(apiGet(`/api/v1/dashboard/provider-usage-history?days=${usageDays}`, { signal, decode: decodeProviderUsage })),
+          { ttlMs: 60_000, topics: ['provider', 'provider_standing', 'provider_usage', 'quota'], reason },
+        ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<readonly PulseApprovalItem[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseApprovalItem[]>(

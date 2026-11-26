@@ -11,7 +11,7 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { EQUIPMENT_IDS, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -48,6 +48,7 @@ const DEFAULT_SLOT_ITEM: Readonly<Record<PortraitSlot, string>> = {
 
 export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
   const { keeper } = props
+  const isSingleUser = authSession.value.kind === 'single_user_local'
   const [ledger, setLedger] = useState<KeeperCandleLedgerData | null>(null)
   const [items, setItems] = useState<KeeperItemsData | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -73,9 +74,10 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
     setLoading(true)
+    const allowItems = authSession.peek().kind === 'single_user_local'
     const [ledRes, itRes] = await Promise.all([
       fetchKeeperCandleLedgerApi(targetKeeper, 100, ctrl.signal),
-      fetchKeeperItemsApi(targetKeeper, ctrl.signal),
+      allowItems ? fetchKeeperItemsApi(targetKeeper, ctrl.signal) : Promise.resolve(null),
     ])
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) {
       return
@@ -87,13 +89,17 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
     } else if (ledRes.error.kind !== 'aborted' && ledRes.error.kind !== 'epoch_stale') {
       errors.push(`원장 조회 실패: ${ledRes.error.message}`)
     }
-    if (itRes.ok) {
-      setItems(itRes.value)
-    } else if (itRes.error.kind !== 'aborted' && itRes.error.kind !== 'epoch_stale') {
-      errors.push(`아이템 조회 실패: ${itRes.error.message}`)
+    if (itRes) {
+      if (itRes.ok) {
+        setItems(itRes.value)
+      } else if (itRes.error.kind !== 'aborted' && itRes.error.kind !== 'epoch_stale') {
+        errors.push(`아이템 조회 실패: ${itRes.error.message}`)
+      }
+    } else {
+      setItems(null)
     }
     setLoadError(errors.length > 0 ? errors.join(' · ') : null)
-  }, [keeper.name])
+  }, [keeper.name, isSingleUser])
 
   useEffect(() => {
     setLedger(null)

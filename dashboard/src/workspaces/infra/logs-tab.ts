@@ -17,6 +17,7 @@ import {
   acquireViewStream,
   apiGet,
   authSession,
+  canReadSuOrMaAdmin,
   getSingleUserToken,
   isEpochCurrent,
   observerSseInstanceId,
@@ -132,7 +133,9 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   pausedByUserRef.current = pausedByUser
   const pendingLiveRef = useRef<PendingTimeline>({ entries: [], resetLogs: false })
   const streamObserved = useRef(false)
-  const liveSupported = authSession.value.kind === 'single_user_local'
+  const session = authSession.value
+  const canReadLogs = canReadSuOrMaAdmin(session)
+  const liveSupported = session.kind === 'single_user_local' && session.role !== 'player'
   const sseInstanceId = liveSupported ? observerSseInstanceId.value : null
   const pausedByVisibility = sseInstanceId !== null && viewStreamPaused.value
 
@@ -164,6 +167,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   }, [])
 
   useEffect(() => {
+    if (!canReadLogs) return
     const controller = new AbortController()
     const { signal } = controller
     void apiGet('/api/v1/dashboard/logs?limit=200', {
@@ -216,14 +220,15 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
       controller.abort()
       unsubObserver()
     }
-  }, [epoch, enqueueLiveEntries])
+  }, [epoch, canReadLogs, enqueueLiveEntries])
 
   // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
   // Waits for observer x-masc-sse-instance-id so zero premature HTTP 400s fire.
   useEffect(() => {
     if (!sseInstanceId) return
     const handle = acquireViewStream('infra-logs', (signal) => {
-      if (authSession.peek().kind !== 'single_user_local') return
+      const cur = authSession.peek()
+      if (cur.kind !== 'single_user_local' || cur.role === 'player') return
       setStreamStatus('connecting')
       const streamUrl = resolveWorkspaceUrl('/api/v1/dashboard/logs/stream?limit=200')
       const headers: Record<string, string> = {
@@ -288,7 +293,8 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   const disconnected = sseInstanceId !== null && streamStatus === 'error'
   const paused = pausedByUser || pausedByVisibility
   const snapshotError = snapshot.kind === 'failed' ? snapshot.message : null
-  const sourceLabel = pausedByUser ? `⏸ PAUSED${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}`
+  const sourceLabel = !canReadLogs ? '○ ADMIN ONLY'
+    : pausedByUser ? `⏸ PAUSED${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}`
     : pausedByVisibility ? '⏸ PAUSED (hidden)'
     : live ? '● LIVE SSE'
     : connecting ? 'CONNECTING'
@@ -358,9 +364,9 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
               color: (pausedByUser || pausedByVisibility) ? 'var(--warn-fg)' : live ? 'var(--ok-fg)' : 'var(--fg-2)',
             }}
           >
-            ${!paused && (connecting || (!live && snapshot.kind === 'loading')) && html`<${InlineSpinner} /> `}
+            ${canReadLogs && !paused && (connecting || (!live && snapshot.kind === 'loading')) && html`<${InlineSpinner} /> `}
             ${sourceLabel}
-            ${!paused && !live && snapshot.kind === 'ready' && html`
+            ${canReadLogs && !paused && !live && snapshot.kind === 'ready' && html`
               · <time dateTime=${new Date(snapshot.observedAt).toISOString()} title="마지막 로그 확인">
                 ${formatTimestampKo(snapshot.observedAt / 1000)}
               </time>

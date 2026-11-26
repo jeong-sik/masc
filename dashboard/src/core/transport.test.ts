@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  authSession,
   bootstrapAuthSession,
   bumpSessionEpoch,
+  currentSessionEpoch,
   resetAuthStateForTests,
   setSingleUserToken,
 } from './auth'
@@ -228,7 +230,6 @@ describe('core/transport', () => {
     const notOk = unwrapOkData({ ok: false, error: 'denied', code: 'forbidden' })
     expect(notOk.ok).toBe(false)
   })
-
   it('preserves parsed JSON error body on ApiError for HTTP 500 recovery inspection', async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse({ recorded: true, state: 'wakeup_deferred', error: 'wakeup queued' }, 500),
@@ -246,5 +247,51 @@ describe('core/transport', () => {
         error: 'wakeup queued',
       })
     }
+  })
+
+  it('triggers throttled whoami-only recheck on non-CSRF 403 and bumps sessionEpoch on demotion', async () => {
+    let sessionFetches = 0
+    let whoamiFetches = 0
+    let serverRole: 'admin' | 'worker' = 'admin'
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') {
+        sessionFetches += 1
+        return jsonResponse({ user_id: 'acct-403', csrf_token: 'csrf-403' })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        whoamiFetches += 1
+        return jsonResponse({ principal: { kind: 'human', id: 'acct-403' }, role: serverRole })
+      }
+      if (url === '/api/v1/dashboard/logs') {
+        return jsonResponse({ error: { code: 'forbidden', message: 'Admin role required' } }, 403)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(sessionFetches).toBe(1)
+    expect(whoamiFetches).toBe(1)
+    expect(authSession.value).toMatchObject({ kind: 'multi_account_signed_in', role: 'admin' })
+
+    serverRole = 'worker'
+    const epochBefore = currentSessionEpoch()
+    const res1 = await apiGet('/api/v1/dashboard/logs', { fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(res1.ok).toBe(false)
+
+    await vi.waitFor(() => {
+      expect(authSession.value).toMatchObject({ kind: 'multi_account_signed_in', role: 'worker' })
+    })
+    expect(currentSessionEpoch()).toBe(epochBefore + 1)
+    // Must never touch /auth/session on ordinary RBAC 403
+    expect(sessionFetches).toBe(1)
+    expect(whoamiFetches).toBe(2)
+
+    // Subsequent 403 inside cooldown window is throttled
+    await apiGet('/api/v1/dashboard/logs', { fetchImpl: fetchMock as unknown as typeof fetch })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(whoamiFetches).toBe(2)
   })
 })

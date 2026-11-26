@@ -39,6 +39,7 @@ import {
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   decodeToolMetricsSeriesPayload,
@@ -248,7 +249,13 @@ export function decodeToolsCatalogPayload(raw: unknown): {
 
 export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const win = timeWindow.value
-  const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const isMultiAccountSignedIn = session.kind === 'multi_account_signed_in'
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const canAdminTools = isSingleUser && !adminLocked
+  const canBroadcastTools = isSingleUser && session.role !== 'player'
+  const sseInstanceId = isSingleUser ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
   const [section, setSection] = useState<ToolsSubSection>('catalog')
   const [search, setSearch] = useState('')
@@ -330,6 +337,23 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     }
   }, [epoch])
 
+  useEffect(() => {
+    if (canAdminTools) return
+    skillReadRef.current?.abort()
+    oauthFlowRef.current?.cancel()
+    setSelectedSkill(null)
+    setSkillSource('')
+    setSkillPreviewNote(null)
+    setSkillBusy(false)
+    setActiveOAuthFlow(null)
+    setClientDrawer(null)
+    setClientBusy(false)
+  }, [canAdminTools])
+
+  useEffect(() => {
+    if (!canBroadcastTools) setBindTarget(null)
+  }, [canBroadcastTools])
+
   const sinceHours = win === '24h' ? 24 : win === '7d' ? 168 : 720
   const bucket = win === '24h' ? 'hour' : 'day'
   const seriesKey = `runtime:tools-series:${win}`
@@ -342,8 +366,9 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const utcOffsetMin = localUtcOffsetMin()
 
-  const loadSeriesSnapshot = (reason: 'mount' | 'sse' | 'manual' = 'mount') =>
-    resourceCache.fetch<ToolMetricsSeriesPayload>(
+  const loadSeriesSnapshot = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    if (authSession.peek().kind !== 'single_user_local') return Promise.resolve(null)
+    return resourceCache.fetch<ToolMetricsSeriesPayload>(
       seriesKey,
       (signal) => apiGet<ToolMetricsSeriesPayload>(
         `/api/v1/tool-metrics/series?since_hours=${sinceHours}&bucket=${bucket}&utc_offset_min=${utcOffsetMin}`,
@@ -351,15 +376,21 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       ),
       { ttlMs: 15_000, topics: ['tool_metrics', 'tools'], reason },
     )
+  }
 
   const loadSubSection = (targetSection: ToolsSubSection, reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const cur = authSession.peek()
+    const singleLocal = cur.kind === 'single_user_local'
+    const multiSignedIn = cur.kind === 'multi_account_signed_in'
     if (targetSection === 'catalog') {
+      if (!singleLocal && !multiSignedIn) return Promise.resolve(null)
       return resourceCache.fetch<unknown>(
         'runtime:dashboard-tools',
         (signal) => apiGet<unknown>('/api/v1/dashboard/tools', { signal }),
         { ttlMs: 20_000, topics: ['tools', 'tool_metrics', 'skills', 'async_requests'], reason },
       )
     }
+    if (!singleLocal) return Promise.resolve(null)
     if (targetSection === 'skills') {
       return resourceCache.fetch<SkillsApiPayload>(
         'runtime:skills',
@@ -384,11 +415,12 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     return Promise.resolve(null)
   }
 
-  // Snapshot load for tool series across 24h | 7d | 30d
+  // Snapshot load for tool series across 24h | 7d | 30d (single_user only)
   useEffect(() => {
     setLiveSeries(null)
+    if (!isSingleUser) return
     void loadSeriesSnapshot('mount')
-  }, [win, epoch])
+  }, [win, epoch, isSingleUser])
 
   // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
   useEffect(() => {
@@ -481,6 +513,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     if (section !== 'oauth') {
       void loadSubSection(section, 'mount')
     } else if (section === 'oauth') {
+      if (!isSingleUser) return
       let cancelled = false
       void (async () => {
         let targetKeeper = selectedOAuthTarget.current?.keeper ?? ''
@@ -496,11 +529,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             }
           }
 
-          // Primary canonical roster endpoint: GET /api/v1/gate/keepers
-          const gateRes = await apiGet<{ readonly keepers?: readonly { readonly name?: string }[] }>('/api/v1/gate/keepers')
-          if (cancelled) return
-          if (gateRes.ok && Array.isArray(gateRes.value.keepers)) {
-            for (const k of gateRes.value.keepers) addName(k?.name)
+          // Primary canonical roster endpoint: GET /api/v1/gate/keepers (CanBroadcast)
+          if (canBroadcastTools) {
+            const gateRes = await apiGet<{ readonly keepers?: readonly { readonly name?: string }[] }>('/api/v1/gate/keepers')
+            if (cancelled) return
+            if (gateRes.ok && Array.isArray(gateRes.value.keepers)) {
+              for (const k of gateRes.value.keepers) addName(k?.name)
+            }
           }
 
           // Fallback: flatten groups[].keepers (and optional top-level keepers) from /api/v1/dashboard/shell
@@ -542,9 +577,10 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       }
     }
     return undefined
-  }, [section, epoch])
+  }, [section, epoch, isSingleUser, isMultiAccountSignedIn, canBroadcastTools])
 
   const loadKeeperOAuth = async (keeperName: string) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const target = selectedOAuthTarget.current
     if (!target?.keeper || target.keeper !== keeperName.trim() || !isCurrentOAuthTarget(target)) return
     oauthRead.current?.abort()
@@ -569,12 +605,15 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     }
   }
 
-  const activeSeries = (win === '24h' && sseInstanceId && liveSeries)
-    ? liveSeries
-    : (seriesObs.kind === 'value' ? seriesObs.data : null)
-  const live = win === '24h' && sseInstanceId !== null && streamLive
-  const snapshotError = !activeSeries ? snapshotUnavailableReason(seriesObs) : null
-  const seriesSource = live ? '● LIVE SSE (tool-metrics)'
+  const activeSeries = !isSingleUser
+    ? null
+    : (win === '24h' && sseInstanceId && liveSeries)
+      ? liveSeries
+      : (seriesObs.kind === 'value' ? seriesObs.data : null)
+  const live = isSingleUser && win === '24h' && sseInstanceId !== null && streamLive
+  const snapshotError = isSingleUser && !activeSeries ? snapshotUnavailableReason(seriesObs) : null
+  const seriesSource = !isSingleUser ? '○ SINGLE-USER ONLY'
+    : live ? '● LIVE SSE (tool-metrics)'
     : snapshotError ? '○ UNAVAILABLE'
     : seriesObs.kind === 'loading' && !activeSeries ? '◐ LOADING'
     : `○ SNAPSHOT (${win})`
@@ -672,7 +711,18 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     s ? `${s.identity.source_id}:${s.identity.package_id}:${s.identity.name}` : ''
   selectedSkillKeyRef.current = skillKey(selectedSkill)
 
+  const hasAdminToolsAccess = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
+  }
+
+  const hasBroadcastToolsAccess = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && cur.role !== 'player'
+  }
+
   const handleOpenSkill = async (skill: SkillSummaryItem) => {
+    if (!hasAdminToolsAccess()) return
     skillReadRef.current?.abort()
     const ctrl = new AbortController()
     skillReadRef.current = ctrl
@@ -701,7 +751,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   }
 
   const handlePreviewSkill = async () => {
-    if (!selectedSkill) return
+    if (!hasAdminToolsAccess() || !selectedSkill) return
     const startEpoch = sessionEpoch.peek()
     const targetKey = skillKey(selectedSkill)
     setSkillBusy(true)
@@ -724,7 +774,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   }
 
   const handleSaveSkill = async () => {
-    if (!selectedSkill) return
+    if (!hasAdminToolsAccess() || !selectedSkill) return
     const startEpoch = sessionEpoch.peek()
     const savedKey = skillKey(selectedSkill)
     setSkillBusy(true)
@@ -766,7 +816,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   // Gate connector bind / unbind
   const handleConnectorBind = async (ev: Event) => {
     ev.preventDefault()
-    if (!bindTarget || !bindTarget.channelId.trim() || !bindTarget.keeperName.trim()) return
+    if (!hasBroadcastToolsAccess() || !bindTarget || !bindTarget.channelId.trim() || !bindTarget.keeperName.trim()) return
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/gate/connector/bind?name=${encodeURIComponent(bindTarget.connectorId)}`,
@@ -787,6 +837,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   }
 
   const handleConnectorUnbind = async (connectorId: string, channelId: string) => {
+    if (!hasBroadcastToolsAccess()) return
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`,
@@ -807,6 +858,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   // Keeper OAuth actions (synchronous popup + postMessage + 1.5s attempt-status poll + GitHub device SSE)
   const handleOAuthAttach = (providerRow: KeeperOAuthProviderRow) => {
+    if (!hasAdminToolsAccess()) return
     const keeper = oauthKeeper.trim()
     if (!keeper) {
       setBanner({ kind: 'err', text: '먼저 대상 Keeper를 선택하세요.' })
@@ -834,7 +886,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const handleSaveOAuthClient = async (ev: Event) => {
     ev.preventDefault()
-    if (!clientDrawer || !clientDrawer.clientId.trim()) return
+    if (!hasAdminToolsAccess() || !clientDrawer || !clientDrawer.clientId.trim()) return
     const target = selectedOAuthTarget.current
     setClientBusy(true)
     const res = await saveKeeperOAuthClient({
@@ -856,6 +908,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   }
 
   const handleOAuthSwitch = async (providerId: string, enabled: boolean) => {
+    if (!hasAdminToolsAccess()) return
     const target = selectedOAuthTarget.current
     const res = await apiMutate<unknown>(
       'POST',
@@ -871,6 +924,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   }
 
   const handleOAuthDisconnect = async (providerId: string) => {
+    if (!hasAdminToolsAccess()) return
     const target = selectedOAuthTarget.current
     const res = await disconnectKeeperOAuth(oauthKeeper, providerId)
     if (!isCurrentOAuthTarget(target)) return
@@ -934,7 +988,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
         series=${TOOL_SERIES_SPECS}
         height=${185}
         syncCrosshair=${true}
-        emptyLabel=${snapshotError ? `도구 호출 시계열 조회 실패: ${snapshotError}`
+        emptyLabel=${!isSingleUser ? '도구 호출 시계열은 single_user 모드에서 제공됩니다.'
+          : snapshotError ? `도구 호출 시계열 조회 실패: ${snapshotError}`
           : seriesObs.kind === 'loading' ? '도구 호출 시계열 불러오는 중…'
           : '도구 호출 시계열 데이터 없음'}
       />
@@ -987,7 +1042,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
         </div>
       `}
 
-      ${section === 'skills' && html`
+      ${section !== 'catalog' && !isSingleUser && html`
+        <div class="wka-card" data-testid="tools-section-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+          선택한 플러그인 탭(Skills · Gate 커넥터 · Keeper OAuth · MCP 클라이언트)은 single_user 모드 전용입니다.
+        </div>
+      `}
+
+      ${section === 'skills' && isSingleUser && html`
         <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
             <div class="wka-h">
@@ -1011,6 +1072,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                     key=${`${s.identity.source_id}:${s.identity.package_id}:${s.identity.name}`}
                     type="button"
                     class="btn-ghost"
+                    disabled=${!canAdminTools}
                     style=${{
                       justifyContent: 'space-between',
                       textAlign: 'left',
@@ -1027,7 +1089,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
           <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
             <div class="wka-h">
               <h3>${selectedSkill ? `SKILL.md · ${selectedSkill.identity.name}` : 'SKILL.md 뷰어 / 편집기'}</h3>
-              ${selectedSkill && html`
+              ${canAdminTools && selectedSkill && html`
                 <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
                   <button type="button" class="btn-ghost" aria-pressed=${!skillReading} onClick=${() => setSkillReading(value => !value)}>
                     ${skillReading ? '원문' : '읽기'}
@@ -1037,28 +1099,32 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                 </div>
               `}
             </div>
-            ${skillPreviewNote && html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--info-fg)' }}>${skillPreviewNote}</div>`}
-            ${selectedSkill
-              ? skillReading
-                ? html`<${MarkdownContent} text=${skillSource} document />`
-                : html`
-                  <textarea
-                    rows=${14}
-                    readOnly=${skillAccess !== 'read_write'}
-                    value=${skillSource}
-                    onInput=${(e: Event) => setSkillSource((e.target as HTMLTextAreaElement).value)}
-                    class="mono"
-                    style=${{ width: '100%', padding: 'var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
-                  />
-                `
-              : html`<div class="dtable-absent">왼쪽에서 스킬을 선택하면 SKILL.md 본문을 불러옵니다.</div>`}
+            ${!canAdminTools
+              ? html`<div class="dtable-absent" data-testid="tools-skills-admin-locked" role="status">SKILL.md 본문 조회 및 편집은 관리자 전용입니다.</div>`
+              : html`
+                  ${skillPreviewNote && html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--info-fg)' }}>${skillPreviewNote}</div>`}
+                  ${selectedSkill
+                    ? skillReading
+                      ? html`<${MarkdownContent} text=${skillSource} document />`
+                      : html`
+                        <textarea
+                          rows=${14}
+                          readOnly=${skillAccess !== 'read_write'}
+                          value=${skillSource}
+                          onInput=${(e: Event) => setSkillSource((e.target as HTMLTextAreaElement).value)}
+                          class="mono"
+                          style=${{ width: '100%', padding: 'var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+                        />
+                      `
+                    : html`<div class="dtable-absent">왼쪽에서 스킬을 선택하면 SKILL.md 본문을 불러옵니다.</div>`}
+                `}
           </div>
         </div>
       `}
 
-      ${section === 'connectors' && html`
+      ${section === 'connectors' && isSingleUser && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-          ${bindTarget && html`
+          ${canBroadcastTools && bindTarget && html`
             <form class="wka-card" onSubmit=${handleConnectorBind} style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <strong style=${{ fontSize: 'var(--fs-12)' }}>${bindTarget.connectorId} 바인딩:</strong>
               <input
@@ -1107,20 +1173,24 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                           : (c.configured_bindings ?? []).map((b) => html`
                               <div key=${`${b.channel_id}:${b.keeper_name}`} style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 'var(--fs-12)' }}>
                                 <span class="mono">${b.channel_id} → ${b.keeper_name}</span>
-                                <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => void handleConnectorUnbind(c.connector_id, b.channel_id)}>
-                                  Unbind
-                                </button>
+                                ${canBroadcastTools && html`
+                                  <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => void handleConnectorUnbind(c.connector_id, b.channel_id)}>
+                                    Unbind
+                                  </button>
+                                `}
                               </div>
                             `)}
                       </div>
-                      <button
-                        type="button"
-                        class="btn-ghost"
-                        style=${{ alignSelf: 'flex-start' }}
-                        onClick=${() => setBindTarget({ connectorId: c.connector_id, channelId: '', keeperName: '' })}
-                      >
-                        + 채널 바인딩
-                      </button>
+                      ${canBroadcastTools && html`
+                        <button
+                          type="button"
+                          class="btn-ghost"
+                          style=${{ alignSelf: 'flex-start' }}
+                          onClick=${() => setBindTarget({ connectorId: c.connector_id, channelId: '', keeperName: '' })}
+                        >
+                          + 채널 바인딩
+                        </button>
+                      `}
                     </article>
                   `)}
                 </div>
@@ -1128,8 +1198,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
         </div>
       `}
 
-      ${section === 'oauth' && html`
+      ${section === 'oauth' && isSingleUser && html`
         <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+          ${!canAdminTools && html`
+            <div class="dtable-absent" data-testid="tools-oauth-admin-locked" role="status">
+              OAuth 앱 설정·연결·스위치·해제는 관리자 전용입니다. 현재 연결 상태만 조회할 수 있습니다.
+            </div>
+          `}
           <form
             onSubmit=${(e: Event) => {
               e.preventDefault()
@@ -1291,39 +1366,41 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                           : '미연결'}
                     </div>
                   </div>
-                  <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                    ${p.provider !== 'github' && html`
-                      <button
-                        type="button"
-                        class="btn-ghost"
-                        onClick=${() => setClientDrawer({
-                          provider: p.provider,
-                          providerLabel: p.provider_label ?? p.provider,
-                          clientId: '',
-                          clientSecret: '',
-                          scopes: '',
-                        })}
-                      >
-                        앱 설정
-                      </button>
-                    `}
-                    ${!p.problem && (!p.attached
-                      ? html`<button type="button" class="btn-primary" onClick=${() => handleOAuthAttach(p)}>OAuth 연결</button>`
-                      : html`
-                          <button type="button" class="btn-ghost" onClick=${() => void handleOAuthSwitch(p.provider, p.enabled === false)}>
-                            ${p.enabled === false ? '켜기' : '끄기'}
-                          </button>
-                          <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleOAuthDisconnect(p.provider)}>
-                            연결 해제
-                          </button>
-                        `)}
-                  </div>
+                  ${canAdminTools && html`
+                    <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                      ${p.provider !== 'github' && html`
+                        <button
+                          type="button"
+                          class="btn-ghost"
+                          onClick=${() => setClientDrawer({
+                            provider: p.provider,
+                            providerLabel: p.provider_label ?? p.provider,
+                            clientId: '',
+                            clientSecret: '',
+                            scopes: '',
+                          })}
+                        >
+                          앱 설정
+                        </button>
+                      `}
+                      ${!p.problem && (!p.attached
+                        ? html`<button type="button" class="btn-primary" onClick=${() => handleOAuthAttach(p)}>OAuth 연결</button>`
+                        : html`
+                            <button type="button" class="btn-ghost" onClick=${() => void handleOAuthSwitch(p.provider, p.enabled === false)}>
+                              ${p.enabled === false ? '켜기' : '끄기'}
+                            </button>
+                            <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleOAuthDisconnect(p.provider)}>
+                              연결 해제
+                            </button>
+                          `)}
+                    </div>
+                  `}
                 </div>
               `)}
         </div>
       `}
 
-      ${section === 'clients' && html`
+      ${section === 'clients' && isSingleUser && html`
         <${DataTable}
           data=${clientsList}
           columns=${clientColumns}

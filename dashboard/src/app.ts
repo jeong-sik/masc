@@ -395,13 +395,25 @@ export function App(): VNode {
   // Capability-gated bootstrap: `/health` -> `AuthSession` -> `startObserverStream()`
   useEffect(() => {
     let disposed = false
+    let bootstrapped = false
+    let lastObserverEpoch = sessionEpoch.peek()
     const stopViewport = installViewportListener()
     const stopRouter = initAPlusRouter()
     const stopAuthGuards = installAuthLifecycleGuards()
     const stopShellObservers = installShellObservers()
+    const unsubEpochObserver = sessionEpoch.subscribe((epoch) => {
+      if (disposed || !bootstrapped || epoch === lastObserverEpoch) return
+      lastObserverEpoch = epoch
+      const cur = authSession.peek()
+      if (cur.kind === 'single_user_local' || cur.kind === 'multi_account_signed_in') {
+        void startObserverStream()
+      }
+    })
 
     void bootstrapAuthSession().then((session) => {
       if (disposed) return
+      bootstrapped = true
+      lastObserverEpoch = sessionEpoch.peek()
       if (session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in') {
         void startObserverStream()
         void probeBuildConnectionInfo()
@@ -411,6 +423,7 @@ export function App(): VNode {
 
     return () => {
       disposed = true
+      unsubEpochObserver()
       stopViewport()
       stopRouter()
       stopAuthGuards()

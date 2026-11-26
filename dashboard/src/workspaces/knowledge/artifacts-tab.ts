@@ -10,7 +10,7 @@ import { html } from 'htm/preact'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { authSession, canUseSingleUserTokenAdmin, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
@@ -37,6 +37,10 @@ interface ArtifactListBundle {
 }
 
 export function ArtifactsTab(props: WorkspaceViewProps) {
+  const session = authSession.value
+  const epoch = sessionEpoch.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const canListArtifacts = canUseSingleUserTokenAdmin(session)
   const [bundle, setBundle] = useState<ArtifactListBundle>({ artifacts: [], diagnostics: [] })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -66,6 +70,17 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   }, [props.entityId])
 
   const loadList = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
+    const curSession = authSession.peek()
+    if (!canUseSingleUserTokenAdmin(curSession)) {
+      setBundle({ artifacts: [], diagnostics: [] })
+      if (curSession.kind !== 'single_user_local') {
+        setSelectedId(null)
+        setDoc(null)
+      }
+      setLoading(false)
+      setLoadError(null)
+      return
+    }
     const startEpoch = currentSessionEpoch()
     setLoading(true)
     setLoadError(null)
@@ -113,9 +128,10 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     void loadList('mount')
-  }, [loadList])
+  }, [loadList, isSingleUser, canListArtifacts, epoch])
 
   const loadDocument = useCallback(async (id: string, revision: number | null, signal?: AbortSignal) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     setDocError(null)
     const revQuery = revision !== null ? `?revision=${revision}` : ''
     const res = await apiGet<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${revQuery}`, { signal })
@@ -229,6 +245,16 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
         />
       </div>
 
+      ${!isSingleUser && html`
+        <div class="kn-notice kn-notice--info kn-inset" data-testid="artifacts-mode-notice" role="status">
+          발행된 아티팩트 조회는 싱글유저 로컬 세션에서 지원됩니다.
+        </div>
+      `}
+      ${isSingleUser && !canListArtifacts && html`
+        <div class="kn-notice kn-notice--info kn-inset" data-testid="artifacts-admin-locked" role="status">
+          아티팩트 목록 조회(<code>/api/v1/published-artifacts</code>)는 토큰 기반 관리자 권한이 필요합니다.
+        </div>
+      `}
       ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
       ${bundle.diagnostics.length > 0 && html`
         <div class="kn-notice kn-notice--warn kn-inset">

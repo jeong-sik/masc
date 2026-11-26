@@ -17,12 +17,15 @@ import {
   apiGet,
   apiMutate,
   apiRequest,
+  authSession,
   currentSessionEpoch,
   isEpochCurrent,
   resourceCache,
+  sessionEpoch,
 } from '../../core'
 import { MasterDetail } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { isAdminLockedForSession } from '../../routes/router'
 import {
   describeWireType,
   expectOptionalArrayField,
@@ -108,6 +111,11 @@ function renderDiffLines(patchText: string, maxLines = 40) {
 }
 
 export function ReposTab(props: WorkspaceViewProps) {
+  const session = authSession.value
+  const epoch = sessionEpoch.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const canAdminRepos = isSingleUser && !isAdminLockedForSession('admin', session)
+
   const reposObs = resourceCache.observe<readonly InfraRepository[]>('infra:repositories').value
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -125,7 +133,14 @@ export function ReposTab(props: WorkspaceViewProps) {
   const activityKey = effectiveRepoId ? `infra:repo-activity:${effectiveRepoId}` : 'infra:repo-activity:none'
   const activityObs = resourceCache.observe<RepoActivityData>(activityKey).value
 
+  const hasSingleUserAccess = (): boolean => authSession.peek().kind === 'single_user_local'
+  const hasAdminRepoAccess = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
+  }
+
   const loadRepos = (reason: 'mount' | 'manual' = 'mount') => {
+    if (!hasSingleUserAccess()) return
     void resourceCache.fetch<readonly InfraRepository[]>(
       'infra:repositories',
       (signal) => apiGet<readonly InfraRepository[]>('/api/v1/repositories', { signal, decode: decodeRepoList }),
@@ -134,6 +149,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const loadActivity = (repoId: string, reason: 'mount' | 'manual' = 'mount') => {
+    if (!hasAdminRepoAccess()) return
     void resourceCache.fetch<RepoActivityData>(
       `infra:repo-activity:${repoId}`,
       (signal) => apiRequest<RepoActivityData>({
@@ -156,18 +172,23 @@ export function ReposTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
+    if (!isSingleUser) return
     loadRepos('mount')
-  }, [])
+  }, [epoch, isSingleUser])
 
   useEffect(() => {
+    if (!canAdminRepos) {
+      setShowAddForm(false)
+      return
+    }
     if (effectiveRepoId) {
       loadActivity(effectiveRepoId, 'mount')
     }
-  }, [effectiveRepoId])
+  }, [effectiveRepoId, epoch, canAdminRepos])
 
   const handleAddRepo = async (ev: Event) => {
     ev.preventDefault()
-    if (!newName.trim() || !newUrl.trim()) return
+    if (!hasAdminRepoAccess() || !newName.trim() || !newUrl.trim()) return
     const startEpoch = currentSessionEpoch()
     const trimmedName = newName.trim()
     setBusy('add')
@@ -193,6 +214,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const handleSyncRepo = async (repoId: string) => {
+    if (!hasAdminRepoAccess()) return
     const startEpoch = currentSessionEpoch()
     setBusy(`sync:${repoId}`)
     setErrorBanner(null)
@@ -238,12 +260,14 @@ export function ReposTab(props: WorkspaceViewProps) {
     <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
       <div class="wka-h">
         <h3>등록된 저장소 (<span class="tnum">${repos.length}</span>)</h3>
-        <button type="button" class="btn-primary" onClick=${() => setShowAddForm((v) => !v)}>
-          ${showAddForm ? '취소' : '+ 저장소 추가'}
-        </button>
+        ${canAdminRepos && html`
+          <button type="button" class="btn-primary" onClick=${() => setShowAddForm((v) => !v)}>
+            ${showAddForm ? '취소' : '+ 저장소 추가'}
+          </button>
+        `}
       </div>
 
-      ${showAddForm && html`
+      ${canAdminRepos && showAddForm && html`
         <form onSubmit=${handleAddRepo} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', background: 'var(--bg-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}>
           <input
             type="text"
@@ -305,15 +329,17 @@ export function ReposTab(props: WorkspaceViewProps) {
               >
                 ${repo.name}
               </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
-                disabled=${busy === `sync:${repo.id}`}
-                onClick=${() => void handleSyncRepo(repo.id)}
-              >
-                동기화
-              </button>
+              ${canAdminRepos && html`
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
+                  disabled=${busy === `sync:${repo.id}`}
+                  onClick=${() => void handleSyncRepo(repo.id)}
+                >
+                  동기화
+                </button>
+              `}
             </div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
               ${repo.default_branch} · ${repo.status}
@@ -328,20 +354,26 @@ export function ReposTab(props: WorkspaceViewProps) {
     <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
       <div class="wka-h">
         <h3>${selectedRepo ? `${selectedRepo.name} · 24시간 Keeper 파일 변경 Diff` : '24시간 파일 변경 내역'}</h3>
-        ${selectedRepo && html`
+        ${canAdminRepos && selectedRepo && html`
           <button type="button" class="btn-ghost" onClick=${() => loadActivity(selectedRepo.id, 'manual')}>새로고침</button>
         `}
       </div>
 
-      ${!selectedRepo && html`<div class="dtable-absent">왼쪽에서 저장소를 선택하세요.</div>`}
+      ${!canAdminRepos && html`
+        <div class="wka-card dtable-absent" data-testid="infra-repo-activity-admin-locked" role="status">
+          24시간 Keeper 파일 변경 이력(<span class="mono">/api/v1/ide/repository-activity</span>)과 저장소 등록·동기화는 관리자 전용입니다.
+        </div>
+      `}
 
-      ${selectedRepo && activityObs.kind === 'loading' && html`<div class="dtable-absent">24시간 파일 변경 이력 불러오는 중…</div>`}
+      ${canAdminRepos && !selectedRepo && html`<div class="dtable-absent">왼쪽에서 저장소를 선택하세요.</div>`}
 
-      ${selectedRepo && activityObs.kind === 'failed' && html`
+      ${canAdminRepos && selectedRepo && activityObs.kind === 'loading' && html`<div class="dtable-absent">24시간 파일 변경 이력 불러오는 중…</div>`}
+
+      ${canAdminRepos && selectedRepo && activityObs.kind === 'failed' && html`
         <div class="ap-error" role="alert">변경 이력 조회 실패: ${activityObs.error.message}</div>
       `}
 
-      ${selectedRepo && activityData && html`
+      ${canAdminRepos && selectedRepo && activityData && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
             변경 ${activityChanges.length}건 · 미완결 ${activityData.incomplete ?? 0} · 미귀속 ${activityData.unattributed ?? 0} (window=${activityData.window_hours ?? 24}h)
@@ -395,14 +427,22 @@ export function ReposTab(props: WorkspaceViewProps) {
         </div>
       `}
 
-      <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
-        <${MasterDetail}
-          masterLabel="저장소 목록"
-          detailLabel="24시간 변경 Diff"
-          master=${masterPane}
-          detail=${detailPane}
-        />
-      </div>
+      ${!isSingleUser
+        ? html`
+            <div class="wka-card" data-testid="infra-repos-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+              저장소 관리 및 24시간 파일 변경 이력(<span class="mono">/api/v1/repositories</span>, <span class="mono">/api/v1/ide/repository-activity</span>)은 single_user 모드 전용입니다.
+            </div>
+          `
+        : html`
+            <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
+              <${MasterDetail}
+                masterLabel="저장소 목록"
+                detailLabel="24시간 변경 Diff"
+                master=${masterPane}
+                detail=${detailPane}
+              />
+            </div>
+          `}
     </div>
   `
 }

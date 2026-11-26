@@ -13,7 +13,8 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { activeWorkspaceId, sessionEpoch } from '../../core/auth'
+import { activeWorkspaceId, authSession, sessionEpoch } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { markViewSynced } from '../../core/observer'
 import { observedAbsent, observedValue, resourceCache } from '../../core/resource-cache'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
@@ -55,6 +56,9 @@ interface GoalCandleObservation {
 }
 
 export function CandleTab(props: WorkspaceViewProps) {
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const canReleaseHold = isSingleUser && !isAdminLockedForSession('admin', session)
   const [ledger, setLedger] = useState<CandleLedgerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -103,6 +107,7 @@ export function CandleTab(props: WorkspaceViewProps) {
   }, [loadLedger])
 
   const inspectGoalCandle = useCallback(async (goalIdRaw: string) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const goalId = goalIdRaw.trim()
     if (!goalId) return
     inspectAbortRef.current?.abort()
@@ -146,12 +151,16 @@ export function CandleTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
-    if (props.entityId) {
+    if (props.entityId && isSingleUser) {
       setInspectGoalId(props.entityId)
       void inspectGoalCandle(props.entityId)
+    } else if (!isSingleUser) {
+      inspectAbortRef.current?.abort()
+      setObservation(null)
+      setGoalCandleError(null)
     }
     return () => inspectAbortRef.current?.abort()
-  }, [props.entityId, inspectGoalCandle])
+  }, [props.entityId, isSingleUser, inspectGoalCandle])
 
   const currentObservation = observation?.goalId === inspectGoalId.trim() ? observation : null
   const observedLedger = currentObservation?.data.ledger
@@ -161,6 +170,8 @@ export function CandleTab(props: WorkspaceViewProps) {
   const heldVerificationId = asNonEmptyString(held?.verification_run_id)
 
   const handleReleaseHold = async (target: GoalCandleObservation, requestId: string, verificationRunId: string) => {
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) return
     if (releaseBusy !== null || sessionEpoch.peek() !== target.epoch
         || activeWorkspaceId.peek() !== target.workspaceId || currentObservation !== target) return
     const { goalId } = target
@@ -395,61 +406,75 @@ export function CandleTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            <div class="wk-row-wrap">
-              <input
-                type="text"
-                class="wk-input wk-flex-input"
-                placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
-                value=${inspectGoalId}
-                disabled=${releaseBusy !== null}
-                onInput=${(e: Event) => {
-                  inspectAbortRef.current?.abort()
-                  setInspectGoalId((e.target as HTMLInputElement).value)
-                  setObservation(null)
-                  setGoalCandleLoading(false)
-                  setGoalCandleError(null)
-                }}
-                aria-label="Goal Candle 조회 ID"
-              />
-              <button
-                type="button"
-                class="btn-ghost"
-                style=${{ minWidth: '112px' }}
-                disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
-                onClick=${() => void inspectGoalCandle(inspectGoalId)}
-              >
-                ${goalCandleLoading ? '조회 중…' : 'Goal 지급 관측'}
-              </button>
-            </div>
+            ${isSingleUser
+              ? html`
+                  <div class="wk-row-wrap">
+                    <input
+                      type="text"
+                      class="wk-input wk-flex-input"
+                      placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
+                      value=${inspectGoalId}
+                      disabled=${releaseBusy !== null}
+                      onInput=${(e: Event) => {
+                        inspectAbortRef.current?.abort()
+                        setInspectGoalId((e.target as HTMLInputElement).value)
+                        setObservation(null)
+                        setGoalCandleLoading(false)
+                        setGoalCandleError(null)
+                      }}
+                      aria-label="Goal Candle 조회 ID"
+                    />
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      style=${{ minWidth: '112px' }}
+                      disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
+                      onClick=${() => void inspectGoalCandle(inspectGoalId)}
+                    >
+                      ${goalCandleLoading ? '조회 중…' : 'Goal 지급 관측'}
+                    </button>
+                  </div>
+                `
+              : html`
+                  <div class="wk-notice wk-notice--info" data-testid="candle-goal-mode-notice" role="status">
+                    Goal별 Candle 지급 진단 및 보류 해제는 싱글유저 로컬 세션 전용입니다.
+                  </div>
+                `}
 
             ${goalCandleError && html`<div class="wk-notice wk-notice--err" role="alert">${goalCandleError}</div>`}
             ${currentObservation && html`
               <pre class="wk-code-preview">${JSON.stringify(currentObservation.data, null, 2)}</pre>
             `}
 
-            ${currentObservation && heldRequestId && heldVerificationId && html`
-              <${TargetLockedAction}
-                target=${{
-                  workspaceId: currentObservation.workspaceId,
-                  keeper: '—',
-                  requestId: heldRequestId,
-                  revision: heldVerificationId,
-                }}
-                lockedEpoch=${currentObservation.epoch}
-                onRefresh=${() => void inspectGoalCandle(currentObservation.goalId)}
-              >
-                <p>Goal <code>${currentObservation.goalId}</code> · Candle 지급 보류 중</p>
-                <button
-                  type="button"
-                  class="wk-btn-warn"
-                  style=${{ minWidth: '108px' }}
-                  disabled=${releaseBusy !== null}
-                  onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
-                >
-                  ${releaseBusy ? '해제 중…' : 'Hold Release'}
-                </button>
-              </${TargetLockedAction}>
-            `}
+            ${currentObservation && heldRequestId && heldVerificationId && (canReleaseHold
+              ? html`
+                  <${TargetLockedAction}
+                    target=${{
+                      workspaceId: currentObservation.workspaceId,
+                      keeper: '—',
+                      requestId: heldRequestId,
+                      revision: heldVerificationId,
+                    }}
+                    lockedEpoch=${currentObservation.epoch}
+                    onRefresh=${() => void inspectGoalCandle(currentObservation.goalId)}
+                  >
+                    <p>Goal <code>${currentObservation.goalId}</code> · Candle 지급 보류 중</p>
+                    <button
+                      type="button"
+                      class="wk-btn-warn"
+                      style=${{ minWidth: '108px' }}
+                      disabled=${releaseBusy !== null}
+                      onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
+                    >
+                      ${releaseBusy ? '해제 중…' : 'Hold Release'}
+                    </button>
+                  </${TargetLockedAction}>
+                `
+              : html`
+                  <div class="wk-notice wk-notice--info" data-testid="candle-hold-admin-locked" role="status">
+                    Candle 지급 보류 해제는 관리자 전용입니다.
+                  </div>
+                `)}
 
             ${ledger.diagnostics.items.length === 0
               ? html`<span class="dtable-absent">현재 진단 경고가 없습니다.</span>`

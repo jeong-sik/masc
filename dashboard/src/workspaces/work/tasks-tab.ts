@@ -25,7 +25,7 @@ import {
   subscribeObserverReconnect,
   subscribeObserverResync,
 } from '../../core/observer'
-import { currentRoute } from '../../routes/router'
+import { currentRoute, isAdminLockedForSession } from '../../routes/router'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
@@ -525,7 +525,9 @@ export function TasksTab(props: WorkspaceViewProps) {
     setHistoryNextCursor(res.value.next_cursor ?? null)
   }, [epoch])
 
-  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const canAdminTask = isSingleUser && !isAdminLockedForSession('admin', session)
   const isSchedulesView = chip === 'schedules'
   const selectedTaskKey = selectedTask?.id ?? null
   const historyCurrent = historyOwner?.epoch === epoch && historyOwner.taskId === selectedTaskKey
@@ -586,6 +588,7 @@ export function TasksTab(props: WorkspaceViewProps) {
 
   const handleCreateTask = async (e: Event) => {
     e.preventDefault()
+    if (authSession.peek().kind !== 'single_user_local') return
     const trimmed = newTaskTitle.trim()
     if (!trimmed) {
       setFeedback({ kind: 'err', message: '태스크 제목을 입력하세요.' })
@@ -617,6 +620,7 @@ export function TasksTab(props: WorkspaceViewProps) {
   }
 
   const handleTaskTransition = async (task: TaskItem, action: 'claim' | 'start' | 'release') => {
+    if (authSession.peek().kind !== 'single_user_local') return
     setBusyAction(action)
     setFeedback(null)
     const res = await callMcpToolViaCore('masc_transition', { task_id: task.id, action })
@@ -633,6 +637,8 @@ export function TasksTab(props: WorkspaceViewProps) {
   }
 
   const handleLinkGoal = async (task: TaskItem) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const linkable = checkTaskGoalLinkable(task)
     if (!linkable.ok) {
       setFeedback({
@@ -676,6 +682,8 @@ export function TasksTab(props: WorkspaceViewProps) {
   }
 
   const handleCancelTask = async (task: TaskItem) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     setBusyAction('cancel')
     setFeedback(null)
     const wsRes = await readWorkspacePrecondition()
@@ -705,6 +713,8 @@ export function TasksTab(props: WorkspaceViewProps) {
   }
 
   const handleDeleteTask = async (task: TaskItem) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     setBusyAction('delete')
     setFeedback(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/tasks/delete', { task_id: task.id })
@@ -722,6 +732,7 @@ export function TasksTab(props: WorkspaceViewProps) {
 
   const handleCreateSchedule = async (e: Event) => {
     e.preventDefault()
+    if (authSession.peek().kind !== 'single_user_local') return
     if (!schedKeeper.trim() || !schedMessage.trim()) {
       setFeedback({ kind: 'err', message: '대상 Keeper와 예약 메시지를 입력하세요.' })
       return
@@ -753,6 +764,7 @@ export function TasksTab(props: WorkspaceViewProps) {
   }
 
   const handleCancelSchedule = async (scheduleId: string) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     setBusyAction(`cancel-sched:${scheduleId}`)
     setFeedback(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_schedule_cancel', {
@@ -806,9 +818,9 @@ export function TasksTab(props: WorkspaceViewProps) {
           ${tasksSyncPill}
         </div>
         <div class="wk-actions">
-          ${chip === 'schedules'
+          ${isSingleUser && (chip === 'schedules'
             ? html`<button type="button" class="btn-primary" onClick=${() => setShowCreateSchedule((v) => !v)}>${showCreateSchedule ? '닫기' : '+ 새 예약'}</button>`
-            : html`<button type="button" class="btn-primary" onClick=${() => setShowCreateTask((v) => !v)}>${showCreateTask ? '닫기' : '+ 새 태스크'}</button>`}
+            : html`<button type="button" class="btn-primary" onClick=${() => setShowCreateTask((v) => !v)}>${showCreateTask ? '닫기' : '+ 새 태스크'}</button>`)}
           <button
             type="button"
             class="btn-ghost"
@@ -868,7 +880,7 @@ export function TasksTab(props: WorkspaceViewProps) {
         </div>
       </div>
 
-      ${showCreateTask && chip !== 'schedules' && html`
+      ${isSingleUser && showCreateTask && chip !== 'schedules' && html`
         <form class="wk-form wk-inset" onSubmit=${handleCreateTask}>
           <div class="wk-section-title">새 태스크 추가 (masc_add_task)</div>
           <div class="wk-field">
@@ -911,7 +923,7 @@ export function TasksTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${showCreateSchedule && chip === 'schedules' && html`
+      ${isSingleUser && showCreateSchedule && chip === 'schedules' && html`
         <form class="wk-form wk-inset" onSubmit=${handleCreateSchedule}>
           <div class="wk-section-title">예약 자동화 생성 (POST /api/v1/tools/masc_schedule_create)</div>
           <div class="wk-form-grid">
@@ -1082,16 +1094,20 @@ export function TasksTab(props: WorkspaceViewProps) {
             ${selectedSchedule.lastWakeError && html`
               <div class="wk-notice wk-notice--err">최근 실패 사유: ${selectedSchedule.lastWakeError}</div>
             `}
-            <div class="wk-actions">
-              <button
-                type="button"
-                class="wk-btn-danger"
-                disabled=${busyAction !== null}
-                onClick=${() => void handleCancelSchedule(selectedSchedule.scheduleId)}
-              >
-                예약 취소
-              </button>
-            </div>
+            ${isSingleUser
+              ? html`
+                  <div class="wk-actions">
+                    <button
+                      type="button"
+                      class="wk-btn-danger"
+                      disabled=${busyAction !== null}
+                      onClick=${() => void handleCancelSchedule(selectedSchedule.scheduleId)}
+                    >
+                      예약 취소
+                    </button>
+                  </div>
+                `
+              : html`<div class="wk-notice wk-notice--info" data-testid="schedule-mode-notice" role="status">예약 자동화 생성·취소는 싱글유저 로컬 세션 전용입니다.</div>`}
           </div>
         `
       : null
@@ -1183,12 +1199,12 @@ export function TasksTab(props: WorkspaceViewProps) {
               <section class="wk-section" aria-label="태스크 작업 제어">
                 <h3 class="wk-section-title">Lifecycle Actions</h3>
                 <div class="wk-actions">
-                  ${selectedTask.status === 'Todo' && html`
+                  ${isSingleUser && selectedTask.status === 'Todo' && html`
                     <button type="button" class="btn-primary" disabled=${busyAction !== null} onClick=${() => void handleTaskTransition(selectedTask, 'claim')}>
                       Claim (담당 잡기)
                     </button>
                   `}
-                  ${selectedTask.status === 'Claimed' && html`
+                  ${isSingleUser && selectedTask.status === 'Claimed' && html`
                     <button type="button" class="btn-primary" disabled=${busyAction !== null} onClick=${() => void handleTaskTransition(selectedTask, 'start')}>
                       Start (진행 시작)
                     </button>
@@ -1196,7 +1212,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                       Release (담당 해제)
                     </button>
                   `}
-                  ${selectedTask.status === 'InProgress' && html`
+                  ${isSingleUser && selectedTask.status === 'InProgress' && html`
                     <button type="button" class="btn-ghost" disabled=${busyAction !== null} onClick=${() => void handleTaskTransition(selectedTask, 'release')}>
                       Release
                     </button>
@@ -1215,7 +1231,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                   </button>
                 </div>
 
-                ${selectedTask.status !== 'Done' && selectedTask.status !== 'Cancelled' && html`
+                ${canAdminTask && selectedTask.status !== 'Done' && selectedTask.status !== 'Cancelled' && html`
                   <div class="wk-row-wrap wk-mt-2">
                     <input
                       type="text"
@@ -1233,11 +1249,16 @@ export function TasksTab(props: WorkspaceViewProps) {
                     </button>
                   </div>
                 `}
-                ${(selectedTask.status === 'Done' || selectedTask.status === 'Cancelled') && html`
+                ${canAdminTask && (selectedTask.status === 'Done' || selectedTask.status === 'Cancelled') && html`
                   <div class="wk-actions wk-mt-1">
                     <button type="button" class="wk-btn-danger" disabled=${busyAction !== null} onClick=${() => void handleDeleteTask(selectedTask)}>
                       Delete Task
                     </button>
+                  </div>
+                `}
+                ${!canAdminTask && html`
+                  <div class="wk-muted-sm wk-mt-1" data-testid="task-admin-locked">
+                    ${isSingleUser ? '태스크 취소·삭제 및 Goal 연결은 관리자 전용입니다.' : '태스크 생성·전환·취소·삭제는 싱글유저 로컬 세션 전용입니다.'}
                   </div>
                 `}
               </section>
@@ -1292,8 +1313,10 @@ export function TasksTab(props: WorkspaceViewProps) {
 
               <section class="wk-section" aria-label="Goal 연결">
                 <h3 class="wk-section-title">Goal 연결 (set_task_goal — goalless 태스크 전용)</h3>
-                ${linkCheck.ok
-                  ? html`
+                ${!canAdminTask
+                  ? html`<div class="wk-notice" data-testid="task-link-goal-admin-locked">${isSingleUser ? 'Goal 연결은 관리자 전용입니다.' : 'Goal 연결은 싱글유저 로컬 관리자 세션 전용입니다.'}</div>`
+                  : linkCheck.ok
+                    ? html`
                       <div class="wk-row-wrap">
                         <select
                           class="wk-select wk-flex-input"

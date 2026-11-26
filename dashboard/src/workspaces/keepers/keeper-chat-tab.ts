@@ -24,6 +24,7 @@ import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { randomUuid } from '../../lib/uuid'
+import { isAdminLockedForSession } from '../../routes/router'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
 import {
@@ -415,9 +416,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const discordReplyTrigger = useRef<HTMLButtonElement | null>(null)
   const discordSession = authSession.value
   const discordEpoch = sessionEpoch.value
+  const canAdminLocalChat = discordSession.kind === 'single_user_local' && !isAdminLockedForSession('admin', discordSession)
   const [discordAuthority, setDiscordAuthority] = useState<(DiscordReplyAuthority & { epoch: number }) | null>(null)
   const hasDiscordReplySource = scopedMessages.some(msg => msg.discordReplyOrigin)
-  const hasBearer = discordSession.kind === 'single_user_local' && discordSession.tokenPresent
+  const hasBearer = canAdminLocalChat && discordSession.tokenPresent
   const discordOperator = hasBearer && discordAuthority?.epoch === discordEpoch ? discordAuthority : null
   useEffect(() => {
     if (!hasBearer || !hasDiscordReplySource) return
@@ -3355,10 +3357,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <div key=${op.operationId} class="kp-queue-row">
                     <span class="kp-roster-name">${op.message || op.operationId}</span>
                     <div class="kp-pill-row">
-                      <button type="button" class="btn-ghost" disabled=${queueBusy}
-                        onClick=${() => void updateQueueOperation(op.operationId, runQueuedChatOperationNext)}>
-                        지금 실행
-                      </button>
+                      ${canAdminLocalChat && html`
+                        <button type="button" class="btn-ghost" disabled=${queueBusy}
+                          onClick=${() => void updateQueueOperation(op.operationId, runQueuedChatOperationNext)}>
+                          지금 실행
+                        </button>
+                      `}
                       <button type="button" class="btn-ghost" disabled=${queueBusy}
                         onClick=${() => void updateQueueOperation(op.operationId, moveQueuedChatOperationToEndApi)}>
                         뒤로
@@ -3528,14 +3532,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               >
                 첨부
               </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${voiceBusy}
-                onClick=${() => voiceInputRef.current?.click()}
-              >
-                ${voiceBusy ? 'STT 인식 중…' : '음성 STT'}
-              </button>
+              ${canAdminLocalChat && html`
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  disabled=${voiceBusy}
+                  onClick=${() => voiceInputRef.current?.click()}
+                >
+                  ${voiceBusy ? 'STT 인식 중…' : '음성 STT'}
+                </button>
+              `}
             </div>
 
             <div class="kp-composer-actions">

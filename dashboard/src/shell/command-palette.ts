@@ -316,23 +316,34 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
           group: 'Action' as const,
           subtitle: 'Fetch /api/v1/keepers/tool-approvals & /asks',
           run: async () => {
+            if (authSession.peek().kind !== 'single_user_local') {
+              pushShellToast('승인 대기열 새로고침은 싱글유저 세션 전용입니다.', 'info')
+              return
+            }
             await refreshPendingHitl()
             pushShellToast('승인 및 질문 대기열을 새로고침했습니다.', 'info')
           },
         }]
       : []),
-    {
-      id: 'action:reconnect-observer',
-      label: 'Action: Reconnect Observer SSE Stream',
-      category: 'Action',
-      keywords: ['sse', 'observer', 'reconnect', 'live', '재연결'],
-      group: 'Action',
-      subtitle: 'Restart shared observer stream',
-      run: () => {
-        void startObserverStream()
-        pushShellToast('Observer SSE 재연결을 시작했습니다.', 'info')
-      },
-    },
+    ...(session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+      ? [{
+          id: 'action:reconnect-observer',
+          label: 'Action: Reconnect Observer SSE Stream',
+          category: 'Action',
+          keywords: ['sse', 'observer', 'reconnect', 'live', '재연결'],
+          group: 'Action' as const,
+          subtitle: 'Restart shared observer stream',
+          run: () => {
+            const cur = authSession.peek()
+            if (cur.kind !== 'single_user_local' && cur.kind !== 'multi_account_signed_in') {
+              pushShellToast('로그인된 세션에서만 Observer SSE를 재연결할 수 있습니다.', 'info')
+              return
+            }
+            void startObserverStream()
+            pushShellToast('Observer SSE 재연결을 시작했습니다.', 'info')
+          },
+        }]
+      : []),
     {
       id: 'action:operator-snapshot-check',
       label: 'Action: Read Operator Digest Snapshot',
@@ -344,7 +355,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
         : 'GET /api/v1/operator/digest (read-only)',
       locked: adminLocked,
       run: async () => {
-        if (adminLocked) {
+        if (isAdminLockedForSession('admin', authSession.peek())) {
           pushShellToast('운영자 다이제스트 조회는 관리자 전용입니다.', 'info')
           return
         }
@@ -367,30 +378,37 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
         pushShellToast(`Operator digest: ${status}`, 'success')
       },
     },
-    {
-      id: 'action:runtime-defaults-check',
-      label: 'Action: Inspect Resolved Runtime Defaults',
-      category: 'Action',
-      keywords: ['runtime', 'defaults', 'model', 'routing', '런타임'],
-      group: 'Action',
-      subtitle: 'GET /api/v1/dashboard/runtime-defaults (read-only)',
-      run: async () => {
-        const res = await apiGet<unknown>('/api/v1/dashboard/runtime-defaults')
-        if (!res.ok) {
-          pushShellToast(`런타임 기본값 조회 실패: ${res.error.message}`, 'warning')
-          return
-        }
-        try {
-          const parsed = parseRuntimeDefaultsResponse(res.value)
-          pushShellToast(
-            `Default runtime: ${parsed.default_runtime_id ?? '없음'} (${parsed.runtimes.length} configured)`,
-            'success',
-          )
-        } catch (cause) {
-          pushShellToast(`런타임 스키마 확인 필요: ${cause instanceof Error ? cause.message : String(cause)}`, 'warning')
-        }
-      },
-    },
+    ...(session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+      ? [{
+          id: 'action:runtime-defaults-check',
+          label: 'Action: Inspect Resolved Runtime Defaults',
+          category: 'Action',
+          keywords: ['runtime', 'defaults', 'model', 'routing', '런타임'],
+          group: 'Action' as const,
+          subtitle: 'GET /api/v1/dashboard/runtime-defaults (read-only)',
+          run: async () => {
+            const cur = authSession.peek()
+            if (cur.kind !== 'single_user_local' && cur.kind !== 'multi_account_signed_in') {
+              pushShellToast('로그인된 세션에서만 런타임 기본값을 조회할 수 있습니다.', 'info')
+              return
+            }
+            const res = await apiGet<unknown>('/api/v1/dashboard/runtime-defaults')
+            if (!res.ok) {
+              pushShellToast(`런타임 기본값 조회 실패: ${res.error.message}`, 'warning')
+              return
+            }
+            try {
+              const parsed = parseRuntimeDefaultsResponse(res.value)
+              pushShellToast(
+                `Default runtime: ${parsed.default_runtime_id ?? '없음'} (${parsed.runtimes.length} configured)`,
+                'success',
+              )
+            } catch (cause) {
+              pushShellToast(`런타임 스키마 확인 필요: ${cause instanceof Error ? cause.message : String(cause)}`, 'warning')
+            }
+          },
+        }]
+      : []),
   )
 
   return cmds

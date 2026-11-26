@@ -212,44 +212,59 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     setCfgError(null)
   }, [keeperName])
 
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const canAdminDebug = isSingleUser && !adminLocked
+
   const loadTrace = useCallback(async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local') return
+    const allowAdmin = !isAdminLockedForSession('admin', cur)
     const seq = ++traceSeqRef.current
     const startEpoch = currentSessionEpoch()
     setTraceError(null)
-    const [tr, tc, rt] = await Promise.all([
-      fetchKeeperTurnRecordsApi(keeperName, 60),
-      fetchKeeperToolCallsApi(keeperName, 50),
-      fetchKeeperRawTracesApi(keeperName, 12),
-    ])
+    const trPromise = fetchKeeperTurnRecordsApi(keeperName, 60)
+    const tcPromise = allowAdmin ? fetchKeeperToolCallsApi(keeperName, 50) : Promise.resolve(null)
+    const rtPromise = allowAdmin ? fetchKeeperRawTracesApi(keeperName, 12) : Promise.resolve(null)
+    const [tr, tc, rt] = await Promise.all([trPromise, tcPromise, rtPromise])
     if (!mountedRef.current || seq !== traceSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
     if (tr.ok) setTurns(tr.value)
     else errs.push(`턴 기록: ${tr.error.message}`)
-    if (tc.ok) setToolCalls(tc.value)
-    else errs.push(`도구 호출: ${tc.error.message}`)
-    if (rt.ok) setRawTraces(rt.value)
-    else errs.push(`원시 추적: ${rt.error.message}`)
+    if (allowAdmin && !isAdminLockedForSession('admin', authSession.peek())) {
+      if (tc) {
+        if (tc.ok) setToolCalls(tc.value)
+        else errs.push(`도구 호출: ${tc.error.message}`)
+      }
+      if (rt) {
+        if (rt.ok) setRawTraces(rt.value)
+        else errs.push(`원시 추적: ${rt.error.message}`)
+      }
+    }
     if (errs.length > 0) setTraceError(errs.join(' · '))
   }, [keeperName])
 
   const loadContext = useCallback(async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local') return
+    const allowAdmin = !isAdminLockedForSession('admin', cur)
     const seq = ++contextSeqRef.current
     const startEpoch = currentSessionEpoch()
     setContextError(null)
-    const [tr, lp, cp, os] = await Promise.all([
-      fetchKeeperTurnRecordsApi(keeperName, 60),
-      fetchKeeperLastPromptApi(keeperName),
-      fetchKeeperCheckpointsApi(keeperName),
-      fetchKeeperMemoryOsInternalsApi(keeperName),
-    ])
+    const trPromise = fetchKeeperTurnRecordsApi(keeperName, 60)
+    const lpPromise = fetchKeeperLastPromptApi(keeperName)
+    const cpPromise = allowAdmin ? fetchKeeperCheckpointsApi(keeperName) : Promise.resolve(null)
+    const osPromise = fetchKeeperMemoryOsInternalsApi(keeperName)
+    const [tr, lp, cp, os] = await Promise.all([trPromise, lpPromise, cpPromise, osPromise])
     if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
     if (tr.ok) {
       setTurns(tr.value)
       const latestTurnRef = tr.value.entries[0]?.record.turn_ref
-      if (latestTurnRef) {
+      if (allowAdmin && latestTurnRef && !isAdminLockedForSession('admin', authSession.peek())) {
         const pi = await fetchKeeperProviderInputApi(keeperName, latestTurnRef)
-        if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
+        if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch) || isAdminLockedForSession('admin', authSession.peek())) return
         if (pi.ok) setProviderInput(pi.value)
         else errs.push(`Provider 입력: ${pi.error.message}`)
       } else {
@@ -260,14 +275,18 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     }
     if (lp.ok) setLastPrompt(lp.value)
     else errs.push(`최근 프롬프트: ${lp.error.message}`)
-    if (cp.ok) setCheckpoints(cp.value)
-    else errs.push(`체크포인트: ${cp.error.message}`)
+    if (allowAdmin && cp && !isAdminLockedForSession('admin', authSession.peek())) {
+      if (cp.ok) setCheckpoints(cp.value)
+      else errs.push(`체크포인트: ${cp.error.message}`)
+    }
     if (os.ok) setCompactionEpochs(os.value.compaction.epoch_count)
     else errs.push(`Memory OS: ${os.error.message}`)
     if (errs.length > 0) setContextError(errs.join(' · '))
   }, [keeperName])
 
   const loadMemory = useCallback(async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const seq = ++memorySeqRef.current
     const startEpoch = currentSessionEpoch()
     setMemError(null)
@@ -275,7 +294,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
       fetchKeeperMemoryFactsApi(keeperName),
       fetchKeeperMemoryJournalApi(keeperName, 20),
     ])
-    if (!mountedRef.current || seq !== memorySeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
+    if (!mountedRef.current || seq !== memorySeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch) || isAdminLockedForSession('admin', authSession.peek())) return
     const errs: string[] = []
     if (mf.ok) setMemFacts(mf.value)
     else errs.push(`Memory Facts: ${mf.error.message}`)
@@ -314,13 +333,27 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     }
   }, [keeperName])
 
-  const adminLocked = isAdminLockedForSession('admin', authSession.value)
-
   useEffect(() => {
+    if (!canAdminDebug) {
+      traceSeqRef.current += 1
+      contextSeqRef.current += 1
+      memorySeqRef.current += 1
+      setToolCalls(null)
+      setRawTraces([])
+      setRawTracePage(null)
+      setProviderInput(null)
+      setCheckpoints(null)
+      setPendingDanger(null)
+      setMemFacts(null)
+      setMemJournal(null)
+      setMemError(null)
+      setMemActStatus(null)
+    }
+    if (!isSingleUser) return
     if (tab === 'trace') void loadTrace()
     else if (tab === 'context') void loadContext()
-    else if (tab === 'memory') void loadMemory()
-  }, [tab, loadTrace, loadContext, loadMemory])
+    else if (tab === 'memory' && canAdminDebug) void loadMemory()
+  }, [tab, isSingleUser, canAdminDebug, loadTrace, loadContext, loadMemory])
 
   useEffect(() => {
     if (adminLocked) {
@@ -347,6 +380,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const cacheSegs = useMemo(() => computePromptCacheSegments(turnRecords[0] ?? null), [turnRecords])
 
   const handleOpenRawTrace = async (file: string) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
     setTraceError(null)
@@ -368,6 +403,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleClearHistory = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
     setContextStatus('대화 컨텍스트 초기화 중…')
@@ -383,6 +420,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleResetKeeper = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
     setContextStatus('Keeper 리셋 중…')
@@ -398,6 +437,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleMemoryAct = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
     setMemActStatus(null)
@@ -525,55 +566,59 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
             <div class="kp-card-head">
               <h3>Recent Tool Calls (${toolCalls?.count ?? 0})</h3>
             </div>
-            ${!toolCalls || toolCalls.entries.length === 0
-              ? html`<div class="kp-empty">도구 호출 없음</div>`
-              : toolCalls.entries.slice(0, 15).map((tc, idx) => html`
-                  <button
-                    key=${tc.execution_id ?? idx}
-                    type="button"
-                    class="kp-kv-box"
-                    onClick=${() => props.onInspect({
-                      title: `Tool Call · ${tc.tool}`,
-                      subtitle: `${keeperName} · ${Math.round(tc.duration_ms)}ms`,
-                      kind: 'tool_call',
-                      data: tc,
-                      render: () => html`
-                        <${KeeperToolCallInspector}
-                          key=${`${keeperName}:${tc.execution_id ?? `${tc.ts}-${tc.tool}`}`}
-                          keeperName=${keeperName}
-                          entry=${tc}
-                        />
-                      `,
-                    })}
-                  >
-                    <div class="kp-card-head">
-                      <span class="kp-roster-name">${tc.tool}</span>
-                      <span class="kp-pill" data-tone=${recordedToolOutcomeTone(tc)}>
-                        ${Math.round(tc.duration_ms)}ms
-                      </span>
-                    </div>
-                    <span class="kp-roster-sub">${tc.disposition ?? tc.wire_outcome}</span>
-                  </button>
-                `)}
+            ${!canAdminDebug
+              ? html`<div class="kp-empty" data-testid="companion-tool-calls-admin-locked" role="status">도구 호출 상세 내역은 관리자 전용입니다.</div>`
+              : !toolCalls || toolCalls.entries.length === 0
+                ? html`<div class="kp-empty">도구 호출 없음</div>`
+                : toolCalls.entries.slice(0, 15).map((tc, idx) => html`
+                    <button
+                      key=${tc.execution_id ?? idx}
+                      type="button"
+                      class="kp-kv-box"
+                      onClick=${() => props.onInspect({
+                        title: `Tool Call · ${tc.tool}`,
+                        subtitle: `${keeperName} · ${Math.round(tc.duration_ms)}ms`,
+                        kind: 'tool_call',
+                        data: tc,
+                        render: () => html`
+                          <${KeeperToolCallInspector}
+                            key=${`${keeperName}:${tc.execution_id ?? `${tc.ts}-${tc.tool}`}`}
+                            keeperName=${keeperName}
+                            entry=${tc}
+                          />
+                        `,
+                      })}
+                    >
+                      <div class="kp-card-head">
+                        <span class="kp-roster-name">${tc.tool}</span>
+                        <span class="kp-pill" data-tone=${recordedToolOutcomeTone(tc)}>
+                          ${Math.round(tc.duration_ms)}ms
+                        </span>
+                      </div>
+                      <span class="kp-roster-sub">${tc.disposition ?? tc.wire_outcome}</span>
+                    </button>
+                  `)}
           </div>
 
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Raw Traces (${rawTraces.length})</h3>
             </div>
-            ${rawTraces.length === 0
-              ? html`<div class="kp-empty">Raw trace 파일 없음</div>`
-              : rawTraces.slice(0, 8).map((rt) => html`
-                  <button
-                    key=${rt.file}
-                    type="button"
-                    class="btn-ghost"
-                    onClick=${() => void handleOpenRawTrace(rt.file)}
-                  >
-                    ${rt.file} (${rt.records ?? '?'} rec · ${Math.round(rt.bytes / 1024)}KB)
-                  </button>
-                `)}
-            ${rawTracePage && html`
+            ${!canAdminDebug
+              ? html`<div class="kp-empty" data-testid="companion-raw-traces-admin-locked" role="status">Raw Trace 조회는 관리자 전용입니다.</div>`
+              : rawTraces.length === 0
+                ? html`<div class="kp-empty">Raw trace 파일 없음</div>`
+                : rawTraces.slice(0, 8).map((rt) => html`
+                    <button
+                      key=${rt.file}
+                      type="button"
+                      class="btn-ghost"
+                      onClick=${() => void handleOpenRawTrace(rt.file)}
+                    >
+                      ${rt.file} (${rt.records ?? '?'} rec · ${Math.round(rt.bytes / 1024)}KB)
+                    </button>
+                  `)}
+            ${canAdminDebug && rawTracePage && html`
               <div class="kp-roster-sub">최근 로드: ${String(rawTracePage.file ?? '')}</div>
             `}
           </div>
@@ -673,57 +718,72 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
             <div class="kp-card-head">
               <h3>Checkpoints / Clear / Reset</h3>
             </div>
-            <div class="kp-roster-sub">
-              Current: ${checkpoints?.current ? `${checkpoints.current.message_count} msgs (${checkpoints.current.snapshot_id.slice(0, 12)})` : checkpoints?.current_status ?? '없음'}
-              · History: ${checkpoints?.history.length ?? 0}
-            </div>
-            ${contextStatus && html`<div class="kp-pill" data-tone="info">${contextStatus}</div>`}
-            <div class="kp-lifecycle-bar">
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => setPendingDanger((cur) => (cur === 'clear' ? null : 'clear'))}
-              >
-                Clear Context…
-              </button>
-              <button
-                type="button"
-                class="kp-btn-danger"
-                onClick=${() => setPendingDanger((cur) => (cur === 'reset' ? null : 'reset'))}
-              >
-                Reset Keeper…
-              </button>
-            </div>
-            ${pendingDanger !== null && html`
-              <${TargetLockedAction}
-                target=${{
-                  workspaceId: activeWorkspaceId.value,
-                  keeper: keeperName,
-                  requestId: `${pendingDanger}:${keeperName}`,
-                  revision: checkpoints?.current?.snapshot_id ?? checkpoints?.trace_id ?? 'none',
-                }}
-              >
-                <button
-                  type="button"
-                  class="kp-btn-danger"
-                  onClick=${async () => {
-                    const action = pendingDanger
-                    setPendingDanger(null)
-                    if (action === 'clear') await handleClearHistory()
-                    else await handleResetKeeper()
-                  }}
-                >
-                  ${pendingDanger === 'clear' ? 'Clear Context 실행 확인' : 'Reset Keeper 실행 확인'}
-                </button>
-                <button type="button" class="btn-ghost" onClick=${() => setPendingDanger(null)}>
-                  취소
-                </button>
-              <//>
-            `}
+            ${!canAdminDebug
+              ? html`<div class="kp-empty" data-testid="companion-checkpoints-admin-locked" role="status">체크포인트 조회 및 Clear/Reset은 관리자 전용입니다.</div>`
+              : html`
+                  <div class="kp-roster-sub">
+                    Current: ${checkpoints?.current ? `${checkpoints.current.message_count} msgs (${checkpoints.current.snapshot_id.slice(0, 12)})` : checkpoints?.current_status ?? '없음'}
+                    · History: ${checkpoints?.history.length ?? 0}
+                  </div>
+                  ${contextStatus && html`<div class="kp-pill" data-tone="info">${contextStatus}</div>`}
+                  <div class="kp-lifecycle-bar">
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      onClick=${() => setPendingDanger((cur) => (cur === 'clear' ? null : 'clear'))}
+                    >
+                      Clear Context…
+                    </button>
+                    <button
+                      type="button"
+                      class="kp-btn-danger"
+                      onClick=${() => setPendingDanger((cur) => (cur === 'reset' ? null : 'reset'))}
+                    >
+                      Reset Keeper…
+                    </button>
+                  </div>
+                  ${pendingDanger !== null && html`
+                    <${TargetLockedAction}
+                      target=${{
+                        workspaceId: activeWorkspaceId.value,
+                        keeper: keeperName,
+                        requestId: `${pendingDanger}:${keeperName}`,
+                        revision: checkpoints?.current?.snapshot_id ?? checkpoints?.trace_id ?? 'none',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        class="kp-btn-danger"
+                        onClick=${async () => {
+                          const action = pendingDanger
+                          setPendingDanger(null)
+                          if (action === 'clear') await handleClearHistory()
+                          else await handleResetKeeper()
+                        }}
+                      >
+                        ${pendingDanger === 'clear' ? 'Clear Context 실행 확인' : 'Reset Keeper 실행 확인'}
+                      </button>
+                      <button type="button" class="btn-ghost" onClick=${() => setPendingDanger(null)}>
+                        취소
+                      </button>
+                    <//>
+                  `}
+                `}
           </div>
         `}
 
-        ${tab === 'memory' && html`
+        ${tab === 'memory' && (!canAdminDebug
+          ? html`
+              <div class="kp-card">
+                <div class="kp-card-head">
+                  <h3>Memory Facts & Recovery</h3>
+                </div>
+                <div class="kp-empty" data-testid="companion-memory-admin-locked" role="status">
+                  메모리 Facts·Journal 조회 및 memory/act 복구는 관리자 전용입니다.
+                </div>
+              </div>
+            `
+          : html`
           ${memError && html`<div class="ap-error" role="alert">${memError}</div>`}
           <div class="kp-card">
             <div class="kp-card-head">
@@ -802,7 +862,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
             </button>
             ${memActStatus && html`<div class="kp-pill" data-tone="info">${memActStatus}</div>`}
           </div>
-        `}
+        `)}
 
         ${tab === 'config-diff' && html`
           <div class="kp-card">

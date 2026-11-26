@@ -35,6 +35,7 @@ import {
   type ApiError,
 } from '../../core/transport'
 import { acquireViewStream } from '../../core/view-stream-slot'
+import { isAdminLockedForSession } from '../../routes/router'
 import {
   observedAbsent,
   observedValue,
@@ -1110,7 +1111,17 @@ export function runQueuedChatOperationNext(
   keeper: string,
   operationId: string,
   interruptToken?: string | null,
-) {
+): Promise<Result<unknown, ApiError>> {
+  const curSession = authSession.peek()
+  if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) {
+    return Promise.resolve(err({
+      kind: 'forbidden',
+      status: null,
+      code: 'admin_only',
+      message: '지금 실행(/api/v1/keepers/turn/run-next)은 관리자 전용입니다.',
+      retryable: false,
+    }))
+  }
   const payload: Record<string, unknown> = {
     name: keeper,
     request_id: operationId,
@@ -2146,6 +2157,18 @@ export async function transcribeVoiceAudio(
   mimeType: string,
   opts: { readonly signal?: AbortSignal; readonly fetchImpl?: typeof fetch } = {},
 ): Promise<Result<string, ApiError>> {
+  const curSession = authSession.peek()
+  if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) {
+    return err({
+      kind: 'forbidden',
+      status: null,
+      code: curSession.kind !== 'single_user_local' ? 'single_user_only' : 'admin_only',
+      message: curSession.kind !== 'single_user_local'
+        ? '음성 전사(/api/v1/voice/transcribe)는 싱글유저 로컬 세션 전용입니다.'
+        : '음성 전사(/api/v1/voice/transcribe)는 관리자 전용입니다.',
+      retryable: false,
+    })
+  }
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
   const startEpoch = currentSessionEpoch()
   const controller = new AbortController()
@@ -2920,9 +2943,16 @@ export async function fetchKeeperSandboxApi(keeper: string, signal?: AbortSignal
       },
     },
   )
-  return !result.ok && result.error.status === 404 && result.error.code === 'sandbox_telemetry_missing'
-    ? ok(null)
-    : result
+  if (!result.ok && result.error.status === 404 && result.error.code === 'sandbox_telemetry_missing') {
+    return ok(null)
+  }
+  if (!result.ok && result.error.kind === 'forbidden') {
+    return err({
+      ...result.error,
+      message: '이 Keeper의 샌드박스 상태는 소유자 또는 관리자만 조회할 수 있습니다 (403).',
+    })
+  }
+  return result
 }
 
 // ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────

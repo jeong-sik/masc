@@ -146,8 +146,10 @@ interface JoinedKeeperSpendRow {
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
   const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const isMultiAccountSignedIn = session.kind === 'multi_account_signed_in'
   const adminLocked = isAdminLockedForSession('admin', session)
-  const sseInstanceId = session.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const sseInstanceId = isSingleUser ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
   const params = windowToModelsParams(win)
   const providerDays = timeWindowProviderDays(win)
@@ -176,61 +178,71 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const effObs = resourceCache.observe<KeeperEfficiencyPayload>(effKey).value
 
   const loadSnapshots = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const curSession = authSession.peek()
+    const singleLocal = curSession.kind === 'single_user_local'
+    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
+    if (!singleLocal && !multiSignedIn) return
+
     const startEpoch = epoch
-    void Promise.all([
+    const jobs: Promise<unknown>[] = [
       resourceCache.fetch<CacheStatsPayload>(
         cacheStatsKey,
         (signal) => apiGet<CacheStatsPayload>('/api/v1/dashboard/cache-stats', { signal }),
         { ttlMs: 15_000, topics: ['cache_stats', 'model_metrics', 'telemetry'], reason },
       ),
-      resourceCache.fetch<ModelsMetricsPayload>(
-        modelsKey,
-        (signal) => apiGet<ModelsMetricsPayload>(
-          `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
-          { signal, decode: decodeModelsMetricsPayload },
+    ]
+    if (!isAdminLockedForSession('admin', curSession)) {
+      jobs.push(
+        resourceCache.fetch<LaneRunsResponse>(
+          exactRunsKey,
+          (signal) => loadLaneRunsPage({ limit: 50 }, signal),
+          { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
         ),
-        { ttlMs: 20_000, topics: ['model_metrics', 'telemetry'], reason },
-      ),
-      resourceCache.fetch<ProviderUsageHistoryResponse>(
-        historyKey,
-        (signal) => loadProviderUsageHistory(providerDays, signal),
-        { ttlMs: 30_000, topics: ['provider_usage', 'runtime_resolved'], reason },
-      ),
-      resourceCache.fetch<ToolMetricsSeriesPayload>(
-        toolSeriesKey,
-        (signal) => apiGet<ToolMetricsSeriesPayload>(
-          `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=${utcOffsetMin}`,
-          { signal, decode: decodeToolMetricsSeriesPayload },
+      )
+    }
+    if (singleLocal) {
+      jobs.push(
+        resourceCache.fetch<ModelsMetricsPayload>(
+          modelsKey,
+          (signal) => apiGet<ModelsMetricsPayload>(
+            `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
+            { signal, decode: decodeModelsMetricsPayload },
+          ),
+          { ttlMs: 20_000, topics: ['model_metrics', 'telemetry'], reason },
         ),
-        { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
-      ),
-      ...(!isAdminLockedForSession('admin', authSession.peek())
-        ? [
-            resourceCache.fetch<LaneRunsResponse>(
-              exactRunsKey,
-              (signal) => loadLaneRunsPage({ limit: 50 }, signal),
-              { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
-            ),
-          ]
-        : []),
-      // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
-      resourceCache.fetch<KeeperCostsPayload>(
-        costsKey,
-        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', {
-          signal,
-          decode: decodeKeeperCostsPayload,
-        }),
-        { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
-      ),
-      resourceCache.fetch<KeeperEfficiencyPayload>(
-        effKey,
-        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
-          signal,
-          decode: decodeKeeperEfficiencyPayload,
-        }),
-        { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
-      ),
-    ]).then(() => {
+        resourceCache.fetch<ProviderUsageHistoryResponse>(
+          historyKey,
+          (signal) => loadProviderUsageHistory(providerDays, signal),
+          { ttlMs: 30_000, topics: ['provider_usage', 'runtime_resolved'], reason },
+        ),
+        resourceCache.fetch<ToolMetricsSeriesPayload>(
+          toolSeriesKey,
+          (signal) => apiGet<ToolMetricsSeriesPayload>(
+            `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=${utcOffsetMin}`,
+            { signal, decode: decodeToolMetricsSeriesPayload },
+          ),
+          { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
+        ),
+        // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
+        resourceCache.fetch<KeeperCostsPayload>(
+          costsKey,
+          (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', {
+            signal,
+            decode: decodeKeeperCostsPayload,
+          }),
+          { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
+        ),
+        resourceCache.fetch<KeeperEfficiencyPayload>(
+          effKey,
+          (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
+            signal,
+            decode: decodeKeeperEfficiencyPayload,
+          }),
+          { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
+        ),
+      )
+    }
+    void Promise.all(jobs).then(() => {
       if (isEpochCurrent(startEpoch)) markViewSynced()
     })
   }
@@ -240,7 +252,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     setLiveMetrics(null)
     setStreamError(null)
     loadSnapshots('mount')
-  }, [win, epoch, adminLocked])
+  }, [win, epoch, session.kind, adminLocked])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
@@ -318,15 +330,20 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       unsubResync()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
-  }, [win, epoch, adminLocked])
+  }, [win, epoch, session.kind, adminLocked])
 
-  const effectiveModels = (win === '24h' && sseInstanceId && liveMetrics)
-    ? liveMetrics
-    : (modelsObs.kind === 'value' ? modelsObs.data : null)
-  const live = win === '24h' && sseInstanceId !== null && streamLive
-  const snapshotError = streamError ?? (!effectiveModels ? snapshotUnavailableReason(modelsObs) : null)
+  const effectiveModels = !isSingleUser
+    ? null
+    : (win === '24h' && sseInstanceId && liveMetrics)
+      ? liveMetrics
+      : (modelsObs.kind === 'value' ? modelsObs.data : null)
+  const live = isSingleUser && win === '24h' && sseInstanceId !== null && streamLive
+  const snapshotError = isSingleUser
+    ? (streamError ?? (!effectiveModels ? snapshotUnavailableReason(modelsObs) : null))
+    : null
   const modelsWindowLabel = win === '30d' ? '7d 상한' : win
-  const seriesSource = live ? '● LIVE SSE (models/metrics/stream)'
+  const seriesSource = !isSingleUser ? '○ SINGLE-USER ONLY'
+    : live ? '● LIVE SSE (models/metrics/stream)'
     : streamError ? `○ STREAM ERROR (${streamError})`
     : snapshotError ? '○ UNAVAILABLE'
     : modelsObs.kind === 'loading' && !effectiveModels ? '◐ LOADING'
@@ -562,6 +579,12 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           <button type="button" class="btn-ghost" onClick=${() => loadSnapshots('manual')}>새로고침</button>
         </div>
       </header>
+
+      ${isMultiAccountSignedIn && html`
+        <div class="wka-card" data-testid="efficiency-mode-notice" role="status" style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+          멀티 계정 모드에서는 API 캐시 통계와 Exact-Output 지표(관리자 전용)만 브리지됩니다. 모델·도구·Keeper 비용 시계열은 single_user 모드에서 제공됩니다.
+        </div>
+      `}
 
       ${streamDecodeError && html`
         <div class="ap-error" role="alert">실시간 모델 지표 디코드 오류: ${streamDecodeError}</div>

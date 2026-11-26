@@ -15,6 +15,7 @@ import {
   apiGet,
   apiMutate,
   apiRequest,
+  authSession,
   currentSessionEpoch,
   extractObserverTopics,
   isEpochCurrent,
@@ -32,6 +33,7 @@ import {
   expectOptionalRecordArrayField,
   expectWireRecord,
 } from '../../lib/wire-decode'
+import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
@@ -127,7 +129,13 @@ type BrowserLaneState =
   | { readonly kind: 'ready'; readonly data: BrowserClientsPayload }
 
 export function AddonsTab(props: WorkspaceViewProps) {
+  const session = authSession.value
   const epoch = sessionEpoch.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const canUseLocalAddons = isSingleUser && session.role !== 'player'
+  const canAnswerAddonAsk = isSingleUser && !adminLocked
+
   const addonsObs = resourceCache.observe<LaneAddonsPayload>('runtime:lane-addons').value
   const asksObs = resourceCache.observe<LaneAddonAsksResponse>('runtime:lane-addons-asks').value
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -147,7 +155,18 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const catalogAbortRef = useRef<AbortController | null>(null)
   const previewAbortRef = useRef<AbortController | null>(null)
 
+  const hasLocalAddonAccess = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && cur.role !== 'player'
+  }
+
+  const hasAdminAddonAccess = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
+  }
+
   const loadAddons = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    if (!hasLocalAddonAccess()) return
     const startEpoch = currentSessionEpoch()
     void Promise.all([
       resourceCache.fetch<LaneAddonsPayload>(
@@ -172,6 +191,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const loadBrowserLane = async () => {
+    if (!hasLocalAddonAccess()) return
     browserAbortRef.current?.abort()
     const ctrl = new AbortController()
     browserAbortRef.current = ctrl
@@ -201,6 +221,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const loadCatalog = async (directory?: string) => {
+    if (!hasLocalAddonAccess()) return
     catalogAbortRef.current?.abort()
     const ctrl = new AbortController()
     catalogAbortRef.current = ctrl
@@ -225,7 +246,16 @@ export function AddonsTab(props: WorkspaceViewProps) {
     setTabsByClient({})
     setAskAnswersByKey({})
     setBanner(null)
+    setReadingClient(null)
     setBrowserState({ kind: 'loading' })
+    if (!canUseLocalAddons) {
+      browserAbortRef.current?.abort()
+      catalogAbortRef.current?.abort()
+      previewAbortRef.current?.abort()
+      return () => {
+        mountedRef.current = false
+      }
+    }
     loadAddons('mount')
     void loadBrowserLane()
 
@@ -270,7 +300,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       catalogAbortRef.current?.abort()
       previewAbortRef.current?.abort()
     }
-  }, [epoch])
+  }, [epoch, canUseLocalAddons])
 
   const instances: readonly LaneAddonInstanceRow[] =
     addonsObs.kind === 'value' && Array.isArray(addonsObs.data?.instances)
@@ -279,6 +309,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const selectedInstance = instances.find((i) => i.instance_id === selectedId) ?? instances[0] ?? null
 
   const handlePreviewManifest = async (manifestPath: string) => {
+    if (!hasLocalAddonAccess()) return
     previewAbortRef.current?.abort()
     const ctrl = new AbortController()
     previewAbortRef.current = ctrl
@@ -295,6 +326,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleAttach = async (manifestPath: string) => {
+    if (!hasLocalAddonAccess()) return
     const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/attach', {
       manifest_path: manifestPath,
@@ -314,6 +346,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleDetach = async (instanceId: string) => {
+    if (!hasLocalAddonAccess()) return
     const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/detach', { instance_id: instanceId })
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
@@ -327,6 +360,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleObserve = async (instanceId: string) => {
+    if (!hasLocalAddonAccess()) return
     const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/observe', { instance_id: instanceId })
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
@@ -338,6 +372,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleInvokeAction = async (inst: LaneAddonInstanceRow) => {
+    if (!hasLocalAddonAccess()) return
     let parsedAction: Record<string, unknown>
     try {
       const val = JSON.parse(actionJson)
@@ -376,8 +411,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   // Exact OCaml contract (lib/server/server_routes_http_routes_lane_addons.ml:692-713,808):
-  // POST /api/v1/lane-addons/ask-answer with { declaration_id, ask_id, answers }
+  // POST /api/v1/lane-addons/ask-answer with { declaration_id, ask_id, answers } requires CanAdmin
   const handleAnswerAddonAsk = async (ask: LaneAddonAskRow) => {
+    if (!hasAdminAddonAccess()) return
     const submissions = (ask.questions ?? []).map((q, idx) => {
       const qid = q.id ?? q.question_id ?? `q-${idx}`
       const key = `${ask.ask_id}:${qid}`
@@ -410,6 +446,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleReadOpenTabs = async (client: BrowserClientRow) => {
+    if (!hasLocalAddonAccess()) return
     const startEpoch = currentSessionEpoch()
     setReadingClient(client.clientId)
     const res = await apiMutate<readonly BrowserTabRow[]>('POST', '/api/v1/dashboard/browser-lane/read', {
@@ -561,25 +598,35 @@ export function AddonsTab(props: WorkspaceViewProps) {
                     <div id=${promptId}>
                       <${MarkdownContent} text=${q.prompt ?? q.text ?? q.label ?? qid} />
                     </div>
-                    <input
-                      type="text"
-                      aria-labelledby=${promptId}
-                      placeholder="응답 입력 (비우면 skipped)"
-                      value=${askAnswersByKey[key] ?? ''}
-                      onInput=${(e: Event) => setAskAnswersByKey((prev) => ({ ...prev, [key]: (e.target as HTMLInputElement).value }))}
-                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                    />
+                    ${canAnswerAddonAsk && html`
+                      <input
+                        type="text"
+                        aria-labelledby=${promptId}
+                        placeholder="응답 입력 (비우면 skipped)"
+                        value=${askAnswersByKey[key] ?? ''}
+                        onInput=${(e: Event) => setAskAnswersByKey((prev) => ({ ...prev, [key]: (e.target as HTMLInputElement).value }))}
+                        style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      />
+                    `}
                   </div>
                 `
               })}
-              <button
-                type="button"
-                class="btn-primary"
-                style=${{ alignSelf: 'flex-start' }}
-                onClick=${() => void handleAnswerAddonAsk(ask)}
-              >
-                질문 응답 제출
-              </button>
+              ${canAnswerAddonAsk
+                ? html`
+                    <button
+                      type="button"
+                      class="btn-primary"
+                      style=${{ alignSelf: 'flex-start' }}
+                      onClick=${() => void handleAnswerAddonAsk(ask)}
+                    >
+                      질문 응답 제출
+                    </button>
+                  `
+                : html`
+                    <div class="dtable-absent" data-testid="addon-ask-admin-locked" role="status">
+                      애드온 질문 응답 제출은 관리자 전용입니다.
+                    </div>
+                  `}
             </div>
           `)}
         </div>
@@ -750,14 +797,24 @@ export function AddonsTab(props: WorkspaceViewProps) {
         </div>
       `}
 
-      <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
-        <${MasterDetail}
-          masterLabel="Lane-Addons 인스턴스"
-          detailLabel="Browser Lane 클라이언트"
-          master=${leftPane}
-          detail=${rightPane}
-        />
-      </div>
+      ${!canUseLocalAddons
+        ? html`
+            <div class="wka-card" data-testid="addons-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+              ${isSingleUser
+                ? 'Lane-Addons 및 Browser Lane 제어는 워크스페이스 접근 권한이 있는 세션에서만 사용할 수 있습니다.'
+                : 'Lane-Addons 및 Browser Lane(/api/v1/lane-addons, /api/v1/dashboard/browser-lane)은 single_user 모드 전용입니다.'}
+            </div>
+          `
+        : html`
+            <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
+              <${MasterDetail}
+                masterLabel="Lane-Addons 인스턴스"
+                detailLabel="Browser Lane 클라이언트"
+                master=${leftPane}
+                detail=${rightPane}
+              />
+            </div>
+          `}
     </div>
   `
 }

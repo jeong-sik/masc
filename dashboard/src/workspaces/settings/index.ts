@@ -18,11 +18,13 @@ import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
+  authSession,
   currentSessionEpoch,
   isEpochCurrent,
   resourceCache,
+  sessionEpoch,
 } from '../../core'
-import { currentRoute } from '../../routes/router'
+import { currentRoute, isAdminLockedForSession } from '../../routes/router'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import {
   fetchConfigSchemaApi,
@@ -111,6 +113,11 @@ function resolveInitialCategoryId(): string {
 }
 
 export function SettingsWorkspace(props: WorkspaceViewProps) {
+  const session = authSession.value
+  const epoch = sessionEpoch.value
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const canExportWorldConfig = session.kind === 'single_user_local' && !adminLocked
+
   const target = props.entityId ? `keeper:${props.entityId}` : 'runtime'
   const schemaCacheKey = `settings:schema:${target}`
   const schemaObs = resourceCache.observe<ConfigSchemaData>(schemaCacheKey).value
@@ -148,6 +155,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }, [])
 
   const loadSchema = (reason: 'mount' | 'manual' = 'mount') => {
+    if (isAdminLockedForSession('admin', authSession.peek())) return
     void resourceCache.fetch<ConfigSchemaData>(
       schemaCacheKey,
       (signal) => fetchConfigSchemaApi(target, signal),
@@ -162,8 +170,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     setCasConflict(null)
     setErrorBanner(null)
     setBusy(null)
-    loadSchema('mount')
-  }, [target])
+    if (!adminLocked) loadSchema('mount')
+  }, [target, epoch, adminLocked])
 
   const schemaData = schemaObs.kind === 'value' ? schemaObs.data : null
 
@@ -216,6 +224,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   const handlePreviewDiff = async () => {
+    if (isAdminLockedForSession('admin', authSession.peek())) return
     if (!schemaData || hasInvalidNumber || stagedList.length === 0 || busy) return
     const startEpoch = currentSessionEpoch()
     const requestTarget = schemaData.target
@@ -251,6 +260,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   const handleApplyPatch = async () => {
+    if (isAdminLockedForSession('admin', authSession.peek())) return
     if (!preview || !dryRunResult?.changed || busy) return
     const startEpoch = currentSessionEpoch()
     const requestTarget = preview.target
@@ -290,6 +300,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   const handleExportWorldConfig = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const startEpoch = currentSessionEpoch()
     setBusy('export')
     setErrorBanner(null)
@@ -523,14 +535,16 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             onInput=${(e: Event) => setSearchQuery((e.target as HTMLInputElement).value)}
             style=${{ minHeight: 'var(--btn-h, 32px)', fontSize: 'var(--fs-12)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', minWidth: '200px' }}
           />
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busy === 'export'}
-            onClick=${() => void handleExportWorldConfig()}
-          >
-            ${busy === 'export' ? '내보내는 중…' : 'Export World Config'}
-          </button>
+          ${canExportWorldConfig && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              disabled=${busy === 'export'}
+              onClick=${() => void handleExportWorldConfig()}
+            >
+              ${busy === 'export' ? '내보내는 중…' : 'Export World Config'}
+            </button>
+          `}
           <button
             type="button"
             class="btn-primary"

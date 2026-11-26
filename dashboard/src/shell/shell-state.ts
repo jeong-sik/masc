@@ -870,6 +870,10 @@ export async function submitFastToolApproval(
   decision: 'approve' | 'deny',
   fetchImpl?: typeof fetch,
 ): Promise<{ readonly ok: boolean; readonly message: string }> {
+  const cur = authSession.peek()
+  if (cur.kind !== 'single_user_local' || (cur.role !== undefined && cur.role !== 'admin')) {
+    return { ok: false, message: '도구 승인 결정은 싱글유저 관리자 세션에서만 실행할 수 있습니다.' }
+  }
   const startEpoch = currentSessionEpoch()
   const res = await apiMutate<Record<string, unknown>>(
     'POST',

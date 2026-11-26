@@ -73,6 +73,15 @@ describe('workspaces/work', () => {
 
   beforeEach(() => {
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     resetPortraitCacheForTests()
     resourceCache.clearAll()
@@ -1981,5 +1990,76 @@ describe('workspaces/work', () => {
 
     expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
     expect(container.querySelector('.md-detail')!.textContent).toContain('Linked goal')
+  })
+
+  it('prevents unbridged 404s in multi_account_signed_in (admin) and CanAdmin 403s in single_user worker across Goals, Tasks, Inbox, and Candle', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({
+          tree: [{
+            id: 'goal-rbac-1',
+            title: 'Ship RBAC',
+            phase: 'Awaiting_confirmation',
+            priority: 1,
+            measure: { kind: 'done_when', condition: 'All gates pass' },
+            procedure: 'Verify',
+            criterion_revision: 'crev-1',
+            criterion_review: { state: 'viable', reason: 'Clear' },
+            linked_task_count: 0,
+            tasks: [],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) return jsonResponse({ tasks: [], goals: [] })
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/scheduled-automation')) return jsonResponse({ schedules: [] })
+      if (url.startsWith('/api/v1/candle/ledger')) {
+        return jsonResponse({
+          schema_version: 2,
+          instance_id: 'i1',
+          generated_at_unix: 1,
+          data: { entries: [], balances: [] },
+        })
+      }
+      return jsonResponse({ error: 'unexpected unbridged route' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin across all 4 tabs: 0x unbridged 404 calls
+    setMultiAccountSessionForTest()
+    for (const subroute of ['goals', 'tasks', 'inbox', 'candle'] as const) {
+      render(null, container)
+      resourceCache.clearAll()
+      render(html`<${WorkWorkspace} subroute=${subroute} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi(10)
+    }
+    expect(seenUrls.some((u) => u.startsWith('/health?full=1'))).toBe(false)
+    expect(seenUrls.some((u) => u === '/mcp')).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/verification/requests'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/goals/candle'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/gate'))).toBe(false)
+
+    // 2. Single-user Worker: skips CanAdmin goal confirmation & hides CanAdmin controls
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${WorkWorkspace} subroute="goals" entityId="goal-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+    expect(container.textContent).not.toContain('최종 완료 확정')
   })
 })

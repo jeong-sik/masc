@@ -213,8 +213,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const epoch = sessionEpoch.value
   const isMultiAccountSignedIn = session.kind === 'multi_account_signed_in'
   const isSingleUserLocal = session.kind === 'single_user_local'
-  const canManageProviders = isSingleUserLocal || isMultiAccountSignedIn
   const adminLocked = isAdminLockedForSession('admin', session)
+  const canManageProviders = isMultiAccountSignedIn || (isSingleUserLocal && !adminLocked)
 
   const resolvedObs = resourceCache.observe<RuntimeResolvedPayload>('runtime:resolved').value
   const historyKey = `runtime:provider-usage-history:${providerDays}`
@@ -266,12 +266,16 @@ export function QuotasTab(props: WorkspaceViewProps) {
         loadRuntimeResolved,
         { ttlMs: 15_000, topics: ['runtime', 'runtime_resolved', 'provider_usage', 'config'], reason },
       ),
-      resourceCache.fetch<ProviderUsageHistoryResponse>(
-        historyKey,
-        (signal) => loadProviderUsageHistory(providerDays, signal),
-        { ttlMs: 30_000, topics: ['provider_usage'], reason },
-      ),
     ]
+    if (singleLocal) {
+      jobs.push(
+        resourceCache.fetch<ProviderUsageHistoryResponse>(
+          historyKey,
+          (signal) => loadProviderUsageHistory(providerDays, signal),
+          { ttlMs: 30_000, topics: ['provider_usage'], reason },
+        ),
+      )
+    }
 
     if (multiSignedIn) {
       rawConfigAbortRef.current?.abort()
@@ -293,7 +297,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           { ttlMs: 30_000, topics: ['provider_accounts', 'config'], reason },
         ),
       )
-    } else if (singleLocal) {
+    } else if (singleLocal && !isAdminLockedForSession('admin', curSession)) {
       jobs.push(
         resourceCache.fetch<SetupInventoryPayload>(
           'runtime:setup-inventory',
@@ -305,16 +309,16 @@ export function QuotasTab(props: WorkspaceViewProps) {
         ),
       )
       rawConfigAbortRef.current?.abort()
-      if (!isAdminLockedForSession('admin', curSession)) {
-        const ctrl = new AbortController()
-        rawConfigAbortRef.current = ctrl
-        void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
-          if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
-          if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
-            setSourceRevision(res.value.source_revision.trim())
-          }
-        })
-      }
+      const ctrl = new AbortController()
+      rawConfigAbortRef.current = ctrl
+      void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
+        if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
+        if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
+          setSourceRevision(res.value.source_revision.trim())
+        }
+      })
+    } else {
+      rawConfigAbortRef.current?.abort()
     }
 
     void Promise.all(jobs).then(() => {
@@ -518,12 +522,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
     return rt?.model ?? ''
   }
 
+  const canManageProvidersSession = (cur: typeof session): boolean =>
+    cur.kind === 'multi_account_signed_in'
+    || (cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur))
+
   const handleSaveCredential = async (ev: Event) => {
     ev.preventDefault()
     const curSession = authSession.peek()
     const multiSignedIn = curSession.kind === 'multi_account_signed_in'
-    const singleLocal = curSession.kind === 'single_user_local'
-    if (!multiSignedIn && !singleLocal) return
+    if (!canManageProvidersSession(curSession)) return
     if (!credForm || !credForm.providerId.trim() || !credForm.secret.trim()) return
     const startEpoch = currentSessionEpoch()
     const providerId = credForm.providerId.trim()
@@ -611,13 +618,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
     setCopiedDeviceCode(false)
     setSourceRevision('')
     setActionBusy(null)
-  }, [epoch, session.kind])
+  }, [epoch, session.kind, canManageProviders])
 
   const handleStartOAuthLogin = async (integrationId: string) => {
     const curSession = authSession.peek()
     const multiSignedIn = curSession.kind === 'multi_account_signed_in'
-    const singleLocal = curSession.kind === 'single_user_local'
-    if (!multiSignedIn && !singleLocal) return
+    if (!canManageProvidersSession(curSession)) return
 
     const startEpoch = currentSessionEpoch()
     loginAbortRef.current?.abort('superseded')
@@ -741,8 +747,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
   const handleSubmitLoginInput = async (ev: Event) => {
     ev.preventDefault()
-    const curSession = authSession.peek()
-    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
+    if (!canManageProvidersSession(authSession.peek())) return
     if (!loginReceipt?.loginId || !loginInputText.trim()) return
     const startEpoch = currentSessionEpoch()
     const text = loginInputText.trim()
@@ -759,8 +764,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleSendLoginEnterKey = async () => {
-    const curSession = authSession.peek()
-    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
+    if (!canManageProvidersSession(authSession.peek())) return
     if (!loginReceipt?.loginId) return
     const startEpoch = currentSessionEpoch()
     setActionBusy('login-input')
@@ -775,8 +779,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleCancelSetupLogin = async () => {
-    const curSession = authSession.peek()
-    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
+    if (!canManageProvidersSession(authSession.peek())) return
     const startEpoch = currentSessionEpoch()
     const owner = loginAbortRef.current
     if (loginReceipt?.loginId) {
@@ -788,8 +791,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleRefreshLoginReceipt = async () => {
-    const curSession = authSession.peek()
-    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
+    if (!canManageProvidersSession(authSession.peek())) return
     const loginId = loginReceipt?.loginId?.trim()
     if (!loginId) return
     const startEpoch = currentSessionEpoch()
@@ -1391,13 +1393,18 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
       <!-- Provider Usage History UPlotChart (Strictly days=1|7|14 & HTTP 200 unavailable honesty) -->
       <section aria-label="제공자 사용량 이력">
-        ${historyState.kind === 'loading' && html`
+        ${!isSingleUserLocal && html`
+          <div class="wka-card dtable-absent" data-testid="provider-usage-mode-notice" role="status">
+            제공자 사용량 이력 시계열은 single_user 모드에서 제공됩니다.
+          </div>
+        `}
+        ${isSingleUserLocal && historyState.kind === 'loading' && html`
           <div class="wka-card dtable-absent">사용량 이력 불러오는 중… (${providerDays}d)</div>
         `}
-        ${historyState.kind === 'failed' && html`
+        ${isSingleUserLocal && historyState.kind === 'failed' && html`
           <div class="ap-error" role="alert">사용량 이력 조회 실패: ${historyState.message}</div>
         `}
-        ${historyState.kind === 'unavailable' && html`
+        ${isSingleUserLocal && historyState.kind === 'unavailable' && html`
           <div
             class="wka-card"
             data-testid="provider-usage-unavailable"
@@ -1412,7 +1419,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
             </div>
           </div>
         `}
-        ${historyState.kind === 'ready' && html`
+        ${isSingleUserLocal && historyState.kind === 'ready' && html`
           <${UPlotChart}
             id="runtime-quotas-history"
             title=${`제공자 사용량 이력 & 일시 중지 추이 (${historyState.days}일 · ${historyState.pointsCount}포인트)`}
@@ -1747,7 +1754,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
                     </div>
                   `)
               : isSingleUserLocal
-                ? (integrations.length === 0
+                ? adminLocked
+                  ? html`<div class="dtable-absent" data-testid="provider-inventory-admin-locked" role="status">워크스페이스 제공자 자격 증명 관리는 관리자 전용입니다.</div>`
+                  : (integrations.length === 0
                   ? (inventoryObs.kind === 'failed'
                     ? null
                     : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '등록된 제공자 인벤토리가 없습니다.'}</div>`)

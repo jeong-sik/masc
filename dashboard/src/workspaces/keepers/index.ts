@@ -12,7 +12,7 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
+import { authSession, currentSessionEpoch, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import type { WorkspaceViewProps } from '../types'
@@ -28,6 +28,8 @@ import type { KeeperRosterItem } from './types'
 import './keepers.css'
 
 export function KeepersWorkspace(props: WorkspaceViewProps) {
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
   const epoch = sessionEpoch.value
   const { roster: listing, turns } = readKeeperRosterSources()
   const roster = useMemo(() => {
@@ -58,6 +60,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
   }, [props.entityId])
 
   const refreshRoster = useCallback(async (reason: 'mount' | 'sse' | 'manual') => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const startEpoch = currentSessionEpoch()
     // Wait for any superseded read before starting a replacement snapshot.
     if (reason === 'sse' && rosterRead.current) await rosterRead.current
@@ -71,10 +74,12 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
+    if (!isSingleUser) return
     void refreshRoster('mount')
-  }, [epoch, refreshRoster])
+  }, [epoch, isSingleUser, refreshRoster])
 
   useEffect(() => {
+    if (!isSingleUser) return
     let timer: ReturnType<typeof setTimeout> | null = null
     let pending = false
     let running = false
@@ -113,7 +118,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       unsubConnection()
       if (timer) clearTimeout(timer)
     }
-  }, [refreshRoster])
+  }, [isSingleUser, refreshRoster])
 
   const rosterItems: readonly KeeperRosterItem[] = roster.kind === 'value' ? roster.data : []
 
@@ -160,6 +165,24 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     void refreshRoster('manual')
     props.onNavigate('/keepers')
   }, [props, refreshRoster])
+
+  if (!isSingleUser) {
+    return html`
+      <div class="kp-root" data-workspace="keepers">
+        <section class="kp-stage" aria-label="Keeper 워크스페이스">
+          <div class="kp-scroll-pane">
+            <div class="kp-card" data-testid="keepers-mode-notice" role="status">
+              <h3>Keepers Fleet Console</h3>
+              <p class="kp-roster-sub">
+                로컬 Keeper Fleet 콘솔(<code>/api/v1/keepers/*</code>, <code>/api/v1/gate/keepers</code>)은 싱글유저 로컬 세션 전용입니다.
+                멀티 계정 세션에서는 404 요청을 발생시키지 않으며, 개인 Keeper는 <code>/api/v1/auth/keepers</code> 경로로 관리됩니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+    `
+  }
 
   return html`
     <div class="kp-root" data-workspace="keepers">

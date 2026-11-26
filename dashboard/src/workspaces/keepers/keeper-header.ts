@@ -28,6 +28,7 @@ import {
 import {
   KEEPER_ENTITY_TAB_LABELS,
   KEEPER_ENTITY_TABS,
+  isAdminLockedForSession,
   type KeeperEntityTab,
 } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
@@ -132,7 +133,9 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [deleteOpen])
 
-  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const canAdminLifecycle = isSingleUser && !isAdminLockedForSession('admin', session)
   const epoch = sessionEpoch.value
   const approvalModesObs = resourceCache.observe<KeeperToolApprovalModesData>('keepers:tool-approval-modes').value
 
@@ -268,6 +271,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     label: string,
     fn: () => Promise<{ ok: boolean; error?: { message: string } }>,
   ) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
     setBusyAction(label)
@@ -285,6 +290,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   }
 
   const handleConfirmDelete = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const targetKeeper = keeper.name
     if (deleteConfirmName.trim() !== targetKeeper) return
     const startEpoch = currentSessionEpoch()
@@ -398,58 +405,62 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           </div>
         </div>
 
-        <div class="kp-lifecycle-bar" role="group" aria-label="Keeper 수명주기 제어">
-          ${!booted && html`
-            <button
-              type="button"
-              class="btn-primary"
-              disabled=${busyAction !== null}
-              onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
-            >
-              Boot
-            </button>
-          `}
-          ${booted && (isPaused
-            ? html`
-                <button
-                  type="button"
-                  class="btn-primary"
-                  disabled=${busyAction !== null}
-                  onClick=${() => void runLifecycle('Resume', () => resumeKeeperAction(keeper.name))}
-                >
-                  Resume
-                </button>
-              `
-            : html`
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  disabled=${busyAction !== null}
-                  onClick=${() => void runLifecycle('Pause', () => pauseKeeperAction(keeper.name))}
-                >
-                  Pause
-                </button>
-              `)}
-          ${keeper.active_turn !== null && html`
-            <button
-              type="button"
-              class="btn-ghost"
-              disabled=${busyAction !== null}
-              onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
-            >
-              Interrupt Turn
-            </button>
-          `}
-          <${PopoverMenu}
-            align="right"
-            triggerLabel="⋯"
-            triggerClassName="btn-ghost"
-            triggerTestId="keeper-actions-menu"
-            popoverTestId="keeper-actions-popover"
-            ariaLabel="Keeper 추가 작업"
-            items=${overflowActionItems}
-          />
-        </div>
+        ${canAdminLifecycle
+          ? html`
+              <div class="kp-lifecycle-bar" role="group" aria-label="Keeper 수명주기 제어">
+                ${!booted && html`
+                  <button
+                    type="button"
+                    class="btn-primary"
+                    disabled=${busyAction !== null}
+                    onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
+                  >
+                    Boot
+                  </button>
+                `}
+                ${booted && (isPaused
+                  ? html`
+                      <button
+                        type="button"
+                        class="btn-primary"
+                        disabled=${busyAction !== null}
+                        onClick=${() => void runLifecycle('Resume', () => resumeKeeperAction(keeper.name))}
+                      >
+                        Resume
+                      </button>
+                    `
+                  : html`
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled=${busyAction !== null}
+                        onClick=${() => void runLifecycle('Pause', () => pauseKeeperAction(keeper.name))}
+                      >
+                        Pause
+                      </button>
+                    `)}
+                ${keeper.active_turn !== null && html`
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    disabled=${busyAction !== null}
+                    onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
+                  >
+                    Interrupt Turn
+                  </button>
+                `}
+                <${PopoverMenu}
+                  align="right"
+                  triggerLabel="⋯"
+                  triggerClassName="btn-ghost"
+                  triggerTestId="keeper-actions-menu"
+                  popoverTestId="keeper-actions-popover"
+                  ariaLabel="Keeper 추가 작업"
+                  items=${overflowActionItems}
+                />
+              </div>
+            `
+          : html`<span class="kp-pill" data-testid="keeper-lifecycle-admin-locked">수명주기 제어: 관리자 전용</span>`}
       </div>
 
       ${hasDiagnostics && html`

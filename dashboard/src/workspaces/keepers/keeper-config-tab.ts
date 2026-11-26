@@ -171,7 +171,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [schema, routeSection])
 
   const loadProviders = useCallback(async () => {
-    if (adminLocked) return
+    // GET /api/v1/keepers/oauth/attached-tools is Public_read in single-user mode
+    // (server_keeper_oauth_http.ml:290) and 404 in multi_account mode.
+    if (authSession.peek().kind !== 'single_user_local') return
     providersAbortRef.current?.abort()
     const ctrl = new AbortController()
     providersAbortRef.current = ctrl
@@ -188,7 +190,11 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     } else if (provRes.error.kind !== 'aborted' && provRes.error.kind !== 'epoch_stale') {
       setOauthError(`OAuth 연결 조회 실패: ${provRes.error.message}`)
     }
-  }, [keeperName, adminLocked])
+  }, [keeperName])
+
+  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const canMutateSecrets = isSingleUser && !adminLocked
+  const canMutateOAuth = isSingleUser && !adminLocked
 
   useEffect(() => {
     oauthFlowRef.current?.cancel()
@@ -209,14 +215,15 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     setActiveOAuthFlow(null)
     setClientDrawer(null)
     lastAppliedSectionRef.current = undefined
-    if (!adminLocked) {
-      void Promise.all([loadSchema(), loadProviders()])
-    }
+    const tasks: Promise<void>[] = []
+    if (!adminLocked) tasks.push(loadSchema())
+    if (isSingleUser) tasks.push(loadProviders())
+    if (tasks.length > 0) void Promise.all(tasks)
     return () => {
       schemaAbortRef.current?.abort()
       providersAbortRef.current?.abort()
     }
-  }, [loadSchema, loadProviders, adminLocked])
+  }, [loadSchema, loadProviders, adminLocked, isSingleUser])
 
   const allFields = useMemo(
     () => (schema ? schema.categories.flatMap((c) => c.fields) : []),
@@ -282,7 +289,8 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }
 
   const handleSaveSecret = async () => {
-    if (adminLocked) return
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const name = secretName.trim()
     if (!name || !secretValue) {
       setSecretError('환경변수 이름과 값을 입력하세요.')
@@ -313,7 +321,8 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }
 
   const handleDeleteSecret = async () => {
-    if (adminLocked) return
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const name = secretName.trim()
     if (!name) return
     const targetKeeper = keeperName
@@ -495,10 +504,10 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
           <div class="kp-card-head">
             <h3>Secrets (Write-Only Env)</h3>
           </div>
-          ${adminLocked
+          ${!canMutateSecrets
             ? html`
                 <div class="kp-empty" data-testid="keeper-secrets-admin-locked" role="status">
-                  Keeper 시크릿 환경변수 관리는 관리자 전용입니다.
+                  ${isSingleUser ? 'Keeper 시크릿 환경변수 관리는 관리자 전용입니다.' : 'Keeper 시크릿 환경변수 관리는 싱글유저 로컬 관리자 세션 전용입니다.'}
                 </div>
               `
             : html`
@@ -543,15 +552,20 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
           <div class="kp-card-head">
             <h3>OAuth Identity & Attached Tools</h3>
           </div>
-          ${adminLocked
+          ${!isSingleUser
             ? html`
                 <div class="kp-empty" data-testid="keeper-oauth-admin-locked" role="status">
-                  OAuth 연결 계정 및 도구 관리는 관리자 전용입니다.
+                  OAuth 연결 계정 및 도구 관리는 싱글유저 로컬 세션 전용입니다.
                 </div>
               `
             : html`
+          ${!canMutateOAuth && html`
+            <div class="kp-roster-sub" data-testid="keeper-oauth-admin-locked" role="status">
+              OAuth 연결·해제·앱 등록 변경은 관리자 전용입니다 (읽기 전용 보기).
+            </div>
+          `}
           ${oauthError && html`<div class="ap-error" role="alert">${oauthError}</div>`}
-          ${activeOAuthFlow && html`
+          ${canMutateOAuth && activeOAuthFlow && html`
             <div class="kp-block-card kp-block-card--tool" data-testid="keeper-config-oauth-flow" role="status">
               <div class="kp-card-head">
                 <strong>${activeOAuthFlow.providerLabel} · ${activeOAuthFlow.phase}</strong>
@@ -584,13 +598,14 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
               </div>
             </div>
           `}
-          ${clientDrawer && html`
+          ${canMutateOAuth && clientDrawer && html`
             <form
               class="kp-block-card kp-block-card--memory"
               data-testid="keeper-config-oauth-client-form"
               onSubmit=${async (ev: Event) => {
                 ev.preventDefault()
-                if (adminLocked || !clientDrawer.clientId.trim()) return
+                const cur = authSession.peek()
+                if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur) || !clientDrawer.clientId.trim()) return
                 const targetKeeper = keeperName
                 const startEpoch = currentSessionEpoch()
                 const submittedLabel = clientDrawer.providerLabel
@@ -693,98 +708,116 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                           : '미연결'}
                     </div>
                   </div>
-                  <div class="kp-pill-row">
-                    ${prov.provider !== 'github' && html`
-                      <button
-                        type="button"
-                        class="btn-ghost"
-                        onClick=${() => setClientDrawer({
-                          provider: prov.provider,
-                          providerLabel: prov.provider_label,
-                          clientId: '',
-                          clientSecret: '',
-                          scopes: '',
-                        })}
-                      >
-                        앱 설정
-                      </button>
-                    `}
-                    ${prov.attached
-                      ? html`
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            disabled=${prov.switch_problem != null}
-                            onClick=${async () => {
-                              if (adminLocked) return
-                              const targetKeeper = keeperName
-                              const startEpoch = currentSessionEpoch()
-                              const next = !(prov.enabled ?? true)
-                              const res = await setKeeperIdentitySwitchApi(targetKeeper, prov.provider, next)
-                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-                              if (res.ok) {
+                  ${canMutateOAuth && html`
+                    <div class="kp-pill-row">
+                      ${prov.provider !== 'github' && html`
+                        <button
+                          type="button"
+                          class="btn-ghost"
+                          onClick=${() => setClientDrawer({
+                            provider: prov.provider,
+                            providerLabel: prov.provider_label,
+                            clientId: '',
+                            clientSecret: '',
+                            scopes: '',
+                          })}
+                        >
+                          앱 설정
+                        </button>
+                      `}
+                      ${prov.attached
+                        ? html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              disabled=${prov.switch_problem != null}
+                              onClick=${async () => {
+                                const cur = authSession.peek()
+                                if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
+                                const targetKeeper = keeperName
+                                const startEpoch = currentSessionEpoch()
+                                const next = !(prov.enabled ?? true)
+                                const res = await setKeeperIdentitySwitchApi(targetKeeper, prov.provider, next)
+                                if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                                if (res.ok) {
+                                  setOauthError(null)
+                                  pushShellToast(`${prov.provider_label} ${next ? '활성화' : '비활성화'}`, 'success')
+                                } else {
+                                  setOauthError(res.error.message)
+                                }
+                                void loadProviders()
+                              }}
+                            >
+                              ${prov.enabled === false ? '켜기' : '끄기'}
+                            </button>
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              onClick=${async () => {
+                                const cur = authSession.peek()
+                                if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
+                                const targetKeeper = keeperName
+                                const startEpoch = currentSessionEpoch()
+                                const res = await refreshKeeperIdentityToolsApi(targetKeeper, prov.provider)
+                                if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                                if (res.ok) {
+                                  setOauthError(null)
+                                  pushShellToast(`${prov.provider_label} 도구 목록 갱신`, 'success')
+                                } else {
+                                  setOauthError(res.error.message)
+                                }
+                                void loadProviders()
+                              }}
+                            >
+                              갱신
+                            </button>
+                            <button
+                              type="button"
+                              class="kp-btn-danger"
+                              onClick=${async () => {
+                                const cur = authSession.peek()
+                                if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
+                                const targetKeeper = keeperName
+                                const startEpoch = currentSessionEpoch()
+                                const res = await disconnectKeeperOAuth(targetKeeper, prov.provider)
+                                if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                                if (res.ok) {
+                                  setOauthError(null)
+                                  pushShellToast(`${prov.provider_label} 연결 해제됨`, 'success')
+                                } else {
+                                  setOauthError(res.error.message)
+                                }
+                                void loadProviders()
+                              }}
+                            >
+                              해제
+                            </button>
+                          `
+                        : html`
+                            <button
+                              type="button"
+                              class="btn-primary"
+                              onClick=${() => {
+                                const cur = authSession.peek()
+                                if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
+                                oauthFlowRef.current?.cancel()
                                 setOauthError(null)
-                                pushShellToast(`${prov.provider_label} ${next ? '활성화' : '비활성화'}`, 'success')
-                              } else {
-                                setOauthError(res.error.message)
-                              }
-                              void loadProviders()
-                            }}
-                          >
-                            ${prov.enabled === false ? '켜기' : '끄기'}
-                          </button>
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            onClick=${async () => {
-                              if (adminLocked) return
-                              const targetKeeper = keeperName
-                              const startEpoch = currentSessionEpoch()
-                              const res = await refreshKeeperIdentityToolsApi(targetKeeper, prov.provider)
-                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-                              if (res.ok) {
-                                setOauthError(null)
-                                pushShellToast(`${prov.provider_label} 도구 목록 갱신`, 'success')
-                              } else {
-                                setOauthError(res.error.message)
-                              }
-                              void loadProviders()
-                            }}
-                          >
-                            갱신
-                          </button>
-                          <button
-                            type="button"
-                            class="kp-btn-danger"
-                            onClick=${async () => {
-                              if (adminLocked) return
-                              const targetKeeper = keeperName
-                              const startEpoch = currentSessionEpoch()
-                              const res = await disconnectKeeperOAuth(targetKeeper, prov.provider)
-                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-                              if (res.ok) {
-                                setOauthError(null)
-                                pushShellToast(`${prov.provider_label} 연결 해제됨`, 'success')
-                              } else {
-                                setOauthError(res.error.message)
-                              }
-                              void loadProviders()
-                            }}
-                          >
-                            해제
-                          </button>
-                        `
-                      : html`
-                          <button
-                            type="button"
-                            class="btn-primary"
-                            onClick=${() => {
-                              if (adminLocked) return
-                              oauthFlowRef.current?.cancel()
-                              setOauthError(null)
-                              if (prov.provider === 'github') {
-                                oauthFlowRef.current = startKeeperGithubDeviceFlow({
+                                if (prov.provider === 'github') {
+                                  oauthFlowRef.current = startKeeperGithubDeviceFlow({
+                                    keeper: keeperName,
+                                    providerLabel: prov.provider_label,
+                                    onUpdate: (st) => {
+                                      setActiveOAuthFlow(st)
+                                    },
+                                    onSettled: (ok) => {
+                                      if (ok) void loadProviders()
+                                    },
+                                  })
+                                  return
+                                }
+                                oauthFlowRef.current = startKeeperOAuthPopupFlow({
                                   keeper: keeperName,
+                                  provider: prov.provider,
                                   providerLabel: prov.provider_label,
                                   onUpdate: (st) => {
                                     setActiveOAuthFlow(st)
@@ -793,25 +826,13 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                                     if (ok) void loadProviders()
                                   },
                                 })
-                                return
-                              }
-                              oauthFlowRef.current = startKeeperOAuthPopupFlow({
-                                keeper: keeperName,
-                                provider: prov.provider,
-                                providerLabel: prov.provider_label,
-                                onUpdate: (st) => {
-                                  setActiveOAuthFlow(st)
-                                },
-                                onSettled: (ok) => {
-                                  if (ok) void loadProviders()
-                                },
-                              })
-                            }}
-                          >
-                            연결
-                          </button>
-                        `}
-                  </div>
+                              }}
+                            >
+                              연결
+                            </button>
+                          `}
+                    </div>
+                  `}
                 </div>
               `)}
               `}

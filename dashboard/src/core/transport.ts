@@ -18,6 +18,7 @@ import {
   isEpochCurrent,
   refreshMultiAccountCsrf,
   resolveWorkspaceUrl,
+  scheduleForbiddenRoleRecheck,
   sessionEpoch,
 } from './auth'
 
@@ -376,6 +377,16 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
       if (refreshed && refreshed !== prevCsrf && isEpochCurrent(startEpoch)) {
         return await executeOnce()
       }
+    }
+    if (
+      !first.ok
+      && first.error.kind === 'forbidden'
+      && authSession.peek().kind === 'multi_account_signed_in'
+      && isEpochCurrent(startEpoch)
+      && opts.path !== '/auth/session'
+      && opts.path !== '/api/v1/auth/whoami'
+    ) {
+      scheduleForbiddenRoleRecheck(fetchImpl)
     }
     return first
   } finally {

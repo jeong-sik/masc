@@ -9,7 +9,7 @@ import { formatObserved, observedFailed, observedValue, resourceCache } from '..
 import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { setStoredToken } from '../../lib/dashboard-bearer'
-import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
+import { canFetchPortraitForSession, resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import { navigate, resetRouterForTests } from '../../routes/router'
 import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import {
@@ -21,6 +21,7 @@ import {
   decodeKeeperRoster,
   enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
+  fetchKeeperSandboxApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
@@ -33,6 +34,7 @@ import {
   parseSourceBoundMemoryBranch,
   recordedToolOutcomeTone,
   reconstructJournalReply,
+  runQueuedChatOperationNext,
   streamKeeperChat,
   transcribeVoiceAudio,
 } from './keepers-api'
@@ -3252,5 +3254,107 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     )
     expect(coldView.container.querySelector('.kp-empty')).not.toBeNull()
     coldView.unmount()
+  })
+
+  it('enforces multi-account zero-404 mode gate, portrait gating, sandbox 403 ownership UX, and single-user worker RBAC', async () => {
+    const seenUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.includes('/api/v1/infra/sandboxes/other-keeper')) {
+        return new Response(JSON.stringify({ error: { code: 'forbidden', message: 'not owner' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/oauth/attached-tools')) {
+        return new Response(JSON.stringify({
+          keeper: 'code-reviewer-sister',
+          providers: [{ provider: 'github', provider_label: 'GitHub', attached: true, enabled: true, tools: ['gh_pr'] }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    // 1. Multi-account Admin: KeepersWorkspace renders mode notice with 0x /gate/keepers or /keepers/* 404s
+    const maAdmin = {
+      kind: 'multi_account_signed_in' as const,
+      mode: 'multi_account' as const,
+      accountId: 'acc-admin',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin' as const,
+      csrfToken: 'csrf-ma',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    authSession.value = maAdmin
+    expect(canFetchPortraitForSession(maAdmin)).toBe(false)
+
+    const wsView = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(wsView.getByTestId('keepers-mode-notice')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls).toEqual([])
+    wsView.unmount()
+
+    // Sandbox 403 surfaces clear ownership message in multi_account
+    const sandboxRes = await fetchKeeperSandboxApi('other-keeper')
+    expect(sandboxRes.ok).toBe(false)
+    if (!sandboxRes.ok) {
+      expect(sandboxRes.error.message).toContain('소유')
+    }
+
+    // 2. Single-user Worker: GET /keepers/oauth/attached-tools (Public_read) stays readable while mutations/CanAdmin fail closed
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    expect(canFetchPortraitForSession(authSession.value)).toBe(true)
+
+    const cfgView = render(html`<${KeeperConfigTab} keeperName="code-reviewer-sister" onMutated=${vi.fn()} />`)
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/keepers/oauth/attached-tools'))).toBe(true)
+    })
+    expect(cfgView.getByTestId('keeper-config-admin-locked')).toBeTruthy()
+    expect(cfgView.getByTestId('keeper-secrets-admin-locked')).toBeTruthy()
+    expect(cfgView.queryByRole('button', { name: '연결 해제' })).toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/config/schema'))).toBe(false)
+    cfgView.unmount()
+
+    // KeeperMemoryTab & KeeperHeader & KeeperWorkSandboxTab enforce CanAdmin for SU Worker
+    seenUrls.length = 0
+    const memView = render(html`<${KeeperMemoryTab} keeperName="code-reviewer-sister" />`)
+    expect(memView.getByTestId('keeper-memory-admin-locked')).toBeTruthy()
+    expect(seenUrls).toEqual([])
+    memView.unmount()
+
+    const hdrView = render(
+      html`<${KeeperHeader} keeper=${makeRosterKeeper()} activeTab="chat" onSelectTab=${vi.fn()} onMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(hdrView.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(hdrView.queryByRole('button', { name: 'Delete' })).toBeNull()
+    hdrView.unmount()
+
+    const workView = render(html`<${KeeperWorkSandboxTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} />`)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls.some((u) => u.includes('/tool-calls'))).toBe(false)
+    workView.unmount()
+
+    // CanAdmin chat helpers reject before fetch() for SU Worker
+    seenUrls.length = 0
+    const sttRes = await transcribeVoiceAudio(new Uint8Array([1, 2, 3]), 'audio/webm')
+    expect(sttRes.ok).toBe(false)
+    const runNextRes = await runQueuedChatOperationNext('code-reviewer-sister', 'op-1')
+    expect(runNextRes.ok).toBe(false)
+    expect(seenUrls).toEqual([])
   })
 })

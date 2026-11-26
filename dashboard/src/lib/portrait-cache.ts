@@ -29,8 +29,9 @@ type PortraitCacheEntry =
 const portraitEntries = new Map<string, PortraitCacheEntry>()
 const inFlightPortraits = new Map<string, Promise<string | null>>()
 
-function canFetchPortraitForSession(session: AuthSession): boolean {
-  return session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+export function canFetchPortraitForSession(session: AuthSession): boolean {
+  // `/api/v1/keepers/:k/portrait.png` is single-user only (404 in multi_account).
+  return session.kind === 'single_user_local'
 }
 
 function sessionCacheTag(session: AuthSession): string {

@@ -84,6 +84,7 @@ const fusionStageText: ReadonlyMap<string, string> = new Map([
 ])
 
 function loadFusion(reason: 'mount' | 'manual' | 'sse') {
+  if (authSession.peek().kind !== 'single_user_local') return
   return resourceCache.fetch(
     FUSION_RUNS_KEY,
     (signal) => apiGet('/api/v1/dashboard/fusion-runs', { signal, decode: parseFusionRunsResponse }),
@@ -92,7 +93,7 @@ function loadFusion(reason: 'mount' | 'manual' | 'sse') {
 }
 
 function FusionRunSnapshot({ row, epoch }: { row: FusionRunRecord; epoch: number }) {
-  const current = sessionEpoch.value === epoch
+  const current = sessionEpoch.value === epoch && authSession.value.kind === 'single_user_local'
   const [read, setRead] = useState<Result<unknown, ApiError> | null>(null)
   useEffect(() => {
     if (!current) return
@@ -182,7 +183,11 @@ function statusPillStyle(status: string) {
 }
 
 export function LanesTab(props: WorkspaceViewProps) {
-  const adminLocked = isAdminLockedForSession('admin', authSession.value)
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const canAdminLocalConfig = isSingleUser && !adminLocked
+  const canLaunchFusion = isSingleUser && session.role !== 'player'
   const [mode, setMode] = useState<LanesMode>(() => resolveInitialMode(props.entityTab))
   const [probeFilter, setProbeFilter] = useState<'all' | 'active_lane' | 'outside_lane'>('all')
   const [laneConfigOpen, setLaneConfigOpen] = useState(false)
@@ -259,30 +264,47 @@ export function LanesTab(props: WorkspaceViewProps) {
     setBusy((action) => action === 'lane-preview' ? null : action)
   }
 
+  const hasLocalConfigAdmin = (): boolean => {
+    const cur = authSession.peek()
+    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
+  }
+
   const loadFailover = (forceProbe = false, reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const curSession = authSession.peek()
+    const singleLocal = curSession.kind === 'single_user_local'
+    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
+    sourceRead.current?.abort()
+    discardLanePreview()
+    setRawConfig(null)
+    setBusy((action) => action === 'lane-apply' ? null : action)
+    if (!singleLocal && !multiSignedIn) {
+      setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
+      return
+    }
     const startEpoch = currentSessionEpoch()
-    void Promise.all([
+    const jobs: Promise<unknown>[] = [
       resourceCache.fetch<RuntimeResolvedPayload>(
         'runtime:resolved',
         loadRuntimeResolved,
         { ttlMs: 15_000, topics: ['runtime', 'runtime_resolved', 'config'], reason },
       ),
-      resourceCache.fetch<RuntimeProbePayload>(
-        'runtime:probe',
-        (signal) => apiGet<RuntimeProbePayload>(
-          `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
-          { signal, decode: decodeRuntimeProbePayload },
+    ]
+    if (singleLocal) {
+      jobs.push(
+        resourceCache.fetch<RuntimeProbePayload>(
+          'runtime:probe',
+          (signal) => apiGet<RuntimeProbePayload>(
+            `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
+            { signal, decode: decodeRuntimeProbePayload },
+          ),
+          { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
         ),
-        { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
-      ),
-    ]).then(() => {
+      )
+    }
+    void Promise.all(jobs).then(() => {
       if (isEpochCurrent(startEpoch)) markViewSynced()
     })
-    sourceRead.current?.abort()
-    discardLanePreview()
-    setRawConfig(null)
-    setBusy((action) => action === 'lane-apply' ? null : action)
-    if (adminLocked) {
+    if (!singleLocal || isAdminLockedForSession('admin', curSession)) {
       setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
       return
     }
@@ -318,7 +340,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const loadExact = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
-    if (adminLocked) return
+    if (isAdminLockedForSession('admin', authSession.peek())) return
     const startEpoch = currentSessionEpoch()
     const query = {
       limit: 50,
@@ -346,22 +368,29 @@ export function LanesTab(props: WorkspaceViewProps) {
   }, [epoch])
 
   useEffect(() => {
-    if (!adminLocked) return
+    if (canAdminLocalConfig) return
     sourceRead.current?.abort()
     previewRequest.current?.abort()
-    inspectRequest.current?.abort()
     discardLanePreview()
     setRawConfig(null)
     setSourceRevision(null)
     setLaneEditor(null)
     setLaneDeleteConfirm(null)
     setLaneCasConflict(null)
+  }, [canAdminLocalConfig])
+
+  useEffect(() => {
+    if (adminLocked) inspectRequest.current?.abort()
   }, [adminLocked])
+
+  useEffect(() => {
+    if (!canLaunchFusion) setFusionModalOpen(false)
+  }, [canLaunchFusion])
 
   useEffect(() => {
     if (mode === 'failover') loadFailover(false, 'mount')
     else if (mode === 'exact') loadExact('mount')
-  }, [mode, runKindFilter, currentCursor, epoch, adminLocked])
+  }, [mode, runKindFilter, currentCursor, epoch, session.kind, adminLocked])
 
   useEffect(() => {
     if (mode === 'fusion') return
@@ -396,10 +425,10 @@ export function LanesTab(props: WorkspaceViewProps) {
       unsubscribeReconnect()
       unsubscribeResync()
     }
-  }, [mode, runKindFilter, currentCursor, epoch])
+  }, [mode, runKindFilter, currentCursor, epoch, session.kind, adminLocked])
 
   useEffect(() => {
-    if (mode !== 'fusion') return
+    if (mode !== 'fusion' || !isSingleUser) return
     let disposed = false
     const unsubscribeFrames = subscribeObserverFrames((frame) => {
       if (extractObserverTopics(frame).includes(FUSION_RUNS_TOPIC)) void loadFusion('sse')
@@ -424,7 +453,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       unsubscribeConnection()
       unsubscribeResync()
     }
-  }, [mode, epoch])
+  }, [mode, epoch, isSingleUser])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   const probeData = probeObs.kind === 'value' ? probeObs.data : null
@@ -625,6 +654,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }, [resolvedData, probeData])
 
   const previewProposedLaneToml = async (nextToml: string, label: string) => {
+    if (!hasLocalConfigAdmin()) return
     const snapshot = rawConfig
     if (!snapshot || !isCurrentLaneSource(snapshot)) {
       setBanner({ kind: 'err', text: 'runtime.toml 원본을 불러오지 못해 미리보기를 실행할 수 없습니다.' })
@@ -724,7 +754,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleApplyLanePreview = async () => {
-    if (adminLocked || !lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
+    if (!hasLocalConfigAdmin() || !lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
     setBusy('lane-apply')
     setBanner(null)
     setLaneCasConflict(null)
@@ -753,7 +783,7 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const handleSaveDefaultRoute = async (ev: Event) => {
     ev.preventDefault()
-    if (adminLocked || !defaultRouteInput.trim()) return
+    if (!hasLocalConfigAdmin() || !defaultRouteInput.trim()) return
     setBusy('routing')
     setBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/routing', {
@@ -772,7 +802,7 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const handleSaveAssignment = async (ev: Event) => {
     ev.preventDefault()
-    if (adminLocked || !assignKeeper.trim()) return
+    if (!hasLocalConfigAdmin() || !assignKeeper.trim()) return
     setBusy('assignment')
     setBanner(null)
     const prev = resolvedData?.assignments?.find((a) => a.keeper === assignKeeper.trim())
@@ -886,6 +916,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleInspectFusionRun = (row: FusionRunRecord) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     props.onInspect({
       title: `Fusion · ${row.preset}`,
       subtitle: `${row.runId} · ${row.topology}`,
@@ -896,6 +927,8 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const handleLaunchFusion = async (ev: Event) => {
     ev.preventDefault()
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' || curSession.role === 'player') return
     if (!fusionKeeper.trim() || !fusionPrompt.trim()) return
     setBusy('fusion')
     setBanner(null)
@@ -990,12 +1023,12 @@ export function LanesTab(props: WorkspaceViewProps) {
               Fusion
             </button>
           </div>
-          ${mode === 'failover' && html`
+          ${mode === 'failover' && isSingleUser && html`
             <button type="button" class="btn-ghost" onClick=${() => loadFailover(true, 'manual')}>
               강제 프로브
             </button>
           `}
-          ${mode === 'fusion' && html`
+          ${mode === 'fusion' && canLaunchFusion && html`
             <button type="button" class="btn-primary" onClick=${() => setFusionModalOpen((v) => !v)}>
               + Fusion 실행
             </button>
@@ -1045,22 +1078,24 @@ export function LanesTab(props: WorkspaceViewProps) {
             >
               <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                 <span>라우팅 · 레인 설정 (기본: ${resolvedData?.default_route ?? '없음'} · 레인 ${declaredTomlLanes.length}개)</span>
-                ${!adminLocked && laneCasConflict && html`
+                ${canAdminLocalConfig && laneCasConflict && html`
                   <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}>CAS 충돌</span>
                 `}
               </span>
               <span aria-hidden="true">${effectiveLaneConfigOpen ? '▾' : '▸'}</span>
             </button>
 
-            ${effectiveLaneConfigOpen && adminLocked && html`
+            ${effectiveLaneConfigOpen && !canAdminLocalConfig && html`
               <div class="ap-disclosure-body" data-testid="lane-config-body">
                 <div class="dtable-absent" data-testid="lane-config-admin-locked" role="status">
-                  라우팅 및 레인 설정 편집은 관리자 전용입니다.
+                  ${isSingleUser
+                    ? '라우팅 및 레인 설정 편집은 관리자 전용입니다.'
+                    : '라우팅 및 runtime.toml 편집은 single_user 모드 전용입니다.'}
                 </div>
               </div>
             `}
 
-            ${effectiveLaneConfigOpen && !adminLocked && html`
+            ${effectiveLaneConfigOpen && canAdminLocalConfig && html`
               <div class="ap-disclosure-body" data-testid="lane-config-body">
                 <datalist id="lane-runtime-candidates">
                   ${availableRuntimeIds.map((rid) => {
@@ -1591,7 +1626,9 @@ export function LanesTab(props: WorkspaceViewProps) {
                 ariaLabel="런타임 프로브 목록"
                 getItemKey=${(r: ProbePartitionRow) => `${r.scopeBand}:${r.runtime_id}`}
                 empty=${html`
-                  ${probeObs.kind === 'failed'
+                  ${!isSingleUser
+                    ? html`<div class="dtable-absent" data-testid="failover-probes-mode-notice" style=${{ padding: 'var(--sp-4)' }}>런타임 프로브(/api/v1/dashboard/runtime-probe)는 single_user 모드에서 제공됩니다.</div>`
+                    : probeObs.kind === 'failed'
                     ? html`<div class="ap-error" role="alert" style=${{ margin: 'var(--sp-3)' }}>런타임 프로브 조회 실패: ${probeObs.error.message}</div>`
                     : html`
                         <div class="dtable-absent" style=${{ padding: 'var(--sp-4)' }}>
@@ -1757,9 +1794,15 @@ export function LanesTab(props: WorkspaceViewProps) {
         </div>
       `}
 
-      ${mode === 'fusion' && html`
+      ${mode === 'fusion' && !isSingleUser && html`
+        <div class="wka-card" data-testid="fusion-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+          Fusion 실행 이력 및 실행 요청(<span class="mono">/api/v1/dashboard/fusion-runs</span>)은 single_user 모드 전용입니다.
+        </div>
+      `}
+
+      ${mode === 'fusion' && isSingleUser && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-          ${fusionModalOpen && html`
+          ${canLaunchFusion && fusionModalOpen && html`
             <form
               class="wka-card"
               data-testid="fusion-launch-form"

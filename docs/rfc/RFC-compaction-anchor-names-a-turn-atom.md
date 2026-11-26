@@ -3,7 +3,7 @@ rfc: "compaction-anchor-names-a-turn-atom"
 title: "압축 지점은 목록 위치가 아니라 Keeper 턴 안의 atom을 가리킨다"
 status: Proposed
 created: 2026-11-26
-updated: 2026-11-26
+updated: 2026-11-27
 author: claude
 supersedes: []
 superseded_by: null
@@ -17,6 +17,7 @@ related: []
 - 운영자는 원인을 근본에서 고치라고 했다(「제대로 찾아서 올바른 방향으로 개선 및 최적화를 부탁한다」).
 - 고정 ID 방향(A안)을 승인했다(「이거 버그가 없게 행랴함 고고」).
 - 코드 좌표는 `origin/main` `a26795cff182c`에서 읽었다.
+- 11-27: #55004 리뷰가 찾은 결함을 반영했다. 목록 종류(D2~D6), 끊긴 턴의 경계(D2), §1.1과 §5.1을 고쳤다.
 
 ## 0. 요약
 
@@ -27,6 +28,7 @@ related: []
 - 이 RFC는 atom의 이름을 바꾼다. 이름은 「그 atom이 속한 Keeper 턴의 ID」와 「그 턴 안에서 몇 번째 atom인지」다.
 - 턴 ID는 이미 메시지 메타데이터에 있다. 새로 찍는 값은 없다.
 - 비교는 메타데이터만 읽고, 턴 ID가 같은지만 본다. 직렬화, 해시, 문자열 접두어 비교를 모두 없앤다.
+- 압축 지점은 어떤 종류의 목록에서 썼는지도 적는다. 순번의 뜻이 목록 종류마다 달라서, 생산자는 같은 종류의 덮은 범위만 이어받는다(D3, §5.1).
 - 옛 `atom-*` 압축 지점은 읽지 않는다(하드컷). 운영자가 두 SQLite 파일을 지운다(§7).
 
 ## 1. 관찰
@@ -35,7 +37,7 @@ related: []
 
 - macOS `sample`로 서버를 떴다. OCaml 5 Eio fiber 경계에서 스택이 끊기므로 경계 아래 masc 프레임의 inclusive 샘플을 셌다.
 - `Keeper_compaction.messages_after_anchor`의 우회 경로 람다 안에서 `atom_hash`가 164번 잡혔다. 바깥에서 부른 `atom_hash`는 없었다.
-- 두 번째로 많은 곳은 `Llm_provider.Utf8_sanitize`(168)였다. 이 RFC의 범위가 아니다(§6).
+- `Llm_provider.Utf8_sanitize`도 168번 잡혔다. 그중 153번은 `atom_hash` 아래였다. `atom_hash`가 해시할 JSON을 `encode_messages`로 만들며 부른 것이다. 나머지 15번은 배포 뒤 다시 잰다(§8.2).
 
 ### 1.2 기록 크기
 
@@ -142,28 +144,45 @@ type coverage =
 
 - 생산자는 자기 목록과 함께 버린 atom을 넘긴다. 앞에서부터 이어진 개수(`prefix`)와 그 뒤에서 따로 버린 번호(`later`)다.
 - 앞에서부터 이어진 부분의 마지막 atom이 `through`다.
-- 그 다음 atom이 있고 다른 턴이면 `Whole_turn`이다. 다음 atom이 없거나 같은 턴이면 `Up_to`다. 진행 중인 턴을 다 덮었다고 하지 않는다.
-- `Up_to`의 `settled`는 모든 atom이 덮인 마지막 턴이다. 경계 턴 바로 앞의 턴이다. 정식 턴 저장소가 이 값으로 cutoff를 정한다(D6).
+- 아래 넷이 모두 맞으면 `Whole_turn`이다. 하나라도 아니면 `Up_to`다. 진행 중인 턴을 다 덮었다고 하지 않는다.
+  - 경계 뒤에 atom이 더 있다.
+  - 경계 턴의 atom이 경계 뒤에 다시 나오지 않는다.
+  - 경계 턴의 atom이 그 턴의 첫 atom부터 경계까지 끊기지 않는다. D3은 `Whole_turn`을 그 턴의 첫 이어진 구간으로 읽는다. 다른 턴이 사이에 낀 턴을 `Whole_turn`으로 적으면 읽는 쪽이 덜 덮고, 다음 압축이 나머지를 다시 보관한다.
+  - 경계 턴보다 먼저 시작한 턴도 경계 뒤에 atom이 없다.
+- `Up_to`의 `settled`는 모든 atom이 덮인 마지막 턴이다. 경계 턴보다 먼저 시작한 턴을 앞에서부터 보며, 경계 뒤에 atom이 있는 턴을 만나기 전까지의 마지막 턴이다. 그런 턴이 없으면 같은 종류의 이전 epoch의 settled를 이어받는다. 정식 턴 저장소가 이 값으로 cutoff를 정한다(D6).
 - `Whole_turn`이면 경계 턴 자체가 settled다.
 - 이어지지 않는 나머지는 `beyond`에 적는다. Agent Core는 크기 거절 뒤 현재 턴의 끝난 도구 왕복을 골라 버린다(`droppable_current_turn_tool_atoms`). 이 atom들이 여기로 간다.
 - 새 경계가 이전 경계보다 앞이면 이전 경계를 그대로 둔다. 덮은 범위는 줄지 않는다.
 - 새 경계가 덮게 된 `beyond` 항목은 지운다. 지금 목록에 없는 `beyond` 항목도 지운다.
+- epoch마다 어떤 종류의 목록에서 썼는지(`frame`)를 함께 적는다.
+
+```ocaml
+type frame =
+  | Message_history  (* Agent Core 기록, 공식 클라이언트 seed, ACP overflow의 시도 입력 *)
+  | Canonical_turns  (* ACP 롤오버가 정식 턴 저장소에서 다시 만든 목록 *)
+```
+
+- `Leading` 위치와 턴 안 순번은 한 목록 안에서 센다. 같은 종류의 목록은 같은 기록을 같은 규칙으로 읽으므로 이름의 뜻이 같다. 종류가 다르면 같은 이름이 다른 atom을 가리킨다(§5.1).
 
 ### D3. 목록에서 덮인 앞부분을 찾는다
 
+- 생산자는 같은 종류(`frame`)의 마지막 epoch이 적은 덮은 범위만 이어받는다. 같은 종류의 epoch이 없으면 덮인 것이 없다고 본다.
+- 요약은 종류와 상관없이 마지막 epoch 위에 쌓는다. epoch 번호도 종류와 상관없이 하나로 센다.
 - `Through_leading k`: 맨 앞 무명 atom 중 `Leading j`(`j ≤ k`)가 덮인다.
 - `Through_turn {turn = b; extent}`: 목록에서 `b`의 첫 atom을 찾는다.
   - 찾지 못하면 아무것도 덮이지 않는다.
   - 찾으면 그 앞의 atom은 모두 덮인다. 기록은 뒤에 붙기만 하므로 `b`보다 앞선 atom은 `b`보다 먼저 버려졌다.
-  - `b`의 이어진 atom 중 `Whole_turn`이면 전부, `Up_to {ordinal = k}`이면 순번 `k`까지 덮인다.
+  - `Whole_turn`이면 `b`의 첫 이어진 구간이 덮인다.
+  - `Up_to {ordinal = k}`이면 순번이 `k` 이하인 `b`의 atom 중 마지막 것까지 덮인다. 그 사이에 낀 다른 턴의 atom도 덮인다.
 - `beyond`에 있는 atom은 생산자에게만 덮인 것이다. 소비자는 잘라 내지 않는다(D5).
 - 경계 턴이 목록에 없으면 덮인 것이 없다고 본다. 잘못 자르는 쪽으로는 가지 않는다(§5.4).
 
 ### D4. 생산자는 새로 버린 atom만 인코딩한다
 
 - 생산자 일곱 곳은 `~evicted_messages` 대신 `~messages`와 버린 atom(`prefix`, `later`)을 넘긴다.
+- 목록 종류(`~frame`)도 넘긴다. ACP 롤오버는 정식 턴 목록을 읽었으면 `Canonical_turns`다. 읽지 못해 메시지 기록으로 대신하면 `Message_history`이고, 읽지 못한 이유를 경고로 남긴다.
 - 이름 짓기는 목록 전체를 한 번 훑는다. 메타데이터만 읽는다.
-- 이전 압축 지점이 덮은 atom과 `beyond`에 있는 atom은 건너뛴다. 새로 버린 atom이 없으면 `Ok None`이다.
+- 같은 종류의 이전 압축 지점이 덮은 atom과 `beyond`에 있는 atom은 건너뛴다. 새로 버린 atom이 없으면 `Ok None`이다.
 - 새로 버린 atom만 JSON으로 인코딩해 보관한다.
 - 쓰지 않던 `?blob_store` 인자를 없앤다. 생산자가 그 값을 만들려고 부르던 `require_reader` 확인도 없어진다.
 
@@ -172,17 +191,20 @@ type coverage =
 - `messages_after_anchor`는 D3의 덮인 구간 끝과 inline 압축 지점 위치 중 뒤쪽 바로 다음부터 돌려준다.
 - `beyond` atom은 잘라 내지 않는다. 덮인 구간 뒤에 있으므로 지금 epoch의 기록이다.
 - 직렬화, 해시, 문자열 접두어 비교를 하지 않는다.
+- 소비자는 종류와 상관없이 마지막 epoch의 경계를 checkpoint 기록에서 찾는다. 정식 턴 목록은 턴마다 atom이 둘 이하(사용자, 어시스턴트)다. 롤오버는 atom을 둘 이상 남긴다. 그래서 그 목록에서 쓴 경계는 `Whole_turn`이거나, 사용자 메시지까지 덮은 순번 0의 `Up_to`다. 둘 다 checkpoint 기록에서 같은 자리를 가리킨다.
+- 저장소를 읽지 못하면 오류를 돌려준다. 도구 묶음은 경고를 남기고 기록 전체에서 도구를 이어 붙인다.
 
 ### D6. 정식 턴 저장소의 cutoff는 settled 턴으로 정한다
 
 - cutoff는 `turn_id`가 압축 지점의 settled 턴과 같은 행의 seq다.
 - settled 턴이 없거나 그 행이 없으면 cutoff를 바꾸지 않는다.
+- epoch의 종류와 상관없이 그 epoch의 settled 턴을 쓴다. settled 턴의 atom은 같은 종류의 epoch들이 자기 목록에서 모두 보관했다.
 - 보관 atom을 읽지 않고 메시지 글자를 맞춰 보지 않는다. `find_cutoff_seq_for_evicted_turns`와 `load_handoff_context`의 보관 atom 우회 경로를 지운다.
 
 ### D7. 저장소를 하드컷한다
 
 - `<keeper>.compaction.db`에 `PRAGMA user_version`을 둔다. 표가 있는데 값이 다르면 `Schema_not_current`로 거절한다.
-- 표: `compaction_epochs(epoch_id, anchor_json, trigger_json, previous_epoch_id)`, `archived_atoms(epoch_id, sequence_ord, atom_json, messages_json)`. 기본 키는 `(epoch_id, sequence_ord)`다. 해시가 겹칠 일이 없어 `-ep` 꼬리를 붙이지 않는다.
+- 표: `compaction_epochs(epoch_id, frame, anchor_json, trigger_json, previous_epoch_id)`, `archived_atoms(epoch_id, sequence_ord, atom_json, messages_json)`. `frame`은 `message_history`와 `canonical_turns`만 받는다(`CHECK`). 기본 키는 `(epoch_id, sequence_ord)`다. 해시가 겹칠 일이 없어 `-ep` 꼬리를 붙이지 않는다.
 - `covers_through_turn` 열, `evicted_turn_ids_json` 열, `active_microcompacted_handles` 표를 지운다. 앞의 둘은 `anchor_json`과 `archived_atoms`에서 얻는다. 마지막 표는 운영 경로가 쓰지 않는다(D8).
 - `<keeper>.canonical-turns.db`에도 `user_version`을 둔다. 이 저장소의 `history_resets.reset_after_anchor_epoch`, `compaction_watermarks.epoch_id`, `canonical_turns.compaction_epoch_id`는 압축 epoch 번호를 기억한다. 압축 DB만 새로 만들면 epoch가 1부터 다시 세어진다. 그러면 새 압축 지점이 리셋 전 것으로 무시되고, 같은 번호의 옛 watermark와 섞인다.
 - 정식 턴 저장소에 남은 옛 열 추가 코드(`ALTER TABLE ... last_turn_id`)도 지운다.
@@ -201,15 +223,18 @@ type coverage =
 - 모델이 보는 압축 지점 글의 `covers_through=`와 `[turn:…]` 표시가 `covers=`와 `[atom:…]`로 바뀐다.
 - 대시보드 API의 `covers_through_turn` 필드는 문자열로 남는다. 내용만 새 이름의 표시 문자열로 바뀐다. TUI는 이 문자열을 그대로 보여 준다.
 - 턴 일부만 버린 압축은 그 턴의 정식 턴 행을 지우지 않는다(§2.3의 마지막 증상이 없어진다).
+- 압축 저장소를 읽지 못하면 도구 묶음이 매 턴 경고를 남긴다. 전에는 아무 말 없이 기록 전체를 썼다.
 
 ## 5. 경계 조건과 한계
 
-### 5.1 표현이 다른 목록 사이의 부분 덮음
+### 5.1 종류가 다른 목록의 덮은 범위는 이어받지 않는다
 
-- 턴 하나를 다 덮었는지는 표현과 상관없이 맞는다(`Whole_turn`).
-- 턴 일부만 덮었으면 순번은 그 압축 지점을 만든 표현에서의 값이다. 다른 표현의 소비자는 자기 목록의 순번으로 비교한다.
-- 예: Agent Core가 턴 T의 4번째 atom까지 덮은 뒤 ACP로 넘어갔다. ACP 목록의 T는 atom 둘(사용자, 어시스턴트 요약)이다. 둘 다 덮였다고 본다. T의 나머지 작업은 이 압축 지점의 요약에 들어가지 않는다. T의 행은 settled가 아니라서 정식 턴 저장소와 handoff에 그대로 남는다.
-- 같은 턴 안에서 런타임을 바꾼 Keeper의 압축 요약이 덜 자세해진다. 행이 남으므로 handoff에서는 사라지지 않는다.
+- 턴 안 순번은 목록 종류마다 다른 atom을 가리킨다. Agent Core 기록에서 턴 T의 순번 1은 첫 도구 왕복일 수 있다. ACP 롤오버 목록에서 T의 순번 1은 최종 답이다.
+- 그래서 생산자는 같은 종류의 마지막 epoch만 이어받는다(D3). 다른 종류를 이어받으면 이런 일이 생긴다(#55004 리뷰).
+  - Agent Core가 T의 도구 왕복까지 덮었다(`Up_to {T; 1}`). ACP 롤오버가 이 범위로 자기 목록을 보면 T의 최종 답이 덮였다고 보고 보관하지 않는다. 다음 롤오버가 그 뒤 턴을 settled로 적으면 T의 행이 지워진다. 답은 어디에도 남지 않는다.
+  - ACP 롤오버가 T까지 다 덮었다. Agent Core가 이 범위로 기록을 보면 T의 도구 왕복을 건너뛴다. 정식 턴 행에는 도구 왕복이 없으므로 아무 데도 보관되지 않는다.
+- 대가: 두 종류가 같은 턴을 한 번씩 보관한다. 요약에도 같은 턴이 두 번 들어갈 수 있다. 잃는 것은 없다.
+- 요약, 소비자, 정식 턴 저장소의 cutoff는 종류와 상관없이 마지막 epoch을 본다(D3, D5, D6).
 
 ### 5.2 턴 중간의 참조 없는 사용자 메시지
 
@@ -225,6 +250,7 @@ type coverage =
 
 - 소비자는 아무것도 자르지 않는다. 생산자는 이전 압축 지점이 덮은 것이 없다고 보고 버린 atom을 모두 보관한다.
 - 덜 자르거나 한 번 더 보관할 수는 있어도, 덮지 않은 것을 잘라 내지는 않는다.
+- 이전 경계가 목록에 없으면 새 경계는 지금 목록 안에서만 정한다. 이전 경계는 이어받지 않는다.
 - 이런 경우가 있다.
   - 기록을 비운 뒤: 새 기록에는 옛 경계 턴이 없다. 자르지 않는 것이 맞다.
   - ACP가 다시 만든 목록: watermark 뒤의 행만 담는다. 경계 턴이 다 덮였으면 목록에 없다. 목록의 행은 모두 덮이지 않은 것이므로 맞다.
@@ -232,10 +258,10 @@ type coverage =
 
 ## 6. 하지 않는 것
 
-- `hydrate_missing_turns`의 글자 비교는 압축 지점을 읽지 않는다. 별도 이슈로 남긴다.
-- ACP 정식 턴 행을 처음부터 Keeper 턴 ID로 쓰는 일. ACP 런타임에 턴 ID를 넘기는 경로가 없어 따로 다룬다. 이 RFC는 임시 ID와 함께 동작한다(§1.5).
-- `Utf8_sanitize`가 요청마다 전체 문자열을 훑는 문제(§1.1 두 번째)는 따로 다룬다.
-- checkpoint 저장 1회 320 ms(재디코드, 소유 파일 `lstat` 연쇄)는 따로 다룬다.
+- `hydrate_missing_turns`의 글자 비교는 압축 지점을 읽지 않는다. #55025로 남겼다.
+- ACP 정식 턴 행을 처음부터 Keeper 턴 ID로 쓰는 일. ACP 런타임에 턴 ID를 넘기는 경로가 없어 따로 다룬다(#55026). 이 RFC는 임시 ID와 함께 동작한다(§1.5).
+- `atom_hash` 밖의 `Utf8_sanitize` 15회(§1.1)는 배포 뒤 다시 재고 판단한다.
+- checkpoint 저장 시간(11-26 로그 7,141건, p50 111 ms, p99 5,354 ms)은 #55034로 남겼다.
 - `History_carry` 계산을 배치 정책 확인 뒤로 미루는 일. D5로 비용이 작아져 이 RFC에서는 하지 않는다.
 
 ## 7. Fresh state required
@@ -265,11 +291,15 @@ type coverage =
 - 턴을 다 덮은 압축 지점은 정식 턴 저장소의 그 턴 행까지 지운다. 일부만 덮었으면 바로 앞 턴까지다.
 - 옛 형식(`user_version` 0, 표 있음) 압축 DB와 정식 턴 저장소는 `Schema_not_current`로 거절된다.
 - 맨 앞 무명 atom만 버린 뒤 턴 atom을 버리면 무명 atom을 다시 보관하지 않는다.
+- Agent Core가 턴 T를 일부만 덮은 뒤 ACP 롤오버가 압축하면, 롤오버가 T의 최종 답을 자기 목록에서 보관한다. T의 행은 그 뒤에 지워진다.
+- ACP 롤오버가 T까지 덮은 뒤 Agent Core가 압축하면 T의 도구 왕복을 보관한다.
+- 다른 턴이 사이에 낀 턴은 `Up_to`로 적힌다. 덮인 끝이 경계와 같고, 다음 압축은 새 atom만 보관한다.
+- 압축 여섯 개가 도메인 풀에서 동시에 돌아도 쓰기 충돌 없이 epoch 여섯 개를 만든다.
 
 ### 8.2 측정
 
 - 수정 전: §1.1의 `sample` 결과.
-- 수정 후: 같은 Keeper 구성으로 서버를 띄운 뒤 같은 명령으로 30초를 뜬다. `messages_after_anchor` 아래 inclusive 샘플 수와 `atom_hash` 유무를 비교한다.
+- 수정 후: 같은 Keeper 구성으로 서버를 띄운 뒤 같은 명령으로 30초를 뜬다. `messages_after_anchor` 아래 inclusive 샘플 수와 `atom_hash` 유무를 비교한다. `Utf8_sanitize`의 inclusive 샘플 수도 비교한다.
 - 명령: `sample <masc pid> 30 -file <out>`. 운영자가 새 빌드를 설치하고 Fresh state를 마친 뒤 돌린다.
 
 ## 9. 순서

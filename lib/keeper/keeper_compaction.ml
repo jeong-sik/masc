@@ -581,6 +581,14 @@ let create_schema_in_tx db ~path =
          trigger_json TEXT NOT NULL, \
          previous_epoch_id INTEGER)"
     in
+    (* Each tool-list build reads the latest epoch of each frame; without the
+       index, a frame with no epoch scans every epoch. *)
+    let* () =
+      exec_sql
+        db
+        "create_epochs_by_frame"
+        "CREATE INDEX compaction_epochs_by_frame ON compaction_epochs (frame, epoch_id)"
+    in
     let* () =
       exec_sql
         db

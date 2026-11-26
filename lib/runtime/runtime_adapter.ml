@@ -44,20 +44,10 @@ type execution_materialization =
 
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
 
-(* SSOT for "this header carries a credential". [runtime_adapter] strips these
-   from [Provider_config.headers] so the secret is not duplicated alongside
-   [api_key], and the dashboard hides them from the provider header list. The
-   two used to keep separate lists: this one knew authorization / x-api-key,
-   the dashboard's also knew api-key and x-auth-token. The narrower list was
-   the one doing the stripping, so a provider declaring
-   [headers."api-key"] passed the filter and the secret reached
-   [Provider_config.headers] — while the dashboard hid the very header that
-   was being forwarded.
-
-   This stays a deny list over free-form TOML keys, which is why the real fix
-   is to reject credential-looking keys at parse time or give headers a typed
-   non-secret map (issue linked in the PR). Until then one list is strictly
-   better than two that disagree. *)
+(* Header names that carry a credential. The provider's [headers] table is
+   built into [Provider_config.headers] without these, so the credential goes
+   to the provider once, as [api_key]. The match is on the name only: a
+   header under any other name goes to that same provider as written. *)
 let auth_header_keys =
   [ "authorization"
   ; "proxy-authorization"

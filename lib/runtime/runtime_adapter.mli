@@ -16,8 +16,7 @@ val default_http_request_path :
 
 (** Header keys that carry a credential. Stripped from
     [Provider_config.headers] so a declared auth header is not duplicated
-    next to [api_key], and hidden from the dashboard's provider header list.
-    Matching is case-insensitive on the trimmed key. *)
+    next to [api_key]. Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
 val http_protocol_metadata : Runtime_schema.provider ->

@@ -53,6 +53,7 @@ import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperReadNotice } from './keeper-read'
 import { KeeperRoster } from './keeper-roster'
+import { REFRESH_BUSY_LABEL } from '../../components/primitives/refresh-button'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
@@ -1354,7 +1355,10 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     vi.stubGlobal('fetch', mockFetch)
 
     const pc = render(html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`)
+    // The read on mount is out: the refresh button says so, and stops when it ends.
+    expect(pc.getByRole('button', { name: REFRESH_BUSY_LABEL }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(pc.container.textContent).toContain('12.500 C'))
+    await waitFor(() => expect(pc.getByRole('button', { name: '새로고침' }).getAttribute('aria-busy')).toBe('false'))
     const policyNote = pc.container.querySelector('[role="note"]')
     expect(policyNote?.classList.contains('kp-notice')).toBe(true)
     expect(policyNote?.classList.contains('kp-pill')).toBe(false)

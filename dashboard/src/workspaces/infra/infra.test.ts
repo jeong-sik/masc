@@ -802,4 +802,44 @@ describe('workspaces/infra', () => {
       expect(container.textContent).toContain(liveLog.message)
     })
   })
+
+  it('stabilizes Logs pause button width with tnum and tolerates omitted repository activity arrays', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/repositories') {
+        return jsonResponse({
+          repositories: [{
+            id: 'repo-masc',
+            name: 'masc',
+            url: 'https://github.com/jeong-sik/masc',
+            local_path: '/workspace/masc',
+            default_branch: 'main',
+            status: 'active',
+            auto_sync: true,
+            sync_interval: 300,
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/ide/repository-activity')) {
+        return jsonResponse({ ok: true, data: { repo_id: 'repo-masc' } })
+      }
+      if (url.startsWith('/api/v1/dashboard/logs')) {
+        return jsonResponse({ entries: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    const pauseBtn = container.querySelector<HTMLButtonElement>('[data-testid="logs-pause-toggle"]')!
+    expect(pauseBtn).not.toBeNull()
+    expect(pauseBtn.classList.contains('tnum')).toBe(true)
+    expect(pauseBtn.style.minWidth).toBe('124px')
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(40)
+    expect(container.textContent).toContain('변경 0건')
+  })
 })

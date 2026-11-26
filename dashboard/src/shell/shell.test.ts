@@ -23,7 +23,7 @@ import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
-import { navigate, resetRouterForTests } from '../routes/router'
+import { currentRoute, navigate, resetRouterForTests } from '../routes/router'
 import { App } from '../app'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
@@ -1220,7 +1220,6 @@ describe('Proposal A+ Shell components', () => {
     expect(accountButtons).toHaveLength(1)
     expect(accountButtons[0]?.textContent?.trim()).toBe('Open Sign-In Gate →')
   })
-
   it('CommandPalette exposes aria-activedescendant tracking the selected option id across ArrowDown', async () => {
     commandPaletteOpen.value = true
     await act(async () => {
@@ -1348,5 +1347,68 @@ describe('Proposal A+ Shell components', () => {
     }
     await refreshPendingHitl(fetchMalformed)
     expect(hitlSourceStatus.value.approvals.kind).toBe('failed')
+  })
+
+  it('blocks admin-only palette actions and settings/infra keyboard shortcuts for non-admin workers while allowing workspace-read defaults', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: AUTH_METHODS,
+    }
+    const seenUrls: string[] = []
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url === '/api/v1/dashboard/runtime-defaults') {
+        return hitlJson({ default_runtime_id: 'claude-code', runtimes: [] })
+      }
+      return hitlJson({})
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const cmds = buildPaletteCommands(authSession.value)
+    const digestCmd = cmds.find((c) => c.id === 'action:operator-snapshot-check')!
+    const defaultsCmd = cmds.find((c) => c.id === 'action:runtime-defaults-check')!
+    expect(digestCmd.locked).toBe(true)
+    expect(Boolean(defaultsCmd.locked)).toBe(false)
+
+    await digestCmd.run()
+    expect(seenUrls.some((u) => u.includes('/api/v1/operator/digest'))).toBe(false)
+    expect(shellToasts.value.some((t) => t.tone === 'info' && t.message.includes('관리자 전용'))).toBe(true)
+
+    await defaultsCmd.run()
+    expect(seenUrls).toContain('/api/v1/dashboard/runtime-defaults')
+
+    resetShellStateForTests()
+    navigate('/work/inbox')
+    await act(async () => {
+      render(h(App, {}), container)
+    })
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: AUTH_METHODS,
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }))
+    expect(currentRoute.value.path).toBe('/work/inbox')
+    expect(window.location.hash).not.toContain('/settings')
+    expect(shellToasts.value.some((t) => t.tone === 'info' && t.message === '설정은 관리자 전용입니다.')).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '6', bubbles: true }))
+    expect(currentRoute.value.path).toBe('/work/inbox')
+    expect(window.location.hash).not.toContain('/infra')
+    expect(shellToasts.value.some((t) => t.tone === 'info' && t.message.includes('Infra') && t.message.includes('관리자 전용'))).toBe(true)
   })
 })

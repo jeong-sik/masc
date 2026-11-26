@@ -14,12 +14,14 @@
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   WIKI_SOURCES,
   computeMarkdownLineDiff,
@@ -46,6 +48,7 @@ interface CasConflictState {
 }
 
 export function WikiTab(props: WorkspaceViewProps) {
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const [leftView, setLeftView] = useState<WikiLeftView>('pages')
   const [wikiIndex, setWikiIndex] = useState<WikiIndexData | null>(null)
   const lintObs = resourceCache.observe<WikiLintData>('kn:wiki:lint').value
@@ -81,7 +84,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [expectedSha, setExpectedSha] = useState<string | null>(null)
   const [expectedRev, setExpectedRev] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saveFeedback, setSaveFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
   const submitSaveRef = useRef<() => Promise<void>>(async () => {})
   const mountedRef = useRef(true)
@@ -96,6 +99,14 @@ export function WikiTab(props: WorkspaceViewProps) {
       searchAbortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (adminLocked && editing) {
+      setEditing(false)
+      setCreatingNew(false)
+      setCasConflict(null)
+    }
+  }, [adminLocked, editing])
 
   const loadIndex = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     const seq = ++indexSeqRef.current
@@ -116,9 +127,10 @@ export function WikiTab(props: WorkspaceViewProps) {
       setWikiIndex(obs.data)
       markViewSynced()
       setSelectedSlug((prev) => {
-        if (props.entityId && obs.data.pages.some((p) => p.slug === props.entityId)) return props.entityId
-        if (prev && obs.data.pages.some((p) => p.slug === prev)) return prev
-        return obs.data.pages[0]?.slug ?? null
+        const pages = obs.data.pages ?? []
+        if (props.entityId && pages.some((p) => p.slug === props.entityId)) return props.entityId
+        if (prev && pages.some((p) => p.slug === prev)) return prev
+        return pages[0]?.slug ?? null
       })
     } else if (obs.kind === 'failed') {
       setLoadError(obs.error.message)
@@ -209,6 +221,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   }, [selectedSlug, creatingNew, loadPage])
 
   const startEdit = (page: WikiPageData) => {
+    if (adminLocked) return
     setCreatingNew(false)
     setEditing(true)
     setCasConflict(null)
@@ -217,7 +230,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     setEditTitle(page.frontmatter.title)
     setEditSummary(page.frontmatter.summary)
     setEditSource(page.frontmatter.source)
-    setEditTags(page.frontmatter.tags.join(', '))
+    setEditTags((page.frontmatter.tags ?? []).join(', '))
     setEditBody(page.body_markdown)
     setEditNote('')
     setExpectedSha(page.sha256)
@@ -225,6 +238,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   }
 
   const startNewPage = () => {
+    if (adminLocked) return
     setCreatingNew(true)
     setEditing(true)
     setCasConflict(null)
@@ -241,6 +255,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   }
 
   const submitSave = async (overrideCas?: { sha256: string; revision: number }) => {
+    if (adminLocked) return
     const targetSlug = editSlug.trim()
     if (!targetSlug || !editTitle.trim()) {
       setSaveFeedback({ kind: 'err', message: 'Slug와 페이지 제목을 모두 입력하세요.' })
@@ -303,10 +318,11 @@ export function WikiTab(props: WorkspaceViewProps) {
     setCreatingNew(false)
     setEditing(false)
     setSelectedSlug(res.value.slug)
-    setSaveFeedback({
-      kind: 'ok',
-      message: `${res.value.slug} (rev ${res.value.revision}) ${res.value.action === 'created' ? '생성' : '저장'} 완료`,
-    })
+    setSaveFeedback(null)
+    pushShellToast(
+      `${res.value.slug} (rev ${res.value.revision}) ${res.value.action === 'created' ? '생성' : '저장'} 완료`,
+      'success',
+    )
     resourceCache.invalidateTopic('wiki')
     await loadIndex('manual')
     pageAbortRef.current?.abort()
@@ -345,14 +361,14 @@ export function WikiTab(props: WorkspaceViewProps) {
             Pages <span class="kn-chip-count">${wikiIndex?.pages_total ?? 0}</span>
           </button>
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'lint'} onClick=${() => setLeftView('lint')}>
-            Lint <span class="kn-chip-count">${wikiIndex?.lint.total_findings ?? 0}</span>
+            Lint <span class="kn-chip-count">${wikiIndex?.lint?.total_findings ?? 0}</span>
           </button>
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'log'} onClick=${() => setLeftView('log')}>
             Log
           </button>
         </div>
         <div class="kn-actions">
-          <button type="button" class="btn-primary" data-opens-detail onClick=${startNewPage}>+ 새 페이지</button>
+          ${!adminLocked && html`<button type="button" class="btn-primary" data-opens-detail onClick=${startNewPage}>+ 새 페이지</button>`}
           <button type="button" class="btn-ghost" onClick=${() => void loadIndex('manual')}>새로고침</button>
         </div>
       </div>
@@ -403,10 +419,10 @@ export function WikiTab(props: WorkspaceViewProps) {
               <option value="title">제목순</option>
               <option value="rank">연결 순위순</option>
             </select>
-            ${wikiIndex && wikiIndex.tags.length > 0 && html`
+            ${wikiIndex && (wikiIndex.tags?.length ?? 0) > 0 && html`
               <${PopoverMenu}
                 align="right"
-                triggerLabel=${tagFilter ? `태그: #${tagFilter} ▾` : `태그 (${wikiIndex.tags.length}) ▾`}
+                triggerLabel=${tagFilter ? `태그: #${tagFilter} ▾` : `태그 (${(wikiIndex.tags ?? []).length}) ▾`}
                 triggerClassName="btn-ghost"
                 triggerTestId="wiki-tag-filter"
                 popoverTestId="wiki-tag-filter-menu"
@@ -420,7 +436,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                     active: tagFilter === '',
                     onSelect: () => setTagFilter(''),
                   },
-                  ...wikiIndex.tags.slice(0, 24).map((t) => ({
+                  ...(wikiIndex.tags ?? []).slice(0, 24).map((t) => ({
                     id: t.tag,
                     testId: `wiki-tag-${t.tag}`,
                     label: `#${t.tag} (${t.count})`,
@@ -444,7 +460,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                     검색 닫기
                   </button>
                 </div>
-                ${searchResult.results.map((r) => html`
+                ${(searchResult.results ?? []).map((r) => html`
                   <button
                     key=${r.slug}
                     type="button"
@@ -464,7 +480,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                       <span class="mono">${r.slug}</span>
                       <span>rev ${r.revision}</span>
                     </div>
-                    ${r.snippets[0] && html`
+                    ${r.snippets?.[0] && html`
                       <div class="kn-sub-line">
                         L${r.snippets[0].line}: ${r.snippets[0].text}
                       </div>
@@ -521,20 +537,20 @@ export function WikiTab(props: WorkspaceViewProps) {
             ? html`<span class="dtable-absent">Lint 보고서 불러오는 중…</span>`
             : html`
                 <div class="kn-chips">
-                  ${Object.entries(lintData.counts).map(([k, v]) => html`
+                  ${Object.entries(lintData.counts ?? {}).map(([k, v]) => html`
                     <span key=${k} class=${`kn-badge ${v > 0 ? 'kn-badge--warn' : 'kn-badge--ok'}`}>
                       ${k}: ${v}
                     </span>
                   `)}
                 </div>
-                ${lintData.duplicate_title_candidates.length > 0 && html`
+                ${(lintData.duplicate_title_candidates ?? []).length > 0 && html`
                   <div class="kn-notice kn-notice--warn">
-                    중복 제목 후보 ${lintData.duplicate_title_candidates.length}쌍 감지됨
+                    중복 제목 후보 ${(lintData.duplicate_title_candidates ?? []).length}쌍 감지됨
                   </div>
                 `}
-                ${lintData.findings.length === 0
+                ${(lintData.findings ?? []).length === 0
                   ? html`<div class="kn-notice kn-notice--ok">Lint 경고가 없습니다 (0).</div>`
-                  : lintData.findings.map((f, idx) => html`
+                  : (lintData.findings ?? []).map((f, idx) => html`
                       <button
                         key=${`${f.kind}-${f.subject}-${idx}`}
                         type="button"
@@ -571,9 +587,9 @@ export function WikiTab(props: WorkspaceViewProps) {
             ? html`<div class="kn-notice kn-notice--err" role="alert">Wiki 로그 조회 실패: ${logObs.kind === 'failed' ? logObs.error.message : logObs.reason ?? '응답을 확인할 수 없습니다.'}</div>`
             : !logData
             ? html`<span class="dtable-absent">로그 불러오는 중…</span>`
-            : logData.entries.length === 0
+            : (logData.entries ?? []).length === 0
               ? html`<span class="dtable-absent">기록된 Wiki 로그가 없습니다.</span>`
-              : logData.entries.map((entry) => html`
+              : (logData.entries ?? []).map((entry) => html`
                   <button
                     key=${entry.idx}
                     type="button"
@@ -604,7 +620,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   // from the first render, before the effect that reads it has run.
   const pageLoading = selectedSlug !== null && !creatingNew && pageDetail === null && pageError === null
 
-  const detailPane = editing
+  const detailPane = editing && !adminLocked
     ? html`
         <div class="kn-detail-pad">
           <div class="kn-section-head">
@@ -634,7 +650,7 @@ export function WikiTab(props: WorkspaceViewProps) {
           </div>
 
           ${saveFeedback && html`
-            <div class=${`kn-notice kn-notice--${saveFeedback.kind}`} role="status">${saveFeedback.message}</div>
+            <div class="kn-notice kn-notice--err" role="alert">${saveFeedback.message}</div>
           `}
 
           ${casConflict && html`
@@ -661,7 +677,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                   class="btn-ghost"
                   onClick=${() => {
                     startEdit(casConflict.serverPage)
-                    setSaveFeedback({ kind: 'ok', message: '서버 최신 리비전으로 에디터를 다시 불러왔습니다.' })
+                    pushShellToast('서버 최신 리비전으로 에디터를 다시 불러왔습니다.', 'info')
                   }}
                 >
                   서버 최신본으로 다시 불러오기 (Reload)
@@ -764,7 +780,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     : pageDetail
       ? html`
           <div class="kn-detail-pad">
-            ${saveFeedback && html`<div class=${`kn-notice kn-notice--${saveFeedback.kind}`} role="status">${saveFeedback.message}</div>`}
+            ${saveFeedback && html`<div class="kn-notice kn-notice--err" role="alert">${saveFeedback.message}</div>`}
             <div class="kn-section-head">
               <div class="kn-min-w-0">
                 <div class="kn-row-meta">
@@ -779,9 +795,11 @@ export function WikiTab(props: WorkspaceViewProps) {
                 `}
               </div>
               <div class="kn-actions">
-                <button type="button" class="btn-primary" onClick=${() => startEdit(pageDetail)}>
-                  CAS 편집
-                </button>
+                ${!adminLocked && html`
+                  <button type="button" class="btn-primary" onClick=${() => startEdit(pageDetail)}>
+                    CAS 편집
+                  </button>
+                `}
                 <button
                   type="button"
                   class="btn-ghost"
@@ -800,13 +818,13 @@ export function WikiTab(props: WorkspaceViewProps) {
             <div class="kn-row-meta">
               <${KeeperBadge} id=${pageDetail.frontmatter.author} size="sm" />
               <span>수정: ${formatRelativeTime(pageDetail.frontmatter.updated)}</span>
-              ${pageDetail.frontmatter.tags.map((tag) => html`<span key=${tag} class="kn-badge">#${tag}</span>`)}
+              ${(pageDetail.frontmatter.tags ?? []).map((tag) => html`<span key=${tag} class="kn-badge">#${tag}</span>`)}
             </div>
 
-            ${pageDetail.lint_findings.length > 0 && html`
+            ${(pageDetail.lint_findings ?? []).length > 0 && html`
               <div class="kn-notice kn-notice--warn">
-                이 페이지에 Lint 경고 ${pageDetail.lint_findings.length}건이 있습니다:
-                ${pageDetail.lint_findings.map((f) => f.kind).join(', ')}
+                이 페이지에 Lint 경고 ${(pageDetail.lint_findings ?? []).length}건이 있습니다:
+                ${(pageDetail.lint_findings ?? []).map((f) => f.kind).join(', ')}
               </div>
             `}
 
@@ -816,18 +834,18 @@ export function WikiTab(props: WorkspaceViewProps) {
 
             <details class="ap-disclosure" data-testid="wiki-links-disclosure">
               <summary class="ap-disclosure-trigger">
-                <span>연결 문서: Backlinks ${pageDetail.backlinks.length} · Outgoing ${pageDetail.outgoing_links.length}</span>
+                <span>연결 문서: Backlinks ${(pageDetail.backlinks ?? []).length} · Outgoing ${(pageDetail.outgoing_links ?? []).length}</span>
                 <span aria-hidden="true">▸</span>
               </summary>
               <div class="ap-disclosure-body">
                 <div class="kn-grid-links">
                   <section class="kn-section">
-                    <h3 class="kn-section-title">Backlinks (${pageDetail.backlinks.length})</h3>
-                    ${pageDetail.backlinks.length === 0
+                    <h3 class="kn-section-title">Backlinks (${(pageDetail.backlinks ?? []).length})</h3>
+                    ${(pageDetail.backlinks ?? []).length === 0
                       ? html`<span class="dtable-absent">없음</span>`
                       : html`
                           <div class="kn-chips">
-                            ${pageDetail.backlinks.map((slug) => html`
+                            ${(pageDetail.backlinks ?? []).map((slug) => html`
                               <button key=${slug} type="button" class="kn-chip mono" onClick=${() => setSelectedSlug(slug)}>
                                 ${slug}
                               </button>
@@ -836,12 +854,12 @@ export function WikiTab(props: WorkspaceViewProps) {
                         `}
                   </section>
                   <section class="kn-section">
-                    <h3 class="kn-section-title">Outgoing Links (${pageDetail.outgoing_links.length})</h3>
-                    ${pageDetail.outgoing_links.length === 0
+                    <h3 class="kn-section-title">Outgoing Links (${(pageDetail.outgoing_links ?? []).length})</h3>
+                    ${(pageDetail.outgoing_links ?? []).length === 0
                       ? html`<span class="dtable-absent">없음</span>`
                       : html`
                           <div class="kn-chips">
-                            ${pageDetail.outgoing_links.map((link, idx) => html`
+                            ${(pageDetail.outgoing_links ?? []).map((link, idx) => html`
                               <button
                                 key=${`${link.target}-${idx}`}
                                 type="button"
@@ -877,7 +895,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       linkedKey=${props.entityId ?? null}
       masterLabel="Wiki 인덱스"
       detailLabel="Wiki 본문"
-      emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 페이지를 선택하거나 "+ 새 페이지"를 눌러 문서를 작성하세요.</span></div>`}
+      emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">${adminLocked ? 'Wiki 페이지를 선택하세요.' : 'Wiki 페이지를 선택하거나 "+ 새 페이지"를 눌러 문서를 작성하세요.'}</span></div>`}
     />
   `
 }

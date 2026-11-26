@@ -32,6 +32,7 @@ import { InlineSpinner } from '../../components/common/inline-spinner'
 import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib/verification-coverage'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
   asSafeInt,
@@ -351,7 +352,7 @@ export function TasksTab(props: WorkspaceViewProps) {
   const [linkGoalId, setLinkGoalId] = useState('')
   const [cancelReason, setCancelReason] = useState('')
   const [busyAction, setBusyAction] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err' | 'warn'; message: string } | null>(null)
+  const [feedback, setFeedback] = useState<{ kind: 'err' | 'warn'; message: string } | null>(null)
 
   useEffect(() => {
     setBusyAction(null)
@@ -609,7 +610,8 @@ export function TasksTab(props: WorkspaceViewProps) {
     setNewTaskDesc('')
     setNewTaskGoalId('')
     setShowCreateTask(false)
-    setFeedback({ kind: 'ok', message: `태스크 "${trimmed}" 생성 완료` })
+    setFeedback(null)
+    pushShellToast(`태스크 "${trimmed}" 생성 완료`, 'success')
     resourceCache.invalidateTopic('tasks')
     await loadTaskSources('manual')
   }
@@ -624,7 +626,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `전환 실패 (${action}): ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: `${task.id} → ${action} 적용됨` })
+    setFeedback(null)
+    pushShellToast(`${task.id} → ${action} 적용됨`, 'success')
     resourceCache.invalidateTopic('tasks')
     await loadTaskSources('manual')
   }
@@ -666,7 +669,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       return
     }
     setLinkGoalId('')
-    setFeedback({ kind: 'ok', message: `${task.id} → Goal ${targetGoalId} 연결 완료` })
+    setFeedback(null)
+    pushShellToast(`${task.id} → Goal ${targetGoalId} 연결 완료`, 'success')
     resourceCache.invalidateTopic('tasks')
     await loadTaskSources('manual')
   }
@@ -694,7 +698,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       return
     }
     setCancelReason('')
-    setFeedback({ kind: 'ok', message: `태스크 ${task.id} 취소 완료` })
+    setFeedback(null)
+    pushShellToast(`태스크 ${task.id} 취소 완료`, 'success')
     resourceCache.invalidateTopic('tasks')
     await loadTaskSources('manual')
   }
@@ -709,7 +714,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `태스크 삭제 실패: ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: `태스크 ${task.id} 삭제 완료` })
+    setFeedback(null)
+    pushShellToast(`태스크 ${task.id} 삭제 완료`, 'success')
     resourceCache.invalidateTopic('tasks')
     await loadTaskSources('manual')
   }
@@ -740,7 +746,8 @@ export function TasksTab(props: WorkspaceViewProps) {
     }
     setSchedMessage('')
     setShowCreateSchedule(false)
-    setFeedback({ kind: 'ok', message: `${schedKeeper.trim()} 예약 자동화 등록 완료` })
+    setFeedback(null)
+    pushShellToast(`${schedKeeper.trim()} 예약 자동화 등록 완료`, 'success')
     resourceCache.invalidateTopic('schedules')
     await loadSchedulesRef.current('manual')
   }
@@ -758,7 +765,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `예약 취소 실패: ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: `예약 ${scheduleId} 취소됨` })
+    setFeedback(null)
+    pushShellToast(`예약 ${scheduleId} 취소됨`, 'success')
     resourceCache.invalidateTopic('schedules')
     await loadSchedulesRef.current('manual')
   }
@@ -1044,7 +1052,7 @@ export function TasksTab(props: WorkspaceViewProps) {
     ? selectedSchedule
       ? html`
           <div class="wk-detail-pad">
-            ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
+            ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="alert">${feedback.message}</div>`}
             <div class="wk-section-head">
               <div class="wk-min-w-0">
                 <div class="mono wk-sub-id">${selectedSchedule.scheduleId}</div>
@@ -1092,7 +1100,7 @@ export function TasksTab(props: WorkspaceViewProps) {
           const linkCheck = checkTaskGoalLinkable(selectedTask)
           return html`
             <div class="wk-detail-pad">
-              ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
+              ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="alert">${feedback.message}</div>`}
               <div class="wk-section-head">
                 <div class="wk-min-w-0">
                   <div class="mono wk-sub-id">${selectedTask.id}</div>

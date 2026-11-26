@@ -23,6 +23,7 @@ import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
 import { MasterDetail, PopoverMenu, TargetLockedAction, VirtualList } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   GOAL_PHASES,
   asNonEmptyString,
@@ -284,13 +285,12 @@ export function GoalsTab(props: WorkspaceViewProps) {
   const [procedure, setProcedure] = useState('')
   const [priority, setPriority] = useState(2)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   // Transition & Confirmation state
   const [transitionNote, setTransitionNote] = useState('')
   const [actionBusy, setActionBusy] = useState<string | null>(null)
-  const [actionFeedback, setActionFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const [actionFeedback, setActionFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
 
   const [confirmationRead, setConfirmationRead] = useState<ConfirmationRead | null>(null)
   const [liveConfirmRev, setLiveConfirmRev] = useState<string | null>(null)
@@ -500,7 +500,6 @@ export function GoalsTab(props: WorkspaceViewProps) {
     e.preventDefault()
     if (multiAccount || !isEpochCurrent(epoch) || creating) return
     setCreateError(null)
-    setCreateSuccess(null)
     const validated = validateNewGoalInput({
       title,
       measureKind,
@@ -541,7 +540,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
       setCreateError(callRes.error.message)
       return
     }
-    setCreateSuccess(`목표 "${validated.value.title}" 생성 완료`)
+    pushShellToast(`목표 "${validated.value.title}" 생성 완료`, 'success')
     setTitle('')
     setCondition('')
     setNoun('')
@@ -581,7 +580,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
       return
     }
     setTransitionNote('')
-    setActionFeedback({ kind: 'ok', message: `${goal.id} → ${action} 전이 적용됨` })
+    setActionFeedback(null)
+    pushShellToast(`${goal.id} → ${action} 전이 적용됨`, 'success')
     resourceCache.invalidateTopic('goals')
     loadData('manual')
   }
@@ -609,16 +609,20 @@ export function GoalsTab(props: WorkspaceViewProps) {
       setActionFeedback({ kind: 'err', message: `완료 확정 실패: ${res.error.message}` })
       return
     }
-    setActionFeedback({ kind: 'ok', message: `목표 ${confirmation.goalId} 최종 완료 확정됨` })
+    setActionFeedback(null)
+    pushShellToast(`목표 ${confirmation.goalId} 최종 완료 확정됨`, 'success')
     resourceCache.invalidateTopic('goals')
     loadData('manual')
   }
 
   const copyText = async (label: string, text: string) => {
     if (!text) return
-    setActionFeedback(await copyToClipboard(text)
-      ? { kind: 'ok', message: `${label} 복사됨` }
-      : { kind: 'err', message: `${label} 복사에 실패했습니다. 직접 선택해 복사해 주세요.` })
+    if (await copyToClipboard(text)) {
+      setActionFeedback(null)
+      pushShellToast(`${label} 복사됨`, 'success')
+    } else {
+      setActionFeedback({ kind: 'err', message: `${label} 복사에 실패했습니다. 직접 선택해 복사해 주세요.` })
+    }
   }
 
   const handleVerificationVerdict = async (
@@ -649,10 +653,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
       setActionFeedback({ kind: 'err', message: `검증 판정 실패: ${res.error.message}` })
       return
     }
-    setActionFeedback({
-      kind: 'ok',
-      message: `검증 ${req.requestId} (${req.taskId}) ${verdict === 'approve' ? '승인' : '반려'} 완료`,
-    })
+    setActionFeedback(null)
+    pushShellToast(`검증 ${req.requestId} (${req.taskId}) ${verdict === 'approve' ? '승인' : '반려'} 완료`, 'success')
     resourceCache.invalidateTopic('verification')
     loadData('manual')
   }
@@ -861,7 +863,6 @@ export function GoalsTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${createSuccess && html`<div class="wk-notice wk-notice--ok wk-inset">${createSuccess}</div>`}
       ${showReadAlert('목표 목록', goalObservation, goalRead !== null)}
 
       ${goalRead && html`
@@ -960,7 +961,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
           </div>
 
           ${actionFeedback && html`
-            <div class=${`wk-notice wk-notice--${actionFeedback.kind}`} role="status">
+            <div class="wk-notice wk-notice--err" role="alert">
               ${actionFeedback.message}
             </div>
           `}

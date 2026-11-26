@@ -15,6 +15,7 @@ import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { activeWorkspaceId, currentAccountMode, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { pushShellToast } from '../../shell/shell-state'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import {
   fetchKeeperMemoryFactsApi,
@@ -68,7 +69,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
 
 type MemoryActionState =
   | { readonly kind: 'pending' }
-  | { readonly kind: 'ok' | 'error'; readonly text: string }
+  | { readonly kind: 'error'; readonly text: string }
 
 function MemoryActionNotice({ state, pending }: {
   readonly state: MemoryActionState | null
@@ -76,7 +77,6 @@ function MemoryActionNotice({ state, pending }: {
 }) {
   if (state?.kind === 'pending') return html`<span class="sr-only" role="status">${pending}</span>`
   if (state?.kind === 'error') return html`<div class="ap-error" role="alert">${state.text}</div>`
-  if (state?.kind === 'ok') return html`<div class="kp-pill" data-tone="ok" role="status">${state.text}</div>`
   return null
 }
 
@@ -210,7 +210,8 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       setActFeedback({ kind: 'error', text: res.error.message })
       return
     }
-    setActFeedback({ kind: 'ok', text: `${payload.action} 적용 완료` })
+    setActFeedback(null)
+    pushShellToast(`${payload.action} 적용 완료`, 'success')
     loadAll()
   }
 
@@ -238,10 +239,11 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       setRetractFeedback({ kind: 'error', text: `${id}의 철회 결과를 확인할 수 없습니다.` })
       return
     }
-    setRetractFeedback({
-      kind: 'ok',
-      text: receipt.outcome === 'retracted' ? `철회 완료 · ${id}` : `현재 메모리에 없는 항목 · ${id}`,
-    })
+    setRetractFeedback(null)
+    pushShellToast(
+      receipt.outcome === 'retracted' ? `철회 완료 · ${id}` : `현재 메모리에 없는 항목 · ${id}`,
+      receipt.outcome === 'retracted' ? 'success' : 'info',
+    )
     setRetractId(current => current.trim() === id ? '' : current)
     loadAll()
   }

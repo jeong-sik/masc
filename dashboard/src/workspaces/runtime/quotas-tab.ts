@@ -18,6 +18,7 @@ import type uPlot from 'uplot'
 import {
   apiGet,
   apiMutate,
+  authSession,
   cancelSetupLogin,
   currentAccountMode,
   currentSessionEpoch,
@@ -37,6 +38,8 @@ import {
 } from '../../core'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { isUtilizationSpent } from '../../lib/quota-window'
+import { isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   PopoverMenu,
   UPlotChart,
@@ -205,6 +208,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
   const providerDays = timeWindowProviderDays(win)
   const accountMode = currentAccountMode.value
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
 
   const resolvedObs = resourceCache.observe<RuntimeResolvedPayload>('runtime:resolved').value
   const historyKey = `runtime:provider-usage-history:${providerDays}`
@@ -224,7 +228,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const [verifyModelInput, setVerifyModelInput] = useState<string>('')
   const [loginReceipt, setLoginReceipt] = useState<LoginReceiptState | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
-  const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [actionBanner, setActionBanner] = useState<{ kind: 'err'; text: string } | null>(null)
   const [sourceRevision, setSourceRevision] = useState<string>('')
   const mountedRef = useRef(true)
   const rawConfigAbortRef = useRef<AbortController | null>(null)
@@ -279,14 +283,16 @@ export function QuotasTab(props: WorkspaceViewProps) {
         ),
       )
       rawConfigAbortRef.current?.abort()
-      const ctrl = new AbortController()
-      rawConfigAbortRef.current = ctrl
-      void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
-        if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
-        if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
-          setSourceRevision(res.value.source_revision.trim())
-        }
-      })
+      if (!adminLocked) {
+        const ctrl = new AbortController()
+        rawConfigAbortRef.current = ctrl
+        void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
+          if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
+          if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
+            setSourceRevision(res.value.source_revision.trim())
+          }
+        })
+      }
     }
 
     void Promise.all(jobs).then(() => {
@@ -303,7 +309,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     loadAll('mount')
-  }, [providerDays, accountMode, epoch])
+  }, [providerDays, accountMode, epoch, adminLocked])
 
   useEffect(() => {
     const watchedTopics = new Set([
@@ -343,7 +349,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       unsubReconnect()
       unsubResync()
     }
-  }, [providerDays, accountMode, epoch])
+  }, [providerDays, accountMode, epoch, adminLocked])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   useEffect(() => {
@@ -485,8 +491,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const manual = verifyModelInput.trim()
     if (manual) return manual
     const integ = personIntegrations.find((i) => i.integration_id === integrationId)
-    if (integ && integ.models[0]) return integ.models[0]
-    const rt = resolvedData?.runtimes.find((r) => r.provider === integrationId && r.model)
+    if (integ && integ.models?.[0]) return integ.models[0]
+    const rt = (resolvedData?.runtimes ?? []).find((r) => r.provider === integrationId && r.model)
     return rt?.model ?? ''
   }
 
@@ -507,7 +513,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
         setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
         return
       }
-      setActionBanner({ kind: 'ok', text: `${credForm.providerId} 개인 API 키가 등록되었습니다.` })
+      setActionBanner(null)
+      pushShellToast(`${credForm.providerId} 개인 API 키가 등록되었습니다.`, 'success')
       setCredForm(null)
       loadAll('manual')
       return
@@ -541,7 +548,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
       setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${credForm.providerId} 자격 증명이 저장되었습니다.` })
+    setActionBanner(null)
+    pushShellToast(`${credForm.providerId} 자격 증명이 저장되었습니다.`, 'success')
     setCredForm(null)
     loadAll('manual')
   }
@@ -632,7 +640,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
             inputReady: false,
             streaming: false,
           }))
-          setActionBanner({ kind: 'ok', text: `${integrationId} CLI OAuth 로그인이 완료되었습니다.` })
+          setActionBanner(null)
+          pushShellToast(`${integrationId} CLI OAuth 로그인이 완료되었습니다.`, 'success')
           loadAll('manual')
           const ref = receipt.accountRef
           // POST /api/v1/setup/accounts/verify is only mounted in multi_account mode (server_login_http.mli:79)
@@ -755,7 +764,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
       setActionBanner({ kind: 'err', text: `검증 실패 (${acctId}): ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${acctId} (${model}) 계정 검증 완료.` })
+    setActionBanner(null)
+    pushShellToast(`${acctId} (${model}) 계정 검증 완료.`, 'success')
     loadAll('manual')
   }
 
@@ -768,7 +778,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
       setActionBanner({ kind: 'err', text: `삭제 실패 (${id}): ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${id} 자격 증명을 제거했습니다.` })
+    setActionBanner(null)
+    pushShellToast(`${id} 자격 증명을 제거했습니다.`, 'success')
     loadAll('manual')
   }
 
@@ -871,13 +882,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
             >
               Re-auth
             </button>
-            <button
-              type="button"
-              class="btn-ghost"
-              onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(pid)}`)}
-            >
-              Open Config Key
-            </button>
+            ${!adminLocked && html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(pid)}`)}
+              >
+                Open Config Key
+              </button>
+            `}
           </div>
         </div>
       </article>
@@ -998,13 +1011,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       </header>
 
       ${actionBanner && html`
-        <div
-          role="status"
-          class=${actionBanner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${actionBanner.kind === 'ok'
-            ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' }
-            : undefined}
-        >
+        <div role="alert" class="ap-error">
           ${actionBanner.text}
         </div>
       `}
@@ -1260,14 +1267,16 @@ export function QuotasTab(props: WorkspaceViewProps) {
                         })}
 
                         <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', paddingTop: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
-                            onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(group.provider)}`)}
-                          >
-                            설정 열기
-                          </button>
+                          ${!adminLocked && html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+                              onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(group.provider)}`)}
+                            >
+                              설정 열기
+                            </button>
+                          `}
                           ${hasPayment && html`
                             <button
                               type="button"
@@ -1669,9 +1678,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
                             <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
                               CLI OAuth
                             </button>
-                            <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
-                              Open Config Key
-                            </button>
+                            ${!adminLocked && html`
+                              <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
+                                Open Config Key
+                              </button>
+                            `}
                           </div>
                         </div>
                       `)}

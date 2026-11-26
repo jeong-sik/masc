@@ -542,6 +542,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   ], [openKeeperSandboxConfig])
 
   const data = obs.kind === 'value' ? obs.data : null
+  const unobservedReasons = Array.isArray(data?.unobserved_reasons) ? data.unobserved_reasons : []
+  const microvmGuests = Array.isArray(data?.microvm_guests) ? data.microvm_guests : []
+  const sshPools = Array.isArray(data?.ssh_pools) ? data.ssh_pools : []
+  const dockerKeepers = Array.isArray(data?.docker_keepers) ? data.docker_keepers : []
   const unboundKeepers = useMemo(
     () => Array.isArray(data?.ssh_unbound_keepers)
       ? data.ssh_unbound_keepers.filter((r): r is InfraSshUnboundKeeper => Boolean(r && typeof r === 'object'))
@@ -668,11 +672,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           </section>
 
           <!-- Unobserved Reasons (Honesty contract) -->
-          ${data.unobserved_reasons.length > 0 && html`
+          ${unobservedReasons.length > 0 && html`
             <section class="ap-error sev-warn" data-testid="sandbox-unobserved-reasons">
-              <strong>미관측 사유 (${data.unobserved_reasons.length}건):</strong>
+              <strong>미관측 사유 (<span class="tnum">${unobservedReasons.length}</span>건):</strong>
               <ul style=${{ margin: 'var(--sp-1) 0 0', paddingLeft: 'var(--sp-4)', fontSize: 'var(--fs-12)' }}>
-                ${data.unobserved_reasons.map((item, idx) => html`
+                ${unobservedReasons.map((item, idx) => html`
                   <li key=${`${item.scope}-${idx}`}>
                     <span class="mono">${item.scope}</span>: ${item.reason}
                   </li>
@@ -684,10 +688,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <!-- MicroVM Guests -->
           <section class="v2-sandbox-section">
             <div class="wka-h">
-              <h3>MicroVM 게스트 (${data.microvm_guests.length})</h3>
+              <h3>MicroVM 게스트 (<span class="tnum">${microvmGuests.length}</span>)</h3>
             </div>
             <${DataTable}
-              data=${data.microvm_guests}
+              data=${microvmGuests}
               columns=${microVmColumns}
               getRowId=${(r: InfraMicroVmGuest, i: number) => r.guest_name ?? r.id ?? r.keeper ?? r.name ?? `vm-${i}`}
               virtualizeThreshold=${30}
@@ -700,11 +704,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <section class="v2-sandbox-section">
             <div class="wka-h">
               <h3>
-                SSH 풀 (${data.ssh_pools.length})${unboundKeepers.length === 0 && data.summary.ssh_unbound_keepers > 0 ? ` · 미바인딩 Keeper ${data.summary.ssh_unbound_keepers}명` : ''}
+                SSH 풀 (<span class="tnum">${sshPools.length}</span>)${unboundKeepers.length === 0 && data.summary.ssh_unbound_keepers > 0 ? html` · 미바인딩 Keeper <span class="tnum">${data.summary.ssh_unbound_keepers}</span>명` : ''}
               </h3>
             </div>
             <${DataTable}
-              data=${data.ssh_pools}
+              data=${sshPools}
               columns=${sshPoolColumns}
               getRowId=${(r: InfraSshPool, i: number) => r.pool_name ?? r.id ?? r.name ?? `ssh-${i}`}
               virtualizeThreshold=${30}
@@ -716,7 +720,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ${unboundKeepers.length > 0 && html`
             <section class="v2-sandbox-section" data-testid="sandbox-ssh-unbound">
               <div class="wka-h">
-                <h3>미바인딩 SSH Keepers (${unboundKeepers.length})</h3>
+                <h3>미바인딩 SSH Keepers (<span class="tnum">${unboundKeepers.length}</span>)</h3>
                 <span class="v2-sync-pill v2-sync-pill--warn">엔드포인트 연결 필요</span>
               </div>
               <${DataTable}
@@ -733,10 +737,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <!-- Docker Keepers -->
           <section class="v2-sandbox-section">
             <div class="wka-h">
-              <h3>Docker Keepers (${data.docker_keepers.length})</h3>
+              <h3>Docker Keepers (<span class="tnum">${dockerKeepers.length}</span>)</h3>
             </div>
             <${DataTable}
-              data=${data.docker_keepers}
+              data=${dockerKeepers}
               columns=${dockerColumns}
               getRowId=${(r: InfraDockerKeeper, i: number) => r.container_id ?? r.keeper ?? `dk-${i}`}
               virtualizeThreshold=${30}

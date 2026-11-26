@@ -30,6 +30,7 @@ import {
   KEEPER_ENTITY_TABS,
   type KeeperEntityTab,
 } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import type { KeeperRosterItem, KeeperToolApprovalModesData } from './types'
 import { isWaitingUnavailable } from './turn-context'
 
@@ -74,7 +75,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const authenticatedPortraitSrc = useAuthenticatedPortrait(rawPortraitUrl)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
-  const [statusMessage, setStatusMessage] = useState<{ readonly tone: 'ok' | 'bad'; readonly text: string } | null>(null)
+  const [statusMessage, setStatusMessage] = useState<{ readonly tone: 'bad'; readonly text: string } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [capturedDeletePhase, setCapturedDeletePhase] = useState<string | null>(null)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
@@ -278,7 +279,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       setStatusMessage({ tone: 'bad', text: `${label} 실패: ${res.error?.message ?? '오류'}` })
       return
     }
-    setStatusMessage({ tone: 'ok', text: `${label} 요청이 처리되었습니다.` })
+    setStatusMessage(null)
+    pushShellToast(`${label} 요청이 처리되었습니다.`, 'success')
     props.onLifecycleMutated()
   }
 
@@ -543,9 +545,9 @@ export function KeeperHeader(props: KeeperHeaderProps) {
 
       ${statusMessage && html`
         <div
-          class=${statusMessage.tone === 'bad' ? 'ap-error' : 'kp-notice'}
+          class="ap-error"
           data-tone=${statusMessage.tone}
-          role="status"
+          role="alert"
         >
           ${statusMessage.text}
         </div>

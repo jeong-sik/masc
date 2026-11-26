@@ -11,7 +11,8 @@ import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { activeWorkspaceId, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -284,6 +285,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }, [keeperName])
 
   const loadConfigSchema = useCallback(async () => {
+    if (isAdminLockedForSession('admin', authSession.peek())) return
     const seq = ++cfgSeqRef.current
     const startEpoch = currentSessionEpoch()
     setCfgError(null)
@@ -306,12 +308,23 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     }
   }, [keeperName])
 
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
+
   useEffect(() => {
     if (tab === 'trace') void loadTrace()
     else if (tab === 'context') void loadContext()
     else if (tab === 'memory') void loadMemory()
-    else if (tab === 'config-diff') void loadConfigSchema()
-  }, [tab, loadTrace, loadContext, loadMemory, loadConfigSchema])
+  }, [tab, loadTrace, loadContext, loadMemory])
+
+  useEffect(() => {
+    if (adminLocked) {
+      setCfgSchema(null)
+      setCfgDiff(null)
+      setCfgError(null)
+      return
+    }
+    if (tab === 'config-diff') void loadConfigSchema()
+  }, [tab, adminLocked, loadConfigSchema])
 
   const turnRecords = useMemo(
     () => (turns ? turns.entries.map((e) => e.record) : []),
@@ -411,7 +424,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleDryRunConfigDiff = async () => {
-    if (!cfgSchema || !cfgFieldKey) return
+    if (adminLocked || !cfgSchema || !cfgFieldKey) return
     const field = cfgSchema.categories.flatMap((c) => c.fields).find((f) => f.full_key === cfgFieldKey)
     if (!field) return
     const change = patchOpForField(field, cfgFieldValue, false, ',')
@@ -788,47 +801,51 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Quick CAS Config Diff</h3>
-              <span class="kp-pill">sha: ${cfgSchema?.file_sha256.slice(0, 8) || '없음'}</span>
+              ${!adminLocked && html`<span class="kp-pill">sha: ${cfgSchema?.file_sha256.slice(0, 8) || '없음'}</span>`}
             </div>
-            ${cfgError && html`<div class="ap-error">${cfgError}</div>`}
-            ${cfgSchema && html`
-              <select
-                class="kp-input"
-                aria-label="설정 필드 선택"
-                value=${cfgFieldKey}
-                onChange=${(e: Event) => {
-                  const nextKey = (e.currentTarget as HTMLSelectElement).value
-                  setCfgFieldKey(nextKey)
-                  setCfgDiff(null)
-                  const f = cfgSchema.categories.flatMap((c) => c.fields).find((x) => x.full_key === nextKey)
-                  setCfgFieldValue(
-                    f
-                      ? (Array.isArray(f.current_value) ? f.current_value.join(', ') : String(f.current_value ?? ''))
-                      : '',
-                  )
-                }}
-              >
-                ${cfgSchema.categories.flatMap((c) => c.fields).filter((f) => f.writable && !f.secret).map((f) => html`
-                  <option key=${f.full_key} value=${f.full_key}>${f.full_key}</option>
-                `)}
-              </select>
-              <input
-                type="text"
-                class="kp-input"
-                aria-label="새 값"
-                value=${cfgFieldValue}
-                onInput=${(e: Event) => setCfgFieldValue((e.currentTarget as HTMLInputElement).value)}
-              />
-              <button type="button" class="btn-primary" onClick=${() => void handleDryRunConfigDiff()}>
-                Dry-Run Diff 계산
-              </button>
-            `}
-            ${cfgDiff && html`
-              <div>
-                <span class="kp-pill" data-tone="info">reload: ${cfgDiff.reload_scope}</span>
-                <${UnifiedDiffView} diffText=${cfgDiff.unified_diff || '(변경 없음)'} inline=${true} />
-              </div>
-            `}
+            ${adminLocked
+              ? html`<div class="kp-empty" data-testid="companion-config-diff-admin-locked" role="status">Config Diff 조회 및 시뮬레이션은 관리자 전용입니다.</div>`
+              : html`
+                  ${cfgError && html`<div class="ap-error" role="alert">${cfgError}</div>`}
+                  ${cfgSchema && html`
+                    <select
+                      class="kp-input"
+                      aria-label="설정 필드 선택"
+                      value=${cfgFieldKey}
+                      onChange=${(e: Event) => {
+                        const nextKey = (e.currentTarget as HTMLSelectElement).value
+                        setCfgFieldKey(nextKey)
+                        setCfgDiff(null)
+                        const f = cfgSchema.categories.flatMap((c) => c.fields).find((x) => x.full_key === nextKey)
+                        setCfgFieldValue(
+                          f
+                            ? (Array.isArray(f.current_value) ? f.current_value.join(', ') : String(f.current_value ?? ''))
+                            : '',
+                        )
+                      }}
+                    >
+                      ${cfgSchema.categories.flatMap((c) => c.fields).filter((f) => f.writable && !f.secret).map((f) => html`
+                        <option key=${f.full_key} value=${f.full_key}>${f.full_key}</option>
+                      `)}
+                    </select>
+                    <input
+                      type="text"
+                      class="kp-input"
+                      aria-label="새 값"
+                      value=${cfgFieldValue}
+                      onInput=${(e: Event) => setCfgFieldValue((e.currentTarget as HTMLInputElement).value)}
+                    />
+                    <button type="button" class="btn-primary" onClick=${() => void handleDryRunConfigDiff()}>
+                      Dry-Run Diff 계산
+                    </button>
+                  `}
+                  ${cfgDiff && html`
+                    <div>
+                      <span class="kp-pill" data-tone="info">reload: ${cfgDiff.reload_scope}</span>
+                      <${UnifiedDiffView} diffText=${cfgDiff.unified_diff || '(변경 없음)'} inline=${true} />
+                    </div>
+                  `}
+                `}
           </div>
         `}
       </div>

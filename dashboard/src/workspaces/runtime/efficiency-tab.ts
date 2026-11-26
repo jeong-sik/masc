@@ -40,6 +40,7 @@ import {
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { isAdminLockedForSession } from '../../routes/router'
 import {
   buildUsageHistoryChartData,
 } from './quotas-tab'
@@ -140,7 +141,9 @@ interface JoinedKeeperSpendRow {
 
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
-  const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const session = authSession.value
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const sseInstanceId = session.kind === 'single_user_local' ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
   const params = windowToModelsParams(win)
   const providerDays = timeWindowProviderDays(win)
@@ -196,11 +199,15 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         ),
         { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
       ),
-      resourceCache.fetch<LaneRunsResponse>(
-        exactRunsKey,
-        (signal) => loadLaneRunsPage({ limit: 50 }, signal),
-        { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
-      ),
+      ...(!adminLocked
+        ? [
+            resourceCache.fetch<LaneRunsResponse>(
+              exactRunsKey,
+              (signal) => loadLaneRunsPage({ limit: 50 }, signal),
+              { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
+            ),
+          ]
+        : []),
       // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
       resourceCache.fetch<KeeperCostsPayload>(
         costsKey,
@@ -222,7 +229,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     setLiveMetrics(null)
     setStreamError(null)
     loadSnapshots('mount')
-  }, [win, epoch])
+  }, [win, epoch, adminLocked])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
@@ -338,7 +345,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     const ts: number[] = []
     const errRate: (number | null)[] = []
     const callsScaled: number[] = []
-    for (const b of toolSeriesObs.data.buckets) {
+    for (const b of toolSeriesObs.data.buckets ?? []) {
       ts.push(b.start)
       const settled = Math.max(0, b.call_count - (b.deferred_count ?? 0))
       const rate = settled > 0 ? Number(((b.failure_count / settled) * 100).toFixed(1)) : null
@@ -354,7 +361,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     let totalCacheRead = 0
     let totalCost: number | null = null
     if (effectiveModels) {
-      for (const m of effectiveModels.models) {
+      for (const m of effectiveModels.models ?? []) {
         if (m.cached_input) {
           totalIn += m.cached_input.input_tokens
           totalCacheRead += m.cached_input.cache_read_tokens
@@ -372,7 +379,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       : observedUnreported()
     const spendObs: Observed<number> = totalCost !== null ? observedValue(totalCost) : observedUnreported()
 
-    const exactRuns = exactObs.kind === 'value' ? exactObs.data.runs : []
+    const exactRuns = !adminLocked && exactObs.kind === 'value' ? (exactObs.data.runs ?? []) : []
     const readings = exactRuns.map(laneRunPassReading)
     const terminalExact = readings.filter((reading) => reading !== 'running')
     const passedExact = terminalExact.filter((reading) => reading === 'passed')
@@ -389,13 +396,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         : observedAbsent()
 
     return { cacheHitObs, spendObs, exactPassObs, toolErrObs }
-  }, [effectiveModels, exactObs, toolSeriesObs])
+  }, [effectiveModels, exactObs, toolSeriesObs, adminLocked])
 
   const joinedKeepers = useMemo<readonly JoinedKeeperSpendRow[]>(() => {
     const map = new Map<string, JoinedKeeperSpendRow>()
     const effByName = new Map<string, KeeperEfficiencyPayload['keepers'][number]>()
     if (effObs.kind === 'value') {
-      for (const row of effObs.data.keepers) effByName.set(row.keeper, row)
+      for (const row of effObs.data.keepers ?? []) effByName.set(row.keeper, row)
     }
 
     const resolveEffCacheHitPct = (
@@ -415,7 +422,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
 
     if (costsObs.kind === 'value') {
-      for (const c of costsObs.data.keepers) {
+      for (const c of costsObs.data.keepers ?? []) {
         const eff = effByName.get(c.keeper_name)
         map.set(c.keeper_name, {
           keeper: c.keeper_name,
@@ -435,7 +442,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
 
     if (effObs.kind === 'value') {
-      for (const eff of effObs.data.keepers) {
+      for (const eff of effObs.data.keepers ?? []) {
         if (map.has(eff.keeper)) continue
         // Keep 24h spend/token/p95 columns strictly scoped to the 24h cost ledger
         // instead of mixing MTD totals or fabricating $0.00 for unreported subscription spend.
@@ -555,7 +562,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         </div>
         <div class="ov-kpi">
           <div class="ov-kpi-k">Exact-Output 통과율</div>
-          <div class="ov-kpi-v ok">${formatObserved(kpis.exactPassObs, (v) => formatPercent(v))}</div>
+          <div class=${`ov-kpi-v ${adminLocked ? '' : 'ok'}`} data-testid="efficiency-exact-pass-kpi">
+            ${adminLocked ? '관리자 전용' : formatObserved(kpis.exactPassObs, (v) => formatPercent(v))}
+          </div>
         </div>
       </section>
 

@@ -46,10 +46,18 @@ export function KeeperReadNotice({ label, read }: {
     readonly error: string | null; readonly refresh: () => Promise<unknown> }
 }) {
   const previous = read.data !== null
-  if (read.loading) return html`
-    <div class="kp-empty" role="status">
-      <${InlineSpinner} size="xs" /> ${label} 불러오는 중…${previous ? ' · 마지막 조회 표시 중' : ''}
-    </div>`
+  if (read.loading) {
+    if (previous) {
+      return html`
+        <div class="kp-pill" data-tone="info" role="status" style=${{ alignSelf: 'flex-start' }}>
+          <${InlineSpinner} size="xs" /> ${label} 불러오는 중… · 마지막 조회 표시 중
+        </div>`
+    }
+    return html`
+      <div class="kp-empty" role="status">
+        <${InlineSpinner} size="xs" /> ${label} 불러오는 중…
+      </div>`
+  }
   if (read.error !== null) return html`
     <div class="kp-lifecycle-bar">
       <span class="ap-error" role="alert">

@@ -339,8 +339,15 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       category: 'Action',
       keywords: ['operator', 'digest', 'probe', 'health', '운영자'],
       group: 'Action',
-      subtitle: 'GET /api/v1/operator/digest (read-only)',
+      subtitle: adminLocked
+        ? 'GET /api/v1/operator/digest · Admin only'
+        : 'GET /api/v1/operator/digest (read-only)',
+      locked: adminLocked,
       run: async () => {
+        if (adminLocked) {
+          pushShellToast('운영자 다이제스트 조회는 관리자 전용입니다.', 'info')
+          return
+        }
         const res = await apiGet<Record<string, unknown>>('/api/v1/operator/digest')
         if (!res.ok) {
           recordIncident({

@@ -1529,7 +1529,6 @@ describe('workspaces/runtime', () => {
     expect(laneRow.textContent).toContain('속도 제한')
     expect(laneRow.textContent).toContain('일시 중지')
   })
-
   it('decodes OCaml tool_inventory + tool_usage.by_tool, handles is_warming, and formats ISO last_seen', () => {
     const warming = decodeToolsCatalogPayload({ is_warming: true, tool_inventory: { count: 0, tools: [] }, tool_usage: {} })
     expect(warming.isWarming).toBe(true)
@@ -1591,5 +1590,97 @@ describe('workspaces/runtime', () => {
     })
     expect(withoutDeferred.rows[0]?.failure_rate).toBe(25)
     expect(withoutDeferred.rows[1]?.failure_rate).toBeNull()
+  })
+
+  it('gates admin-only Runtime fetches and /settings deep-links for non-admin workers and tolerates omitted wire arrays', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'primary',
+          default_runtime: null,
+          runtimes: [{
+            id: 'rt-paused',
+            provider: 'anthropic',
+            model: 'claude-4',
+            source: 'config',
+            status: 'configured',
+            quota_rest: {
+              cause: 'payment_refused',
+              until_unix: Math.floor(Date.now() / 1000) + 3600,
+              detail: 'payment required',
+            },
+          }],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [{
+            scope: 'claude:pro',
+            providers: [{ id: 'anthropic', display_name: 'Claude Max' }],
+            state: 'reported',
+            windows: [],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    // 1. Efficiency tab skips /api/v1/dashboard/exact-lane-runs
+    render(html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(container.querySelector('[data-testid="efficiency-exact-pass-kpi"]')?.textContent).toContain('관리자 전용')
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/exact-lane-runs'))).toBe(false)
+
+    // 2. Lanes tab skips exact-lane-runs & runtime/config/raw, and shows admin-locked states (also tolerating empty {} probe payload)
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/exact-lane-runs'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/runtime/config/raw'))).toBe(false)
+    const cfgToggle = container.querySelector<HTMLButtonElement>('[data-testid="lane-config-toggle"]')!
+    cfgToggle.click()
+    await flushUi(15)
+    expect(container.querySelector('[data-testid="lane-config-admin-locked"]')).not.toBeNull()
+    const exactTab = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+      .find((b) => b.textContent?.trim() === 'Exact Output')!
+    exactTab.click()
+    await flushUi(15)
+    expect(container.querySelector('[data-testid="exact-runs-admin-locked"]')).not.toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/exact-lane-runs'))).toBe(false)
+
+    // 3. Quotas tab skips runtime/config/raw and hides /settings deep-link buttons
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(30)
+    expect(seenUrls.some((u) => u.includes('/api/v1/runtime/config/raw'))).toBe(false)
+    const settingsBtns = [...container.querySelectorAll('button')].filter((b) =>
+      b.textContent?.includes('Open Config Key') || b.textContent?.includes('설정 열기'),
+    )
+    expect(settingsBtns).toHaveLength(0)
+
+    // 4. Addons tab tolerates omitted wire arrays ({}) without crashing
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.textContent).toContain('Lane-Addons 인스턴스 (0)')
   })
 })

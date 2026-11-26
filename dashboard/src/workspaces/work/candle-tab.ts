@@ -26,6 +26,7 @@ import {
   type DataTableColumn,
   type UPlotSeriesSpec,
 } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
   buildCandleTrendSeries,
@@ -63,7 +64,7 @@ export function CandleTab(props: WorkspaceViewProps) {
   const [goalCandleLoading, setGoalCandleLoading] = useState(false)
   const [goalCandleError, setGoalCandleError] = useState<string | null>(null)
   const [releaseBusy, setReleaseBusy] = useState<string | null>(null)
-  const [releaseFeedback, setReleaseFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const [releaseFeedback, setReleaseFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const inspectAbortRef = useRef<AbortController | null>(null)
 
   const loadLedger = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
@@ -182,7 +183,8 @@ export function CandleTab(props: WorkspaceViewProps) {
       await inspectGoalCandle(goalId)
       return
     }
-    setReleaseFeedback({ kind: 'ok', message: `Goal ${goalId} Candle 지급 보류 해제됨` })
+    setReleaseFeedback(null)
+    pushShellToast(`Goal ${goalId} Candle 지급 보류 해제됨`, 'success')
     resourceCache.invalidateTopic('candle')
     await Promise.all([loadLedger('manual'), inspectGoalCandle(goalId)])
   }
@@ -348,7 +350,7 @@ export function CandleTab(props: WorkspaceViewProps) {
 
         <section class="wk-section" aria-label="Keeper Candle 리더보드">
           <div class="wk-section-head">
-            <h3 class="wk-section-title">Keeper Candle Leaderboard (${ledger.balances.length})</h3>
+            <h3 class="wk-section-title">Keeper Candle Leaderboard (<span class="tnum">${ledger.balances.length}</span>)</h3>
           </div>
           <${DataTable}
             data=${ledger.balances}
@@ -381,14 +383,14 @@ export function CandleTab(props: WorkspaceViewProps) {
           </summary>
           <div class="ap-disclosure-body">
             <div class="wk-chips">
-              <span class="wk-badge wk-badge--warn">Held Windows: ${ledger.diagnostics.heldWindowsCount}</span>
-              <span class="wk-badge wk-badge--err">Unattributed: ${ledger.diagnostics.unattributedCount}</span>
-              <span class="wk-badge wk-badge--idle">Backlog Fenced: ${ledger.diagnostics.backlogFencedCount}</span>
-              <span class="wk-badge wk-badge--idle">0-Task Goals: ${ledger.diagnostics.zeroLinkedTasksGoals}</span>
+              <span class="wk-badge wk-badge--warn tnum">Held Windows: ${ledger.diagnostics.heldWindowsCount}</span>
+              <span class="wk-badge wk-badge--err tnum">Unattributed: ${ledger.diagnostics.unattributedCount}</span>
+              <span class="wk-badge wk-badge--idle tnum">Backlog Fenced: ${ledger.diagnostics.backlogFencedCount}</span>
+              <span class="wk-badge wk-badge--idle tnum">0-Task Goals: ${ledger.diagnostics.zeroLinkedTasksGoals}</span>
             </div>
 
             ${releaseFeedback && html`
-              <div class=${`wk-notice wk-notice--${releaseFeedback.kind}`} role="status">
+              <div class="wk-notice wk-notice--err" role="alert">
                 ${releaseFeedback.message}
               </div>
             `}
@@ -412,6 +414,7 @@ export function CandleTab(props: WorkspaceViewProps) {
               <button
                 type="button"
                 class="btn-ghost"
+                style=${{ minWidth: '112px' }}
                 disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
                 onClick=${() => void inspectGoalCandle(inspectGoalId)}
               >
@@ -439,6 +442,7 @@ export function CandleTab(props: WorkspaceViewProps) {
                 <button
                   type="button"
                   class="wk-btn-warn"
+                  style=${{ minWidth: '108px' }}
                   disabled=${releaseBusy !== null}
                   onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
                 >

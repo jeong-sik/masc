@@ -1816,4 +1816,101 @@ describe('workspaces/knowledge', () => {
     expect(shownPane()).toBe('detail')
     expect(detailText()).toContain('Body of page-b')
   })
+
+  it('hides Wiki create/edit controls for non-admin workers and tolerates omitted page arrays', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki/ops-runbook')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            slug: 'ops-runbook',
+            file: 'ops-runbook.md',
+            sha256: 'sha-1',
+            frontmatter: {
+              title: 'Ops Runbook',
+              summary: 'Summary',
+              source: 'observation',
+              revision: 1,
+              author: 'sangsu',
+              created: '2026-11-25T00:00:00Z',
+              updated: '2026-11-26T00:00:00Z',
+              tags: ['ops'],
+              sources: [],
+              hearsay: [],
+            },
+            body_markdown: 'Read-only body',
+            backlinks: [],
+            outgoing_links: [],
+            lint_findings: [],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki?') || url === '/api/v1/wiki') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            pages: [{
+              slug: 'ops-runbook',
+              file: 'ops-runbook.md',
+              title: 'Ops Runbook',
+              summary: 'Summary',
+              source: 'observation',
+              tags: ['ops'],
+              revision: 1,
+              updated: '2026-11-26T00:00:00Z',
+              backlink_count: 0,
+              outgoing_link_count: 0,
+              sources_count: 0,
+              hearsay_count: 0,
+              sha256: 'sha-1',
+            }],
+            unreadable_pages: [],
+            tags: [{ tag: 'ops', count: 1 }],
+            sources: { observation: 1 },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(3)
+
+    expect(container.textContent).toContain('Ops Runbook')
+    const writeButtons = [...container.querySelectorAll('button')].filter((b) =>
+      b.textContent?.includes('+ 새 페이지') || b.textContent?.includes('CAS 편집'),
+    )
+    expect(writeButtons).toHaveLength(0)
+
+    // Tolerate omitted pages/backlinks arrays on partial wire response and hide "+ 새 페이지" hint for workers
+    render(null, container)
+    resourceCache.clearAll()
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      schema_version: 1,
+      instance_id: 'inst-1',
+      generated_at_unix: 1732430000,
+      data: {},
+    })) as typeof fetch
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(3)
+    expect(container.textContent).toContain('등록된 Wiki 페이지가 없습니다.')
+    expect(container.textContent).not.toContain('+ 새 페이지')
+  })
 })

@@ -28,6 +28,7 @@ import {
   currentRoute,
   evaluateRouteAccess,
   initAPlusRouter,
+  isAdminLockedForSession,
   navigate,
 } from './routes/router'
 import { getWorkspaceComponent, WorkspaceLoadError } from './workspaces/registry'
@@ -49,6 +50,7 @@ import {
   isMobileViewport,
   openInspectDrawer,
   probeBuildConnectionInfo,
+  pushShellToast,
   recordIncident,
   refreshPendingHitl,
   shellToasts,
@@ -441,6 +443,10 @@ export function App(): VNode {
       }
       if (event.key === ',') {
         event.preventDefault()
+        if (isAdminLockedForSession('admin', authSession.peek())) {
+          pushShellToast('설정은 관리자 전용입니다.', 'info')
+          return
+        }
         navigate('/settings')
         return
       }
@@ -448,6 +454,10 @@ export function App(): VNode {
         const trunk = TRUNK_NAV[Number(event.key) - 1]
         if (trunk) {
           event.preventDefault()
+          if (isAdminLockedForSession(trunk.access, authSession.peek())) {
+            pushShellToast(`${trunk.label} 워크스페이스는 관리자 전용입니다.`, 'info')
+            return
+          }
           navigate(trunk.defaultPath)
         }
       }

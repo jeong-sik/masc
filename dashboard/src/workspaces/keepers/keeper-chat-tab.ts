@@ -2597,7 +2597,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         </div>
       `}
       ${executionId && cachedRes?.status === 'loaded' && cachedRes.loadMoreError && html`
-        <div class="kp-tool-result-error" role="status" data-testid="tool-result-load-more-error">
+        <div class="kp-tool-result-error" role="alert" data-testid="tool-result-load-more-error">
           <span>${cachedRes.loadMoreError}</span>
           <div class="kp-block-subactions">
             ${cachedRes.loadMoreConflict

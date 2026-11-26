@@ -194,12 +194,13 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const activityData = activityObs.kind === 'value' ? activityObs.data : null
+  const activityChanges = activityData?.changes ?? []
   const selectedRepo = repos.find((r) => r.id === effectiveRepoId) ?? null
 
   const masterPane = html`
     <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
       <div class="wka-h">
-        <h3>등록된 저장소 (${repos.length})</h3>
+        <h3>등록된 저장소 (<span class="tnum">${repos.length}</span>)</h3>
         <button type="button" class="btn-primary" onClick=${() => setShowAddForm((v) => !v)}>
           ${showAddForm ? '취소' : '+ 저장소 추가'}
         </button>
@@ -306,12 +307,12 @@ export function ReposTab(props: WorkspaceViewProps) {
       ${selectedRepo && activityData && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            변경 ${activityData.changes.length}건 · 미완결 ${activityData.incomplete} · 미귀속 ${activityData.unattributed} (window=${activityData.window_hours}h)
+            변경 ${activityChanges.length}건 · 미완결 ${activityData.incomplete ?? 0} · 미귀속 ${activityData.unattributed ?? 0} (window=${activityData.window_hours ?? 24}h)
           </div>
 
-          ${activityData.changes.length === 0
+          ${activityChanges.length === 0
             ? html`<div class="dtable-absent">최근 24시간 동안 기록된 Keeper 파일 쓰기가 없습니다.</div>`
-            : activityData.changes.slice(0, 40).map((ch, idx) => {
+            : activityChanges.slice(0, 40).map((ch, idx) => {
                 const filePath = extractChangePath(ch.location)
                 const patch = buildUnifiedChangeDiff(ch)
                 return html`

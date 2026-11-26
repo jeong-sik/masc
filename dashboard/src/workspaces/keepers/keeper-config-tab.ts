@@ -12,7 +12,7 @@ import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
   disconnectKeeperOAuth,
   saveKeeperOAuthClient,
@@ -29,7 +29,8 @@ import {
   type ConfigPatchResult,
   type ConfigSchemaData,
 } from '../../api/config-schema'
-import { currentRoute } from '../../routes/router'
+import { currentRoute, isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   fetchKeeperOAuthAttachedToolsApi,
   mutateKeeperSecretApi,
@@ -74,6 +75,7 @@ function serializeValue(val: unknown): string {
 
 export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const { keeperName } = props
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const [schema, setSchema] = useState<ConfigSchemaData | null>(null)
   const [activeCategoryId, setActiveCategoryId] = useState<string>('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -86,10 +88,10 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const [secretScope, setSecretScope] = useState<'keeper' | 'shared'>('keeper')
   const [secretName, setSecretName] = useState('')
   const [secretValue, setSecretValue] = useState('')
-  const [secretStatus, setSecretStatus] = useState<string | null>(null)
+  const [secretError, setSecretError] = useState<string | null>(null)
   const [providers, setProviders] = useState<readonly KeeperAttachedProvider[]>([])
   const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string | null>(null)
-  const [oauthStatus, setOauthStatus] = useState<string | null>(null)
+  const [oauthError, setOauthError] = useState<string | null>(null)
   const [activeOAuthFlow, setActiveOAuthFlow] = useState<ActiveKeeperOAuthFlow | null>(null)
   const [clientDrawer, setClientDrawer] = useState<{
     readonly provider: string
@@ -118,6 +120,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [])
 
   const loadSchema = useCallback(async (preservePatchResult = false) => {
+    if (adminLocked) return
     schemaAbortRef.current?.abort()
     const ctrl = new AbortController()
     schemaAbortRef.current = ctrl
@@ -153,7 +156,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       }
       return firstCat
     })
-  }, [keeperName])
+  }, [keeperName, adminLocked])
 
   const routeSection = currentRoute.value.query.section
   useEffect(() => {
@@ -168,6 +171,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [schema, routeSection])
 
   const loadProviders = useCallback(async () => {
+    if (adminLocked) return
     providersAbortRef.current?.abort()
     const ctrl = new AbortController()
     providersAbortRef.current = ctrl
@@ -183,7 +187,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     } else if (provRes.error.kind !== 'aborted' && provRes.error.kind !== 'epoch_stale') {
       setOauthStatus(`OAuth 연결 조회 실패: ${provRes.error.message}`)
     }
-  }, [keeperName])
+  }, [keeperName, adminLocked])
 
   useEffect(() => {
     oauthFlowRef.current?.cancel()
@@ -197,19 +201,21 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     setCasConflict(false)
     setSecretName('')
     setSecretValue('')
-    setSecretStatus(null)
+    setSecretError(null)
     setProviders([])
     setOauthCallbackUrl(null)
-    setOauthStatus(null)
+    setOauthError(null)
     setActiveOAuthFlow(null)
     setClientDrawer(null)
     lastAppliedSectionRef.current = undefined
-    void Promise.all([loadSchema(), loadProviders()])
+    if (!adminLocked) {
+      void Promise.all([loadSchema(), loadProviders()])
+    }
     return () => {
       schemaAbortRef.current?.abort()
       providersAbortRef.current?.abort()
     }
-  }, [loadSchema, loadProviders])
+  }, [loadSchema, loadProviders, adminLocked])
 
   const allFields = useMemo(
     () => (schema ? schema.categories.flatMap((c) => c.fields) : []),
@@ -237,7 +243,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [allFields, drafts])
 
   const runPatch = async (dryRun: boolean) => {
-    if (!schema) return
+    if (adminLocked || !schema) return
     if (invalidFieldKeys.length > 0) {
       setConfigError(`유효하지 않은 숫자/형식 입력이 있습니다: ${invalidFieldKeys.join(', ')}`)
       return
@@ -275,14 +281,15 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }
 
   const handleSaveSecret = async () => {
+    if (adminLocked) return
     const name = secretName.trim()
     if (!name || !secretValue) {
-      setSecretStatus('환경변수 이름과 값을 입력하세요.')
+      setSecretError('환경변수 이름과 값을 입력하세요.')
       return
     }
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
-    setSecretStatus(null)
+    setSecretError(null)
     const res = await mutateKeeperSecretApi(targetKeeper, {
       action: 'set_env',
       scope: secretScope,
@@ -291,14 +298,16 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     })
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
-      setSecretStatus(`저장 실패: ${res.error.message}`)
+      setSecretError(`저장 실패: ${res.error.message}`)
       return
     }
     setSecretValue('')
-    setSecretStatus(`${secretScope}:${name} 시크릿 저장 완료 (값은 재표시되지 않습니다).`)
+    setSecretError(null)
+    pushShellToast(`${secretScope}:${name} 시크릿 저장 완료 (값은 재표시되지 않습니다).`, 'success')
   }
 
   const handleDeleteSecret = async () => {
+    if (adminLocked) return
     const name = secretName.trim()
     if (!name) return
     const targetKeeper = keeperName
@@ -309,7 +318,12 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       name,
     })
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-    setSecretStatus(res.ok ? `${secretScope}:${name} 삭제 완료` : `삭제 실패: ${res.error.message}`)
+    if (!res.ok) {
+      setSecretError(`삭제 실패: ${res.error.message}`)
+      return
+    }
+    setSecretError(null)
+    pushShellToast(`${secretScope}:${name} 삭제 완료`, 'success')
   }
 
   const renderDiffLines = (diffText: string) =>
@@ -320,28 +334,36 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       <section class="kp-card" aria-label="Schema-Driven Keeper TOML 설정 편집기">
         <div class="kp-card-head">
           <h3>Keeper Config Schema (CAS)</h3>
-          <div class="kp-pill-row">
-            <span class="kp-pill">sha256: ${schema?.file_sha256.slice(0, 12) || '없음'}</span>
-            <span class="kp-pill" data-tone=${pendingChanges.length > 0 ? 'brass' : 'default'}>
-              변경 ${pendingChanges.length}건
-            </span>
-            <button type="button" class="btn-ghost" onClick=${() => void loadSchema()}>스키마 다시 읽기</button>
-          </div>
+          ${!adminLocked && html`
+            <div class="kp-pill-row">
+              <span class="kp-pill">sha256: ${schema?.file_sha256.slice(0, 12) || '없음'}</span>
+              <span class="kp-pill" data-tone=${pendingChanges.length > 0 ? 'brass' : 'default'}>
+                변경 ${pendingChanges.length}건
+              </span>
+              <button type="button" class="btn-ghost" onClick=${() => void loadSchema()}>스키마 다시 읽기</button>
+            </div>
+          `}
         </div>
 
-        ${casConflict && html`
+        ${adminLocked && html`
+          <div class="kp-empty" data-testid="keeper-config-admin-locked" role="status">
+            Keeper TOML 설정 스키마 조회 및 변경은 관리자 전용입니다.
+          </div>
+        `}
+
+        ${!adminLocked && casConflict && html`
           <div class="ap-error" role="alert" data-cas-conflict="true">
             CAS 충돌 (409 conflict_cas): 다른 변경이 먼저 적용되었습니다. 스키마를 다시 불러온 뒤 적용하세요.
           </div>
         `}
-        ${invalidFieldKeys.length > 0 && html`
+        ${!adminLocked && invalidFieldKeys.length > 0 && html`
           <div class="ap-error" role="alert">
             유효하지 않은 입력 값: ${invalidFieldKeys.join(', ')}
           </div>
         `}
-        ${configError && !casConflict && html`<div class="ap-error" role="alert">${configError}</div>`}
+        ${!adminLocked && configError && !casConflict && html`<div class="ap-error" role="alert">${configError}</div>`}
 
-        ${schema && html`
+        ${!adminLocked && schema && html`
           <div class="kp-tabs" role="tablist" aria-label="설정 카테고리">
             ${schema.categories.map((cat) => html`
               <button
@@ -414,26 +436,28 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
           `}
         `}
 
-        <div class="kp-lifecycle-bar">
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busy || pendingChanges.length === 0}
-            onClick=${() => void runPatch(true)}
-          >
-            Dry-Run Unified Diff 미리보기
-          </button>
-          <button
-            type="button"
-            class="btn-primary"
-            disabled=${busy || pendingChanges.length === 0}
-            onClick=${() => void runPatch(false)}
-          >
-            CAS 설정 적용 (expected_sha256)
-          </button>
-        </div>
+        ${!adminLocked && html`
+          <div class="kp-lifecycle-bar">
+            <button
+              type="button"
+              class="btn-ghost"
+              disabled=${busy || pendingChanges.length === 0}
+              onClick=${() => void runPatch(true)}
+            >
+              Dry-Run Unified Diff 미리보기
+            </button>
+            <button
+              type="button"
+              class="btn-primary"
+              disabled=${busy || pendingChanges.length === 0}
+              onClick=${() => void runPatch(false)}
+            >
+              CAS 설정 적용 (expected_sha256)
+            </button>
+          </div>
+        `}
 
-        ${patchResult && html`
+        ${!adminLocked && patchResult && html`
           <div>
             <div class="kp-pill-row">
               <span class="kp-pill" data-tone=${patchResult.applied ? 'ok' : 'info'}>
@@ -460,47 +484,62 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
           <div class="kp-card-head">
             <h3>Secrets (Write-Only Env)</h3>
           </div>
-          <select
-            class="kp-input"
-            aria-label="시크릿 범위"
-            value=${secretScope}
-            onChange=${(e: Event) => setSecretScope((e.currentTarget as HTMLSelectElement).value as 'keeper' | 'shared')}
-          >
-            <option value="keeper">keeper (${keeperName})</option>
-            <option value="shared">shared (workspace)</option>
-          </select>
-          <input
-            type="text"
-            class="kp-input"
-            placeholder="ENV_VAR_NAME"
-            aria-label="시크릿 이름"
-            value=${secretName}
-            onInput=${(e: Event) => setSecretName((e.currentTarget as HTMLInputElement).value)}
-          />
-          <input
-            type="password"
-            class="kp-input"
-            placeholder="시크릿 값 (저장 후 재표시되지 않음)"
-            aria-label="시크릿 값"
-            value=${secretValue}
-            onInput=${(e: Event) => setSecretValue((e.currentTarget as HTMLInputElement).value)}
-          />
-          <div class="kp-lifecycle-bar">
-            <button type="button" class="btn-primary" onClick=${() => void handleSaveSecret()}>
-              시크릿 저장
-            </button>
-            <button type="button" class="kp-btn-danger" onClick=${() => void handleDeleteSecret()}>
-              시크릿 삭제
-            </button>
-          </div>
-          ${secretStatus && html`<div class="kp-pill" data-tone="info">${secretStatus}</div>`}
+          ${adminLocked
+            ? html`
+                <div class="kp-empty" data-testid="keeper-secrets-admin-locked" role="status">
+                  Keeper 시크릿 환경변수 관리는 관리자 전용입니다.
+                </div>
+              `
+            : html`
+                <select
+                  class="kp-input"
+                  aria-label="시크릿 범위"
+                  value=${secretScope}
+                  onChange=${(e: Event) => setSecretScope((e.currentTarget as HTMLSelectElement).value as 'keeper' | 'shared')}
+                >
+                  <option value="keeper">keeper (${keeperName})</option>
+                  <option value="shared">shared (workspace)</option>
+                </select>
+                <input
+                  type="text"
+                  class="kp-input"
+                  placeholder="ENV_VAR_NAME"
+                  aria-label="시크릿 이름"
+                  value=${secretName}
+                  onInput=${(e: Event) => setSecretName((e.currentTarget as HTMLInputElement).value)}
+                />
+                <input
+                  type="password"
+                  class="kp-input"
+                  placeholder="시크릿 값 (저장 후 재표시되지 않음)"
+                  aria-label="시크릿 값"
+                  value=${secretValue}
+                  onInput=${(e: Event) => setSecretValue((e.currentTarget as HTMLInputElement).value)}
+                />
+                <div class="kp-lifecycle-bar">
+                  <button type="button" class="btn-primary" onClick=${() => void handleSaveSecret()}>
+                    시크릿 저장
+                  </button>
+                  <button type="button" class="kp-btn-danger" onClick=${() => void handleDeleteSecret()}>
+                    시크릿 삭제
+                  </button>
+                </div>
+                ${secretError && html`<div class="ap-error" role="alert">${secretError}</div>`}
+              `}
         </section>
 
         <section class="kp-card" aria-label="OAuth 연결 계정 및 도구">
           <div class="kp-card-head">
             <h3>OAuth Identity & Attached Tools</h3>
           </div>
-          ${oauthStatus && html`<div class="kp-pill" data-tone="info">${oauthStatus}</div>`}
+          ${adminLocked
+            ? html`
+                <div class="kp-empty" data-testid="keeper-oauth-admin-locked" role="status">
+                  OAuth 연결 계정 및 도구 관리는 관리자 전용입니다.
+                </div>
+              `
+            : html`
+          ${oauthError && html`<div class="ap-error" role="alert">${oauthError}</div>`}
           ${activeOAuthFlow && html`
             <div class="kp-block-card kp-block-card--tool" data-testid="keeper-config-oauth-flow" role="status">
               <div class="kp-card-head">
@@ -540,7 +579,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
               data-testid="keeper-config-oauth-client-form"
               onSubmit=${async (ev: Event) => {
                 ev.preventDefault()
-                if (!clientDrawer.clientId.trim()) return
+                if (adminLocked || !clientDrawer.clientId.trim()) return
                 const targetKeeper = keeperName
                 const startEpoch = currentSessionEpoch()
                 const submittedLabel = clientDrawer.providerLabel
@@ -554,10 +593,11 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                 if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
                 setClientBusy(false)
                 if (!res.ok) {
-                  setOauthStatus(`앱 등록 실패: ${res.error.message}`)
+                  setOauthError(`앱 등록 실패: ${res.error.message}`)
                   return
                 }
-                setOauthStatus(`${submittedLabel} OAuth 앱 등록 완료`)
+                setOauthError(null)
+                pushShellToast(`${submittedLabel} OAuth 앱 등록 완료`, 'success')
                 setClientDrawer(null)
                 void loadProviders()
               }}
@@ -576,7 +616,12 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                     onClick=${() => {
                       void copyToClipboard(oauthCallbackUrl).then((copied) => {
                         if (!mountedRef.current) return
-                        setOauthStatus(copied ? 'Callback URL 복사 완료' : 'Callback URL 복사에 실패했습니다.')
+                        if (copied) {
+                          setOauthError(null)
+                          pushShellToast('Callback URL 복사 완료', 'success')
+                        } else {
+                          setOauthError('Callback URL 복사에 실패했습니다.')
+                        }
                       })
                     }}
                   >
@@ -660,9 +705,18 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                             class="btn-ghost"
                             disabled=${prov.switch_problem != null}
                             onClick=${async () => {
+                              if (adminLocked) return
+                              const targetKeeper = keeperName
+                              const startEpoch = currentSessionEpoch()
                               const next = !(prov.enabled ?? true)
-                              const res = await setKeeperIdentitySwitchApi(keeperName, prov.provider, next)
-                              setOauthStatus(res.ok ? `${prov.provider_label} ${next ? '활성화' : '비활성화'}` : res.error.message)
+                              const res = await setKeeperIdentitySwitchApi(targetKeeper, prov.provider, next)
+                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                              if (res.ok) {
+                                setOauthError(null)
+                                pushShellToast(`${prov.provider_label} ${next ? '활성화' : '비활성화'}`, 'success')
+                              } else {
+                                setOauthError(res.error.message)
+                              }
                               void loadProviders()
                             }}
                           >
@@ -672,8 +726,17 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                             type="button"
                             class="btn-ghost"
                             onClick=${async () => {
-                              const res = await refreshKeeperIdentityToolsApi(keeperName, prov.provider)
-                              setOauthStatus(res.ok ? `${prov.provider_label} 도구 목록 갱신` : res.error.message)
+                              if (adminLocked) return
+                              const targetKeeper = keeperName
+                              const startEpoch = currentSessionEpoch()
+                              const res = await refreshKeeperIdentityToolsApi(targetKeeper, prov.provider)
+                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                              if (res.ok) {
+                                setOauthError(null)
+                                pushShellToast(`${prov.provider_label} 도구 목록 갱신`, 'success')
+                              } else {
+                                setOauthError(res.error.message)
+                              }
                               void loadProviders()
                             }}
                           >
@@ -683,8 +746,17 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                             type="button"
                             class="kp-btn-danger"
                             onClick=${async () => {
-                              const res = await disconnectKeeperOAuth(keeperName, prov.provider)
-                              setOauthStatus(res.ok ? `${prov.provider_label} 연결 해제됨` : res.error.message)
+                              if (adminLocked) return
+                              const targetKeeper = keeperName
+                              const startEpoch = currentSessionEpoch()
+                              const res = await disconnectKeeperOAuth(targetKeeper, prov.provider)
+                              if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+                              if (res.ok) {
+                                setOauthError(null)
+                                pushShellToast(`${prov.provider_label} 연결 해제됨`, 'success')
+                              } else {
+                                setOauthError(res.error.message)
+                              }
                               void loadProviders()
                             }}
                           >
@@ -696,14 +768,15 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                             type="button"
                             class="btn-primary"
                             onClick=${() => {
+                              if (adminLocked) return
                               oauthFlowRef.current?.cancel()
+                              setOauthError(null)
                               if (prov.provider === 'github') {
                                 oauthFlowRef.current = startKeeperGithubDeviceFlow({
                                   keeper: keeperName,
                                   providerLabel: prov.provider_label,
                                   onUpdate: (st) => {
                                     setActiveOAuthFlow(st)
-                                    setOauthStatus(st.message)
                                   },
                                   onSettled: (ok) => {
                                     if (ok) void loadProviders()
@@ -717,7 +790,6 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                                 providerLabel: prov.provider_label,
                                 onUpdate: (st) => {
                                   setActiveOAuthFlow(st)
-                                  setOauthStatus(st.message)
                                 },
                                 onSettled: (ok) => {
                                   if (ok) void loadProviders()
@@ -731,6 +803,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                   </div>
                 </div>
               `)}
+              `}
         </section>
       </div>
     </div>

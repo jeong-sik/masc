@@ -11,6 +11,7 @@
  */
 
 import { html } from 'htm/preact'
+import { goalPhaseSemanticTone, parseCanonicalGoalPhase } from '../../lib/goal-phase-tone'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
@@ -162,13 +163,16 @@ function renderPulseKeeperErrorDetail(row: PulseKeeperRow) {
 }
 
 function goalPhaseTone(phase: string): 'ok' | 'warn' | 'bad' | 'info' | 'brass' | 'default' {
-  const lower = phase.toLowerCase()
-  if (lower === 'completed') return 'ok'
-  if (lower === 'verifying' || lower === 'awaiting_confirmation') return 'brass'
-  if (lower === 'blocked') return 'bad'
-  if (lower === 'paused') return 'warn'
-  if (lower === 'executing') return 'info'
-  return 'default'
+  const canonical = parseCanonicalGoalPhase(phase)
+  if (canonical === null) return 'default'
+  switch (goalPhaseSemanticTone(canonical)) {
+    case 'ok': return 'ok'
+    case 'info': return 'info'
+    case 'stalled': return 'brass'
+    case 'warn': return 'warn'
+    case 'err': return 'bad'
+    case 'idle': return 'default'
+  }
 }
 
 function keeperCtxTone(obs: Observed<number>): 'ok' | 'warn' | 'bad' | 'default' {

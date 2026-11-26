@@ -157,7 +157,7 @@ export function toolResultMarkdownPreview(content: string): string | null {
 
 const auxiliaryTags = 'think|thinking|thought|reasoning|memory_recall|memory|recalled_memory'
 const auxiliaryStart = new RegExp(`\n {0,3}<(?:${auxiliaryTags})>`, 'i')
-const auxiliaryBlock = new RegExp(`^ {0,3}<(${auxiliaryTags})>([\\s\\S]*?)</\\1>`, 'i')
+const auxiliaryBlock = new RegExp(`^ {0,3}<(${auxiliaryTags})>([\\s\\S]*?)</\\1\\s*>`, 'i')
 
 const chatLexer = new Marked().use({
   extensions: [{

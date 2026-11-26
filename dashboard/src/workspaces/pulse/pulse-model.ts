@@ -612,8 +612,6 @@ export function classifyKeeperCompany(
 ): string {
   const fromShell = shellGroupByKeeper.get(keeperName)
   if (fromShell && fromShell.trim()) return fromShell.trim()
-  const dashIdx = keeperName.indexOf('-')
-  if (dashIdx > 0) return keeperName.slice(0, dashIdx)
   return 'General'
 }
 

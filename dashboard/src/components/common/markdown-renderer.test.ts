@@ -139,6 +139,23 @@ describe('MarkdownContent', () => {
     render(h(MarkdownContent, { text: '<think>hidden thought</think>' }), container)
     expect(container.querySelector('details')).not.toBeNull()
     expect(container.querySelector('summary')).not.toBeNull()
+
+    render(h(MarkdownContent, { text: '  <THINK>indented uppercase</THINK >' }), container)
+    expect(container.querySelector('details.think-block')).not.toBeNull()
+    expect(container.querySelector('details.think-block')?.textContent).toContain('indented uppercase')
+  })
+
+  it('keeps #fragment links in-page without target="_blank" when document={false}', () => {
+    const container = document.createElement('div')
+    render(h(MarkdownContent, {
+      text: '[Jump](#sec) · [External](https://example.test/doc)',
+    }), container)
+    const links = Array.from(container.querySelectorAll('a'))
+    expect(links).toHaveLength(2)
+    expect(links[0]?.getAttribute('href')).toBe('#sec')
+    expect(links[0]?.hasAttribute('target')).toBe(false)
+    expect(links[1]?.getAttribute('href')).toBe('https://example.test/doc')
+    expect(links[1]?.getAttribute('target')).toBe('_blank')
   })
 
   it('keeps inline think tags and document fragment navigation intact', () => {

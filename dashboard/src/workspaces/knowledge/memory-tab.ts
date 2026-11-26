@@ -485,17 +485,17 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       ${(world || diffData) && html`
         <div class="kn-chips" role="tablist" aria-label="World Memory 상세 섹션">
           ${world && html`
-            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'claims'} aria-pressed=${visibleSection === 'claims'} onClick=${() => setSection('claims')}>
+            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'claims'} onClick=${() => setSection('claims')}>
               Claims <span class="kn-chip-count">${world.claims.length}</span>
             </button>
-            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'conflicts'} aria-pressed=${visibleSection === 'conflicts'} onClick=${() => setSection('conflicts')}>
+            <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'conflicts'} onClick=${() => setSection('conflicts')}>
               Active Conflicts <span class="kn-chip-count">${world.activeConflicts.length}</span>
             </button>
           `}
-          <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'diff'} aria-pressed=${visibleSection === 'diff'} onClick=${() => setSection('diff')}>
+          <button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'diff'} onClick=${() => setSection('diff')}>
             Temporal Diff (${activeWin})
           </button>
-          ${world && html`<button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'writers'} aria-pressed=${visibleSection === 'writers'} onClick=${() => setSection('writers')}>
+          ${world && html`<button type="button" role="tab" class="kn-chip" aria-selected=${visibleSection === 'writers'} onClick=${() => setSection('writers')}>
             Librarian Writers <span class="kn-chip-count">${world.writers.length}</span>
           </button>`}
         </div>

@@ -147,6 +147,9 @@ function AccountWorkspaceSwitcher(): VNode {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) {
+          return
+        }
         event.preventDefault()
         event.stopPropagation()
         setOpen(false)
@@ -392,6 +395,9 @@ function ProvenancePill(): VNode {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) {
+          return
+        }
         event.preventDefault()
         event.stopPropagation()
         setOpen(false)

@@ -41,7 +41,6 @@ let activeSlot: ActiveSlot | null = null
 let guardsInstalled = false
 
 export const activeViewStreamKey: ReadonlySignal<string | null> = activeKeySignal
-export const viewStreamGeneration: ReadonlySignal<number> = generationSignal
 export const viewStreamPaused: ReadonlySignal<boolean> = pausedSignal
 
 function stopSlotConnection(slot: ActiveSlot): void {

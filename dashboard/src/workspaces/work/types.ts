@@ -17,6 +17,7 @@ import type { ComponentChildren } from 'preact'
 import { decodeGoalProof } from '../../api/goal-proof'
 import { parseStoredHandoff, type StoredHandoff } from '../../store-normalizers'
 import type { ApprovalQueuePhase, GateDecisionSource, KeeperSummaryAttemptDisposition } from '../../types/gate'
+import { goalPhaseSemanticTone } from '../../lib/goal-phase-tone'
 import { formatMilliCandleObserved } from '../../api/keeper-diagnostics'
 import type { GoalProof } from '../../types/core'
 import { ok, err, type Result } from '../../lib/result'
@@ -608,15 +609,7 @@ export function goalPhaseLabel(phase: GoalPhase): string {
 }
 
 export function goalPhaseTone(phase: GoalPhase): 'ok' | 'info' | 'warn' | 'err' | 'stalled' | 'idle' {
-  switch (phase) {
-    case 'Executing': return 'info'
-    case 'Verifying': return 'stalled'
-    case 'Awaiting_confirmation': return 'warn'
-    case 'Blocked': return 'err'
-    case 'Paused': return 'idle'
-    case 'Completed': return 'ok'
-    case 'Dropped': return 'idle'
-  }
+  return goalPhaseSemanticTone(phase)
 }
 
 function decodeNonNegativeCount(raw: unknown): number | null {

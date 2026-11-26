@@ -8,7 +8,8 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
+import { useFocusScope } from '../../design-system/headless-preact/use-focus-scope'
 import { authSession, isAuthenticated } from '../core/auth'
 import {
   WORKSPACE_NAV_BY_ID,
@@ -44,12 +45,21 @@ export function MobileNav(): VNode {
     ? `Inbox ${formatInboxPendingCount(pending, true)}`
     : `Inbox ${pending}건 대기 중`
   const unreadInc = unreadIncidentCount.value
+  const sheetRef = useRef<HTMLDivElement>(null)
+
+  useFocusScope({ containerRef: sheetRef, active: moreOpen })
 
   useEffect(() => {
     if (!moreOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined') {
+          const otherModalOpen = Array.from(
+            document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+          ).some((el) => el !== sheetRef.current)
+          if (otherModalOpen) return
+        }
         event.preventDefault()
         event.stopPropagation()
         mobileMoreOpen.value = false
@@ -69,6 +79,7 @@ export function MobileNav(): VNode {
         onClick=${() => { mobileMoreOpen.value = false }}
       />
       <div
+        ref=${sheetRef}
         class="ap-more-sheet"
         role="dialog"
         aria-modal="true"

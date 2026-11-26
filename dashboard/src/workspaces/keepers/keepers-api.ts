@@ -135,10 +135,6 @@ function asNum(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-function wrap<T>(p: Promise<Result<T, ApiError>>): Promise<Result<T | null, ApiError>> {
-  return p.then((r) => (r.ok ? ok<T | null>(r.value) : r))
-}
-
 // ── Shared Formatters ────────────────────────────────────────────────────
 
 export function formatCandleMilli(raw: string | number | null | undefined): Observed<string> {
@@ -312,11 +308,6 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
   return map
 }
 
-function deriveCompany(name: string): string {
-  const dash = name.indexOf('-')
-  return dash > 0 ? name.slice(0, dash) : 'General'
-}
-
 export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
   const list = isRecord(gateRaw) && Array.isArray(gateRaw.keepers) ? gateRaw.keepers : []
   const items: KeeperRosterItem[] = []
@@ -360,7 +351,7 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
       activation_mode: asStr(raw.activation_mode) ?? 'manual',
       runtime_id: asStr(raw.runtime_id) ?? 'unassigned',
       sandbox_profile: meta ? asStr(meta.sandbox_profile) : null,
-      company: asStr(raw.group) ?? deriveCompany(name),
+      company: asStr(raw.group) ?? 'General',
       context_ratio: asNum(raw.context_ratio),
       context_tokens: asNum(raw.context_tokens),
       context_max: asNum(raw.context_max),
@@ -2818,15 +2809,6 @@ export function fetchKeeperOAuthAttachedToolsApi(
   )
 }
 
-export function fetchKeeperAttachedProvidersApi(keeper: string): Promise<Result<readonly KeeperAttachedProvider[], ApiError>> {
-  return apiGet<readonly KeeperAttachedProvider[]>(
-    `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
-    {
-      decode: decodeKeeperAttachedProviders,
-    },
-  )
-}
-
 export function setKeeperIdentitySwitchApi(keeper: string, provider: string, enabled: boolean) {
   return apiMutate<unknown>(
     'POST',
@@ -2843,14 +2825,6 @@ export function refreshKeeperIdentityToolsApi(keeper: string, provider: string) 
   )
 }
 
-export function startKeeperOAuthLoginApi(keeper: string, provider: string) {
-  return apiMutate<{ readonly authorize_url?: string }>(
-    'POST',
-    `/api/v1/keepers/${encodeURIComponent(keeper)}/oauth-login`,
-    { provider },
-  )
-}
-
 export function mutateKeeperSecretApi(
   keeper: string,
   payload:
@@ -2863,5 +2837,3 @@ export function mutateKeeperSecretApi(
     payload,
   )
 }
-
-export { wrap }

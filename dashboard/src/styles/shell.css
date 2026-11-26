@@ -573,6 +573,14 @@
   color: var(--brass-1);
 }
 
+.ap-acct-lock {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--sp-1);
+  font-size: var(--fs-11);
+  opacity: 0.78;
+}
+
 .tla.ap-fast-tla {
   padding: 0;
   gap: var(--sp-1);

@@ -75,7 +75,7 @@ export function FastApprovalStrip(): VNode | null {
         return
       }
       if (!headApproval) return
-      const allowedWhileTyping = event.altKey && (key === 'y' || key === 'n')
+      const allowedWhileTyping = event.altKey && !event.shiftKey && (key === 'y' || key === 'n')
       if (typing && !allowedWhileTyping) return
       if (!typing && event.altKey && key !== 'y' && key !== 'n') return
 

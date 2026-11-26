@@ -22,8 +22,10 @@ const documentRenderer = {
 const renderer = {
   ...documentRenderer,
   link(this: Renderer, token: Tokens.Link) {
-    return Renderer.prototype.link.call(this, token)
-      .replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ')
+    const rendered = Renderer.prototype.link.call(this, token)
+    const href = token.href?.trim() ?? ''
+    if (!href || href.startsWith('#')) return rendered
+    return rendered.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ')
   },
 }
 
@@ -52,11 +54,11 @@ const thinkBlock = {
   name: 'thinkBlock',
   level: 'block' as const,
   start(source: string) {
-    const index = source.indexOf('\n<think>')
-    return index >= 0 ? index + 1 : undefined
+    const match = /\n {0,3}<think>/i.exec(source)
+    return match ? match.index + 1 : undefined
   },
   tokenizer(source: string) {
-    const match = /^<think>([\s\S]*?)<\/think\s*>/.exec(source)
+    const match = /^ {0,3}<think>([\s\S]*?)<\/think\s*>/i.exec(source)
     if (!match) return undefined
     return { type: 'thinkBlock', raw: match[0], text: (match[1] ?? '').trim() }
   },
@@ -188,7 +190,7 @@ export function MarkdownContent({
     <div
       ref=${root}
       class=${classes}
-      onClick=${document ? followDocumentFragment : undefined}
+      onClick=${followDocumentFragment}
       dangerouslySetInnerHTML=${{ __html: htmlStr }}
     ></div>
   `

@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { isWaitingUnavailable } from './turn-context'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import { formatObserved, type Observed } from '../../core/resource-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
@@ -231,15 +232,28 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
   const [draftValues, setDraftValues] = useState<Record<string, string>>({})
   const [preview, setPreview] = useState<ConfigPatchResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const modalRef = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const onCloseRef = useRef(props.onClose)
   onCloseRef.current = props.onClose
+
+  useFocusScope({
+    containerRef: modalRef,
+    active: true,
+    initialFocus: () => nameInputRef.current,
+  })
 
   useEffect(() => {
     queueMicrotask(() => nameInputRef.current?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        if (typeof document !== 'undefined') {
+          const otherModalOpen = Array.from(
+            document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+          ).some((el) => el !== modalRef.current)
+          if (otherModalOpen) return
+        }
         event.preventDefault()
         event.stopPropagation()
         onCloseRef.current()
@@ -309,6 +323,7 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
 
   return html`
     <div
+      ref=${modalRef}
       class="kp-modal-backdrop"
       role="dialog"
       aria-modal="true"

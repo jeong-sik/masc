@@ -16,7 +16,7 @@ import type { KeeperActiveTurn, KeeperActiveTurnPreview, KeeperRosterItem } from
 
 const preview = (revision: number | null, statusText = `at ${revision}`): KeeperActiveTurnPreview => ({
   status_text: statusText, activity: 'tool', preparation: null, work_context: null, open_activities: null, text_tail: '', last_tool: null,
-  updated_at_unix: 100, revision,
+  last_failure: null, updated_at_unix: 100, revision,
 })
 const received = (ownerKey: string, revision: number | null): ReceivedTurnPreview => ({
   ownerKey, preview: preview(revision), receivedAt: 0, live: true,
@@ -116,6 +116,16 @@ describe('a turn preview read from a shared Observer frame', () => {
       jsonrpc: '2.0', params: frame({ observation: { owner_key: 'A', preview: wire } }),
     })
     expect(event?.keeperName).toBe('alpha')
+  })
+
+  it('reads why an attempt failed, and takes a blank reason for none', () => {
+    const failure = (last_failure: unknown) =>
+      parseKeeperTurnPreviewEvent('message', frame({ observation: { owner_key: 'A', preview: { ...wire, last_failure } } }))?.preview.last_failure
+    expect(failure('429 from provider')).toBe('429 from provider')
+    expect(failure('  ')).toBeNull()
+    expect(failure(null)).toBeNull()
+    // A server from before the field.
+    expect(parseKeeperTurnPreviewEvent('message', frame({ observation: { owner_key: 'A', preview: wire } }))?.preview.last_failure).toBeNull()
   })
 
   it.each([

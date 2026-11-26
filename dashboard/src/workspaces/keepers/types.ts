@@ -85,6 +85,9 @@ export interface KeeperActiveTurnPreview {
   readonly work_context: KeeperTurnWorkContext | null
   readonly text_tail: string
   readonly last_tool: string | null
+  /** Why an attempt of the turn failed, as the server words it. It outlasts
+   *  the attempt: a later attempt of the same turn still carries it. */
+  readonly last_failure: string | null
   readonly updated_at_unix: number
   readonly revision: number | null
 }

@@ -14,7 +14,7 @@ const preview = (
   preparation: KeeperTurnPreparation | null = null,
 ): KeeperActiveTurnPreview => ({
   status_text: 'runtime · ' + activity, activity, open_activities: open, preparation, work_context: null,
-  text_tail: '', last_tool: null, updated_at_unix: 200, revision: 1,
+  text_tail: '', last_tool: null, last_failure: null, updated_at_unix: 200, revision: 1,
 })
 const step = (
   state: KeeperTurnPreparation['state'],

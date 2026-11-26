@@ -230,6 +230,13 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
     && !resultState.isBinary,
   )
 
+  const secondaryMetaSummary: string[] = []
+  if (entry.turn !== undefined) secondaryMetaSummary.push(`Turn #${entry.turn}`)
+  if (entry.record_kind !== 'tool_call') secondaryMetaSummary.push(entry.record_kind)
+  if (entry.model) secondaryMetaSummary.push(entry.model)
+  if (executionId) secondaryMetaSummary.push(`exec: ${executionId.slice(0, 12)}${executionId.length > 12 ? '…' : ''}`)
+  const hasSecondaryMeta = secondaryMetaSummary.length > 0
+
   return html`
     <div class="kp-inspector" data-testid="tool-call-inspector">
       <div class="kp-pill-row" data-testid="tool-call-inspector-meta">
@@ -238,20 +245,8 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
           ${entry.disposition ?? entry.wire_outcome}
         </span>
         <span class="kp-pill">${Math.round(entry.duration_ms)}ms</span>
-        ${entry.turn !== undefined && html`
-          <span class="kp-pill">Turn #${entry.turn}</span>
-        `}
-        ${entry.record_kind !== 'tool_call' && html`
-          <span class="kp-pill">${entry.record_kind}</span>
-        `}
-        ${entry.model && html`
-          <span class="kp-pill">${entry.model}</span>
-        `}
         ${entry.failure_class && html`
           <span class="kp-pill" data-tone="bad">${entry.failure_class}</span>
-        `}
-        ${executionId && html`
-          <span class="kp-pill">exec: ${executionId}</span>
         `}
         ${hydratedLoaded && progressText
           ? html`
@@ -265,6 +260,31 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
               </span>
             `}
       </div>
+
+      ${hasSecondaryMeta && html`
+        <details class="ap-disclosure" data-testid="tool-call-inspector-secondary-meta">
+          <summary class="ap-disclosure-trigger">
+            <span>실행 메타데이터 (${secondaryMetaSummary.join(' · ')})</span>
+            <span aria-hidden="true">▸</span>
+          </summary>
+          <div class="ap-disclosure-body">
+            <div class="kp-pill-row">
+              ${entry.turn !== undefined && html`
+                <span class="kp-pill">Turn #${entry.turn}</span>
+              `}
+              ${entry.record_kind !== 'tool_call' && html`
+                <span class="kp-pill">${entry.record_kind}</span>
+              `}
+              ${entry.model && html`
+                <span class="kp-pill">${entry.model}</span>
+              `}
+              ${executionId && html`
+                <span class="kp-pill">exec: ${executionId}</span>
+              `}
+            </div>
+          </div>
+        </details>
+      `}
 
       <!-- Input (Args) -->
       <section class="kp-inspector-section" aria-label="입력 (Args)">

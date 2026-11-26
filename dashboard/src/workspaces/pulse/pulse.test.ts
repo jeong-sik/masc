@@ -453,8 +453,20 @@ describe('PulseWorkspace DOM Integration', () => {
     releaseUsage()
     await waitFor(() => expect(container.textContent).toContain('$0 Sub'))
 
-    // Zero empty 0.000 Candle box when policy is off
+    // Zero empty 0.000 Candle box when policy is off; Candle digest collapses when disabled/empty
     expect(queryByText('0.000 C')).toBeNull()
+    const candleDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="pulse-candle-disclosure"]')
+    expect(candleDisclosure).not.toBeNull()
+    expect(candleDisclosure?.open).toBe(false)
+
+    // No nested <h2> inside another card heading / no double .pulse-card > .pulse-digest-box wrapper
+    expect(container.querySelector('.pulse-card .pulse-digest-box')).toBeNull()
+    expect(container.querySelector('h2 h2')).toBeNull()
+
+    // Per-company 92px sparklines start collapsed so Team Handoff fits above the fold
+    const sparkDisclosures = Array.from(container.querySelectorAll<HTMLDetailsElement>('[data-testid="pulse-sparkline-disclosure"]'))
+    expect(sparkDisclosures.length).toBeGreaterThan(0)
+    expect(sparkDisclosures.every((el) => !el.open)).toBe(true)
 
     // DOM node budget check (<1,200)
     expect(container.querySelectorAll('*').length).toBeLessThan(1200)

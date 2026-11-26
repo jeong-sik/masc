@@ -92,6 +92,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const [search, setSearch] = useState('')
   const [showAllJournal, setShowAllJournal] = useState(false)
   const [showAllActivity, setShowAllActivity] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
 
   // memory/act controls
   const [actKind, setActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
@@ -152,6 +153,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
           onClick=${() => {
             setRetractId(r.memory_id)
             if (!retractReason) setRetractReason('operator_cleanup')
+            setToolsOpen(true)
           }}
         >
           Retract 선택
@@ -401,94 +403,107 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       </section>
 
       <!-- Memory Recovery (memory/act) & Retraction Cleanup (memory/retractions) -->
-      <div class="kp-grid-2">
-        <section class="kp-card" aria-label="Librarian memory/act 복구">
-          <div class="kp-card-head">
-            <h3>Librarian Recovery (POST /memory/act)</h3>
-          </div>
-          <select
-            class="kp-input"
-            aria-label="memory/act 선택"
-            value=${actKind}
-            onChange=${(e: Event) => setActKind((e.currentTarget as HTMLSelectElement).value as typeof actKind)}
-          >
-            <option value="resume">resume</option>
-            <option value="adopt">adopt</option>
-            <option value="restart_reading">restart_reading</option>
-            <option value="skip_line">skip_line</option>
-            <option value="skip_item">skip_item</option>
-          </select>
-          ${(actKind === 'adopt' || actKind === 'restart_reading' || actKind === 'skip_item') && html`
-            <input
-              type="text"
-              class="kp-input"
-              placeholder=${actKind === 'adopt' ? 'observed digest sha256' : 'turn_log id'}
-              value=${actObserved}
-              onInput=${(e: Event) => setActObserved((e.currentTarget as HTMLInputElement).value)}
-            />
-          `}
-          ${(actKind === 'skip_line' || actKind === 'skip_item') && html`
-            <input
-              type="number"
-              class="kp-input"
-              placeholder="offset / line"
-              value=${actOffset}
-              onInput=${(e: Event) => setActOffset((e.currentTarget as HTMLInputElement).value)}
-            />
-          `}
-          <button
-            type="button"
-            class="btn-primary"
-            disabled=${actFeedback?.kind === 'pending'}
-            onClick=${() => void handleRunAct()}
-          >
-            ${actFeedback?.kind === 'pending' ? html`<${InlineSpinner} size="xs" /> 복구 적용 중…` : 'memory/act 적용'}
-          </button>
-          <${MemoryActionNotice} state=${actFeedback} pending="메모리 복구 적용 중…" />
-        </section>
+      <details
+        class="ap-disclosure"
+        data-testid="memory-tools-disclosure"
+        open=${toolsOpen}
+        onToggle=${(e: Event) => setToolsOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary class="ap-disclosure-trigger">
+          <span>메모리 복구 · 철회 도구</span>
+          <span aria-hidden="true">${toolsOpen ? '▾' : '▸'}</span>
+        </summary>
+        <div class="ap-disclosure-body">
+          <div class="kp-grid-2">
+            <section class="kp-card" aria-label="Librarian memory/act 복구">
+              <div class="kp-card-head">
+                <h3>Librarian Recovery (POST /memory/act)</h3>
+              </div>
+              <select
+                class="kp-input"
+                aria-label="memory/act 선택"
+                value=${actKind}
+                onChange=${(e: Event) => setActKind((e.currentTarget as HTMLSelectElement).value as typeof actKind)}
+              >
+                <option value="resume">resume</option>
+                <option value="adopt">adopt</option>
+                <option value="restart_reading">restart_reading</option>
+                <option value="skip_line">skip_line</option>
+                <option value="skip_item">skip_item</option>
+              </select>
+              ${(actKind === 'adopt' || actKind === 'restart_reading' || actKind === 'skip_item') && html`
+                <input
+                  type="text"
+                  class="kp-input"
+                  placeholder=${actKind === 'adopt' ? 'observed digest sha256' : 'turn_log id'}
+                  value=${actObserved}
+                  onInput=${(e: Event) => setActObserved((e.currentTarget as HTMLInputElement).value)}
+                />
+              `}
+              ${(actKind === 'skip_line' || actKind === 'skip_item') && html`
+                <input
+                  type="number"
+                  class="kp-input"
+                  placeholder="offset / line"
+                  value=${actOffset}
+                  onInput=${(e: Event) => setActOffset((e.currentTarget as HTMLInputElement).value)}
+                />
+              `}
+              <button
+                type="button"
+                class="btn-primary"
+                disabled=${actFeedback?.kind === 'pending'}
+                onClick=${() => void handleRunAct()}
+              >
+                ${actFeedback?.kind === 'pending' ? html`<${InlineSpinner} size="xs" /> 복구 적용 중…` : 'memory/act 적용'}
+              </button>
+              <${MemoryActionNotice} state=${actFeedback} pending="메모리 복구 적용 중…" />
+            </section>
 
-        <section class="kp-card" aria-label="Memory Retraction Cleanup">
-          <div class="kp-card-head">
-            <h3>Fact Retraction Cleanup</h3>
+            <section class="kp-card" aria-label="Memory Retraction Cleanup">
+              <div class="kp-card-head">
+                <h3>Fact Retraction Cleanup</h3>
+              </div>
+              <${TargetLockedAction}
+                target=${{
+                  workspaceId: activeWorkspaceId.value,
+                  keeper: keeperName,
+                  requestId: `memory-retract:${keeperName}`,
+                  revision,
+                }}
+              >
+                <input
+                  type="text"
+                  class="kp-input"
+                  placeholder="memory_id"
+                  aria-label="철회할 memory_id"
+                  value=${retractId}
+                  onInput=${(e: Event) => setRetractId((e.currentTarget as HTMLInputElement).value)}
+                />
+                <input
+                  type="text"
+                  class="kp-input"
+                  placeholder="철회 사유 (필수)"
+                  aria-label="철회 사유"
+                  value=${retractReason}
+                  onInput=${(e: Event) => setRetractReason((e.currentTarget as HTMLInputElement).value)}
+                />
+                <button
+                  type="button"
+                  class="kp-btn-danger"
+                  disabled=${retractFeedback?.kind === 'pending'}
+                  onClick=${() => void handleRetract()}
+                >
+                  ${retractFeedback?.kind === 'pending'
+                    ? html`<${InlineSpinner} size="xs" /> 철회 요청 중…`
+                    : 'Fact 철회 (POST /memory/retractions)'}
+                </button>
+              <//>
+              <${MemoryActionNotice} state=${retractFeedback} pending="메모리 철회 요청 중…" />
+            </section>
           </div>
-          <${TargetLockedAction}
-            target=${{
-              workspaceId: activeWorkspaceId.value,
-              keeper: keeperName,
-              requestId: `memory-retract:${keeperName}`,
-              revision,
-            }}
-          >
-            <input
-              type="text"
-              class="kp-input"
-              placeholder="memory_id"
-              aria-label="철회할 memory_id"
-              value=${retractId}
-              onInput=${(e: Event) => setRetractId((e.currentTarget as HTMLInputElement).value)}
-            />
-            <input
-              type="text"
-              class="kp-input"
-              placeholder="철회 사유 (필수)"
-              aria-label="철회 사유"
-              value=${retractReason}
-              onInput=${(e: Event) => setRetractReason((e.currentTarget as HTMLInputElement).value)}
-            />
-            <button
-              type="button"
-              class="kp-btn-danger"
-              disabled=${retractFeedback?.kind === 'pending'}
-              onClick=${() => void handleRetract()}
-            >
-              ${retractFeedback?.kind === 'pending'
-                ? html`<${InlineSpinner} size="xs" /> 철회 요청 중…`
-                : 'Fact 철회 (POST /memory/retractions)'}
-            </button>
-          <//>
-          <${MemoryActionNotice} state=${retractFeedback} pending="메모리 철회 요청 중…" />
-        </section>
-      </div>
+        </div>
+      </details>
 
       <!-- Memory Journal & Activity -->
       <section class="kp-card" aria-label="Memory Journal 및 활동 로그">

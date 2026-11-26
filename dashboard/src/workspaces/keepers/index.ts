@@ -170,7 +170,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
         onCreatedKeeper=${handleCreatedKeeper}
       />
 
-      <main class="kp-stage" aria-label="활성 Keeper 상세">
+      <section class="kp-stage" aria-label="Keeper 워크스페이스">
         ${!activeKeeper
           ? html`
               <div class="kp-scroll-pane">
@@ -233,7 +233,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                 `}
               </div>
             `}
-      </main>
+      </section>
     </div>
   `
 }

@@ -18,7 +18,7 @@ import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
 import {
   WIKI_SOURCES,
   computeMarkdownLineDiff,
@@ -370,26 +370,34 @@ export function WikiTab(props: WorkspaceViewProps) {
               <option value="title">제목순</option>
               <option value="rank">연결 순위순</option>
             </select>
+            ${wikiIndex && wikiIndex.tags.length > 0 && html`
+              <${PopoverMenu}
+                align="right"
+                triggerLabel=${tagFilter ? `태그: #${tagFilter} ▾` : `태그 (${wikiIndex.tags.length}) ▾`}
+                triggerClassName="btn-ghost"
+                triggerTestId="wiki-tag-filter"
+                popoverTestId="wiki-tag-filter-menu"
+                popoverClassName="kn-tag-popover"
+                ariaLabel="태그 필터"
+                items=${[
+                  {
+                    id: '__all__',
+                    testId: 'wiki-tag-all',
+                    label: '전체 태그',
+                    active: tagFilter === '',
+                    onSelect: () => setTagFilter(''),
+                  },
+                  ...wikiIndex.tags.slice(0, 24).map((t) => ({
+                    id: t.tag,
+                    testId: `wiki-tag-${t.tag}`,
+                    label: `#${t.tag} (${t.count})`,
+                    active: tagFilter === t.tag,
+                    onSelect: () => setTagFilter(tagFilter === t.tag ? '' : t.tag),
+                  })),
+                ]}
+              />
+            `}
           </div>
-
-          ${wikiIndex && wikiIndex.tags.length > 0 && html`
-            <div class="kn-chips" aria-label="태그 클러스터">
-              <button type="button" class="kn-chip" aria-pressed=${tagFilter === ''} onClick=${() => setTagFilter('')}>
-                전체 태그
-              </button>
-              ${wikiIndex.tags.slice(0, 12).map((t) => html`
-                <button
-                  key=${t.tag}
-                  type="button"
-                  class="kn-chip"
-                  aria-pressed=${tagFilter === t.tag}
-                  onClick=${() => setTagFilter(tagFilter === t.tag ? '' : t.tag)}
-                >
-                  #${t.tag} <span class="kn-chip-count">${t.count}</span>
-                </button>
-              `)}
-            </div>
-          `}
         </div>
 
         ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
@@ -761,44 +769,52 @@ export function WikiTab(props: WorkspaceViewProps) {
               <${MarkdownContent} text=${pageDetail.body_markdown} document />
             </article>
 
-            <div class="kn-grid-links">
-              <section class="kn-section">
-                <h3 class="kn-section-title">Backlinks (${pageDetail.backlinks.length})</h3>
-                ${pageDetail.backlinks.length === 0
-                  ? html`<span class="dtable-absent">없음</span>`
-                  : html`
-                      <div class="kn-chips">
-                        ${pageDetail.backlinks.map((slug) => html`
-                          <button key=${slug} type="button" class="kn-chip mono" onClick=${() => setSelectedSlug(slug)}>
-                            ${slug}
-                          </button>
-                        `)}
-                      </div>
-                    `}
-              </section>
-              <section class="kn-section">
-                <h3 class="kn-section-title">Outgoing Links (${pageDetail.outgoing_links.length})</h3>
-                ${pageDetail.outgoing_links.length === 0
-                  ? html`<span class="dtable-absent">없음</span>`
-                  : html`
-                      <div class="kn-chips">
-                        ${pageDetail.outgoing_links.map((link, idx) => html`
-                          <button
-                            key=${`${link.target}-${idx}`}
-                            type="button"
-                            class="kn-chip"
-                            onClick=${() => {
-                              if (link.kind === 'page' && link.exists) setSelectedSlug(link.target)
-                            }}
-                          >
-                            ${link.text || link.target}
-                            ${link.exists === false && html`<span class="kn-badge kn-badge--err">broken</span>`}
-                          </button>
-                        `)}
-                      </div>
-                    `}
-              </section>
-            </div>
+            <details class="ap-disclosure" data-testid="wiki-links-disclosure">
+              <summary class="ap-disclosure-trigger">
+                <span>연결 문서: Backlinks ${pageDetail.backlinks.length} · Outgoing ${pageDetail.outgoing_links.length}</span>
+                <span aria-hidden="true">▸</span>
+              </summary>
+              <div class="ap-disclosure-body">
+                <div class="kn-grid-links">
+                  <section class="kn-section">
+                    <h3 class="kn-section-title">Backlinks (${pageDetail.backlinks.length})</h3>
+                    ${pageDetail.backlinks.length === 0
+                      ? html`<span class="dtable-absent">없음</span>`
+                      : html`
+                          <div class="kn-chips">
+                            ${pageDetail.backlinks.map((slug) => html`
+                              <button key=${slug} type="button" class="kn-chip mono" onClick=${() => setSelectedSlug(slug)}>
+                                ${slug}
+                              </button>
+                            `)}
+                          </div>
+                        `}
+                  </section>
+                  <section class="kn-section">
+                    <h3 class="kn-section-title">Outgoing Links (${pageDetail.outgoing_links.length})</h3>
+                    ${pageDetail.outgoing_links.length === 0
+                      ? html`<span class="dtable-absent">없음</span>`
+                      : html`
+                          <div class="kn-chips">
+                            ${pageDetail.outgoing_links.map((link, idx) => html`
+                              <button
+                                key=${`${link.target}-${idx}`}
+                                type="button"
+                                class="kn-chip"
+                                onClick=${() => {
+                                  if (link.kind === 'page' && link.exists) setSelectedSlug(link.target)
+                                }}
+                              >
+                                ${link.text || link.target}
+                                ${link.exists === false && html`<span class="kn-badge kn-badge--err">broken</span>`}
+                              </button>
+                            `)}
+                          </div>
+                        `}
+                  </section>
+                </div>
+              </div>
+            </details>
           </div>
         `
       : pageLoading

@@ -15,7 +15,7 @@ import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
 import {
   asNonEmptyString,
   asSafeInt,
@@ -279,20 +279,36 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
             </div>
             <div class="kn-actions">
               <button type="button" class="btn-ghost" onClick=${() => void copyText(doc.content, '본문')}>본문 복사</button>
-              <button type="button" class="btn-ghost" onClick=${() => void copyText(doc.artifact.sha256, 'SHA-256')}>SHA-256 복사</button>
               <button type="button" class="btn-primary" onClick=${() => downloadArtifact(doc)}>다운로드</button>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => props.onInspect({
-                  title: `Artifact: ${doc.artifact.title}`,
-                  subtitle: `${doc.artifact.id} · r${doc.artifact.revision}`,
-                  kind: 'artifact',
-                  data: doc.artifact,
-                })}
-              >
-                메타데이터
-              </button>
+              <${PopoverMenu}
+                align="right"
+                triggerLabel="⋯"
+                triggerClassName="btn-ghost"
+                triggerTestId="artifact-detail-actions"
+                popoverTestId="artifact-detail-actions-menu"
+                ariaLabel="아티팩트 추가 작업"
+                items=${[
+                  {
+                    id: 'copy-sha',
+                    testId: 'artifact-action-copy-sha',
+                    label: 'SHA-256 복사',
+                    description: doc.artifact.sha256 ? `${doc.artifact.sha256.slice(0, 12)}…` : '없음',
+                    disabled: !doc.artifact.sha256,
+                    onSelect: () => void copyText(doc.artifact.sha256, 'SHA-256'),
+                  },
+                  {
+                    id: 'metadata',
+                    testId: 'artifact-action-metadata',
+                    label: '메타데이터',
+                    onSelect: () => props.onInspect({
+                      title: `Artifact: ${doc.artifact.title}`,
+                      subtitle: `${doc.artifact.id} · r${doc.artifact.revision}`,
+                      kind: 'artifact',
+                      data: doc.artifact,
+                    }),
+                  },
+                ]}
+              />
             </div>
           </div>
 
@@ -300,7 +316,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
 
           <div class="kn-row-meta">
             <${KeeperBadge} id=${doc.artifact.author} size="sm" />
-            <span class="mono" title=${doc.artifact.sha256}>
+            <span class="mono kn-sha256" data-testid="artifact-sha256" title=${doc.artifact.sha256 || undefined}>
               SHA-256: ${doc.artifact.sha256 || '없음'}
             </span>
             ${doc.artifact.goalId && html`

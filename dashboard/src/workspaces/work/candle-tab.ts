@@ -359,113 +359,131 @@ export function CandleTab(props: WorkspaceViewProps) {
           />
         </section>
 
-        <section class="wk-section" aria-label="지급 진단 및 보류 해제">
-          <div class="wk-section-head">
-            <h3 class="wk-section-title">Unattributed / Backlog-Fenced Diagnostics & Hold Release</h3>
+        <details
+          class="ap-disclosure"
+          data-testid="candle-diagnostics-disclosure"
+          aria-label="지급 진단 및 보류 해제"
+          open=${(
+            ledger.diagnostics.heldWindowsCount > 0
+            || ledger.diagnostics.unattributedCount > 0
+            || ledger.diagnostics.items.length > 0
+            || Boolean(props.entityId)
+            || currentObservation !== null
+            || Boolean(goalCandleError)
+            || Boolean(releaseFeedback)
+          ) || undefined}
+        >
+          <summary class="ap-disclosure-trigger">
+            <span>Unattributed / Backlog-Fenced Diagnostics & Hold Release</span>
+            <span class="wk-sub-id tnum">
+              Held ${ledger.diagnostics.heldWindowsCount} · Unattributed ${ledger.diagnostics.unattributedCount} ▸
+            </span>
+          </summary>
+          <div class="ap-disclosure-body">
             <div class="wk-chips">
               <span class="wk-badge wk-badge--warn">Held Windows: ${ledger.diagnostics.heldWindowsCount}</span>
               <span class="wk-badge wk-badge--err">Unattributed: ${ledger.diagnostics.unattributedCount}</span>
               <span class="wk-badge wk-badge--idle">Backlog Fenced: ${ledger.diagnostics.backlogFencedCount}</span>
               <span class="wk-badge wk-badge--idle">0-Task Goals: ${ledger.diagnostics.zeroLinkedTasksGoals}</span>
             </div>
-          </div>
 
-          ${releaseFeedback && html`
-            <div class=${`wk-notice wk-notice--${releaseFeedback.kind}`} role="status">
-              ${releaseFeedback.message}
-            </div>
-          `}
+            ${releaseFeedback && html`
+              <div class=${`wk-notice wk-notice--${releaseFeedback.kind}`} role="status">
+                ${releaseFeedback.message}
+              </div>
+            `}
 
-          <div class="wk-row-wrap">
-            <input
-              type="text"
-              class="wk-input wk-flex-input"
-              placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
-              value=${inspectGoalId}
-              disabled=${releaseBusy !== null}
-              onInput=${(e: Event) => {
-                inspectAbortRef.current?.abort()
-                setInspectGoalId((e.target as HTMLInputElement).value)
-                setObservation(null)
-                setGoalCandleLoading(false)
-                setGoalCandleError(null)
-              }}
-              aria-label="Goal Candle 조회 ID"
-            />
-            <button
-              type="button"
-              class="btn-ghost"
-              disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
-              onClick=${() => void inspectGoalCandle(inspectGoalId)}
-            >
-              ${goalCandleLoading ? '조회 중…' : 'Goal 지급 관측'}
-            </button>
-          </div>
-
-          ${goalCandleError && html`<div class="wk-notice wk-notice--err" role="alert">${goalCandleError}</div>`}
-          ${currentObservation && html`
-            <pre class="wk-code-preview">${JSON.stringify(currentObservation.data, null, 2)}</pre>
-          `}
-
-          ${currentObservation && heldRequestId && heldVerificationId && html`
-            <${TargetLockedAction}
-              target=${{
-                workspaceId: currentObservation.workspaceId,
-                keeper: '—',
-                requestId: heldRequestId,
-                revision: heldVerificationId,
-              }}
-              lockedEpoch=${currentObservation.epoch}
-              onRefresh=${() => void inspectGoalCandle(currentObservation.goalId)}
-            >
-              <p>Goal <code>${currentObservation.goalId}</code> · Candle 지급 보류 중</p>
+            <div class="wk-row-wrap">
+              <input
+                type="text"
+                class="wk-input wk-flex-input"
+                placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
+                value=${inspectGoalId}
+                disabled=${releaseBusy !== null}
+                onInput=${(e: Event) => {
+                  inspectAbortRef.current?.abort()
+                  setInspectGoalId((e.target as HTMLInputElement).value)
+                  setObservation(null)
+                  setGoalCandleLoading(false)
+                  setGoalCandleError(null)
+                }}
+                aria-label="Goal Candle 조회 ID"
+              />
               <button
                 type="button"
-                class="wk-btn-warn"
-                disabled=${releaseBusy !== null}
-                onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
+                class="btn-ghost"
+                disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
+                onClick=${() => void inspectGoalCandle(inspectGoalId)}
               >
-                ${releaseBusy ? '해제 중…' : 'Hold Release'}
+                ${goalCandleLoading ? '조회 중…' : 'Goal 지급 관측'}
               </button>
-            </${TargetLockedAction}>
-          `}
+            </div>
 
-          ${ledger.diagnostics.items.length === 0
-            ? html`<span class="dtable-absent">현재 진단 경고가 없습니다.</span>`
-            : html`
-                <div class="wk-stack-2">
-                  ${ledger.diagnostics.items.map((item) => html`
-                    <div key=${`${item.goalId}-${item.kind}-${item.atUnix}`} class="wk-diag-row">
-                      <div class="wk-diag-main">
-                        <div class="wk-diag-title">
-                          <span class=${`wk-badge ${item.kind === 'candidate_window_held' ? 'wk-badge--warn' : 'wk-badge--err'}`}>
-                            ${item.kind}
-                          </span>
-                          <strong>${item.title ?? item.goalId}</strong>
-                          <span class="mono wk-sub-id">${item.goalId}</span>
+            ${goalCandleError && html`<div class="wk-notice wk-notice--err" role="alert">${goalCandleError}</div>`}
+            ${currentObservation && html`
+              <pre class="wk-code-preview">${JSON.stringify(currentObservation.data, null, 2)}</pre>
+            `}
+
+            ${currentObservation && heldRequestId && heldVerificationId && html`
+              <${TargetLockedAction}
+                target=${{
+                  workspaceId: currentObservation.workspaceId,
+                  keeper: '—',
+                  requestId: heldRequestId,
+                  revision: heldVerificationId,
+                }}
+                lockedEpoch=${currentObservation.epoch}
+                onRefresh=${() => void inspectGoalCandle(currentObservation.goalId)}
+              >
+                <p>Goal <code>${currentObservation.goalId}</code> · Candle 지급 보류 중</p>
+                <button
+                  type="button"
+                  class="wk-btn-warn"
+                  disabled=${releaseBusy !== null}
+                  onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
+                >
+                  ${releaseBusy ? '해제 중…' : 'Hold Release'}
+                </button>
+              </${TargetLockedAction}>
+            `}
+
+            ${ledger.diagnostics.items.length === 0
+              ? html`<span class="dtable-absent">현재 진단 경고가 없습니다.</span>`
+              : html`
+                  <div class="wk-stack-2">
+                    ${ledger.diagnostics.items.map((item) => html`
+                      <div key=${`${item.goalId}-${item.kind}-${item.atUnix}`} class="wk-diag-row">
+                        <div class="wk-diag-main">
+                          <div class="wk-diag-title">
+                            <span class=${`wk-badge ${item.kind === 'candidate_window_held' ? 'wk-badge--warn' : 'wk-badge--err'}`}>
+                              ${item.kind}
+                            </span>
+                            <strong>${item.title ?? item.goalId}</strong>
+                            <span class="mono wk-sub-id">${item.goalId}</span>
+                          </div>
+                          <div class="wk-diag-hint">
+                            ${item.diagnosticHint || item.observation}
+                          </div>
                         </div>
-                        <div class="wk-diag-hint">
-                          ${item.diagnosticHint || item.observation}
+                        <div class="wk-actions">
+                          <button
+                            type="button"
+                            class="btn-ghost"
+                            disabled=${releaseBusy !== null}
+                            onClick=${() => {
+                              setInspectGoalId(item.goalId)
+                              void inspectGoalCandle(item.goalId)
+                            }}
+                          >
+                            ${item.kind === 'candidate_window_held' ? '보류 확인' : '관측'}
+                          </button>
                         </div>
                       </div>
-                      <div class="wk-actions">
-                        <button
-                          type="button"
-                          class="btn-ghost"
-                          disabled=${releaseBusy !== null}
-                          onClick=${() => {
-                            setInspectGoalId(item.goalId)
-                            void inspectGoalCandle(item.goalId)
-                          }}
-                        >
-                          ${item.kind === 'candidate_window_held' ? '보류 확인' : '관측'}
-                        </button>
-                      </div>
-                    </div>
-                  `)}
-                </div>
-              `}
-        </section>
+                    `)}
+                  </div>
+                `}
+          </div>
+        </details>
       `}
     </div>
   `

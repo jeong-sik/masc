@@ -15,6 +15,7 @@ import { html } from 'htm/preact'
 import { ErrorBoundary } from '../../components/common/error-boundary'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { WorkspaceChatImage } from '../../components/chat/workspace-image'
+import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
@@ -2367,34 +2368,36 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         <div class="kp-chat-toolbar">
           <div class="kp-pill-row">
             <span class="kp-pill" data-tone="info">Origin_bare · AG-UI SSE</span>
-            <button
-              type="button"
-              class="btn-ghost kp-toggle-btn"
-              data-testid="chat-toggle-thinking"
-              data-active=${blockPrefs.thinking !== 'hidden' ? 'true' : 'false'}
-              title="추론 블록 표시 모드 전환 (Alt+T)"
-              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, thinking: nextThinkingMode(cur.thinking) }))}
-            >
-              추론: ${thinkingModeLabel(blockPrefs.thinking)} (Alt+T)
-            </button>
-            <button
-              type="button"
-              class="btn-ghost kp-toggle-btn"
-              data-testid="chat-toggle-tools"
-              data-active=${blockPrefs.tools !== 'hidden' ? 'true' : 'false'}
-              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, tools: nextToolsMode(cur.tools) }))}
-            >
-              도구: ${toolsModeLabel(blockPrefs.tools)}
-            </button>
-            <button
-              type="button"
-              class="btn-ghost kp-toggle-btn"
-              data-testid="chat-toggle-internal"
-              data-active=${blockPrefs.internal === 'shown' ? 'true' : 'false'}
-              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, internal: nextInternalMode(cur.internal) }))}
-            >
-              메모리·내부: ${internalModeLabel(blockPrefs.internal)}${hiddenInternalCount > 0 ? ` (${hiddenInternalCount})` : ''}
-            </button>
+            <${PopoverMenu}
+              triggerLabel=${`표시 ▾`}
+              triggerClassName="btn-ghost kp-toggle-btn"
+              triggerTestId="chat-display-menu"
+              popoverTestId="chat-display-popover"
+              ariaLabel="채팅 블록 표시 설정"
+              triggerTitle=${`추론: ${thinkingModeLabel(blockPrefs.thinking)} · 도구: ${toolsModeLabel(blockPrefs.tools)} · 메모리·내부: ${internalModeLabel(blockPrefs.internal)}`}
+              closeOnSelect=${false}
+              items=${[
+                {
+                  id: 'thinking',
+                  testId: 'chat-toggle-thinking',
+                  label: `추론: ${thinkingModeLabel(blockPrefs.thinking)}`,
+                  shortcut: 'Alt+T',
+                  onSelect: () => updateBlockPrefs((cur) => ({ ...cur, thinking: nextThinkingMode(cur.thinking) })),
+                },
+                {
+                  id: 'tools',
+                  testId: 'chat-toggle-tools',
+                  label: `도구: ${toolsModeLabel(blockPrefs.tools)}`,
+                  onSelect: () => updateBlockPrefs((cur) => ({ ...cur, tools: nextToolsMode(cur.tools) })),
+                },
+                {
+                  id: 'internal',
+                  testId: 'chat-toggle-internal',
+                  label: `메모리·내부: ${internalModeLabel(blockPrefs.internal)}${hiddenInternalCount > 0 ? ` (${hiddenInternalCount})` : ''}`,
+                  onSelect: () => updateBlockPrefs((cur) => ({ ...cur, internal: nextInternalMode(cur.internal) })),
+                },
+              ]}
+            />
             ${hasMore && html`
               <button type="button" class="btn-ghost" disabled=${loadingHistory} onClick=${() => void handleLoadEarlier()}>
                 이전 대화 불러오기
@@ -2950,10 +2953,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
           <div class="kp-composer-footer">
             <div class="kp-composer-meta">
-              <span class="kp-pill" data-tone="info">
-                ${keeper.runtime_id}${keeper.active_turn ? ` · ${keeper.active_turn.lane}` : ''}
-              </span>
-
               <!-- Circular SVG Context Ring % (zero inline HTML style) -->
               <span class="kp-ctx-ring" title=${formatContextDetail(keeper).tooltip}>
                 <svg class="kp-ring-svg" viewBox="0 0 22 22" aria-hidden="true">

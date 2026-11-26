@@ -73,6 +73,14 @@ import {
 } from './chat-blocks'
 import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
 import {
+  acceptedReplyState,
+  appendStreamNotice,
+  chatProviderRetry,
+  providerRetryLabel,
+  runtimeAttemptLabel,
+  streamNoticePrefix,
+} from './chat-stream-notices'
+import {
   openActivityLeavesMasc,
   openActivityPhrase,
   openActivityReachLabel,
@@ -1231,23 +1239,26 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           onAccepted: (info) => {
             acceptedByServer = true
             if (info.controlToken) setControlToken(info.controlToken)
-            const nextState: ChatDeliveryState =
-              info.state === 'Queued'
-                ? 'Queued'
-                : info.state === 'Running'
-                  ? 'Pending_processing'
-                  : 'Delivered'
+            const accepted = acceptedReplyState(info.state)
+            const interruptProblem = info.interruptProblem
             updateEntryById(userId, (m) => ({
               ...m,
               deliveryState: info.state === 'Queued' ? 'Queued' : 'Delivered',
             }))
-            updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: nextState }))
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              deliveryState: accepted.delivery,
+              errorDetail: accepted.detail ?? m.errorDetail,
+              streamNotices: interruptProblem === null
+                ? m.streamNotices
+                : appendStreamNotice(m.streamNotices, { kind: 'interrupt', text: interruptProblem }),
+            }))
           },
           onRunStarted: () => {
             markUserDelivered()
             updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: 'Pending_processing' }))
           },
-          onAttemptStarted: () => {
+          onAttemptStarted: (attempt) => {
             markUserDelivered()
             thinkingByBlock.clear()
             liveTools = []
@@ -1256,7 +1267,37 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               content: '',
               thinking: undefined,
               toolCalls: undefined,
+              providerRetry: undefined,
+              runtimeAttempt: attempt ?? m.runtimeAttempt,
               deliveryState: 'Streaming',
+            }))
+          },
+          onProviderRetry: (retry) => {
+            const projected = chatProviderRetry(retry)
+            updateAssistantEntry(assistantId, (m) => (m.content === ''
+              ? { ...m, providerRetry: projected, deliveryState: promoteStreaming(m.deliveryState) }
+              : m))
+          },
+          onStreamProtocolError: ({ message, quarantinedStreamKey }) => {
+            if (quarantinedStreamKey !== undefined) {
+              liveTools = liveTools.map((tc) => (tc.streamKey === quarantinedStreamKey
+                ? { ...tc, status: 'error' }
+                : tc))
+            }
+            const snapshotTools = liveTools
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: quarantinedStreamKey === undefined ? m.toolCalls : snapshotTools,
+              streamNotices: appendStreamNotice(m.streamNotices, { kind: 'protocol_error', text: message }),
+            }))
+          },
+          onContinuationCheckpoint: (message) => {
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              streamNotices: appendStreamNotice(m.streamNotices, {
+                kind: 'checkpoint',
+                text: message ?? '턴이 체크포인트에서 멈췄고 이어서 진행해요.',
+              }),
             }))
           },
           onModelActivity: () => {
@@ -1271,6 +1312,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: m.content + delta,
+              providerRetry: undefined,
               deliveryState: 'Streaming',
             }))
           },
@@ -2432,6 +2474,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                             ${msg.surface && msg.surface !== 'chat' && msg.surface !== 'dashboard' && html`
                               <span class="kp-pill" data-tone="info">${msg.surface}</span>
                             `}
+                            ${msg.runtimeAttempt && runtimeAttemptLabel(msg.runtimeAttempt) && html`
+                              <span class="kp-pill" data-tone="info" data-testid="chat-runtime-attempt">
+                                ${runtimeAttemptLabel(msg.runtimeAttempt)}
+                              </span>
+                            `}
                             ${msg.deliveryState && html`
                               <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
                                 ${msg.deliveryState}
@@ -2554,6 +2601,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                         ${msg.retainedImages?.map((image, index) => html`
                           <${WorkspaceChatImage} key=${`${index}:${image.path}`}
                             path=${image.path} caption=${image.caption} workspaceEpoch=${image.workspaceEpoch} />
+                        `)}
+                        ${msg.providerRetry && html`
+                          <div class="kp-stream-notice" data-kind="retry" role="status">
+                            ${providerRetryLabel(msg.providerRetry)}
+                          </div>
+                        `}
+                        ${msg.streamNotices?.map((notice, index) => html`
+                          <div class="kp-stream-notice" data-kind=${notice.kind} key=${`notice:${index}`}
+                            role=${notice.kind === 'protocol_error' ? 'alert' : 'status'}>
+                            <strong>${streamNoticePrefix(notice.kind)}</strong> ${notice.text}
+                          </div>
                         `)}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
                         ${discordOperator && msg.discordReplyOrigin && discordReplyId === msg.id && html`

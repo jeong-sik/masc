@@ -347,7 +347,7 @@ let ending_name = function
 (* Runs the stream's own step through the real pump over [items] already
    queued. Returns every frame written, in order, and how the stream ended. *)
 let serve_chat ~replayed items =
-  Eio_main.run (fun env ->
+  Eio_main.run (fun _env ->
     let queue = Pump.Queue.create ~max_queued_events:64 in
     let written = ref [] in
     let send bytes = written := List.rev_append (split_frames bytes) !written; Sse.Written in
@@ -355,9 +355,6 @@ let serve_chat ~replayed items =
     let ending =
       Pump.run ~source:(Pump.Queue.source queue)
         ~step:(Stream.For_testing.keeper_chat_step ~replayed)
-        ~idle:(fun () -> Pump.Finish)
-        ~clock:(Eio.Stdenv.clock env)
-        ~ping_interval_s:30.0
         ~closed:Eio.Fiber.await_cancel
         ~send
     in
@@ -367,11 +364,9 @@ let live_item (seq, event) = Stream.For_testing.Live (Some seq, event)
 
 let acceptance = "event: accepted\n\n"
 
-(* A ping interval no queued event waits for. A stream that should have ended
-   and asks [idle] fails the test instead. *)
-let short_ping_interval_s = 0.05
-
-let idle_must_not_be_asked () = Alcotest.fail "the stream waited for more events"
+(* Longer than any queued event waits. A stream that should have ended and
+   waits for more events fails the test instead. *)
+let more_events_patience_s = 5.0
 
 (* Runs the handler's code after an accepted submit with a [send] that
    records each frame. [after_send n] gives the live events the sink
@@ -394,10 +389,15 @@ let serve_accepted ?(queued = []) ?(after_send = fun _ -> []) ?closed_from
     in
     let ending =
       (* The stub response never closes; the stream ends through [send]. *)
-      Stream.For_testing.serve_accepted_chat ~send ~closed:Eio.Fiber.await_cancel ~queue
-        ~acceptance_frame:acceptance
-        ~replay:(fun () -> replay) ~missed_terminal ~settled ~idle:idle_must_not_be_asked
-        ~clock:(Eio.Stdenv.clock env) ~ping_interval_s:short_ping_interval_s
+      match
+        Eio.Time.with_timeout (Eio.Stdenv.clock env) more_events_patience_s (fun () ->
+          Ok
+            (Stream.For_testing.serve_accepted_chat ~send ~closed:Eio.Fiber.await_cancel ~queue
+               ~acceptance_frame:acceptance
+               ~replay:(fun () -> replay) ~missed_terminal ~settled))
+      with
+      | Ok ending -> ending
+      | Error `Timeout -> Alcotest.fail "the stream waited for more events"
     in
     List.rev !written, Option.map ending_name ending)
 
@@ -524,26 +524,19 @@ let test_the_submit_runs_while_the_retry_frame_waits () =
     Alcotest.(check string) "the submit's result comes back" "accepted" accepted)
 
 let idle_name = function
-  | Pump.Keepalive -> "Keepalive"
-  | Pump.Quiet -> "Quiet"
-  | Pump.Finish -> "Finish"
+  | Sse.Keepalive -> "Keepalive"
+  | Sse.Quiet -> "Quiet"
+  | Sse.Finish -> "Finish"
 
-(* A quiet stream ends when its client is gone without reading the operation,
-   keeps a queued or running operation's stream alive, ends a settled one so
-   the TUI settles it from the record, and waits when the record is
-   unreadable. *)
-let test_a_quiet_stream_follows_the_client_and_the_operation () =
-  let idle ?(client_gone = false) state =
-    idle_name
-      (Stream.For_testing.keeper_chat_idle ~client_gone:(fun () -> client_gone)
-         ~operation_state:(fun () -> state))
+(* A quiet stream keeps a queued or running operation's stream alive, ends a
+   settled one so the TUI settles it from the record, and waits when the
+   record is unreadable. A client that left closes the response, which ends
+   the keepalive before it asks. *)
+let test_a_quiet_stream_follows_the_operation () =
+  let idle state =
+    idle_name (Stream.For_testing.keeper_chat_idle ~operation_state:(fun () -> state))
   in
   let module Op = Keeper_owner.Chat_operation in
-  Alcotest.(check string) "the client is gone"
-    "Finish"
-    (idle_name
-       (Stream.For_testing.keeper_chat_idle ~client_gone:(fun () -> true)
-          ~operation_state:(fun () -> Alcotest.fail "the operation was read")));
   Alcotest.(check string) "queued" "Keepalive" (idle (Some Op.Queued));
   Alcotest.(check string) "running" "Keepalive" (idle (Some (Op.Running { started_at = 1.0 })));
   Alcotest.(check string) "settled" "Finish"
@@ -706,7 +699,7 @@ let () =
         ; Alcotest.test_case "the submit runs while the retry frame waits" `Quick
             test_the_submit_runs_while_the_retry_frame_waits
         ; Alcotest.test_case "a quiet stream follows the client and the operation" `Quick
-            test_a_quiet_stream_follows_the_client_and_the_operation
+            test_a_quiet_stream_follows_the_operation
         ; Alcotest.test_case "the step drops only what the replay wrote" `Quick
             test_the_step_drops_only_what_the_replay_wrote
         ; Alcotest.test_case "terminals and Settled end the stream" `Quick

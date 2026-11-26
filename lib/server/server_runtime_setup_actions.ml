@@ -200,11 +200,8 @@ let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace conf
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
   let* timeout = match choice with
     | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
-    | Gemini | Vertex_gemini | Claude_code | Codex -> Ok []
-    | Mistral_vibe | Kimi_acp | Antigravity_acp ->
-      (match declared_provider config id with
-       | Some { acp = Some acp; _ } -> Ok ["timeout_s", `Float acp.timeout_s]
-       | Some _ | None -> Ok [])
+    | Gemini | Vertex_gemini | Claude_code | Codex
+    | Mistral_vibe | Kimi_acp | Antigravity_acp -> Ok []
     | Antigravity ->
       (match account with
        | Some (Runtime_setup_accounts.Antigravity_account account) -> Ok ["timeout_s",`Float account.timeout_s]

@@ -240,7 +240,6 @@ driver = "antigravity"
 command = "agy"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.kimi_test]
 protocol = "acp"
@@ -248,7 +247,6 @@ driver = "kimi_code"
 command = "kimi"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 120.0
 
 [providers.vibe_test]
 protocol = "acp"
@@ -257,7 +255,6 @@ command = "vibe-acp"
 strip-env = ["MISTRAL_API_KEY"]
 mode = "auto-approve"
 is-non-interactive = true
-timeout-s = 120.0
 
 [models.m_agy]
 api-name = "gemini-4-neon-high"
@@ -337,8 +334,6 @@ let acp_execution_of_driver driver =
     ; mode = None
     ; contributor_mode = Runtime_acp_client.default_contributor_mode
     ; oauth_source = None
-    ; timeout_s = 1.
-    ; admission_timeout_s = 1.
     }
   in
   Runtime_execution.Acp config
@@ -738,7 +733,6 @@ driver = "muse_code"
 command = "muse"
 args = ["acp", "-c", "reasoning_effort=\"low\""]
 is-non-interactive = true
-timeout-s = 120.0
 
 [models.m_muse]
 api-name = "muse-ember-1.0"
@@ -2341,7 +2335,6 @@ for line in sys.stdin:
         { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
           cli_path = "python3"
         ; args = [ mock_script ]
-        ; admission_timeout_s = 10.0
         }
       in
       Eio.Switch.run (fun sw ->
@@ -2402,13 +2395,11 @@ for line in sys.stdin:
         check bool "PID-tagged --gemini-dir cleaned up on close" false (Sys.file_exists gdir))))
 ;;
 
-(* Behavioral F1 proof: a non-default [admission_timeout_s] must reach the
-   [session/new] RPC deadline. The mock answers [initialize] immediately (so
-   [start] succeeds) but delays [session/new] past the configured 0.5s budget;
-   the client must fail with [Timeout { seconds = 0.5; _ }] — the configured
-   value, not the module default. Without the SSOT fix the client would hang
-   until the hardcoded 30s literal (this test would never finish). *)
-let test_nondefault_admission_timeout_reaches_session_new () =
+(* An agent that restores a long session sends nothing until it answers
+   [session/new]. The mock answers [initialize] at once and [session/new]
+   after a silence; the client waits for the answer instead of failing on the
+   quiet. *)
+let test_slow_session_new_is_not_failed () =
   let tmp = Filename.temp_dir "acp-admission-" "" in
   let mock_script = Filename.concat tmp "mock_acp.py" in
   let script_body =
@@ -2433,7 +2424,7 @@ for line in sys.stdin:
                 "agentCapabilities": {"loadSession": True}
             }})
         elif m == "session/new":
-            time.sleep(2)
+            time.sleep(1)
             send({"jsonrpc": "2.0", "id": req_id, "result": {
                 "sessionId": "sess-1",
                 "configOptions": []
@@ -2451,7 +2442,6 @@ for line in sys.stdin:
         { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
           cli_path = "python3"
         ; args = [ mock_script ]
-        ; admission_timeout_s = 0.5
         }
       in
       Eio.Switch.run (fun sw ->
@@ -2461,13 +2451,9 @@ for line in sys.stdin:
           | Error err -> failf "mock ACP start failed: %s" (Runtime_acp_client.error_to_string err)
         in
         (match Runtime_acp_client.new_session client ~cwd:tmp () with
-         | Error (Runtime_acp_client.Timeout { seconds; stage = Some stage; _ }) ->
-           check string "timeout stage is session/new" "session/new" stage;
-           check bool "timeout_s is the configured non-default value" true
-             (Float.abs (seconds -. 0.5) < 0.0001)
-         | Ok _ -> fail "session/new must time out after 0.5s"
+         | Ok session -> check string "the late answer is the session" "sess-1" session.session_id
          | Error err ->
-           failf "expected Timeout, got %s" (Runtime_acp_client.error_to_string err));
+           failf "a slow session/new must not fail: %s" (Runtime_acp_client.error_to_string err));
         Runtime_acp_client.close client)))
 ;;
 
@@ -3030,7 +3016,6 @@ for line in sys.stdin:
         { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
           cli_path = "python3"
         ; args = [ mock_script ]
-        ; admission_timeout_s = 10.0
         }
       in
       Eio.Switch.run (fun sw ->
@@ -4654,8 +4639,6 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     ; mode = Some "default"
     ; contributor_mode = Runtime_acp_client.default_contributor_mode
     ; oauth_source = Some "/tmp/oauth-a"
-    ; timeout_s = 120.0
-    ; admission_timeout_s = 30.0
     }
   in
   let h_base =
@@ -6182,8 +6165,8 @@ let () =
             test_pool_key_switch_evicts_superseded_keeper_entry
         ; test_case "mock ACP child PGID reap, sessionId perm check & PID-tagged gemini dir" `Quick
             test_mock_acp_child_pgid_reap_session_perm_and_pid_tagged_dir
-        ; test_case "non-default admission_timeout_s reaches session/new deadline" `Quick
-            test_nondefault_admission_timeout_reaches_session_new
+        ; test_case "a slow session/new is not failed" `Quick
+            test_slow_session_new_is_not_failed
         ] )
     ; ( "rollover_and_vibe310"
       , [ test_case "80% hysteresis rollover, durable marker & ContextOverflow classification" `Quick

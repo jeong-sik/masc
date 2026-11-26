@@ -804,6 +804,22 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ?provider_effort:execution.effort
         ()
     in
+    (* No ACP request has a silence window of its own, so the preset's
+       declared deadline bounds the whole run, from spawn to answer.
+       Cancelling it sends session/cancel and closes the client. *)
+    let within_preset_deadline run =
+      match timeout_s with
+      | None -> run ()
+      | Some secs ->
+        (match Eio.Time.with_timeout clock secs (fun () -> Ok (run ())) with
+         | Ok result -> result
+         | Error `Timeout ->
+           acp_failed
+             (Runtime_acp_client.Timeout
+                (Runtime_timeout_payload.of_acp ~stage:"fusion panelist" ~timeout_s:secs)))
+    in
+    within_preset_deadline
+    @@ fun () ->
     Eio.Switch.run
     @@ fun sw ->
     (match Runtime_acp_client.create_isolated_workspace ~sw ~prefix:"fusion" () with
@@ -819,7 +835,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ; cwd = isolated_cwd
          ; oauth_source = execution.oauth_source
          ; dangerously_skip_permissions = false
-         ; admission_timeout_s = execution.admission_timeout_s
          }
        in
        match
@@ -885,33 +900,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                  with
                  | Error err -> acp_failed err
                  | Ok session ->
-                   let run_prompt () =
-                     Runtime_acp_client.prompt
-                       client
-                       ~session_id:session.session_id
-                       ~blocks
-                       ~permission_policy:Runtime_acp_client.Deny_all
-                       ()
-                   in
-                   (* An ACP prompt has no silence window of its own, so the
-                      preset's declared deadline bounds the whole request.
-                      Cancelling the prompt fiber sends session/cancel. *)
-                   let prompt_result =
-                     match timeout_s with
-                     | None -> run_prompt ()
-                     | Some secs ->
-                       (match
-                          Eio.Time.with_timeout clock secs (fun () -> Ok (run_prompt ()))
-                        with
-                        | Ok result -> result
-                        | Error `Timeout ->
-                          Error
-                            (Runtime_acp_client.Timeout
-                               (Runtime_timeout_payload.of_acp
-                                  ~stage:"session/prompt"
-                                  ~timeout_s:secs)))
-                   in
-                   (match prompt_result with
+                   (match
+                      Runtime_acp_client.prompt
+                        client
+                        ~session_id:session.session_id
+                        ~blocks
+                        ~permission_policy:Runtime_acp_client.Deny_all
+                        ()
+                    with
                     | Error err -> acp_failed err
                     | Ok res ->
                       if caps.close_session && Runtime_acp_client.is_alive client

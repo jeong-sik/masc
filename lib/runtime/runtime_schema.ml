@@ -91,7 +91,6 @@ type capabilities =
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 let exact_body_timeout_s_key = "exact-body-timeout-s"
-let admission_timeout_s_key = "admission-timeout-s"
 let admission_priority_run_limit_key = "admission-priority-run-limit"
 let store_key = "store"
 let truncation_key = "truncation"
@@ -144,8 +143,6 @@ type acp_options =
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; contributor_mode : Runtime_acp_client.contributor_mode
-  ; timeout_s : float
-  ; admission_timeout_s : float
   }
 [@@deriving show, eq]
 
@@ -433,7 +430,8 @@ type model_spec =
         it started (a command, a file change, an MCP call, a sleep), because
         the CLI may write nothing until that step or item ends.
         Owner cancellation remains available during these waits.
-        [None] keeps the provider value where one exists and the adapter default
+        An ACP runtime does not read it: no ACP request has a silence
+        deadline. [None] keeps the provider value where one exists and the adapter default
         otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)

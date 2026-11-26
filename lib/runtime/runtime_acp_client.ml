@@ -428,7 +428,6 @@ let resolve_mode_for_posture ~driver ~(posture : Runtime_native_tools.posture) ~
 (* ── Named protocol constants ─────────────────────────────────────────────── *)
 
 let protocol_version = 1
-let default_admission_timeout_s = Runtime_timeout_budget.acp_default_admission_timeout_s
 let cancel_write_timeout_s = 1.0
 let default_reap_grace_seconds = 5.0
 let max_ndjson_line_bytes = 16 * 1024 * 1024
@@ -475,7 +474,6 @@ type config =
   ; cwd : string
   ; oauth_source : string option
   ; dangerously_skip_permissions : bool
-  ; admission_timeout_s : float
   }
 
 let default_config ~driver ~cwd =
@@ -489,7 +487,6 @@ let default_config ~driver ~cwd =
   ; cwd
   ; oauth_source = None
   ; dangerously_skip_permissions = false
-  ; admission_timeout_s = default_admission_timeout_s
   }
 ;;
 
@@ -2473,7 +2470,6 @@ type activity_mark =
 
 type t =
   { driver : driver
-  ; admission_timeout_s : float
   ; mutable capabilities : agent_capabilities
   ; mutable init_latency_ms : int
   ; managed_schema_root : (string * string) option
@@ -2522,8 +2518,6 @@ let note_activity t seen =
   Atomic.set t.activity { seen; seen_at_ns = monotonic_now_ns () }
 ;;
 
-let last_activity_ns t = (Atomic.get t.activity).seen_at_ns
-
 let activity_trace t =
   let { seen; seen_at_ns } = Atomic.get t.activity in
   let age_ns = Int64.max 0L (Int64.sub (monotonic_now_ns ()) seen_at_ns) in
@@ -2538,9 +2532,6 @@ let with_external_activity t f =
   Atomic.incr t.in_flight_external_work;
   Fun.protect
     ~finally:(fun () ->
-      (* Stamp BEFORE decrementing the in-flight count so a waking
-         session/load watchdog never observes [in_flight = 0] paired with a
-         pre-tool timestamp. *)
       note_activity t Masc_tool_finished;
       Atomic.decr t.in_flight_external_work)
     f
@@ -2955,54 +2946,6 @@ let dispatch_incoming_message t msg =
   | _ -> ()
 ;;
 
-(* session/load replays a whole session, so its admission budget is a silence
-   window rather than a deadline: every replayed frame restarts it. *)
-let await_promise_with_idle_timeout
-      ~clock
-      ~stage
-      ~idle_timeout_s
-      ~last_activity_ns
-      ~in_flight_work
-      promise
-  =
-  let elapsed_since_last_activity_s () =
-    let last = last_activity_ns () in
-    let now = monotonic_now_ns () in
-    Int64.to_float (Int64.max 0L (Int64.sub now last)) /. 1e9
-  in
-  let rec wait () =
-    match Eio.Promise.peek promise with
-    | Some resp -> Ok resp
-    | None ->
-      let remaining =
-        if Atomic.get in_flight_work > 0
-        then idle_timeout_s
-        else idle_timeout_s -. elapsed_since_last_activity_s ()
-      in
-      if remaining <= 0.0
-      then (
-        match Eio.Promise.peek promise with
-        | Some resp -> Ok resp
-        | None -> Error (Timeout (Runtime_timeout_payload.of_acp ~stage ~timeout_s:idle_timeout_s)))
-      else (
-        let slice = Float.max 0.001 remaining in
-        match
-          Eio.Time.with_timeout clock slice (fun () -> Ok (Eio.Promise.await promise))
-        with
-        | Ok resp -> Ok resp
-        | Error `Timeout ->
-          (match Eio.Promise.peek promise with
-           | Some resp -> Ok resp
-           | None ->
-             if Atomic.get in_flight_work > 0
-             then wait ()
-             else if elapsed_since_last_activity_s () >= idle_timeout_s
-             then Error (Timeout (Runtime_timeout_payload.of_acp ~stage ~timeout_s:idle_timeout_s))
-             else wait ()))
-  in
-  wait ()
-;;
-
 let rpc_call_with_wait
       (type a)
       t
@@ -3031,10 +2974,26 @@ let rpc_call_with_wait
         ; "params", params
         ]
     in
+    (* What the agent was asked last is part of every failure that follows:
+       there is no silence deadline, so a request ends on an answer, a closed
+       stdout, or the caller's cancel. *)
+    let ended_without_answer ~detail ~stderr_tail =
+      Error
+        (Process_exited
+           { detail = method_name ^ ": " ^ detail
+           ; stderr_tail
+           ; last_activity = Some (activity_trace t)
+           })
+    in
+    note_activity t (Request_sent method_name);
     match send_json t request with
-    | Error _ as err ->
+    | Error err ->
       with_state_lock t (fun () -> Hashtbl.remove t.pending id);
-      err
+      (match err with
+       | Process_exited { detail; stderr_tail; last_activity = _ } ->
+         ended_without_answer ~detail ~stderr_tail
+       | Invalid_config _ | Spawn_refused _ | Protocol_error _ | Rpc_error _ | Timeout _
+       | Client_closed -> Error err)
     | Ok () ->
       let remove_pending () =
         with_state_lock t (fun () -> Hashtbl.remove t.pending id)
@@ -3046,10 +3005,7 @@ let rpc_call_with_wait
          |> Result.map_error (fun detail -> Protocol_error { stage = method_name; detail })
        | Rpc_err (code, message, data) ->
          Error (rpc_error ~method_name ~code ~message ~data)
-       | Rpc_closed reason ->
-         Error
-           (Process_exited
-              { detail = reason; stderr_tail = stderr_tail t; last_activity = None })))
+       | Rpc_closed reason -> ended_without_answer ~detail:reason ~stderr_tail:(stderr_tail t)))
 ;;
 
 let rpc_call_decoded
@@ -3057,21 +3013,11 @@ let rpc_call_decoded
       t
       ~(method_name : string)
       ~(params : Yojson.Safe.t)
-      ~(timeout_s : float option)
       ~(decoder : a json_decoder)
   : (a, error) result
   =
   rpc_call_with_wait t ~method_name ~params ~decoder ~wait:(fun promise ->
-    match timeout_s with
-    | None -> Ok (Eio.Promise.await promise)
-    | Some secs when (not (Float.is_finite secs)) || secs <= 0.0 -> Ok (Eio.Promise.await promise)
-    | Some secs ->
-      (match Eio.Time.with_timeout t.clock secs (fun () -> Ok (Eio.Promise.await promise)) with
-       | Ok resp -> Ok resp
-       | Error `Timeout ->
-         (match Eio.Promise.peek promise with
-          | Some resp -> Ok resp
-          | None -> Error (Timeout (Runtime_timeout_payload.of_acp ~stage:method_name ~timeout_s:secs)))))
+    Ok (Eio.Promise.await promise))
 ;;
 
 let send_json_bounded t ~timeout_s json =
@@ -3444,7 +3390,6 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                 in
                 let t =
                   { driver = config.driver
-                  ; admission_timeout_s = config.admission_timeout_s
                   ; capabilities =
                       { load_session = false
                       ; resume_session = false
@@ -3594,7 +3539,6 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
           t
           ~method_name:"initialize"
           ~params:init_params
-          ~timeout_s:(Some t.admission_timeout_s)
           ~decoder:init_decoder
       with
       | Eio.Cancel.Cancelled _ as exn ->
@@ -3622,7 +3566,6 @@ let set_mode t ~session_id ~mode_id =
     t
     ~method_name:"session/set_mode"
     ~params
-    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun _ -> Ok ()) }
 ;;
 
@@ -3632,7 +3575,6 @@ let set_model t ~session_id ~model_id =
     t
     ~method_name:"session/set_model"
     ~params
-    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun _ -> Ok ()) }
 ;;
 
@@ -3648,19 +3590,26 @@ let set_config_option t ~session_id ~config_id ~value =
     t
     ~method_name:"session/set_config_option"
     ~params
-    ~timeout_s:(Some t.admission_timeout_s)
     ~decoder:{ decode = (fun json -> Ok (parse_config_options json)) }
 ;;
 
-let close_session ?timeout_s t ~session_id =
-  let timeout_s = Option.value timeout_s ~default:t.admission_timeout_s in
+(* A close is best effort on a session the caller is leaving, so the caller
+   bounds how long it waits for the agent to confirm. *)
+let close_session ~timeout_s t ~session_id =
+  let method_name = "session/close" in
   let params = `Assoc [ "sessionId", `String session_id ] in
-  rpc_call_decoded
+  rpc_call_with_wait
     t
-    ~method_name:"session/close"
+    ~method_name
     ~params
-    ~timeout_s:(Some timeout_s)
     ~decoder:{ decode = (fun _ -> Ok ()) }
+    ~wait:(fun promise ->
+      match Eio.Time.with_timeout t.clock timeout_s (fun () -> Ok (Eio.Promise.await promise)) with
+      | Ok resp -> Ok resp
+      | Error `Timeout ->
+        (match Eio.Promise.peek promise with
+         | Some resp -> Ok resp
+         | None -> Error (Timeout (Runtime_timeout_payload.of_acp ~stage:method_name ~timeout_s))))
 ;;
 
 let with_session_observer t ~session_id ~on_event f =
@@ -4065,8 +4014,7 @@ let new_session
       t
       ~method_name:"session/new"
       ~params
-      ~timeout_s:(Some t.admission_timeout_s)
-      ~decoder:{ decode = parse_session_info }
+        ~decoder:{ decode = parse_session_info }
   in
   let merged = merge_with_cached_session_catalog t info in
   apply_session_options t merged ~mode ~model ~effort
@@ -4098,7 +4046,6 @@ let muse_held_tokens (request : Runtime_muse_session_log.counts) =
 let attach_existing_session
       t
       ~method_name
-      ~use_idle_liveness
       ~session_id
       ~cwd
       ?mcp_server
@@ -4144,21 +4091,9 @@ let attach_existing_session
            | Error _ -> Ok (fallback_session_info ~session_id json))
     }
   in
-  note_activity t (Request_sent method_name);
   let* raw_info =
     with_session_observer t ~session_id ~on_event:on_replay_event (fun () ->
-      if use_idle_liveness
-      then
-        rpc_call_with_wait t ~method_name ~params ~decoder ~wait:(fun promise ->
-          await_promise_with_idle_timeout
-            ~clock:t.clock
-            ~stage:method_name
-            ~idle_timeout_s:t.admission_timeout_s
-            ~last_activity_ns:(fun () -> last_activity_ns t)
-            ~in_flight_work:t.in_flight_external_work
-            promise)
-      else
-        rpc_call_decoded t ~method_name ~params ~timeout_s:(Some t.admission_timeout_s) ~decoder)
+      rpc_call_decoded t ~method_name ~params ~decoder)
   in
   let with_replay =
     { raw_info with
@@ -4209,7 +4144,6 @@ let load_session
   attach_existing_session
     t
     ~method_name:"session/load"
-    ~use_idle_liveness:true
     ~session_id
     ~cwd
     ?mcp_server
@@ -4234,7 +4168,6 @@ let resume_session
   attach_existing_session
     t
     ~method_name:"session/resume"
-    ~use_idle_liveness:false
     ~session_id
     ~cwd
     ?mcp_server
@@ -4341,7 +4274,6 @@ let prompt
     | Allow_read_and_masc_mcp { mcp_server_name; _ } -> Some mcp_server_name
     | Allow_all | Deny_all -> t.mcp_server_name
   in
-  note_activity t (Request_sent "session/prompt");
   with_state_lock t (fun () ->
     t.active_turn <-
       Some
@@ -4414,11 +4346,7 @@ let prompt
         raise exn)
   in
   match result with
-  | Error (Process_exited { detail; stderr_tail; last_activity = _ }) ->
-    Error (Process_exited { detail; stderr_tail; last_activity = Some (activity_trace t) })
-  | Error
-      (( Invalid_config _ | Spawn_refused _ | Protocol_error _ | Rpc_error _ | Timeout _
-       | Client_closed ) as err) -> Error err
+  | Error err -> Error err
   | Ok (stop_reason, acp_usage) ->
     (* Without its journal a Muse prompt has no count of the session: the
        [used] its frames carried is the host's estimate. *)

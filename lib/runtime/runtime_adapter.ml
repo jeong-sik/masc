@@ -1625,8 +1625,6 @@ let acp_execution (provider : Runtime_schema.provider)
         ; mode = options.mode
         ; contributor_mode = options.contributor_mode
         ; oauth_source
-        ; timeout_s = options.timeout_s
-        ; admission_timeout_s = options.admission_timeout_s
         }
     in
     (match provider.acp, provider.credentials with

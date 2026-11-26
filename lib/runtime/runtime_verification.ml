@@ -756,7 +756,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                  ; cwd = isolated_cwd
                  ; oauth_source = execution.oauth_source
                  ; dangerously_skip_permissions = false
-                 ; admission_timeout_s = Float.min timeout_s execution.admission_timeout_s
                  }
                in
                match

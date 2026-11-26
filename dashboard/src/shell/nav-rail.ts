@@ -54,7 +54,7 @@ function renderNavItem(
       data-nav-id=${item.id}
       data-rbac-locked=${locked ? 'true' : undefined}
       onClick=${(event: MouseEvent) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
         event.preventDefault()
         navigate(item.defaultPath)
       }}
@@ -98,7 +98,7 @@ export function NavRail(): VNode {
           class="ap-brand-link"
           aria-label="MASC 홈 (Pulse)"
           onClick=${(event: MouseEvent) => {
-            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
             event.preventDefault()
             navigate('/pulse')
           }}

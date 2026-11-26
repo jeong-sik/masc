@@ -988,7 +988,7 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
   `
 }
 
-function ChatPreviewModal({
+export function ChatPreviewModal({
   title,
   onClose,
   children,
@@ -1457,7 +1457,7 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
-  const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
+  const safeSrc = src && isSafeMediaUrl(src, ['data:image/png', 'data:image/jpeg', 'data:image/gif', 'data:image/webp', 'data:image/avif']) ? src : null
   // Image block: figure.img-out > .img-frame > img | .img-ph.
   // chat-block-media-frame stays alongside img-frame — it owns the extras
   // img-frame does not set (placeholder min-height, img max-height cap).

@@ -1164,6 +1164,21 @@ export function moveQueuedChatOperationToEndApi(keeper: string, operationId: str
   )
 }
 
+export function runQueuedChatOperationNext(
+  keeper: string,
+  operationId: string,
+  interruptToken?: string | null,
+) {
+  const payload: Record<string, unknown> = {
+    name: keeper,
+    request_id: operationId,
+  }
+  if (interruptToken) {
+    payload.interrupt_token = interruptToken
+  }
+  return apiMutate<unknown>('POST', '/api/v1/keepers/turn/run-next', payload)
+}
+
 function decodeTextOwner(raw: Record<string, unknown>): ChatJournalTextOwner {
   const resp = isRecord(raw.response)
     ? raw.response
@@ -1488,6 +1503,175 @@ function extractThinkingBlockKey(val: Record<string, unknown>): string {
   return `${cg}:${ss}:${idx}`
 }
 
+function buildChatStreamHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'Content-Type': 'application/json',
+  }
+  const session = authSession.peek()
+  if (session.kind === 'multi_account_signed_in') {
+    const csrf = getActiveCsrfToken()
+    if (csrf) headers['x-masc-csrf-token'] = csrf
+  } else {
+    const token = getSingleUserToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}
+
+/**
+ * Enqueues a follow-up Keeper chat operation via `POST /api/v1/keepers/chat/stream`
+ * WITHOUT preempting the active Layer 3 `view-stream-slot` SSE stream.
+ * Reads only until `KEEPER_CHAT_OPERATION_ACCEPTED` (or `RUN_ERROR`) and closes
+ * immediately; the server durably retains the accepted operation in the Keeper queue.
+ */
+export async function enqueueKeeperChat(params: {
+  readonly keeper: string
+  readonly message: string
+  readonly operationId: string
+  readonly mode: ChatSubmitMode
+  readonly attachments?: readonly ChatAttachmentDraft[]
+  readonly signal?: AbortSignal
+  readonly fetchImpl?: typeof fetch
+}): Promise<{
+  readonly accepted: boolean
+  readonly state: string | null
+  readonly controlToken: string | null
+  readonly error: string | null
+}> {
+  const fetchImpl = params.fetchImpl ?? globalThis.fetch
+  const startEpoch = currentSessionEpoch()
+  if (params.signal?.aborted) {
+    return { accepted: false, state: null, controlToken: null, error: 'aborted' }
+  }
+
+  const controller = new AbortController()
+  const onParentAbort = () => controller.abort(params.signal?.reason)
+  params.signal?.addEventListener('abort', onParentAbort, { once: true })
+  const unsubEpoch = sessionEpoch.subscribe((ep) => {
+    if (ep !== startEpoch && !controller.signal.aborted) {
+      controller.abort('session_epoch_changed')
+    }
+  })
+
+  try {
+    const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/keepers/chat/stream'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: buildChatStreamHeaders(),
+      body: JSON.stringify(buildChatStreamRequestBody(params)),
+      signal: controller.signal,
+    })
+
+    if (!isEpochCurrent(startEpoch)) {
+      return { accepted: false, state: null, controlToken: null, error: 'session_epoch_changed' }
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => `HTTP ${res.status}`)
+      return { accepted: false, state: null, controlToken: null, error: txt.trim() || `HTTP ${res.status}` }
+    }
+    if (!res.body) {
+      return { accepted: false, state: null, controlToken: null, error: '스트림 본문 없음' }
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let result: {
+      readonly accepted: boolean
+      readonly state: string | null
+      readonly controlToken: string | null
+      readonly error: string | null
+    } | null = null
+
+    const inspectFrame = (rawFrame: string) => {
+      let dataLine = ''
+      for (const line of rawFrame.split(/\r?\n/)) {
+        if (line.startsWith('data:')) {
+          dataLine += (dataLine ? '\n' : '') + line.slice(5).trim()
+        }
+      }
+      if (!dataLine) return
+      let ev: Record<string, unknown>
+      try {
+        const parsed = JSON.parse(dataLine)
+        if (!isRecord(parsed)) return
+        ev = parsed
+      } catch {
+        return
+      }
+      const evType = asStr(ev.type)
+      if (evType === 'RUN_ERROR') {
+        result = {
+          accepted: false,
+          state: null,
+          controlToken: null,
+          error: asStr(ev.message) ?? '전송 오류',
+        }
+        return
+      }
+      if (evType === 'CUSTOM' && asStr(ev.name) === 'KEEPER_CHAT_OPERATION_ACCEPTED' && isRecord(ev.value)) {
+        const inter = isRecord(ev.value.interactive) ? ev.value.interactive : null
+        result = {
+          accepted: true,
+          state: asStr(ev.value.state) ?? 'Queued',
+          controlToken: inter ? asStr(inter.chat_control_token) : null,
+          error: null,
+        }
+      }
+    }
+
+    try {
+      while (result === null) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!isEpochCurrent(startEpoch) || controller.signal.aborted) break
+        buf += decoder.decode(value, { stream: true })
+        const parts = buf.split(/\r?\n\r?\n/)
+        buf = parts.pop() ?? ''
+        for (const frame of parts) {
+          inspectFrame(frame)
+          if (result !== null) break
+        }
+      }
+      if (result === null && buf.trim() && isEpochCurrent(startEpoch) && !controller.signal.aborted) {
+        inspectFrame(buf)
+      }
+    } finally {
+      try {
+        await reader.cancel()
+      } catch { /* ignore */ }
+      reader.releaseLock()
+      if (!controller.signal.aborted) controller.abort('accepted_close')
+    }
+
+    if (result !== null) return result
+    if (!isEpochCurrent(startEpoch)) {
+      return { accepted: false, state: null, controlToken: null, error: 'session_epoch_changed' }
+    }
+    return { accepted: true, state: 'Queued', controlToken: null, error: null }
+  } catch (e) {
+    if (controller.signal.aborted) {
+      const reason = controller.signal.reason
+      return {
+        accepted: false,
+        state: null,
+        controlToken: null,
+        error: reason === 'session_epoch_changed' ? 'session_epoch_changed' : 'aborted',
+      }
+    }
+    return {
+      accepted: false,
+      state: null,
+      controlToken: null,
+      error: e instanceof Error ? e.message : String(e),
+    }
+  } finally {
+    params.signal?.removeEventListener('abort', onParentAbort)
+    unsubEpoch()
+  }
+}
+
 /**
  * Mode-aware, epoch-fenced, 2+1 SSE slot-managed AG-UI chat client
  * (`POST /api/v1/keepers/chat/stream`). Acquires Layer 3 `acquireViewStream`
@@ -1510,19 +1694,7 @@ export async function streamKeeperChat(params: {
   }
 
   const streamKey = `keeper-chat:${params.keeper}:${params.mode.kind}:${params.operationId}`
-
-  const headers: Record<string, string> = {
-    Accept: 'text/event-stream',
-    'Content-Type': 'application/json',
-  }
-  const session = authSession.peek()
-  if (session.kind === 'multi_account_signed_in') {
-    const csrf = getActiveCsrfToken()
-    if (csrf) headers['x-masc-csrf-token'] = csrf
-  } else {
-    const token = getSingleUserToken()
-    if (token) headers.Authorization = `Bearer ${token}`
-  }
+  const headers = buildChatStreamHeaders()
 
   let runPromise: Promise<{ readonly terminal: boolean; readonly error: string | null }> | null = null
 

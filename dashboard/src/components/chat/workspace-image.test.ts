@@ -37,4 +37,10 @@ it('retries a retained image in the same workspace after an HTTP 503', async () 
     window.location.origin + path,
     window.location.origin + path,
   ])
+
+  // Clicking the loaded image opens the lightbox preview modal and Escape closes it.
+  fireEvent.click(view.getByRole('button', { name: '도구 출력 크게 보기' }))
+  expect(document.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull()
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(document.querySelector('[role="dialog"][aria-modal="true"]')).toBeNull()
 })

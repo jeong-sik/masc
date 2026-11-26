@@ -211,7 +211,20 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                       <tr
                         key=${row.id}
                         data-selected=${isSelected ? 'true' : undefined}
+                        tabIndex=${props.onRowClick ? 0 : undefined}
                         onClick=${props.onRowClick ? () => props.onRowClick!(row.original) : undefined}
+                        onKeyDown=${props.onRowClick ? (event: KeyboardEvent) => {
+                          if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+                          if (event.key !== 'Enter' && event.key !== ' ') return
+                          if (event.target !== event.currentTarget) {
+                            const target = event.target
+                            if (target instanceof HTMLElement && target.closest('button, a, input, select, textarea, [role="button"]')) {
+                              return
+                            }
+                          }
+                          event.preventDefault()
+                          props.onRowClick!(row.original)
+                        } : undefined}
                       >
                         ${row.getAllCells().map((cell) => {
                           const meta = columnMetaById.get(cell.column.id)

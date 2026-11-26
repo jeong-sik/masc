@@ -2090,4 +2090,100 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(cleanHdr.container.querySelector('.kp-diag-banner')).toBeNull()
     cleanHdr.unmount()
   })
+
+  it('allows queueing follow-up messages mid-stream, bare /btw, and run-next on queued items', async () => {
+    const streamCalls: Record<string, unknown>[] = []
+    const runNextCalls: Record<string, unknown>[] = []
+    let releaseFirstStream: () => void = () => {}
+    let firstAborted = false
+    const encoder = new TextEncoder()
+
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/chat/history/page')) {
+        return new Response(JSON.stringify({ messages: [], has_more: false, next_cursor: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/chat/operations')) {
+        const body = url.includes('after_sequence=')
+          ? queuedOperations([])
+          : queuedOperations([1], () => 'Queued task')
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/turn/run-next')) {
+        runNextCalls.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        streamCalls.push(parsed)
+        if (streamCalls.length === 1) {
+          init?.signal?.addEventListener('abort', () => { firstAborted = true })
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'First partial' })}\n\n`,
+              ))
+              releaseFirstStream = () => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'RUN_FINISHED' })}\n\n`))
+                controller.close()
+              }
+            },
+          })
+          return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+        }
+        const acceptSse = `data: ${JSON.stringify({
+          type: 'CUSTOM',
+          name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+          value: { operation_id: parsed.request_id, state: 'Queued', queued_count: 2 },
+        })}\n\n`
+        return new Response(acceptSse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return new Response(JSON.stringify({ entries: [], turns: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const { container, getByLabelText, findByRole } = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+
+    // 1. Run-next button triggers POST /api/v1/keepers/turn/run-next
+    const runNextBtn = await findByRole('button', { name: '지금 실행' })
+    fireEvent.click(runNextBtn)
+    await waitFor(() => expect(runNextCalls.length).toBe(1))
+    expect(runNextCalls[0]).toEqual({ name: 'code-reviewer-sister', request_id: 'queued-1' })
+
+    // 2. Start streaming first turn
+    const input = getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'First turn' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(container.textContent).toContain('First partial'))
+
+    // 3. Queue a second message while first turn is STILL streaming (must NOT abort first stream)
+    fireEvent.input(input, { target: { value: 'Follow-up queued mid-stream' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(streamCalls.length).toBe(2))
+    expect(streamCalls[1]!.message).toBe('Follow-up queued mid-stream')
+    expect(firstAborted).toBe(false)
+
+    // 4. Bare `/btw` opens the side-query box instead of sending `/btw` to Keeper
+    fireEvent.input(input, { target: { value: '/btw' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(container.textContent).toContain('/btw Ephemeral Side-Query'))
+    expect(streamCalls.length).toBe(2)
+
+    releaseFirstStream()
+    await waitFor(() => expect(getActiveViewStreamKey()).toBeNull())
+  })
 })

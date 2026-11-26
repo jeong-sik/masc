@@ -45,12 +45,12 @@ import {
   installShellObservers,
   installViewportListener,
   isMobileViewport,
-  openCommandPalette,
   openInspectDrawer,
   probeBuildConnectionInfo,
   recordIncident,
   refreshPendingHitl,
   shellToasts,
+  toggleCommandPalette,
   toggleIncidentsOverlay,
   toggleQueueContextOverlay,
   toggleRail,
@@ -396,17 +396,15 @@ export function App(): VNode {
       const mod = (event.metaKey && !event.ctrlKey) || (event.ctrlKey && !event.metaKey)
       const lower = event.key.toLowerCase()
 
-      if (mod && !event.altKey && !event.shiftKey && lower === 'k') {
+      if (shouldBootstrapCommandPaletteShortcut(event, false)) {
         event.preventDefault()
-        if (commandPaletteOpen.peek()) {
-          commandPaletteOpen.value = false
-        } else {
-          openCommandPalette()
-        }
+        toggleCommandPalette()
         return
       }
 
       if (mod && !event.altKey && !event.shiftKey && lower === 't') {
+        if (commandPaletteOpen.peek()) return
+        if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
         event.preventDefault()
         toggleQueueContextOverlay()
         return
@@ -417,12 +415,12 @@ export function App(): VNode {
       if (commandPaletteOpen.peek()) return
       if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
 
-      if (lower === 'b') {
+      if (!event.shiftKey && lower === 'b') {
         event.preventDefault()
         toggleRail()
         return
       }
-      if (lower === 'i') {
+      if (!event.shiftKey && lower === 'i') {
         event.preventDefault()
         toggleIncidentsOverlay()
         return

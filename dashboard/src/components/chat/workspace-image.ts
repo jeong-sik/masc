@@ -5,6 +5,7 @@ import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { authSession, getSingleUserToken, resolveWorkspaceUrl, sessionEpoch } from '../../core/auth'
 import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { parseUrl } from '../../lib/parse-url'
+import { ChatPreviewModal } from './primitives'
 
 // Match the server ceiling of KeeperGeneratedMedia.max_bytes (50 MiB).
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024
@@ -56,6 +57,7 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
   const epoch = sessionEpoch.value
   const currentWorkspace = workspaceEpoch === epoch
   const [loaded, setLoaded] = useState<{ path: string; epoch: number; src: string | null } | null>(null)
+  const [zoomed, setZoomed] = useState(false)
 
   useEffect(() => {
     const figure = ref.current
@@ -107,8 +109,26 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
   return html`
     <figure class="img-out" ref=${ref}>
       ${current?.src ? html`
-        <img src=${current.src} alt=${alt} class="max-h-96 w-full rounded-[var(--r-1)] object-contain"
-          onError=${() => setLoaded({ path, epoch, src: null })} />
+        <div
+          class="chat-block-media-frame img-frame cursor-zoom-in"
+          role="button"
+          tabIndex=${0}
+          aria-label=${`${alt} 크게 보기`}
+          onClick=${() => setZoomed(true)}
+          onKeyDown=${(e: KeyboardEvent) => {
+            if (e.isComposing || e.keyCode === 229) return
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setZoomed(true)
+            }
+          }}
+        >
+          <img src=${current.src} alt=${alt} class="max-h-96 w-full rounded-[var(--r-1)] object-contain"
+            onError=${() => {
+              setZoomed(false)
+              setLoaded({ path, epoch, src: null })
+            }} />
+        </div>
       ` : html`
         <div class="chat-block-media-ph img-ph">
           <span role="status">${current ? '이미지를 불러올 수 없습니다' : alt}</span>
@@ -121,6 +141,15 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
         </div>
       `}
       ${caption && html`<figcaption>${caption}</figcaption>`}
+      ${zoomed && current?.src && html`
+        <${ChatPreviewModal} title=${alt} onClose=${() => setZoomed(false)}>
+          <img
+            src=${current.src}
+            alt=${alt}
+            class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+          />
+        <//>
+      `}
     </figure>
   `
 }

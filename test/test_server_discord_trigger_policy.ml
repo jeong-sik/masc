@@ -791,7 +791,8 @@ let test_discord_image_admission_and_read () =
   let channel_id = "100002" and message_id = "100003" and author_id = "100004" in
   let good_id = "100005" and bad_id = "100006" in
   let route =
-    match Keeper_continuation_channel.discord ~channel_id ~reply_to_message_id:message_id
+    match Keeper_continuation_channel.discord ~guild_id:None ~channel_id
+            ~parent_channel_id:None ~thread_id:None ~reply_to_message_id:message_id
             ~user_id:author_id () with
     | Ok route -> route
     | Error detail -> fail detail

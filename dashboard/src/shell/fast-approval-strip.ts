@@ -284,7 +284,7 @@ export function FastApprovalStrip(): VNode | null {
             class="btn-primary ap-fast-btn"
             onClick=${() => navigate('/work/inbox')}
           >
-            확정하기 <kbd class="ap-kbd">J</kbd>
+            Inbox <kbd class="ap-kbd">J</kbd>
           </button>
         </div>
       </div>

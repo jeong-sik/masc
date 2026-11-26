@@ -132,14 +132,11 @@ function loadTaskSources(reason: FetchReason) {
   ])
 }
 
-function sourceNotice(label: string, observation: Observed<unknown>, retained = false) {
+function sourceAlert(label: string, observation: Observed<unknown>) {
   switch (observation.kind) {
     case 'loading':
-      return html`<div class="wk-notice wk-notice--info wk-inset" role="status"><${InlineSpinner} /> ${label} 불러오는 중…</div>`
     case 'value':
-      return observation.stale || retained
-        ? html`<div class="wk-notice wk-notice--warn wk-inset" role="status">${label} · 마지막 조회 결과</div>`
-        : null
+      return null
     case 'absent':
     case 'unreported':
     case 'failed': {
@@ -151,6 +148,30 @@ function sourceNotice(label: string, observation: Observed<unknown>, retained = 
       `
     }
   }
+}
+
+function renderTaskSyncPill(sources: readonly { label: string; observation: Observed<unknown>; retained?: boolean }[]) {
+  const loadingLabels: string[] = []
+  const staleLabels: string[] = []
+  for (const s of sources) {
+    if (s.observation.kind === 'loading') {
+      loadingLabels.push(s.label)
+    } else if (s.observation.kind === 'value' && (s.observation.stale || Boolean(s.retained))) {
+      staleLabels.push(s.label)
+    }
+  }
+  const parts: string[] = []
+  if (loadingLabels.length > 0) parts.push(`${loadingLabels.join(', ')} 불러오는 중…`)
+  if (staleLabels.length > 0) parts.push(`${staleLabels.join(', ')} · 마지막 조회 결과`)
+  if (parts.length === 0) return null
+  const text = parts.join(' · ')
+  const tone = staleLabels.length > 0 ? 'warn' : 'info'
+  return html`
+    <span class=${`wk-status-pill wk-status-pill--${tone}`} role="status" title=${text}>
+      ${loadingLabels.length > 0 && html`<${InlineSpinner} />`}
+      <span class="wk-status-pill-text">${text}</span>
+    </span>
+  `
 }
 
 interface TaskVerificationReport {
@@ -757,12 +778,22 @@ export function TasksTab(props: WorkspaceViewProps) {
     { id: 'schedules', label: 'Schedules', count: scheduleCountLabel },
   ]
 
+  const tasksSyncPill = isSchedulesView
+    ? renderTaskSyncPill([{ label: '예약 목록', observation: scheduleObs }])
+    : renderTaskSyncPill([
+        { label: '계획 목록', observation: planningObs },
+        { label: '실행 태스크', observation: executionObs, retained: execution?.retained },
+      ])
+
   const masterPane = html`
     <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">
           ${chip === 'schedules' ? 'Scheduled Automation' : 'Tasks'}
         </h2>
+        <div class="wk-pane-status-slot" data-testid="tasks-sync-slot">
+          ${tasksSyncPill}
+        </div>
         <div class="wk-actions">
           ${chip === 'schedules'
             ? html`<button type="button" class="btn-primary" onClick=${() => setShowCreateSchedule((v) => !v)}>${showCreateSchedule ? '닫기' : '+ 새 예약'}</button>`
@@ -918,7 +949,7 @@ export function TasksTab(props: WorkspaceViewProps) {
 
       ${isSchedulesView
         ? html`
-            ${sourceNotice('예약 목록', scheduleObs)}
+            ${sourceAlert('예약 목록', scheduleObs)}
             ${schedules?.state === 'unavailable' && html`
               <div class="wk-notice wk-notice--warn wk-inset" role="alert">예약 저장소 조회 불가 · ${schedules.reason}</div>
             `}
@@ -959,8 +990,8 @@ export function TasksTab(props: WorkspaceViewProps) {
             `}
           `
         : html`
-            ${sourceNotice('계획 목록', planningObs)}
-            ${sourceNotice('실행 태스크', executionObs, execution?.retained)}
+            ${sourceAlert('계획 목록', planningObs)}
+            ${sourceAlert('실행 태스크', executionObs)}
             ${execution !== null && execution.omitted > 0 && html`
               <div class="wk-notice wk-inset" role="note">
                 종료된 실행 태스크 ${execution.omitted}건이 현재 목록의 표시 범위 밖에 있습니다.

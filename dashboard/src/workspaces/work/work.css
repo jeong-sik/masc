@@ -212,6 +212,22 @@
   min-width: 0;
 }
 
+.wk-toolbar-end {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 360px;
+  margin-left: auto;
+}
+
+.wk-toolbar-end > button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .wk-chips {
   display: flex;
   flex-wrap: wrap;
@@ -246,6 +262,9 @@
 }
 
 .wk-chip-count {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums slashed-zero;
   font-size: var(--fs-11);
@@ -285,6 +304,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-height: 40px;
+  flex: none;
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--line-1);
   background: var(--bg-2);
@@ -296,6 +317,79 @@
   font-size: var(--fs-13);
   font-weight: 600;
   color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.wk-pane-head > .wk-actions {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.wk-pane-head > .wk-actions > button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.wk-pane-status-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.wk-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-11);
+  line-height: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wk-status-pill-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-status-pill--warn {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+}
+
+.wk-status-pill--info {
+  border-color: var(--info-border);
+  background: var(--info-soft);
+  color: var(--info-fg);
+}
+
+.wk-status-pill--ok {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+}
+
+.wk-status-pill--err {
+  border-color: var(--err-border);
+  background: var(--err-soft);
+  color: var(--err-fg);
 }
 
 .wk-detail-pad {

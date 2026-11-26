@@ -1334,4 +1334,52 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('Evidence from second')
     expect(verificationReads).toEqual(['first', 'second'])
   })
+
+  it('keeps stale Inbox queue notices inside the fixed pane header slot without inserting in-flow warn banners above the list', async () => {
+    let resolveSecondApprovals!: (r: Response) => void
+    let approvalCalls = 0
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) {
+        approvalCalls += 1
+        if (approvalCalls === 1) return Promise.resolve(jsonResponse({ pending: [] }))
+        return new Promise<Response>((resolve) => { resolveSecondApprovals = resolve })
+      }
+      if (url.startsWith('/api/v1/keepers/asks')) {
+        return Promise.resolve(jsonResponse({ asks: [] }))
+      }
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return Promise.resolve(jsonResponse({ approval_queue: [], recent_resolved: [] }))
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return Promise.resolve(jsonResponse({
+          goals: [
+            { id: 'g-confirm-1', title: 'Confirm goal stability', phase: 'Awaiting_confirmation', priority: 1 },
+          ],
+          tasks: [],
+        }))
+      }
+      return Promise.resolve(jsonResponse({}))
+    })
+
+    render(html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    const syncSlot = () => container.querySelector('[data-testid="inbox-queue-sync-slot"]')
+    expect(syncSlot()?.textContent?.trim()).toBe('')
+    expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
+
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((el) => el.textContent?.trim() === '새로고침')!
+    refresh.click()
+    await flushUi()
+
+    // While tool-approvals revalidates, stale status stays inside the header slot (zero in-flow warn banner above VirtualList).
+    expect(syncSlot()?.textContent).toContain('도구 승인 · 마지막 조회 결과')
+    expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
+
+    resolveSecondApprovals(jsonResponse({ pending: [] }))
+    await flushUi()
+    expect(syncSlot()?.textContent?.trim()).toBe('')
+  })
 })

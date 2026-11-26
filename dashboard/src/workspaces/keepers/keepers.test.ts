@@ -17,6 +17,7 @@ import {
   decodeKeeperMemoryFacts,
   decodeKeeperRoster,
   fetchKeeperChatHistoryPageApi,
+  fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
   formatContextDetail,
@@ -1323,7 +1324,57 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/api/v1/keepers/chat/stream'))).toBe(false)
   })
 
-  it('sends raw binary audio for Voice STT, decodes diff_vs_prev.changed, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {
+  it('reads debug companion turn records with the turn inspector decoder', async () => {
+    // Unmodified writer output; the OCaml codec suite reads the same file.
+    const record = JSON.parse(readFileSync(
+      resolve(__dirname, '../../api/fixtures/turn-record-writer.jsonl'), 'utf8',
+    ).split('\n')[0]!) as Record<string, unknown>
+    const keeper = String(record.keeper)
+    const ts = Number(record.ts)
+    const canonical = {
+      keeper, count: 1, skipped_rows: 0, source: 'turn_record',
+      producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+      durable_store: `.masc/keepers/${keeper}/turn-records`,
+      dashboard_surface: '/api/v1/keepers/:name/turn-records',
+      freshness_slo_s: 300, live_turn_in_progress: false,
+      live_turn_started_at_unix: null, live_turn_last_progress_at_unix: null,
+      latest_ts_unix: ts, latest_ts_iso: new Date(Math.floor(ts) * 1000).toISOString().replace('.000Z', 'Z'),
+      latest_age_s: 10, health: 'ok', stale_reason: null,
+      memory_os: {
+        keeper, snapshot_store: `.masc/keepers/${keeper}.memory-current.json`, recall_enabled: true,
+        revision: 0, updated_at: null, update_source: null, read_errors: [],
+        facts: { shown: 0, current: 0, items: [] },
+        change: { added: [], removed: [], retained: 0, invalidated: [] },
+      },
+      entries: [{ record, diff_vs_prev: null }],
+    }
+    // The shape the companion's own decoder used to accept: no usage scope,
+    // no provenance, and unknown values filled in.
+    const lenient = {
+      keeper, count: 1, live_turn_in_progress: false, health: 'ok',
+      entries: [{
+        record: { trace_id: 'tr1', absolute_turn: 2, turn_ref: 'tr1#2', turn_kind: 'direct', runtime_profile: 'default', ts: 100, blocks: [], raw_trace_run_ref: null },
+        diff_vs_prev: null,
+      }],
+    }
+    let body: unknown = canonical
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const read = await fetchKeeperTurnRecordsApi(keeper, 60)
+    expect(read.ok).toBe(true)
+    if (read.ok) {
+      expect(read.value.entries[0]?.record.usage_scope).toBe('per_request')
+      expect(read.value.entries[0]?.record.input_tokens).toBe(18000)
+    }
+
+    body = lenient
+    const drift = await fetchKeeperTurnRecordsApi(keeper, 60)
+    expect(drift.ok).toBe(false)
+    if (!drift.ok) expect(drift.error).toMatchObject({ kind: 'decode', code: 'schema_drift' })
+  })
+
+  it('sends raw binary audio for Voice STT, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {
     let voiceContentType: string | null = null
     let voiceBodyWasBinary = false
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

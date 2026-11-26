@@ -6,6 +6,7 @@
  */
 
 import type {
+  KeeperTurnBreakdown,
   KeeperTurnPreparation,
   KeeperTurnWorkContext,
   KeeperWaitingHead,
@@ -214,4 +215,43 @@ export function waitingRowDetailLines(detail: unknown): readonly string[] {
     }
   }
   return lines
+}
+
+const SLOT_COUNTS = ['ok', 'rested', 'failed', 'scheduled', 'reacted', 'chat', 'own', 'unknown'] as const
+
+/** The gate roster's `recent_turns.slots`, summed. Every slot must carry
+ *  each count as a non-negative integer and its causes must add up to its
+ *  outcomes, as the TUI checks (wire_fleet.ml decode_turn_slot); otherwise
+ *  the totals are unknown (`null`) rather than a partial sum. */
+export function decodeRecentTurns(raw: unknown): KeeperTurnBreakdown | null {
+  if (!isRecord(raw) || !Array.isArray(raw.slots)) return null
+  const total: Record<(typeof SLOT_COUNTS)[number], number> = {
+    ok: 0, rested: 0, failed: 0, scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0,
+  }
+  for (const slot of raw.slots) {
+    if (!isRecord(slot)) return null
+    const counts: Partial<Record<(typeof SLOT_COUNTS)[number], number>> = {}
+    for (const key of SLOT_COUNTS) {
+      const value = slot[key]
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null
+      counts[key] = value
+    }
+    const outcomes = (counts.ok ?? 0) + (counts.rested ?? 0) + (counts.failed ?? 0)
+    const causes = (counts.scheduled ?? 0) + (counts.reacted ?? 0) + (counts.chat ?? 0)
+      + (counts.own ?? 0) + (counts.unknown ?? 0)
+    if (outcomes !== causes) return null
+    for (const key of SLOT_COUNTS) total[key] += counts[key] ?? 0
+  }
+  return {
+    ok: total.ok,
+    rested: total.rested,
+    failed: total.failed,
+    causes: {
+      scheduled: total.scheduled,
+      reacted: total.reacted,
+      chat: total.chat,
+      own: total.own,
+      unknown: total.unknown,
+    },
+  }
 }

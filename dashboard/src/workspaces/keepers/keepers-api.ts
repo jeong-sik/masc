@@ -59,6 +59,7 @@ import {
 } from './chat-blocks'
 import { decodeOpenActivities } from './turn-open-work'
 import {
+  decodeRecentTurns,
   decodeTurnPreparation,
   decodeTurnWorkContext,
   decodeWaitingSummary,
@@ -108,7 +109,6 @@ import type {
   KeeperToolCallsData,
   KeeperToolSource,
   KeeperToolStatsData,
-  KeeperTurnBreakdown,
   KeeperTurnRecordsData,
   KeeperWaitingSummary,
   KeeperWaitingUnavailable,
@@ -332,21 +332,10 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
       ? { cause: asStr(raw.last_failure.cause)!, at_unix: asNum(raw.last_failure.at_unix) }
       : null
 
-    let turns24h: number | null = null
-    let turnsBreakdown: KeeperTurnBreakdown | null = null
-    if (isRecord(raw.recent_turns) && Array.isArray(raw.recent_turns.slots)) {
-      let okCount = 0
-      let restedCount = 0
-      let failedCount = 0
-      for (const s of raw.recent_turns.slots) {
-        if (!isRecord(s)) continue
-        okCount += asNum(s.ok) ?? 0
-        restedCount += asNum(s.rested) ?? 0
-        failedCount += asNum(s.failed) ?? 0
-      }
-      turns24h = okCount + restedCount + failedCount
-      turnsBreakdown = { ok: okCount, rested: restedCount, failed: failedCount }
-    }
+    const turnsBreakdown = decodeRecentTurns(raw.recent_turns)
+    const turns24h = turnsBreakdown === null
+      ? null
+      : turnsBreakdown.ok + turnsBreakdown.rested + turnsBreakdown.failed
 
     let portraitEquipment: KeeperEquipment | null = null
     if (isRecord(raw.portrait) && raw.portrait.state === 'ready' && isKeeperEquipment(raw.portrait.equipment)) {

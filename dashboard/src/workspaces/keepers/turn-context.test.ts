@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  decodeRecentTurns,
   decodeTurnPreparation,
   decodeTurnWorkContext,
   decodeWaitingSummary,
@@ -78,5 +79,18 @@ describe('keeper turn context', () => {
       .toEqual(['종료 막힘: joining_lanes · lane 3 did not stop'])
     expect(waitingRowDetailLines({ rejection_reason: 'no evidence' })).toEqual(['거절 이유: no evidence'])
     expect(waitingRowDetailLines(null)).toEqual([])
+  })
+
+  it('sums recent turns with their causes, or says nothing when a slot is off', () => {
+    const slot = { starts_at: 0, ok: 2, rested: 1, failed: 4, scheduled: 3, reacted: 2, chat: 1, own: 1, unknown: 0 }
+    expect(decodeRecentTurns({ slots: [slot, slot] })).toEqual({
+      ok: 4, rested: 2, failed: 8,
+      causes: { scheduled: 6, reacted: 4, chat: 2, own: 2, unknown: 0 },
+    })
+    expect(decodeRecentTurns({ slots: [{ ...slot, unknown: 1 }] })).toBeNull()
+    expect(decodeRecentTurns({ slots: [{ starts_at: 0, ok: 1, rested: 0, failed: 0 }] })).toBeNull()
+    expect(decodeRecentTurns({ slots: [] })).toEqual({
+      ok: 0, rested: 0, failed: 0, causes: { scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0 },
+    })
   })
 })

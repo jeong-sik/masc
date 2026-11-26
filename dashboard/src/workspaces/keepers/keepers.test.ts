@@ -1906,7 +1906,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
             },
             recent_turns: {
               known_since: 1_700_000_000,
-              slots: [{ starts_at: 1_700_000_000, ok: 2, rested: 1, failed: 4 }],
+              slots: [{ starts_at: 1_700_000_000, ok: 2, rested: 1, failed: 4, scheduled: 3, reacted: 2, chat: 1, own: 1, unknown: 0 }],
             },
           },
           {
@@ -1935,7 +1935,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(isKeeperPathResting(k)).toBe(true)
     expect(isKeeperPathResting(pausedK)).toBe(false)
     expect(k.runtime_path_rest?.release_at).toContain('2025-11-25')
-    expect(k.turns_24h_breakdown).toEqual({ ok: 2, rested: 1, failed: 4 })
+    expect(k.turns_24h_breakdown).toEqual({ ok: 2, rested: 1, failed: 4, causes: { scheduled: 3, reacted: 2, chat: 1, own: 1, unknown: 0 } })
     expect(k.runtime_lane_failures).toHaveLength(2)
     expect(formatContextDetail(k).label).toBe('~61%')
 

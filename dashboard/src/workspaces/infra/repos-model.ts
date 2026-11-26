@@ -5,6 +5,9 @@
  * decode error or an `unreadable` count, never a default that looks healthy.
  */
 
+import { expectRecordElements, expectRequiredStringField } from '../../lib/wire-decode'
+import type { InfraRepository } from './types'
+
 // ── Repository status (GET /api/v1/repositories) ────────────────────────
 
 export type RepoStatus =
@@ -126,6 +129,45 @@ export function lastSyncFact(clock: RepoSyncClock, nowSec: number): Fact {
 
 export function isRecord(raw: unknown): raw is Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+}
+
+const REPO_LIST_READ = 'GET /api/v1/repositories'
+
+function decodeRepoRow(raw: Record<string, unknown>, index: number): InfraRepository {
+  const where = `${REPO_LIST_READ} repositories[${index}]`
+  const id = expectRequiredStringField(raw, 'id', where).trim()
+  const name = expectRequiredStringField(raw, 'name', where).trim()
+  if (id === '' || name === '') {
+    throw new Error(`${where}: "id"와 "name" 필드는 비어 있을 수 없습니다.`)
+  }
+  return {
+    id,
+    name,
+    // `local_path` is the stored declaration and may be relative; only the
+    // server knows the base it resolves against.
+    local_path: typeof raw.resolved_local_path === 'string'
+      ? raw.resolved_local_path
+      : typeof raw.local_path === 'string' ? raw.local_path : null,
+    status: parseRepoStatus(raw.status, raw.error_message),
+    auto_sync: typeof raw.auto_sync === 'boolean' ? raw.auto_sync : null,
+    sync_interval: typeof raw.sync_interval === 'number' && raw.sync_interval > 0 ? raw.sync_interval : null,
+    updated_at: typeof raw.updated_at === 'number' && raw.updated_at > 0 ? raw.updated_at : null,
+  }
+}
+
+/**
+ * `GET /api/v1/repositories` answers `{ "repositories": [...] }` and nothing
+ * else (server_routes_http_routes_repositories.ml). An answer of any other
+ * shape is a read that failed: it must not pass for "no repository". A row
+ * that is not an object, or has no id or name, fails the read too and the
+ * error names the row: a list short without saying so reads as the whole of it.
+ */
+export function decodeRepoList(raw: unknown): readonly InfraRepository[] {
+  if (!isRecord(raw) || !Array.isArray(raw.repositories)) {
+    throw new Error(`${REPO_LIST_READ}: the answer has no \`repositories\` list`)
+  }
+  const rows = expectRecordElements<Record<string, unknown>>(raw.repositories, 'repositories', REPO_LIST_READ)
+  return rows.map(decodeRepoRow)
 }
 
 export function count(raw: unknown): number | null {

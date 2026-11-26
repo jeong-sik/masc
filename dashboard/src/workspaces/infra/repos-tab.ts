@@ -41,6 +41,7 @@ const MS_PER_SECOND = 1000
 /** How often the list is read again while a clone is in progress. The server
  *  sends no event when one ends, and the list read runs no git subprocess. */
 const CLONING_POLL_MS = 5_000
+const NO_REPOS: readonly InfraRepository[] = []
 
 /** When the oldest reading on screen was taken. One refresh re-reads them all. */
 function OldestRead(props: { readonly keys: readonly string[] }) {
@@ -74,7 +75,7 @@ export function ReposTab(props: WorkspaceViewProps) {
     }
   }, [])
 
-  const repos = reposObs.kind === 'value' ? reposObs.data : []
+  const repos = reposObs.kind === 'value' ? reposObs.data : NO_REPOS
   const selectedRepo = repos.find((repo) => repo.id === selectedRepoId) ?? firstByName(repos)
   // The default is pinned once it is shown, so a repository that later sorts
   // ahead of it does not take the detail away.
@@ -91,9 +92,18 @@ export function ReposTab(props: WorkspaceViewProps) {
 
   // Each poll re-renders the tab, so this is judged again every time.
   const followingClone = repos.some((repo) => cloneInProgress(repo, Date.now() / MS_PER_SECOND))
+  // A tick does not start while the read of the tick before is out: a list
+  // read slower than the interval would be replaced before it could answer.
+  const pollOut = useRef(false)
   useEffect(() => {
     if (!followingClone) return undefined
-    const timer = setInterval(() => void loadRepos('manual'), CLONING_POLL_MS)
+    const timer = setInterval(() => {
+      if (pollOut.current) return
+      pollOut.current = true
+      void loadRepos('manual').finally(() => {
+        pollOut.current = false
+      })
+    }, CLONING_POLL_MS)
     return () => clearInterval(timer)
   }, [followingClone])
 

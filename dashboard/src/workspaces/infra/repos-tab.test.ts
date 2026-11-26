@@ -364,6 +364,37 @@ describe('workspaces/infra repos tab', () => {
     expect(container.querySelector('.rp-form')).toBeNull()
   })
 
+  it('says the list read failed when the answer is not a list, and not that no repository is registered', async () => {
+    let broken = true
+    stubServer((url, method) => (broken && method === 'GET' && url.pathname === '/api/v1/repositories'
+      ? jsonResponse({ error: 'store unreadable' })
+      : undefined))
+    mount()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('저장소 목록 조회 실패')
+    })
+    expect(container.textContent).not.toContain('등록된 저장소가 없습니다.')
+
+    broken = false
+    buttonNamed('다시 시도')!.click()
+    await vi.waitFor(() => {
+      expect(pullNumbers()).toEqual(['#13', '#12', '#11'])
+    })
+  })
+
+  it('says the list read failed and names the row when a row has no id or name', async () => {
+    stubServer((url, method) => (method === 'GET' && url.pathname === '/api/v1/repositories'
+      ? jsonResponse({ repositories: [...REPOS.repositories, { status: 'active' }] })
+      : undefined))
+    mount()
+    await vi.waitFor(() => {
+      const alert = container.querySelector('[role="alert"]')
+      expect(alert?.textContent).toContain('저장소 목록 조회 실패')
+      expect(alert?.textContent).toContain('repositories[2]')
+    })
+    expect(container.textContent).not.toContain('등록된 저장소가 없습니다.')
+  })
+
   it('keeps pull requests readable when the git call fails, and retries on request', async () => {
     let failGit = true
     stubServer((url) => (failGit && url.pathname === '/api/v1/git/status'
@@ -497,8 +528,8 @@ describe('workspaces/infra repos tab', () => {
         })
       : undefined))
     const listReads = () => seen.filter((line) => line === 'GET /api/v1/repositories').length
-    // A poll that finds the previous read still out joins it, so each step
-    // waits for the list to have answered.
+    // A tick that finds the read of the tick before still out starts none,
+    // so each step waits for the list to have answered.
     const listAnswered = (reads: number) => vi.waitFor(() => {
       expect(listReads()).toBe(reads)
       expect(resourceCache.peek(REPOS_KEY)).toMatchObject({ kind: 'value', stale: false })
@@ -523,6 +554,41 @@ describe('workspaces/infra repos tab', () => {
     vi.advanceTimersByTime(30_000)
     await settled()
     expect(listReads()).toBe(3)
+  })
+
+  it('starts no poll while the list read of the poll before is out', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const gate = { held: false, open: () => {} }
+    const listAnswer = () => jsonResponse({
+      repositories: [...REPOS.repositories, repoRow('gamma', { status: 'cloning', updated_at: NOW_SEC - 10 })],
+    })
+    const seen = stubServer((url) => {
+      if (url.pathname !== '/api/v1/repositories') return undefined
+      if (!gate.held) return listAnswer()
+      return new Promise<Response>((resolve) => {
+        gate.open = () => resolve(listAnswer())
+      })
+    })
+    const listReads = () => seen.filter((line) => line === 'GET /api/v1/repositories').length
+    await act(() => { mount() })
+    await act(async () => { await vi.waitFor(() => expect(listReads()).toBe(1)) })
+    await settled()
+
+    gate.held = true
+    vi.advanceTimersByTime(5_000)
+    await vi.waitFor(() => expect(listReads()).toBe(2))
+    // Three more ticks pass while that read is out.
+    vi.advanceTimersByTime(15_000)
+    await Promise.resolve()
+    expect(listReads()).toBe(2)
+
+    gate.held = false
+    await act(async () => {
+      gate.open()
+      await vi.waitFor(() => expect(resourceCache.peek(REPOS_KEY)).toMatchObject({ kind: 'value', stale: false }))
+    })
+    vi.advanceTimersByTime(5_000)
+    await vi.waitFor(() => expect(listReads()).toBe(3))
   })
 
   it('reads the clone of another repository only when it is selected', async () => {

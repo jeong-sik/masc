@@ -9,18 +9,10 @@
 
 import { useEffect } from 'preact/hooks'
 import { apiGet, apiRequest, authSession, resourceCache, type AuthSession, type Observed } from '../../core'
-import {
-  describeWireType,
-  expectOptionalArrayField,
-  expectOptionalRecordArrayField,
-  expectRecordElements,
-  expectRequiredStringField,
-  expectWireRecord,
-  isJsonRecord,
-} from '../../lib/wire-decode'
+import { expectOptionalRecordArrayField, expectWireRecord } from '../../lib/wire-decode'
 import { isAdminLockedForSession } from '../../routes/router'
 import { decodeGitStatus, type RepoGitState } from './repos-git-model'
-import { parseRepoStatus } from './repos-model'
+import { decodeRepoList } from './repos-model'
 import { decodePullsSnapshot, type PullsSnapshot } from './repos-pulls-model'
 import type { InfraRepository, RepoActivityChange, RepoActivityData } from './types'
 
@@ -51,50 +43,6 @@ export function canAdminRepos(session: AuthSession): boolean {
  *  out, and the entry stays as it was. */
 function unread<T>(key: string): Promise<Observed<T>> {
   return Promise.resolve(resourceCache.observe<T>(key).peek())
-}
-
-/** A row that is not an object, or has no id or name, fails the whole read:
- *  dropping it would show a shorter list as if it were the full one. */
-function decodeRepoList(raw: unknown): readonly InfraRepository[] {
-  const ctx = 'GET /api/v1/repositories'
-  let rows: readonly unknown[]
-  let field = 'repositories'
-  if (Array.isArray(raw)) {
-    rows = raw
-  } else if (isJsonRecord(raw)) {
-    if ('repositories' in raw && raw.repositories !== undefined) {
-      rows = expectOptionalArrayField<unknown>(raw, 'repositories', ctx)
-    } else if (raw.ok === true && 'data' in raw && raw.data !== undefined) {
-      field = 'data'
-      rows = expectOptionalArrayField<unknown>(raw, 'data', ctx)
-    } else {
-      rows = []
-    }
-  } else {
-    throw new Error(`${ctx}: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
-  }
-  const records = expectRecordElements<Record<string, unknown>>(rows, field, ctx)
-  return records.map((r, idx) => {
-    const rowCtx = `${ctx} ${field}[${idx}]`
-    const id = expectRequiredStringField(r, 'id', rowCtx).trim()
-    const name = expectRequiredStringField(r, 'name', rowCtx).trim()
-    if (id === '' || name === '') {
-      throw new Error(`${rowCtx}: "id"와 "name" 필드는 비어 있을 수 없습니다.`)
-    }
-    return {
-      id,
-      name,
-      // `local_path` is the stored declaration and may be relative; only the
-      // server knows the base it resolves against.
-      local_path: typeof r.resolved_local_path === 'string'
-        ? r.resolved_local_path
-        : typeof r.local_path === 'string' ? r.local_path : null,
-      status: parseRepoStatus(r.status, r.error_message),
-      auto_sync: typeof r.auto_sync === 'boolean' ? r.auto_sync : null,
-      sync_interval: typeof r.sync_interval === 'number' && r.sync_interval > 0 ? r.sync_interval : null,
-      updated_at: typeof r.updated_at === 'number' && r.updated_at > 0 ? r.updated_at : null,
-    }
-  })
 }
 
 /** `changes` left out reads as none; `changes` that is not a list of objects

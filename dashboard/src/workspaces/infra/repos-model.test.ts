@@ -10,6 +10,7 @@ import {
 } from './repos-git-model'
 import {
   cloneInProgress,
+  decodeRepoList,
   firstByName,
   formatSpan,
   groupWritesByFile,
@@ -30,6 +31,28 @@ const change = (path: string, flags: Partial<Record<'staged' | 'unstaged' | 'unt
 })
 
 describe('workspaces/infra repos-model', () => {
+  it('reads the repository list only from the shape the server sends', () => {
+    const row = { id: 'masc', name: 'masc', local_path: 'repos/masc', resolved_local_path: '/srv/repos/masc', status: 'active', auto_sync: true, sync_interval: 300, updated_at: 100 }
+    expect(decodeRepoList({ repositories: [row] })).toEqual([
+      { id: 'masc', name: 'masc', local_path: '/srv/repos/masc', status: { kind: 'active' }, auto_sync: true, sync_interval: 300, updated_at: 100 },
+    ])
+    // No repository is an answer too.
+    expect(decodeRepoList({ repositories: [] })).toEqual([])
+  })
+
+  it('refuses a list answer of another shape instead of reading it as no repository', () => {
+    for (const answer of [{}, { repositories: null }, { error: 'store unreadable' }, 'ok', null, [], { ok: true, data: [] }]) {
+      expect(() => decodeRepoList(answer)).toThrow('no `repositories` list')
+    }
+  })
+
+  it('refuses a list with a row it cannot read, and names the row', () => {
+    const good = { id: 'masc', name: 'masc', status: 'active' }
+    for (const bad of [{ name: 'no-id', status: 'active' }, { id: 'no-name', status: 'active' }, { id: '', name: '' }, 'not a row', null]) {
+      expect(() => decodeRepoList({ repositories: [good, bad] })).toThrow('repositories[1]')
+    }
+  })
+
   describe('decodeGitStatus', () => {
     it('reads a branch that tracks its remote', () => {
       const state = decodeGitStatus({

@@ -156,6 +156,12 @@ type open_work = {
 }
 
 val open_work_of_preview : Wire_fleet.turn_preview -> open_work option
+
+val open_activity_phrase : Wire_fleet.turn_open_activity -> Say.t
+(** What one open activity is doing, in the words the status line uses. *)
+
+val open_activity_since : Wire_fleet.turn_open_activity -> float
+(** When the activity's channel or stage last changed. *)
 (** What a running turn is doing, from the work the server saw start and did
     not see end. [None] for a server that does not report the open work, and
     for a failed attempt or a turn that is still preparing. *)

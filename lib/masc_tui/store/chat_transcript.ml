@@ -2254,6 +2254,51 @@ let stream_tool_groups ~tools_mode rows =
   in
   consecutive_tool_groups ~tools_mode ~same rows
 
+(* RFC open-tool-carries-cohort-and-reach D4. Open work in the order the
+   server lists it; calls agent core planned to run at once are gathered
+   under one piece. Row counting and drawing both read these pieces. *)
+type progress_piece =
+  | Progress_single of Wire_fleet.turn_open_activity
+  | Progress_batch of { size : int; members : Wire_fleet.turn_open_activity list }
+
+let concurrent_batch_of = function
+  | Wire_fleet.Open_tool { cohort = Some { Wire_fleet.concurrent = true; batch_size; batch_index }; _ }
+    when batch_size > 1 ->
+      Some (batch_index, batch_size)
+  | Wire_fleet.Open_tool { cohort = Some { Wire_fleet.concurrent = true; _ }; _ }
+  | Wire_fleet.Open_tool { cohort = Some { Wire_fleet.concurrent = false; _ }; _ }
+  | Wire_fleet.Open_tool { cohort = None; _ }
+  | Wire_fleet.Open_response _ ->
+      None
+
+let progress_pieces activities =
+  let rec go acc = function
+    | [] -> List.rev acc
+    | activity :: rest -> (
+        match concurrent_batch_of activity with
+        | None -> go (Progress_single activity :: acc) rest
+        | Some (index, size) ->
+            let same_batch other =
+              match concurrent_batch_of other with
+              | Some (other_index, _) -> Int.equal other_index index
+              | None -> false
+            in
+            let members = activity :: List.filter same_batch rest in
+            let rest = List.filter (fun other -> not (same_batch other)) rest in
+            go (Progress_batch { size; members } :: acc) rest)
+  in
+  go [] activities
+
+let progress_row_count (turn : Wire_fleet.active_turn) =
+  match turn.preview with
+  | Some { Wire_fleet.open_activities = Some (_ :: _ as activities); _ } ->
+      List.fold_left
+        (fun n -> function
+          | Progress_single _ -> n + 1
+          | Progress_batch { members; _ } -> n + 1 + List.length members)
+        0 (progress_pieces activities)
+  | Some { Wire_fleet.open_activities = Some [] | None; _ } | None -> 0
+
 type transcript_section =
   | Section_history of Wire_fleet.chat_message list
   | Section_active_turn of Wire_fleet.active_turn
@@ -2828,7 +2873,9 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
           | Section_history msgs -> count_history msgs
           | Section_active_turn turn ->
               let summary =
-                if show_active_turn_summary ~model ~keeper turn then 1 else 0
+                if show_active_turn_summary ~model ~keeper turn then
+                  1 + progress_row_count turn
+                else 0
               in
               summary
               + if Option.is_some (active_turn_preview_tail turn) then 1 else 0

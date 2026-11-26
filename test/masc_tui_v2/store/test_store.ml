@@ -23476,9 +23476,10 @@ let open_response channel since =
     { channel; started_at_unix = since -. 1.0; since_unix = since }
 ;;
 
-let open_tool ?tool_use_id name stage since =
+let open_tool ?tool_use_id ?cohort ?reach name stage since =
   Wire_fleet.Open_tool
-    { tool_use_id; name; stage; started_at_unix = since -. 2.0; since_unix = since }
+    { tool_use_id; name; stage; started_at_unix = since -. 2.0; since_unix = since; cohort
+    ; reach }
 ;;
 
 let preview_reporting ?(activity = Wire_fleet.Preview_streaming) open_activities last_tool
@@ -23714,6 +23715,56 @@ let test_wire_reads_the_open_work () =
   (match decode (`List [ `Assoc [ "kind", `String "tool"; "tool_use_id", `Null; "name", `String "Read"; "stage", `String "finished"; "started_at_unix", `Float 1.0; "since_unix", `Float 1.0 ] ]) with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "an unknown tool stage was accepted");
+  (* RFC open-tool-carries-cohort-and-reach. *)
+  let tool_with extra =
+    `List
+      [ `Assoc
+          ([ "kind", `String "tool"; "tool_use_id", `String "toolu_b"; "name", `String "WebFetch";
+             "stage", `String "executing"; "started_at_unix", `Float 9.0;
+             "since_unix", `Float 11.0 ]
+           @ extra) ]
+  in
+  let batch = { Wire_fleet.batch_index = 2; batch_size = 3; concurrent = true } in
+  Alcotest.(check bool) "a call is read with its batch and where it reaches" true
+    (open_of
+       (decode
+          (tool_with
+             [ "cohort",
+               `Assoc [ "batch_index", `Int 2; "batch_size", `Int 3; "concurrent", `Bool true ];
+               "reach", `String "network" ]))
+     = Some
+         [ open_tool ~tool_use_id:"toolu_b" ~cohort:batch ~reach:Wire_fleet.Reach_network
+             "WebFetch" Wire_fleet.Tool_executing 11.0 ]);
+  Alcotest.(check bool) "null batch and reach read as not known" true
+    (open_of (decode (tool_with [ "cohort", `Null; "reach", `Null ]))
+     = Some [ open_tool ~tool_use_id:"toolu_b" "WebFetch" Wire_fleet.Tool_executing 11.0 ]);
+  (match decode (tool_with [ "reach", `String "elsewhere" ]) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an unknown reach was accepted");
+  let with_one activity = preview_reporting (Some [ activity ]) None in
+  Alcotest.(check bool) "a preview whose call learned its reach is a new preview" false
+    (Wire_fleet.equal_turn_preview
+       (with_one (open_tool "WebFetch" Wire_fleet.Tool_executing 4.0))
+       (with_one (open_tool ~reach:Wire_fleet.Reach_network "WebFetch" Wire_fleet.Tool_executing 4.0)));
+  (* Calls planned to run at once are one piece, in the server's order; a
+     lone call and the model's answer stay single. *)
+  let a = open_tool ~tool_use_id:"a" ~cohort:batch "Execute" Wire_fleet.Tool_executing 4.0 in
+  let b = open_tool ~tool_use_id:"b" ~cohort:batch "WebFetch" Wire_fleet.Tool_executing 4.0 in
+  let lone =
+    open_tool ~tool_use_id:"c" ~cohort:{ batch with batch_index = 3; batch_size = 1 } "Read"
+      Wire_fleet.Tool_executing 4.0
+  in
+  let thinking = open_response Wire_fleet.Channel_thinking 3.0 in
+  let shape =
+    List.map
+      (function
+        | Chat_transcript.Progress_single _ -> "single"
+        | Chat_transcript.Progress_batch { size; members } ->
+            Printf.sprintf "batch %d of %d" (List.length members) size)
+      (Chat_transcript.progress_pieces [ thinking; a; lone; b ])
+  in
+  Alcotest.(check (list string)) "a batch gathers its calls" [ "single"; "batch 2 of 3"; "single" ]
+    shape;
   let with_open activities = preview_reporting (Some activities) None in
   Alcotest.(check bool) "two previews with different open work are different" false
     (Wire_fleet.equal_turn_preview (with_open []) (with_open [ open_tool "Read" Wire_fleet.Tool_executing 4.0 ]));

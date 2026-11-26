@@ -196,6 +196,18 @@ type turn_response_channel = Channel_none | Channel_thinking | Channel_text
 
 type turn_tool_stage = Tool_requested | Tool_executing
 
+(** Where agent core planned a call: its batch in the turn, how many calls
+    the batch holds, and whether they run at once. *)
+type turn_tool_cohort = { batch_index : int; batch_size : int; concurrent : bool }
+
+(** Where a call reaches: MASC's own state, the Keeper sandbox or host
+    process, the network, or a model provider. *)
+type turn_tool_reach =
+  | Reach_masc_state
+  | Reach_sandbox
+  | Reach_network
+  | Reach_model_provider
+
 (** Work the server saw start in a running turn and did not see end. An
     activity carries when it began and when its channel or stage last
     changed. *)
@@ -211,6 +223,8 @@ type turn_open_activity =
       stage : turn_tool_stage;
       started_at_unix : float;
       since_unix : float;
+      cohort : turn_tool_cohort option;
+      reach : turn_tool_reach option;
     }
 
 type turn_preparation_phase =
@@ -544,6 +558,14 @@ let turn_response_channel_of_string raw =
   | "text" -> Some Channel_text
   | _ -> None
 
+let turn_tool_reach_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "masc_state" -> Some Reach_masc_state
+  | "sandbox" -> Some Reach_sandbox
+  | "network" -> Some Reach_network
+  | "model_provider" -> Some Reach_model_provider
+  | _ -> None
+
 let turn_tool_stage_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
   | "requested" -> Some Tool_requested
@@ -635,6 +657,19 @@ let turn_tool_stage_tag = function
   | Tool_requested -> 0
   | Tool_executing -> 1
 
+let equal_turn_tool_cohort (a : turn_tool_cohort) (b : turn_tool_cohort) =
+  Int.equal a.batch_index b.batch_index
+  && Int.equal a.batch_size b.batch_size
+  && Bool.equal a.concurrent b.concurrent
+
+let turn_tool_reach_tag = function
+  | Reach_masc_state -> 0
+  | Reach_sandbox -> 1
+  | Reach_network -> 2
+  | Reach_model_provider -> 3
+
+let equal_turn_tool_reach a b = Int.equal (turn_tool_reach_tag a) (turn_tool_reach_tag b)
+
 let equal_turn_open_activity (a : turn_open_activity) (b : turn_open_activity) =
   match a, b with
   | Open_response a, Open_response b ->
@@ -647,6 +682,8 @@ let equal_turn_open_activity (a : turn_open_activity) (b : turn_open_activity) =
       && Int.equal (turn_tool_stage_tag a.stage) (turn_tool_stage_tag b.stage)
       && Float.equal a.started_at_unix b.started_at_unix
       && Float.equal a.since_unix b.since_unix
+      && Option.equal equal_turn_tool_cohort a.cohort b.cohort
+      && Option.equal equal_turn_tool_reach a.reach b.reach
   | Open_response _, Open_tool _ | Open_tool _, Open_response _ -> false
 
 let equal_turn_preview (a : turn_preview) (b : turn_preview) =
@@ -926,7 +963,20 @@ let decode_turn_open_activity json =
       let* tool_use_id = optional_nonblank_string json "tool_use_id" in
       let* name = required_nonblank_string json "name" in
       let* stage = decode_enum ~field:"stage" turn_tool_stage_of_string json in
-      Ok (Open_tool { tool_use_id; name; stage; started_at_unix; since_unix })
+      let* cohort_obj = optional_object_field json "cohort" in
+      let* cohort =
+        match cohort_obj with
+        | None -> Ok None
+        | Some c ->
+            let* batch_index = required_int_field c "batch_index" in
+            let* batch_size = required_int_field c "batch_size" in
+            let* concurrent = required_bool_field c "concurrent" in
+            Ok (Some { batch_index; batch_size; concurrent })
+      in
+      let* reach = decode_optional_enum ~field:"reach" turn_tool_reach_of_string json in
+      Ok
+        (Open_tool
+           { tool_use_id; name; stage; started_at_unix; since_unix; cohort; reach })
   | other -> Error (Printf.sprintf "unknown open activity kind %S" other)
 
 let decode_turn_open_activities items =

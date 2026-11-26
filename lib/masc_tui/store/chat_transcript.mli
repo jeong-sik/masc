@@ -221,6 +221,18 @@ val stream_tool_groups :
   Fleet_store.active_tool_call list ->
   Fleet_store.active_tool_call tool_group list
 
+(** Open work of a running turn as the chat draws it: one activity, or the
+    calls agent core planned to run at once with the batch's planned size. *)
+type progress_piece =
+  | Progress_single of Wire_fleet.turn_open_activity
+  | Progress_batch of { size : int; members : Wire_fleet.turn_open_activity list }
+
+val progress_pieces : Wire_fleet.turn_open_activity list -> progress_piece list
+
+val progress_row_count : Wire_fleet.active_turn -> int
+(** Rows the progress block takes under the active-turn header: one per
+    activity and one per batch header. *)
+
 type transcript_section =
   | Section_history of Wire_fleet.chat_message list
   | Section_active_turn of Wire_fleet.active_turn

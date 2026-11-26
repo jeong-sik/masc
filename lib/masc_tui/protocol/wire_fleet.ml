@@ -3163,6 +3163,15 @@ let decode_custom_chat_chunk json =
       let tool_name =
         match name_camel with Some _ as x -> x | None -> name_snake
       in
+      let* is_error_camel = optional_bool_field value "isError" in
+      let* is_error_snake = optional_bool_field value "is_error" in
+      let ok =
+        match
+          match is_error_camel with Some _ as x -> x | None -> is_error_snake
+        with
+        | Some is_err -> Some (not is_err)
+        | None -> None
+      in
       Ok
         (Chunk_tool_end
            {
@@ -3170,7 +3179,7 @@ let decode_custom_chat_chunk json =
              tool_use_id;
              tool_name;
              execution_id;
-             ok = None;
+             ok;
              output_preview = None;
            })
   | "KEEPER_NATIVE_TOOL_START" ->

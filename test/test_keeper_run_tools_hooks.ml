@@ -1686,7 +1686,7 @@ let test_a_cancelled_call_leaves_an_unsettled_row () =
   let rows =
     rejected_rows_for
       ~stage:Agent_core.Hooks.Cancelled_during_execution
-      ~on_tool_result_ready:(fun ~tool_call_id:_ ~turn:_ ~planned_index:_ ~execution_id:_ ->
+      ~on_tool_result_ready:(fun ~tool_call_id:_ ~turn:_ ~planned_index:_ ~execution_id:_ ~is_error:_ ->
         announced := true)
       ()
   in
@@ -1710,7 +1710,8 @@ let test_validation_rejection_notifies_after_exact_log_commit () =
     rejected_rows_for
       ~stage:Agent_core.Hooks.Validation_before_execution
       ~on_tool_result_ready:
-        (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
+        (fun ~tool_call_id ~turn ~planned_index ~execution_id ~is_error ->
+           check (option bool) "validation rejection reports is_error = Some true" (Some true) is_error;
            observed :=
              Some
                ( tool_call_id

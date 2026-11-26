@@ -18,7 +18,7 @@ val journal_grew :
 val on_event : t -> Agent_core.Types.sse_event -> unit
 val on_tool_stream_observation : t -> Keeper_hooks_agent_core.tool_stream_observation -> unit
 val on_tool_result_ready :
-  t -> tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit
+  t -> tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> is_error:bool option -> unit
 
 type ending =
   | Completed of { reply : string; turn_outcome : Keeper_turn_outcome.t }

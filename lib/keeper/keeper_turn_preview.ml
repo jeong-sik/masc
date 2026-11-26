@@ -145,31 +145,31 @@ let same_tool ~tool_use_id ~tool_name (tool : open_tool) =
   | Some wanted, Some have -> String.equal wanted have
   | Some _, None | None, Some _ | None, None -> String.equal tool_name tool.tool_name
 
-let open_tool_of ~tool_use_id ~tool_name work =
-  match
-    List.find_opt
-      (function
-        | Tool_open tool -> same_tool ~tool_use_id ~tool_name tool
-        | Response_open _ -> false)
-      work
-  with
-  | Some (Tool_open tool) -> Some tool
-  | Some (Response_open _) | None -> None
-
-(* The model started calling the tool. Nothing says it runs yet. *)
-let tool_requested ~now ~tool_use_id ~tool_name work =
-  match open_tool_of ~tool_use_id ~tool_name work with
-  | Some _ -> work
-  | None ->
-      work
-      @ [ Tool_open
-            { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now
-            ; cohort = None; reach = None } ]
-
 (* The before-tool hook runs once the gates before it said yes, so this is
    where execution starts. Hearing it twice for one call changes nothing. *)
 let has_tool_id id (tool : open_tool) =
   Option.equal String.equal (Some id) tool.tool_use_id
+
+(* The model started calling the tool. Nothing says it runs yet.
+   Only deduplicate when a concrete [tool_use_id] is already open; distinct
+   anonymous ([None]) parallel calls of the same tool remain separate rows. *)
+let tool_requested ~now ~tool_use_id ~tool_name work =
+  let already_open =
+    match tool_use_id with
+    | Some id ->
+        List.exists
+          (function
+            | Tool_open tool -> has_tool_id id tool
+            | Response_open _ -> false)
+          work
+    | None -> false
+  in
+  if already_open then work
+  else
+    work
+    @ [ Tool_open
+          { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now
+          ; cohort = None; reach = None } ]
 
 let tool_executing ~now ~tool_use_id ~tool_name ~cohort ~reach work =
   let already_started id =
@@ -214,7 +214,9 @@ let tool_executing ~now ~tool_use_id ~tool_name ~cohort ~reach work =
               { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now
               ; cohort; reach } ]
 
-(* Match an identified return before trying the oldest anonymous call. *)
+(* Match an identified return before trying the oldest unpromoted anonymous
+   request. Never match an already-executing anonymous sibling when ending a
+   concrete [Some id] call. *)
 let tool_ended ~tool_use_id ~tool_name work =
   let end_first accepts =
     remove_first (function Tool_open tool -> accepts tool | Response_open _ -> false) work
@@ -224,7 +226,11 @@ let tool_ended ~tool_use_id ~tool_name work =
   | Some id ->
       let exact = end_first (has_tool_id id) in
       if exact != work then exact
-      else end_first (same_tool ~tool_use_id ~tool_name)
+      else
+        end_first (fun tool ->
+            Option.is_none tool.tool_use_id
+            && tool.stage = Tool_requested
+            && String.equal tool_name tool.tool_name)
 
 (* The host is running a call, so the model's message that called it is over.
    An official client's turn is one long message boundary around many model
@@ -343,6 +349,7 @@ type text_intake =
   }
 
 module Tool_indexes = Map.Make (Int)
+module Tool_id_set = Set.Make (String)
 
 (* What the stream said about a tool block it opened. A model's call of a MASC
    tool is a "tool_use" block: in the agent loop it ends when the model
@@ -365,6 +372,7 @@ type entry =
   ; text_intake : text_intake
   ; released_bytes : int
   ; tools : tool_block Tool_indexes.t
+  ; ended_tool_ids : Tool_id_set.t
   ; preparations : (unit ref * preparation_span) list
   ; next_preparation_scope_id : int
   ; owner : Keeper_interrupt_token.t option
@@ -477,7 +485,7 @@ let change_entry ~writer ~now f =
 
 let update ~writer ~now f =
   change_entry ~writer ~now (fun entry ->
-    Some { entry with preparations = [];
+    Some { entry with preparations = []; ended_tool_ids = Tool_id_set.empty;
       preview = { (f entry.preview) with preparation = None } })
 
 let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
@@ -561,7 +569,8 @@ let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
     with_lock (fun () ->
       let preview = empty ~execution_scope ~revision:(next_revision ()) now in
       let writer = ref { preview; text_intake; released_bytes = 0;
-        tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
+        tools = Tool_indexes.empty; ended_tool_ids = Tool_id_set.empty;
+        preparations = []; next_preparation_scope_id = 0;
         owner; original_turn_ref = turn_ref; shown_as; loop = None } in
       Hashtbl.replace table keeper_name writer;
       writer, shown_after_write writer)
@@ -583,6 +592,7 @@ let note_attempt ~writer ~now ~runtime_id ~checkpoint_owner =
            still held belongs to the tail this clears, and any work it left
            open ended with it. *)
       ; tools = Tool_indexes.empty
+      ; ended_tool_ids = Tool_id_set.empty
       ; preparations = []
       ; owner
       ; original_turn_ref
@@ -636,39 +646,65 @@ let note_text ~writer ~now text =
 
 (* The before-tool hook. It runs once the gates before it said yes. *)
 let note_tool_started ~writer ~now ~tool_use_id ~tool_name ~cohort ~reach =
-  update ~writer ~now (fun old ->
-    { old with last_tool = Some tool_name
-    ; open_activities = tool_running ~now ~tool_use_id ~tool_name ~cohort ~reach old.open_activities })
+  change_entry ~writer ~now (fun ({ preview; ended_tool_ids; _ } as entry) ->
+    let ended_tool_ids =
+      match tool_use_id with
+      | Some id -> Tool_id_set.remove id ended_tool_ids
+      | None -> ended_tool_ids
+    in
+    Some
+      { entry with preparations = []; ended_tool_ids
+      ; preview =
+          { preview with last_tool = Some tool_name; preparation = None
+          ; open_activities = tool_running ~now ~tool_use_id ~tool_name ~cohort ~reach preview.open_activities } })
 
 (* The after-tool hook, for a result and for a failure alike. *)
 let note_tool_finished ~writer ~now ~tool_use_id ~tool_name =
-  change_entry ~writer ~now (fun ({ preview; _ } as entry) ->
-    let before = preview.open_activities in
-    Some
-      { entry with preparations = []
-      ; preview =
-          { preview with
-              last_tool = Some tool_name
-            ; open_activities =
-                response_after_return ~now ~loop:entry.loop before
-                  (tool_ended ~tool_use_id ~tool_name before)
-            ; preparation = None } })
+  change_entry ~writer ~now (fun ({ preview; ended_tool_ids; _ } as entry) ->
+    match tool_use_id with
+    | Some id when Tool_id_set.mem id ended_tool_ids ->
+        (* Ignore duplicate completions for an already-ended concrete call ID
+           so an unrelated unpromoted anonymous sibling stays open. *)
+        None
+    | Some _ | None ->
+        let before = preview.open_activities in
+        let after = tool_ended ~tool_use_id ~tool_name before in
+        let ended_tool_ids =
+          match tool_use_id with
+          | Some id when after != before -> Tool_id_set.add id ended_tool_ids
+          | Some _ | None -> ended_tool_ids
+        in
+        Some
+          { entry with preparations = []; ended_tool_ids
+          ; preview =
+              { preview with
+                  last_tool = Some tool_name
+                ; open_activities =
+                    response_after_return ~now ~loop:entry.loop before after
+                ; preparation = None } })
 
 (* The run of this turn is over at a tool boundary: the loop yields there and
    no later model response or turn text comes to close what the last tool
    return opened. *)
 let note_turn_over ~writer ~now =
-  update ~writer ~now (fun old -> { old with open_activities = [] })
+  change_entry ~writer ~now (fun ({ preview; _ } as entry) ->
+    Some
+      { entry with preparations = []; ended_tool_ids = Tool_id_set.empty
+      ; preview = { preview with open_activities = []; preparation = None } })
 
 let note_request ~writer ~now =
-  update ~writer ~now (fun old ->
+  change_entry ~writer ~now (fun ({ preview; _ } as entry) ->
     let work =
-      drop (function Tool_open _ -> true | Response_open _ -> false) old.open_activities in
-    { old with
-        open_activities =
-          Response_open (open_response ~channel:No_content ~now)
-          :: drop (function Response_open _ -> true | Tool_open _ -> false) work
-    ; attempt_failed = false })
+      drop (function Tool_open _ -> true | Response_open _ -> false) preview.open_activities in
+    Some
+      { entry with preparations = []; ended_tool_ids = Tool_id_set.empty
+      ; preview =
+          { preview with
+              open_activities =
+                Response_open (open_response ~channel:No_content ~now)
+                :: drop (function Response_open _ -> true | Tool_open _ -> false) work
+            ; attempt_failed = false
+            ; preparation = None } })
 
 (* Positions count only bytes actually emitted by this writer's redactor.
    A replacement starts a new source generation, even if its text repeats. *)
@@ -787,10 +823,34 @@ let note_stream ~writer ~now event =
     in
     let open_changed = not (open_activities == preview.open_activities) in
     let tool_changed = not (Option.equal String.equal last_tool preview.last_tool) in
+    let ended_tool_ids =
+      match event with
+      | Agent_core.Types.ContentBlockStart { tool_id = Some id; tool_name = Some _; _ } ->
+          Tool_id_set.remove id released_entry.ended_tool_ids
+      | Agent_core.Types.ContentBlockStart _
+      | Agent_core.Types.ContentBlockStop _
+      | Agent_core.Types.ContentBlockDelta _
+      | Agent_core.Types.MessageStart _
+      | Agent_core.Types.MessageDelta _
+      | Agent_core.Types.MessageStop
+      | Agent_core.Types.InlineContentReplay _
+      | Agent_core.Types.ResponsesOutputItems _
+      | Agent_core.Types.Ping
+      | Agent_core.Types.Connected
+      | Agent_core.Types.SSEError _
+      | Agent_core.Types.NDJSONError _
+      | Agent_core.Types.SSEParseFailed _
+      | Agent_core.Types.NDJSONParseFailed _
+      | Agent_core.Types.SSEUnknownEventType _
+      | Agent_core.Types.SSEUnsupportedPart _
+      | Agent_core.Types.SSEUnsupportedResponse _
+      | Agent_core.Types.Timeout _
+      | Agent_core.Types.StreamIncomplete _ -> released_entry.ended_tool_ids
+    in
     if (not open_changed) && (not text_changed) && (not tool_changed) then None
     else
       Some
-        { released_entry with tools; preparations = [];
+        { released_entry with tools; ended_tool_ids; preparations = [];
           preview =
             { preview with
                 last_tool

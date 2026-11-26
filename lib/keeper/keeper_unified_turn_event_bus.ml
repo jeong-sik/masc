@@ -39,6 +39,8 @@ type t =
   ; turn_id : int
   ; event_bus_subscription : event_bus_subscription Atomic.t
   ; drain_cancel : drain_cancel_state Atomic.t
+  ; drain_mutex : Cross_context_mutex.t
+  ; background_done : unit Eio.Promise.t option Atomic.t
   ; state : event_bus_state Atomic.t
   ; on_pending_count_change : int -> unit
   }
@@ -69,6 +71,8 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~sco
   ; turn_id = Keeper_turn_scope.turn_id scope
   ; event_bus_subscription = Atomic.make event_bus_subscription
   ; drain_cancel = Atomic.make Inactive
+  ; drain_mutex = Cross_context_mutex.create ()
+  ; background_done = Atomic.make None
   ; state =
       Atomic.make
         { summary = Keeper_turn_runtime_budget.empty_turn_event_bus_summary
@@ -161,59 +165,62 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
 ;;
 
 let drain ?(site = "unspecified") t =
-  let events =
-    match Atomic.get t.event_bus_subscription with
-    | Subscribed { event_bus_sub; _ } -> Runtime_event_bus.drain event_bus_sub
-    | No_event_bus -> []
-  in
-  let outcome = if events = [] then "empty" else "drained" in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string EventBusDrain)
-    ~labels:[ "site", site; "outcome", outcome ]
-    ();
-  let rec update () =
-    let old = Atomic.get t.state in
-    let new_pending_tool_count, transitions =
-      record_fsm_tool_transitions
-        ~keeper_name:t.keeper_name
-        ~turn_id:t.turn_id
-        old.pending_tool_count
-        events
-    in
-    let new_tracker =
-      Keeper_unified_turn_types.record_turn_tool_events
-        ~keeper_name:t.keeper_name
-        old.tracker
-        events
-    in
-    let new_summary =
-      Keeper_turn_runtime_budget.merge_turn_event_bus_summary
-        old.summary
-        (Keeper_turn_runtime_budget.summarize_turn_event_bus events)
-    in
-    let new_state =
-      { summary = new_summary
-      ; tracker = new_tracker
-      ; pending_tool_count = new_pending_tool_count
-      }
-    in
-    if Atomic.compare_and_set t.state old new_state
-    then (
+  (* Serialize dequeue and state-fold under [Cross_context_mutex.with_durable_lock].
+     This is Eio-safe across [Runtime_event_bus.drain]'s internal mutex yield,
+     works from non-Eio domains/tests, and defers Eio cancellation until the
+     popped events are folded into [t.state] so concurrent drainers cannot
+     reorder [ToolCompleted] ahead of [ToolCalled] or drop dequeued events. *)
+  let new_summary, count_changed =
+    Cross_context_mutex.with_durable_lock t.drain_mutex (fun () ->
+      let events =
+        match Atomic.get t.event_bus_subscription with
+        | Subscribed { event_bus_sub; _ } -> Runtime_event_bus.drain event_bus_sub
+        | No_event_bus -> []
+      in
+      let outcome = if events = [] then "empty" else "drained" in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string EventBusDrain)
+        ~labels:[ "site", site; "outcome", outcome ]
+        ();
+      let old = Atomic.get t.state in
+      let new_pending_tool_count, transitions =
+        record_fsm_tool_transitions
+          ~keeper_name:t.keeper_name
+          ~turn_id:t.turn_id
+          old.pending_tool_count
+          events
+      in
+      let new_tracker =
+        Keeper_unified_turn_types.record_turn_tool_events
+          ~keeper_name:t.keeper_name
+          old.tracker
+          events
+      in
+      let new_summary =
+        Keeper_turn_runtime_budget.merge_turn_event_bus_summary
+          old.summary
+          (Keeper_turn_runtime_budget.summarize_turn_event_bus events)
+      in
+      let new_state =
+        { summary = new_summary
+        ; tracker = new_tracker
+        ; pending_tool_count = new_pending_tool_count
+        }
+      in
+      Atomic.set t.state new_state;
       List.iter
         (emit_fsm_transition
            ~keeper_name:t.keeper_name
            ~turn_id:t.turn_id
            ~pending_count:new_state.pending_tool_count)
         transitions;
-      (* Mirror the in-flight count to the registry only when it moved, so the
-         supervisor sweep can exclude active tool execution.
-         The count is the authoritative FSM value, not a re-derived counter. *)
-      if old.pending_tool_count <> new_state.pending_tool_count
-      then t.on_pending_count_change new_state.pending_tool_count;
-      new_summary)
-    else update ()
+      new_summary, old.pending_tool_count <> new_state.pending_tool_count)
   in
-  update ()
+  (* Mirror the in-flight count to the registry outside [t.drain_mutex] so lock
+     order stays strictly separate from [Keeper_registry]'s own mutex, reading
+     the latest authoritative count. *)
+  if count_changed then t.on_pending_count_change (Atomic.get t.state).pending_tool_count;
+  new_summary
 ;;
 
 (* Keep the recursion outside the cycle's exception handler. Calling [loop]
@@ -241,46 +248,63 @@ let pending_tool_count t = (Atomic.get t.state).pending_tool_count
 let start_background_drain ~clock t =
   match Atomic.get t.event_bus_subscription, Eio_context.get_switch_opt () with
   | Subscribed _, Some sw ->
-    Eio.Fiber.fork ~sw (fun () ->
-      Eio.Cancel.sub (fun cc ->
-        match Atomic.compare_and_set t.drain_cancel Inactive (Active cc) with
-        | true ->
-          let run_cycle () =
-            try
-              let _summary = drain ~site:"background_poll" t in
-              Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-              true
-            with
-            | Eio.Cancel.Cancelled _ ->
-              (* [unsubscribe] cancels this background worker as normal teardown. *)
-              false
-            | exn ->
-              Log.Keeper.warn
-                "%s: keeper_turn event-bus drain failed: %s"
-                t.keeper_name
-                (Printexc.to_string exn);
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string EventBusDrain)
-                ~labels:
-                  [ ( "site"
-                    , Keeper_event_bus_drain_site.(to_label Background_poll) )
-                  ; "outcome", "exception"
-                  ]
-                ();
-              (try
-                 Eio.Time.sleep
-                   clock
-                   (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-                 true
-               with
-               | Eio.Cancel.Cancelled _ -> false)
-          in
-          run_background_drain_loop run_cycle
-        | false ->
-          (* [unsubscribe] has already closed the bus, or another fiber has
-             already claimed the active drainer role. Either way this fiber
-             must not install [cc] or start polling. *)
-          ()))
+    (match Atomic.get t.drain_cancel with
+     | Closed | Active _ -> ()
+     | Inactive ->
+       let done_p, done_r = Eio.Promise.create () in
+       if Atomic.compare_and_set t.background_done None (Some done_p)
+       then (
+         try
+           Eio.Fiber.fork ~sw (fun () ->
+             Fun.protect
+               ~finally:(fun () -> Eio.Promise.resolve done_r ())
+               (fun () ->
+                 Eio.Cancel.sub (fun cc ->
+                   match Atomic.compare_and_set t.drain_cancel Inactive (Active cc) with
+                   | true ->
+                     let run_cycle () =
+                       try
+                         let _summary = drain ~site:"background_poll" t in
+                         Eio.Time.sleep
+                           clock
+                           (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
+                         true
+                       with
+                       | Eio.Cancel.Cancelled _ ->
+                         (* [unsubscribe] cancels this background worker as normal teardown. *)
+                         false
+                       | exn ->
+                         Log.Keeper.warn
+                           "%s: keeper_turn event-bus drain failed: %s"
+                           t.keeper_name
+                           (Printexc.to_string exn);
+                         Otel_metric_store.inc_counter
+                           Keeper_metrics.(to_string EventBusDrain)
+                           ~labels:
+                             [ ( "site"
+                               , Keeper_event_bus_drain_site.(to_label Background_poll) )
+                             ; "outcome", "exception"
+                             ]
+                           ();
+                         (try
+                            Eio.Time.sleep
+                              clock
+                              (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
+                            true
+                          with
+                          | Eio.Cancel.Cancelled _ -> false)
+                     in
+                     run_background_drain_loop run_cycle
+                   | false ->
+                     (* [unsubscribe] has already closed the bus, or another fiber has
+                        already claimed the active drainer role. Either way this fiber
+                        must not install [cc] or start polling. *)
+                     ())))
+         with
+         | exn ->
+           Atomic.set t.background_done None;
+           Eio.Promise.resolve done_r ();
+           raise exn))
   | (Subscribed _, None) | (No_event_bus, _) -> ()
 ;;
 
@@ -311,6 +335,10 @@ let unsubscribe t =
          "%s: event bus drain cancel ignored after context finish: %s"
          t.keeper_name
          msg));
+  (match Atomic.exchange t.background_done None with
+   | None -> ()
+   | Some done_p ->
+     Eio.Cancel.protect (fun () -> Eio.Promise.await done_p));
   ignore (drain ~site:"unsubscribe_final" t);
   (match Atomic.exchange t.event_bus_subscription No_event_bus with
   | Subscribed { event_bus; event_bus_sub } ->

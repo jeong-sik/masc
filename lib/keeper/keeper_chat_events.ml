@@ -184,6 +184,7 @@ type keeper_chat_event =
       { occurrence : tool_stream_occurrence
       ; tool_call_id : string option
       ; execution_id : Ids.Execution_id.t
+      ; is_error : bool option
       }
   | Tool_transcript_committed of
       { delivery_key : Keeper_chat_delivery_identity.delivery_key

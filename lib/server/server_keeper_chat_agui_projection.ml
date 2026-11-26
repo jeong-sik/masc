@@ -315,7 +315,7 @@ let project ~timestamp ~redact_text state event =
                 ; "approval_id", `String approval_id
                 ; "outcome", `String outcome
                 ])) )
-  | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
+  | Tool_result_ready { occurrence; tool_call_id; execution_id; is_error } ->
       ( state
       , Some
           (custom ~timestamp state Tool_result_ready
@@ -327,7 +327,9 @@ let project ~timestamp ~redact_text state event =
                  @ json_opt "providerMessageId"
                      (Option.map (fun value -> `String value) occurrence.provider_message_id)
                  @ json_opt "toolCallId"
-                     (Option.map (fun value -> `String value) tool_call_id)))) )
+                     (Option.map (fun value -> `String value) tool_call_id)
+                 @ json_opt "isError"
+                     (Option.map (fun value -> `Bool value) is_error)))) )
   | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
       (state, Some (custom ~timestamp state Tool_transcript_committed
         (`Assoc [ "deliveryKey", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key

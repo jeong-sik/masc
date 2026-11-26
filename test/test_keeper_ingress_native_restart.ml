@@ -359,7 +359,7 @@ is-default = true
     check bool "the real approval policy remains Auto" true
       (Keeper_tool_approval_mode.resolve (Keeper_tool_approval_mode.shared ()) ~keeper_name
        = Keeper_tool_approval_mode.Auto);
-    let on_tool_result_ready ~tool_call_id ~turn:_ ~planned_index:_ ~execution_id:_ =
+    let on_tool_result_ready ~tool_call_id ~turn:_ ~planned_index:_ ~execution_id:_ ~is_error:_ =
       if String.equal tool_call_id target_id then (
         record root "ready";
         if child && cut = Settled_result then Unix._exit (exit_code cut)) in

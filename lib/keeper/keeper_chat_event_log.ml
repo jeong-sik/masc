@@ -339,13 +339,14 @@ let keeper_chat_event_to_json event =
     type_tag
       "tool_approval_settled"
       [ "tool_call_id", `String tool_call_id; "approval_id", `String approval_id; "outcome", `String outcome ]
-  | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
+  | Tool_result_ready { occurrence; tool_call_id; execution_id; is_error } ->
     type_tag
       "tool_result_ready"
       ([ "occurrence", occurrence_to_json occurrence
        ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
        ]
-       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id)
+       @ json_opt "is_error" (Option.map (fun value -> `Bool value) is_error))
   | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
     type_tag "tool_transcript_committed"
       [ "delivery_key", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
@@ -659,6 +660,7 @@ let keeper_chat_event_of_json json =
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            ; execution_id =
                Ids.Execution_id.of_string (json |> member "execution_id" |> to_string)
+           ; is_error = json |> member "is_error" |> to_bool_option
            })
     | "tool_transcript_committed" ->
       let* ordinal =

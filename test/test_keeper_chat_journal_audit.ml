@@ -32,7 +32,7 @@ let match_events =
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Text_delta {text="hello"; response=Unobserved_scope (None)}
   ; E.Tool_result_ready
-      { occurrence; tool_call_id = Some "tc-1"; execution_id }
+      { occurrence; tool_call_id = Some "tc-1"; execution_id; is_error = None }
   ; E.Reply_details
       { terminal_stream_scope = None; reply = "done"; turn_outcome = Outcome.Visible_reply; turn_ref }
   ; E.Text_message_end

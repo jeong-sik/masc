@@ -303,10 +303,10 @@ let prepare_agent_setup
   in
   let on_tool_result_ready =
     Option.map
-      (fun notify ~tool_call_id ~turn ~planned_index ~execution_id ->
+      (fun notify ~tool_call_id ~turn ~planned_index ~execution_id ~is_error ->
          match !active_checkpoint_owner with
          | Some Runtime_execution.Masc_agent_core ->
-           notify ~tool_call_id ~turn ~planned_index ~execution_id
+           notify ~tool_call_id ~turn ~planned_index ~execution_id ~is_error
          | Some Runtime_execution.Official_client ->
            (* Official clients execute dynamic tools without an Agent Core
               pre-admission source sidecar. This callback cannot join them.

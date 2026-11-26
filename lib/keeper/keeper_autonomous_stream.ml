@@ -124,11 +124,11 @@ let mapping_failed t detail =
       index = None; tool_call_id = None; event_type = None;
       reason = Some (t.redact_text detail); raw_bytes = None })
 
-let result_ready t stream ~tool_call_id ~execution_id = function
+let result_ready t stream ~tool_call_id ~execution_id ~is_error = function
   | Error detail -> mapping_failed t detail
   | Ok occurrence ->
       stream.bridge <- Bridge.record_tool_result stream.bridge occurrence;
-      publish t (Events.Tool_result_ready {occurrence; tool_call_id; execution_id})
+      publish t (Events.Tool_result_ready {occurrence; tool_call_id; execution_id; is_error})
 
 let on_event t event = with_open_stream t (fun stream ->
   Accum.on_event t.accum event;
@@ -179,11 +179,11 @@ let on_tool_stream_observation t = function
           ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion stream.bridge))
   | Keeper_hooks_agent_core.Official_tool_result {block_index; tool_call_id; execution_id} ->
       with_open_stream t (fun stream ->
-        result_ready t stream ~tool_call_id:(Some tool_call_id) ~execution_id
+        result_ready t stream ~tool_call_id:(Some tool_call_id) ~execution_id ~is_error:None
           (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
 
-let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_open_stream t (fun stream ->
-  result_ready t stream ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id
+let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id ~is_error = with_open_stream t (fun stream ->
+  result_ready t stream ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id ~is_error
     (Accum.record_execution_id t.accum ~tool_call_id ~turn ~planned_index ~execution_id))
 
 type ending =

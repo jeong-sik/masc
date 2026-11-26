@@ -1059,7 +1059,62 @@ let run_turn
   | Ok s ->
     let approval_gate = Option.map
       (fun (gate : Keeper_tool_approval_gate.t) ->
-        { gate with identity_tool_index = s.Keeper_run_tools_hooks.identity_tool_index })
+        let pre_tool_use ~identity_tool_index event =
+          let decision = gate.pre_tool_use ~identity_tool_index event in
+          (match decision with
+           | Agent_core.Hooks.Block _ ->
+             (match event with
+              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                Keeper_turn_preview.note_tool_finished
+                  ~writer:preview
+                  ~now:(Time_compat.now ())
+                  ~tool_use_id:
+                    (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+                  ~tool_name
+              | Agent_core.Hooks.BeforeTurn _
+              | Agent_core.Hooks.BeforeTurnParams _
+              | Agent_core.Hooks.AfterTurn _
+              | Agent_core.Hooks.AfterRestoredTurn _
+              | Agent_core.Hooks.PostToolUse _
+              | Agent_core.Hooks.PostToolUseFailure _
+              | Agent_core.Hooks.OnStop _
+              | Agent_core.Hooks.OnError _
+              | Agent_core.Hooks.OnToolError _ -> ())
+           | Agent_core.Hooks.Continue
+           | Agent_core.Hooks.AdjustParams _
+           | Agent_core.Hooks.ElicitInput _
+           | Agent_core.Hooks.ElicitToolApproval _
+           | Agent_core.Hooks.Nudge _
+           | Agent_core.Hooks.HookFailed _ -> ());
+          decision
+        in
+        let tool_approval (request : Agent_core.Hooks.tool_approval_request) =
+          let decision = gate.tool_approval request in
+          let tool_use_id =
+            Some (Agent_core.Tool_contract.Invocation.tool_use_id request.invocation)
+          in
+          (match decision with
+           | Agent_core.Hooks.Approved ->
+             Keeper_turn_preview.note_tool_started
+               ~writer:preview
+               ~now:(Time_compat.now ())
+               ~tool_use_id
+               ~tool_name:request.tool_name
+               ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule request.invocation))
+               ~reach:(s.Keeper_run_tools_hooks.tool_reach request.tool_name)
+           | Agent_core.Hooks.Denied | Agent_core.Hooks.Timed_out ->
+             Keeper_turn_preview.note_tool_finished
+               ~writer:preview
+               ~now:(Time_compat.now ())
+               ~tool_use_id
+               ~tool_name:request.tool_name);
+          decision
+        in
+        { Keeper_tool_approval_gate.identity_tool_index =
+            s.Keeper_run_tools_hooks.identity_tool_index
+        ; pre_tool_use
+        ; tool_approval
+        })
       approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools_hooks.model_message in

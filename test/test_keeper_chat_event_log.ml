@@ -148,6 +148,7 @@ let all_events : E.keeper_chat_event list =
       { occurrence
       ; tool_call_id = Some "tc-1"
       ; execution_id = Ids.Execution_id.of_string "exec-1"
+      ; is_error = None
       }
   ; E.Tool_transcript_committed
       { delivery_key = (match Keeper_chat_delivery_identity.Request_id.of_string "operation-1" with Ok id -> Keeper_chat_delivery_identity.Operation id | Error detail -> failwith detail); execution_id = Ids.Execution_id.of_string "exec-1"; ordinal = 0 }
@@ -1220,6 +1221,7 @@ let golden_events : E.keeper_chat_event list =
       { occurrence
       ; tool_call_id = Some "tc-1"
       ; execution_id = Ids.Execution_id.of_string "exec-golden-1"
+      ; is_error = None
       }
   ; E.Agent_core_media_delta
       { index = 2
@@ -1587,7 +1589,7 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (Masc.Keeper_hooks_agent_core.Native_tool_completion
            {block_index=2; tool_call_id=Some "late-call"; completion=Runtime_native_tools.end_observed});
       let execution_id = Ids.Execution_id.of_string "late-execution" in
-      Stream.on_tool_result_ready stream ~tool_call_id:"late-call" ~turn:9 ~planned_index:0 ~execution_id;
+      Stream.on_tool_result_ready stream ~tool_call_id:"late-call" ~turn:9 ~planned_index:0 ~execution_id ~is_error:None;
       let delivery_key = match Keeper_chat_delivery_identity.Request_id.of_string "late-approval" with
         | Ok id -> Keeper_chat_delivery_identity.Approval_lifecycle id
         | Error detail -> Alcotest.fail detail in

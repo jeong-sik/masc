@@ -915,12 +915,19 @@ let make_hooks
                   | None -> ());
                  Option.iter
                    (fun notify ->
+                      let is_error =
+                        match outcome with
+                        | Tool_result.Ok -> Some false
+                        | Tool_result.Error -> Some true
+                        | Tool_result.Unknown -> None
+                      in
                       notify
                         ~tool_call_id:tool_use_id
                         ~turn:
                           (Agent_core.Tool_contract.Invocation.turn invocation)
                         ~planned_index:schedule.planned_index
-                        ~execution_id)
+                        ~execution_id
+                        ~is_error)
                    on_tool_result_ready)
         in
         (try
@@ -1143,11 +1150,19 @@ let make_hooks
       | Agent_core.Hooks.PostToolUseFailure
           { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
-        Keeper_turn_preview.note_tool_finished ~writer:preview
-          ~now:(Time_compat.now ())
-          ~tool_use_id:
-            (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
-          ~tool_name;
+        (* Only close the preview activity when [PostToolUse] did not already
+           fire for this invocation; [Execution] failures run [PostToolUse]
+           first and calling [note_tool_finished] a second time could close an
+           unrelated anonymous sibling of the same tool. *)
+        (match stage with
+         | Agent_core.Hooks.Execution -> ()
+         | Agent_core.Hooks.Validation_before_execution
+         | Agent_core.Hooks.Cancelled_during_execution ->
+           Keeper_turn_preview.note_tool_finished ~writer:preview
+             ~now:(Time_compat.now ())
+             ~tool_use_id:
+               (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
+             ~tool_name);
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
            is already emitted at ERROR by keeper_tools_agent_core before this
@@ -1205,8 +1220,15 @@ let make_hooks
                  log_committed := true;
                  Keeper_tool_call_log.clear_board_action_evidence ~invocation ();
                  Option.iter
-                   (fun notify -> notify ~tool_call_id:tool_use_id ~turn
-                     ~planned_index:schedule.planned_index ~execution_id)
+                   (fun notify ->
+                      let is_error =
+                        match wire_outcome with
+                        | Tool_result.Ok -> Some false
+                        | Tool_result.Error -> Some true
+                        | Tool_result.Unknown -> None
+                      in
+                      notify ~tool_call_id:tool_use_id ~turn
+                        ~planned_index:schedule.planned_index ~execution_id ~is_error)
                    (if result_ready then on_tool_result_ready else None))
                ()
            with

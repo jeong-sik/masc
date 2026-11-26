@@ -1694,7 +1694,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
          | Error _ as error -> error
          | Ok occurrence ->
            push_worker_event (Stream_chat_event (Keeper_chat_events.Tool_result_ready
-             { occurrence; tool_call_id = Some tool_call_id; execution_id }));
+             { occurrence; tool_call_id = Some tool_call_id; execution_id; is_error = None }));
            Ok ())
       | Keeper_hooks_agent_core.Turn_closed_without_sources { turn } ->
         Keeper_stream_tool_accum.close_turn_without_sources worker_tool_accum ~turn
@@ -1716,7 +1716,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
          protocol failure rather than a state to normalize. *)
       failwith ("tool stream occurrence mapping rejected: " ^ detail)
   in
-  let on_tool_result_ready ~tool_call_id ~turn ~planned_index ~execution_id =
+  let on_tool_result_ready ~tool_call_id ~turn ~planned_index ~execution_id ~is_error =
     match
       Keeper_stream_tool_accum.record_execution_id worker_tool_accum
         ~tool_call_id ~turn ~planned_index ~execution_id
@@ -1728,7 +1728,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
       push_worker_event
         (Stream_chat_event
            (Keeper_chat_events.Tool_result_ready
-              { occurrence; tool_call_id; execution_id }))
+              { occurrence; tool_call_id; execution_id; is_error }))
     | Error detail ->
       (* The runtime-aware wrapper invokes this callback only for the exact
          Agent Core candidate attempt whose pre-execution sidecar can satisfy

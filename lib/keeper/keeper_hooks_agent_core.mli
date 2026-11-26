@@ -275,7 +275,7 @@ val make_hooks :
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
   ?tool_result_commit_required:(unit -> bool) ->
-  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) ->
+  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> is_error:bool option -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_core.Hooks.hooks
 (** Build the [Agent_core.Hooks.hooks] record used by the keeper turn loop:

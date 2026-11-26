@@ -183,7 +183,7 @@ module For_testing : sig
   val split_older_for_rollover
     :  ?keep_ratio:float
     -> Agent_core.Types.message list
-    -> Agent_core.Types.message list
+    -> Agent_core.Types.message list * int
 
   val prefer_handoff_for_start
     :  planned_fresh_rollover:bool

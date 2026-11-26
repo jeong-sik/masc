@@ -1781,11 +1781,12 @@ let make_stream_projection
 
 let default_keep_ratio = 0.25
 
+(* [messages] without synthetic preambles, and how many of its atoms to evict
+   from the front. The split is on [Runtime_model_input_tail_window] [Atom]
+   boundaries, so pinned entries (System, compaction anchors, working state,
+   outside context) are never counted or evicted and [Assistant(tool_use)] +
+   [Tool(tool_result)] pairs are never split apart. *)
 let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message list) =
-  (* Ignore synthetic preambles and slice strictly on [Runtime_model_input_tail_window]
-     [Atom] boundaries so pinned entries (System, compaction anchors, working state,
-     outside context) are never counted/evicted and [Assistant(tool_use)] +
-     [Tool(tool_result)] pairs are never split apart. *)
   let without_preamble =
     List.filter
       (fun (m : Agent_core.Types.message) ->
@@ -1793,23 +1794,15 @@ let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message li
       messages
   in
   let ratio = Option.value keep_ratio ~default:default_keep_ratio in
-  let labelled, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
+  let _, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
   if atom_count <= 2
-  then []
+  then without_preamble, 0
   else (
     let keep_recent = max 2 (int_of_float (Float.of_int atom_count *. ratio)) in
-    let evict_atoms = max 1 (atom_count - keep_recent) in
-    List.filter_map
-      (fun (m, label) ->
-         match label with
-         | Runtime_model_input_tail_window.Atom idx when idx < evict_atoms -> Some m
-         | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
-           None)
-      labelled)
+    without_preamble, max 1 (atom_count - keep_recent))
 ;;
 
 let compact_for_rollover
-      ?blob_store
       ?keep_ratio
       ~keepers_dir
       ~keeper_id
@@ -1822,8 +1815,8 @@ let compact_for_rollover
     | Ok handoff when handoff.messages <> [] -> handoff.messages
     | Ok _ | Error _ -> fallback_messages
   in
-  let evicted_messages = split_older_for_rollover ?keep_ratio source_messages in
-  if evicted_messages = []
+  let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
+  if prefix = 0
   then ()
   else (
     let trigger =
@@ -1832,11 +1825,11 @@ let compact_for_rollover
     in
     match
       Keeper_compaction.compact_evicted_messages
-        ?blob_store
         ~keepers_dir
         ~keeper_id
         ~trigger
-        ~evicted_messages
+        ~messages
+        ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
         ()
     with
     | Ok _ -> ()
@@ -2139,7 +2132,6 @@ let run_without_lifecycle
     | Some r -> Keeper_official_client_tool_receipts.hooks r hooks
   in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let blob_store = Tool_blob_store.create ~base_path in
   let* env =
     match Eio_context.get_env_opt () with
     | Some env -> Ok env
@@ -3542,7 +3534,6 @@ let run_without_lifecycle
         (match rollover with
          | Some rollover ->
           compact_for_rollover
-            ~blob_store
             ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
             ~keepers_dir
             ~keeper_id:keeper_name
@@ -3658,7 +3649,6 @@ let overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capaci
 ;;
 
 let compact_once_for_overflow_with
-      ?blob_store
       ?keep_ratio
       ~already_compacted
       ~keepers_dir
@@ -3672,23 +3662,28 @@ let compact_once_for_overflow_with
   =
   if not !already_compacted
   then (
-    let evicted_messages = split_older_for_rollover ?keep_ratio initial_messages in
-    if evicted_messages <> []
+    let messages, prefix = split_older_for_rollover ?keep_ratio initial_messages in
+    if prefix > 0
     then (
       let trigger =
         overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
       in
       match
         Keeper_compaction.compact_evicted_messages
-          ?blob_store
           ~keepers_dir
           ~keeper_id
           ~trigger
-          ~evicted_messages
+          ~messages
+          ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
           ()
       with
       | Ok (Some _) -> already_compacted := true
-      | Ok None | Error _ -> ()))
+      | Ok None -> ()
+      | Error err ->
+        Log.Keeper.warn
+          ~keeper_name:keeper_id
+          "ACP context overflow compaction skipped: %s"
+          (Keeper_compaction.store_error_to_string err)))
 ;;
 
 let compact_once_for_overflow
@@ -3771,7 +3766,6 @@ let run
   in
   let min_reserve_bytes = String.length system_prompt + String.length goal in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let blob_store = Tool_blob_store.create ~base_path in
   let force_fresh_retry = ref false in
   let compacted_for_overflow = ref false in
   Keeper_official_client_attempt.run
@@ -3819,7 +3813,6 @@ let run
               evict_keeper_for_workspace ~base_path ~keeper_name;
               force_fresh_retry := true;
               compact_once_for_overflow_with
-                ~blob_store
                 ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
                 ~already_compacted:compacted_for_overflow
                 ~keepers_dir

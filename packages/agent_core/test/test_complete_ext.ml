@@ -390,6 +390,40 @@ let test_complete_stream_injected_transport_rejects_typed_empty () =
     empty_failure_stops
 ;;
 
+let test_complete_stream_reports_token_usage () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let usage =
+    { Types.input_tokens = 11
+    ; output_tokens = 5
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let transport =
+    transport_of_sync (fun () ->
+      { Llm_transport.response = Ok (make_response ~usage ()); latency_ms = Some 1 })
+  in
+  let probe = metric_probe () in
+  (match
+     (Complete.complete_stream
+        ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~transport
+        ~config:(make_config ~model_id:"stream-usage" ())
+        ~messages:[ Types.user_msg "hello" ]
+        ~on_event:(fun _ -> ())
+        ~metrics:(metrics_of_probe probe)
+        ()).Llm_provider.Completion_outcome.result
+   with
+   | Ok _ -> ()
+   | Error err -> failf "stream failed: %s" (string_of_http_error err));
+  check (list (pair int int)) "streamed token usage" [ 11, 5 ] probe.token_usage
+;;
+
 (* One call, no text, arguments not one JSON object: content is empty, but the
    model did answer. Rejecting it as an empty completion would end the turn
    before the pipeline can tell the model which call it has to send again. *)
@@ -810,6 +844,10 @@ let () =
             "injected stream rejects typed empty"
             `Quick
             test_complete_stream_injected_transport_rejects_typed_empty
+        ; test_case
+            "stream reports token usage"
+            `Quick
+            test_complete_stream_reports_token_usage
         ; test_case
             "injected response with only an unreadable call is not empty"
             `Quick

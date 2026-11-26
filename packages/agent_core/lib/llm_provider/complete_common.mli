@@ -60,6 +60,16 @@ val emit_tool_call_metrics
   -> Types.api_response
   -> unit
 
+(** Reports the response's token usage to [on_token_usage]. A response that
+    carries no usage reports nothing. Every path that reads a provider
+    completion calls this: non-streaming, streaming, and exact output. *)
+val emit_token_usage_metrics
+  :  Metrics.t
+  -> provider:string
+  -> model_id:string
+  -> Types.api_response
+  -> unit
+
 (** {1 Request admission} *)
 
 val requires_non_http_transport : Provider_config.provider_kind -> bool

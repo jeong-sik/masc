@@ -994,6 +994,72 @@ let test_success_carries_the_usage_the_wire_reported () =
     None
 ;;
 
+(* An execution reports the tokens the provider spent to the process-wide
+   metrics sink, also when normalization then rejects the answer. *)
+let test_execution_reports_token_usage_to_the_metrics_sink () =
+  let run ~id ~content ~usage_field ~accepted expected_reports =
+    let reports = ref [] in
+    let previous = Metrics.get_global () in
+    Metrics.set_global
+      { Metrics.noop with
+        on_token_usage =
+          (fun ~provider ~model_id ~input_tokens ~output_tokens ->
+            reports
+            := Printf.sprintf "%s %s %d %d" provider model_id input_tokens output_tokens
+               :: !reports)
+      };
+    let response =
+      Printf.sprintf
+        {|{"id":"msg-meter","type":"message","role":"assistant","model":"surface","content":%s,"stop_reason":"end_turn","stop_sequence":null%s}|}
+        content
+        usage_field
+    in
+    let result, completion_posts, _, _ =
+      Fun.protect
+        ~finally:(fun () -> Metrics.set_global previous)
+        (fun () ->
+           with_server ~response
+           @@ fun ~sw:_ ~net ~clock ~base_url ->
+           let entry =
+             catalog_entry
+               ~id
+               ~kind:Provider_config.Anthropic
+               ~base_url
+               ~request_path:"/v1/messages"
+               ~capabilities:(capabilities ~native:false ~json:false)
+               ()
+           in
+           with_catalog [ entry ]
+           @@ fun snapshot ->
+           execute_once ~net ~clock (attempt (flow snapshot id EO.Json_syntax)))
+    in
+    check int (id ^ " completion posts") 1 completion_posts;
+    check bool (id ^ " accepted") accepted (Result.is_ok result);
+    check (list string) (id ^ " reported usage") expected_reports (List.rev !reports)
+  in
+  let reported id =
+    Printf.sprintf
+      "%s %s-model 20 9"
+      (Provider_config.string_of_provider_kind Provider_config.Anthropic)
+      id
+  in
+  let usage_field = {|,"usage":{"input_tokens":20,"output_tokens":9}|} in
+  let answer = {|[{"type":"text","text":"{\"name\":\"accepted\"}"}]|} in
+  run
+    ~id:"meter-accepted"
+    ~content:answer
+    ~usage_field
+    ~accepted:true
+    [ reported "meter-accepted" ];
+  run
+    ~id:"meter-rejected"
+    ~content:"[]"
+    ~usage_field
+    ~accepted:false
+    [ reported "meter-rejected" ];
+  run ~id:"meter-no-usage" ~content:answer ~usage_field:"" ~accepted:true []
+;;
+
 let test_provider_trace_fingerprint_anchors_normalized_headers_and_body () =
   let run ~response_headers response =
     let result, posts, _, _ =
@@ -2205,6 +2271,10 @@ let () =
             "success carries the usage the wire reported"
             `Quick
             test_success_carries_the_usage_the_wire_reported
+        ; test_case
+            "token usage reaches the metrics sink"
+            `Quick
+            test_execution_reports_token_usage_to_the_metrics_sink
         ; test_case
             "provider trace fingerprint"
             `Quick

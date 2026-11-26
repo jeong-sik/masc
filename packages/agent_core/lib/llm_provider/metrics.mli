@@ -72,6 +72,8 @@ val noop : t
 (** Install a process-wide metrics sink.  When a caller invokes
     {!Complete.complete} (or a wrapper) without passing [~metrics]
     explicitly, the value installed here is used instead of {!noop}.
+    Exact output executions take no [~metrics]; their token usage always
+    goes to this sink.
 
     Initialization ordering: {!Complete.complete} resolves
     [get_global ()] at call time, so each call re-reads whatever sink

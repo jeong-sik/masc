@@ -690,7 +690,10 @@ export function maxUtilizationPct(
 ): number | null {
   let maxPct: number | null = null
   for (const w of scope.windows) {
-    if (w.resets_at !== null && w.resets_at <= nowSec) continue
+    // A stale reading (taken before its reset time, which has since passed)
+    // says nothing about now and is skipped; a reading seen spent at or after
+    // its own reset still speaks (see isWindowCurrentlySpent / gating_reading).
+    if (w.resets_at !== null && w.resets_at <= nowSec && w.observed_at < w.resets_at) continue
     const u = w.utilization
     let pct: number | null = null
     if (u.unit === 'fraction') pct = Math.min(100, Math.max(0, u.value * 100))

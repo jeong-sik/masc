@@ -27,7 +27,7 @@ import {
   quotaRestCauseMeta,
   stripProviderPrefix,
 } from './quota-rest-groups'
-import { classifyQuotaScope, formatIsoTime, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
+import { classifyQuotaScope, formatIsoTime, maxUtilizationPct, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
 import { decodeToolsCatalogPayload } from './tools-tab'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -199,6 +199,26 @@ describe('workspaces/runtime', () => {
     }
     expect(classifyQuotaScope(alreadyResetScope, 1_700_000_500).badge).toBe('$0 Sub')
     expect(classifyQuotaScope(alreadyResetScope, 1_699_999_500).badge).toBe('$0 Exhausted')
+    expect(maxUtilizationPct(alreadyResetScope, 1_700_000_500)).toBeNull()
+
+    // A spent reading taken at or after its own reset still refuses: $0 Exhausted,
+    // and its utilization still counts for the max bar (server gating_reading).
+    const seenSpentAfterReset: ProviderUsageScope = {
+      scope: 'claude:spent-after-reset',
+      providers: [{ id: 'anthropic', display_name: 'Claude Spent After Reset' }],
+      state: 'reported',
+      windows: [{
+        limit_id: '5h',
+        window: { kind: 'five_hour' },
+        utilization: { unit: 'fraction', value: 1.0 },
+        resets_at: 1_700_000_000,
+        observed_at: 1_700_000_100,
+        source: 'cli',
+        role: 'gates_model_calls',
+      }],
+    }
+    expect(classifyQuotaScope(seenSpentAfterReset, 1_700_000_500).badge).toBe('$0 Exhausted')
+    expect(maxUtilizationPct(seenSpentAfterReset, 1_700_000_500)).toBe(100)
 
     const part = partitionQuotaScopes(scopes)
     expect(part.tier1ExhaustedOrCredits).toHaveLength(1)

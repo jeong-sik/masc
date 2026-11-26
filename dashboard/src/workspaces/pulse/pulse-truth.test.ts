@@ -91,6 +91,15 @@ describe('quota exhaustion against now', () => {
     expect(quota.spentResetUnknown).toBe(0)
   })
 
+  it('a spent reading taken at or after its own reset is reset unknown, not reset', () => {
+    const spentAfterReset = point({ observed_at: NOW + 100, resets_at: NOW, utilization: { unit: 'fraction', value: 1 } })
+    expect(quotaWindowStanding(spentAfterReset, NOW + 500)).toEqual({ kind: 'spent_reset_unknown', observedAt: NOW + 100 })
+    const quota = summarizeQuotaWindows(usage([spentAfterReset]), NOW + 500)
+    expect(quota.exhausted).toBe(0)
+    expect(quota.spentResetUnknown).toBe(1)
+    expect(quota.subscription).toBe(0)
+  })
+
   it('a window spent on an earlier day does not count when a later reading of it has room', () => {
     const spentEarlier = point({ observed_at: NOW - 2 * DAY, resets_at: NOW + DAY, utilization: { unit: 'percent', value: 100 } })
     const today = point({ observed_at: NOW - 60, resets_at: NOW + DAY, utilization: { unit: 'percent', value: 30 } })

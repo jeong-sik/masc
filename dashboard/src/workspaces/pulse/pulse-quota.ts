@@ -15,8 +15,10 @@ import type {
 
 /**
  * Whether one window reading still refuses calls at `nowSec`. A spent reading
- * whose `resets_at` has passed has reset; a spent reading without `resets_at`
- * is spent as of its report and its return time is unknown.
+ * without `resets_at` is spent as of its report and its return time is unknown.
+ * A spent reading whose `resets_at` has passed has reset — unless the reading
+ * was taken at or after that reset (`observed_at >= resets_at`), which still
+ * refuses with an unknown return time (server gating_reading).
  */
 export function quotaWindowStanding(point: PulseProviderUsagePoint, nowSec: number): PulseQuotaWindowStanding {
   const spent = isUtilizationSpent(point.utilization)
@@ -25,7 +27,11 @@ export function quotaWindowStanding(point: PulseProviderUsagePoint, nowSec: numb
   if (point.resets_at === null) return { kind: 'spent_reset_unknown', observedAt: point.observed_at }
   return point.resets_at > nowSec
     ? { kind: 'exhausted', resetsAt: point.resets_at }
-    : { kind: 'reset_since_report', resetsAt: point.resets_at }
+    : point.observed_at >= point.resets_at
+      // The reading was taken at or after its own reset and still said spent:
+      // it refuses with an unknown return time (server gating_reading).
+      ? { kind: 'spent_reset_unknown', observedAt: point.observed_at }
+      : { kind: 'reset_since_report', resetsAt: point.resets_at }
 }
 
 function quotaWindowKey(point: PulseProviderUsagePoint): string {

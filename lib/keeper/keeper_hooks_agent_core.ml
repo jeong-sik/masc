@@ -368,7 +368,8 @@ let make_hooks
           ~now:(Time_compat.now ())
           ~tool_use_id:
             (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
-          ~tool_name;
+          ~tool_name
+          ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation));
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 

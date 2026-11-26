@@ -665,7 +665,8 @@ let assemble_hooks
                   ~now:(Time_compat.now ())
                   ~tool_use_id:
                     (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
-                  ~tool_name;
+                  ~tool_name
+                  ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation));
                 Agent_core.Hooks.Continue
               | BeforeTurn _
               | BeforeTurnParams _

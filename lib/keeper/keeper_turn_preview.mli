@@ -25,6 +25,11 @@ type open_tool =
   ; stage : tool_stage
   ; started_at : float
   ; since : float
+  ; cohort : Agent_core.Tool_contract.schedule option
+      (** Where agent core planned this call: its batch, the batch's size and
+          whether the batch runs at once. Copied from the before-tool hook's
+          invocation. [None] until that hook names the call, and for a call
+          whose loop plans no batches (an official client, a native run). *)
   }
 
 type open_activity = Response_open of open_response | Tool_open of open_tool
@@ -139,7 +144,12 @@ val note_text : writer:writer option -> now:float -> string -> unit
     not erase the last visible words. A missing writer records nothing. *)
 
 val note_tool_started :
-  writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
+  writer:writer option ->
+  now:float ->
+  tool_use_id:string option ->
+  tool_name:string ->
+  cohort:Agent_core.Tool_contract.schedule option ->
+  unit
 (** The before-tool hook ran, so the host is executing this call. A call the
     stream already opened moves from requested to executing; one it never
     showed opens here. The open response ends with that move: the model's

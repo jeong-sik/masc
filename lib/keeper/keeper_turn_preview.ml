@@ -17,6 +17,7 @@ type open_tool =
   ; stage : tool_stage
   ; started_at : float
   ; since : float
+  ; cohort : Agent_core.Tool_contract.schedule option
   }
 
 (** Work that began in the running turn and has not ended. An event is a point
@@ -159,14 +160,17 @@ let tool_requested ~now ~tool_use_id ~tool_name work =
   match open_tool_of ~tool_use_id ~tool_name work with
   | Some _ -> work
   | None ->
-      work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now } ]
+      work
+      @ [ Tool_open
+            { tool_use_id; tool_name; stage = Tool_requested; started_at = now; since = now
+            ; cohort = None } ]
 
 (* The before-tool hook runs once the gates before it said yes, so this is
    where execution starts. Hearing it twice for one call changes nothing. *)
 let has_tool_id id (tool : open_tool) =
   Option.equal String.equal (Some id) tool.tool_use_id
 
-let tool_executing ~now ~tool_use_id ~tool_name work =
+let tool_executing ~now ~tool_use_id ~tool_name ~cohort work =
   let already_started id =
     List.exists
       (function
@@ -181,7 +185,8 @@ let tool_executing ~now ~tool_use_id ~tool_name work =
             let tool_use_id =
               match tool_use_id with Some _ -> tool_use_id | None -> current.tool_use_id
             in
-            Some (Tool_open { current with tool_use_id; stage = Tool_executing; since = now })
+            Some
+              (Tool_open { current with tool_use_id; stage = Tool_executing; since = now; cohort })
         | Tool_open { stage = Tool_requested; _ }
         | Tool_open { stage = Tool_executing; _ }
         | Response_open _ -> None)
@@ -202,7 +207,10 @@ let tool_executing ~now ~tool_use_id ~tool_name work =
       if promoted != work then promoted
       else
         (* The stream never showed this call, so the hook is the first word of it. *)
-        work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } ]
+        work
+        @ [ Tool_open
+              { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now
+              ; cohort } ]
 
 (* Match an identified return before trying the oldest anonymous call. *)
 let tool_ended ~tool_use_id ~tool_name work =
@@ -221,8 +229,8 @@ let tool_ended ~tool_use_id ~tool_name work =
    messages, so nothing else says where each of them ends. A call that was
    already running hands the list back itself, and then nothing closes: words
    that arrived meanwhile belong to a response opened after the call started. *)
-let tool_running ~now ~tool_use_id ~tool_name work =
-  let moved = tool_executing ~now ~tool_use_id ~tool_name work in
+let tool_running ~now ~tool_use_id ~tool_name ~cohort work =
+  let moved = tool_executing ~now ~tool_use_id ~tool_name ~cohort work in
   if moved == work then work
   else drop (function Response_open _ -> true | Tool_open _ -> false) moved
 
@@ -249,7 +257,9 @@ let response_after_return ~now ~loop before work =
    is handed back so the block table keeps it: its stop ends that run and no
    other of the same name. *)
 let native_started ~now ~tool_use_id ~tool_name work =
-  let run = { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } in
+  let run =
+    { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now; cohort = None }
+  in
   let work = drop (function Response_open _ -> true | Tool_open _ -> false) work in
   (work @ [ Tool_open run ], run)
 
@@ -622,10 +632,10 @@ let note_text ~writer ~now text =
 
 
 (* The before-tool hook. It runs once the gates before it said yes. *)
-let note_tool_started ~writer ~now ~tool_use_id ~tool_name =
+let note_tool_started ~writer ~now ~tool_use_id ~tool_name ~cohort =
   update ~writer ~now (fun old ->
     { old with last_tool = Some tool_name
-    ; open_activities = tool_running ~now ~tool_use_id ~tool_name old.open_activities })
+    ; open_activities = tool_running ~now ~tool_use_id ~tool_name ~cohort old.open_activities })
 
 (* The after-tool hook, for a result and for a failure alike. *)
 let note_tool_finished ~writer ~now ~tool_use_id ~tool_name =
@@ -946,8 +956,20 @@ let open_activity_to_json = function
       ; "started_at_unix", `Float started_at
       ; "since_unix", `Float since
       ]
-  | Tool_open { tool_use_id; tool_name; stage; started_at; since } ->
+  | Tool_open { tool_use_id; tool_name; stage; started_at; since; cohort } ->
     let stage = match stage with Tool_requested -> "requested" | Tool_executing -> "executing" in
+    let cohort_to_json { Agent_core.Tool_contract.batch_index; batch_size; execution_mode; _ } =
+      let concurrent =
+        match execution_mode with
+        | Agent_core.Tool_contract.Concurrent -> true
+        | Agent_core.Tool_contract.Serial -> false
+      in
+      `Assoc
+        [ "batch_index", `Int batch_index
+        ; "batch_size", `Int batch_size
+        ; "concurrent", `Bool concurrent
+        ]
+    in
     `Assoc
       [ "kind", `String "tool"
       ; "tool_use_id", Option.fold ~none:`Null ~some:(fun id -> `String id) tool_use_id
@@ -955,6 +977,7 @@ let open_activity_to_json = function
       ; "stage", `String stage
       ; "started_at_unix", `Float started_at
       ; "since_unix", `Float since
+      ; "cohort", Option.fold ~none:`Null ~some:cohort_to_json cohort
       ]
 
 let work_context_to_json { task_id; start_reasons } =

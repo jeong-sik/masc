@@ -187,6 +187,11 @@ type driver_profile =
    stem of the name a bridge gets from a host that does not. *)
 let bridge_name_stem = "masc"
 
+(* Vibe's documented override of its [enabled_tools] setting, a JSON list
+   that beats the settings file. MASC sets it from the native posture
+   ({!vibe_enabled_tools}), so an inherited value is never passed on. *)
+let vibe_enabled_tools_env = "VIBE_ENABLED_TOOLS"
+
 let profile_of_driver = function
   | Antigravity ->
     { driver = Antigravity
@@ -258,8 +263,9 @@ let profile_of_driver = function
     ; default_args = []
     ; env_set = []
     (* Strip MISTRAL_API_KEY so vibe-acp uses the operator's OS-keyring
-       Pro subscription rather than a budget-capped API key. *)
-    ; default_strip_env = [ "MISTRAL_API_KEY" ]
+       Pro subscription rather than a budget-capped API key. Strip the
+       tool allowlist too: the posture alone sets it. *)
+    ; default_strip_env = [ "MISTRAL_API_KEY"; vibe_enabled_tools_env ]
     ; mcp_wiring = Session_new_http_mcp
     ; bridge_naming = Shared_name bridge_name_stem
     (* Live-verified against vibe-acp 3.1.0: _meta.tool_name emits
@@ -2075,6 +2081,59 @@ let build_environment ~base_env ~driver ~extra_strip_env =
   Array.of_list (filtered @ additions)
 ;;
 
+(* Vibe takes the native posture as its own tool allowlist, [enabled_tools]
+   through {!vibe_enabled_tools_env}
+   (RFC-vibe-holds-the-native-posture-with-its-own-tool-allowlist). Checked
+   offline on 2026-11-26 against vibe-acp 3.1.0 and 3.1.5 with a stand-in
+   model and MCP server. A builtin left off the list is refused inside Vibe
+   with [tool_denied] and no permission request, from [run_typescript] too.
+   A tool Vibe provides itself leaves the catalog: [cron], [todo],
+   [unified_harness_scratchpad], and the goal tools 3.1.5 added. An MCP tool
+   matches by its display name [<server>_<tool>]. Without a list, Vibe ran an
+   allowlisted [echo] on the host without asking the client, so refusing the
+   permission requests alone did not hold [Native_none].
+   [todo] is the session's own plan and acts on nothing outside it, so every
+   restricted posture keeps it. [Native_full] sends no list, and Vibe enables
+   tools from its own settings. *)
+let vibe_enabled_tools ?mcp_server posture =
+  let restricted native_tools =
+    let mcp_tools =
+      match mcp_server with
+      | Some (server : mcp_http_server) -> [ server.name ^ "_*" ]
+      | None -> []
+    in
+    Some (mcp_tools @ ("todo" :: native_tools))
+  in
+  match posture with
+  | Some Runtime_native_tools.Native_full -> None
+  | Some Runtime_native_tools.Native_read -> restricted [ "read_file" ]
+  | Some Runtime_native_tools.Native_none | None -> restricted []
+;;
+
+(* The variables a host takes its native posture through. Only Vibe takes
+   one. Muse takes it in its argv ({!build_argv}); Antigravity and Kimi Code
+   take it only through the session mode and MASC's permission answers. *)
+let posture_environment ?mcp_server ~driver posture =
+  match driver with
+  | Mistral_vibe ->
+    (match vibe_enabled_tools ?mcp_server posture with
+     | Some tools ->
+       [ ( vibe_enabled_tools_env
+         , Yojson.Safe.to_string (`List (List.map (fun tool -> `String tool) tools)) )
+       ]
+     | None -> [])
+  | Antigravity | Kimi_code | Muse_code -> []
+;;
+
+(* The environment [start] spawns the host with. *)
+let host_environment ~base_env ~driver ~extra_strip_env ?mcp_server native_posture =
+  let posture =
+    posture_environment ?mcp_server ~driver native_posture
+    |> List.map (fun (key, value) -> key ^ "=" ^ value)
+  in
+  Array.append (build_environment ~base_env ~driver ~extra_strip_env) (Array.of_list posture)
+;;
+
 let write_private_file_0600 path content =
   let fd =
     Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600
@@ -3295,10 +3354,12 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
     in
     Eio.Switch.on_release sw cleanup_gemini_dir;
     let env =
-      build_environment
+      host_environment
         ~base_env:(Unix.environment ())
         ~driver:config.driver
         ~extra_strip_env:config.strip_env
+        ?mcp_server
+        native_posture
     in
     let usage_journal =
       match profile.usage_channel with
@@ -4437,6 +4498,7 @@ let prompt
 module For_testing = struct
   let occupancy_fell = occupancy_fell
   let build_environment = build_environment
+  let host_environment = host_environment
   let build_argv = build_argv
   let utf8_safe_suffix = utf8_safe_suffix
   let redact_stderr_text = redact_stderr_text

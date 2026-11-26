@@ -817,6 +817,18 @@ module For_testing : sig
     -> extra_strip_env:string list
     -> string array
 
+  (** {!build_environment} plus the variables the host takes its native
+      posture through: Vibe's [VIBE_ENABLED_TOOLS] tool allowlist for
+      [Native_none] and [Native_read] (and for no posture), none for
+      [Native_full] or for another driver. [start] spawns the host with it. *)
+  val host_environment
+    :  base_env:string array
+    -> driver:driver
+    -> extra_strip_env:string list
+    -> ?mcp_server:mcp_http_server
+    -> Runtime_native_tools.posture option
+    -> string array
+
   val build_argv
     :  ?native_posture:Runtime_native_tools.posture
     -> ?mcp_server:mcp_http_server

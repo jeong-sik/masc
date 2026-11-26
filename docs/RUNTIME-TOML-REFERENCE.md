@@ -251,6 +251,38 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   missing, cannot be read or links observers of its own: the whole turn is
   unreadable, and the reason names that journal.
 
+`mistral_vibe` takes the Keeper's native tool posture as its own tool
+allowlist (vibe-acp 3.1.0 and 3.1.5, measured offline 2026-11-26). The host
+runs some calls without asking the client. With no allowlist, an `echo` the
+host allows ran with no permission request while MASC refused every request.
+MASC therefore starts the host with `VIBE_ENABLED_TOOLS`, Vibe's documented
+override of its `enabled_tools` setting:
+
+| Keeper `keeper.tools.native` | `VIBE_ENABLED_TOOLS` | Tools the host offers |
+| --- | --- | --- |
+| `none` | `["<bridge>_*","todo"]` | MASC's tools and the session plan |
+| `read` | `["<bridge>_*","todo","read_file"]` | the above and file read |
+| `full` | not set | the tools the operator's Vibe settings enable |
+
+- `<bridge>` is `masc`, the name of the Keeper's MCP bridge. A start without
+  a bridge leaves that entry out.
+- A builtin left off the list stays in the model's tool list. A call to it
+  ends inside the host with `tool_denied` ("Tool execution denied by approval
+  policy") and sends no permission request. The same holds for a call from
+  `run_typescript`.
+- A tool the host provides itself leaves the model's tool list: `cron`,
+  `unified_harness_scratchpad`, and in 3.1.5 `create_goal`, `get_goal` and
+  `update_goal`. The 3.1.5 source filters the connector tools (web search,
+  news, finance, weather, `open_url`) by the same list; that was read, not
+  run. Search files with MASC's `Grep` and the web with `WebSearch` and
+  `WebFetch`.
+- The variable beats an `enabled_tools` line in the settings file. MASC
+  removes an inherited `VIBE_ENABLED_TOOLS` at every posture, so under `full`
+  the settings file alone decides.
+- `full` takes effect only when the Keeper's tool approval mode is `yolo`; in
+  any other mode MASC runs the Keeper at `read`. Fusion and runtime
+  verification run Vibe at `none`.
+
 ### `[providers.<id>.credentials]`
 
 | Key | Meaning |

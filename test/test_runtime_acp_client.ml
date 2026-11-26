@@ -34,7 +34,8 @@ let test_driver_profiles () =
     (kimi.mcp_identifier_syntaxes = [ Runtime_acp_client.Mcp_double_underscore ]);
   let vibe = Runtime_acp_client.profile_of_driver Mistral_vibe in
   check string "vibe command" "vibe-acp" vibe.default_command;
-  check (list string) "vibe strips MISTRAL_API_KEY by default" [ "MISTRAL_API_KEY" ]
+  check (list string) "vibe strips MISTRAL_API_KEY and an inherited tool allowlist"
+    [ "MISTRAL_API_KEY"; "VIBE_ENABLED_TOOLS" ]
     vibe.default_strip_env;
   check bool "vibe uses session/new HTTP MCP" true
     (vibe.mcp_wiring = Runtime_acp_client.Session_new_http_mcp);
@@ -99,6 +100,46 @@ let test_build_environment () =
     (find_env "EXTRA_SECRET" kimi_env);
   check (option string) "kimi preserves PATH" (Some "/usr/bin")
     (find_env "PATH" kimi_env)
+;;
+
+(* Vibe takes the posture as its [enabled_tools] allowlist, so the list a
+   host is spawned with is the posture itself. An allowlist the MASC server
+   inherited never reaches the host, at any posture. *)
+let test_vibe_takes_the_posture_as_its_tool_allowlist () =
+  let base_env = [| "PATH=/usr/bin"; {|VIBE_ENABLED_TOOLS=["bash"]|} |] in
+  let masc =
+    { Runtime_acp_client.name = "masc"
+    ; url = "http://127.0.0.1:9/mcp"
+    ; headers = []
+    ; tool_names = [ "masc_status" ]
+    }
+  in
+  let allowlists ?mcp_server posture =
+    Runtime_acp_client.For_testing.host_environment
+      ~base_env ~driver:Mistral_vibe ~extra_strip_env:[] ?mcp_server posture
+    |> Array.to_list
+    |> List.filter (String.starts_with ~prefix:"VIBE_ENABLED_TOOLS=")
+  in
+  let allowlist tools = [ "VIBE_ENABLED_TOOLS=" ^ tools ] in
+  check (list string) "none: the MASC bridge and the session plan"
+    (allowlist {|["masc_*","todo"]|})
+    (allowlists ~mcp_server:masc (Some Runtime_native_tools.Native_none));
+  check (list string) "read: also read_file"
+    (allowlist {|["masc_*","todo","read_file"]|})
+    (allowlists ~mcp_server:masc (Some Runtime_native_tools.Native_read));
+  check (list string) "full: no list, and the inherited one is gone" []
+    (allowlists ~mcp_server:masc (Some Runtime_native_tools.Native_full));
+  check (list string) "no posture is none"
+    (allowlist {|["masc_*","todo"]|})
+    (allowlists ~mcp_server:masc None);
+  check (list string) "no bridge leaves the session plan only"
+    (allowlist {|["todo"]|})
+    (allowlists (Some Runtime_native_tools.Native_none));
+  check (option string) "PATH is kept" (Some "/usr/bin")
+    (find_env "PATH"
+       (Runtime_acp_client.For_testing.host_environment
+          ~base_env ~driver:Mistral_vibe ~extra_strip_env:[]
+          (Some Runtime_native_tools.Native_none)))
 ;;
 
 let test_parse_wire_updates_and_usage () =
@@ -644,6 +685,51 @@ for line in sys.stdin:
     check (list string) "read, server lists no tool"
       (required @ [ "-c"; {|run.toolset=["read_file","search"]|} ])
       (host_args ~tool_names:[] Runtime_native_tools.Native_read))
+;;
+
+(* [start] hands its posture and its MCP server to the environment Vibe is
+   spawned with; the environment test above calls [host_environment]
+   directly. A stand-in host writes the allowlist it was started with. *)
+let test_vibe_start_spawns_the_host_with_the_posture_allowlist () =
+  let cwd = Filename.temp_dir "vibe-allowlist-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = Filename.concat cwd "host.py" and env_file = Filename.concat cwd "env" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|import json, os, sys
+with open(sys.argv[1], "w") as out:
+    json.dump(os.environ.get("VIBE_ENABLED_TOOLS"), out)
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" in request:
+        result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+|});
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    let host_allowlist posture =
+      Eio.Switch.run @@ fun sw ->
+      let config = { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd) with
+                     cli_path = "python3"; args = [script; env_file] } in
+      let mcp_server =
+        { Runtime_acp_client.name = "masc"
+        ; url = "http://127.0.0.1:9/mcp"
+        ; headers = []
+        ; tool_names = [ "masc_status" ]
+        }
+      in
+      match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+              ~mcp_server ~native_posture:posture () with
+      | Error err -> fail (Runtime_acp_client.error_to_string err)
+      | Ok client ->
+        Runtime_acp_client.close client;
+        Yojson.Safe.from_file env_file |> Yojson.Safe.Util.to_string_option
+    in
+    check (option string) "none" (Some {|["masc_*","todo"]|})
+      (host_allowlist Runtime_native_tools.Native_none);
+    check (option string) "read" (Some {|["masc_*","todo","read_file"]|})
+      (host_allowlist Runtime_native_tools.Native_read);
+    check (option string) "full" None (host_allowlist Runtime_native_tools.Native_full))
 ;;
 
 (* The name the bridge of the Keeper [keeper-a] has under [driver]. *)
@@ -6148,6 +6234,8 @@ let () =
         ] )
     ; ( "environment"
       , [ test_case "env strip and override" `Quick test_build_environment
+        ; test_case "vibe takes the posture as its tool allowlist" `Quick
+            test_vibe_takes_the_posture_as_its_tool_allowlist
         ; test_case
             "only muse takes a compaction point"
             `Quick
@@ -6157,6 +6245,8 @@ let () =
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
         ; test_case "muse start spawns the host with the posture toolset" `Quick
             test_muse_start_spawns_the_host_with_the_posture_toolset
+        ; test_case "vibe start spawns the host with the posture allowlist" `Quick
+            test_vibe_start_spawns_the_host_with_the_posture_allowlist
         ; test_case "server record reads every field from the bridge" `Quick
             test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
         ; test_case "bridge server name per driver" `Quick test_bridge_server_names

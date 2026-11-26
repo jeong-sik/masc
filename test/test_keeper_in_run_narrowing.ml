@@ -61,18 +61,35 @@ let answered =
   reply ~id:"answered" ~stop_reason:"end_turn"
     [ `Assoc [ "type", `String "text"; "text", `String "Both results are read." ] ]
 
-(* The provider counts at [count_path] and answers completions at
-   [completion_path] with the next of [answers]. It refuses a completion it
-   has no answer left for, and a path the lane should not send to. *)
-let start_provider ~sw ~net answers =
-  let seen = ref [] and left = ref answers in
+(* How the provider counts a request at [count_path]. [Per_byte] counts one
+   input token per byte of the counted request. [Full_after_first] counts the
+   run's first request so and every later one as the whole window: after the
+   first request the window keeps no room for the output a request reserves,
+   however narrow the request is. *)
+type counting =
+  | Per_byte
+  | Full_after_first
+
+(* The provider counts at [count_path] as [counting] says and answers
+   completions at [completion_path] with the next of [answers]. It refuses a
+   completion it has no answer left for with a 400 whose cause agent core
+   does not model, and a path the lane should not send to. *)
+let start_provider ~sw ~net ~counting ~window answers =
+  let seen = ref [] and left = ref answers and counted = ref 0 in
   let respond status body = Cohttp_eio.Server.respond_string ~status ~body () in
   let handler _conn request body =
     let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let path = Cohttp.Request.uri request |> Uri.path in
     seen := !seen @ [ path, body ];
     if String.equal path count_path
-    then respond `OK (Printf.sprintf {|{"input_tokens":%d}|} (String.length body))
+    then (
+      let input_tokens =
+        match counting, !counted with
+        | Per_byte, _ | Full_after_first, 0 -> String.length body
+        | Full_after_first, _ -> window
+      in
+      incr counted;
+      respond `OK (Printf.sprintf {|{"input_tokens":%d}|} input_tokens))
     else if String.equal path completion_path
     then (
       match !left with
@@ -142,9 +159,10 @@ type turn =
 (* One Keeper turn on a lane whose window is [window] tokens. The large tool
    returns [large_bytes] of text, the small tool a short labelled text, and
    [answers] are the provider's completions in order. [receipts] are
-   retained results the run carries; [reader] offers the artifact reader. *)
-let with_turn ?(receipts = []) ?(reader = false) ~window ~large_bytes ~answers
-    (inspect : turn -> unit) =
+   retained results the run carries; [reader] offers the artifact reader;
+   [counting] is how the provider counts. *)
+let with_turn ?(receipts = []) ?(reader = false) ?(counting = Per_byte) ~window ~large_bytes
+    ~answers (inspect : turn -> unit) =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -172,7 +190,7 @@ let with_turn ?(receipts = []) ?(reader = false) ~window ~large_bytes ~answers
   let inline = String.concat "\n\n" (Outbox.developer_context (pending ())) in
   let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
   let loaded = List.length (Outbox.receipt_ids (pending ())) in
-  let base_url, seen = start_provider ~sw ~net:env#net answers in
+  let base_url, seen = start_provider ~sw ~net:env#net ~counting ~window answers in
   let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"in-run-narrowing-fixture"
       (Printf.sprintf "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"anthropic\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\nsupports_native_streaming = false\n"
          model_id window reserved_output_tokens)) in
@@ -291,36 +309,57 @@ let test_a_request_after_the_checkpoint_narrows_in_the_same_run () =
     fail (Printf.sprintf "expected four counts and three completions, saw %d and %d"
       (List.length counts) (List.length completions))
 
-(* With no reader and no retained results no rung narrows the request: the
-   carrier holds nothing, the range opens where this turn began, and no
-   result can leave as a marker. The candidates run out, the turn ends with
-   the refusal, and the attempt is not sent again. *)
+(* With no reader and no retained results the carrier, the turn boundary,
+   the demotion and this turn's start move nothing. The rungs after them
+   narrow without a reader: the large result leaves as a head and tail
+   preview, then its closed round is dropped. The window keeps room for the
+   run's first request only, so each of those candidates is refused too. The
+   candidates run out and the turn ends with the refusal: no request after
+   the first is answered, and no candidate after the refused request carries
+   the large result. *)
 let test_a_turn_whose_candidates_run_out_ends_with_the_refusal () =
-  with_turn ~window:48_000 ~large_bytes:50_000
+  with_turn ~counting:Full_after_first ~window:48_000 ~large_bytes:50_000
     ~answers:[ calls large_tool; answered ] @@ fun turn ->
   (match turn.result with
    | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> ()
    | Error error ->
      fail ("the turn ended with another error: " ^ Agent_core.Error.to_string error)
-   | Ok _ -> fail "a request no rung narrows was answered");
-  check (list string) "the refused request is the last the provider saw"
-    [ count_path; completion_path; count_path ] turn.paths;
-  check int "the large tool ran once" 1 turn.large_runs
+   | Ok _ -> fail "a request no candidate fits was answered");
+  check int "only the run's first request was sent" 1 (List.length turn.completions);
+  check int "the large tool ran once" 1 turn.large_runs;
+  match turn.counts with
+  | _first :: refused :: (_ :: _ as candidates) ->
+    check bool "the refused request carried the large result" true
+      (contains large_label refused);
+    check bool "every candidate after it is narrower: none carries the large result" false
+      (List.exists (contains large_label) candidates)
+  | counts ->
+    fail (Printf.sprintf
+      "expected the refused request and at least one candidate after it, saw %d counts"
+      (List.length counts))
 
 (* RFC-0521 §4.3, O-2: the run's first request carried the goal alone; its
-   second, refused, carried the large result. The failed-cycle line sizes
-   the second: the walk's terminal error carries what that attempt composed
-   last, at least the large result's bytes. The first request's value, or
-   the system prompt and goal the line already prints, is far below it. *)
+   second carried the large result, fit the window, and was sent. The
+   provider has no answer for it and refuses it with a 400 whose cause agent
+   core does not model, as #52053's refusal was. That is no size refusal, so
+   no rung narrows it and the second request stays the attempt's last
+   composition. The failed-cycle line sizes the second: the walk's terminal
+   error carries what that attempt composed last, at least the large
+   result's bytes. The first request's value, or the system prompt and goal
+   the line already prints, is far below it. *)
 let test_a_refused_second_request_is_the_size_the_failure_names () =
   let large_bytes = 50_000 in
-  with_turn ~window:48_000 ~large_bytes
-    ~answers:[ calls large_tool; answered ] @@ fun turn ->
+  with_turn ~window:64_000 ~large_bytes ~answers:[ calls large_tool ] @@ fun turn ->
   (match turn.result with
-   | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> ()
+   | Error
+       (Agent_core.Error.Api
+          (Agent_core.Retry.InvalidRequest
+             { reason = Agent_core.Retry.Unknown_invalid_request; _ })) -> ()
    | Error error ->
      fail ("the turn ended with another error: " ^ Agent_core.Error.to_string error)
-   | Ok _ -> fail "a request no rung narrows was answered");
+   | Ok _ -> fail "the request the provider refused was answered");
+  check (list string) "the refused second request is the last the provider saw"
+    [ count_path; completion_path; count_path; completion_path ] turn.paths;
   match turn.terminal with
   | None -> fail "the walk returned the candidate's refusal without naming it"
   | Some { Keeper_turn_driver.last_composed_request = Keeper_turn_driver.Not_composed; _ } ->

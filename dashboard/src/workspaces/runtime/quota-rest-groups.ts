@@ -175,7 +175,7 @@ function lookupRecordOrMap<V>(
   return (source as Readonly<Record<string, V>>)[key]
 }
 
-function formatAccountEmailEntry(entry: SetupAccountEmail | string | undefined): string | null {
+export function formatAccountEmailEntry(entry: SetupAccountEmail | string | undefined): string | null {
   if (entry === undefined) return null
   if (typeof entry === 'string') {
     const trimmed = entry.trim()

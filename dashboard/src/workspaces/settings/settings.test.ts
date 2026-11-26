@@ -363,5 +363,13 @@ describe('workspaces/settings', () => {
     expect(matchCanonicalCategoryId({ id: 'build_release', title: 'Build & Quick Guide', field_count: 0, fields: [] })).toBe('build_release')
     expect(matchCanonicalCategoryId({ id: 'suite_req', title: 'Required Suite Equipment', field_count: 0, fields: [] })).toBe('suite_req')
     expect(matchCanonicalCategoryId({ id: 'board_memory_candle', title: 'Board, Memory & Candle', field_count: 0, fields: [] })).toBe('board_memory_candle')
+    // All 7 closed server category IDs map deterministically regardless of localized title text
+    expect(matchCanonicalCategoryId({ id: 'observability_ops', title: '관측', field_count: 0, fields: [] })).toBe('general')
+    expect(matchCanonicalCategoryId({ id: 'runtime_providers', title: '공급자', field_count: 0, fields: [] })).toBe('providers')
+    expect(matchCanonicalCategoryId({ id: 'routing_failover', title: '라우팅', field_count: 0, fields: [] })).toBe('routing')
+    expect(matchCanonicalCategoryId({ id: 'keepers_autonomy', title: '키퍼', field_count: 0, fields: [] })).toBe('keepers')
+    expect(matchCanonicalCategoryId({ id: 'sandbox_infra', title: '샌드박스', field_count: 0, fields: [] })).toBe('sandbox')
+    expect(matchCanonicalCategoryId({ id: 'economy_connectors', title: '연동', field_count: 0, fields: [] })).toBe('voice')
+    expect(matchCanonicalCategoryId({ id: 'memory_knowledge', title: '메모리', field_count: 0, fields: [] })).toBe('board_memory_candle')
   })
 })

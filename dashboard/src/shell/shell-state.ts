@@ -22,7 +22,11 @@ import {
   sessionEpoch,
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
-import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../api/hitl-decoders'
+import {
+  decodeGateQueueStrict,
+  decodeKeeperAsksWire,
+  decodeToolApprovalsWire,
+} from '../api/hitl-decoders'
 import {
   extractObserverTopics,
   subscribeObserverFrames,
@@ -491,66 +495,32 @@ export function parseKeeperAsksPayload(
   raw: unknown,
   workspaceId: string,
 ): readonly PendingAskItem[] {
-  if (!isRecord(raw)) return []
-  const list = Array.isArray(raw.asks)
-    ? raw.asks
-    : Array.isArray(raw.open)
-      ? raw.open
-      : Array.isArray(raw.pending)
-        ? raw.pending
-        : []
-  const items: PendingAskItem[] = []
-  for (const row of list) {
-    if (!isRecord(row)) continue
-    const askId = asNonEmptyString(row.ask_id) ?? asNonEmptyString(row.id)
-    const keeper = asNonEmptyString(row.keeper) ?? asNonEmptyString(row.name) ?? 'keeper'
-    if (!askId) continue
-    if (!isOpenKeeperAskRow(row)) continue
-    const askedAt = typeof row.asked_at === 'number'
-      ? row.asked_at
-      : typeof row.created_at === 'number'
-        ? row.created_at
-        : null
-    let prompt = asNonEmptyString(row.question) ?? asNonEmptyString(row.prompt) ?? ''
-    if (!prompt && Array.isArray(row.questions) && row.questions.length > 0 && isRecord(row.questions[0])) {
-      prompt = asNonEmptyString(row.questions[0].prompt) ?? asNonEmptyString(row.questions[0].text) ?? ''
-    }
-    const revision = asNonEmptyString(row.revision)
-      ?? (typeof row.revision === 'number' ? String(row.revision) : `${askId}:${askedAt ?? 0}`)
-    items.push({
-      askId,
-      keeper,
-      prompt: prompt || 'Keeper awaiting operator answer',
-      askedAt,
-      workspaceId,
-      revision,
-    })
-  }
-  return items
+  const decoded = decodeKeeperAsksWire(raw)
+  if (!decoded.ok) return []
+  return decoded.asks.map((ask) => ({
+    askId: ask.askId,
+    keeper: ask.keeper,
+    prompt: ask.promptSummary ?? 'Keeper awaiting operator answer',
+    askedAt: ask.askedAt,
+    workspaceId,
+    revision: ask.revision,
+  }))
 }
 
 export function parseGateQueuePayload(
   raw: unknown,
   workspaceId: string,
 ): readonly PendingGateItem[] {
-  if (!isRecord(raw) || !Array.isArray(raw.approval_queue)) return []
-  const items: PendingGateItem[] = []
-  for (const row of raw.approval_queue) {
-    if (!isRecord(row)) continue
-    const id = asNonEmptyString(row.id)
-    const keeper = asNonEmptyString(row.keeper_name) ?? asNonEmptyString(row.keeper)
-    const toolName = asNonEmptyString(row.tool_name) ?? asNonEmptyString(row.tool) ?? 'tool'
-    if (!id || !keeper) continue
-    items.push({
-      id,
-      keeper,
-      toolName,
-      phase: asNonEmptyString(row.phase) ?? 'human_required',
-      waitingSec: typeof row.waiting_s === 'number' && Number.isFinite(row.waiting_s) ? row.waiting_s : null,
-      workspaceId,
-    })
-  }
-  return items
+  const decoded = decodeGateQueueStrict(raw)
+  if (!decoded.ok) return []
+  return decoded.rows.map((row) => ({
+    id: row.id,
+    keeper: row.keeper,
+    toolName: row.toolName,
+    phase: row.phase ?? 'unknown',
+    waitingSec: row.waitingSec,
+    workspaceId,
+  }))
 }
 
 export function parseAwaitingGoalsPayload(
@@ -715,11 +685,24 @@ export async function refreshPendingHitl(
       }
     })
 
-    const asksJob = apiGet<unknown>('/api/v1/keepers/asks', reqOpts).then((asksRes) => {
+    const asksJob = apiGet<unknown>('/api/v1/keepers/asks?include_resolved=false', reqOpts).then((asksRes) => {
       if (!isCurrent()) return
       if (asksRes.ok) {
+        const decoded = decodeKeeperAsksWire(asksRes.value)
+        if (!decoded.ok) {
+          setHitlSourceState('asks', { kind: 'failed', message: decoded.error })
+          recordHitlIncidentOnce('asks', 'Keeper asks queue response invalid', decoded.error)
+          return
+        }
         clearHitlIncident('asks')
-        pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
+        pendingAsks.value = decoded.asks.map((ask) => ({
+          askId: ask.askId,
+          keeper: ask.keeper,
+          prompt: ask.promptSummary ?? 'Keeper awaiting operator answer',
+          askedAt: ask.askedAt,
+          workspaceId,
+          revision: ask.revision,
+        }))
         setHitlSourceState('asks', { kind: 'ok' })
       } else if (
         asksRes.error.kind !== 'epoch_stale'
@@ -737,28 +720,28 @@ export async function refreshPendingHitl(
     const gateJob = apiGet<unknown>('/api/v1/dashboard/gate', reqOpts).then((gateRes) => {
       if (!isCurrent()) return
       if (gateRes.ok) {
-        if (
-          isRecord(gateRes.value)
-          && isRecord(gateRes.value.approval_queue_state)
-          && gateRes.value.approval_queue_state.state === 'unavailable'
-        ) {
-          const st = gateRes.value.approval_queue_state
-          const detail =
-            asNonEmptyString(st.operator_detail)
-            ?? asNonEmptyString(st.detail)
-            ?? asNonEmptyString(st.title)
-            ?? 'gate approval queue reported unavailable'
-          setHitlSourceState('gate', { kind: 'failed', message: detail })
+        const decoded = decodeGateQueueStrict(gateRes.value)
+        if (!decoded.ok) {
+          setHitlSourceState('gate', { kind: 'failed', message: decoded.error })
           recordHitlIncidentOnce(
             'gate',
-            'Channel gate approval queue unavailable',
-            detail,
+            decoded.unavailable
+              ? 'Channel gate approval queue unavailable'
+              : 'Channel gate queue response invalid',
+            decoded.error,
           )
-        } else {
-          clearHitlIncident('gate')
-          setHitlSourceState('gate', { kind: 'ok' })
+          return
         }
-        pendingGateApprovals.value = parseGateQueuePayload(gateRes.value, workspaceId)
+        clearHitlIncident('gate')
+        setHitlSourceState('gate', { kind: 'ok' })
+        pendingGateApprovals.value = decoded.rows.map((row) => ({
+          id: row.id,
+          keeper: row.keeper,
+          toolName: row.toolName,
+          phase: row.phase ?? 'unknown',
+          waitingSec: row.waitingSec,
+          workspaceId,
+        }))
       } else if (
         gateRes.error.kind !== 'epoch_stale'
         && gateRes.error.kind !== 'aborted'
@@ -879,11 +862,26 @@ export async function submitFastToolApproval(
     })
     return { ok: false, message: res.error.message }
   }
+  const receipt = isRecord(res.value) ? res.value : null
+  const settled = receipt?.settled === true
+  const remembered = receipt?.remembered === true
+  if (!settled && !remembered) {
+    const detail = '결정 접수를 확인하지 못했습니다.'
+    recordIncident({
+      severity: 'error',
+      source: 'approvals',
+      summary: `${decision === 'approve' ? '승인' : '거절'} 미확인 (${item.keeper}/${item.tool || item.approvalId})`,
+      detail,
+    })
+    return { ok: false, message: detail }
+  }
   pendingApprovals.value = pendingApprovals.peek().filter(
     (row) => row.approvalId !== item.approvalId,
   )
   pushShellToast(
-    `${item.keeper} · ${item.tool || item.approvalId} ${decision === 'approve' ? '승인 완료' : '거절 완료'}`,
+    settled
+      ? `${item.keeper} · ${item.tool || item.approvalId} ${decision === 'approve' ? '승인 완료' : '거절 완료'}`
+      : `${item.keeper} · ${item.tool || item.approvalId} · 같은 호출 재시도 시 적용할 결정으로 저장했습니다.`,
     decision === 'approve' ? 'success' : 'warning',
   )
   return { ok: true, message: 'ok' }

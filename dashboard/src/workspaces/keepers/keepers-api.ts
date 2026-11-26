@@ -2568,10 +2568,15 @@ export function postKeeperMemoryRetractions(
 
 // ── Portrait & Candle (V2Envelope + Flat /items + MCP purchase/equip) ────
 
-export function fetchKeeperCandleLedgerApi(keeper: string, limit = 100): Promise<Result<KeeperCandleLedgerData, ApiError>> {
+export function fetchKeeperCandleLedgerApi(
+  keeper: string,
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<Result<KeeperCandleLedgerData, ApiError>> {
   return apiGetV2<KeeperCandleLedgerData>(
     `/api/v1/candle/ledger?keeper=${encodeURIComponent(keeper)}&limit=${limit}`,
     {
+      signal,
       decode: (raw) => {
         const rec = isRecord(raw) ? raw : {}
         const policy = isRecord(rec.policy) ? rec.policy : {}
@@ -2637,10 +2642,14 @@ export function fetchKeeperCandleLedgerApi(keeper: string, limit = 100): Promise
   )
 }
 
-export function fetchKeeperItemsApi(keeper: string): Promise<Result<KeeperItemsData, ApiError>> {
+export function fetchKeeperItemsApi(
+  keeper: string,
+  signal?: AbortSignal,
+): Promise<Result<KeeperItemsData, ApiError>> {
   return apiGet<KeeperItemsData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/items`,
     {
+      signal,
       decode: (raw) => {
         const rec = isRecord(raw) ? raw : {}
         const status = rec.status === 'ready' ? 'ready' : rec.status === 'disabled' ? 'disabled' : 'off'
@@ -2792,10 +2801,12 @@ function decodeKeeperAttachedProviders(raw: unknown): readonly KeeperAttachedPro
 
 export function fetchKeeperOAuthAttachedToolsApi(
   keeper: string,
+  signal?: AbortSignal,
 ): Promise<Result<KeeperAttachedToolsSnapshot, ApiError>> {
   return apiGet<KeeperAttachedToolsSnapshot>(
     `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
     {
+      signal,
       decode: (raw) => {
         const callback = isRecord(raw) && isRecord(raw.callback) ? raw.callback : null
         return {

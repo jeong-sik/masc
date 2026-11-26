@@ -10,11 +10,13 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useId, useState } from 'preact/hooks'
+import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
   apiMutate,
   apiRequest,
+  currentSessionEpoch,
+  isEpochCurrent,
   resourceCache,
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
@@ -67,6 +69,10 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const [browserState, setBrowserState] = useState<BrowserLaneState>({ kind: 'loading' })
   const [tabsByClient, setTabsByClient] = useState<Readonly<Record<string, readonly BrowserTabRow[]>>>({})
   const [readingClient, setReadingClient] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+  const browserAbortRef = useRef<AbortController | null>(null)
+  const catalogAbortRef = useRef<AbortController | null>(null)
+  const previewAbortRef = useRef<AbortController | null>(null)
 
   const loadAddons = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<LaneAddonsPayload>(
@@ -82,13 +88,20 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const loadBrowserLane = async () => {
+    browserAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    browserAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     setBrowserState({ kind: 'loading' })
     const res = await apiRequest<BrowserClientsPayload>({
       method: 'GET',
       path: '/api/v1/dashboard/browser-lane/clients',
       envelope: 'ok_data',
+      signal: ctrl.signal,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
     if (!res.ok) {
+      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
       if (res.error.status === 503) {
         setBrowserState({
           kind: 'unattached_503',
@@ -103,26 +116,48 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const loadCatalog = async (directory?: string) => {
+    catalogAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    catalogAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     const query = directory ? `?directory=${encodeURIComponent(directory)}` : ''
-    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`)
+    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`, { signal: ctrl.signal })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
     if (res.ok) setCatalog(res.value)
-    else setBanner({ kind: 'err', text: `패키지 카탈로그 조회 실패: ${res.error.message}` })
+    else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
+      setBanner({ kind: 'err', text: `패키지 카탈로그 조회 실패: ${res.error.message}` })
+    }
   }
 
   useEffect(() => {
+    mountedRef.current = true
     loadAddons('mount')
     void loadBrowserLane()
+    return () => {
+      mountedRef.current = false
+      browserAbortRef.current?.abort()
+      catalogAbortRef.current?.abort()
+      previewAbortRef.current?.abort()
+    }
   }, [])
 
   const instances = addonsObs.kind === 'value' ? addonsObs.data.instances : []
   const selectedInstance = instances.find((i) => i.instance_id === selectedId) ?? instances[0] ?? null
 
   const handlePreviewManifest = async (manifestPath: string) => {
+    previewAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    previewAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     const res = await apiGet<PackagePreviewPayload>(
       `/api/v1/lane-addons/package-preview?manifest_path=${encodeURIComponent(manifestPath)}`,
+      { signal: ctrl.signal },
     )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
     if (res.ok) setPreview(res.value)
-    else setBanner({ kind: 'err', text: `미리보기 실패: ${res.error.message}` })
+    else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
+      setBanner({ kind: 'err', text: `미리보기 실패: ${res.error.message}` })
+    }
   }
 
   const handleAttach = async (manifestPath: string) => {

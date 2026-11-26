@@ -17,6 +17,7 @@ import {
   bootstrapAuthSession,
   installAuthLifecycleGuards,
   isAuthenticated,
+  sessionEpoch,
 } from './core/auth'
 import { startObserverStream, stopObserverStream } from './core/observer'
 import { releaseAllViewStreams } from './core/view-stream-slot'
@@ -276,11 +277,13 @@ function WorkspaceHost(): VNode {
     `
   }
 
+  const epoch = sessionEpoch.value
   const ActiveWorkspace = getWorkspaceComponent(route.workspace)
   return html`
-    <${WorkspaceErrorBoundary} resetKey=${route.path}>
+    <${WorkspaceErrorBoundary} resetKey=${`${epoch}:${route.path}`}>
       <${Suspense} fallback=${html`<section class="ap-gate" role="status"><div class="ap-card"><p class="ap-muted">워크스페이스 불러오는 중…</p></div></section>`}>
         <${ActiveWorkspace}
+          key=${epoch}
           subroute=${route.subroute}
           entityId=${route.entityId}
           entityTab=${route.entityTab}

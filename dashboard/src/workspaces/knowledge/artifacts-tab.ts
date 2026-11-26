@@ -7,6 +7,7 @@
  */
 
 import { html } from 'htm/preact'
+import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSnapshot } from '../../core/observer'
@@ -165,15 +166,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   }, [bundle.artifacts, formatFilter, query])
 
   const copyText = async (text: string, label: string) => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-      }
-      setCopyNotice(`${label} 복사됨`)
-      setTimeout(() => setCopyNotice(null), 2000)
-    } catch {
-      setCopyNotice('클립보드 복사를 지원하지 않는 환경입니다.')
-    }
+    const copied = await copyToClipboard(text)
+    setCopyNotice(copied ? `${label} 복사됨` : '클립보드 복사를 지원하지 않는 환경입니다.')
+    setTimeout(() => setCopyNotice(null), 2000)
   }
 
   const downloadArtifact = (current: ArtifactDocumentData) => {

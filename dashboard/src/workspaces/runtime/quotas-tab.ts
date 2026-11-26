@@ -20,6 +20,8 @@ import {
   apiMutate,
   cancelSetupLogin,
   currentAccountMode,
+  currentSessionEpoch,
+  isEpochCurrent,
   resourceCache,
   sendSetupLoginInput,
   streamSetupAccountLogin,
@@ -27,9 +29,12 @@ import {
   timeWindowProviderDays,
   type Observed,
 } from '../../core'
+import { copyToClipboard } from '../../components/common/copyable-code'
+import { isUtilizationSpent } from '../../lib/quota-window'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives'
 import {
   causeBadgeStyle,
+  formatAccountEmailEntry,
   formatReleaseSummary,
   groupRestingRuntimes,
   quotaRestCauseMeta,
@@ -79,26 +84,22 @@ export function buildUsageHistoryChartData(
     // Bucket to hour boundaries so uPlot receives strictly increasing timestamps
     const ts = Math.floor(pt.observed_at / 3600) * 3600
     let pct: number | null = null
-    let exhausted = false
 
     const u = pt.utilization
+    const exhausted = isUtilizationSpent(u) === true
     switch (u.unit) {
       case 'fraction':
         pct = Math.min(100, Math.max(0, u.value * 100))
-        if (u.value >= 0.99) exhausted = true
         break
       case 'percent':
         pct = Math.min(100, Math.max(0, u.value))
-        if (u.value >= 99) exhausted = true
         break
       case 'usd':
         if (u.limit !== null && u.limit > 0) {
           pct = Math.min(100, Math.max(0, (u.value / u.limit) * 100))
-          if (u.value >= u.limit) exhausted = true
         }
         break
       case 'credit_balance':
-        if (u.remaining <= 0) exhausted = true
         if (u.total !== null && u.total > 0) {
           pct = Math.min(100, Math.max(0, ((u.total - u.remaining) / u.total) * 100))
         }
@@ -163,9 +164,7 @@ function scopeDisplayName(scope: ProviderUsageScope): string {
 /** The account line under a provider: its login email and the plan labels
  *  the client reports, or why the login file was not read. */
 export function accountLine(row: SetupAccountEmail | undefined): string | null {
-  if (row === undefined) return null
-  if (row.state === 'not_read') return `계정 미확인 (${row.cause})`
-  return [row.email, ...(row.plan ?? [])].join(' · ')
+  return formatAccountEmailEntry(row)
 }
 
 function primaryProviderId(scope: ProviderUsageScope): string {
@@ -214,6 +213,16 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [sourceRevision, setSourceRevision] = useState<string>('')
+  const mountedRef = useRef(true)
+  const rawConfigAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      rawConfigAbortRef.current?.abort()
+    }
+  }, [])
 
   const loadAll = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<RuntimeResolvedPayload>(
@@ -244,7 +253,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
         (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', { signal }),
         { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
       )
-      void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw').then((res) => {
+      rawConfigAbortRef.current?.abort()
+      const ctrl = new AbortController()
+      rawConfigAbortRef.current = ctrl
+      const startEpoch = currentSessionEpoch()
+      void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
+        if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
         if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
           setSourceRevision(res.value.source_revision.trim())
         }
@@ -1410,10 +1424,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
                   type="button"
                   class="btn-ghost"
                   onClick=${() => {
-                    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                      void navigator.clipboard.writeText(loginReceipt.deviceCode ?? '')
-                      setCopiedDeviceCode(true)
-                    }
+                    const code = loginReceipt.deviceCode ?? ''
+                    void copyToClipboard(code).then((copied) => {
+                      if (!mountedRef.current) return
+                      if (copied) {
+                        setCopiedDeviceCode(true)
+                      } else {
+                        setActionBanner({ kind: 'err', text: '클립보드 복사에 실패했습니다. 코드를 직접 선택해 복사하세요.' })
+                      }
+                    })
                   }}
                 >
                   ${copiedDeviceCode ? '복사됨 ✓' : '코드 복사'}

@@ -8,9 +8,11 @@
  */
 
 import { html } from 'htm/preact'
+import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
   disconnectKeeperOAuth,
   saveKeeperOAuthClient,
@@ -76,17 +78,38 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   } | null>(null)
   const [clientBusy, setClientBusy] = useState(false)
   const oauthFlowRef = useRef<KeeperOAuthFlowHandle | null>(null)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeperName)
+  const schemaAbortRef = useRef<AbortController | null>(null)
+  const providersAbortRef = useRef<AbortController | null>(null)
+  activeKeeperRef.current = keeperName
 
-  useEffect(() => () => {
-    oauthFlowRef.current?.cancel()
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      oauthFlowRef.current?.cancel()
+      schemaAbortRef.current?.abort()
+      providersAbortRef.current?.abort()
+    }
   }, [])
 
   const loadSchema = useCallback(async (preservePatchResult = false) => {
+    schemaAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    schemaAbortRef.current = ctrl
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setConfigError(null)
     setCasConflict(false)
-    const schemaRes = await fetchConfigSchemaApi(`keeper:${keeperName}`)
+    const schemaRes = await fetchConfigSchemaApi(`keeper:${targetKeeper}`, ctrl.signal)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) {
+      return
+    }
     if (!schemaRes.ok) {
-      setConfigError(schemaRes.error.message)
+      if (schemaRes.error.kind !== 'aborted' && schemaRes.error.kind !== 'epoch_stale') {
+        setConfigError(schemaRes.error.message)
+      }
       return
     }
     setSchema(schemaRes.value)
@@ -99,7 +122,15 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [keeperName])
 
   const loadProviders = useCallback(async () => {
-    const provRes = await fetchKeeperOAuthAttachedToolsApi(keeperName)
+    providersAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    providersAbortRef.current = ctrl
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
+    const provRes = await fetchKeeperOAuthAttachedToolsApi(targetKeeper, ctrl.signal)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) {
+      return
+    }
     if (provRes.ok) {
       setProviders(provRes.value.providers)
       setOauthCallbackUrl(provRes.value.callbackUrl)
@@ -108,9 +139,27 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
 
   useEffect(() => {
     oauthFlowRef.current?.cancel()
+    schemaAbortRef.current?.abort()
+    providersAbortRef.current?.abort()
+    setSchema(null)
+    setActiveCategoryId('')
+    setDrafts({})
+    setPatchResult(null)
+    setConfigError(null)
+    setCasConflict(false)
+    setSecretName('')
+    setSecretValue('')
+    setSecretStatus(null)
+    setProviders([])
+    setOauthCallbackUrl(null)
+    setOauthStatus(null)
     setActiveOAuthFlow(null)
     setClientDrawer(null)
     void Promise.all([loadSchema(), loadProviders()])
+    return () => {
+      schemaAbortRef.current?.abort()
+      providersAbortRef.current?.abort()
+    }
   }, [loadSchema, loadProviders])
 
   const allFields = useMemo(
@@ -123,8 +172,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     [schema, activeCategoryId],
   )
 
-  const pendingChanges = useMemo<readonly ConfigPatchChange[]>(() => {
+  const { pendingChanges, invalidFieldKeys } = useMemo(() => {
     const out: ConfigPatchChange[] = []
+    const invalid: string[] = []
     for (const field of allFields) {
       if (!field.writable) continue
       const edited = drafts[field.full_key]
@@ -132,21 +182,32 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       if (edited === serializeValue(field.current_value)) continue
       const change = patchOpForField(field, edited, false, ',')
       if (change) out.push(change)
+      else invalid.push(field.full_key)
     }
-    return out
+    return { pendingChanges: out, invalidFieldKeys: invalid }
   }, [allFields, drafts])
 
   const runPatch = async (dryRun: boolean) => {
-    if (!schema || pendingChanges.length === 0) return
+    if (!schema) return
+    if (invalidFieldKeys.length > 0) {
+      setConfigError(`유효하지 않은 숫자/형식 입력이 있습니다: ${invalidFieldKeys.join(', ')}`)
+      return
+    }
+    if (pendingChanges.length === 0) return
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     setConfigError(null)
     setCasConflict(false)
     const res = await postConfigPatchApi({
-      target: `keeper:${keeperName}`,
+      target: `keeper:${targetKeeper}`,
       expectedSha256: schema.file_sha256,
       dryRun,
       changes: pendingChanges,
     })
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+      return
+    }
     setBusy(false)
     if (!res.ok) {
       if (res.error.kind === 'conflict_cas' || res.error.status === 409) {
@@ -158,7 +219,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     setPatchResult(res.value)
     if (!dryRun && res.value.applied) {
       await loadSchema(true)
-      props.onMutated()
+      if (mountedRef.current && activeKeeperRef.current === targetKeeper && isEpochCurrent(startEpoch)) {
+        props.onMutated()
+      }
     }
   }
 
@@ -168,13 +231,16 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       setSecretStatus('환경변수 이름과 값을 입력하세요.')
       return
     }
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setSecretStatus(null)
-    const res = await mutateKeeperSecretApi(keeperName, {
+    const res = await mutateKeeperSecretApi(targetKeeper, {
       action: 'set_env',
       scope: secretScope,
       name,
       value: secretValue,
     })
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setSecretStatus(`저장 실패: ${res.error.message}`)
       return
@@ -186,11 +252,14 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const handleDeleteSecret = async () => {
     const name = secretName.trim()
     if (!name) return
-    const res = await mutateKeeperSecretApi(keeperName, {
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
+    const res = await mutateKeeperSecretApi(targetKeeper, {
       action: 'delete_env',
       scope: secretScope,
       name,
     })
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     setSecretStatus(res.ok ? `${secretScope}:${name} 삭제 완료` : `삭제 실패: ${res.error.message}`)
   }
 
@@ -214,6 +283,11 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
         ${casConflict && html`
           <div class="ap-error" role="alert" data-cas-conflict="true">
             CAS 충돌 (409 conflict_cas): 다른 변경이 먼저 적용되었습니다. 스키마를 다시 불러온 뒤 적용하세요.
+          </div>
+        `}
+        ${invalidFieldKeys.length > 0 && html`
+          <div class="ap-error" role="alert">
+            유효하지 않은 입력 값: ${invalidFieldKeys.join(', ')}
           </div>
         `}
         ${configError && !casConflict && html`<div class="ap-error" role="alert">${configError}</div>`}
@@ -418,6 +492,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
               onSubmit=${async (ev: Event) => {
                 ev.preventDefault()
                 if (!clientDrawer.clientId.trim()) return
+                const targetKeeper = keeperName
+                const startEpoch = currentSessionEpoch()
+                const submittedLabel = clientDrawer.providerLabel
                 setClientBusy(true)
                 const res = await saveKeeperOAuthClient({
                   provider: clientDrawer.provider,
@@ -425,12 +502,13 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                   clientSecret: clientDrawer.clientSecret,
                   scopes: clientDrawer.scopes,
                 })
+                if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
                 setClientBusy(false)
                 if (!res.ok) {
                   setOauthStatus(`앱 등록 실패: ${res.error.message}`)
                   return
                 }
-                setOauthStatus(`${clientDrawer.providerLabel} OAuth 앱 등록 완료`)
+                setOauthStatus(`${submittedLabel} OAuth 앱 등록 완료`)
                 setClientDrawer(null)
                 void loadProviders()
               }}
@@ -447,10 +525,10 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                     type="button"
                     class="btn-ghost"
                     onClick=${() => {
-                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                        void navigator.clipboard.writeText(oauthCallbackUrl)
-                        setOauthStatus('Callback URL 복사 완료')
-                      }
+                      void copyToClipboard(oauthCallbackUrl).then((copied) => {
+                        if (!mountedRef.current) return
+                        setOauthStatus(copied ? 'Callback URL 복사 완료' : 'Callback URL 복사에 실패했습니다.')
+                      })
                     }}
                   >
                     복사

@@ -17101,6 +17101,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       activity = Wire_fleet.Preview_waiting;
       text_tail = "";
       last_tool = Some "Execute";
+      last_failure = None;
       updated_at_unix = 1795503086.0;
       revision = None;
       preparation = None;
@@ -17653,7 +17654,7 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   in
   let preview revision text : Wire_fleet.turn_preview =
     { status_text = "streaming"; activity = Preview_streaming; text_tail = text;
-      last_tool = None; updated_at_unix = 100.0; revision = Some revision;
+      last_tool = None; last_failure = None; updated_at_unix = 100.0; revision = Some revision;
       preparation = None; work_context = None; open_activities = None }
   in
   let row ~keeper_name ~token ~ref_id ~revision ~text : Wire_fleet.keeper_turn_row =
@@ -23483,7 +23484,7 @@ let open_tool ?tool_use_id name stage since =
 
 let preview_reporting ?(activity = Wire_fleet.Preview_streaming) open_activities last_tool
     : Wire_fleet.turn_preview =
-  { status_text = ""; activity; text_tail = ""; last_tool; updated_at_unix = 100.0;
+  { status_text = ""; activity; text_tail = ""; last_tool; last_failure = None; updated_at_unix = 100.0;
     revision = Some 1; preparation = None; work_context = None; open_activities }
 ;;
 

@@ -994,6 +994,7 @@ let to_json ?(include_preparation_timeline = false) preview =
     "text_position", `Assoc ["generation", `Int preview.text_position.generation;
       "start_byte", `Int preview.text_position.start_byte];
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
+    "last_failure", (match preview.last_failure with None -> `Null | Some detail -> `String detail);
     "updated_at_unix", `Float preview.updated_at;
     "revision", `Int preview.revision;
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;

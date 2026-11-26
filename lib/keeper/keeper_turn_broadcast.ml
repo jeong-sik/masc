@@ -1,4 +1,5 @@
 let changed_event = "keeper_turn_changed"
+let succeeded_event = "keeper_turn_succeeded"
 
 let publish ~base_path ~keeper_name ~event fields =
   (* The write is already committed, often under the caller's lock or in its
@@ -32,6 +33,6 @@ let changed ~base_path ~keeper_name =
 ;;
 
 let succeeded ~base_path ~keeper_name ~elapsed_ms =
-  publish ~base_path ~keeper_name ~event:"keeper_turn_succeeded"
+  publish ~base_path ~keeper_name ~event:succeeded_event
     [ "elapsed_ms", `Int elapsed_ms ]
 ;;

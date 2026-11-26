@@ -88,6 +88,11 @@ let valid_sub_board_slug_pattern =
   Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
 ;;
 
+let is_valid_sub_board_slug slug =
+  let len = String.length slug in
+  len >= 1 && len <= 64 && Re.execp valid_sub_board_slug_pattern slug
+;;
+
 let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
   `Assoc
     [ "id", `String (Sub_board_id.to_string sb.id)

@@ -488,42 +488,18 @@ let extract_flair content =
 let flair_to_yojson (name, emoji, label) =
   `Assoc [("name", `String name); ("emoji", `String emoji); ("label", `String label)]
 
-(** Enhanced post_to_yojson with karma *)
+(** Enhanced {!post_to_yojson} with karma, flair, and derived score.
+    Derives directly from {!post_to_yojson} so every canonical post field
+    (including [origin], [closed], [classification_reason], [meta]) stays in sync. *)
 let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
   let flair = extract_flair p.body in
   let flair_json = match flair with Some f -> flair_to_yojson f | None -> `Null in
-  `Assoc ([
-    ("id", `String (Post_id.to_string p.id));
-    ("author", `String (Agent_id.to_string p.author));
-    ("author_karma", `Int author_karma);
-    ("title", `String p.title);
-    ("body", `String p.body);
-    ("post_kind", `String (post_kind_to_string p.post_kind));
-    ("flair", flair_json);
-    ("visibility", `String (visibility_to_string p.visibility));
-    ("created_at", `Float p.created_at);
-    ("updated_at", `Float p.updated_at);
-    ("expires_at", `Float p.expires_at);
-    ("votes_up", `Int p.votes_up);
-    ("votes_down", `Int p.votes_down);
-    ("score", `Int (p.votes_up - p.votes_down));
-    ("reply_count", `Int p.reply_count);
-    ("pinned", `Bool p.pinned);
-  ] @ (match p.audience with Some audience -> [("audience", Board_audience.to_yojson audience)] | None -> [])
-    @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
-    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
-    (* The dashboard board serializer ([board_post_dashboard_json])
-       funnels every board list/detail route through this function, so emitting
-       [origin] here exposes the originating-turn provenance on every
-       dashboard-facing post in one place (no per-route N-of-M). Same encoder as
-       [post_to_yojson] so the wire shape is identical. *)
-    @ (match p.origin with Some o -> [("origin", post_origin_to_yojson o)] | None -> [])
-    (* task-1758/#39356 completion criterion 4: dashboard/TUI reads must show
-       closed state and successor, same as {!post_to_yojson} already does --
-       this hand-rolled encoder does not derive from that one, so without
-       this line a closed post would look open on the dashboard. *)
-    @ (match p.closed with Some c -> [("closed", post_close_state_to_yojson c)] | None -> [])
-    @ (match post_classification_reason p with
-       | Some reason -> [("classification_reason", `String reason)]
-       | None -> [])
-    @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))
+  let extra =
+    [ ("author_karma", `Int author_karma)
+    ; ("flair", flair_json)
+    ; ("score", `Int (p.votes_up - p.votes_down))
+    ]
+  in
+  match post_to_yojson p with
+  | `Assoc fields -> `Assoc (fields @ extra)
+  | other -> other

@@ -291,6 +291,11 @@ val classify_embedded_json
     such as ["HTTP 4290"], ["HTTP 500-byte"], or ["HTTP 403/404"]. *)
 val http_status_of_machine_tokens : string -> int option
 
+(** [true] when [status] is an explicit non-overflow HTTP refusal code
+    ([401], [402], [403], [413], [429], or any recognized 5xx server/overload
+    status from {!server_status_class_of_code}). *)
+val is_non_overflow_http_refusal_status : int -> bool
+
 (** Classify an error string strictly by exact ASCII-boundary machine wire
     codes (such as [RESOURCE_EXHAUSTED], [UNAUTHENTICATED],
     [PERMISSION_DENIED], [exceeded_current_quota_error],

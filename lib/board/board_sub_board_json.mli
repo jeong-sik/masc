@@ -19,6 +19,9 @@ val sub_board_access_field_of_yojson
 val sub_board_members_field_of_yojson
   :  Yojson.Safe.t
   -> (string list option, board_error) result
+val is_valid_sub_board_slug : string -> bool
+(** [true] when [slug] is 1..64 characters matching [^[a-z0-9][a-z0-9_-]*$]. *)
+
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 (** Accepts only the exact current persistence shape emitted for stored

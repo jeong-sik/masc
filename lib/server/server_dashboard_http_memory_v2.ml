@@ -37,9 +37,9 @@ let retrieval_heat_to_string = function
 ;;
 
 let window_seconds = function
-  | Window_24h -> 86400.0
-  | Window_7d -> 7.0 *. 86400.0
-  | Window_30d -> 30.0 *. 86400.0
+  | Window_24h -> Masc_time_constants.day
+  | Window_7d -> 7.0 *. Masc_time_constants.day
+  | Window_30d -> 30.0 *. Masc_time_constants.day
 ;;
 
 let window_to_string = function
@@ -65,9 +65,9 @@ let classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at =
       | Some ts -> Float.max 0.0 (now -. ts)
       | None -> Float.infinity
     in
-    if Float.compare age_sec 86400.0 <= 0 || retrieved_count >= 5
+    if Float.compare age_sec Masc_time_constants.day <= 0 || retrieved_count >= 5
     then Heat_hot
-    else if Float.compare age_sec (7.0 *. 86400.0) <= 0 || retrieved_count >= 2
+    else if Float.compare age_sec (7.0 *. Masc_time_constants.day) <= 0 || retrieved_count >= 2
     then Heat_warm
     else Heat_cold)
 ;;
@@ -1011,17 +1011,34 @@ let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
     let index_updates = ref 0 in
     let digest_commits = ref 0 in
     let missing_evidence = ref 0 in
-    let emit_revision (event : World_memory_types.change_event) ~op =
+    let module Diff_op = struct
+      type t =
+        | Added
+        | Updated
+        | Retracted
+        | Edge_added
+        | Index_upserted
+        | Digest_committed
+
+      let to_string = function
+        | Added -> "added"
+        | Updated -> "updated"
+        | Retracted -> "retracted"
+        | Edge_added -> "edge_added"
+        | Index_upserted -> "index_upserted"
+        | Digest_committed -> "digest_committed"
+    end in
+    let emit_revision (event : World_memory_types.change_event) ~(op : Diff_op.t) =
       revisions := `Assoc
         [ "rev", `Int event.seq
         ; "batch_id", `String (World_memory_types.change_event_kind_to_string event.kind)
         ; "fact_id", `String event.target_id
         ; "recorded_at", `String (rfc3339_of_unix event.recorded_at)
-        ; "op", `String op
+        ; "op", `String (Diff_op.to_string op)
         ] :: !revisions
     in
     let emit_fact destination (event : World_memory_types.change_event)
-          ~(current : World_memory_types.fact_version) ~previous ~op =
+          ~(current : World_memory_types.fact_version) ~previous ~(op : Diff_op.t) =
       let version_text (version : World_memory_types.fact_version) = version.version_text in
       let before_text = Option.map version_text previous |> Json_util.string_opt_to_json in
       let payload = World_memory_types.change_event_to_json event in
@@ -1038,10 +1055,16 @@ let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
         ]
       in
       let values =
-        if String.equal op "updated" then
+        match op with
+        | Diff_op.Updated ->
           [ "before", before_text; "after", payload ]
-        else [ "batch_id", `String (World_memory_types.change_event_kind_to_string event.kind)
-             ; "payload", payload ]
+        | Diff_op.Added
+        | Diff_op.Retracted
+        | Diff_op.Edge_added
+        | Diff_op.Index_upserted
+        | Diff_op.Digest_committed ->
+          [ "batch_id", `String (World_memory_types.change_event_kind_to_string event.kind)
+          ; "payload", payload ]
       in
       destination := `Assoc (fact_fields @ values) :: !destination;
       emit_revision event ~op
@@ -1050,14 +1073,14 @@ let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
     |> List.filter in_range
     |> List.iter (fun event ->
       match classify_change event with
-      | Store.Claim_added current -> emit_fact added event ~current ~previous:None ~op:"added"
+      | Store.Claim_added current -> emit_fact added event ~current ~previous:None ~op:Diff_op.Added
       | Store.Claim_updated { previous; current } ->
-        emit_fact updated event ~current ~previous ~op:"updated"
+        emit_fact updated event ~current ~previous ~op:Diff_op.Updated
       | Store.Claim_retracted { previous; current } ->
-        emit_fact retracted event ~current ~previous ~op:"retracted"
-      | Store.Shared_edge -> incr edges; emit_revision event ~op:"edge_added"
-      | Store.Shared_index -> incr index_updates; emit_revision event ~op:"index_upserted"
-      | Store.Shared_digest -> incr digest_commits; emit_revision event ~op:"digest_committed"
+        emit_fact retracted event ~current ~previous ~op:Diff_op.Retracted
+      | Store.Shared_edge -> incr edges; emit_revision event ~op:Diff_op.Edge_added
+      | Store.Shared_index -> incr index_updates; emit_revision event ~op:Diff_op.Index_upserted
+      | Store.Shared_digest -> incr digest_commits; emit_revision event ~op:Diff_op.Digest_committed
       | Store.Private_change -> ()
       | Store.Missing_change_evidence -> incr missing_evidence);
     let data =
@@ -1258,22 +1281,14 @@ let world_diff_json ~now ~config ~range =
           (Json_util.assoc_string_opt "kind" c.payload)
       in
       let display_summary =
-        match claim_text_opt with
-        | Some text when not (String_util.contains_substring c.summary text) ->
-          (match kind_lc with
-           | Some "claim_retracted" -> "Retracted: " ^ text
-           | Some "claim_shrank" -> "Support shrank: " ^ text
-           | Some "claim_joined" -> "Joined: " ^ text
-           | Some "conflict_dissolved" -> "Conflict dissolved: " ^ text
-           | Some "conflict_joined" -> "Conflict joined: " ^ text
-           | Some "claim_created" | Some "conflict_created" -> text
-           | Some _ | None ->
-             if String.starts_with ~prefix:"Claim " c.summary
-                || String.starts_with ~prefix:"Conflict " c.summary
-                || String.starts_with ~prefix:"Joined " c.summary
-             then text
-             else c.summary)
-        | Some _ | None -> c.summary
+        match claim_text_opt, kind_lc with
+        | Some text, Some "claim_retracted" -> "Retracted: " ^ text
+        | Some text, Some "claim_shrank" -> "Support shrank: " ^ text
+        | Some text, Some "claim_joined" -> "Joined: " ^ text
+        | Some text, Some "conflict_dissolved" -> "Conflict dissolved: " ^ text
+        | Some text, Some "conflict_joined" -> "Conflict joined: " ^ text
+        | Some text, Some ("claim_created" | "conflict_created") -> text
+        | (Some _ | None), (Some _ | None) -> c.summary
       in
       ( cid_opt
       , claim_text_opt
@@ -1283,6 +1298,21 @@ let world_diff_json ~now ~config ~range =
       , kind_lc
       , display_summary )
     in
+    let module Legacy_op = struct
+      type t =
+        | Added of string
+        | Updated of string
+        | Retracted of string
+
+      let of_raw_string raw =
+        match raw with
+        | "retracted" | "removed" -> Retracted raw
+        | "updated" -> Updated raw
+        | _ -> Added raw
+
+      let wire_name = function
+        | Added s | Updated s | Retracted s -> s
+    end in
     let added = ref [] in
     let updated = ref [] in
     let retracted = ref [] in
@@ -1301,16 +1331,16 @@ let world_diff_json ~now ~config ~range =
          in
          let op_kind =
            match Json_util.assoc_string_opt "op" c.payload with
-           | Some s -> String.lowercase_ascii (String.trim s)
+           | Some s -> Legacy_op.of_raw_string (String.lowercase_ascii (String.trim s))
            | None ->
              (match Json_util.assoc_string_opt "action" c.payload with
-              | Some s -> String.lowercase_ascii (String.trim s)
+              | Some s -> Legacy_op.of_raw_string (String.lowercase_ascii (String.trim s))
               | None ->
                 (match kind_lc with
-                 | Some ("claim_retracted" | "conflict_dissolved") -> "retracted"
-                 | Some "claim_shrank" -> "updated"
+                 | Some ("claim_retracted" | "conflict_dissolved") -> Legacy_op.Retracted "retracted"
+                 | Some "claim_shrank" -> Legacy_op.Updated "updated"
                  | Some ("claim_created" | "claim_joined" | "conflict_created" | "conflict_joined")
-                 | Some _ | None -> "added"))
+                 | Some _ | None -> Legacy_op.Added "added"))
          in
          let enrichment_fields =
            [ "claim_id", Json_util.string_opt_to_json cid_opt
@@ -1337,15 +1367,12 @@ let world_diff_json ~now ~config ~range =
               ; "batch_id", `String c.batch_id
               ; "fact_id", `String c.fact_id
               ; "recorded_at", `String c.recorded_at
-              ; "op", `String op_kind
+              ; "op", `String (Legacy_op.wire_name op_kind)
               ]
             :: !revisions;
-         if String.equal op_kind "retracted" || String.equal op_kind "removed"
-         then retracted := entry_json :: !retracted
-         else if
-           String.equal op_kind "updated"
-           || Option.is_some (Json_util.assoc_member_opt "before" c.payload)
-         then (
+         match op_kind with
+         | Legacy_op.Retracted _ -> retracted := entry_json :: !retracted
+         | Legacy_op.Updated _ ->
            let before =
              Option.value ~default:`Null (Json_util.assoc_member_opt "before" c.payload)
            in
@@ -1362,8 +1389,27 @@ let world_diff_json ~now ~config ~range =
                  ; "after", after
                  ]
                  @ enrichment_fields)
-              :: !updated)
-         else added := entry_json :: !added)
+              :: !updated
+         | Legacy_op.Added _ ->
+           if Option.is_some (Json_util.assoc_member_opt "before" c.payload) then (
+             let before =
+               Option.value ~default:`Null (Json_util.assoc_member_opt "before" c.payload)
+             in
+             let after =
+               Option.value ~default:c.payload (Json_util.assoc_member_opt "after" c.payload)
+             in
+             updated
+             := `Assoc
+                  ([ "seq", `Int c.seq
+                   ; "fact_id", `String c.fact_id
+                   ; "summary", `String display_summary
+                   ; "recorded_at", `String c.recorded_at
+                   ; "before", before
+                   ; "after", after
+                   ]
+                   @ enrichment_fields)
+                :: !updated)
+           else added := entry_json :: !added)
       selected;
     let total_claims_now =
       match ledger_opt with

@@ -1343,6 +1343,7 @@ let is_exact_machine_wire_token = function
   | "quota_exceeded"
   | "QUOTA_EXCEEDED"
   | "usage_limit_exceeded"
+  | "billing_error"
   | "billing_hard_limit_reached"
   | "billing_api_budget_exhausted"
   | "billing_disabled"
@@ -1371,6 +1372,8 @@ let is_exact_machine_wire_token = function
   | "permission_error"
   | "access_denied"
   (* Context overflow *)
+  | "contextOverflow"
+  | "CONTEXT_OVERFLOW"
   | "context_length_exceeded"
   | "CONTEXT_LENGTH_EXCEEDED"
   | "context_window_exceeded"
@@ -1387,6 +1390,8 @@ let is_exact_machine_wire_token = function
   | "string_above_max_length"
   | "invalid_argument_prompt_too_long"
   (* Provider unavailable *)
+  | "api_error"
+  | "internal_error"
   | "overloaded_error"
   | "service_unavailable"
   | "SERVICE_UNAVAILABLE"
@@ -1396,6 +1401,11 @@ let is_exact_machine_wire_token = function
   | "gateway_timeout"
   | "server_error" -> true
   | _ -> false
+;;
+
+let is_non_overflow_http_refusal_status = function
+  | 401 | 402 | 403 | 413 | 429 -> true
+  | status -> Option.is_some (server_status_class_of_code status)
 ;;
 
 let http_status_of_machine_tokens (text : string) : int option =

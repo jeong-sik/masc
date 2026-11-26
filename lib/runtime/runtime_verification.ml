@@ -832,7 +832,9 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                              | Some _ | None ->
                                Runtime_acp_client.model_selection_to_string execution.model
                            in
-                           Ok { model = observed_model; text = res.text }))))
+                           (* A host may narrate before it calls the tool; the
+                              answer to check is the last message. *)
+                           Ok { model = observed_model; text = res.final_message }))))
       | Runtime_execution.Antigravity_cli execution ->
         (match authorize_host Runtime_account_access.Antigravity with
          | Error failure -> Error failure

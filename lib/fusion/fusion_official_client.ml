@@ -918,7 +918,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                         | Some _ | None ->
                           Runtime_acp_client.model_selection_to_string execution.model
                       in
-                      succeeded { text = res.text; model = observed_model; usage }))))
+                      (* The panel answer is the last message; what the host said
+                         before a tool call is not part of it. *)
+                      succeeded { text = res.final_message; model = observed_model; usage }))))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

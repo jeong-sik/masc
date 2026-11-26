@@ -109,7 +109,8 @@ let test_parse_wire_updates_and_usage () =
       ]
     |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
   in
-  check bool "text delta parsed" true (text_ev = Some (Runtime_acp_client.Text_delta "hello"));
+  check bool "text delta parsed" true
+    (text_ev = Some (Runtime_acp_client.Text_delta { text = "hello"; message_id = None }));
   let thought_ev =
     `Assoc
       [ "sessionUpdate", `String "agent_thought_chunk"
@@ -4821,7 +4822,7 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
     (List.map (fun (r : Keeper_client_usage_report.t) -> r.official_turn, r.response_id) !usage_reports_rev);
   (* Thought -> Text -> MCP tool -> Native tool -> Finish *)
   on_acp_event (Runtime_acp_client.Thought_delta "thinking...");
-  on_acp_event (Runtime_acp_client.Text_delta "hello ");
+  on_acp_event (Runtime_acp_client.Text_delta { text = "hello "; message_id = None });
   check bool "on_tool_started accepted before finish" true
     (on_tool_started
        ~call_id:"mcp-call-1"
@@ -5638,6 +5639,88 @@ let muse_journal_session_id = "01a2113e-b6c0-7f71-bab2-c29018711194"
 let muse_journal_first_prompt_line = 18
 let muse_journal_last_prompt_line = 58
 
+(* A host that narrates before it calls a tool sends two messages in one turn,
+   each with its own [messageId]. *)
+let narrating_host_script =
+  {|#!/usr/bin/env python3
+import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+def chunk(message_id, text):
+    send({"jsonrpc": "2.0", "method": "session/update", "params": {
+        "sessionId": "sess-narrate",
+        "update": {"sessionUpdate": "agent_message_chunk", "messageId": message_id,
+                   "content": {"type": "text", "text": text}}}})
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-narrate"}})
+    elif method == "session/prompt":
+        chunk("m1", "Calling the tool.")
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-narrate",
+            "update": {"sessionUpdate": "tool_call", "toolCallId": "tc-1", "title": "lookup",
+                       "kind": "other", "status": "completed"}}})
+        chunk("m2", "{\"answer\":")
+        chunk("m2", "1}")
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+|}
+;;
+
+let test_final_message_is_the_last_message_of_the_turn () =
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-final-message-" "" in
+  let mock_script = Filename.concat tmp "mock_narrate.py" in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc narrating_host_script);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          let session =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s
+            | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          match
+            Runtime_acp_client.prompt
+              client
+              ~session_id:session.session_id
+              ~blocks:[ Runtime_acp_client.Text_block "go" ]
+              ()
+          with
+          | Ok result ->
+            check string "every chunk of the turn" "Calling the tool.{\"answer\":1}"
+              result.Runtime_acp_client.text;
+            check string "only the last message" "{\"answer\":1}"
+              result.Runtime_acp_client.final_message
+          | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)))))
+;;
+
 let muse_mock_host_script ~writes_journal ~sends_occupancy =
   let python_bool b = if b then "True" else "False" in
   Printf.sprintf
@@ -5919,6 +6002,8 @@ let () =
         ; test_case "driver-aware usage normalization (vibe + agy live payloads)" `Quick
             test_driver_aware_usage_normalization
         ; test_case "exhaustive stop_reason mapping" `Quick test_stop_reason_mapping
+        ; test_case "final message is the last messageId of the turn" `Quick
+            test_final_message_is_the_last_message_of_the_turn
         ] )
     ; "compaction", [ test_case "structural monotonic drop detection" `Quick test_compaction_detection ]
     ; ( "muse_usage_journal"

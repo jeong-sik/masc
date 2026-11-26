@@ -705,7 +705,10 @@ type tool_call_status =
   | Tool_other_status of string
 
 type stream_event =
-  | Text_delta of string
+  | Text_delta of
+      { text : string
+      ; message_id : string option
+      }
   | Thought_delta of string
   | Tool_call_started of
       { tool_call_id : string
@@ -766,6 +769,7 @@ type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
   ; text : string
+  ; final_message : string
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source
@@ -1779,7 +1783,8 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
       | Some content -> json_string_opt "text" content
       | None -> json_string_opt "text" update
     in
-    Option.map (fun s -> Text_delta s) text
+    let message_id = json_string_opt "messageId" update in
+    Option.map (fun text -> Text_delta { text; message_id }) text
   | Some "agent_thought_chunk" ->
     let text =
       match json_field "content" update with
@@ -4146,6 +4151,8 @@ let prompt
   let* () = validate_prompt_blocks ~driver:t.driver ~capabilities:t.capabilities blocks in
   let started_at = Time_compat.now () in
   let text_buf = Buffer.create 1024 in
+  let final_message_buf = Buffer.create 1024 in
+  let final_message_id = ref None in
   let thought_buf = Buffer.create 512 in
   let tool_calls = ref 0 in
   let last_context_used = ref None in
@@ -4160,7 +4167,15 @@ let prompt
   in
   let handle_event event =
     (match event with
-     | Text_delta s -> append_bounded text_buf s
+     | Text_delta { text; message_id } ->
+       append_bounded text_buf text;
+       (match message_id with
+        | Some id
+          when text <> "" && not (Option.equal String.equal !final_message_id message_id) ->
+          Buffer.clear final_message_buf;
+          final_message_id := Some id
+        | Some _ | None -> ());
+       append_bounded final_message_buf text
      | Thought_delta s -> append_bounded thought_buf s
      | Tool_call_started _ -> incr tool_calls
      | Tool_call_updated _ | Mode_updated _ | Config_options_updated _ -> ()
@@ -4300,6 +4315,7 @@ let prompt
       { session_id
       ; stop_reason
       ; text = Buffer.contents text_buf
+      ; final_message = Buffer.contents final_message_buf
       ; thought = Buffer.contents thought_buf
       ; usage
       ; usage_source

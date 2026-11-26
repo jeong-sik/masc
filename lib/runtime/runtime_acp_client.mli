@@ -429,7 +429,12 @@ type tool_call_status =
   | Tool_other_status of string
 
 type stream_event =
-  | Text_delta of string
+  | Text_delta of
+      { text : string
+      ; message_id : string option
+        (** The [messageId] the host put on the chunk. Chunks of one assistant
+            message share it; [None] when the host sends no id. *)
+      }
   | Thought_delta of string
   | Tool_call_started of
       { tool_call_id : string
@@ -536,6 +541,12 @@ type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
   ; text : string
+    (** Every message chunk of the turn, in order. *)
+  ; final_message : string
+    (** The last assistant message: the chunks that share the last [messageId]
+        of the turn. A host that narrates before it calls a tool puts that
+        narration in an earlier message, so a caller that reads an answer takes
+        this field. Equal to [text] when no chunk carries an id. *)
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source

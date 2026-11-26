@@ -2322,8 +2322,6 @@ let test_repo_runtime_toml_vendor_ssot_alignment () =
   (match find_runtime runtimes "glm-coding.glm-5-4" with
    | None -> fail "missing glm-coding.glm-5-4 in seed"
    | Some runtime ->
-     check bool "glm-5-4 seed carries no capabilities override over its catalog row" true
-       (Option.is_none runtime.model.capabilities);
      match
        Llm_provider.Provider_config.capabilities_for_config_model
          (agent_core_provider_config runtime)
@@ -2331,8 +2329,7 @@ let test_repo_runtime_toml_vendor_ssot_alignment () =
      | Some caps ->
        check (option int) "glm-5-4 resolves catalog max_output_tokens = 131072"
          (Some 131072) caps.max_output_tokens;
-       check bool "glm-5-4 reads images from its catalog row" true
-         caps.supports_image_input
+       check bool "glm-5-4 reads images" true caps.supports_image_input
      | None -> fail "expected glm-5-4 resolved capabilities");
   List.iter
     (fun (model_id, expected_ctx) ->

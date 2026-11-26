@@ -11,6 +11,7 @@
 
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { copyToClipboard } from '../../components/common/copyable-code'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/dashboard-goals'
 import { activeWorkspaceId, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
@@ -542,6 +543,13 @@ export function GoalsTab(props: WorkspaceViewProps) {
     loadData('manual')
   }
 
+  const copyText = async (label: string, text: string) => {
+    if (!text) return
+    setActionFeedback(await copyToClipboard(text)
+      ? { kind: 'ok', message: `${label} 복사됨` }
+      : { kind: 'err', message: `${label} 복사에 실패했습니다. 직접 선택해 복사해 주세요.` })
+  }
+
   const handleVerificationVerdict = async (
     req: VerificationRequestItem,
     verdict: 'approve' | 'reject',
@@ -584,6 +592,20 @@ export function GoalsTab(props: WorkspaceViewProps) {
     const linkedIds = new Set(selectedGoal.linkedTasks.map((t) => t.id))
     return verificationRows.filter((v) => linkedIds.has(v.taskId))
   }, [verificationRows, selectedGoal])
+  // A count of related verifications is a fact only when both reads are current
+  // and complete; otherwise an empty or partial list would read as "none".
+  const relatedVerificationsKnown = verificationsCurrent && goalsCurrent
+    && !verificationRead?.incomplete && !taskLinksIncomplete
+
+  const linkedTaskSummary = useMemo(() => {
+    if (!selectedGoal) return '—'
+    const total = selectedGoal.linkedTasks.length
+    const done = selectedGoal.linkedTasks.filter((t) => t.status === 'Done').length
+    const awaiting = selectedGoal.linkedTasks.filter((t) => t.status === 'AwaitingVerification').length
+    const cancelled = selectedGoal.linkedTasks.filter((t) => t.status === 'Cancelled').length
+    const rest = total - done - awaiting - cancelled
+    return `태스크 ${total}개 · 완료 ${done} · 검증 대기 ${awaiting} · 취소 ${cancelled} · 그 외 ${rest}`
+  }, [selectedGoal])
 
   const masterPane = html`
     <div class="wk-pane-col">
@@ -816,6 +838,15 @@ export function GoalsTab(props: WorkspaceViewProps) {
               <button
                 type="button"
                 class="btn-ghost"
+                aria-label="목표 ID 복사"
+                title="목표 ID 복사"
+                onClick=${() => void copyText('목표 ID', selectedGoal.id)}
+              >
+                ID 복사
+              </button>
+              <button
+                type="button"
+                class="btn-ghost"
                 onClick=${() => props.onNavigate(`/work/candle/${encodeURIComponent(selectedGoal.id)}`)}
               >
                 Candle 지급 보기 →
@@ -868,6 +899,14 @@ export function GoalsTab(props: WorkspaceViewProps) {
             </div>
           </div>
 
+          <div class="wk-notice" role="status">
+            ${taskLinksIncomplete || !goalsCurrent
+              ? '태스크 목록 확인 중 — 아래 연결된 태스크와 검증 목록을 함께 보세요.'
+              : relatedVerificationsKnown
+                ? `${linkedTaskSummary} · 검증 제출 ${relatedVerifications.length}건${relatedVerifications.length > 0 ? ' (아래 목록)' : ''}`
+                : `${linkedTaskSummary} · 검증 제출 —`}
+          </div>
+
           <section class="wk-section" aria-label="측정 절차 및 기준 심사">
             <div class="wk-section-head">
               <h3 class="wk-section-title">측정 절차 (procedure) & Criterion Review</h3>
@@ -875,6 +914,19 @@ export function GoalsTab(props: WorkspaceViewProps) {
               ${selectedGoal.criterionVerdict.kind === 'needs_revision' && html`<span class="wk-badge wk-badge--err">Needs Revision</span>`}
               ${selectedGoal.criterionVerdict.kind === 'pending' && html`<span class="wk-badge wk-badge--idle">${selectedGoal.criterionVerdict.state}</span>`}
               ${selectedGoal.criterionVerdict.kind === 'unavailable' && html`<span class="wk-badge wk-badge--warn">Unavailable</span>`}
+              <button
+                type="button"
+                class="btn-ghost"
+                aria-label="측정 절차 복사"
+                title="측정 절차 복사"
+                disabled=${!selectedGoal.procedure}
+                onClick=${() => void copyText('측정 절차', selectedGoal.procedure)}
+              >
+                복사
+              </button>
+              ${selectedGoal.phase === 'Awaiting_confirmation' && currentConfirmation && html`
+                <span class="wk-muted-sm">최신 증거는 아래 Goal Completion Confirmation 참조 (기준 ${currentConfirmation.criterionRevision})</span>
+              `}
             </div>
             <${MarkdownContent} class="wk-prose" text=${selectedGoal.procedure || '측정 절차 없음'} />
             <${MarkdownContent} class="wk-muted-sm" text=${
@@ -918,6 +970,17 @@ export function GoalsTab(props: WorkspaceViewProps) {
             <section class="wk-section" aria-label="목표 최종 완료 확인">
               <div class="wk-section-head">
                 <h3 class="wk-section-title">Goal Completion Confirmation</h3>
+                ${currentConfirmation && html`
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    aria-label="완료 증거 복사"
+                    title="완료 증거 복사"
+                    onClick=${() => void copyText('완료 증거', currentConfirmation.evidence)}
+                  >
+                    증거 복사
+                  </button>
+                `}
                 ${!multiAccount && html`
                   <button type="button" class="btn-ghost" disabled=${!goalsCurrent} onClick=${() => void loadConfirmation(selectedGoal.id, goalObservation)}>
                     증거 다시 읽기
@@ -962,7 +1025,18 @@ export function GoalsTab(props: WorkspaceViewProps) {
 
           ${(proof?.state === 'proven' || proof?.state === 'refuted') && html`
             <section class="wk-section" aria-label="목표 검증 증거">
-              <h3 class="wk-section-title">${verification?.state === 'stale' ? '이전 기준의 검증 증거' : '목표 검증 증거'}</h3>
+              <div class="wk-section-head">
+                <h3 class="wk-section-title">${verification?.state === 'stale' ? '이전 기준의 검증 증거' : '목표 검증 증거'}</h3>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  aria-label="검증 증거 복사"
+                  title="검증 증거 복사"
+                  onClick=${() => void copyText('검증 증거', proof.evidence)}
+                >
+                  증거 복사
+                </button>
+              </div>
               <div class="wk-muted-sm">
                 ${proof.state === 'proven' ? '증명됨' : '반증됨'} · ${proof.actor} · ${formatRelativeTime(proof.recordedAt)}
               </div>
@@ -1012,7 +1086,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
 
           <section class="wk-section" aria-label="연결 태스크 검증 판정">
             <div class="wk-section-head">
-              <h3 class="wk-section-title">Verification Verdicts (${verificationsCurrent && goalsCurrent && !verificationRead?.incomplete && !taskLinksIncomplete ? relatedVerifications.length : '—'})</h3>
+              <h3 class="wk-section-title">Verification Verdicts (${relatedVerificationsKnown ? relatedVerifications.length : '—'})</h3>
               ${!multiAccount && html`
                 <button type="button" class="btn-ghost" onClick=${() => void refreshVerificationList('manual')}>검증 다시 읽기</button>
               `}

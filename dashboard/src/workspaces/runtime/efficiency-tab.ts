@@ -22,6 +22,8 @@ import {
   authSession,
   extractObserverTopics,
   formatObserved,
+  isEpochCurrent,
+  markViewSynced,
   observedAbsent,
   observedUnreported,
   observedValue,
@@ -29,6 +31,8 @@ import {
   resourceCache,
   sessionEpoch,
   subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
   timeWindow,
   timeWindowProviderDays,
   type Observed,
@@ -46,6 +50,7 @@ import {
   formatUsd,
   loadLaneRunsPage,
   loadProviderUsageHistory,
+  localUtcOffsetMin,
   openViewSseStream,
   snapshotUnavailableReason,
   toObservedNumber,
@@ -96,17 +101,18 @@ interface AggregatedModelBucket {
 
 function aggregateModelBuckets(payload: ModelsMetricsPayload | null): readonly AggregatedModelBucket[] {
   if (!payload) return []
-  const map = new Map<number, { entries: number; cost: number; cacheSum: number; cacheCount: number }>()
+  const map = new Map<number, { entries: number; cost: number; cacheWeightedSum: number; cacheWeight: number }>()
   for (const m of payload.models) {
     for (const b of m.buckets) {
-      const cur = map.get(b.ts_start) ?? { entries: 0, cost: 0, cacheSum: 0, cacheCount: 0 }
+      const cur = map.get(b.ts_start) ?? { entries: 0, cost: 0, cacheWeightedSum: 0, cacheWeight: 0 }
       cur.entries += b.entry_count
       if (typeof b.total_cost_usd === 'number' && Number.isFinite(b.total_cost_usd)) {
         cur.cost += b.total_cost_usd
       }
       if (typeof b.cache_hit_ratio === 'number' && Number.isFinite(b.cache_hit_ratio)) {
-        cur.cacheSum += b.cache_hit_ratio * 100
-        cur.cacheCount += 1
+        const weight = b.entry_count > 0 ? b.entry_count : 1
+        cur.cacheWeightedSum += b.cache_hit_ratio * 100 * weight
+        cur.cacheWeight += weight
       }
       map.set(b.ts_start, cur)
     }
@@ -117,7 +123,7 @@ function aggregateModelBuckets(payload: ModelsMetricsPayload | null): readonly A
       ts,
       entries: agg.entries,
       costUsd: agg.cost,
-      cacheHitPct: agg.cacheCount > 0 ? Number((agg.cacheSum / agg.cacheCount).toFixed(1)) : null,
+      cacheHitPct: agg.cacheWeight > 0 ? Number((agg.cacheWeightedSum / agg.cacheWeight).toFixed(1)) : null,
     }))
 }
 
@@ -141,7 +147,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
   const [liveMetrics, setLiveMetrics] = useState<ModelsMetricsPayload | null>(null)
   const [streamLive, setStreamLive] = useState(false)
+  const [streamError, setStreamError] = useState<string | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const utcOffsetMin = localUtcOffsetMin()
 
   const modelsKey = `runtime:models-metrics:${win}`
   const cacheStatsKey = 'runtime:cache-stats'
@@ -160,53 +168,59 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const effObs = resourceCache.observe<KeeperEfficiencyPayload>(effKey).value
 
   const loadSnapshots = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
-    void resourceCache.fetch<CacheStatsPayload>(
-      cacheStatsKey,
-      (signal) => apiGet<CacheStatsPayload>('/api/v1/dashboard/cache-stats', { signal }),
-      { ttlMs: 15_000, topics: ['cache_stats', 'model_metrics'], reason },
-    )
-    void resourceCache.fetch<ModelsMetricsPayload>(
-      modelsKey,
-      (signal) => apiGet<ModelsMetricsPayload>(
-        `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
-        { signal },
+    const startEpoch = epoch
+    void Promise.all([
+      resourceCache.fetch<CacheStatsPayload>(
+        cacheStatsKey,
+        (signal) => apiGet<CacheStatsPayload>('/api/v1/dashboard/cache-stats', { signal }),
+        { ttlMs: 15_000, topics: ['cache_stats', 'model_metrics', 'telemetry'], reason },
       ),
-      { ttlMs: 20_000, topics: ['model_metrics'], reason },
-    )
-    void resourceCache.fetch<ProviderUsageHistoryResponse>(
-      historyKey,
-      (signal) => loadProviderUsageHistory(providerDays, signal),
-      { ttlMs: 30_000, topics: ['provider_usage'], reason },
-    )
-    void resourceCache.fetch<ToolMetricsSeriesPayload>(
-      toolSeriesKey,
-      (signal) => apiGet<ToolMetricsSeriesPayload>(
-        `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=0`,
-        { signal },
+      resourceCache.fetch<ModelsMetricsPayload>(
+        modelsKey,
+        (signal) => apiGet<ModelsMetricsPayload>(
+          `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
+          { signal },
+        ),
+        { ttlMs: 20_000, topics: ['model_metrics', 'telemetry'], reason },
       ),
-      { ttlMs: 20_000, topics: ['tool_metrics'], reason },
-    )
-    void resourceCache.fetch<LaneRunsResponse>(
-      exactRunsKey,
-      (signal) => loadLaneRunsPage({ limit: 50 }, signal),
-      { ttlMs: 20_000, topics: ['exact_lane_runs'], reason },
-    )
-    // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
-    void resourceCache.fetch<KeeperCostsPayload>(
-      costsKey,
-      (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', { signal }),
-      { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics'], reason },
-    )
-    void resourceCache.fetch<KeeperEfficiencyPayload>(
-      effKey,
-      (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', { signal }),
-      { ttlMs: 60_000, topics: ['keeper_efficiency'], reason },
-    )
+      resourceCache.fetch<ProviderUsageHistoryResponse>(
+        historyKey,
+        (signal) => loadProviderUsageHistory(providerDays, signal),
+        { ttlMs: 30_000, topics: ['provider_usage', 'runtime_resolved'], reason },
+      ),
+      resourceCache.fetch<ToolMetricsSeriesPayload>(
+        toolSeriesKey,
+        (signal) => apiGet<ToolMetricsSeriesPayload>(
+          `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=${utcOffsetMin}`,
+          { signal },
+        ),
+        { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
+      ),
+      resourceCache.fetch<LaneRunsResponse>(
+        exactRunsKey,
+        (signal) => loadLaneRunsPage({ limit: 50 }, signal),
+        { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
+      ),
+      // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
+      resourceCache.fetch<KeeperCostsPayload>(
+        costsKey,
+        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', { signal }),
+        { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
+      ),
+      resourceCache.fetch<KeeperEfficiencyPayload>(
+        effKey,
+        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', { signal }),
+        { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
+      ),
+    ]).then(() => {
+      if (isEpochCurrent(startEpoch)) markViewSynced()
+    })
   }
 
   // Initial + window-change snapshots
   useEffect(() => {
     setLiveMetrics(null)
+    setStreamError(null)
     loadSnapshots('mount')
   }, [win, epoch])
 
@@ -222,12 +236,24 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         '/api/v1/models/metrics/stream?window=1440&bucket_min=60',
         signal,
         (frame) => {
-          if (frame.data && typeof frame.data === 'object' && 'models' in (frame.data as Record<string, unknown>)) {
-            setLiveMetrics(frame.data as ModelsMetricsPayload)
-            setStreamLive(true)
+          if (frame.data && typeof frame.data === 'object') {
+            const payload = frame.data as Record<string, unknown>
+            if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+              setStreamLive(false)
+              setStreamError(payload.error.trim())
+              return
+            }
+            if ('models' in payload) {
+              setLiveMetrics(frame.data as ModelsMetricsPayload)
+              setStreamError(null)
+              setStreamLive(true)
+            }
           }
         },
-        (status) => setStreamLive(status === 'open'),
+        (status, detail) => {
+          setStreamLive(status === 'open')
+          if (status === 'error' && detail) setStreamError(detail)
+        },
       )
     })
     return () => {
@@ -241,6 +267,11 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       'provider_usage',
       'tool_metrics',
       'exact_lane_runs',
+      'model_metrics',
+      'telemetry',
+      'runtime_resolved',
+      'keeper_turn_complete',
+      'keeper_turns',
       'dataset_invalidation',
     ])
     const unsub = subscribeObserverFrames((frame) => {
@@ -251,8 +282,15 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         }, 600)
       }
     })
+    const recover = () => {
+      if (isEpochCurrent(epoch)) loadSnapshots('sse')
+    }
+    const unsubReconnect = subscribeObserverReconnect(recover)
+    const unsubResync = subscribeObserverResync(recover)
     return () => {
       unsub()
+      unsubReconnect()
+      unsubResync()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
   }, [win, epoch])
@@ -261,9 +299,10 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     ? liveMetrics
     : (modelsObs.kind === 'value' ? modelsObs.data : null)
   const live = win === '24h' && sseInstanceId !== null && streamLive
-  const snapshotError = !effectiveModels ? snapshotUnavailableReason(modelsObs) : null
+  const snapshotError = streamError ?? (!effectiveModels ? snapshotUnavailableReason(modelsObs) : null)
   const modelsWindowLabel = win === '30d' ? '7d 상한' : win
   const seriesSource = live ? '● LIVE SSE (models/metrics/stream)'
+    : streamError ? `○ STREAM ERROR (${streamError})`
     : snapshotError ? '○ UNAVAILABLE'
     : modelsObs.kind === 'loading' && !effectiveModels ? '◐ LOADING'
     : `○ SNAPSHOT (${modelsWindowLabel})`
@@ -297,11 +336,12 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const toolChartData = useMemo<uPlot.AlignedData>(() => {
     if (toolSeriesObs.kind !== 'value') return [[], [], []]
     const ts: number[] = []
-    const errRate: number[] = []
+    const errRate: (number | null)[] = []
     const callsScaled: number[] = []
     for (const b of toolSeriesObs.data.buckets) {
       ts.push(b.start)
-      const rate = b.call_count > 0 ? Number(((b.failure_count / b.call_count) * 100).toFixed(1)) : 0
+      const settled = Math.max(0, b.call_count - (b.deferred_count ?? 0))
+      const rate = settled > 0 ? Number(((b.failure_count / settled) * 100).toFixed(1)) : null
       errRate.push(rate)
       callsScaled.push(Number((b.call_count / 10).toFixed(1)))
     }
@@ -341,10 +381,11 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       : observedAbsent()
 
     const toolTotal = toolSeriesObs.kind === 'value' ? toolSeriesObs.data.total : null
-    const toolErrObs: Observed<number> = toolTotal && toolTotal.call_count > 0
-      ? observedValue((toolTotal.failure_count / toolTotal.call_count) * 100)
+    const settledTools = toolTotal ? Math.max(0, toolTotal.call_count - (toolTotal.deferred_count ?? 0)) : 0
+    const toolErrObs: Observed<number> = toolTotal && settledTools > 0
+      ? observedValue((toolTotal.failure_count / settledTools) * 100)
       : toolTotal
-        ? observedValue(0)
+        ? observedUnreported()
         : observedAbsent()
 
     return { cacheHitObs, spendObs, exactPassObs, toolErrObs }
@@ -575,10 +616,10 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             : '일시 중지 이력 없음'}
         />
 
-        <!-- Panel 4: Tool Error Rate & Exact-Output Pass % -->
+        <!-- Panel 4: Tool Error Rate & Call Volume -->
         <${UPlotChart}
           id="eff-panel-4-tools-exact"
-          title="4. Tool Error Rate & Exact-Output Pass %"
+          title="4. Tool Error Rate & Call Volume"
           subtitle=${html`
             <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
               <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/tools')}>

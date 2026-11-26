@@ -16,12 +16,14 @@ import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   formatObserved,
+  resourceCache,
   type Observed,
 } from '../../core/resource-cache'
 import {
   markViewSynced,
   subscribeObserverFrames,
   subscribeObserverReconnect,
+  subscribeObserverResync,
 } from '../../core/observer'
 import {
   timeWindow,
@@ -219,9 +221,14 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
     const unsubReconnect = subscribeObserverReconnect(() => {
       void refresh('sse')
     })
+    const unsubResync = subscribeObserverResync(() => {
+      resourceCache.invalidateAll()
+      void refresh('sse')
+    })
     return () => {
       unsub()
       unsubReconnect()
+      unsubResync()
       if (timer) clearTimeout(timer)
     }
   }, [refresh])

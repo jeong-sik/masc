@@ -16,8 +16,14 @@ import {
   apiMutate,
   apiRequest,
   currentSessionEpoch,
+  extractObserverTopics,
   isEpochCurrent,
+  markViewSynced,
   resourceCache,
+  sessionEpoch,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
@@ -55,6 +61,7 @@ type BrowserLaneState =
   | { readonly kind: 'ready'; readonly data: BrowserClientsPayload }
 
 export function AddonsTab(props: WorkspaceViewProps) {
+  const epoch = sessionEpoch.value
   const addonsObs = resourceCache.observe<LaneAddonsPayload>('runtime:lane-addons').value
   const asksObs = resourceCache.observe<LaneAddonAsksResponse>('runtime:lane-addons-asks').value
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -74,17 +81,22 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const catalogAbortRef = useRef<AbortController | null>(null)
   const previewAbortRef = useRef<AbortController | null>(null)
 
-  const loadAddons = (reason: 'mount' | 'manual' = 'mount') => {
-    void resourceCache.fetch<LaneAddonsPayload>(
-      'runtime:lane-addons',
-      (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', { signal }),
-      { ttlMs: 15_000, topics: ['lane_addon'], reason },
-    )
-    void resourceCache.fetch<LaneAddonAsksResponse>(
-      'runtime:lane-addons-asks',
-      (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', { signal }),
-      { ttlMs: 15_000, topics: ['lane_addon'], reason },
-    )
+  const loadAddons = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const startEpoch = currentSessionEpoch()
+    void Promise.all([
+      resourceCache.fetch<LaneAddonsPayload>(
+        'runtime:lane-addons',
+        (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', { signal }),
+        { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_exports_changed'], reason },
+      ),
+      resourceCache.fetch<LaneAddonAsksResponse>(
+        'runtime:lane-addons-asks',
+        (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', { signal }),
+        { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_asks_changed'], reason },
+      ),
+    ]).then(() => {
+      if (mountedRef.current && isEpochCurrent(startEpoch)) markViewSynced()
+    })
   }
 
   const loadBrowserLane = async () => {
@@ -131,17 +143,63 @@ export function AddonsTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     mountedRef.current = true
+    setSelectedId(null)
+    setCatalog(null)
+    setPreview(null)
+    setTabsByClient({})
+    setAskAnswersByKey({})
+    setBanner(null)
+    setBrowserState({ kind: 'loading' })
     loadAddons('mount')
     void loadBrowserLane()
+
+    const watchedTopics = new Set([
+      'lane_addon',
+      'lane_addon_asks',
+      'lane_addon_asks_changed',
+      'lane_addon_exports_changed',
+      'dataset_invalidation',
+    ])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        if (!mountedRef.current || !isEpochCurrent(epoch)) return
+        loadAddons('sse')
+        void loadBrowserLane()
+      }, 350)
+    }
+    const unsubFrames = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
+        scheduleRefresh()
+      }
+    })
+    const recover = () => {
+      if (!mountedRef.current || !isEpochCurrent(epoch)) return
+      resourceCache.invalidateTopic('lane_addon')
+      loadAddons('sse')
+      void loadBrowserLane()
+    }
+    const unsubReconnect = subscribeObserverReconnect(recover)
+    const unsubResync = subscribeObserverResync(recover)
+
     return () => {
       mountedRef.current = false
+      if (timer !== null) clearTimeout(timer)
+      unsubFrames()
+      unsubReconnect()
+      unsubResync()
       browserAbortRef.current?.abort()
       catalogAbortRef.current?.abort()
       previewAbortRef.current?.abort()
     }
-  }, [])
+  }, [epoch])
 
-  const instances = addonsObs.kind === 'value' ? addonsObs.data.instances : []
+  const instances: readonly LaneAddonInstanceRow[] =
+    addonsObs.kind === 'value' && Array.isArray(addonsObs.data?.instances)
+      ? addonsObs.data.instances
+      : []
   const selectedInstance = instances.find((i) => i.instance_id === selectedId) ?? instances[0] ?? null
 
   const handlePreviewManifest = async (manifestPath: string) => {

@@ -21,12 +21,18 @@ import {
   authSession,
   apiMutate,
   disconnectKeeperOAuth,
+  extractObserverTopics,
+  isEpochCurrent,
+  markViewSynced,
   observerSseInstanceId,
   resourceCache,
   saveKeeperOAuthClient,
   sessionEpoch,
   startKeeperGithubDeviceFlow,
   startKeeperOAuthPopupFlow,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
   timeWindow,
   type ActiveKeeperOAuthFlow,
   type KeeperOAuthFlowHandle,
@@ -38,6 +44,7 @@ import {
   formatIsoTime,
   formatMs,
   formatPercent,
+  localUtcOffsetMin,
   openViewSseStream,
   snapshotUnavailableReason,
   toObservedNumber,
@@ -84,8 +91,11 @@ const TOOL_SERIES_SPECS: readonly UPlotSeriesSpec[] = [
 
 interface ToolUsageAggregate {
   calls: number
+  successCount: number
+  hasSuccessCount: boolean
   failureCount: number
   deferredCount: number
+  hasDeferredCount: boolean
   p95Ms: number | null
 }
 
@@ -95,25 +105,37 @@ function addToolUsageEntry(map: Map<string, ToolUsageAggregate>, key: string, en
     : typeof entry.calls === 'number' && Number.isFinite(entry.calls)
       ? entry.calls
       : 0
+  const hasSuccessCount = typeof entry.success_count === 'number' && Number.isFinite(entry.success_count)
+  const successCount = hasSuccessCount ? (entry.success_count as number) : 0
   const failureCount = typeof entry.failure_count === 'number' && Number.isFinite(entry.failure_count)
     ? entry.failure_count
     : 0
-  const deferredCount = typeof entry.deferred_count === 'number' && Number.isFinite(entry.deferred_count)
-    ? entry.deferred_count
-    : 0
+  const hasDeferredCount = typeof entry.deferred_count === 'number' && Number.isFinite(entry.deferred_count)
+  const deferredCount = hasDeferredCount ? (entry.deferred_count as number) : 0
   const p95Ms = typeof entry.p95_ms === 'number' && Number.isFinite(entry.p95_ms) && calls > 0
     ? entry.p95_ms
     : null
   const existing = map.get(key)
   if (existing) {
     existing.calls += calls
+    existing.successCount += successCount
+    existing.hasSuccessCount = existing.hasSuccessCount && hasSuccessCount
     existing.failureCount += failureCount
     existing.deferredCount += deferredCount
+    existing.hasDeferredCount = existing.hasDeferredCount && hasDeferredCount
     if (p95Ms !== null) {
       existing.p95Ms = existing.p95Ms === null ? p95Ms : Math.max(existing.p95Ms, p95Ms)
     }
   } else {
-    map.set(key, { calls, failureCount, deferredCount, p95Ms })
+    map.set(key, {
+      calls,
+      successCount,
+      hasSuccessCount,
+      failureCount,
+      deferredCount,
+      hasDeferredCount,
+      p95Ms,
+    })
   }
 }
 
@@ -176,17 +198,30 @@ export function decodeToolsCatalogPayload(raw: unknown): {
       const failureCount = typeof item.failure_count === 'number'
         ? item.failure_count
         : (joined ? joined.failureCount : 0)
-      const deferredCount = typeof item.deferred_count === 'number'
-        ? item.deferred_count
+      const hasInlineDeferred = typeof item.deferred_count === 'number' && Number.isFinite(item.deferred_count)
+      const deferredCount = hasInlineDeferred
+        ? (item.deferred_count as number)
         : (joined ? joined.deferredCount : 0)
+      const hasInlineSuccess = typeof item.success_count === 'number' && Number.isFinite(item.success_count)
+      const successCount = hasInlineSuccess
+        ? (item.success_count as number)
+        : (joined ? joined.successCount : 0)
+      const hasDeferred = hasInlineDeferred || Boolean(joined?.hasDeferredCount)
+      const hasSuccess = hasInlineSuccess || Boolean(joined?.hasSuccessCount)
       const inlineFailureRate = typeof item.failure_rate === 'number'
         ? item.failure_rate
         : typeof item.failure_rate_pct === 'number'
           ? item.failure_rate_pct
           : null
-      const settledCalls = calls !== null ? Math.max(0, calls - deferredCount) : 0
+      const settledCalls = hasDeferred && calls !== null
+        ? Math.max(0, calls - deferredCount)
+        : hasSuccess
+          ? successCount + failureCount
+          : calls !== null
+            ? Math.max(0, calls - deferredCount)
+            : 0
       const failureRate = inlineFailureRate
-        ?? (joined && settledCalls > 0 ? (failureCount / settledCalls) * 100 : null)
+        ?? ((joined || inlineCalls !== null) && settledCalls > 0 ? (failureCount / settledCalls) * 100 : null)
       const p95Ms = typeof item.p95_ms === 'number'
         ? item.p95_ms
         : (joined ? joined.p95Ms : null)
@@ -302,17 +337,54 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const connectorsObs = resourceCache.observe<{ readonly connectors?: readonly GateConnectorRow[] }>('runtime:gate-connectors').value
   const clientsObs = resourceCache.observe<{ readonly clients?: readonly McpClientRow[] }>('runtime:mcp-clients').value
 
+  const utcOffsetMin = localUtcOffsetMin()
+
+  const loadSeriesSnapshot = (reason: 'mount' | 'sse' | 'manual' = 'mount') =>
+    resourceCache.fetch<ToolMetricsSeriesPayload>(
+      seriesKey,
+      (signal) => apiGet<ToolMetricsSeriesPayload>(
+        `/api/v1/tool-metrics/series?since_hours=${sinceHours}&bucket=${bucket}&utc_offset_min=${utcOffsetMin}`,
+        { signal },
+      ),
+      { ttlMs: 15_000, topics: ['tool_metrics', 'tools'], reason },
+    )
+
+  const loadSubSection = (targetSection: ToolsSubSection, reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    if (targetSection === 'catalog') {
+      return resourceCache.fetch<unknown>(
+        'runtime:dashboard-tools',
+        (signal) => apiGet<unknown>('/api/v1/dashboard/tools', { signal }),
+        { ttlMs: 20_000, topics: ['tools', 'tool_metrics', 'skills', 'async_requests'], reason },
+      )
+    }
+    if (targetSection === 'skills') {
+      return resourceCache.fetch<SkillsApiPayload>(
+        'runtime:skills',
+        (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
+        { ttlMs: 20_000, topics: ['skills', 'skill_usage', 'skill_activations'], reason },
+      )
+    }
+    if (targetSection === 'connectors') {
+      return resourceCache.fetch<{ readonly connectors?: readonly GateConnectorRow[] }>(
+        'runtime:gate-connectors',
+        (signal) => apiGet('/api/v1/gate/connectors', { signal }),
+        { ttlMs: 15_000, topics: ['connectors', 'gate', 'gate_connector_changed'], reason },
+      )
+    }
+    if (targetSection === 'clients') {
+      return resourceCache.fetch<{ readonly clients?: readonly McpClientRow[] }>(
+        'runtime:mcp-clients',
+        (signal) => apiGet('/api/v1/dashboard/clients', { signal }),
+        { ttlMs: 15_000, topics: ['clients', 'ide_presence'], reason },
+      )
+    }
+    return Promise.resolve(null)
+  }
+
   // Snapshot load for tool series across 24h | 7d | 30d
   useEffect(() => {
     setLiveSeries(null)
-    void resourceCache.fetch<ToolMetricsSeriesPayload>(
-      seriesKey,
-      (signal) => apiGet<ToolMetricsSeriesPayload>(
-        `/api/v1/tool-metrics/series?since_hours=${sinceHours}&bucket=${bucket}&utc_offset_min=0`,
-        { signal },
-      ),
-      { ttlMs: 15_000, topics: ['tool_metrics'], reason: 'mount' },
-    )
+    void loadSeriesSnapshot('mount')
   }, [win, epoch])
 
   // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
@@ -323,12 +395,20 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     }
     const handle = acquireViewStream('runtime-tools', (signal) => {
       openViewSseStream(
-        '/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=0',
+        `/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=${utcOffsetMin}`,
         signal,
         (frame) => {
-          if (frame.data && typeof frame.data === 'object' && 'buckets' in (frame.data as Record<string, unknown>)) {
-            setLiveSeries(frame.data as ToolMetricsSeriesPayload)
-            setStreamLive(true)
+          if (frame.data && typeof frame.data === 'object') {
+            const payload = frame.data as Record<string, unknown>
+            if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+              setStreamLive(false)
+              setBanner({ kind: 'err', text: `도구 지표 스트림 오류: ${payload.error}` })
+              return
+            }
+            if ('buckets' in payload) {
+              setLiveSeries(frame.data as ToolMetricsSeriesPayload)
+              setStreamLive(true)
+            }
           }
         },
         (st) => {
@@ -341,32 +421,55 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     }
   }, [win, sseInstanceId, epoch])
 
+  // Observer SSE refresh for warming catalog completion, skills, connectors, and clients
+  useEffect(() => {
+    const watchedTopics = new Set([
+      'tools',
+      'tool_metrics',
+      'skills',
+      'async_requests',
+      'skill_usage',
+      'skill_activations',
+      'gate_connector_changed',
+      'gate',
+      'connectors',
+      'ide_presence',
+      'clients',
+      'dataset_invalidation',
+    ])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const refreshActive = () => {
+      if (!mountedRef.current || !isEpochCurrent(epoch)) return
+      void Promise.all([
+        loadSeriesSnapshot('sse'),
+        loadSubSection(section, 'sse'),
+      ]).then(() => {
+        if (mountedRef.current && isEpochCurrent(epoch)) markViewSynced()
+      })
+    }
+    const unsubFrames = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
+        if (timer !== null) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = null
+          refreshActive()
+        }, 400)
+      }
+    })
+    const unsubReconnect = subscribeObserverReconnect(refreshActive)
+    const unsubResync = subscribeObserverResync(refreshActive)
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+      unsubFrames()
+      unsubReconnect()
+      unsubResync()
+    }
+  }, [section, win, epoch])
+
   // Lazy load active sub-section
   useEffect(() => {
-    if (section === 'catalog') {
-      void resourceCache.fetch<unknown>(
-        'runtime:dashboard-tools',
-        (signal) => apiGet<unknown>('/api/v1/dashboard/tools', { signal }),
-        { ttlMs: 20_000, topics: ['tools'], reason: 'mount' },
-      )
-    } else if (section === 'skills') {
-      void resourceCache.fetch<SkillsApiPayload>(
-        'runtime:skills',
-        (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
-        { ttlMs: 20_000, topics: ['skills'], reason: 'mount' },
-      )
-    } else if (section === 'connectors') {
-      void resourceCache.fetch<{ readonly connectors?: readonly GateConnectorRow[] }>(
-        'runtime:gate-connectors',
-        (signal) => apiGet('/api/v1/gate/connectors', { signal }),
-        { ttlMs: 15_000, topics: ['connectors'], reason: 'mount' },
-      )
-    } else if (section === 'clients') {
-      void resourceCache.fetch<{ readonly clients?: readonly McpClientRow[] }>(
-        'runtime:mcp-clients',
-        (signal) => apiGet('/api/v1/dashboard/clients', { signal }),
-        { ttlMs: 15_000, topics: ['clients'], reason: 'mount' },
-      )
+    if (section !== 'oauth') {
+      void loadSubSection(section, 'mount')
     } else if (section === 'oauth') {
       let cancelled = false
       void (async () => {

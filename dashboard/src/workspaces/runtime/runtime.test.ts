@@ -27,7 +27,7 @@ import {
   quotaRestCauseMeta,
   stripProviderPrefix,
 } from './quota-rest-groups'
-import { classifyQuotaScope, formatIsoTime, maxUtilizationPct, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
+import { classifyQuotaScope, formatIsoTime, localUtcOffsetMin, maxUtilizationPct, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
 import { decodeToolsCatalogPayload } from './tools-tab'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -748,7 +748,7 @@ describe('workspaces/runtime', () => {
     })
     expect(toolStreamCalls).toEqual([
       {
-        url: '/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=0',
+        url: `/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=${localUtcOffsetMin()}`,
         instanceHeader: 'inst-tools.42',
       },
     ])
@@ -1576,5 +1576,20 @@ describe('workspaces/runtime', () => {
 
     expect(formatIsoTime('2026-11-26T12:34:56Z')).toBe('11-26 12:34:56')
     expect(formatIsoTime(null)).toBe('미보고')
+
+    // When deferred_count is omitted, success_count + failure_count computes settled failure rate honestly
+    const withoutDeferred = decodeToolsCatalogPayload({
+      tool_inventory: {
+        tools: [{ name: 'Execute' }, { name: 'DeferredOnly' }],
+      },
+      tool_usage: {
+        top_20: [
+          { name: 'Execute', call_count: 10, success_count: 6, failure_count: 2, p95_ms: 100 },
+          { name: 'DeferredOnly', call_count: 4, success_count: 0, failure_count: 0, p95_ms: 50 },
+        ],
+      },
+    })
+    expect(withoutDeferred.rows[0]?.failure_rate).toBe(25)
+    expect(withoutDeferred.rows[1]?.failure_rate).toBeNull()
   })
 })

@@ -306,10 +306,11 @@ describe('core/observer & core/time-window', () => {
     expect(syncSpy).toHaveBeenCalledWith(CROSSHAIR_SYNC_KEY)
   })
 
-  it('captures x-masc-sse-instance-id response header from observer stream and clears it on sessionEpoch bump', async () => {
+  it('captures x-masc-sse-instance-id response header from observer stream, clears it on EOF/idle-timeout and sessionEpoch bump', async () => {
+    let streamCtrl!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.close()
+        streamCtrl = controller
       },
     })
 
@@ -335,15 +336,43 @@ describe('core/observer & core/time-window', () => {
       authMethods: { google: false, github: false, dev_token: false },
       workspaceId: 'default',
     }
-    await startObserverStream({ fetchImpl: fetchMock as unknown as typeof fetch })
+    const streamPromise = startObserverStream({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      autoReconnect: false,
+    })
+    await new Promise((r) => setTimeout(r, 10))
 
     expect(observerSseInstanceId.value).toBe('rt-inst-8935.epoch-4')
     expect(getObserverSseInstanceId()).toBe('rt-inst-8935.epoch-4')
 
-    // Bumping sessionEpoch clears cached observerSseInstanceId
+    // Closing the observer stream clears stale sseInstanceId immediately
+    streamCtrl.close()
+    await streamPromise
+    expect(observerSseInstanceId.value).toBeNull()
+    expect(getObserverSseInstanceId()).toBeNull()
+
+    // Bumping sessionEpoch also clears an active observerSseInstanceId
+    let openCtrl!: ReadableStreamDefaultController<Uint8Array>
+    const openStream = new ReadableStream<Uint8Array>({
+      start(controller) { openCtrl = controller },
+    })
+    const openPromise = startObserverStream({
+      fetchImpl: vi.fn(async () => new Response(openStream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          [OBSERVER_SSE_INSTANCE_HEADER]: 'rt-inst-8935.epoch-5',
+        },
+      })) as unknown as typeof fetch,
+      autoReconnect: false,
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(observerSseInstanceId.value).toBe('rt-inst-8935.epoch-5')
     bumpSessionEpoch()
     expect(observerSseInstanceId.value).toBeNull()
     expect(getObserverSseInstanceId()).toBeNull()
+    try { openCtrl.close() } catch { /* already closed */ }
+    await openPromise
   })
 
   it('preserves STREAM_GAP across markViewSynced, extracts dataset topics, and auto-reconnects after drop', async () => {
@@ -484,5 +513,39 @@ describe('core/observer & core/time-window', () => {
     expect(postCalls).toBe(1)
     expect(postObs.kind === 'value' && postObs.data).toBe('post-invalidation-payload')
     expect(postObs.kind === 'value' && postObs.stale).toBe(false)
+  })
+
+  it('enforces x-masc-observer-idle-timeout-ms, clears sseInstanceId on idle timeout, and expands new runtime/addon topic aliases', async () => {
+    const stalledStream = new ReadableStream<Uint8Array>({
+      start() { /* intentionally never emits or closes */ },
+    })
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    await startObserverStream({
+      fetchImpl: vi.fn(async () => new Response(stalledStream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          [OBSERVER_SSE_INSTANCE_HEADER]: 'inst-idle-1',
+          'x-masc-observer-idle-timeout-ms': '25',
+        },
+      })) as unknown as typeof fetch,
+      autoReconnect: false,
+    })
+    expect(observerConnected.value).toBe(false)
+    expect(observerSseInstanceId.value).toBeNull()
+    expect(viewProvenance.value).toBe('STREAM_GAP')
+
+    const frame = parseSseBlock(
+      'event: workspace_dataset_changed\ndata: {"datasets":["runtime_resolved","lane_addon_asks_changed","gate_connector_changed","ide_presence","model_metrics"]}\n',
+    )!
+    expect(extractObserverTopics(frame)).toEqual(
+      expect.arrayContaining(['runtime', 'provider_usage', 'lane_addon', 'connectors', 'clients', 'keeper_costs']),
+    )
   })
 })

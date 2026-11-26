@@ -22,10 +22,12 @@ import {
   extractObserverTopics,
   formatObserved,
   isEpochCurrent,
+  markViewSynced,
   observerConnected,
   resourceCache,
   sessionEpoch,
   subscribeObserverFrames,
+  subscribeObserverReconnect,
   subscribeObserverResync,
   type ApiError,
 } from '../../core'
@@ -253,20 +255,25 @@ export function LanesTab(props: WorkspaceViewProps) {
     setBusy((action) => action === 'lane-preview' ? null : action)
   }
 
-  const loadFailover = (forceProbe = false, reason: 'mount' | 'manual' = 'mount') => {
-    void resourceCache.fetch<RuntimeResolvedPayload>(
-      'runtime:resolved',
-      loadRuntimeResolved,
-      { ttlMs: 15_000, topics: ['runtime', 'config'], reason },
-    )
-    void resourceCache.fetch<RuntimeProbePayload>(
-      'runtime:probe',
-      (signal) => apiGet<RuntimeProbePayload>(
-        `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
-        { signal },
+  const loadFailover = (forceProbe = false, reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const startEpoch = currentSessionEpoch()
+    void Promise.all([
+      resourceCache.fetch<RuntimeResolvedPayload>(
+        'runtime:resolved',
+        loadRuntimeResolved,
+        { ttlMs: 15_000, topics: ['runtime', 'runtime_resolved', 'config'], reason },
       ),
-      { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
-    )
+      resourceCache.fetch<RuntimeProbePayload>(
+        'runtime:probe',
+        (signal) => apiGet<RuntimeProbePayload>(
+          `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
+          { signal },
+        ),
+        { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
+      ),
+    ]).then(() => {
+      if (isEpochCurrent(startEpoch)) markViewSynced()
+    })
     sourceRead.current?.abort()
     const read = new AbortController()
     sourceRead.current = read
@@ -302,7 +309,8 @@ export function LanesTab(props: WorkspaceViewProps) {
     })
   }
 
-  const loadExact = (reason: 'mount' | 'manual' = 'mount') => {
+  const loadExact = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const startEpoch = currentSessionEpoch()
     const query = {
       limit: 50,
       runKind: runKindFilter === 'all' ? undefined : runKindFilter,
@@ -312,7 +320,9 @@ export function LanesTab(props: WorkspaceViewProps) {
       exactKey,
       (signal) => loadLaneRunsPage(query, signal),
       { ttlMs: 15_000, topics: ['exact_lane_runs'], reason },
-    )
+    ).then(() => {
+      if (isEpochCurrent(startEpoch)) markViewSynced()
+    })
   }
 
   useEffect(() => {
@@ -329,6 +339,41 @@ export function LanesTab(props: WorkspaceViewProps) {
   useEffect(() => {
     if (mode === 'failover') loadFailover(false, 'mount')
     else if (mode === 'exact') loadExact('mount')
+  }, [mode, runKindFilter, currentCursor, epoch])
+
+  useEffect(() => {
+    if (mode === 'fusion') return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const watchedTopics = mode === 'failover'
+      ? new Set(['runtime', 'runtime_resolved', 'runtime_probe', 'config', 'dataset_invalidation'])
+      : new Set(['exact_lane_runs', 'goal_projection_changed', 'verification_requests', 'dataset_invalidation'])
+    const refreshMode = () => {
+      if (disposed || !isEpochCurrent(epoch)) return
+      if (mode === 'failover') loadFailover(false, 'sse')
+      else loadExact('sse')
+    }
+    const schedule = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        refreshMode()
+      }, 400)
+    }
+    const unsubscribeFrames = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
+        schedule()
+      }
+    })
+    const unsubscribeReconnect = subscribeObserverReconnect(refreshMode)
+    const unsubscribeResync = subscribeObserverResync(refreshMode)
+    return () => {
+      disposed = true
+      if (timer !== null) clearTimeout(timer)
+      unsubscribeFrames()
+      unsubscribeReconnect()
+      unsubscribeResync()
+    }
   }, [mode, runKindFilter, currentCursor, epoch])
 
   useEffect(() => {

@@ -409,6 +409,21 @@ type model_spec =
         {!Runtime.reasoning_effort_of_runtime_id} →
         {!Runtime_inference.resolve_reasoning_effort}, symmetric to the
         [temperature] path. *)
+  ; context_rollover_threshold : float option
+    (** [context-rollover-threshold] — per-model proactive context rollover
+        occupancy in [0.0, 1.0] (fraction of the declared context window). When
+        the agent-reported occupancy reaches this fraction, a fresh session
+        with an anchored compaction is armed. [None] uses the fallback default
+        at the consumer. Validated at load; out-of-range fails closed. *)
+  ; tail_window_atoms : int option
+    (** [tail-window-atoms] — per-model tail-window quantization quantum in
+        atoms (positive int). The tail cut jumps in multiples of this atom
+        count so the transmitted prefix stays stable. [None] uses the fallback
+        default at the consumer. *)
+  ; compaction_keep_ratio : float option
+    (** [compaction-keep-ratio] — per-model fraction of atoms kept after a
+        rollover eviction, in [0.0, 1.0]. [None] uses the fallback default at
+        the consumer (historically 0.25, i.e. keep the newest quarter). *)
   ; turn_timeout_s : float option
     (** [turn-timeout-s] — per-model liveness window for one official-client
         turn, in seconds. Codex, Claude, and Antigravity reset it on every

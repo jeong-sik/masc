@@ -845,6 +845,10 @@ val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t o
     the runtime id is unknown. Consumed by
     {!Runtime_inference.resolve_reasoning_effort}. *)
 
+val context_rollover_threshold_of_runtime_id : string -> float option
+val tail_window_atoms_of_runtime_id : string -> int option
+val compaction_keep_ratio_of_runtime_id : string -> float option
+
 val turn_timeout_s_of_runtime_id : string -> float option
 (** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
     runtime id is unknown. Official-client adapters interpret it as the maximum

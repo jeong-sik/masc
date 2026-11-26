@@ -618,6 +618,11 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1048576
+# Context-growth thresholds (masc#54868). Absent keeps the fallback
+# (0.80 rollover occupancy, 60-atom tail quantum, 0.25 eviction keep ratio).
+# context-rollover-threshold = 0.80
+# tail-window-atoms = 60
+# compaction-keep-ratio = 0.25
 tools-support = true
 streaming = true
 

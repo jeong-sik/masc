@@ -308,6 +308,7 @@ val budget_error_to_core_error : budget_error -> Agent_core.Error.t
 
 val project_with_drop
   :  ?allow_empty_history:bool
+  -> ?window_atoms:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
@@ -319,6 +320,7 @@ val project_with_drop
 
 val project
   :  ?allow_empty_history:bool
+  -> ?window_atoms:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int

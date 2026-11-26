@@ -2040,6 +2040,24 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
+let context_rollover_threshold_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.context_rollover_threshold
+  | None -> None
+;;
+
+let tail_window_atoms_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.tail_window_atoms
+  | None -> None
+;;
+
+let compaction_keep_ratio_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.compaction_keep_ratio
+  | None -> None
+;;
+
 
 
 

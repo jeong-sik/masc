@@ -651,6 +651,7 @@ let carried_atoms (carried : carried_start) =
    range that fit goes exactly as it was cut, and a cut that did land puts
    back its own. *)
 let window_carried_range
+      ?window_atoms
       ~measure_message_bytes
       ~capacity_bytes
       ~reserved_bytes
@@ -666,6 +667,7 @@ let window_carried_range
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Runtime_model_input_tail_window.project_with_drop
         ~allow_empty_history:true
+        ?window_atoms
         ~measure_message_bytes
         ~capacity_bytes
         ~reserved_bytes
@@ -970,7 +972,8 @@ let start_range_projection ~input_source ?argument_projection
     else
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         Runtime_model_input_tail_window.project_with_drop
-          ~allow_empty_history:true ~measure_message_bytes ~capacity_bytes
+          ~allow_empty_history:true ?window_atoms:(Runtime.tail_window_atoms_of_runtime_id runtime_id)
+          ~measure_message_bytes ~capacity_bytes
           ~reserved_bytes messages)
       |> Result.map (fun projection -> Some projection)
       |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
@@ -997,7 +1000,8 @@ let start_range_projection ~input_source ?argument_projection
       | None ->
         Ok { carried; sent = carried.messages; atoms_kept = carried_atoms carried }
       | Some _ ->
-        window_carried_range ~measure_message_bytes ~capacity_bytes
+        window_carried_range ?window_atoms:(Runtime.tail_window_atoms_of_runtime_id runtime_id)
+          ~measure_message_bytes ~capacity_bytes
           ~reserved_bytes carried
     in
     let* windowed =

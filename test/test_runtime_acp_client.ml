@@ -1873,6 +1873,7 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
       ~context_used
       ~context_size
       ~input_limit:(limit tokens)
+      ~threshold:None
   in
   let rollover_t = option (pair int int) in
   check rollover_t "below 80% of the declared limit keeps the session" None

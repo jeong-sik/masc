@@ -135,6 +135,8 @@ type turn =
   ; tool_result_saves : int
   ; sha256 : string (* the address of the retained receipts' inline text *)
   ; loaded : int (* the receipts the run loaded *)
+  ; terminal : Keeper_turn_driver.lane_terminal_error option
+        (* the candidate error the walk returned, when it returned one *)
   }
 
 (* One Keeper turn on a lane whose window is [window] tokens. The large tool
@@ -218,7 +220,9 @@ max-tokens = %d
     [ fixture_tool ~name:large_tool ~content:(labelled large_label large_bytes) large_runs
     ; fixture_tool ~name:small_tool ~content:(labelled small_label 64) small_runs ]
     @ (if reader then [ artifact_reader base_path ] else []) in
+  let terminal = ref None in
   let result = Keeper_turn_driver.run_named ~runtime_id:"fixture.consumer" ~keeper_name ~base_path
+    ~on_runtime_lane_terminal_error:(fun error -> terminal := Some error)
     ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
     ~goal:"Read both fixture results, then answer."
     ~input_source:(Keeper_request_source.Keeper_history {trace_id=session_id})
@@ -242,6 +246,7 @@ max-tokens = %d
     ; tool_result_saves = !tool_result_saves
     ; sha256
     ; loaded
+    ; terminal = !terminal
     }
 
 let check_completed (turn : turn) =
@@ -302,6 +307,39 @@ let test_a_turn_whose_candidates_run_out_ends_with_the_refusal () =
     [ count_path; completion_path; count_path ] turn.paths;
   check int "the large tool ran once" 1 turn.large_runs
 
+(* RFC-0521 §4.3, O-2: the run's first request carried the goal alone; its
+   second, refused, carried the large result. The failed-cycle line sizes
+   the second: the walk's terminal error carries what that attempt composed
+   last, at least the large result's bytes. The first request's value, or
+   the system prompt and goal the line already prints, is far below it. *)
+let test_a_refused_second_request_is_the_size_the_failure_names () =
+  let large_bytes = 50_000 in
+  with_turn ~window:48_000 ~large_bytes
+    ~answers:[ calls large_tool; answered ] @@ fun turn ->
+  (match turn.result with
+   | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> ()
+   | Error error ->
+     fail ("the turn ended with another error: " ^ Agent_core.Error.to_string error)
+   | Ok _ -> fail "a request no rung narrows was answered");
+  match turn.terminal with
+  | None -> fail "the walk returned the candidate's refusal without naming it"
+  | Some { Keeper_turn_driver.last_composed_request = Keeper_turn_driver.Not_composed; _ } ->
+    fail "the refused attempt composed its requests, so its size is known"
+  | Some
+      { Keeper_turn_driver.last_composed_request =
+          Keeper_turn_driver.Composed { transmitted_bytes }
+      ; origin_attempt
+      ; _
+      } ->
+    check int "the refusal is the walk's only attempt" 0 origin_attempt;
+    check bool
+      (Printf.sprintf
+         "the size names the refused second request (%d bytes), which carried \
+          the %d-byte result"
+         transmitted_bytes large_bytes)
+      true
+      (transmitted_bytes >= large_bytes)
+
 let carries_receipt body index = contains (receipt_label index) body
 
 (* The carrier is the first candidate. The retained receipts ride inline in
@@ -343,5 +381,7 @@ let () = run "Keeper in-run narrowing"
       test_a_request_after_the_checkpoint_narrows_in_the_same_run;
     test_case "a turn whose candidates run out ends with the refusal" `Quick
       test_a_turn_whose_candidates_run_out_ends_with_the_refusal;
+    test_case "a refused second request is the size the failure names" `Quick
+      test_a_refused_second_request_is_the_size_the_failure_names;
     test_case "the carrier candidate keeps the history range" `Quick
       test_the_carrier_candidate_keeps_the_history_range]]

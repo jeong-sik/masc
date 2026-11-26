@@ -7190,6 +7190,11 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
       ~on_attempt_error:(fun ~runtime_id ~attempt ~dispatch _error ->
         attempt_errors := !attempt_errors @ [ runtime_id, attempt, dispatch ])
       ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
+      ~composed_request_of:(fun ~attempt ->
+        (* The overflowed request was large; the fallback's was small. *)
+        match attempt with
+        | 0 -> Driver.Composed { transmitted_bytes = 300_000 }
+        | _ -> Driver.Composed { transmitted_bytes = 1_200 })
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -7238,6 +7243,12 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
     Alcotest.(check string) "checkpoint belongs to earlier terminal-error origin, not last candidate"
       "small.test_model" (Option.get terminal.checkpoint_after).session_id;
     Alcotest.(check int) "origin attempt index is the first walk index" 0 terminal.origin_attempt;
+    (* RFC-0521 §4.3: the failed-cycle line sizes the request of the
+       candidate whose error it reports, not the last dispatched one. *)
+    Alcotest.(check string)
+      "the composed request belongs to the overflow's attempt"
+      "300000"
+      (Driver.composed_request_to_string terminal.last_composed_request);
     Alcotest.(check bool)
       "the reported lane error is the overflow itself"
       true

@@ -207,6 +207,19 @@ type runtime_retry_deferral =
   ; on_deferred : deferred_runtime_lane -> unit
   }
 
+(* The request a candidate composed last in one walk attempt, counted as the
+   carried range line counts it (RFC-0521 §4.3). An official client sends its
+   own request and a candidate refused before its projection ran composed
+   none: both are [Not_composed]. *)
+type composed_request =
+  | Composed of { transmitted_bytes : int }
+  | Not_composed
+
+let composed_request_to_string = function
+  | Composed { transmitted_bytes } -> string_of_int transmitted_bytes
+  | Not_composed -> "not_composed"
+;;
+
 (* The candidate error a runtime walk returns as the lane's error, together
    with the candidate that produced it. The walk may return an error observed
    on an earlier candidate than the one it ended on (a typed context overflow
@@ -218,6 +231,7 @@ type lane_terminal_error =
   ; origin_attempt : int
   ; lane_error : Agent_core.Error.t
   ; checkpoint_after : Agent_core.Checkpoint.t option
+  ; last_composed_request : composed_request
   }
 
 (* Quota demotion must never promote a candidate the runtime table cannot
@@ -1092,6 +1106,7 @@ let attempt_runtime_candidates
     ?(attempt_continuation = fun ~dispatch:_ _ -> Runtime_attempt_dispatch.Next_may_dispatch)
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
+    ?(composed_request_of = fun ~attempt:(_ : int) -> Not_composed)
     ?(provider_answered = fun _ -> true)
     ?quota_scope_of
     ?candidate_backpressure_of
@@ -1577,6 +1592,9 @@ let attempt_runtime_candidates
            ~allow_accept_no_progress_retry
            error
        in
+       (* Read once the attempt has ended, so it is that attempt's last
+          composition and an overflow kept for a later report keeps it. *)
+       let last_composed_request = composed_request_of ~attempt:idx in
        let observed_overflow =
          match observed_overflow with
          | Some _ -> observed_overflow
@@ -1590,6 +1608,7 @@ let attempt_runtime_candidates
                ; origin_attempt = idx
                ; lane_error = error
                ; checkpoint_after
+               ; last_composed_request
                }
            else None
        in
@@ -1598,6 +1617,7 @@ let attempt_runtime_candidates
          ; origin_attempt = idx
          ; lane_error
          ; checkpoint_after
+         ; last_composed_request
          }
        in
        (* RFC last-path-resumes-after-progress §3.1: a chat operation that
@@ -3043,6 +3063,10 @@ let run_named
         (fun (readers : Keeper_media_reading.source_readers) -> readers.read) media_readers)
       ~input_source media_projector in
   let current_has_remaining_candidates = ref false in
+  (* Each walk attempt's last Keeper composition, by walk attempt index: the
+     lane's terminal error names the request its candidate composed last
+     (RFC-0521 §4.3). Only the Agent Core attempt below writes it. *)
+  let composed_bytes_by_attempt : (int, int) Hashtbl.t = Hashtbl.create 4 in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -3054,6 +3078,10 @@ let run_named
     ?attempt_continuation
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
+    ~composed_request_of:(fun ~attempt ->
+      match Hashtbl.find_opt composed_bytes_by_attempt attempt with
+      | Some transmitted_bytes -> Composed { transmitted_bytes }
+      | None -> Not_composed)
     ~on_attempt_context:(fun ~has_remaining_candidates ->
       current_has_remaining_candidates := has_remaining_candidates)
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
@@ -4361,6 +4389,9 @@ let run_named
             ; on_request_wire_observation
             ; on_model_input_window_observation
             ; on_response_observed_model_input
+            ; on_request_composed =
+                (fun ~transmitted_bytes ->
+                   Hashtbl.replace composed_bytes_by_attempt idx transmitted_bytes)
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

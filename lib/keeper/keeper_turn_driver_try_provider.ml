@@ -378,6 +378,9 @@ type try_provider_ctx =
         option
   ; on_response_observed_model_input :
       (Turn_record.response_observed_model_input -> unit) option
+  ; on_request_composed : transmitted_bytes:int -> unit
+        (* Every Keeper composition's [composed.transmitted_bytes], the value
+           [state.last_composed_bytes] holds (RFC-0521 §4.3). *)
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -2627,6 +2630,7 @@ let bounded_model_input_projection
           , (Some _ | None) ) -> Ok view)
     in
     state.last_composed_bytes := Some view.composed.transmitted_bytes;
+    ctx.on_request_composed ~transmitted_bytes:view.composed.transmitted_bytes;
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each demoting request and only narrow the frozen
        set, including the first ordinary request after a turn ends. *)

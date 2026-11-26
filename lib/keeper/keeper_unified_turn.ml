@@ -1137,7 +1137,7 @@ let run_keeper_cycle
                      attempts=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%s \
-                     cycle_latency=%dms%s error=%s"
+                     transmitted_bytes=%s cycle_latency=%dms%s error=%s"
                     meta.name
                     cycle_end
                     (keeper_cycle_failed_runtime_to_string
@@ -1168,6 +1168,15 @@ let run_keeper_cycle
                           + String.length world_state
                           + String.length user_message)
                      | None -> "not_sent")
+                    (* The request the [error_origin=] candidate composed
+                       last, its carried messages only (RFC-0521 §4.3). The
+                       carried range line prints only an attempt's first
+                       request, so a refusal mid-run is sized here. *)
+                    (Keeper_turn_driver.composed_request_to_string
+                       (match turn_state.lane_terminal_error with
+                        | Some (terminal : Keeper_turn_driver.lane_terminal_error) ->
+                          terminal.last_composed_request
+                        | None -> Keeper_turn_driver.Not_composed))
                     latency_ms
                     (if Option.is_some provider_rest
                      then

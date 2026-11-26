@@ -1729,7 +1729,7 @@ let test_keeper_turns_preview_roundtrip () =
   Preview.note_attempt ~writer:(Some writer) ~now:1795503001.0
     ~runtime_id:"ollama-rt" ~checkpoint_owner:Runtime_execution.Masc_agent_core;
   Preview.note_tool_started ~writer:(Some writer) ~now:1795503002.0 ~tool_use_id:None
-    ~tool_name:"Execute";
+    ~tool_name:"Execute" ~cohort:None;
   Preview.note_request ~writer:(Some writer) ~now:1795503003.0;
   Preview.note_text ~writer:(Some writer) ~now:1795503004.0
     "Streaming summary line";

@@ -1097,6 +1097,43 @@ let test_no_ceiling_leaves_the_loop_unbounded () =
   Alcotest.(check int) "ran every round the transcript asked for" 4 !call_count
 ;;
 
+let test_advanced_tool_round_ceiling_fails_the_run () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let transport, call_count = sequence_transport looping_transcript in
+  let agent =
+    make_agent_with_options
+      ~max_tool_rounds:2
+      ~net:env#net
+      ~transport
+      ~raw_trace:trace
+      ~checkpoint_sink:(fun _ -> Ok ())
+      ~context_injector:None
+      ~on_run_complete:None
+      ~tool:(time_tool ignore)
+      ()
+  in
+  let result =
+    Agent.Advanced.run_blocks
+      ~sw
+      ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
+      agent
+      [ Types.Text "work" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "Advanced run past declared ceiling reported success"
+   | Error (Error.Agent (Error.ToolRoundLimitExceeded { rounds; limit })) ->
+     Alcotest.(check int) "advanced rounds executed" 2 rounds;
+     Alcotest.(check int) "advanced declared ceiling" 2 limit
+   | Error other -> Alcotest.fail ("unexpected error: " ^ Error.to_string other));
+  Alcotest.(check int) "advanced stopped calling provider at ceiling" 2 !call_count
+;;
+
 let test_terminal_typed_error_allows_correction () =
   with_temp_trace
   @@ fun trace_path ->
@@ -1540,6 +1577,10 @@ let () =
             "declared tool-round ceiling fails the run"
             `Quick
             test_tool_round_ceiling_fails_the_run
+        ; Alcotest.test_case
+            "Advanced declared tool-round ceiling fails the run"
+            `Quick
+            test_advanced_tool_round_ceiling_fails_the_run
         ; Alcotest.test_case
             "no declared ceiling leaves the loop unbounded"
             `Quick

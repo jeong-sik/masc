@@ -493,6 +493,7 @@ let complete_stream_http
                | Ok eff_body -> Ok (eff_first_event, eff_body)))
         in
         let rec dispatch_stream_once
+              ?attempt_latency_counter
               ~allow_cached_fallback
               ~allow_auth_retry
               (serialized : Complete_common.serialized_http_request)
@@ -520,7 +521,7 @@ let complete_stream_http
           then observe_wire_once ();
           let requested_at = Unix.gettimeofday () in
           let latency_counter =
-            match latency_counter with
+            match attempt_latency_counter with
             | Some counter -> counter
             | None -> start_latency_counter ?clock ()
           in
@@ -1359,7 +1360,9 @@ let complete_stream_http
         with
         | Eio.Cancel.Cancelled _ as exn ->
           let bt = Printexc.get_raw_backtrace () in
-          observe_wire_once ();
+          Eio.Cancel.protect (fun () ->
+            observe_wire_once ();
+            publish_summary ~terminal:Telemetry_event.Terminal_cancelled ());
           Printexc.raise_with_backtrace exn bt
       with
       | Error
@@ -1643,6 +1646,7 @@ let complete_stream_http
             current_auth_headers := fresh_auth_headers;
             ( serialized
             , dispatch_stream_once
+                ?attempt_latency_counter:latency_counter
                 ~allow_cached_fallback:false
                 ~allow_auth_retry:false
                 serialized )
@@ -1651,6 +1655,7 @@ let complete_stream_http
         else
           ( serialized
           , dispatch_stream_once
+              ?attempt_latency_counter:latency_counter
               ~allow_cached_fallback:false
               ~allow_auth_retry:allow_initial_auth_retry
               serialized )
@@ -1666,12 +1671,14 @@ let complete_stream_http
          | Error _ ->
            ( serialized
            , dispatch_stream_once
+               ?attempt_latency_counter:latency_counter
                ~allow_cached_fallback:false
                ~allow_auth_retry:allow_initial_auth_retry
                serialized )
          | Ok cached_serialized ->
            (match
               dispatch_stream_once
+                ?attempt_latency_counter:latency_counter
                 ~allow_cached_fallback:true
                 ~allow_auth_retry:allow_initial_auth_retry
                 cached_serialized

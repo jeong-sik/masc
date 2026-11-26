@@ -587,7 +587,21 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
             emit (StreamIncomplete { reason = responses_incomplete_reason response })
           | Some _ | None -> ());
          emit_terminal response
-       | "response.failed" | "error" ->
+       | "response.failed" ->
+         let target =
+           match json |> member "response" with
+           | `Assoc _ as r -> r
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> json
+         in
+         emit
+           (SSEError
+              { message = responses_error_message target
+              ; error_type = responses_error_type target
+              ; provider_status = None
+              ; report = Types.Provider_stated
+              ; raw = data_str
+              })
+       | "error" ->
          emit
            (SSEError
               { message = responses_error_message json

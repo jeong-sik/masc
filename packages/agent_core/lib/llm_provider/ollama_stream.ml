@@ -143,7 +143,8 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
         Some
           (Stop_reason_wire.of_finish
              (Stop_reason_wire.wire_finish_of_string reason)
-             ~has_tool_blocks:(chunk.oll_tool_calls <> []))
+             ~has_tool_blocks:
+               (Hashtbl.length state.tool_block_indices > 0 || chunk.oll_tool_calls <> []))
     in
     List.iter emit (openai_open_block_stops state);
     let reported_cache_read =

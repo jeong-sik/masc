@@ -773,6 +773,18 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
     1.0;
   check int "one keeper row" 1 (json_int_member "row_count" json);
   check int "one global row" 1 (json_int_member "global_row_count" json);
+  check bool "a reservation whose time has not come has no waiting age" true
+    (U.member "oldest_age_seconds" json = `Null);
+  (* The per-source age metric reads the same wait as the summary: a
+     reservation whose time has not come adds no age in either scope. *)
+  check_metric_float "keeper schedule age metric"
+    Otel_metric_store.metric_keeper_waiting_age_seconds
+    ~labels:[ "scope", "keeper"; "source", "schedule_waiting" ]
+    0.0;
+  check_metric_float "global schedule age metric"
+    Otel_metric_store.metric_keeper_waiting_age_seconds
+    ~labels:[ "scope", "global"; "source", "schedule_waiting" ]
+    0.0;
   (match find_keeper json keeper_name with
    | None -> fail "keeper row missing"
    | Some keeper ->
@@ -794,6 +806,10 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
           (json_string_member "next_action" row);
         check string "keeper schedule id" "sched-owned"
           U.(row |> member "detail" |> member "schedule_id" |> to_string);
+        check bool "nothing waits on the reservation yet, so it has no since" true
+          (U.member "since" row = `Null);
+        check (float 0.0) "the request time stays in the detail" 100.0
+          U.(row |> member "detail" |> member "requested_at" |> to_number);
         check string "schedule sentence names the schedule" "예약 실행 · sched-owned"
           (json_string_member "what" row)
       | rows -> failf "expected one keeper schedule row, got %d" (List.length rows)));
@@ -806,6 +822,43 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
     check string "global schedule id" "sched-global"
       U.(row |> member "detail" |> member "schedule_id" |> to_string)
   | rows -> failf "expected one global schedule row, got %d" (List.length rows)
+;;
+
+let test_due_schedule_waits_from_its_due_time () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "due-keeper" in
+  ensure_keeper config keeper_name;
+  ignore
+    (create_schedule_exn
+       config
+       ~schedule_id:"sched-due"
+       ~scheduled_by:(automated keeper_name)
+      : Schedule_domain.schedule_request);
+  (match
+     Schedule_store.refresh_due
+       config
+       ~now:201.0
+       ~retention_days:Schedule_store.terminal_schedule_retention_days
+   with
+   | Ok (_state, 1) -> ()
+   | Ok (_state, changed) -> failf "expected one schedule marked due, got %d" changed
+   | Error err -> fail ("schedule refresh failed: " ^ Schedule_store.store_error_to_string err));
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  (* Requested at 100, due at 200: the Keeper has waited since 200. *)
+  match U.(json |> member "rows" |> to_list) with
+  | [ row ] ->
+    check string "due schedule row" "schedule_waiting" (json_string_member "source" row);
+    check (float 0.0) "a due reservation waits from its due time" 200.0
+      U.(row |> member "since" |> to_number);
+    let summary_age = U.(json |> member "oldest_age_seconds" |> to_number) in
+    check bool "a due reservation has a waiting age" true (summary_age > 0.0);
+    (* One row, one clock: the per-source metric reads the same wait. *)
+    check (float 0.0) "the schedule age metric counts from the due time" summary_age
+      (metric_value
+         Otel_metric_store.metric_keeper_waiting_age_seconds
+         ~labels:[ "scope", "keeper"; "source", "schedule_waiting" ])
+  | rows -> failf "expected one due schedule row, got %d" (List.length rows)
 ;;
 
 let test_live_turn_keeper_is_busy_without_waiting_rows () =
@@ -1669,6 +1722,8 @@ let () =
             test_unreadable_shutdown_keeps_fence_and_read_error
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
+        ; test_case "a due schedule waits from its due time" `Quick
+            test_due_schedule_waits_from_its_due_time
         ; test_case "keeper_wake schedule what prefers human summary" `Quick
             test_keeper_wake_schedule_what_prefers_human_summary
         ; test_case "scoped schedules preserve participants" `Quick test_scoped_schedules_keep_participant_identity

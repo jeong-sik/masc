@@ -77,7 +77,8 @@ type row_bearing =
   | Holds_state  (** The row puts its Keeper in [waiting] or [deferred]. *)
   | Listed_only
       (** The row is listed and puts the Keeper in no state: a reservation
-          whose time has not come. *)
+          whose time has not come. Nothing waits on it yet, so its [since] is
+          [None] and no wait age counts it. *)
 
 type waiting_row =
   { keeper_name : string option

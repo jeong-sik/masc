@@ -25,6 +25,11 @@ import {
 } from './keepers-api'
 import type { MemoryActPayload, OrdinaryMemoryFact, SourceBoundMemoryFact } from './types'
 
+/** The ID cell shows this many digest characters after the `sha256:` prefix;
+ *  the full ID is its tooltip. */
+const MEMORY_ID_DIGEST_CHARS = 8
+const MEMORY_ID_PREFIX = 'sha256:'
+
 export interface KeeperMemoryTabProps {
   readonly keeperName: string
 }
@@ -142,7 +147,12 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const ordinaryColumns = useMemo<readonly DataTableColumn<OrdinaryMemoryFact>[]>(() => [
     { id: 'category', header: 'Category', accessor: (r) => r.category, sortable: true },
     { id: 'claim', header: 'Claim', cell: (r) => html`<${MarkdownContent} text=${r.claim} />` },
-    { id: 'memory_id', header: 'ID', accessor: (r) => r.memory_id },
+    {
+      id: 'memory_id',
+      header: 'ID',
+      accessor: (r) => r.memory_id,
+      cell: (r) => html`<span class="kp-mem-id" title=${r.memory_id}>${(r.memory_id.startsWith(MEMORY_ID_PREFIX) ? r.memory_id.slice(MEMORY_ID_PREFIX.length) : r.memory_id).slice(0, MEMORY_ID_DIGEST_CHARS)}</span>`,
+    },
     {
       id: 'act',
       header: 'Cleanup',
@@ -360,6 +370,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
                     columns=${ordinaryColumns}
                     getRowId=${(r: OrdinaryMemoryFact, idx: number) => r.memory_id || String(idx)}
                     maxHeight=${280}
+                    className="kp-mem-facts kp-mem-facts-ordinary"
                     emptyLabel="Ordinary fact 없음"
                     caption="Keeper Ordinary Memory Facts"
                   />
@@ -391,6 +402,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
                     columns=${sourceBoundColumns}
                     getRowId=${(r: SourceBoundMemoryFact, idx: number) => `${r.path}:${idx}`}
                     maxHeight=${220}
+                    className="kp-mem-facts kp-mem-facts-source"
                     emptyLabel="Source-bound fact 없음"
                     caption="Keeper Source-Bound Memory Facts"
                   />

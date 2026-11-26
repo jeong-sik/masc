@@ -129,7 +129,7 @@ val mcp_headers : string -> string -> (string * string) list
 
 val session_cookie_header : string -> string * string
 (** [session_cookie_header session_id] returns
-    [("set-cookie", "mcp-session-id=<id>; Path=/; Max-Age=<day>; SameSite=Lax")].
+    [("set-cookie", "mcp-session-id=<id>; Path=/; Max-Age=<day>; HttpOnly; SameSite=Lax")].
     [Max-Age] is one day (from {!Masc_time_constants.day_int}) —
     operators relying on shorter sessions must reset cookies via
     a separate path. *)

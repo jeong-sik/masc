@@ -99,6 +99,24 @@ let test_unknown_id_mints_fresh_when_replacing () =
   check bool "fresh id distinct from supplied" true
     (not (String.equal supplied fresh))
 
+let test_session_id_rejects_injection_and_oversized () =
+  check bool "empty rejected" false (Session.is_valid "");
+  check bool "crlf rejected" false (Session.is_valid "abc\r\nSet-Cookie: evil=1");
+  check bool "semicolon rejected" false (Session.is_valid "abc; Domain=.evil.com");
+  check bool "space rejected" false (Session.is_valid "abc def");
+  check bool "quote rejected" false (Session.is_valid "abc\"def");
+  check bool "over 128 bytes rejected" false (Session.is_valid (String.make 129 'a'));
+  check bool "128 bytes allowed" true (Session.is_valid (String.make 128 'a'));
+  let generated = Session.generate () in
+  check bool "generated starts with mcp_" true
+    (String.starts_with ~prefix:"mcp_" generated);
+  check int "generated has 128-bit hex suffix" 36 (String.length generated);
+  let _, cookie_val =
+    Server_mcp_transport_http_headers.session_cookie_header generated
+  in
+  check bool "session cookie is HttpOnly" true
+    (String_util.contains_substring cookie_val "HttpOnly")
+
 let () =
   Alcotest.run "test_mcp_session_id_header"
     [
@@ -119,5 +137,7 @@ let () =
             test_session_id_echo_across_requests;
           test_case "fresh id is valid and distinct" `Quick
             test_unknown_id_mints_fresh_when_replacing;
+          test_case "rejects header/cookie injection and enforces HttpOnly" `Quick
+            test_session_id_rejects_injection_and_oversized;
         ] );
     ]

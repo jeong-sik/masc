@@ -302,6 +302,23 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     then None
     else get_session_id_any request
   in
+  match session_id_opt with
+  | Some sid when not (Mcp_session.is_valid sid) ->
+      let protocol_version = get_protocol_version request in
+      let origin = deps.get_origin request in
+      let body =
+        Mcp_error_code.jsonrpc_error_body Invalid_request
+          ~message:"Invalid MCP session ID"
+      in
+      let headers =
+        Httpun.Headers.of_list
+          (("content-length", string_of_int (String.length body))
+          :: Server_mcp_transport_http_headers.sessionless_json_headers
+               ~deps protocol_version origin)
+      in
+      let response = Httpun.Response.create ~headers `Bad_request in
+      Http_reqd.respond_with_string reqd response body
+  | None | Some _ ->
   let session_id =
     match session_id_opt with
     | Some sid -> sid
@@ -697,12 +714,14 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 Option.iter stream_post_sse_finish !inline_sse;
                                 raise e
                             | exn ->
+                                Log.Server.error
+                                  "MCP POST handler raised for session %s: %s"
+                                  session_id (Printexc.to_string exn);
                                 (match !inline_sse with
                                 | Some response ->
                                     stream_post_sse_json ~session_id response
                                       (error_body ~code:Mcp_error_code.Internal_error ?id:response_id
-                                         ("Internal error: "
-                                        ^ Printexc.to_string exn));
+                                         "Internal server error");
                                     stream_post_sse_finish response
                                 | None ->
                                     let protocol_version =
@@ -712,8 +731,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     respond_mcp_error ~code:Mcp_error_code.Internal_error
                                       ~deps ~request_authority request reqd ~session_id
                                       ~protocol_version
-                                      ("Internal error: "
-                                     ^ Printexc.to_string exn))))))))
+                                      "Internal server error")))))))
 
 let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     request reqd =
@@ -1312,6 +1330,24 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
+  let requested_session_id = get_session_id_any request in
+  match requested_session_id with
+  | Some session_id when not (Mcp_session.is_valid session_id) ->
+      let protocol_version = get_protocol_version request in
+      let origin = deps.get_origin request in
+      let body =
+        Mcp_error_code.jsonrpc_error_body Invalid_request
+          ~message:"Invalid MCP session ID"
+      in
+      let headers =
+        Httpun.Headers.of_list
+          (("content-length", string_of_int (String.length body))
+          :: Server_mcp_transport_http_headers.sessionless_json_headers
+               ~deps protocol_version origin)
+      in
+      let response = Httpun.Response.create ~headers `Bad_request in
+      Http_reqd.respond_with_string reqd response body
+  | None | Some _ ->
   let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
@@ -1324,7 +1360,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   in
   match auth_result with
   | Error failure ->
-      let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+      let session_id = Mcp_session.get_or_generate requested_session_id in
       let protocol_version = get_protocol_version_for_session ~session_id request in
       respond_mcp_auth_error
         ~deps
@@ -1336,7 +1372,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         ~protocol_version
         failure
   | Ok principal -> (
-      match get_session_id_any request with
+      match requested_session_id with
       | Some session_id -> (
           match validate_mcp_session_delete_profile ~profile session_id with
           | Error msg ->

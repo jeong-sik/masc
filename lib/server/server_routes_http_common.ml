@@ -47,7 +47,14 @@ let current_server_state_opt () = current_server_state ()
 let is_mcp_transport_request (request : Httpun.Request.t) =
   match request.meth, Http.Request.path request with
   | `POST, "/" -> true
-  | _, ("/mcp" | "/mcp/managed" | "/mcp/operator" | "/mcp/play" | "/sse") -> true
+  | ( _
+    , ( "/mcp"
+      | "/mcp/managed"
+      | "/mcp/operator"
+      | "/mcp/play"
+      | "/sse"
+      | "/ag-ui/events"
+      | "/events/presence" ) ) -> true
   | _ -> false
 ;;
 
@@ -64,8 +71,23 @@ let validate_origin ~request_authority (request : Httpun.Request.t) =
 
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
   {
-    get_origin;
-    cors_headers;
+    get_origin =
+      (fun request ->
+        match Server_request_authority.current () with
+        | None -> ""
+        | Some request_authority ->
+          (match classify_request_origin ~request_authority request with
+           | Missing_origin -> "*"
+           | Single_origin
+               { origin; admission = (Same_origin | Allowed_dev_origin) } ->
+             origin
+           | Single_origin { admission = Rejected; _ }
+           | Multiple_origins
+           | Malformed_origin -> ""));
+    cors_headers =
+      (fun origin ->
+        if String.equal origin "" then [ "vary", "Origin" ]
+        else cors_headers origin);
     auth_token_from_request;
     is_ready =
       (fun () ->

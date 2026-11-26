@@ -899,7 +899,19 @@ let test_mcp_origin_validation_uses_admitted_authority () =
     "GET root is dashboard"
     false
     (Server_routes_http_common.is_mcp_transport_request
-       (http1_request "/"))
+       (http1_request "/"));
+  check
+    bool
+    "GET /ag-ui/events is MCP transport"
+    true
+    (Server_routes_http_common.is_mcp_transport_request
+       (http1_request "/ag-ui/events"));
+  check
+    bool
+    "GET /events/presence is MCP transport"
+    true
+    (Server_routes_http_common.is_mcp_transport_request
+       (http1_request "/events/presence"))
 ;;
 
 let test_fiber_binding_has_no_fallback () =
@@ -983,7 +995,15 @@ let test_admitted_cors_headers_reject_foreign_origin () =
            (Some "http://localhost:8935")
            (List.assoc_opt "access-control-allow-origin" admitted);
          check (list (pair string string)) "foreign origin receives only Vary"
-           [ "vary", "Origin" ] (headers "https://attacker.invalid")))
+           [ "vary", "Origin" ] (headers "https://attacker.invalid");
+         let deps = Server_routes_http_common.mcp_transport_http_deps () in
+         let foreign_req =
+           http1_request ~headers:[ "origin", "https://attacker.invalid" ] "/ag-ui/events"
+         in
+         check (list (pair string string))
+           "MCP transport deps reject foreign origin"
+           [ "vary", "Origin" ]
+           (deps.cors_headers (deps.get_origin foreign_req))))
 ;;
 
 let permission_request base_path meth =

@@ -145,6 +145,17 @@ let github_token =
 
 let github_token_re = Re.compile github_token
 
+(* MASC Personal Access Tokens ([mpat_<id>.<64-hex>]) and Service credentials
+   ([msvc_<id>.<64-hex>]), defined in [lib/auth/authz_credential_token.mli]. *)
+let masc_credential_token =
+  Re.seq
+    [ Re.bow
+    ; Re.alt [ Re.str "mpat_"; Re.str "msvc_" ]
+    ; Re.rep1 (Re.alt [ Re.alnum; Re.set "_-." ])
+    ]
+
+let masc_credential_token_re = Re.compile masc_credential_token
+
 (** A PEM private key block, header to footer.
 
     This was a hand-written substring scan that allocated a fresh
@@ -303,18 +314,27 @@ let secret_res =
   ; awsasia_re
   ; github_token_re
   ; slack_token_re
+  ; masc_credential_token_re
   ]
 
 (* A text matches [Re.alt] of the patterns exactly when it matches one of them,
    and a replacement pass that finds no match returns its input. So when this
    scan finds nothing, every pass in [secret_res] would leave the text as it
-   is, and [redact_text] skips them: one scan instead of seven for the text
+   is, and [redact_text] skips them: one scan instead of eight for the text
    that carries no secret. When the scan finds a match the passes run in
    their order. *)
 let any_secret_re =
   Re.compile
     (Re.alt
-       [ url_credential; sk; stripe_key; awsakia; awsasia; github_token; slack_token ])
+       [ url_credential
+       ; sk
+       ; stripe_key
+       ; awsakia
+       ; awsasia
+       ; github_token
+       ; slack_token
+       ; masc_credential_token
+       ])
 
 (* Sensitive HTTP headers: field name, colon, and the rest of the line.
    Longer hyphenated names precede their suffixes so [proxy-authorization],

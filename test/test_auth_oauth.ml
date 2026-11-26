@@ -170,7 +170,7 @@ let test_dual_auth_code_and_refresh_lifecycle () =
           let wrong_verifier = String.make 43 'a' in
           check
             bool
-            "wrong verifier rejected without consuming code"
+            "wrong verifier rejected and consumes authorization code"
             true
             (Result.is_error
                (Auth_oauth.exchange_authorization_code
@@ -181,11 +181,31 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                   ~redirect_uri
                   ~resource:(Some resource)
                   ~code_verifier:wrong_verifier));
+          check
+            bool
+            "failed exchange burns single-use code even for later valid verifier"
+            true
+            (Result.is_error
+               (Auth_oauth.exchange_authorization_code
+                  ~base_path
+                  ~expected_resource:resource
+                  ~code
+                  ~client_id:client.client_id
+                  ~redirect_uri
+                  ~resource:(Some resource)
+                  ~code_verifier:verifier));
+          let fresh_code =
+            Auth_oauth.issue_authorization_code
+              ~base_path
+              ~request
+              ~bootstrap_credential:static_credential
+            |> oauth_ok
+          in
           let first_pair =
             Auth_oauth.exchange_authorization_code
               ~base_path
               ~expected_resource:resource
-              ~code
+              ~code:fresh_code
               ~client_id:client.client_id
               ~redirect_uri
               ~resource:(Some resource)
@@ -200,7 +220,7 @@ let test_dual_auth_code_and_refresh_lifecycle () =
                (Auth_oauth.exchange_authorization_code
                   ~base_path
                   ~expected_resource:resource
-                  ~code
+                  ~code:fresh_code
                   ~client_id:client.client_id
                   ~redirect_uri
                   ~resource:(Some resource)

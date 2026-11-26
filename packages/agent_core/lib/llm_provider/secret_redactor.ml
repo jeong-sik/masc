@@ -475,6 +475,37 @@ let is_sensitive_header_name name =
   | _ -> false
 ;;
 
+let is_sensitive_json_key name =
+  is_sensitive_header_name name
+  ||
+  match String.lowercase_ascii (String.trim name) with
+  | "access_key"
+  | "access_key_id"
+  | "access_token"
+  | "api_key"
+  | "api_secret"
+  | "api_token"
+  | "apikey"
+  | "auth_token"
+  | "bearer_token"
+  | "client_secret"
+  | "credential"
+  | "credentials"
+  | "id_token"
+  | "passphrase"
+  | "password"
+  | "passwd"
+  | "private_key"
+  | "refresh_token"
+  | "secret"
+  | "secret_access_key"
+  | "secret_key"
+  | "secretaccesskey"
+  | "session_token"
+  | "token" -> true
+  | _ -> false
+;;
+
 let builtin_prefixes =
   [ "Bearer "
   ; "Bearer\t"
@@ -507,7 +538,14 @@ let redact_string s =
 let rec redact_json (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `String s -> `String (redact_string s)
-  | `Assoc pairs -> `Assoc (List.map (fun (k, v) -> k, redact_json v) pairs)
+  | `Assoc pairs ->
+    `Assoc
+      (List.map
+         (fun (k, v) ->
+            let k' = redact_string k in
+            if is_sensitive_json_key k then k', `String "[REDACTED]"
+            else k', redact_json v)
+         pairs)
   | `List xs -> `List (List.map redact_json xs)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as leaf -> leaf
 ;;
@@ -533,6 +571,22 @@ let%test "redact_string masks private key block" =
 let%test "redact_json preserves structure" =
   redact_json (`Assoc [ "key", `String "Bearer tok" ])
   = `Assoc [ "key", `String "Bearer [REDACTED]" ]
+;;
+
+let%test "redact_json masks sensitive keys and redacts credentialed keys" =
+  redact_json
+    (`Assoc
+       [ "api_key", `String "raw-secret-123"
+       ; "Authorization", `String "raw-header-value"
+       ; "https://user:pass@example.com", `Bool true
+       ; "note", `String "plain"
+       ])
+  = `Assoc
+      [ "api_key", `String "[REDACTED]"
+      ; "Authorization", `String "[REDACTED]"
+      ; "https://[REDACTED]@example.com", `Bool true
+      ; "note", `String "plain"
+      ]
 ;;
 
 let%test "redact_string collapses base64 media data url" =

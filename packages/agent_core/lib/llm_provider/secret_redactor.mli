@@ -24,6 +24,12 @@ val redacted_excerpt : string -> string
     [llm_provider]. *)
 val is_sensitive_header_name : string -> bool
 
-(** [redact_json j] recursively redacts string values inside a JSON tree.
-    The tree structure and key names are preserved. *)
+(** [is_sensitive_json_key name] is [true] for JSON field or log field names
+    that carry raw credentials (passwords, tokens, API keys, and sensitive HTTP
+    header names; ASCII case-insensitive, trimmed). *)
+val is_sensitive_json_key : string -> bool
+
+(** [redact_json j] recursively redacts string values and object keys inside a
+    JSON tree, replacing the value of any {!is_sensitive_json_key} field with
+    [[REDACTED]]. *)
 val redact_json : Yojson.Safe.t -> Yojson.Safe.t

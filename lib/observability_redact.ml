@@ -49,8 +49,11 @@ let map_marker_preview transform s =
         transform s
   else transform s
 
+(* Redact before truncating so a secret token or URL userinfo straddling
+   [max_len] cannot lose its closing delimiter/length and slip past the
+   pattern matcher as a partial raw prefix. *)
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
-  map_marker_preview (fun text -> text |> truncate ~max_len |> redact_patterns) s
+  map_marker_preview (fun text -> text |> redact_patterns |> truncate ~max_len) s
 
 let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
     : Yojson.Safe.t =

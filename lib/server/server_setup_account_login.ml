@@ -60,12 +60,12 @@ let actor_of = function
   | Person { user_id; _ } -> Session.Person (Authz_types.User_id.to_string user_id)
 
 (* The page of this server reads a person's stream from the same origin, so
-   that stream names no origin it allows. The operator's stream keeps the
-   headers of the single-user server. *)
+   that stream names no origin it allows. The operator's stream only reflects
+   origins admitted by the current request authority. *)
 let stream_cors_headers owner request =
   match owner with
   | Person (_ : person) -> []
-  | Operator { actor = (_ : string) } -> Server_auth.cors_headers (Server_auth.get_origin request)
+  | Operator { actor = (_ : string) } -> Server_auth.admitted_cors_headers request
 
 (* HIGH-RISK-UNREVIEWED: a person signs in from another machine. A browser
    the client opened on this one would show their approval page to whoever

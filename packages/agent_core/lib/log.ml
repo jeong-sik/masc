@@ -75,8 +75,14 @@ let field_to_json = function
 let redact = Llm_provider.Secret_redactor.redact_string
 
 let redact_field_value = function
-  | S (k, v) -> S (k, redact v)
-  | J (k, v) -> J (k, Llm_provider.Secret_redactor.redact_json v)
+  | S (k, v) ->
+    if Llm_provider.Secret_redactor.is_sensitive_json_key k
+    then S (k, "[REDACTED]")
+    else S (k, redact v)
+  | J (k, v) ->
+    if Llm_provider.Secret_redactor.is_sensitive_json_key k
+    then J (k, `String "[REDACTED]")
+    else J (k, Llm_provider.Secret_redactor.redact_json v)
   | (I _ | F _ | B _ | Secret _) as f -> f
 ;;
 

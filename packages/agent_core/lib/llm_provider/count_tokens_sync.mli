@@ -6,8 +6,6 @@
 
     @stability Internal *)
 
-include module type of Measurement_types
-
 (** Endpoint for an Anthropic-compatible Messages count-tokens call: inserts
     [/count_tokens] after the configured request path, preserving any query
     string carried by custom or proxy configurations. *)
@@ -46,6 +44,16 @@ val gemini_count_tokens_body
 
     The call is bounded only when [timeout_s] is explicitly supplied;
     enforcing it also requires [clock], mirroring {!Http_client.post_sync}. *)
+type completion_request_measurement = private
+  { input_count : Input_token_count.count
+  ; output_token_receipt : Types.output_token_receipt
+  }
+
+type completion_request_error =
+  | Input_count_failed of Input_token_count.error
+  | Output_token_resolution_failed of Types.required_output_token_error
+  | Invalid_completion_request of string
+
 (** Whether AGENT_CORE has an exact provider-native measurement adapter for this
     request configuration. This is the support SSOT used by both measurement
     dispatch and Agent admission routing. *)

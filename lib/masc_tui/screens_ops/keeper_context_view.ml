@@ -1068,27 +1068,17 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let max_skip = Int.max 0 (List.length rows - vis_h) in
     let skip = Int.min max_skip (Int.max 0 st.scroll_offset) in
     let y = ref content.y and bot = Rect.bottom content in
-    let strip_rule s =
-      let s =
-        if String.starts_with ~prefix:"──" s then
-          String.sub s 6 (String.length s - 6)
-        else s
-      in
-      let s = String.trim s in
-      if String.ends_with ~suffix:"──" s then
-        String.sub s 0 (String.length s - 6) |> String.trim
-      else s
-    in
     List.iter
       (fun (style, txt) ->
         if !y < bot then begin
-          if String.starts_with ~prefix:"──" txt then
-            Card.draw_hairline ~pad_x:0 ~bg ~label:(strip_rule txt) grid
-              ~rect:content ~y:!y ~theme
-          else
-            ignore
-              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                 ~max_w:content.w ~style txt);
+          (match Card.legacy_rule_label txt with
+          | Some lbl ->
+              Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                ~y:!y ~theme
+          | None ->
+              ignore
+                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                   ~max_w:content.w ~style txt));
           incr y
         end)
       (Store_scroll.drop skip rows)
@@ -1650,27 +1640,17 @@ let draw_response_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
         let max_skip = Int.max 0 (List.length rows - vis_h) in
         let skip = Int.min max_skip (Int.max 0 st.scroll_offset) in
         let y = ref content.y and bot = Rect.bottom content in
-        let strip_rule s =
-          let s =
-            if String.starts_with ~prefix:"──" s then
-              String.sub s 6 (String.length s - 6)
-            else s
-          in
-          let s = String.trim s in
-          if String.ends_with ~suffix:"──" s then
-            String.sub s 0 (String.length s - 6) |> String.trim
-          else s
-        in
         List.iter
           (fun (style, txt) ->
             if !y < bot then begin
-              if String.starts_with ~prefix:"──" txt then
-                Card.draw_hairline ~pad_x:0 ~bg ~label:(strip_rule txt) grid
-                  ~rect:content ~y:!y ~theme
-              else
-                ignore
-                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                     ~max_w:content.w ~style txt);
+              (match Card.legacy_rule_label txt with
+              | Some lbl ->
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                    ~y:!y ~theme
+              | None ->
+                  ignore
+                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                       ~max_w:content.w ~style txt));
               incr y
             end)
           (Store_scroll.drop skip rows)

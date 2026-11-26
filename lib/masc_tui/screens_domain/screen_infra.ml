@@ -494,11 +494,11 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
           if rem_rows >= 2 then
             let empty_hint =
               if model.nav.zoomed && Model.can_zoom_current_view model then
-                Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [o] 키퍼 · [p] 프로브"
-                  ~en:"[e] Keeper Cfg · [S] SSH Pools · [o] Keeper · [p] Probe"
+                Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
+                  ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe"
               else
-                Say.make ~ko:"[Enter/z] 확대 보기 · [e] 설정 · [o] 키퍼"
-                  ~en:"[Enter/z] Zoom · [e] Config · [o] Keeper"
+                Say.make ~ko:"[Enter/z] 확대 보기 · [e] 설정"
+                  ~en:"[Enter/z] Zoom · [e] Config"
             in
             ignore
               (H.put_clipped ~grid ~clip:empty_box ~x:(empty_box.x + 2)
@@ -747,12 +747,12 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
   let hotkey =
     if zoomed then
       Say.resolve lang
-        (Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [o] 키퍼 · [p] 프로브"
-           ~en:"[e] Keeper Cfg · [S] SSH Pools · [o] Keeper · [p] Probe")
+        (Say.make ~ko:"[e] 키퍼 설정 · [o] 키퍼 · [S] SSH 풀 · [p] 프로브"
+           ~en:"[e] Keeper Cfg · [o] Keeper · [S] SSH Pools · [p] Probe")
     else
       Say.resolve lang
-        (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [o] 키퍼 · [p] 프로브"
-           ~en:"[Enter/z] Zoom · [e] Config · [o] Keeper · [p] Probe")
+        (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [p] 프로브"
+           ~en:"[Enter/z] Zoom · [e] Config · [p] Probe")
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -1290,8 +1290,8 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [S] SSH 풀 · [o] 키퍼"
-                 ~en:"[Enter/z] Zoom · [e] Config · [S] SSH Pools · [o] Keeper"))
+              (Say.make ~ko:"[Enter/z] 확대 · [o] 키퍼 · [S] SSH 풀"
+                 ~en:"[Enter/z] Zoom · [o] Keeper · [S] SSH Pools"))
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 샌드박스 플릿 (%d)" (List.length entries))

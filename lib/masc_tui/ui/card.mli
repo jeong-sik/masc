@@ -77,6 +77,13 @@ val draw :
     title/subtitle, btop-style right-aligned badge/italic hotkey, and focus
     highlight, and return {!inner_rect} for child rendering. *)
 
+val legacy_rule_label : string -> string option
+(** Extract the inner title from a column-0 legacy ["── Label"] or
+    ["── Label ──"] section-rule line, stripping leading/trailing box-dash
+    delimiters and surrounding whitespace. Indented lines (e.g. ["  ── ..."])
+    and ordinary text return [None] so untrusted body content cannot spoof a
+    section header. *)
+
 val draw_hairline :
   ?pad_x:int ->
   ?label:string ->

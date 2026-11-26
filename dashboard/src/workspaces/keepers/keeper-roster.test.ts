@@ -204,6 +204,20 @@ describe('a roster row', () => {
     expect(seen.get('b-resting')).toMatchObject({ line: '⏸ 휴식 · rt-rest', parts: null })
   })
 
+  it("colors a row's Ctx pill by how full the context is and leaves it plain with no reading", () => {
+    const view = render(html`<${KeeperRoster}
+      roster=${observedValue([
+        keeper('a-room', { context_ratio: 0.64 }),
+        keeper('b-filling', { context_ratio: 0.65 }),
+        keeper('c-full', { context_ratio: 0.85 }),
+        keeper('d-unread', { context_ratio: null }),
+      ], Date.now())}
+      selectedKeeper=${null} onSelectKeeper=${vi.fn()} onCreatedKeeper=${vi.fn()}
+    />`)
+    const tone = (name: string) => view.container.querySelector(`[data-keeper="${name}"] [data-ctx="true"]`)?.getAttribute('data-tone') ?? null
+    expect([tone('a-room'), tone('b-filling'), tone('c-full'), tone('d-unread')]).toEqual(['ok', 'warn', 'bad', null])
+  })
+
   it('lays what a turn sent since the snapshot over its own row and over no other', () => {
     const keepers = [
       keeper('alpha', { active_turn: turn([tool('Grep', 'executing')]) }),

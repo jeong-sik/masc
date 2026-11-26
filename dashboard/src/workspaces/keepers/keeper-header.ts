@@ -3,7 +3,6 @@
  */
 
 import { html } from 'htm/preact'
-import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import {
@@ -22,6 +21,7 @@ import { PopoverMenu, type PopoverMenuItem } from '../../components/primitives/p
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import {
   bootKeeperAction,
+  contextPillTone,
   deleteKeeperAction,
   formatContextDetail,
   interruptKeeperTurnAction,
@@ -349,10 +349,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               <span
                 class="kp-pill"
                 data-ctx="true"
-                data-tone=${(() => {
-                  const tone = ctxObs.kind === 'value' ? contextSeverityTone(ctxObs.data) : 'absent'
-                  return tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'brass'
-                })()}
+                data-tone=${contextPillTone(ctxObs)}
                 title=${ctxDetail.tooltip}
               >
                 Ctx ${ctxText}

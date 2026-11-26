@@ -13,6 +13,7 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { isAdminLockedForSession } from '../../routes/router'
 import {
+  contextPillTone,
   filterAndSortRoster,
   formatContextDetail,
   isKeeperPathResting,
@@ -178,13 +179,6 @@ export function KeeperRoster(props: KeeperRosterProps) {
                   const ctxObs = observeRosterContextPct(k)
                   const ctxDetail = formatContextDetail(k)
                   const ctxLabel = ctxObs.kind === 'value' ? ctxDetail.label : formatObserved(ctxObs, (v) => `${v}%`)
-                  const ctxTone = ctxObs.kind !== 'value'
-                    ? undefined
-                    : ctxObs.data >= 85
-                      ? 'bad'
-                      : ctxObs.data >= 65
-                        ? 'warn'
-                        : 'ok'
                   const resting = isKeeperPathResting(k)
                   const failing = needsRosterAttention(k)
                   const selected = props.selectedKeeper === k.name
@@ -256,7 +250,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
                       <span class="kp-roster-text">
                         <span class="kp-roster-line">
                           <span class="kp-roster-name">${k.name}</span>
-                          <span class="kp-pill" data-ctx="true" data-tone=${ctxTone} title=${ctxDetail.tooltip}>
+                          <span class="kp-pill" data-ctx="true" data-tone=${contextPillTone(ctxObs)} title=${ctxDetail.tooltip}>
                             Ctx ${ctxLabel}
                           </span>
                         </span>

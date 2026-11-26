@@ -376,9 +376,6 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
           owner_key: asStr(activeRaw.owner_key),
           preview_observed_through: asNum(activeRaw.preview_observed_through),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
-          phase: asStr(activeRaw.phase),
-          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
-          elapsed_ms: asNum(activeRaw.elapsed_ms),
           preview: decodedPreview,
         }
       : null

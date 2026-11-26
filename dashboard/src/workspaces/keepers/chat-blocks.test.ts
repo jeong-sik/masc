@@ -42,7 +42,7 @@ describe('owner-scoped turn progress', () => {
   })
   const turn = (ownerKey: string, through: number): KeeperActiveTurn => ({
     lane: 'chat', owner_key: ownerKey, preview_observed_through: through,
-    started_at_unix: 5, tool_in_flight: null,
+    started_at_unix: 5,
   })
   it('keeps both the displayed preview and the next owner received ahead of its HTTP snapshot', () => {
     const a = sample('A', 3, 10)
@@ -619,7 +619,7 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     const keeper = makeRosterKeeper()
     const startedAt = 1_700_000_000
     const active: KeeperActiveTurn = {
-      owner_key: 'A', lane: 'autonomous', started_at_unix: startedAt, tool_in_flight: null,
+      owner_key: 'A', lane: 'autonomous', started_at_unix: startedAt,
     }
     const at = (elapsed: number) => {
       const turns = observedValue(new Map([[keeper.name, {
@@ -950,9 +950,6 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
         lane: 'autonomous',
         turn_ref: 'tr-9#4',
         started_at_unix: Math.floor(Date.now() / 1000) - 10,
-        phase: 'tool',
-        tool_in_flight: null,
-        elapsed_ms: 10_000,
         preview: {
           status_text: 'Checking build output',
           activity: 'tool',

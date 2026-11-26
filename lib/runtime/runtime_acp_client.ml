@@ -375,7 +375,11 @@ let profile_of_driver = function
     ; model_config_id = "model"
     ; effort_config_id = None
     (* Its soft fraction must stay below its hard fraction, 0.9 unless set, so
-       MASC sets the hard one to the whole limit. *)
+       MASC sets the hard one to the whole limit. The host then reports the
+       limit it was given as its window ([usage_update.size] 400000 with the
+       setting, 1007997 without, echo provider), so on such a lane a limit
+       above the model's own window shows up as the provider's overflow, not
+       as the start-time window check. *)
     ; compaction_point = Muse_compaction_settings
     }
 ;;

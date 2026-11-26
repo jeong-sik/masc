@@ -1169,15 +1169,28 @@ let jump_to_knowledge_wiki ?zoomed ?return_from (m : Model.t) (slug : string) =
   let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   let knowledge =
-    m.knowledge
-    |> Knowledge_store.unpin_memory_diff_revs
-    |> Knowledge_store.close_memory_reading
-    |> Knowledge_store.close_memory_diagram
-    |> Knowledge_store.clear_pending_wiki_edit
-    |> Knowledge_store.clear_armed_vote
-    |> Knowledge_store.clear_pending_artifact_revision
-    |> close_board_recovery
-    |> Knowledge_store.select_wiki_slug ~slug
+    let k0 =
+      m.knowledge
+      |> Knowledge_store.unpin_memory_diff_revs
+      |> Knowledge_store.close_memory_reading
+      |> Knowledge_store.close_memory_diagram
+      |> Knowledge_store.clear_pending_wiki_edit
+      |> Knowledge_store.clear_armed_vote
+      |> Knowledge_store.clear_pending_artifact_revision
+      |> close_board_recovery
+      |> Knowledge_store.select_wiki_slug ~slug
+    in
+    match (k0.pending_wiki_jump_slug, k0.wiki_index) with
+    | Some _, Observed.Value { stale = false; _ } ->
+        { k0 with wiki_index = Observed.mark_stale k0.wiki_index }
+    | ( Some _
+      , ( Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ) )
+    | None, _ ->
+        k0
   in
   let next0 =
     {
@@ -4155,7 +4168,9 @@ let enter_plan (m : Model.t) : enter_plan =
           match m.knowledge.active_tab with
           | Nav.Knowledge_board ->
               if m.nav.pane_index >= 1 || m.nav.zoomed then Enter_noop
-              else if Option.is_some (Knowledge_store.selected_post m.knowledge)
+              else if
+                Option.is_some
+                  (Knowledge_store.board_detail_post m.knowledge)
               then Enter_toggle_zoom
               else Enter_noop
           | Nav.Knowledge_wiki ->
@@ -10528,7 +10543,7 @@ let pop_workspace_return (m : Model.t) =
       in
       Some (next, View_fetches.fetches_for_current_view next)
 
-let close_inspector (m : Model.t) =
+let close_inspector ?(preserve_overlay = false) (m : Model.t) =
   match m.nav.inspector with
   | None -> (m, [])
   | Some _ ->
@@ -10542,21 +10557,23 @@ let close_inspector (m : Model.t) =
       in
       let keep_ask = Model.has_preserved_ask_return nav_cleared in
       let restored_overlay, restored_ask_modal =
-        match ret_overlay with
-        | Some Nav.Ask_answer ->
-            if Option.is_some m.ask_modal then
-              (Some Nav.Ask_answer, m.ask_modal)
-            else (None, None)
-        | Some
-            (( Nav.Incidents
-             | Nav.Queue_context _
-             | Nav.Palette
-             | Nav.Settings _
-             | Nav.Inline_action _
-             | Nav.Help
-             | Nav.System_gate _ ) as ov) ->
-            (Some ov, if keep_ask then m.ask_modal else None)
-        | None -> (None, if keep_ask then m.ask_modal else None)
+        if preserve_overlay then (m.nav.overlay, m.ask_modal)
+        else
+          match ret_overlay with
+          | Some Nav.Ask_answer ->
+              if Option.is_some m.ask_modal then
+                (Some Nav.Ask_answer, m.ask_modal)
+              else (None, None)
+          | Some
+              (( Nav.Incidents
+               | Nav.Queue_context _
+               | Nav.Palette
+               | Nav.Settings _
+               | Nav.Inline_action _
+               | Nav.Help
+               | Nav.System_gate _ ) as ov) ->
+              (Some ov, if keep_ask then m.ask_modal else None)
+          | None -> (None, if keep_ask then m.ask_modal else None)
       in
       let next0 =
         {
@@ -10644,12 +10661,18 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
     y := min body_bot (!y + 4);
     let v_opt = Work_store.verification_for_task ~task_id:tk.id m.work in
     let rest_h = max 0 (body_bot - !y) in
+    let empty_v_notice_h =
+      match v_opt with
+      | Some _ -> 0
+      | None ->
+          Work_store.verification_notice_rows ~max_rows:(Int.min 2 rest_h) m.work
+    in
     let desc_h =
       if rest_h <= 0 then 0
       else
         match tk.description, v_opt with
         | Some _, Some _ -> min rest_h (max 1 (rest_h / 2))
-        | Some _, None -> rest_h
+        | Some _, None -> max 0 (rest_h - empty_v_notice_h)
         | None, _ -> 0
     in
     let md_max =

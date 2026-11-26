@@ -14,7 +14,7 @@ related: []
 
 - 코드 기준: main `0ab05798e9a5b`.
 - Vibe 기준: Mistral Vibe 3.1.0(운영 설치본)과 3.1.5 의 소스, 오프라인 실험(§5).
-- **정한 것**: 수준을 Vibe 에 넘기는 법(D1), ACP `read`·`full` 의 작업 폴더(D2).
+- **정한 것**: 수준을 Vibe 에 넘기는 법(D1), ACP `read`·`full` 의 작업 폴더와 skill 폴더(D2).
 - **배포 뒤 정할 것**: Keeper 에게 주는 안내(D3).
 
 ## 0. 요약
@@ -41,6 +41,9 @@ Vibe 는 묻지 않고 실행하는 호출이 있다. 그래서 `none` 인 Keepe
 - ACP 의 `none` 은 빈 격리 폴더(`create_isolated_workspace`)에서 돈다.
 - `read`·`full` 은 pool key 의 `cwd = base_path` 에서 돈다(`keeper_acp_runtime.ml`).
 - Vibe 는 작업 폴더 안 읽기를 묻지 않는다(실험 C1). `full` 에서는 쓰기도 묻지 않는다(실험 F1). 작업 폴더가 base path 면 그 자리가 운영자 체크아웃이다.
+- `read`·`full` host 는 base path 의 `.masc/skills`·`.agents/skills` 도 받는다(`discover_skills_dirs`). Kimi 는 `--skills-dir` 로, Vibe 는 세션 폴더(`additionalDirectories`)로 받는다.
+- Vibe 는 세션 폴더를 작업 폴더처럼 다룬다. `read` 는 그 안을 묻지 않고 읽고, `full` 은 묻지 않고 쓴다(실험 X1·X2). 두 폴더 밖을 읽을 때는 허락 요청을 보낸다(실험 X0).
+- `.agents/skills` 는 운영자의 skill 이다. `.masc/skills` 는 MASC skill 목록의 원본이고, Keeper 는 그 목록을 `keeper_skill` 로 받는다.
 - Codex 는 다른 규칙을 쓴다(`Keeper_codex_runtime.native_cwd` 주석, #39444). base path 는 운영자의 AGENTS.md 와 skill 이 있는 체크아웃이라 작업 폴더로 쓰지 않는다. 샌드박스가 호스트 트리를 붙이는 Keeper 는 그 트리에서 돈다. 나머지 Keeper 는 MASC 런타임 루트 아래 자기 폴더에서 돈다.
 - 그 주석은 이 규칙을 Muse 와 Antigravity 가 쓴다고 적는다. ACP 로 도는 Muse 는 지금 이 규칙을 따르지 않는다.
 - Vibe 는 신뢰한 폴더에서만 프로젝트 파일을 싣는다. 작업 폴더의 `.vibe/config.toml`·`.vibe/agents/`(`vibe/core/config/layers/project.py`), 작업 폴더에서 저장소 루트까지의 `AGENTS.md`(`vibe/core/trusted_folders.py`)다.
@@ -107,6 +110,8 @@ Vibe 는 묻지 않고 실행하는 호출이 있다. 그래서 `none` 인 Keepe
 - 규칙은 `Keeper_codex_runtime.native_cwd` 에서 모듈 하나로 뽑는다. Codex 와 ACP 가 같이 부른다. 복사하지 않는다.
 - 폴더 이름은 클라이언트의 닫힌 합으로 정한다. Codex 는 지금 폴더(`codex-workspaces`)를 그대로 쓴다.
 - `none` 은 지금처럼 빈 격리 폴더에서 돈다.
+- `read`·`full` host 에 주는 폴더는 바인딩이 적은 `skills-dirs` 뿐이다. base path 의 폴더는 넘기지 않는다. Codex 도 운영자 skill 을 받지 않는다(#39444). MASC skill 은 모든 수준에서 `keeper_skill` 로 간다.
+- pool key 는 host 폴더를 `Isolated_per_spawn`·`Keeper_folder of string` 으로 든다. 두 spawn 자리는 수준을 다시 보지 않고 key 를 읽는다.
 - 개인 폴더도 base path 의 `.masc` 안에 있다. 저장소 루트까지 올라가 파일을 읽는 host 는 base path 저장소의 파일을 여전히 본다.
 - Codex 는 `project_root_markers=[]` 로 이 길을 끊는다. Muse 가 저장소의 `.mcp.json` 을 싣는 일은 이 RFC 가 바꾸지 않는다. Vibe 는 신뢰하지 않은 폴더라 싣지 않는다(§1.2).
 - ACP driver 넷(Antigravity, Kimi Code, Mistral Vibe, Muse Code)에 같이 적용된다. 지금 `read`·`full` 을 선언한 운영 Keeper 는 없다(§1.1).
@@ -147,6 +152,9 @@ Vibe 는 묻지 않고 실행하는 호출이 있다. 그래서 `none` 인 Keepe
 | C1 | `["masc_*","todo","read_file"]`, 클라이언트가 모두 거절 | 작업 폴더의 `read_file` 이 내용을 돌려줬다. 허락 요청 0건 |
 | C2 | C1 의 목록, 클라이언트가 모두 허락 | `write_file` 이 `tool_denied`. 허락 요청 0건 |
 | F1 | 목록 없음, 모드 `auto-approve`, 클라이언트가 모두 거절 | `write_file` 이 작업 폴더에 썼다. 허락 요청 0건 |
+| X0 | C1 의 목록, 세션 폴더 하나, 클라이언트가 모두 거절 | 작업 폴더와 세션 폴더 밖 파일의 `read_file` 이 허락 요청 1건 뒤 `tool_denied` |
+| X1 | X0 과 같다 | 세션 폴더 안 `read_file` 이 내용을 돌려줬다. 허락 요청 0건 |
+| X2 | 목록 없음, 모드 `auto-approve`, 세션 폴더 하나, 클라이언트가 모두 거절 | 세션 폴더 안에 `write_file` 이 썼다. 허락 요청 0건 |
 
 시험과 배포 뒤 측정:
 

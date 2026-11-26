@@ -17,7 +17,7 @@
 
 출처는 `<base-path>/.masc/activity-events/2026-11/` 의 `task.submit_for_verification`·`task.approved`·`task.rejected` 사건과 `<base-path>/.masc/verification-runs.jsonl` 다. 집계 방법과 사본 위치는 #54918 에 적었다.
 
-- 승인이 못 본 채로 나온다. 실행 기록이 남은 승인 39건 중 12건이 자기 도구 결과에 로그인 벽을 만나고도 승인됐다. task-4031 의 승인은 「Actions 로그 상세는 sign-in 필요로 … 직접 확인하지 못했고」 라고 적었다. 실행 기록 파일는 48시간만 남는다. 같은 날 12:15Z 에 다시 세면 38건 중 11건이다.
+- 승인이 못 본 채로 나온다. 실행 기록이 남은 승인 39건 중 12건이 자기 도구 결과에 로그인 벽을 만나고도 승인됐다. task-4031 의 승인은 「Actions 로그 상세는 sign-in 필요로 … 직접 확인하지 못했고」 라고 적었다. 실행 기록 파일는 끝난 판정 64건만 남는다(`lib/verification_run_registry.ml:159`). 같은 날 12:15Z 에 다시 세면 38건 중 11건이다.
 - 판정 사건에는 승인 사유가 없다(`config/prompts/verification.md:37`). 실행 기록이 남은 승인에는 사유가 있다. 승인 175건 가운데 기록이 없는 검증자 승인은 131건이고 사람 승인이 6건이다. 그 131건은 읽었는지 알 수 없다.
 - 거절의 주원인은 못 읽음이 아니다. 거절 89건을 사유 원문으로 나누면 읽기 실패만 7건, 읽은 것과 상충 4건, 일 미충족이거나 실행 증거를 내지 않음 56건, 혼합 18건, 계약 문구가 현실과 어긋남 4건이다. 읽기 실패가 원인인 것은 25건(28%) 까지다. 이 분류는 검증자가 쓴 사유 원문을 읽은 것이다. 실제와 대조한 것은 task-3891 한 건이고, 제출자가 미충족을 스스로 적은 24건은 뒷받침된다.
 - Keeper 가 아닌 생산자의 거절 9건 중 생산자가 답한 것은 1건이다. 거절 사유는 Task 의 handoff 에 실린다(`lib/workspace/workspace_task.ml:487-508`). 생산자를 향한 표면은 없다. Task 는 「Any agent may claim this task」 로 `todo` 에 놓인다.
@@ -203,7 +203,7 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 
 | 층 | 더하는 것 | 지우는 것 | 재는 것 |
 |---|---|---|---|
-| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 판정 행의 `evidence_reads`(live 조회 포함). 조회 관측을 48시간 밖으로 남기는 저장소로 옮긴다 | 「read ranges of the actual file」 문구(`lib/workspace/workspace_verification_snapshot.ml:308-329`) | 읽은 페이지가 판정 행에 남은 판정의 비율 |
+| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 판정 사건의 `evidence_reads`(기록 읽기와 live 조회). 지금은 도구 관측이 64건만 남는 실행 기록에만 있다 | 「read ranges of the actual file」 문구(`lib/workspace/workspace_verification_snapshot.ml:308-329`) | 읽은 페이지가 판정 사건에 남은 판정의 비율 |
 | 2 `truncated` 삭제 | 텍스트 본문을 통째로 blob 으로 두고 리더로 읽는다 | `truncated`, `warn_oversized_evidence`(`lib/verification_protocol.ml:106-124`), posture 절 | 잘림 사유 거절 9건, 잘린 항목을 가진 승인 19건 |
 | 3 sha256 참조 | `artifact:sha256:` 와 export 결과의 참조, `masc_evidence_put`, 기록의 blob 붙잡기 | checkout 접두어 안내 | 경로 사유 거절. #27552 |
 | 4 경계 하나 | resolver 하나, `Unreadable(reason)`, `Submitter` 거절, Harness 보류와 운영자 목록, `gh:`(공개 저장소) | 정책 다섯을 하나로. #38583 의 meta 거절. `evidence_capture` 진단(`lib/task/tool_task.ml:268`). 「note 로 감싸라」 두 곳을 `gh:` 안내로 | 제출에서 거절한 건수(사유별). 운영자 목록에 오른 Harness 멈춤. 문법이 덮지 않은 live 조회 건수 |
@@ -267,6 +267,6 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - MCP 클라이언트의 호출 시간 한도. 네트워크 읽기가 제출 호출 안으로 들어온다.
 - Keeper 가 제출 거절을 받고 어떻게 행동하는지. 재지 않았다.
 - 검증자 승인 131건은 시도별 기록이 없어 읽었는지 알 수 없다.
-- 실행 기록 파일는 48시간만 남는다. 승인 39건 중 12건은 11-26 오전 실측의 값이고 원본은 굴러갔다. 12:15Z 의 사본은 64건(승인 38, 로그인 벽 11)이다. 1층에서 조회 관측을 오래 남는 저장소로 옮기기 전까지는 재실측이 같은 수를 재지 못한다.
+- 실행 기록 파일는 끝난 판정 64건만 남는다. 승인 39건 중 12건은 11-26 오전 실측의 값이고 원본은 굴러갔다. 12:15Z 의 사본은 64건(승인 38, 로그인 벽 11)이다. 1층에서 판정 사건에 읽은 기록을 싣기 전까지는 재실측이 같은 수를 재지 못한다.
 - 거절 분류는 LLM 이 쓴 사유 원문을 읽은 것이다(±5건). 실제와 대조한 것은 1건이다.
 - live 조회의 긴 꼬리(contents·branches·variables·issues) 가운데 어느 것이 계약 판정에 꼭 필요한지. run 의 artifact 본문도 그렇다. 5층 전에 잰다.

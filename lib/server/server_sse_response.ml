@@ -221,13 +221,20 @@ let keepalive_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
    clock that was set back reads an earlier time after a later send. Each
    sleep is at most one interval, so a clock set back holds the keepalive
    at most one interval past the wake that saw the new count. [Quiet] starts
-   the next interval at the answer. *)
+   the next interval at the answer.
+
+   The race in [respond] cancels this fiber at the close, but a fiber whose
+   sleep already ended runs on to its next suspension: a close and a due
+   keepalive in the same instant would still ask [idle]. So every wake reads
+   the close first. *)
 let keep_alive t ~sleep ~idle =
   let rec wait ~marked ~from =
     let due_in = from +. keepalive_interval_s -. t.now () in
     sleep (Float.min keepalive_interval_s (Float.max 0.0 due_in));
     let now_marked = Atomic.get t.sends_marked in
-    if now_marked <> marked
+    if Eio.Promise.is_resolved t.closed || is_closed t
+    then ()
+    else if now_marked <> marked
     then wait ~marked:now_marked ~from:(Atomic.get t.last_marked_at)
     else if Atomic.get t.sends_waiting > 0
     then wait ~marked ~from:(t.now ())

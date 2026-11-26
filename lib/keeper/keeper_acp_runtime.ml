@@ -1283,19 +1283,91 @@ let make_stream_projection
         observation);
     drain_events_if_owner should_drain
   in
+  (* Records the end of native runs and tells the completion observers. It runs
+     outside [stream_mu], like every callback. *)
+  let report_native_ends completion runs =
+    List.iter
+      (fun (idx, observation) ->
+         Host.record_raw_native_tool
+           ~keeper_name
+           ~raw_trace_run
+           ~phase:`Finished
+           observation;
+         Option.iter
+           (fun notify ->
+              notify
+                ~block_index:idx
+                ~tool_call_id:(Runtime_native_tools.call_id observation)
+                completion)
+           on_native_tool_completion)
+      runs
+  in
+  (* Ends the one native run the client reported as finished. A call that is
+     not open here, because it already ended or was never opened, ends
+     nothing. *)
+  let finish_native_tool ~tool_call_id completion =
+    let closed, should_drain =
+      Stdlib.Mutex.protect stream_mu (fun () ->
+        if !finished || tool_call_id = ""
+        then None, false
+        else (
+          match Hashtbl.find_opt native_tool_indices tool_call_id with
+          | None -> None, false
+          | Some (idx, observation) ->
+              Hashtbl.remove native_tool_indices tool_call_id;
+              Hashtbl.replace closed_native_tool_ids tool_call_id ();
+              let drain =
+                enqueue_events_locked [ Agent_core.Types.ContentBlockStop { index = idx } ]
+              in
+              Some (idx, observation), drain))
+    in
+    report_native_ends completion (Option.to_list closed);
+    drain_events_if_owner should_drain
+  in
+  (* Every native run still open, oldest block first, with the stream stops
+     that close them. The caller holds [stream_mu]. *)
+  let close_open_native_locked () =
+    let runs =
+      (Hashtbl.fold
+         (fun id (idx, observation) acc -> (id, idx, observation) :: acc)
+         native_tool_indices []
+       @ List.map (fun (idx, observation) -> "", idx, observation) !anonymous_native_blocks)
+      |> List.sort (fun (_, a, _) (_, b, _) -> Int.compare a b)
+    in
+    Hashtbl.iter
+      (fun id _ -> if id <> "" then Hashtbl.replace closed_native_tool_ids id ())
+      native_tool_indices;
+    Hashtbl.clear native_tool_indices;
+    anonymous_native_blocks := [];
+    ( List.map (fun (_, idx, observation) -> idx, observation) runs
+    , List.map (fun (_, idx, _) -> Agent_core.Types.ContentBlockStop { index = idx }) runs )
+  in
+  (* The client moved on to its next message, so a native run still open is
+     over: an agent cannot stream past a tool call before the result exists.
+     Mistral Vibe's search_tool_functions reported no end of its own and stayed
+     open until the turn ended while the model was already answering. *)
+  let agent_message_is_arriving events_of =
+    let ended, should_drain =
+      Stdlib.Mutex.protect stream_mu (fun () ->
+        if !finished
+        then [], false
+        else
+          let native_ends, native_stops = close_open_native_locked () in
+          let drain = enqueue_events_locked (events_of native_stops) in
+          native_ends, drain)
+    in
+    report_native_ends Runtime_native_tools.end_observed ended;
+    drain_events_if_owner should_drain
+  in
   let on_acp_event = function
     | Acp.Text_delta delta ->
       observe_activity ();
-      let should_drain =
-        Stdlib.Mutex.protect stream_mu (fun () ->
-          if !finished
-          then false
-          else (
-            let prefix = ensure_message_started_locked () @ close_open_thought_locked () in
-            let start_ev, idx =
-              match !text_index with
-              | Some i -> [], i
-              | None ->
+      agent_message_is_arriving (fun native_stops ->
+          let prefix = ensure_message_started_locked () @ close_open_thought_locked () in
+          let start_ev, idx =
+            match !text_index with
+            | Some i -> [], i
+            | None ->
                 let i = alloc_index_locked () in
                 text_index := Some i;
                 ( [ Agent_core.Types.ContentBlockStart
@@ -1306,27 +1378,21 @@ let make_stream_projection
                       }
                   ]
                 , i )
-            in
-            enqueue_events_locked
-              (prefix
-               @ start_ev
-               @ [ Agent_core.Types.ContentBlockDelta
-                     { index = idx; delta = Agent_core.Types.TextDelta delta }
-                 ])))
-      in
-      drain_events_if_owner should_drain
+          in
+          native_stops
+          @ prefix
+          @ start_ev
+          @ [ Agent_core.Types.ContentBlockDelta
+                { index = idx; delta = Agent_core.Types.TextDelta delta }
+            ])
     | Acp.Thought_delta delta ->
       observe_activity ();
-      let should_drain =
-        Stdlib.Mutex.protect stream_mu (fun () ->
-          if !finished
-          then false
-          else (
-            let prefix = ensure_message_started_locked () @ close_open_text_locked () in
-            let start_ev, idx =
-              match !thought_index with
-              | Some i -> [], i
-              | None ->
+      agent_message_is_arriving (fun native_stops ->
+          let prefix = ensure_message_started_locked () @ close_open_text_locked () in
+          let start_ev, idx =
+            match !thought_index with
+            | Some i -> [], i
+            | None ->
                 let i = alloc_index_locked () in
                 thought_index := Some i;
                 ( [ Agent_core.Types.ContentBlockStart
@@ -1337,15 +1403,13 @@ let make_stream_projection
                       }
                   ]
                 , i )
-            in
-            enqueue_events_locked
-              (prefix
-               @ start_ev
-               @ [ Agent_core.Types.ContentBlockDelta
-                     { index = idx; delta = Agent_core.Types.ThinkingDelta delta }
-                 ])))
-      in
-      drain_events_if_owner should_drain
+          in
+          native_stops
+          @ prefix
+          @ start_ev
+          @ [ Agent_core.Types.ContentBlockDelta
+                { index = idx; delta = Agent_core.Types.ThinkingDelta delta }
+            ])
     | Acp.Usage_updated
         { prompt_tokens
         ; completion_tokens
@@ -1381,7 +1445,7 @@ let make_stream_projection
              ; vendor_total_tokens = total_tokens
              }
        | _ -> ())
-    | Acp.Tool_call_started { tool_call_id; title; kind = _; status = _; raw_input; identity } ->
+    | Acp.Tool_call_started { tool_call_id; title; kind = _; status; raw_input; identity } ->
       observe_activity ();
       if should_fence_tool_call_started
            ~server_isolation
@@ -1393,7 +1457,13 @@ let make_stream_projection
       (match identity with
        | Acp.Native_tool { name; _ } ->
          record_native_tool_started ~tool_call_id ~title ~name ~raw_input
-       | Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _ -> ())
+       | Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _ -> ());
+      (* A fast native tool can arrive in one piece: a single tool_call whose
+         status is already terminal, with no tool_call_update behind it. Its
+         end is recorded here, or it would stay open until the turn ended. *)
+      (match completion_of_acp_tool_status status with
+       | None -> ()
+       | Some completion -> finish_native_tool ~tool_call_id completion)
     | Acp.Tool_call_updated
         { tool_call_id; title; kind = _; status; raw_input; raw_output = _; identity } ->
       observe_activity ();
@@ -1423,42 +1493,9 @@ let make_stream_projection
       (match status with
        | None -> ()
        | Some st ->
-         (match completion_of_acp_tool_status st with
-          | None -> ()
-          | Some completion ->
-            if tool_call_id <> ""
-            then (
-              let closed, should_drain =
-                Stdlib.Mutex.protect stream_mu (fun () ->
-                  if !finished
-                  then None, false
-                  else (
-                    match Hashtbl.find_opt native_tool_indices tool_call_id with
-                    | None -> None, false
-                    | Some (idx, observation) ->
-                      Hashtbl.remove native_tool_indices tool_call_id;
-                      Hashtbl.replace closed_native_tool_ids tool_call_id ();
-                      let drain =
-                        enqueue_events_locked [ Agent_core.Types.ContentBlockStop { index = idx } ]
-                      in
-                      Some (idx, observation), drain))
-              in
-              Option.iter
-                (fun (idx, observation) ->
-                   Host.record_raw_native_tool
-                     ~keeper_name
-                     ~raw_trace_run
-                     ~phase:`Finished
-                     observation;
-                   Option.iter
-                     (fun notify ->
-                        notify
-                          ~block_index:idx
-                          ~tool_call_id:(Runtime_native_tools.call_id observation)
-                          completion)
-                     on_native_tool_completion)
-                closed;
-              drain_events_if_owner should_drain)))
+           (match completion_of_acp_tool_status st with
+            | None -> ()
+            | Some completion -> finish_native_tool ~tool_call_id completion))
     | (Acp.Mode_updated _ | Acp.Config_options_updated _) as meta_ev ->
       on_session_meta_updated meta_ev
   in

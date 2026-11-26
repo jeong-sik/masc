@@ -519,7 +519,7 @@ let test_cli_reuse_requires_non_interactive () =
     ["codex", ["account_home", `String "/fixture/codex"];
      "claude_code", ["account_home", `String "/fixture/claude"];
      "antigravity", ["credential_file", `String "/fixture/oauth.json"; "timeout_s", `Int 60];
-     "mistral_vibe", ["timeout_s", `Int 120]]
+     "mistral_vibe", []]
 
 let test_existing_inline_selection () =
   let parse extra = Runtime_setup_spec.of_json (`Assoc (["choice",`String "openai_compatible";

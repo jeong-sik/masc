@@ -70,7 +70,6 @@ type capabilities =
 
 val connect_timeout_s_key : string
 val exact_body_timeout_s_key : string
-val admission_timeout_s_key : string
 val admission_priority_run_limit_key : string
 val store_key : string
 val truncation_key : string
@@ -123,8 +122,6 @@ type acp_options =
   ; contributor_mode : Runtime_acp_client.contributor_mode
         (** [contributor-mode] — [Contributor_off] when the key is absent.
             Valid only for driver [muse_code]. *)
-  ; timeout_s : float
-  ; admission_timeout_s : float
   }
 [@@deriving show, eq]
 

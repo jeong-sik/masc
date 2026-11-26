@@ -2335,7 +2335,6 @@ driver = "antigravity"
 command = "agy"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 180.0
 
 [providers.antigravity_acp.credentials]
 type = "file"
@@ -2471,7 +2470,6 @@ driver = "kimi_code"
 command = "kimi"
 args = ["acp"]
 is-non-interactive = true
-timeout-s = 180.0
 
 [models.acp-kimi-k3-1-pro]
 api-name = "kimi-code/k3.1-pro"
@@ -2554,7 +2552,6 @@ command = "vibe-acp"
 # Strip MISTRAL_API_KEY so vibe-acp uses the active os_keyring Pro subscription.
 strip-env = ["MISTRAL_API_KEY"]
 is-non-interactive = true
-timeout-s = 180.0
 
 [models.acp-vibe-mistral-medium-3-5]
 api-name = "mistral-medium-3.5"

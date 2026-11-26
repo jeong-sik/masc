@@ -187,8 +187,9 @@ let of_json ?home_dir = function
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Gemini | Vertex_gemini
         | Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp -> [])
       @ (match choice with
-        | Antigravity | Antigravity_acp -> ["credential_file";"timeout_s"]
-        | Mistral_vibe | Kimi_acp -> ["timeout_s"]
+        | Antigravity -> ["credential_file";"timeout_s"]
+        | Antigravity_acp -> ["credential_file"]
+        | Mistral_vibe | Kimi_acp
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Gemini | Vertex_gemini
         | Claude_code | Codex -> []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
@@ -316,19 +317,8 @@ let of_json ?home_dir = function
               Ok (Some (reference_path path))
             else Ok None
           in
-          let* timeout = match List.assoc_opt "timeout_s" fields with
-            | None -> Ok None
-            | Some (`Int value) when value > 0 -> Ok (Some (float_of_int value))
-            | Some (`Float value) when Float.is_finite value && value > 0. -> Ok (Some value)
-            | _ -> invalid "timeout_s" in
-          Ok (oauth, timeout)
-        | Mistral_vibe | Kimi_acp ->
-          let* timeout = match List.assoc_opt "timeout_s" fields with
-            | None -> Ok None
-            | Some (`Int value) when value > 0 -> Ok (Some (float_of_int value))
-            | Some (`Float value) when Float.is_finite value && value > 0. -> Ok (Some value)
-            | _ -> invalid "timeout_s" in
-          Ok (None, timeout)
+          Ok (oauth, None)
+        | Mistral_vibe | Kimi_acp -> Ok (None, None)
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Gemini | Vertex_gemini
         | Claude_code | Codex ->
           Ok (None,None) in
@@ -428,15 +418,9 @@ let connection_matches spec (provider : Runtime_schema.provider) =
       client.command=command && account_home_matches spec.choice client.account_home provider.account_home
       && credential_matches (Option.map (fun path -> File_reference path) client.oauth)
       && (match spec.choice, client.timeout, provider.antigravity_cli, provider.acp with
-          | Mistral_vibe, timeout, None, Some acp ->
-            acp.driver = Runtime_schema.Mistral_vibe
-            && (match timeout with None -> true | Some t -> t = acp.timeout_s)
-          | Kimi_acp, timeout, None, Some acp ->
-            acp.driver = Runtime_schema.Kimi_code
-            && (match timeout with None -> true | Some t -> t = acp.timeout_s)
-          | Antigravity_acp, timeout, None, Some acp ->
-            acp.driver = Runtime_schema.Antigravity
-            && (match timeout with None -> true | Some t -> t = acp.timeout_s)
+          | Mistral_vibe, None, None, Some acp -> acp.driver = Runtime_schema.Mistral_vibe
+          | Kimi_acp, None, None, Some acp -> acp.driver = Runtime_schema.Kimi_code
+          | Antigravity_acp, None, None, Some acp -> acp.driver = Runtime_schema.Antigravity
           | (Mistral_vibe | Kimi_acp | Antigravity_acp), _, _, _ -> false
           | Antigravity, Some timeout, Some options, None -> timeout=options.timeout_s
           | Antigravity, _, _, _ -> false
@@ -572,17 +556,14 @@ let render ?include_provider ?wizard_default spec =
         | Mistral_vibe ->
           [ "driver", `String "mistral_vibe"
           ; "strip-env", `List [ `String "MISTRAL_API_KEY" ]
-          ; "timeout-s", `Float (Option.value c.timeout ~default:180.0)
           ]
         | Kimi_acp ->
           [ "driver", `String "kimi_code"
           ; "args", `List [ `String "acp" ]
-          ; "timeout-s", `Float (Option.value c.timeout ~default:180.0)
           ]
         | Antigravity_acp ->
           [ "driver", `String "antigravity"
           ; "args", `List [ `String "acp" ]
-          ; "timeout-s", `Float (Option.value c.timeout ~default:180.0)
           ]
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Gemini | Vertex_gemini
         | Claude_code | Codex | Antigravity ->

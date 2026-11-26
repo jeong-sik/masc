@@ -107,7 +107,7 @@ val run_panelist
     consumer of that runtime. When absent the adapter uses the selected model's
     declaration, falling back to its captured admission value only when that
     declaration is absent. It does not move [admission_timeout_s], which bounds waiting for
-    admission rather than the answer.
+    admission rather than the answer, on the clients that have one.
 
     On the Claude, Codex and Antigravity clients the turn timeout is the
     longest silence allowed between stream messages, not a whole-turn limit:
@@ -115,9 +115,9 @@ val run_panelist
     cancellation. On Codex the window is suspended while a tool
     item runs, since the app-server may write nothing until it completes. The
     same preset key on an Agent_core runtime is a whole-call deadline
-    ([body_timeout_s]). An ACP prompt has no silence window: without
-    [timeout_s] it runs until the agent answers or exits, and with it the
-    preset value bounds the whole [session/prompt] request.
+    ([body_timeout_s]). ACP requests have no silence window: without
+    [timeout_s] an ACP panelist runs until the agent answers or exits, and
+    with it the preset value bounds the whole run, from spawn to answer.
 
     [output_schema] is a JSON Schema the client holds its own answer to. The
     Claude, Antigravity and Codex clients each have a channel for one and no

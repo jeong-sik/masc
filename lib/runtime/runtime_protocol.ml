@@ -80,7 +80,6 @@ let acp_editor =
         ; "effort"
         ; "mode"
         ; "contributor-mode"
-        ; "timeout-s"
         ]
     ; required_provider_fields = [ "driver" ]
     }

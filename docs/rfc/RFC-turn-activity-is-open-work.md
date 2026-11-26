@@ -58,6 +58,7 @@ related: ["0503", "0486"]
 - `live_chat_phase`(`lib/masc_tui/store/chat_transcript.ml:970`)는 차례로 (가) 이 TUI가 보낸 요청의 스트림 버퍼, (나) `active_turn`의 `tool_in_flight`·`phase`, (다) `active_turn.preview`를 본다.
 - (가)는 내가 말을 건 턴에만 있다. 스트림은 메시지를 보낼 때 열린다(`lib/masc_tui/store/update_actions.ml`, `keeper_is_busy`).
 - (나)은 서버가 보낸 적이 없다. TUI의 `active_turn`은 turns 답 위에 미리보기를 덧씌워 만든다(`lib/masc_tui/store/fleet_store.ml`, `overlay_turns_on_keepers`). turns 답은 `lane`·`turn_ref`·`started_at_unix`·`interrupt_token`·`preview_observed_through`·`preview`만 싣는다(`lib/server/server_routes_http_keeper_control.ml`). `tool_in_flight`라는 글자는 서버 코드에 들어간 적이 없다. `git log -S '"tool_in_flight"'`의 결과가 #54401의 TUI 코드뿐이다.
+- 정정(2026-11-26). `phase`에는 쓰는 곳이 하나 있었다. 턴 안 하트비트가 상수 `turn_running`을 덧씌운다(`lib/keeper/keeper_heartbeat_loop_in_turn_pulse.ml`, TUI의 `Fleet_store.apply_heartbeat`). turns 답에는 없고, `"thinking"`은 어디서도 보내지 않는다. 미리보기가 아직 없는 턴에서는 그 토큰이 상태 줄에 그대로 보였다. 셋 다 #54841에서 지웠다.
 - 그래서 자율 턴은 (다) 하나만 쓴다. 「도구 사용 중」과 「추론 중」으로 가는 길은 실행될 수 없다.
 
 ### 1.5 자율 턴에는 스트림 길이 없다
@@ -252,7 +253,24 @@ related: ["0503", "0486"]
 
 끊김. 첫 키퍼의 표본 480개 중 84개(18%)는 플릿 응답이 늦어 `△ 지연` 상태였다. 그때 상태 줄은 `○ 마지막 확인 · …`으로 경과 시간 없이 마지막에 본 일을 적는다(D6).
 
-재실측. D2의 고침(#54824, #54836)이 설치된 뒤 같은 방법으로 다시 잰다.
+### 8.2 재실측 (2026-11-26)
+
+서버·TUI 빌드 `eee88944dfa3`(#54824 포함, #54836 미포함)으로 두 키퍼를 같은 방법으로 받아 적었다. 표본은 각 300개다.
+
+`e-masc-the-leader`(Mistral Vibe ACP). 10:28:47~10:34:04.
+
+- 8.1에서 틀렸던 것이 나오지 않았다. `도구 실행 전` 0회(8.1에서 `self.sleep · 1m 39s`), `외 N건` 0회(8.1에서 `bash 외 4건 · 5m 38s`).
+- 도구: 상태 줄의 도구 구간 6개가 모두 로그의 셸 실행과 `tool_call` 행과 맞는다. 시작은 `Execute result authorization` 행과 0~1 초, 끝은 1~3 초 안이다. 가장 긴 구간은 10 초이고, 그동안 셸 실행 6번이 연달아 있었다.
+- 도구와 도구 사이: 돌아온 뒤 `모델 응답 대기 · 1s, 2s`로 다시 센다. 조각이 오면 `추론 중 · 0s…`, `답변 중 · 0s…`로 바뀐다. 8.1처럼 턴 첫 요청부터 세지 않는다.
+- 이 창에는 native 도구가 없었다. 8.1의 `self.sleep` 경로는 재지 못했다.
+
+`context-reviewer`(Codex Terra). 10:34:40~10:39:59.
+
+- 도구: 상태 줄의 도구 구간 7개가 모두 로그의 `tool_call` 행과 0~3 초 안에서 맞는다. 셸이 아닌 `Read`·`Write`·`Edit`·`keeper_artifact_read`도 들어 있다.
+- 도구가 두 단계로 보인다. 모델이 호출을 만드는 동안 `도구 실행 전 · Execute · 0s, 1s`, 호스트가 돌리는 동안 `도구 실행 중 · Execute · 0s…`. 긴 `Write`는 호출을 만드는 동안 17 초 `도구 실행 전`이었다.
+- 돌아온 뒤 `모델 응답 대기 · 0s, 2s`로 다시 센다.
+
+재지 못한 것. agent core 루프로 도는 키퍼(`code-reviewer`는 이 창에 턴이 없었다), native 도구, 거절된 호출. #54836은 설치 빌드에 아직 없다.
 
 ## 9. 구현 기록
 
@@ -265,6 +283,6 @@ related: ["0503", "0486"]
 - #54824 뒤에 운영자가 Codex 대신 Opus를 정했다. 새 문맥의 Opus가 네 런타임의 수명 계약을 먼저 스스로 적고 나서 #54824를 봤다. 판정은 근본 수선이다. 같은 기준으로 남은 구멍을 찾았고 #54836가 서버에서 닫는 것을 닫았다. 미리보기가 루프를 가른다. agent core 시도에서 돌아옴이 응답을 열지 않는다. official client 시도에서 거절된 호출이 블록 닫힘에서 끝난다(#54819). 같은 순간에 열린 native 둘이 각자 끝난다. 어댑터의 구멍은 #54832에 남겼다.
 - `test_keeper_task_skill_turn_exact`의 실패 하나는 이 작업과 무관하다. 같은 base의 문서 전용 가지에서도 같은 단언이 실패한다(호스트 실행 45603088092).
 - 남은 것.
-  - (나)의 죽은 분기 지우기. 같은 파일을 고치는 열린 PR이 들어간 뒤에 한다(#54818). TUI가 실행 중인 도구를 먼저 이름 쓰게 하는 것도 여기서 한다.
+  - (나)의 죽은 분기 지우기: #54841(TUI·대시보드). TUI가 실행 중인 도구를 먼저 이름 쓰게 하는 것도 거기서 했다.
   - 어댑터가 native 실행의 닫는 사건을 보내지 않는 경우(#54832). 재실측에서 남는지 보고 고친다.
-  - #54824와 #54836이 설치된 뒤 재실측.
+  - 재실측. #54824는 재었다(§8.2). #54836이 설치된 뒤 agent core 루프와 거절된 호출을 같은 방법으로 잰다. native 도구는 그 경로가 나오는 창을 잡아야 한다.

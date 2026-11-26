@@ -380,7 +380,8 @@ let detect_capabilities () : Presenter.capabilities =
   }
 
 let msg_pace = function
-  | Msg.Key_event _ | Msg.Paste_text _ | Msg.Mouse_event _ | Msg.Resize _
+  | Msg.Key_event _ | Msg.Paste_text _ | Msg.Mouse_event _
+  | Msg.Terminal_focus _ | Msg.Resize _
   | Msg.Chat_stream_chunk _ | Msg.Chat_stream_done _
   | Msg.Memory_diagram_rendered _ ->
       Frame_scheduler.Pace_interactive
@@ -665,6 +666,12 @@ let dispatch_decoded_events ~signals ~bell ~input_queue ?on_reply events =
       | Input_decoder.Mouse mev ->
           Signals.withdraw_interrupt signals;
           Eio.Stream.add input_queue (Msg.Mouse_event mev);
+          pushed := true
+      | Input_decoder.Focus_in ->
+          Eio.Stream.add input_queue (Msg.Terminal_focus true);
+          pushed := true
+      | Input_decoder.Focus_out ->
+          Eio.Stream.add input_queue (Msg.Terminal_focus false);
           pushed := true
       | Input_decoder.Reply reply ->
           Option.iter (fun f -> f reply) on_reply
@@ -1244,6 +1251,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Boot
             | Msg.Paste_text _
             | Msg.Mouse_event _
+            | Msg.Terminal_focus _
             | Msg.Resize _
             | Msg.Tick _
             | Msg.Server_health_result _

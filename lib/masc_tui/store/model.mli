@@ -285,6 +285,7 @@ type t = {
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
   mouse_selection : mouse_selection_state;
+  terminal_focused : bool;
 }
 
 val equal_cell_pos : cell_pos -> cell_pos -> bool

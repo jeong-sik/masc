@@ -204,13 +204,52 @@ let test_a_late_failure_does_not_land_on_another_file () =
   in
   Alcotest.(check bool) "b.ml is not marked failed" false (is_failed m.infra.code.git_diff)
 
+let test_effective_diff_pane_width_and_side_by_side_gate () =
+  (* Wide split (160 cols + docked sidebar): right diff pane is ~84 cols (< 120),
+     so side_by_side stays false and falls back to unified diff. *)
+  let w_160_split =
+    L.effective_diff_pane_width ~viewport_cols:160 ~sidebar_docked:true ()
+  in
+  Alcotest.(check bool) "160-col split with sidebar stays unified (< min_cols)"
+    false (L.side_by_side ~cols:w_160_split);
+  Alcotest.(check bool) "160-col split diff pane width is strictly narrower than viewport"
+    true (w_160_split > 0 && w_160_split < L.side_by_side_min_cols);
+  (* Zoomed 160-col review fills the full body width (~132 cols >= 120) -> side-by-side *)
+  let w_160_zoomed =
+    L.effective_diff_pane_width ~zoomed:true ~viewport_cols:160
+      ~sidebar_docked:true ()
+  in
+  Alcotest.(check bool) "160-col zoomed with sidebar fits side-by-side"
+    true (L.side_by_side ~cols:w_160_zoomed);
+  (* Ultra-wide 220-col split with docked sidebar has right pane >= 120 -> side-by-side *)
+  let w_220_split =
+    L.effective_diff_pane_width ~viewport_cols:220 ~sidebar_docked:true ()
+  in
+  Alcotest.(check bool) "220-col split with sidebar fits side-by-side"
+    true (L.side_by_side ~cols:w_220_split);
+  (* Closing sidebar widens the effective diff pane *)
+  let w_189_docked =
+    L.effective_diff_pane_width ~viewport_cols:189 ~sidebar_docked:true ()
+  in
+  let w_189_undocked =
+    L.effective_diff_pane_width ~viewport_cols:189 ~sidebar_docked:false ()
+  in
+  Alcotest.(check bool) "undocking sidebar widens effective diff pane"
+    true (w_189_undocked > w_189_docked);
+  Alcotest.(check bool) "189-col split with sidebar stays unified"
+    false (L.side_by_side ~cols:w_189_docked);
+  Alcotest.(check bool) "189-col split without sidebar fits side-by-side"
+    true (L.side_by_side ~cols:w_189_undocked)
+
 let () =
   Alcotest.run "code_review"
     [ ( "layout",
         [ Alcotest.test_case "side by side pairs" `Quick
             test_side_by_side_pairs_each_change_block;
           Alcotest.test_case "hunk steps and jump lines" `Quick
-            test_hunk_steps_and_jump_lines ] );
+            test_hunk_steps_and_jump_lines;
+          Alcotest.test_case "effective diff pane width gates side-by-side" `Quick
+            test_effective_diff_pane_width_and_side_by_side_gate ] );
       ( "store",
         [ Alcotest.test_case "status selects the first change" `Quick
             test_status_selects_the_first_change_and_reads_its_diff;

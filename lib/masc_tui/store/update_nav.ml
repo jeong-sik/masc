@@ -4383,8 +4383,14 @@ let enter_plan (m : Model.t) : enter_plan =
                 match m.infra.code.active_file_path with
                 | None -> Enter_noop
                 | Some path ->
+                    let diff_cols =
+                      Code_review_layout.effective_diff_pane_width
+                        ~zoomed:(Model.is_zoomed_active m)
+                        ~viewport_cols:m.viewport.cols
+                        ~sidebar_docked:(Model.sidebar_docked m) ()
+                    in
                     let rows =
-                      Infra_store.review_diff_rows ~cols:m.viewport.cols m.infra
+                      Infra_store.review_diff_rows ~cols:diff_cols m.infra
                     in
                     Enter_code_jump_match
                       {
@@ -4476,6 +4482,7 @@ let dive_selected (m : Model.t) =
           {
             m with
             nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+            knowledge = Knowledge_store.clear_armed_vote m.knowledge;
             infra = { m.infra with show_raw_json = false };
           }
         in
@@ -4511,6 +4518,7 @@ let dive_selected (m : Model.t) =
             m with
             drafts;
             work;
+            knowledge = Knowledge_store.clear_armed_vote m.knowledge;
             nav =
               {
                 m.nav with
@@ -8596,7 +8604,12 @@ let code_right_pane_line_count (m : Model.t) : int =
           List.length cs
       | Some _ | None -> 0)
   | Infra_store.Code_review ->
-      List.length (Infra_store.review_diff_rows ~cols:m.viewport.cols m.infra)
+      let diff_cols =
+        Code_review_layout.effective_diff_pane_width
+          ~zoomed:(Model.is_zoomed_active m) ~viewport_cols:m.viewport.cols
+          ~sidebar_docked:(Model.sidebar_docked m) ()
+      in
+      List.length (Infra_store.review_diff_rows ~cols:diff_cols m.infra)
 
 let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
     (k : Knowledge_store.t) =
@@ -8801,13 +8814,14 @@ let knowledge_detail_max_scroll (m : Model.t) =
           let rev_rows =
             match detail_opt with
             | Some d when d.revisions <> [] -> 1 + List.length d.revisions
-            | Some _ | None ->
+            | Some _ ->
                 if not zoomed then 0
                 else (
                   match Observed.to_option k.artifacts with
                   | Some items when List.length items > 1 ->
                       1 + List.length items
                   | Some _ | None -> 0)
+            | None -> 0
           in
           let total_rows =
             if rev_rows = 0 then body_rows

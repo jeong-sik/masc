@@ -26,27 +26,43 @@ let equal_event a b =
   | Input_decoder.Mouse x, Input_decoder.Mouse y ->
       Input_decoder.equal_mouse_event x y
   | Input_decoder.Reply x, Input_decoder.Reply y -> equal_reply x y
+  | Input_decoder.Focus_in, Input_decoder.Focus_in
+  | Input_decoder.Focus_out, Input_decoder.Focus_out
   | Input_decoder.Unknown_escape, Input_decoder.Unknown_escape
   | Input_decoder.Invalid_utf8, Input_decoder.Invalid_utf8 ->
       true
   | ( Input_decoder.Key _,
       ( Input_decoder.Paste _ | Input_decoder.Mouse _ | Input_decoder.Reply _
+      | Input_decoder.Focus_in | Input_decoder.Focus_out
       | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
   | ( Input_decoder.Paste _,
       ( Input_decoder.Key _ | Input_decoder.Mouse _ | Input_decoder.Reply _
+      | Input_decoder.Focus_in | Input_decoder.Focus_out
       | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
   | ( Input_decoder.Mouse _,
       ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Reply _
+      | Input_decoder.Focus_in | Input_decoder.Focus_out
       | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
   | ( Input_decoder.Reply _,
       ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Mouse _
+      | Input_decoder.Focus_in | Input_decoder.Focus_out
+      | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
+  | ( Input_decoder.Focus_in,
+      ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Mouse _
+      | Input_decoder.Reply _ | Input_decoder.Focus_out
+      | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
+  | ( Input_decoder.Focus_out,
+      ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Mouse _
+      | Input_decoder.Reply _ | Input_decoder.Focus_in
       | Input_decoder.Unknown_escape | Input_decoder.Invalid_utf8 ) )
   | ( Input_decoder.Unknown_escape,
       ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Mouse _
-      | Input_decoder.Reply _ | Input_decoder.Invalid_utf8 ) )
+      | Input_decoder.Reply _ | Input_decoder.Focus_in | Input_decoder.Focus_out
+      | Input_decoder.Invalid_utf8 ) )
   | ( Input_decoder.Invalid_utf8,
       ( Input_decoder.Key _ | Input_decoder.Paste _ | Input_decoder.Mouse _
-      | Input_decoder.Reply _ | Input_decoder.Unknown_escape ) ) ->
+      | Input_decoder.Reply _ | Input_decoder.Focus_in | Input_decoder.Focus_out
+      | Input_decoder.Unknown_escape ) ) ->
       false
 
 let equal_event_list xs ys =
@@ -97,6 +113,8 @@ let pp_event fmt = function
       Format.fprintf fmt "Reply(Gfx %S)" s
   | Input_decoder.Reply (Input_decoder.Palette_reply _) ->
       Format.fprintf fmt "Reply(Palette)"
+  | Input_decoder.Focus_in -> Format.fprintf fmt "Focus_in"
+  | Input_decoder.Focus_out -> Format.fprintf fmt "Focus_out"
   | Input_decoder.Unknown_escape -> Format.fprintf fmt "Unknown_escape"
   | Input_decoder.Invalid_utf8 -> Format.fprintf fmt "Invalid_utf8"
 
@@ -566,6 +584,13 @@ let paste_mouse_reply_cases : (string * string * Input_decoder.event list) list 
              });
       ] );
     ("APC Kitty graphics reply", "\x1b_Gi=31;OK\x1b\\", [ Reply (Graphics_reply "i=31;OK") ]);
+    (* DECSET 1004 terminal focus-in / focus-out reports *)
+    ("CSI I Focus_in", "\x1b[I", [ Focus_in ]);
+    ("CSI O Focus_out", "\x1b[O", [ Focus_out ]);
+    ("CSI O then CSI I round-trip", "\x1b[O\x1b[I", [ Focus_out; Focus_in ]);
+    ("CSI I followed immediately by key", "\x1b[Ia", [ Focus_in; Key (mk (Char "a")) ]);
+    ("CSI 1 I parameterized is not Focus_in", "\x1b[1I", [ Unknown_escape ]);
+    ("CSI 1 O parameterized is not Focus_out", "\x1b[1O", [ Unknown_escape ]);
   ]
 
 (* -------------------------------------------------------------------------- *)

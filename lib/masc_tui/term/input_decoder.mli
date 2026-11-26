@@ -70,6 +70,8 @@ type event =
   | Key of key_event
   | Paste of paste_event
   | Mouse of mouse_event
+  | Focus_in
+  | Focus_out
   | Reply of terminal_reply
   | Unknown_escape
   | Invalid_utf8

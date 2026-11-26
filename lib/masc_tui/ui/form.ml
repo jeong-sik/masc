@@ -772,6 +772,9 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
                  (Grapheme.truncate_to_width ~max_width:(Int.max 0 (iw - adv)) f.key))
           end;
           let y2 = rect.y + 2 in
+          let showed_shortcut_hint_on_y2 =
+            Option.is_none f.error && Option.is_none f.help
+          in
           if y2 < Rect.bottom rect then begin
             let r2 = Rect.make ~x:ix ~y:y2 ~w:iw ~h:1 in
             match (f.error, f.help) with
@@ -827,7 +830,7 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Grapheme.truncate_to_width
                       ~max_width:(Int.max 0 (ix + iw - !cx)) after_s))
             end
-            else
+            else if not showed_shortcut_hint_on_y2 then
               let hint =
                 Say.resolve lang
                   (Say.make

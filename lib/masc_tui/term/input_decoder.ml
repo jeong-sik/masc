@@ -124,6 +124,8 @@ type event =
   | Key of key_event
   | Paste of paste_event
   | Mouse of mouse_event
+  | Focus_in
+  | Focus_out
   | Reply of terminal_reply
   | Unknown_escape
   | Invalid_utf8
@@ -670,6 +672,8 @@ let complete_csi t parameters final =
     t.state <- X10_awaiting_button;
     []
   end
+  else if String.equal parameters "" && final = 'I' then [ Focus_in ]
+  else if String.equal parameters "" && final = 'O' then [ Focus_out ]
   else if String.length parameters > 0 && parameters.[0] = '<' then
     match parse_sgr_mouse parameters final with
     | Some m -> [ Mouse m ]

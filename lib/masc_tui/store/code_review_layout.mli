@@ -16,9 +16,18 @@ type row =
           deletion of a change block next to its [n]th addition. *)
 
 val side_by_side_min_cols : int
-(** Viewport width from which the review diff shows old and new side by side. *)
+(** Effective diff-pane width (in cells) from which the review diff shows old
+    and new side by side. *)
+
+val effective_diff_pane_width :
+  ?zoomed:bool -> viewport_cols:int -> sidebar_docked:bool -> unit -> int
+(** Pure geometry SSOT computing the inner width of the right-hand diff pane in
+    [Infra > Code > Review] from terminal width, docked-sidebar visibility, and
+    zoom state, matching [Chrome.compute_layout] and [Screen_infra.render_code]. *)
 
 val side_by_side : cols:int -> bool
+(** [true] iff the effective diff-pane width [cols] is at least
+    {!side_by_side_min_cols}. *)
 
 val rows : side_by_side:bool -> Wire_infra.git_diff_row list -> row list
 

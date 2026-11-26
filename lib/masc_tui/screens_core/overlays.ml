@@ -390,8 +390,8 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
               match arr.(idx) with
               | Palette_header hdr ->
-                  Card.draw_hairline ~pad_x ~label:hdr ~bg grid ~rect:inner
-                    ~y:py ~theme
+                  Card.draw_hairline ~pad_x ~label:hdr ~focused:false ~bg grid
+                    ~rect:inner ~y:py ~theme
               | Palette_overflow msg ->
                   ignore
                     (Cell_grid.put_text ~clip:row_r grid ~x:q_left ~y:py
@@ -1146,8 +1146,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
       if !y < bottom then
         match rows_arr.(vpos) with
         | Group_divider label ->
-            Card.draw_hairline ~pad_x:rpad ~label ~bg:bg_card grid ~rect:fields_r
-              ~y:!y ~theme;
+            Card.draw_hairline ~pad_x:rpad ~label ~focused:false ~bg:bg_card
+              grid ~rect:fields_r ~y:!y ~theme;
             incr y
         | Group_field (idx, f) ->
             let is_selected = Int.equal idx form_state.focused in
@@ -1326,6 +1326,9 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                     f.key))
           end;
           let y2 = footer_r.y + 2 in
+          let showed_shortcut_hint_on_y2 =
+            Option.is_none f.error && Option.is_none f.help
+          in
           if y2 < Rect.bottom footer_r then begin
             let r2 = Rect.make ~x:fx ~y:y2 ~w:fw ~h:1 in
             match (f.error, f.help) with
@@ -1392,7 +1395,7 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                       ~max_width:(Int.max 0 (fx + fw - !cx))
                       after_s))
             end
-            else
+            else if not showed_shortcut_hint_on_y2 then
               ignore
                 (Cell_grid.put_text ~clip:r3 grid ~x:fx ~y:y3
                    ~style:(Typography.whisper ~bg:bg_card theme)
@@ -1437,16 +1440,16 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.make ~ko:"▸ 탐색 트리 · 활성" ~en:"▸ TREE · FOCUS")
           else
             Say.resolve lang
-              (Say.make ~ko:"  탐색 트리 [Tab]" ~en:"  Tree [Tab]")
+              (Say.make ~ko:"탐색 트리 [Tab]" ~en:"Tree [Tab]")
         in
         let hdr_st =
           if tree_focused then Typography.accent ~bg:hdr_bg ~bold:true theme
           else Typography.whisper ~bg:hdr_bg theme
         in
         ignore
-          (Cell_grid.put_text ~clip:hdr_r grid ~x:(rect.x + 1) ~y:rect.y
+          (Cell_grid.put_text ~clip:hdr_r grid ~x:(rect.x + 2) ~y:rect.y
              ~style:hdr_st
-             (Grapheme.truncate_to_width ~max_width:(Int.max 0 (rect.w - 2))
+             (Grapheme.truncate_to_width ~max_width:(Int.max 0 (rect.w - 3))
                 hdr_lbl));
         Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:rect.w ~h:(rect.h - 1)
       end
@@ -1533,7 +1536,7 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let right_w =
               Grapheme.display_width dirty_s + Grapheme.display_width count_s
             in
-            let left_x = body_r.x + 1 in
+            let left_x = body_r.x + 2 in
             let right_edge = Rect.right body_r - 1 in
             let left_max =
               Int.max 0 (right_edge - left_x - right_w - (if right_w > 0 then 1 else 0))
@@ -1663,8 +1666,8 @@ let render_dry_run_pane ?(scroll = 0) grid ~(rect : Rect.t) ~(theme : Theme.t)
     let bg = Color.of_rgb theme.surface_1 in
     Cell_grid.fill_rect ~clip:rect grid ~rect
       ~style:(Typography.primary ~bg theme) ();
-    Card.draw_hairline ~pad_x ~label:"Dry-run TOML Diff" ~bg grid ~rect
-      ~y:rect.y ~theme;
+    Card.draw_hairline ~pad_x ~label:"Dry-run TOML Diff" ~focused:false ~bg
+      grid ~rect ~y:rect.y ~theme;
     let content = Rect.inset ~left:pad_x ~right:pad_x rect in
     let y = ref (rect.y + 1) in
     let bottom = Rect.bottom rect in
@@ -2481,13 +2484,13 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       if zoomed then
         Say.resolve lang
           (Say.make
-             ~ko:"[Space] JSON · [↑↓] 스크롤 · [o] 이동 · [z/Esc] 목록"
-             ~en:"[Space] JSON · [↑↓] Scroll · [o] Jump · [z/Esc] List")
+             ~ko:"[Space] JSON · [o] 이동 · [Esc]"
+             ~en:"[Space] JSON · [o] Jump · [Esc]")
       else
         Say.resolve lang
           (Say.make
-             ~ko:"[Enter/z] 상세 · [d] 숨김 · [Space] 숨김표시 · [J/K] 스크롤 · [o] 이동 · [Esc]"
-             ~en:"[Enter/z] Expand · [d] Dismiss · [Space] Show hidden · [J/K] Scroll · [o] Jump · [Esc]")
+             ~ko:"[Enter/z] 상세 · [d] 숨김 · [Esc]"
+             ~en:"[Enter/z] Expand · [d] Dismiss · [Esc]")
     in
     let inner =
       Card.draw ~cache grid ~rect:drawer_r ~theme
@@ -2495,7 +2498,7 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           (Card.default_spec ~title) with
           badge = Some badge;
           hotkey = Some hotkey;
-          focused = true;
+          focused = model.terminal_focused;
           elevated = true;
         }
     in
@@ -4828,7 +4831,8 @@ let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0)
         match arr.(idx) with
         | Help_blank -> ()
         | Help_header title ->
-            Card.draw_hairline ~pad_x:0 ~label:title ~bg grid ~rect ~y:py ~theme
+            Card.draw_hairline ~pad_x:0 ~label:title ~focused:false ~bg grid
+              ~rect ~y:py ~theme
         | Help_entry e ->
             let rr = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
             let keys_s =
@@ -6024,8 +6028,8 @@ let render_ask_answer_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         cur_p tot_p
                   | None -> base_lbl
                 in
-                Card.draw_hairline ~pad_x ~bg ~label:mode_lbl grid ~rect:inner
-                  ~y:!y ~theme;
+                Card.draw_hairline ~pad_x ~bg ~label:mode_lbl ~focused:false
+                  grid ~rect:inner ~y:!y ~theme;
                 incr y
               end;
               let list_h = Int.max 0 (body_bot - !y) in
@@ -6268,7 +6272,6 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       if Rect.is_empty rect then ()
       else
         let theme = Theme.of_preset model.theme_preset in
-        Render_util.dim_backdrop grid ~rect ~theme;
         match overlay with
         | Nav.Palette -> render_palette grid ~cache ~rect ~theme ~model
         | Nav.Settings active_tab ->

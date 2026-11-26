@@ -839,6 +839,7 @@ type t =
   | Key_event of Keymap.Input.key_event
   | Paste_text of string
   | Mouse_event of Keymap.Input.mouse_event
+  | Terminal_focus of bool
   | Resize of { cols : int; rows : int }
   | Tick of { wall_unix : float }
   | Server_health_result of {

@@ -148,7 +148,7 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
         (Some sb_rect, false, b_rect)
       else if Model.sidebar_drawer_open sized_model && full_body.w >= 20 then
         let dw = Int.min (Model.sidebar_width + 2) (Int.max 18 (cols - 4)) in
-        let dx = if cols > dw + 2 then 1 else 0 in
+        let dx = Layout.outer_margin breakpoint in
         let sb_rect = Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h in
         (Some sb_rect, true, full_body)
       else (None, false, full_body)
@@ -175,7 +175,14 @@ let short_workspace_label ~(lang : Say.lang) ~compact ws =
   if not compact then full
   else
     match lang with
-    | Say.Lang_ko -> full
+    | Say.Lang_ko -> (
+        match ws with
+        | Nav.Pulse -> "펄스"
+        | Nav.Work -> "작업"
+        | Nav.Knowledge -> "지식"
+        | Nav.Keepers -> "키퍼"
+        | Nav.Runtime -> "런"
+        | Nav.Infra -> "인프")
     | Say.Lang_en -> (
         match ws with
         | Nav.Pulse -> "Pulse"
@@ -227,7 +234,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     (* Left side: 1-cell side margin + clickable [b] Menu toggle + Brand (Wide/Std) + 6 Workspace Tabs *)
     let x = ref (rect.x + 1) in
     if not is_micro then begin
-      let sb_focused = Model.sidebar_has_focus model in
+      let sb_focused = model.terminal_focused && Model.sidebar_has_focus model in
       let menu_st =
         if sb_focused then
           Typography.accent ~bg:pill_bg ~bold:true theme
@@ -300,9 +307,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         !x + a3
       end
       else begin
-        let use_compact_tabs =
-          rect.w < 98 && Say.equal_lang model.lang Say.Lang_en
-        in
+        let use_compact_tabs = rect.w < 98 in
         let tab_gap = Layout.tab_gap breakpoint in
         List.iter
           (fun ws ->
@@ -1245,16 +1250,36 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     (* Far-left persistent Focus Pill: makes the active input target unmistakable
        at a glance across multi-pane bodies, Composer, Filter, and Overlays. *)
     if avail_w >= 28 then begin
-      let focus_raw = Say.resolve model.lang (Model.active_focus_label model) in
-      let max_fw = if compact then 16 else 24 in
+      let caret = Glyph.to_utf8 Glyph.Focus_caret in
       let focus_txt =
-        Printf.sprintf " %s %s "
-          (Glyph.to_utf8 Glyph.Focus_caret)
-          (Grapheme.truncate_to_width ~max_width:max_fw focus_raw)
+        if compact then
+          let n_panes = Model.focusable_pane_count model in
+          if
+            Option.is_none model.nav.overlay
+            && (not model.nav.filter_focused)
+            && (not (Drafts.is_focused model.drafts))
+            && (not (Model.sidebar_has_focus model))
+            && n_panes > 1
+          then
+            let idx = Int.min n_panes (Int.max 1 (model.nav.pane_index + 1)) in
+            Printf.sprintf "%s%d/%d" caret idx n_panes
+          else
+            let focus_raw =
+              Say.resolve model.lang (Model.active_focus_label model)
+            in
+            Printf.sprintf "%s%s" caret
+              (Grapheme.truncate_to_width ~max_width:10 focus_raw)
+        else
+          let focus_raw =
+            Say.resolve model.lang (Model.active_focus_label model)
+          in
+          Printf.sprintf " %s %s " caret
+            (Grapheme.truncate_to_width ~max_width:24 focus_raw)
       in
       let pill_bg = Color.of_rgb theme.surface_2 in
       let focus_st =
-        if model.nav.filter_focused || Drafts.is_focused model.drafts then
+        if not model.terminal_focused then Typography.whisper ~bg:pill_bg theme
+        else if model.nav.filter_focused || Drafts.is_focused model.drafts then
           Typography.status ~bg:pill_bg ~bold:true theme Theme.Status_attention
         else if Option.is_some model.nav.overlay then
           Typography.status ~bg:pill_bg ~bold:true theme Theme.Status_ai
@@ -1264,22 +1289,35 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:focus_st
           focus_txt
       in
-      x := !x + f_adv + 2
+      x := !x + f_adv + (if compact then 1 else 2)
     end;
     (* On Compact idle (when no overlay is open), fold composer cleanly into left side *)
     if composer_folded && Option.is_none model.nav.overlay && avail_w >= 16 then
       begin
         let comp_st = Render_util.composer_state_of_model model in
-        let raw_pill = Composer.folded_footer_pill ~lang:model.lang comp_st in
-        let max_pill_w = Int.min 26 (avail_w / 2) in
-        let pill = Grapheme.truncate_to_width ~max_width:max_pill_w raw_pill in
         let pill_bg = Color.of_rgb theme.surface_2 in
-        let p_adv =
-          Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-            ~style:(Typography.anchor ~bg:pill_bg theme)
-            (" " ^ pill ^ " ")
+        let pill_txt =
+          if compact then
+            let short_k =
+              Grapheme.truncate_to_width ~max_width:8 comp_st.target_keeper
+            in
+            Printf.sprintf "%s@%s [i]"
+              (Glyph.to_utf8 Glyph.Prompt_caret)
+              short_k
+          else
+            let raw_pill = Composer.folded_footer_pill ~lang:model.lang comp_st in
+            let max_pill_w = Int.min 26 (avail_w / 2) in
+            " " ^ Grapheme.truncate_to_width ~max_width:max_pill_w raw_pill ^ " "
         in
-        x := !x + p_adv + 2
+        let pill_st =
+          if model.terminal_focused then Typography.anchor ~bg:pill_bg theme
+          else Typography.structure ~bg:pill_bg theme
+        in
+        let p_adv =
+          Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:pill_st
+            pill_txt
+        in
+        x := !x + p_adv + (if compact then 1 else 2)
       end;
     let hints_right_limit = Int.max !x (right_edge - right_hint_reserve) in
     let remaining_w = Int.max 0 (hints_right_limit - !x) in
@@ -1890,7 +1928,8 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
-    let focused = Model.sidebar_has_focus model in
+    let logical_focused = Model.sidebar_has_focus model in
+    let focused = model.terminal_focused && logical_focused in
     let title = Say.resolve lang (Say.make ~ko:"메뉴" ~en:"Menu") in
     let hotkey =
       if focused then Say.resolve lang (Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Body")
@@ -1911,7 +1950,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let bg = Color.of_rgb bg_rgb in
       let active_target = Model.active_menu_target model in
       let effective_cursor =
-        if focused then model.nav.sidebar_cursor
+        if logical_focused then model.nav.sidebar_cursor
         else Nav.menu_item_index active_target
       in
       let rows = Array.of_list Model.sidebar_visual_rows in
@@ -1963,24 +2002,26 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           ~style:sec_st s))
           | Model.Sidebar_item { index; item } ->
               let is_cursor = focused && Int.equal index model.nav.sidebar_cursor in
+              let is_blurred_cursor =
+                logical_focused && (not focused)
+                && Int.equal index model.nav.sidebar_cursor
+              in
               let is_active = Nav.equal_menu_target item.target active_target in
               let row_bg_rgb =
-                if is_cursor then theme.selection_bg else bg_rgb
+                if is_cursor then theme.selection_bg
+                else if is_blurred_cursor then theme.surface_2
+                else bg_rgb
               in
               let row_bg = Color.of_rgb row_bg_rgb in
-              if is_cursor then
+              if is_cursor || is_blurred_cursor then
                 Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
                   ~style:(Typography.primary ~bg:row_bg theme) ();
               if is_cursor then
                 Card.draw_left_rail ~bg:row_bg ~color:theme.border_focused grid
                   ~x:inner.x ~y:py ~h:1 ~theme
-              else if is_active then begin
-                let rail_color =
-                  if focused then theme.border_inactive else theme.border_focused
-                in
-                Card.draw_left_rail ~bg:row_bg ~color:rail_color grid
-                  ~x:inner.x ~y:py ~h:1 ~theme
-              end;
+              else if is_active || is_blurred_cursor then
+                Card.draw_left_rail ~bg:row_bg ~color:theme.border_inactive grid
+                  ~x:inner.x ~y:py ~h:1 ~theme;
               let badge_opt : (string * Style.t) option =
                 match item.target with
                 | Nav.Menu_work Nav.Work_inbox when attn_n > 0 ->
@@ -2033,8 +2074,10 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let lbl_st =
                 if is_cursor then Typography.anchor ~bg:row_bg theme
                 else if is_active then
-                  Typography.accent ~bg:row_bg ~bold:(not focused) theme
-                else if focused then Typography.primary ~bg:row_bg theme
+                  if focused then Typography.accent ~bg:row_bg ~bold:false theme
+                  else Typography.primary ~bg:row_bg theme
+                else if focused || is_blurred_cursor then
+                  Typography.primary ~bg:row_bg theme
                 else Typography.structure ~bg:row_bg theme
               in
               let lbl =
@@ -2161,7 +2204,8 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
                  (Some comp_st.target_keeper)
           in
           let c =
-            Composer.draw ~show_pending_tx:(not progress_in_chat) grid ~rect:r
+            Composer.draw ~show_pending_tx:(not progress_in_chat)
+              ~terminal_focused:model.terminal_focused grid ~rect:r
               ~theme ~lang:model.lang
               ~breakpoint:layout.breakpoint comp_st
           in
@@ -2172,6 +2216,10 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
                let scrim_bg = Color.of_rgb theme.surface_0 in
                Cell_grid.dim_rect grid ~rect:layout.body ~fg:scrim_fg
                  ~bg:scrim_bg;
+               (match layout.sidebar with
+                | Some sr ->
+                    Cell_grid.dim_rect grid ~rect:sr ~fg:scrim_fg ~bg:scrim_bg
+                | None -> ());
                (match layout.approval_strip with
                 | Some ar ->
                     Cell_grid.dim_rect grid ~rect:ar ~fg:scrim_fg ~bg:scrim_bg
@@ -2208,7 +2256,7 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
     match model.nav.overlay with
     | None ->
         render_toast_pill grid ~body_rect:layout.body ~theme ~model;
-        comp_cursor
+        if model.terminal_focused then comp_cursor else Presenter.hidden_cursor
     | Some _ ->
         let overlay_rect =
           Rect.make ~x:0 ~y:layout.top_rail.h ~w:cols

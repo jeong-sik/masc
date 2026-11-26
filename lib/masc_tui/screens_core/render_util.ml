@@ -403,27 +403,6 @@ let draw_pill ?clip grid ~x ~y ~fg ~bg ?(bold = false) text =
     let padded = " " ^ text ^ " " in
     Cell_grid.put_text ?clip grid ~x ~y ~style padded
 
-let dim_backdrop grid ~(rect : Rect.t) ~(theme : Theme.t) =
-  let bounds = Rect.intersect rect (Cell_grid.bounds grid) in
-  if not (Rect.is_empty bounds) then
-    let dim_fg = Color.of_rgb theme.text_muted in
-    let dim_bg = Color.of_rgb theme.surface_0 in
-    for y = bounds.y to Rect.bottom bounds - 1 do
-      for x = bounds.x to Rect.right bounds - 1 do
-        let c = Cell_grid.get grid ~x ~y in
-        match c.glyph with
-        | Cell_grid.Continuation -> ()
-        | Cell_grid.Empty
-        | Cell_grid.Ascii _
-        | Cell_grid.Braille _
-        | Cell_grid.Utf8 _ ->
-            let style =
-              Style.make ~fg:dim_fg ~bg:dim_bg ~attrs:Attr.none ()
-            in
-            Cell_grid.set_cell ~clip:bounds grid ~x ~y { c with style }
-      done
-    done
-
 let parse_json_struct_only s =
   match Yojson.Safe.from_string s with
   | (`Assoc _ | `List _) as json -> Some json

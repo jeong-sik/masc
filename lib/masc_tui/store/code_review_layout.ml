@@ -8,9 +8,43 @@ type row =
       right : Wire_infra.git_diff_line option;
     }
 
-(* Two 14-cell gutters plus two columns of 70 cells: below this an 80-column
-   source line no longer fits on either side. *)
-let side_by_side_min_cols = 160
+(* Two 60-cell halves (each with 6-cell line-number+marker gutter and >= 53-cell
+   source column) plus a 1-cell center divider: below 120 cells of actual diff
+   pane width, unified view stays cleaner and more readable. *)
+let side_by_side_min_cols = 120
+
+let effective_diff_pane_width ?(zoomed = false) ~viewport_cols ~sidebar_docked
+    () =
+  let cols = max 0 viewport_cols in
+  let outer_margin = if cols >= 100 then 1 else 0 in
+  let full_w =
+    if outer_margin > 0 && cols > outer_margin * 2 then
+      cols - (outer_margin * 2)
+    else cols
+  in
+  let sidebar_width = 24 in
+  let sidebar_gap = 1 in
+  let body_w =
+    if sidebar_docked && full_w >= sidebar_width + 20 then
+      max 0 (full_w - sidebar_width - sidebar_gap)
+    else full_w
+  in
+  let right_w =
+    if zoomed || cols < 100 then body_w
+    else
+      let gap = if cols >= 140 then 2 else 1 in
+      let avail = max 0 (body_w - gap) in
+      let left_w = int_of_float (Float.floor (float_of_int avail *. 0.32)) in
+      max 0 (avail - left_w)
+  in
+  let inner_w = max 0 (right_w - 2) in
+  let pad_x =
+    if inner_w < 20 then 0
+    else if inner_w < 44 then 1
+    else if cols >= 100 then 2
+    else 1
+  in
+  max 0 (inner_w - (2 * pad_x))
 
 let side_by_side ~cols = cols >= side_by_side_min_cols
 

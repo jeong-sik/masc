@@ -179,7 +179,7 @@ type keyboard = Legacy | Kitty | Xterm
 
 let enter_screen_seq ~keyboard ~mouse ~bracketed_paste =
   let buf = Buffer.create 64 in
-  Buffer.add_string buf "\x1b[?1049h\x1b[?25l";
+  Buffer.add_string buf "\x1b[?1049h\x1b[?25l\x1b[?1004h";
   if bracketed_paste then Buffer.add_string buf "\x1b[?2004h";
   if mouse then Buffer.add_string buf "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
   (match keyboard with
@@ -195,7 +195,7 @@ let leave_screen_seq ~keyboard =
   | Kitty -> Buffer.add_string buf Input_decoder.disable_kitty_keyboard
   | Xterm -> Buffer.add_string buf "\x1b[>4;0m");
   Buffer.add_string buf
-    "\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?7h\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l";
+    "\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?7h\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l";
   Buffer.contents buf
 
 let install_switch_teardown ~sw ~keyboard ?on_after_drain () =

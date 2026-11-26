@@ -8,10 +8,10 @@
 import { html } from 'htm/preact'
 import { InlineSpinner } from '../components/common/inline-spinner'
 import { MarkdownContent } from '../components/common/markdown-renderer'
-import { activeScheduleRead, subscribeActiveSchedulesRefresh } from '../components/schedule/schedule-state'
 import type { VNode } from 'preact'
-import { useEffect } from 'preact/hooks'
-import { isAuthenticated, sessionEpoch } from '../core/auth'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { isAuthenticated, isEpochCurrent, sessionEpoch } from '../core/auth'
+import { extractObserverTopics, subscribeObserverFrames } from '../core/observer'
 import { formatObserved, resourceCache } from '../core/resource-cache'
 import { apiGet } from '../core/transport'
 import { formatTimestampKo } from '../lib/format-time'
@@ -50,6 +50,34 @@ interface QuickPeekSchedule {
 }
 
 const SHELL_CACHE_KEY = 'shell:queue-context'
+const SCHEDULE_TOPICS = [
+  'schedules',
+  'schedule_store_changed',
+  'scheduled_automation_changed',
+  'scheduled_automation',
+]
+
+interface QuickPeekAvailableSchedules {
+  readonly state: 'available'
+  readonly rows: readonly QuickPeekSchedule[]
+  readonly totalCount: number
+  readonly truncated: boolean
+  readonly observedAt: number
+}
+
+type QuickPeekSchedulesResult =
+  | QuickPeekAvailableSchedules
+  | {
+      readonly state: 'unavailable'
+      readonly reason: string
+    }
+
+interface QuickPeekScheduleState {
+  readonly epoch: number
+  readonly sample: QuickPeekAvailableSchedules | null
+  readonly loading: boolean
+  readonly error: string | null
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -106,6 +134,32 @@ function quickPeekSchedule(raw: unknown): QuickPeekSchedule[] {
   }]
 }
 
+function decodeQuickPeekSchedules(raw: unknown): QuickPeekSchedulesResult {
+  if (!isRecord(raw)) {
+    return { state: 'unavailable', reason: '예약 자동화 응답 형식이 잘못되었습니다.' }
+  }
+  const readError = asStr(raw.schedule_store_read_error)
+  if (readError) return { state: 'unavailable', reason: readError }
+  if (raw.schedule_store_known === false || raw.status === 'unknown') {
+    return { state: 'unavailable', reason: '예약 저장소 상태를 확인할 수 없습니다.' }
+  }
+  if (!Array.isArray(raw.requests)) {
+    return { state: 'unavailable', reason: '예약 자동화 응답 형식이 잘못되었습니다.' }
+  }
+  const rows = raw.requests.flatMap(quickPeekSchedule)
+  const rawTotal = asNumberOrNull(raw.request_count)
+  const totalCount = rawTotal !== null && Number.isSafeInteger(rawTotal) && rawTotal >= 0
+    ? rawTotal
+    : rows.length
+  return {
+    state: 'available',
+    rows,
+    totalCount,
+    truncated: raw.truncated === true,
+    observedAt: Date.now(),
+  }
+}
+
 export function QueueContextOverlayBody(): VNode {
   const authed = isAuthenticated.value
   const epoch = sessionEpoch.value
@@ -118,12 +172,33 @@ export function QueueContextOverlayBody(): VNode {
   const sourceStatus = effectiveHitlSourceStatus.value
   const inboxUnchecked = inboxUncheckedSources.value
   const observed = resourceCache.observe<ShellQueueSummary>(SHELL_CACHE_KEY).value
-  const { observation: schedules, loading: schedulesLoading, error: schedulesError } = activeScheduleRead.value
-  const schedulePage = schedules?.projection.page
-  const scheduleRows = schedules?.projection.data.requests.flatMap(quickPeekSchedule).slice(0, MAX_SCHEDULE_PREVIEW) ?? []
+  const [scheduleState, setScheduleState] = useState<QuickPeekScheduleState>(() => ({
+    epoch,
+    sample: null,
+    loading: false,
+    error: null,
+  }))
+  const scheduleAbortRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      scheduleAbortRef.current?.abort()
+      scheduleAbortRef.current = null
+    }
+  }, [])
+
+  const currentScheduleState = scheduleState.epoch === epoch
+    ? scheduleState
+    : { epoch, sample: null, loading: false, error: null }
+  const schedules = currentScheduleState.sample
+  const schedulesLoading = currentScheduleState.loading
+  const schedulesError = currentScheduleState.error
+  const scheduleRows = schedules ? schedules.rows.slice(0, MAX_SCHEDULE_PREVIEW) : []
   const lastSchedules = schedules !== null && (schedulesLoading || schedulesError !== null)
-  const scheduleCount = schedulePage
-    ? `${schedulePage.totalCount}${lastSchedules ? ' · 마지막 확인' : ''}`
+  const scheduleCount = schedules
+    ? `${schedules.totalCount}${lastSchedules ? ' · 마지막 확인' : ''}`
     : schedulesError ? '조회 실패' : '…'
 
   const sectionCountLabel = (count: number, st: HitlSourceState): string => {
@@ -132,8 +207,58 @@ export function QueueContextOverlayBody(): VNode {
     return count > 0 ? `${count} · ${status}` : status
   }
 
+  const loadSchedules = useCallback(async (targetEpoch: number) => {
+    scheduleAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    scheduleAbortRef.current = ctrl
+    setScheduleState((cur) => ({
+      epoch: targetEpoch,
+      sample: cur.epoch === targetEpoch ? cur.sample : null,
+      loading: true,
+      error: cur.epoch === targetEpoch ? cur.error : null,
+    }))
+    const res = await apiGet<QuickPeekSchedulesResult>(
+      '/api/v1/dashboard/scheduled-automation?active_only=true',
+      { signal: ctrl.signal, decode: decodeQuickPeekSchedules },
+    )
+    if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(targetEpoch)) return
+    if (!res.ok) {
+      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+      setScheduleState((cur) => ({
+        epoch: targetEpoch,
+        sample: cur.epoch === targetEpoch ? cur.sample : null,
+        loading: false,
+        error: res.error.message,
+      }))
+      return
+    }
+    if (res.value.state === 'unavailable') {
+      const reason = res.value.reason
+      setScheduleState((cur) => ({
+        epoch: targetEpoch,
+        sample: cur.epoch === targetEpoch ? cur.sample : null,
+        loading: false,
+        error: reason,
+      }))
+      return
+    }
+    setScheduleState({
+      epoch: targetEpoch,
+      sample: res.value,
+      loading: false,
+      error: null,
+    })
+  }, [])
+  const loadSchedulesRef = useRef(loadSchedules)
+  loadSchedulesRef.current = loadSchedules
+
   useEffect(() => {
-    if (!authed) return
+    if (!authed) {
+      scheduleAbortRef.current?.abort()
+      scheduleAbortRef.current = null
+      setScheduleState({ epoch, sample: null, loading: false, error: null })
+      return
+    }
     void resourceCache.fetch(
       SHELL_CACHE_KEY,
       (signal) => apiGet<ShellQueueSummary>('/api/v1/dashboard/shell', {
@@ -142,9 +267,25 @@ export function QueueContextOverlayBody(): VNode {
       }),
       { ttlMs: 10_000, topics: ['workspace_dataset_changed', 'keeper_heartbeat'], reason: 'mount' },
     )
+    void loadSchedules(epoch)
     void refreshPendingHitl()
+    return () => {
+      scheduleAbortRef.current?.abort()
+      scheduleAbortRef.current = null
+    }
+  }, [authed, epoch, loadSchedules])
+
+  useEffect(() => {
+    if (!authed) return
+    const unsub = subscribeObserverFrames((frame) => {
+      const topics = extractObserverTopics(frame)
+      if (!topics.some((t) => SCHEDULE_TOPICS.includes(t))) return
+      void loadSchedulesRef.current(epoch)
+    })
+    return () => {
+      unsub()
+    }
   }, [authed, epoch])
-  useEffect(() => authed ? subscribeActiveSchedulesRefresh() : undefined, [authed])
 
   const formatMetric = (value: number | null | undefined): string => {
     if (observed.kind !== 'value') return formatObserved(observed)
@@ -408,7 +549,7 @@ export function QueueContextOverlayBody(): VNode {
                   ${formatTimestampKo(schedules.observedAt / 1000)}
                 </time></p>
               `}
-              ${schedulePage?.totalCount === 0 && html`
+              ${schedules && schedules.totalCount === 0 && html`
                 <p class="ap-muted">${lastSchedules ? '마지막 조회에 활성 예약이 없었습니다.' : '활성 예약 자동화가 없습니다.'}</p>
               `}
               ${scheduleRows.length > 0 && html`
@@ -427,7 +568,7 @@ export function QueueContextOverlayBody(): VNode {
                   `)}
                 </ul>
               `}
-              ${schedulePage && (schedulePage.truncated || scheduleRows.length < schedulePage.totalCount) && html`
+              ${schedules && (schedules.truncated || scheduleRows.length < schedules.totalCount) && html`
                 <p class="ap-muted">표시 제한으로 일부 예약만 표시됩니다. 전체 목록은 Schedules에서 확인하세요.</p>
               `}
             </section>

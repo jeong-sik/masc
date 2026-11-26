@@ -278,7 +278,7 @@ export function decodeApprovals(raw: unknown): PulseApprovalItem[] {
 
 function decodeAsks(raw: unknown): PulseAskItem[] {
   const decoded = decodeKeeperAsksWire(raw)
-  if (!decoded.ok) return []
+  if (!decoded.ok) throw new Error(decoded.error)
   return decoded.asks.map((ask) => ({
     ask_id: ask.askId,
     keeper: ask.keeper,
@@ -378,13 +378,18 @@ function decodeBoardPosts(raw: unknown): PulseBoardPost[] {
 }
 
 function decodeWorldMemory(raw: unknown): PulseWorldMemoryDigest {
-  const rec = isRecord(raw) ? raw : {}
-  const inv = isRecord(rec.inventory) ? rec.inventory : {}
-  const mvcc = isRecord(rec.world_mvcc) ? rec.world_mvcc : null
-  const briefing = isRecord(rec.briefing) ? rec.briefing : {}
+  if (!isRecord(raw)) {
+    throw new Error('World Memory 응답 형식이 잘못되었습니다.')
+  }
+  if (raw.ledger_state !== 'available' && raw.ledger_state !== 'missing') {
+    throw new Error('World Memory ledger_state 값을 확인할 수 없습니다.')
+  }
+  const inv = isRecord(raw.inventory) ? raw.inventory : {}
+  const mvcc = isRecord(raw.world_mvcc) ? raw.world_mvcc : null
+  const briefing = isRecord(raw.briefing) ? raw.briefing : {}
   return {
-    source: asStr(rec.source),
-    ledger_state: rec.ledger_state === 'available' ? 'available' : 'missing',
+    source: asStr(raw.source),
+    ledger_state: raw.ledger_state,
     claims_count: asNum(inv.claims_count) ?? 0,
     facts_count: asNum(inv.facts_count) ?? 0,
     conflicts_count: asNum(inv.conflicts_count) ?? 0,
@@ -396,10 +401,15 @@ function decodeWorldMemory(raw: unknown): PulseWorldMemoryDigest {
 }
 
 function decodeCandleDigest(raw: unknown): PulseCandleDigest {
-  const rec = isRecord(raw) ? raw : {}
-  const policy = isRecord(rec.policy) ? rec.policy : {}
+  if (!isRecord(raw)) {
+    throw new Error('Candle 원장 응답 형식이 잘못되었습니다.')
+  }
+  if (raw.ledger_state !== 'present' && raw.ledger_state !== 'missing') {
+    throw new Error('Candle 원장 ledger_state 값을 확인할 수 없습니다.')
+  }
+  const policy = isRecord(raw.policy) ? raw.policy : {}
   const halfLife = isRecord(policy.half_life) ? policy.half_life : {}
-  const supply = isRecord(rec.supply) ? rec.supply : {}
+  const supply = isRecord(raw.supply) ? raw.supply : {}
   const cfg = policy.configuration
   const policyConfig: PulseCandleDigest['policy_configuration'] =
     cfg === 'enabled' ? 'enabled' : cfg === 'disabled' ? 'disabled' : 'off'
@@ -409,8 +419,8 @@ function decodeCandleDigest(raw: unknown): PulseCandleDigest {
     return '0'
   }
   return {
-    ledger_state: rec.ledger_state === 'present' ? 'present' : 'missing',
-    total_events: asNum(rec.total_events) ?? 0,
+    ledger_state: raw.ledger_state,
+    total_events: asNum(raw.total_events) ?? 0,
     policy_configuration: policyConfig,
     disabled_reason: asStr(policy.disabled_reason),
     pricing_mode: asStr(policy.pricing_mode) ?? 'off',

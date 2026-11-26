@@ -1,3 +1,5 @@
+import { ChatPreviewModal } from '../primitives/chat-preview-modal'
+export { ChatPreviewModal }
 import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } from './tool-output-lookup'
 import { ChatEditEvidence } from './edit-evidence'
 import { PublishedArtifactCard } from './published-artifact-card'
@@ -9,7 +11,6 @@ import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import { ringFocusClasses } from '../common/ring'
 import {
   ATTACHMENT_INPUT_ACCEPT,
@@ -31,10 +32,10 @@ import { useVoiceInput } from './voice-input'
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
-import { isDismissEscape, isImeComposing, isSubmitEnter } from '../../lib/keyboard'
+import { isImeComposing, isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
-import { createPortal, memo } from 'preact/compat'
+import { memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
@@ -987,65 +988,6 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
       </tbody>
     </table>
   `
-}
-
-export function ChatPreviewModal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  children: ComponentChildren
-}) {
-  const modalRef = useRef<HTMLDivElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
-  useFocusScope({ containerRef: modalRef, active: true })
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (isDismissEscape(e)) {
-        e.preventDefault()
-        e.stopPropagation()
-        onCloseRef.current()
-      }
-    }
-    window.addEventListener('keydown', handler, true)
-    return () => window.removeEventListener('keydown', handler, true)
-  }, [])
-
-  // Keep the fixed overlay relative to the viewport, outside transcript row
-  // layout/paint containment and the transcript scroll clip.
-  return createPortal(html`
-    <div
-      ref=${modalRef}
-      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-      onClick=${onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label=${title}
-    >
-      <div
-        class="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-raised)]"
-        onClick=${(e: Event) => e.stopPropagation()}
-      >
-        <div class="mb-3 flex items-center justify-between gap-4">
-          <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${title}</span>
-          <button
-            type="button"
-            class="rounded-[var(--r-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
-            onClick=${onClose}
-            aria-label="닫기"
-          >
-            ✕
-          </button>
-        </div>
-        <div class="chat-preview-modal-body">${children}</div>
-      </div>
-    </div>
-  `, document.body)
 }
 
 function codeBlockText(htmlContent: string, source?: string): string {

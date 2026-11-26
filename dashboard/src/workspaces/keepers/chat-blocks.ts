@@ -558,8 +558,12 @@ export function toolStatusMeta(
       return { label: '실행 중', tone: 'info' }
     case 'awaiting_result':
       return { label: '결과 대기', tone: 'info' }
+    case 'result_ready':
+      return { label: '결과 준비', tone: 'info' }
     case 'awaiting_approval':
       return { label: '승인 대기', tone: 'warn' }
+    case 'interrupted':
+      return { label: '중단됨', tone: 'bad' }
     case 'error':
     case 'failed':
     case 'err':

@@ -53,9 +53,9 @@ describe('turn open work', () => {
     expect(decoded).not.toBeNull()
     const pieces = openWorkPieces(decoded ?? [])
     expect(pieces.map((piece) => piece.kind === 'batch'
-      ? `batch:${piece.members.map((m) => m.name).join('+')}`
+      ? `batch(${piece.members.length}/${piece.batchSize}):${piece.members.map((m) => m.name).join('+')}`
       : piece.activity.kind === 'tool' ? piece.activity.name : piece.activity.channel))
-      .toEqual(['thinking', 'batch:WebFetch+Execute', 'Write', 'Lone'])
+      .toEqual(['thinking', 'batch(2/3):WebFetch+Execute', 'Write', 'Lone'])
   })
 
   it('says what each piece is doing and where a call reaches', () => {

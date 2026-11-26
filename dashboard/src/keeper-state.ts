@@ -1431,6 +1431,7 @@ export function markAssistantToolTraceEnded(
   entryId: string,
   toolOccurrenceId: string,
   executionId?: string,
+  isError?: boolean,
 ): void {
   const id = toolOccurrenceId.trim()
   if (!id) return
@@ -1440,10 +1441,16 @@ export function markAssistantToolTraceEnded(
     const traceSteps = existing.map((trace) => {
       if (trace.kind !== 'tool' || trace.toolOccurrenceId !== id) return trace
       found = true
+      const nextStatus: 'ok' | 'err' =
+        isError === true
+          ? 'err'
+          : trace.status === 'err'
+            ? 'err'
+            : 'ok'
       return {
         ...trace,
         executionId: executionId ?? trace.executionId,
-        status: trace.status === 'err' ? ('err' as const) : ('ok' as const),
+        status: nextStatus,
       }
     })
     return {

@@ -14,13 +14,14 @@ import {
 import {
   observerConnected,
   resetObserverStateForTests,
+  startObserverStream,
+  stopObserverStream,
   viewProvenance,
 } from '../core/observer'
 import { resourceCache } from '../core/resource-cache'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
-import { subscribeActiveSchedulesRefresh } from '../components/schedule/schedule-state'
-import { publishDashboardObservationChange } from '../lib/observation-refresh'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { navigate, resetRouterForTests } from '../routes/router'
 import { App } from '../app'
@@ -856,8 +857,22 @@ describe('Proposal A+ Shell components', () => {
       expect(container.textContent).not.toContain('활성 예약 자동화가 없습니다.')
     })
 
-    it('shares the calendar read and retains its last sample through an unavailable response', async () => {
+    it('loads schedules without legacy executionWorkspaceAuthority and retains its last sample through an unavailable response', async () => {
+      acceptedExecutionWorkspace.value = null
       const reads: Array<(response: Response) => void> = []
+      const encoder = new TextEncoder()
+      let pushObserverFrame: ((topic: string) => void) | null = null
+      const observerStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          pushObserverFrame = (topic: string) => {
+            controller.enqueue(encoder.encode(`event: change\ndata: ${JSON.stringify({ topic })}\n\n`))
+          }
+        },
+      })
+      const observerFetch: typeof fetch = vi.fn(async () => new Response(observerStream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }))
       vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input)
         if (url.includes('/api/v1/dashboard/scheduled-automation?active_only=true')) {
@@ -866,7 +881,7 @@ describe('Proposal A+ Shell components', () => {
         return hitlJson(Object.entries(EMPTY_HITL).find(([path]) => url.includes(path))?.[1] ?? {})
       }))
 
-      const stopCalendar = subscribeActiveSchedulesRefresh()
+      void startObserverStream({ fetchImpl: observerFetch })
       try {
         await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
         await waitFor(() => expect(reads).toHaveLength(1))
@@ -879,7 +894,7 @@ describe('Proposal A+ Shell components', () => {
         await waitFor(() => expect(container.textContent).toContain('Patrol sample'))
         expect(container.textContent).toContain('Upcoming Schedules (1)')
 
-        await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
+        await act(async () => pushObserverFrame?.('scheduled_automation'))
         await waitFor(() => expect(reads).toHaveLength(2))
         expect(container.textContent).toContain('예약 갱신 중')
         expect(container.textContent).toContain('Patrol sample')
@@ -893,18 +908,32 @@ describe('Proposal A+ Shell components', () => {
         expect(container.textContent).toContain('마지막 확인')
         expect(container.querySelector('time')?.getAttribute('datetime')).toBeTruthy()
 
-        await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
+        await act(async () => pushObserverFrame?.('scheduled_automation'))
         await waitFor(() => expect(reads).toHaveLength(3))
         await act(async () => reads[2]!(hitlJson(EMPTY_ACTIVE_SCHEDULES)))
         await waitFor(() => expect(container.textContent).toContain('활성 예약 자동화가 없습니다.'))
         expect(container.textContent).toContain('Upcoming Schedules (0)')
         expect(container.textContent).not.toContain('Patrol sample')
         expect(container.textContent).not.toContain('ledger offline')
-      } finally { stopCalendar() }
+      } finally { stopObserverStream() }
     })
 
     it('releases the previous workspace sample and request before reading the selected route', async () => {
+      acceptedExecutionWorkspace.value = null
       const reads: Array<{ url: string; signal: AbortSignal | null; finish: (response: Response) => void }> = []
+      const encoder = new TextEncoder()
+      let pushObserverFrame: ((topic: string) => void) | null = null
+      const observerStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          pushObserverFrame = (topic: string) => {
+            controller.enqueue(encoder.encode(`event: change\ndata: ${JSON.stringify({ topic })}\n\n`))
+          }
+        },
+      })
+      const observerFetch: typeof fetch = vi.fn(async () => new Response(observerStream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }))
       registerWorkspaceTargets([
         { id: 'alpha', label: 'Alpha', baseUrl: '/ws/alpha' },
         { id: 'beta', label: 'Beta', baseUrl: '/ws/beta' },
@@ -920,24 +949,27 @@ describe('Proposal A+ Shell components', () => {
         ...EMPTY_ACTIVE_SCHEDULES, request_count: 1,
         requests: [{ schedule_id: id, payload_summary: id, status: 'scheduled' }],
       })
-      await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
-      await waitFor(() => expect(reads).toHaveLength(1))
-      expect(reads[0]?.url).toBe('/ws/alpha/api/v1/dashboard/scheduled-automation?active_only=true')
-      await act(async () => reads[0]!.finish(page('Alpha patrol')))
-      await waitFor(() => expect(container.textContent).toContain('Alpha patrol'))
+      void startObserverStream({ fetchImpl: observerFetch })
+      try {
+        await act(async () => { render(h(QueueContextOverlayBody, {}), container) })
+        await waitFor(() => expect(reads).toHaveLength(1))
+        expect(reads[0]?.url).toBe('/ws/alpha/api/v1/dashboard/scheduled-automation?active_only=true')
+        await act(async () => reads[0]!.finish(page('Alpha patrol')))
+        await waitFor(() => expect(container.textContent).toContain('Alpha patrol'))
 
-      await act(async () => publishDashboardObservationChange({ topic: 'scheduled_automation' }))
-      await waitFor(() => expect(reads).toHaveLength(2))
-      await act(async () => { selectWorkspace('beta') })
-      expect(container.textContent).not.toContain('Alpha patrol')
-      expect(reads[1]?.signal?.aborted).toBe(true)
-      await waitFor(() => expect(reads).toHaveLength(3))
-      expect(reads[2]?.url).toBe('/ws/beta/api/v1/dashboard/scheduled-automation?active_only=true')
-      await act(async () => reads[2]!.finish(page('Beta patrol')))
-      await waitFor(() => expect(container.textContent).toContain('Beta patrol'))
-      await act(async () => reads[1]!.finish(page('Alpha late patrol')))
-      expect(container.textContent).toContain('Beta patrol')
-      expect(container.textContent).not.toContain('Alpha late patrol')
+        await act(async () => pushObserverFrame?.('scheduled_automation'))
+        await waitFor(() => expect(reads).toHaveLength(2))
+        await act(async () => { selectWorkspace('beta') })
+        expect(container.textContent).not.toContain('Alpha patrol')
+        expect(reads[1]?.signal?.aborted).toBe(true)
+        await waitFor(() => expect(reads).toHaveLength(3))
+        expect(reads[2]?.url).toBe('/ws/beta/api/v1/dashboard/scheduled-automation?active_only=true')
+        await act(async () => reads[2]!.finish(page('Beta patrol')))
+        await waitFor(() => expect(container.textContent).toContain('Beta patrol'))
+        await act(async () => reads[1]!.finish(page('Alpha late patrol')))
+        expect(container.textContent).toContain('Beta patrol')
+        expect(container.textContent).not.toContain('Alpha late patrol')
+      } finally { stopObserverStream() }
     })
   })
 

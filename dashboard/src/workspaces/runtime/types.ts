@@ -407,6 +407,7 @@ export interface KeeperEfficiencyRow {
   readonly input_tokens: number
   readonly output_tokens: number
   readonly cache_read_tokens?: number | null
+  readonly cache_hit_pct?: number | null
   readonly cost_usd: number
   readonly calls: number
   readonly failed: number
@@ -522,6 +523,7 @@ export interface DashboardToolRow {
   readonly description?: string | null
   readonly calls?: number | null
   readonly failure_count?: number
+  readonly deferred_count?: number
   readonly failure_rate?: number | null
   readonly p95_ms?: number | null
   readonly domain?: string
@@ -546,7 +548,7 @@ export interface McpClientRow {
   readonly keeper_name?: string | null
   readonly status: string
   readonly current_task?: string | null
-  readonly last_seen_unix?: number | null
+  readonly last_seen?: string | null
   readonly capabilities?: readonly string[]
 }
 
@@ -790,6 +792,13 @@ export function formatUnixTime(unixSec: number | null | undefined): string {
   if (typeof unixSec !== 'number' || !Number.isFinite(unixSec) || unixSec <= 0) return '없음'
   const d = new Date(unixSec * 1000)
   return d.toISOString().replace('T', ' ').slice(5, 19)
+}
+
+export function formatIsoTime(iso: string | null | undefined): string {
+  if (typeof iso !== 'string' || !iso.trim()) return '미보고'
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return '미보고'
+  return new Date(ms).toISOString().replace('T', ' ').slice(5, 19)
 }
 
 export function formatResetCountdown(resetsAtUnix: number | null | undefined, nowUnix = Date.now() / 1000): string {

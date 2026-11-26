@@ -235,6 +235,37 @@ export function extractChangeBeforeAfter(change: unknown): { before: string; aft
     if (typeof rec.diff === 'string') {
       return { before: '', after: '', unified: rec.diff }
     }
+    if (rec.kind === 'edit') {
+      return {
+        before: typeof rec.before === 'string' ? rec.before : '',
+        after: typeof rec.after === 'string' ? rec.after : '',
+      }
+    }
+    if (rec.kind === 'write') {
+      return {
+        before: '',
+        after: typeof rec.content === 'string' ? rec.content : '',
+      }
+    }
+    if (rec.kind === 'insert') {
+      const text = typeof rec.text === 'string' ? rec.text : ''
+      const line = typeof rec.line === 'number' && Number.isFinite(rec.line) ? Math.trunc(rec.line) : null
+      const insertedLines = text.length > 0 ? text.split('\n') : ['']
+      const startLine = line !== null && line > 0 ? line : 1
+      const hunkBody = insertedLines.map((l) => `+${l}`).join('\n')
+      return {
+        before: '',
+        after: text,
+        unified: `@@ -${startLine},0 +${startLine},${insertedLines.length} @@\n${hunkBody}`,
+      }
+    }
+    if (rec.kind === 'materialize') {
+      const sha = typeof rec.sha256 === 'string' && rec.sha256.trim() ? rec.sha256.trim() : 'unknown'
+      return {
+        before: '',
+        after: `[materialized content sha256=${sha}]`,
+      }
+    }
     const before = typeof rec.before === 'string'
       ? rec.before
       : typeof rec.old_text === 'string'

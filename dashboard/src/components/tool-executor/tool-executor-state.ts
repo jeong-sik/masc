@@ -13,7 +13,8 @@ export const schemasError = signal<string | null>(null)
 const schemasLoadedAt = signal<number>(0)
 
 export const searchQuery = signal('')
-export const tierFilter = signal<string>('all')
+export type ToolAccessFilter = 'all' | 'readonly' | 'mutating'
+export const accessFilter = signal<ToolAccessFilter>('all')
 
 export const selectedTool = signal<McpToolSchema | null>(null)
 export const formValues = signal<Record<string, unknown>>({})
@@ -36,11 +37,10 @@ export const filteredTools = computed(() => {
   if (q) {
     tools = tools.filter(t => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
   }
-  if (tierFilter.value !== 'all') {
-    tools = tools.filter(t => {
-      const tier = (t.annotations as Record<string, unknown> | undefined)?.['x-tier']
-      return tier === tierFilter.value
-    })
+  if (accessFilter.value === 'readonly') {
+    tools = tools.filter(t => t.annotations?.readOnlyHint === true)
+  } else if (accessFilter.value === 'mutating') {
+    tools = tools.filter(t => t.annotations?.readOnlyHint !== true)
   }
   return tools
 })

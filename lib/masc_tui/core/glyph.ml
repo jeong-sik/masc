@@ -26,6 +26,7 @@ type t =
   | Warning_triangle
   | Check_mark
   | Ellipsis
+  | Locked
   | Left_rail
   | Ai_spark
   | Flow_down
@@ -85,6 +86,7 @@ let to_utf8 = function
   | Warning_triangle -> "△"
   | Check_mark -> "✓"
   | Ellipsis -> "…"
+  | Locked -> "⊘"
   | Left_rail -> "▎"
   | Ai_spark -> "✦"
   | Flow_down -> "↓"
@@ -137,6 +139,7 @@ let to_ascii_fallback = function
   | Warning_triangle -> "!"
   | Check_mark -> "+"
   | Ellipsis -> "."
+  | Locked -> "#"
   | Left_rail -> "|"
   | Ai_spark -> "*"
   | Flow_down -> "v"
@@ -193,6 +196,7 @@ let all =
     Warning_triangle;
     Check_mark;
     Ellipsis;
+    Locked;
     Left_rail;
     Ai_spark;
     Flow_down;

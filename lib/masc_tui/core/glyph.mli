@@ -37,6 +37,7 @@ type t =
   | Warning_triangle        (** △ U+25B3 *)
   | Check_mark              (** ✓ U+2713 *)
   | Ellipsis                (** … U+2026 *)
+  | Locked                  (** ⊘ U+2298 — RBAC-restricted view or action *)
   (* v2.5 Structural Accent, AI Reasoning & Cascade Primitives *)
   | Left_rail               (** ▎ U+258E — selection bar, Thinking/quote/callout rail *)
   | Ai_spark                (** ✦ U+2726 — AI Thinking trace / Candle economy mark *)

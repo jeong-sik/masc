@@ -181,6 +181,7 @@ type planning_failure =
   | Planning_tasks_failed of http_error
 
 type http_reply =
+  | Reply_auth_whoami of (Wire_common.auth_whoami, http_error) result
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
   | Reply_keepers_roster of (Wire_fleet.keepers_roster, http_error) result
   | Reply_keepers_roster_extras of Wire_fleet.keeper_roster_extras

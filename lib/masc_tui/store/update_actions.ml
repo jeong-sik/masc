@@ -522,25 +522,36 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
               { m2 with config = config2 }
           , cmds )
 
+let rbac_denied_toast ~now reason (m : Model.t) =
+  ( Model.with_toast ~now ~level:Model.Toast_warning
+      (Rbac.deny_reason_say reason) m
+  , [] )
+
 let save_settings_config ~now (m : Model.t) =
-  match Config_store.build_patch_request ~dry_run:false m.config with
-  | Ok req ->
-      let config = Config_store.mark_save_in_flight m.config in
-      ( { m with config }
-      , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
-  | Error reason ->
-      ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason) m
-      , [] )
+  match Rbac.decide m.auth_session Rbac.Bridged_token_admin with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed -> (
+      match Config_store.build_patch_request ~dry_run:false m.config with
+      | Ok req ->
+          let config = Config_store.mark_save_in_flight m.config in
+          ( { m with config }
+          , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
+      | Error reason ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason) m
+          , [] ))
 
 let dry_run_settings_config ~now (m : Model.t) =
-  match Config_store.build_patch_request ~dry_run:true m.config with
-  | Ok req ->
-      let config = Config_store.mark_dry_run_loading m.config in
-      ( { m with config }
-      , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
-  | Error reason ->
-      ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason) m
-      , [] )
+  match Rbac.decide m.auth_session Rbac.Bridged_token_admin with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed -> (
+      match Config_store.build_patch_request ~dry_run:true m.config with
+      | Ok req ->
+          let config = Config_store.mark_dry_run_loading m.config in
+          ( { m with config }
+          , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
+      | Error reason ->
+          ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason) m
+          , [] ))
 
 let dry_run_keeper_config ~now (m : Model.t) =
   if Config_store.dirty_count m.config > 0 then dry_run_settings_config ~now m
@@ -1291,7 +1302,10 @@ let upvote_board_target ~now (m : Model.t) =
           ] )
 
 let toggle_board_pin ~now (m : Model.t) =
-  match selected_board_post_for_crud m with
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed -> (
+      match selected_board_post_for_crud m with
   | Some p ->
       let next_pinned = not p.pinned in
       let toast =
@@ -1310,7 +1324,7 @@ let toggle_board_pin ~now (m : Model.t) =
               req = Cmd.Post_board_pin { post_id = p.id; pinned = next_pinned };
             };
         ] )
-  | None -> (m, [])
+  | None -> (m, []))
 
 let keeper_is_offline = function
   | Wire_fleet.Keeper_offline -> true
@@ -1844,6 +1858,9 @@ let set_board_recovery (m : Model.t) board_recovery =
 
 let request_keeper_interrupt ?(from_escape = false) ~now ~keeper ~target
     (m : Model.t) =
+  match Rbac.decide m.auth_session Rbac.Single_user_write with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed ->
   let fleet0, drafts =
     match target with
     | `Turn_token interrupt_token ->
@@ -1885,6 +1902,9 @@ let expected_ws_pair (m : Model.t) =
 
 let dispatch_keeper_lifecycle ~now ~op ~toast ~include_expected_workspace
     (m : Model.t) keeper =
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed ->
   let expected_workspace =
     if include_expected_workspace then expected_ws_pair m else None
   in
@@ -2015,6 +2035,57 @@ let apply_toggle_turn_details ~now (m : Model.t) =
   finalize_tools_mode_change ~now ~prev_mode { m with fleet }
 
 let rec execute_slash ~now (m : Model.t) cmd =
+  let allow_locked_workspace_nav =
+    match cmd with
+    | Slash.Pulse
+    | Slash.Work
+    | Slash.Knowledge
+    | Slash.Keepers
+    | Slash.Runtime
+    | Slash.Infra ->
+        true
+    | Slash.Keeper _
+    | Slash.Model _
+    | Slash.Config _
+    | Slash.Incidents
+    | Slash.Jump
+    | Slash.Voice
+    | Slash.Btw _
+    | Slash.Discord_reply
+    | Slash.Wake _
+    | Slash.Up _
+    | Slash.Resume _
+    | Slash.Pause _
+    | Slash.Down _
+    | Slash.Queue
+    | Slash.Context
+    | Slash.Ctl _
+    | Slash.Gate _
+    | Slash.Exec _
+    | Slash.Skill _
+    | Slash.Prompt _
+    | Slash.Preset _
+    | Slash.Lane _
+    | Slash.Addon _
+    | Slash.Browser _
+    | Slash.Tools _
+    | Slash.Clear
+    | Slash.Theme _
+    | Slash.Lang _
+    | Slash.Help
+    | Slash.Restart
+    | Slash.Quit
+    | Slash.Music _
+    | Slash.Score _ ->
+        false
+  in
+  let verdict =
+    if allow_locked_workspace_nav then Rbac.Allowed
+    else Rbac_policy.decide_slash_parsed m.auth_session cmd
+  in
+  match verdict with
+  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+  | Rbac.Allowed ->
   match cmd with
   | Slash.Discord_reply ->
       let warn ~ko ~en =
@@ -3800,7 +3871,10 @@ and submit_composer ~now ~mode (m : Model.t) =
   | Update_nav.Composer_popup_none -> (
       if String.equal trimmed "" then (m, [])
       else if Char.equal trimmed.[0] '/' then submit_slash_text ~now m trimmed
-      else
+      else (
+        match Rbac_policy.can_chat_with_keeper m.auth_session with
+        | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+        | Rbac.Allowed ->
         let leading_mention_opt =
           if Char.equal trimmed.[0] '@' then
             let len = String.length trimmed in
@@ -3961,7 +4035,7 @@ and submit_composer ~now ~mode (m : Model.t) =
                            ~en:"No steer token yet: your message is queued, nothing was cut")
                         sent
                 in
-                (sent, [ cmd ])))
+                (sent, [ cmd ]))))
 
 and confirm_palette ~now (m : Model.t) =
   match m.palette.mode with
@@ -5923,7 +5997,13 @@ and execute_action ~now (m : Model.t) action =
           }
         in
         let next =
-          { m with epoch = next_epoch; server_identity }
+          {
+            m with
+            epoch = next_epoch;
+            auth_session = Rbac.Probing_health;
+            last_auth_recheck_mono = None;
+            server_identity;
+          }
           |> Model.mark_all_domains_stale
           |> Model.with_toast ~now ~level:Model.Toast_info
                (Say.make ~ko:"서버 핸드셰이크 재시도 중"
@@ -6538,10 +6618,16 @@ and execute_action ~now (m : Model.t) action =
       match m.nav.overlay with
       | Some (Nav.Settings _) -> (
           match m.config.target with
-          | Wire_config.Target_runtime ->
-              (m, [ Cmd.Open_editor_escape_hatch Cmd.Edit_runtime_toml ])
-          | Wire_config.Target_keeper name ->
-              (m, [ Cmd.Open_editor_escape_hatch (Cmd.Edit_keeper_toml name) ])
+          | Wire_config.Target_runtime -> (
+              match Rbac_policy.decide_editor_target m.auth_session Cmd.Edit_runtime_toml with
+              | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+              | Rbac.Allowed ->
+                  (m, [ Cmd.Open_editor_escape_hatch Cmd.Edit_runtime_toml ]))
+          | Wire_config.Target_keeper name -> (
+              match Rbac_policy.decide_editor_target m.auth_session (Cmd.Edit_keeper_toml name) with
+              | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+              | Rbac.Allowed ->
+                  (m, [ Cmd.Open_editor_escape_hatch (Cmd.Edit_keeper_toml name) ]))
           | Wire_config.Target_keeper_create ->
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.make
@@ -7222,14 +7308,20 @@ and execute_action ~now (m : Model.t) action =
                         (m, [])))))
   | Keymap.Context_primary_action -> (
       match board_recovery_keeper m with
-      | Some keeper ->
+      | Some keeper -> (
+          match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           (match Board_recovery.start ~keeper m.knowledge.board_recovery with
            | None -> (m, [])
            | Some (recovery, item) ->
-               (set_board_recovery m recovery, [Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_board_recovery item }]))
+               (set_board_recovery m recovery, [Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_board_recovery item }])))
       | None ->
       match active_artifact_target m with
-      | Some art ->
+      | Some art -> (
+          match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           let rev, sha =
             match Knowledge_store.artifact_detail_for_entry art m.knowledge with
             | Some d -> (d.artifact.revision, d.artifact.body.sha256)
@@ -7270,7 +7362,7 @@ and execute_action ~now (m : Model.t) action =
                         expected_change_id;
                       };
                 };
-            ] )
+            ] ))
       | None -> (
           if Option.is_some m.nav.overlay then (m, [])
           else
@@ -7440,6 +7532,9 @@ and execute_action ~now (m : Model.t) action =
                   ->
                     (m, []))))
   | Keymap.Toggle_artifact_share -> (
+      match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+      | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+      | Rbac.Allowed ->
       match active_artifact_target m with
       | None -> (m, [])
       | Some art -> (
@@ -7681,6 +7776,9 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Unbind_connector -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
       | Some keeper -> (
+          match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           let ks =
             Keeper_context_store.get_keeper ~keeper m.keeper_context
           in
@@ -7712,6 +7810,9 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Runtime
           when Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_connectors
           -> (
+            match Rbac.decide m.auth_session Rbac.Single_user_write with
+            | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+            | Rbac.Allowed ->
             match Runtime_store.selected_connector m.runtime with
             | Some conn -> (
                 match conn.configured_bindings with
@@ -7767,27 +7868,34 @@ and execute_action ~now (m : Model.t) action =
                 (Update_nav.clamp_index (List.length entries)
                    ks.identity_selected_idx)
             with
-            | Some (Update_nav.Identity_oauth { provider; enabled; _ }) ->
-                let next_enabled = not (Option.value ~default:false enabled) in
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make
-                       ~ko:
-                         (Printf.sprintf "OAuth 도구 전환: %s -> %s" provider
-                            (if next_enabled then "활성" else "비활성"))
-                       ~en:
-                         (Printf.sprintf "Toggling OAuth tools %s -> %s"
-                            provider
-                            (if next_enabled then "enabled" else "disabled")))
-                    m
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_oauth_identity_switch
-                            { keeper; provider; enabled = next_enabled };
-                      };
-                  ] )
+            | Some (Update_nav.Identity_oauth { provider; enabled; _ }) -> (
+                match
+                  Rbac.decide m.auth_session Rbac.Single_user_token_admin_only
+                with
+                | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                | Rbac.Allowed ->
+                    let next_enabled =
+                      not (Option.value ~default:false enabled)
+                    in
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:
+                             (Printf.sprintf "OAuth 도구 전환: %s -> %s" provider
+                                (if next_enabled then "활성" else "비활성"))
+                           ~en:
+                             (Printf.sprintf "Toggling OAuth tools %s -> %s"
+                                provider
+                                (if next_enabled then "enabled" else "disabled")))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_oauth_identity_switch
+                                { keeper; provider; enabled = next_enabled };
+                          };
+                      ] ))
             | Some Update_nav.Identity_github | None -> (m, []))
         | None ->
         match Model.active_inspector m with
@@ -7853,45 +7961,60 @@ and execute_action ~now (m : Model.t) action =
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory -> (
                 match resolve_memory_act_keeper m with
-                | Some keeper ->
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make
-                           ~ko:("사서 라이터 재개 요청: " ^ keeper)
-                           ~en:("Requesting librarian writer resume: " ^ keeper))
-                        m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_memory_act
-                                { keeper; act = Wire_knowledge.Act_resume };
-                          };
-                      ] )
+                | Some keeper -> (
+                    match
+                      Rbac.decide m.auth_session
+                        Rbac.Single_user_token_admin_only
+                    with
+                    | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                    | Rbac.Allowed ->
+                        ( Model.with_toast ~now ~level:Model.Toast_info
+                            (Say.make
+                               ~ko:("사서 라이터 재개 요청: " ^ keeper)
+                               ~en:
+                                 ("Requesting librarian writer resume: "
+                                  ^ keeper))
+                            m
+                        , [
+                            Cmd.Http_post
+                              {
+                                epoch = m.epoch;
+                                req =
+                                  Cmd.Post_memory_act
+                                    { keeper; act = Wire_knowledge.Act_resume };
+                              };
+                          ] ))
                 | None -> open_memory_act_modal m ~keeper_default:"")
             | Nav.Keepers
               when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                         Nav.Keeper_memory -> (
                 match Model.selected_keeper_name m with
-                | Some name ->
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make
-                           ~ko:("사서 라이터 재개 요청: " ^ name)
-                           ~en:("Requesting librarian writer resume: " ^ name))
-                        m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_memory_act
-                                {
-                                  keeper = name;
-                                  act = Wire_knowledge.Act_resume;
-                                };
-                          };
-                      ] )
+                | Some name -> (
+                    match
+                      Rbac.decide m.auth_session
+                        Rbac.Single_user_token_admin_only
+                    with
+                    | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                    | Rbac.Allowed ->
+                        ( Model.with_toast ~now ~level:Model.Toast_info
+                            (Say.make
+                               ~ko:("사서 라이터 재개 요청: " ^ name)
+                               ~en:
+                                 ("Requesting librarian writer resume: " ^ name))
+                            m
+                        , [
+                            Cmd.Http_post
+                              {
+                                epoch = m.epoch;
+                                req =
+                                  Cmd.Post_memory_act
+                                    {
+                                      keeper = name;
+                                      act = Wire_knowledge.Act_resume;
+                                    };
+                              };
+                          ] ))
                 | None -> (m, []))
             | Nav.Keepers
               when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
@@ -7919,21 +8042,30 @@ and execute_action ~now (m : Model.t) action =
                        m.runtime.pp_section Runtime_store.Sec_presets
                 then
                   match Runtime_store.selected_preset_manifest m.runtime with
-                  | Some p ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:("프리셋 복원 중 (자동 백업 _autosave): " ^ p.name)
-                             ~en:
-                               ("Restoring preset (autosaving _autosave): "
-                                ^ p.name))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req = Cmd.Post_preset_restore { name = p.name };
-                            };
-                        ] )
+                  | Some p -> (
+                      match
+                        Rbac.decide m.auth_session
+                          Rbac.Single_user_token_admin_only
+                      with
+                      | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                      | Rbac.Allowed ->
+                          ( Model.with_toast ~now ~level:Model.Toast_info
+                              (Say.make
+                                 ~ko:
+                                   ("프리셋 복원 중 (자동 백업 _autosave): "
+                                    ^ p.name)
+                                 ~en:
+                                   ("Restoring preset (autosaving _autosave): "
+                                    ^ p.name))
+                              m
+                          , [
+                              Cmd.Http_post
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Post_preset_restore { name = p.name };
+                                };
+                            ] ))
                   | None -> (m, [])
                 else
                   let keeper_default =
@@ -8025,26 +8157,39 @@ and execute_action ~now (m : Model.t) action =
                     | Work_store.Inbox_rules -> (
                         match Work_store.selected_gate_rule m.work with
                         | None -> (m, [])
-                        | Some rule ->
-                            let work =
-                              {
-                                m.work with
-                                gate_snapshot =
-                                  Observed.mark_stale m.work.gate_snapshot;
-                              }
-                            in
-                            ( Model.with_toast ~now ~level:Model.Toast_info
-                                (Say.make
-                                   ~ko:("Always-Approve 규칙 삭제 중: " ^ rule.id)
-                                   ~en:("Deleting Always-Approve rule: " ^ rule.id))
-                                { m with work }
-                            , [
-                                Cmd.Http_post
+                        | Some rule -> (
+                            match
+                              Rbac.decide m.auth_session
+                                Rbac.Single_user_token_admin_only
+                            with
+                            | Rbac.Denied reason ->
+                                rbac_denied_toast ~now reason m
+                            | Rbac.Allowed ->
+                                let work =
                                   {
-                                    epoch = m.epoch;
-                                    req = Cmd.Post_gate_rule_delete { id = rule.id };
-                                  };
-                              ] ))
+                                    m.work with
+                                    gate_snapshot =
+                                      Observed.mark_stale m.work.gate_snapshot;
+                                  }
+                                in
+                                ( Model.with_toast ~now ~level:Model.Toast_info
+                                    (Say.make
+                                       ~ko:
+                                         ("Always-Approve 규칙 삭제 중: "
+                                          ^ rule.id)
+                                       ~en:
+                                         ("Deleting Always-Approve rule: "
+                                          ^ rule.id))
+                                    { m with work }
+                                , [
+                                    Cmd.Http_post
+                                      {
+                                        epoch = m.epoch;
+                                        req =
+                                          Cmd.Post_gate_rule_delete
+                                            { id = rule.id };
+                                      };
+                                  ] )))
                     | Work_store.Inbox_queue | Work_store.Inbox_history ->
                         (m, []))
                 | Nav.Work_schedules | Nav.Work_candle_scorecard -> (m, []))
@@ -8503,6 +8648,9 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Account_login -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
       | Some keeper -> (
+          match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           let ks =
             Keeper_context_store.get_keeper ~keeper m.keeper_context
           in
@@ -8553,6 +8701,9 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Poll_account_login -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
       | Some keeper -> (
+          match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           let ks =
             Keeper_context_store.get_keeper ~keeper m.keeper_context
           in
@@ -8593,6 +8744,9 @@ and execute_action ~now (m : Model.t) action =
             else
               match m.nav.workspace with
               | Nav.Runtime -> (
+                  match Rbac.decide m.auth_session Rbac.Own_provider_manage with
+                  | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                  | Rbac.Allowed ->
                   match m.runtime.setup_login_receipt with
                   | Some r ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
@@ -8672,6 +8826,9 @@ and execute_action ~now (m : Model.t) action =
               ->
                 (m, [])))
   | Keymap.Board_vote dir -> (
+      match Rbac.decide m.auth_session Rbac.Single_user_write with
+      | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+      | Rbac.Allowed ->
       let target_opt =
         if Option.is_some m.nav.overlay then None
         else
@@ -8859,7 +9016,10 @@ and execute_action ~now (m : Model.t) action =
                   None)
       in
       match target_opt with
-      | Some (target, label) ->
+      | Some (target, label) -> (
+          match Rbac.decide m.auth_session Rbac.Bridged_token_admin with
+          | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+          | Rbac.Allowed ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
                  ~ko:("샌드박스 프로브 실행: " ^ label)
@@ -8868,7 +9028,7 @@ and execute_action ~now (m : Model.t) action =
           , [
               Cmd.Http_post
                 { epoch = m.epoch; req = Cmd.Post_sandbox_probe target };
-            ] )
+            ] ))
       | None -> (m, []))
   | Keymap.Refresh_browser_tabs -> (
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
@@ -8878,6 +9038,9 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Runtime
           when Nav.equal_runtime_tab m.runtime.active_tab
                  Nav.Runtime_addons_browser -> (
+            match Rbac.decide m.auth_session Rbac.Single_user_read with
+            | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+            | Rbac.Allowed ->
             match Runtime_store.selected_browser_client m.runtime with
             | Some cl ->
                 let runtime =
@@ -8975,13 +9138,16 @@ and execute_action ~now (m : Model.t) action =
                 else None
           in
           match wiki_slug with
-          | Some slug ->
+          | Some slug -> (
+              match Rbac_policy.decide_editor_target m.auth_session (Cmd.Edit_wiki_page slug) with
+              | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+              | Rbac.Allowed ->
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
                      ~ko:("외부 편집기로 위키 열기: " ^ slug)
                      ~en:("Opening wiki page in $EDITOR: " ^ slug))
                   m
-              , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] )
+              , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] ))
           | None -> (m, [])))
   | Keymap.Interrupt_turn -> (
       let keeper_opt =
@@ -9102,6 +9268,9 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Keeper_stop_armed -> (
       if not (Model.is_keeper_lifecycle_surface m) then (m, [])
       else
+        match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+        | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+        | Rbac.Allowed ->
         match Model.target_keeper_for_lifecycle m with
         | None ->
             ( Model.with_toast ~now ~level:Model.Toast_warning

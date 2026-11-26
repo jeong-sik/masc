@@ -316,6 +316,12 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               short_workspace_label ~lang:model.lang ~compact:use_compact_tabs
                 ws
             in
+            let ws_locked =
+              not (Rbac_policy.can_access_workspace model.auth_session ws)
+            in
+            let lbl =
+              if ws_locked then Glyph.to_utf8 Glyph.Locked ^ lbl else lbl
+            in
             let active = Nav.equal_workspace ws model.nav.workspace in
             if active then begin
               (* Elevated surface_2 pill + Left_rail accent bar + Bold text_bright
@@ -417,6 +423,29 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           }
       else None
     in
+    let auth_item =
+      let badge_s =
+        Say.resolve model.lang
+          (Rbac.session_badge ~compact model.auth_session)
+      in
+      let tone, prefix =
+        if Rbac.requires_auth_gate model.auth_session then
+          (Theme.Status_critical, Glyph.to_utf8 Glyph.Locked ^ " ")
+        else if Rbac.can_admin model.auth_session then (Theme.Status_ok, "")
+        else if Rbac.is_authenticated model.auth_session then
+          (Theme.Status_attention, Glyph.to_utf8 Glyph.Locked ^ " ")
+        else (Theme.Status_historical, "")
+      in
+      Some
+        {
+          priority = 2;
+          segments =
+            [
+              ( prefix ^ badge_s,
+                Typography.status ~bg ~bold:true theme tone );
+            ];
+        }
+    in
     let help_badge =
       Some
         {
@@ -462,9 +491,17 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     in
     let raw_items =
       (if Model.keeper_dive_focused model then
-         [ attn_item; Some fresh_item; help_badge ]
+         [ attn_item; Some fresh_item; auth_item; help_badge ]
        else
-         [ attn_item; Some fresh_item; inc_badge; help_badge; ws_item; clock_item ])
+         [
+           attn_item;
+           Some fresh_item;
+           auth_item;
+           inc_badge;
+           help_badge;
+           ws_item;
+           clock_item;
+         ])
       |> List.filter_map Fun.id
     in
     let measure_items xs =
@@ -859,6 +896,11 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
          in
          x := !x + adv
      | None -> (
+         let mark_tab_lock verdict lbl =
+           match verdict with
+           | Rbac.Allowed -> lbl
+           | Rbac.Denied _ -> Glyph.to_utf8 Glyph.Locked ^ " " ^ lbl
+         in
          match model.nav.workspace with
          | Nav.Pulse -> ()
          | Nav.Work ->
@@ -879,6 +921,11 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                      | Nav.Work_harness ->
                          base
                    in
+                   let lbl =
+                     mark_tab_lock
+                       (Rbac_policy.decide_work_tab model.auth_session t)
+                       lbl
+                   in
                    (lbl, Nav.equal_work_tab t model.work.active_tab))
                  Nav.all_work_tabs
              in
@@ -887,8 +934,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              let tabs =
                List.map
                  (fun t ->
-                   ( compact_knowledge_tab_label ~lang ~compact t,
-                     Nav.equal_knowledge_tab t model.knowledge.active_tab ))
+                   let lbl =
+                     mark_tab_lock
+                       (Rbac_policy.decide_knowledge_tab model.auth_session t)
+                       (compact_knowledge_tab_label ~lang ~compact t)
+                   in
+                   (lbl, Nav.equal_knowledge_tab t model.knowledge.active_tab))
                  Nav.all_knowledge_tabs
              in
              draw_tab_list tabs
@@ -918,17 +969,28 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  let tabs =
                    List.map
                      (fun t ->
-                       ( compact_keeper_tab_label ~lang ~compact:use_compact_kt t,
-                         Nav.equal_keeper_tab t model.fleet.keeper_dive_tab ))
+                       let lbl =
+                         mark_tab_lock
+                           (Rbac_policy.decide_keeper_tab model.auth_session t)
+                           (compact_keeper_tab_label ~lang
+                              ~compact:use_compact_kt t)
+                       in
+                       (lbl, Nav.equal_keeper_tab t model.fleet.keeper_dive_tab))
                      Nav.all_keeper_tabs
                  in
                  draw_tab_list ~gap:(if use_compact_kt then 1 else gap) tabs
              | None ->
+                 let ws_verdict =
+                   Rbac_policy.decide_workspace model.auth_session Nav.Keepers
+                 in
                  let tabs =
                    List.map
                      (fun m ->
-                       ( Say.resolve lang (Nav.keepers_fleet_mode_label m),
-                         Nav.equal_keepers_fleet_mode m model.fleet.fleet_mode ))
+                       let lbl =
+                         mark_tab_lock ws_verdict
+                           (Say.resolve lang (Nav.keepers_fleet_mode_label m))
+                       in
+                       (lbl, Nav.equal_keepers_fleet_mode m model.fleet.fleet_mode))
                      Nav.all_keepers_fleet_modes
                  in
                  draw_tab_list tabs)
@@ -937,8 +999,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              let tabs =
                List.map
                  (fun t ->
-                   ( compact_runtime_tab_label ~lang ~compact:use_compact_rt t,
-                     Nav.equal_runtime_tab t model.runtime.active_tab ))
+                   let lbl =
+                     mark_tab_lock
+                       (Rbac_policy.decide_runtime_tab model.auth_session t)
+                       (compact_runtime_tab_label ~lang ~compact:use_compact_rt t)
+                   in
+                   (lbl, Nav.equal_runtime_tab t model.runtime.active_tab))
                  Nav.all_runtime_tabs
              in
              draw_tab_list tabs
@@ -946,8 +1012,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              let tabs =
                List.map
                  (fun t ->
-                   ( compact_infra_tab_label ~lang ~compact t,
-                     Nav.equal_infra_tab t model.infra.active_tab ))
+                   let lbl =
+                     mark_tab_lock
+                       (Rbac_policy.decide_infra_tab model.auth_session t)
+                       (compact_infra_tab_label ~lang ~compact t)
+                   in
+                   (lbl, Nav.equal_infra_tab t model.infra.active_tab))
                  Nav.all_infra_tabs
              in
              draw_tab_list tabs));
@@ -1654,6 +1724,41 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                   Some (relabel h ~ko:"확인" ~en:"Confirm"))
           raw
     in
+    let candidates =
+      let view_locked =
+        Option.is_none model.nav.overlay
+        &&
+        match Rbac_policy.active_view_verdict model with
+        | Rbac.Denied _ -> true
+        | Rbac.Allowed -> false
+      in
+      List.filter
+        (fun (h : Keymap.footer_hint) ->
+          Rbac_policy.can_run_keymap_action_in_model model h.action
+          && (not view_locked
+              ||
+              match
+                Rbac_policy.route_access_of_keymap_action_in_model model
+                  h.action
+              with
+              | Rbac.Always_public -> true
+              | Rbac.Single_user_shell_probe
+              | Rbac.Multi_account_whoami_probe
+              | Rbac.Workspace_read
+              | Rbac.Single_user_read
+              | Rbac.Single_user_token_read
+              | Rbac.Single_user_write
+              | Rbac.Su_read_ma_admin
+              | Rbac.Bridged_token_admin
+              | Rbac.Single_user_role_admin
+              | Rbac.Single_user_token_admin_only
+              | Rbac.Own_provider_manage
+              | Rbac.Own_keeper_sandbox_read
+              | Rbac.Memory_diff_read _
+              | Rbac.Machine_play ->
+                  false))
+        candidates
+    in
     let rec draw_keycaps count = function
       | [] -> ()
       | _ when count >= max_pairs -> ()
@@ -2025,7 +2130,15 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               else if is_active || is_blurred_cursor then
                 Card.draw_left_rail ~bg:row_bg ~color:theme.border_inactive grid
                   ~x:inner.x ~y:py ~h:1 ~theme;
+              let item_locked =
+                not (Rbac_policy.can_access_menu_target model.auth_session item.target)
+              in
               let badge_opt : (string * Style.t) option =
+                if item_locked then
+                  Some
+                    ( Glyph.to_utf8 Glyph.Locked,
+                      Typography.status ~bg:row_bg theme Theme.Status_attention )
+                else
                 match item.target with
                 | Nav.Menu_work Nav.Work_inbox when attn_n > 0 ->
                     Some

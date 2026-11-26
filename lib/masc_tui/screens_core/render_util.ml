@@ -345,3 +345,121 @@ let string_of_transport_error ~lang = function
   | Health.Other_io msg ->
       Say.resolve lang
         (Say.make ~ko:("I/O 오류: " ^ msg) ~en:("I/O error: " ^ msg))
+
+let draw_locked_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~(title : Say.t) ~(reason : Rbac.deny_reason) =
+  if Rect.is_empty rect then ()
+  else
+    let lang = model.lang in
+    let title_s = Say.resolve lang title in
+    let badge_text =
+      Say.resolve lang (Say.make ~ko:"제한됨" ~en:"LOCKED")
+    in
+    let inner =
+      Card.draw ~cache grid ~rect ~theme
+        {
+          (Card.default_spec ~title:title_s) with
+          badge =
+            Some
+              {
+                glyph = Some Glyph.Locked;
+                text = badge_text;
+                tone = Some Theme.Status_attention;
+              };
+          focused = true;
+          elevated = false;
+        }
+    in
+    if not (Rect.is_empty inner) then begin
+      let bg = Color.of_rgb theme.surface_1 in
+      let attn_st =
+        Typography.status ~bg ~bold:true theme Theme.Status_attention
+      in
+      let pri_st = Typography.primary ~bg theme in
+      let whisper_st = Typography.whisper ~bg theme in
+      let session_s =
+        Say.resolve lang (Rbac.session_badge ~compact:false model.auth_session)
+      in
+      let actor_suffix =
+        match model.auth_session with
+        | Rbac.Single_user_local { effective_agent = Some agent; _ } ->
+            " (" ^ agent ^ ")"
+        | Rbac.Multi_account_signed_in { principal; _ } ->
+            Printf.sprintf " (%s:%s)"
+              (Rbac.principal_kind_to_string principal.kind)
+              principal.id
+        | Rbac.Single_user_local { effective_agent = None; _ }
+        | Rbac.Probing_health
+        | Rbac.Probing_single_user _
+        | Rbac.Probing_multi_account _
+        | Rbac.Single_user_auth_required _
+        | Rbac.Multi_account_signed_out _
+        | Rbac.Auth_unavailable _ ->
+            ""
+      in
+      let session_line =
+        Say.resolve lang
+          (Say.make
+             ~ko:("현재 세션: " ^ session_s ^ actor_suffix)
+             ~en:("Current session: " ^ session_s ^ actor_suffix))
+      in
+      let hint_line =
+        match reason with
+        | Rbac.Pat_cannot_admin ->
+            Say.resolve lang
+              (Say.make
+                 ~ko:"다중 계정 PAT는 관리자 권한을 가질 수 없습니다. 웹 콘솔 브라우저 세션에서 관리자 작업을 수행하세요."
+                 ~en:"Multi-account PATs cannot hold admin permissions. Use a browser admin session in the web console.")
+        | Rbac.Single_user_only_in_multi_account ->
+            Say.resolve lang
+              (Say.make
+                 ~ko:"다중 계정 서버에서는 브리지된 워크스페이스 조회 경로만 제공됩니다."
+                 ~en:"Multi-account mode serves bridged workspace read routes only.")
+        | Rbac.Token_auth_not_enabled ->
+            Say.resolve lang
+              (Say.make
+                 ~ko:"서버 워크스페이스 인증(auth.enabled=true, require_token=true)과 관리자 토큰이 필요합니다."
+                 ~en:"Requires server workspace auth (auth.enabled=true, require_token=true) with an admin token.")
+        | Rbac.Requires_admin ->
+            Say.resolve lang
+              (Say.make
+                 ~ko:"관리자 토큰으로 연결하거나 [1-5]의 허용된 워크스페이스를 사용하세요."
+                 ~en:"Connect with an admin token or switch to an allowed workspace ([1-5]).")
+        | Rbac.Probing_auth
+        | Rbac.Auth_required _
+        | Rbac.Service_cannot_manage_own_provider
+        | Rbac.Requires_worker_or_admin
+        | Rbac.Multi_account_only_in_single_user ->
+            Say.resolve lang
+              (Say.make ~ko:"[r] 세션 다시 확인 · [?] 허용된 단축키 보기"
+                 ~en:"[r] Re-check session · [?] View allowed keybindings")
+      in
+      let lines =
+        [
+          (attn_st, Glyph.to_utf8 Glyph.Locked ^ " " ^ Say.resolve lang (Rbac.deny_reason_say reason));
+          (pri_st, session_line);
+          (whisper_st, "");
+          (whisper_st, hint_line);
+        ]
+      in
+      let pad_x = if inner.w >= 48 then 2 else 1 in
+      let body = Card.pad_inner ~pad_x inner in
+      if not (Rect.is_empty body) then begin
+        let rail_h = Int.min (List.length lines) body.h in
+        if rail_h > 0 then
+          Card.draw_left_rail ~bg
+            ~color:(Theme.status_color theme Theme.Status_attention)
+            grid ~x:body.x ~y:body.y ~h:rail_h ~theme;
+        let text_x = body.x + 2 in
+        let text_w = Int.max 0 (body.w - 2) in
+        List.iteri
+          (fun idx (st, txt) ->
+            let y = body.y + idx in
+            if y < Rect.bottom body && text_w > 0 then
+              let row_clip = Rect.make ~x:text_x ~y ~w:text_w ~h:1 in
+              ignore
+                (Cell_grid.put_text ~clip:row_clip grid ~x:text_x ~y ~style:st
+                   (Grapheme.truncate_to_width ~max_width:text_w txt)))
+          lines
+      end
+    end

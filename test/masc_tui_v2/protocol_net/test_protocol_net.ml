@@ -100,11 +100,136 @@ let test_wire_common () =
     parse_json {|{ "version": "0.78.0", "paths": { "effective_base_path": "/srv/masc" } }|}
   in
   ignore (expect_err "reject missing masc_root" (Wire_common.decode_server_health missing_root) : string);
-  (* Reject multi-account server *)
+  (* Reject unknown account_mode string, accept Single_user / Multi_account *)
   let bad_health =
     parse_json {|{ "account_mode": "multi", "version": "0.78.0", "live": true }|}
   in
-  ignore (expect_err "reject account_mode" (Wire_common.decode_server_health bad_health) : string);
+  ignore (expect_err "reject unknown account_mode" (Wire_common.decode_server_health bad_health) : string);
+  let ma_health_json =
+    parse_json
+      {|{
+        "version": "0.78.0",
+        "live": true,
+        "ready": true,
+        "account_mode": "Multi_account",
+        "auth_methods": { "google": true, "github": false, "dev_token": true }
+      }|}
+  in
+  let ma_health =
+    expect_ok "multi-account health" (Wire_common.decode_server_health ma_health_json)
+  in
+  Alcotest.(check bool) "health account_mode is Multi_account" true
+    (Rbac.equal_account_mode ma_health.account_mode Rbac.Multi_account);
+  Alcotest.(check bool) "health auth_methods.google" true ma_health.auth_methods.google;
+  Alcotest.(check bool) "health auth_methods.github" false ma_health.auth_methods.github;
+  Alcotest.(check bool) "health auth_methods.dev_token" true ma_health.auth_methods.dev_token;
+  let bad_methods =
+    parse_json
+      {|{ "version": "0.78.0", "account_mode": "Multi_account", "auth_methods": "broken" }|}
+  in
+  ignore (expect_err "reject malformed auth_methods" (Wire_common.decode_server_health bad_methods) : string);
+  (* /api/v1/auth/whoami strict decoder *)
+  let whoami_pat_json =
+    parse_json
+      {|{
+        "principal": { "kind": "human", "id": "usr-42" },
+        "role": "admin",
+        "binding": { "kind": "pat", "id": "pat-99" }
+      }|}
+  in
+  let whoami_pat =
+    expect_ok "whoami pat" (Wire_common.decode_auth_whoami whoami_pat_json)
+  in
+  Alcotest.(check bool) "whoami principal kind human" true
+    (Rbac.equal_principal_kind whoami_pat.principal.kind Rbac.Human);
+  Alcotest.(check string) "whoami principal id" "usr-42" whoami_pat.principal.id;
+  Alcotest.(check bool) "whoami role admin" true
+    (Rbac.equal_role whoami_pat.role Rbac.Admin);
+  Alcotest.(check bool) "whoami binding kind pat" true
+    (Rbac.equal_binding_kind whoami_pat.binding.kind Rbac.Pat);
+  Alcotest.(check string) "whoami binding id" "pat-99" whoami_pat.binding.id;
+  let whoami_svc_json =
+    parse_json
+      {|{
+        "principal": { "kind": "service", "id": "svc-ci" },
+        "role": "worker",
+        "binding": { "kind": "service_credential", "id": "sc-1" }
+      }|}
+  in
+  let whoami_svc =
+    expect_ok "whoami service" (Wire_common.decode_auth_whoami whoami_svc_json)
+  in
+  Alcotest.(check bool) "whoami service kind" true
+    (Rbac.equal_principal_kind whoami_svc.principal.kind Rbac.Service);
+  Alcotest.(check bool) "whoami service binding" true
+    (Rbac.equal_binding_kind whoami_svc.binding.kind Rbac.Service_credential);
+  List.iter
+    (fun (label, raw) ->
+      ignore (expect_err label (Wire_common.decode_auth_whoami (parse_json raw)) : string))
+    [
+      ("whoami unknown role", {|{"principal":{"kind":"human","id":"u1"},"role":"root","binding":{"kind":"pat","id":"p1"}}|});
+      ("whoami unknown principal kind", {|{"principal":{"kind":"bot","id":"u1"},"role":"worker","binding":{"kind":"pat","id":"p1"}}|});
+      ("whoami unknown binding kind", {|{"principal":{"kind":"human","id":"u1"},"role":"worker","binding":{"kind":"cookie","id":"p1"}}|});
+      ("whoami missing principal", {|{"role":"admin","binding":{"kind":"session","id":"s1"}}|});
+      ("whoami empty principal id", {|{"principal":{"kind":"human","id":""},"role":"admin","binding":{"kind":"session","id":"s1"}}|});
+      ("whoami non-object", {|["oops"]|});
+    ];
+  (* /api/v1/dashboard/shell auth summary strict decoder *)
+  let shell_auth_json =
+    parse_json
+      {|{
+        "generated_at": "2026-11-26T12:00:00Z",
+        "counts": { "agents": 1, "tasks": 0, "tasks_done_24h": 0, "keepers": 0, "total_runtimes": 0 },
+        "auth": {
+          "enabled": true,
+          "require_token": true,
+          "token_present": true,
+          "token_valid": true,
+          "effective_agent": "alice",
+          "effective_role": "worker",
+          "effective_admin": false,
+          "can_keeper_msg": true,
+          "auth_error_code": null,
+          "auth_error_detail": null
+        }
+      }|}
+  in
+  let shell_w =
+    expect_ok "dashboard shell with auth"
+      (Wire_fleet.decode_dashboard_shell ~observed_at:t0 shell_auth_json)
+  in
+  (match shell_w.auth with
+  | Some a ->
+      Alcotest.(check bool) "shell auth enabled" true a.enabled;
+      Alcotest.(check bool) "shell auth require_token" true a.require_token;
+      Alcotest.(check bool) "shell auth token_valid" true a.token_valid;
+      Alcotest.(check (option bool)) "shell auth effective_admin" (Some false) a.effective_admin;
+      Alcotest.(check (option string)) "shell auth agent" (Some "alice") a.effective_agent;
+      Alcotest.(check bool) "shell auth role worker" true
+        (Option.equal Rbac.equal_role a.effective_role (Some Rbac.Worker))
+  | None -> Alcotest.fail "expected Some shell.auth");
+  let bad_shell_auth =
+    parse_json
+      {|{
+        "counts": { "agents": 0, "tasks": 0, "tasks_done_24h": 0, "keepers": 0, "total_runtimes": 0 },
+        "auth": { "enabled": true, "require_token": true, "token_present": true, "token_valid": true, "effective_role": "godmode", "effective_admin": false }
+      }|}
+  in
+  ignore
+    (expect_err "reject unknown shell.auth.effective_role"
+       (Wire_fleet.decode_dashboard_shell ~observed_at:t0 bad_shell_auth)
+     : string);
+  let bad_shell_auth_shape =
+    parse_json
+      {|{
+        "counts": { "agents": 0, "tasks": 0, "tasks_done_24h": 0, "keepers": 0, "total_runtimes": 0 },
+        "auth": "oops"
+      }|}
+  in
+  ignore
+    (expect_err "reject non-object shell.auth"
+       (Wire_fleet.decode_dashboard_shell ~observed_at:t0 bad_shell_auth_shape)
+     : string);
   (* api_error with observed_workspace_sha256 *)
   let err_json =
     parse_json

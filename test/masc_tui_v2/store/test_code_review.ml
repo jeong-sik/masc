@@ -95,7 +95,7 @@ let file_reads cmds =
     (Cmd.flatten cmds)
 
 let reviewing_model () =
-  let m = Model.initial ~cols:120 ~rows:40 () in
+  let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
   let infra =
     m.infra |> Infra_store.set_tab Nav.Infra_code
     |> Infra_store.set_code_right_mode Infra_store.Code_review

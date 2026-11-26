@@ -187,6 +187,44 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
 
 let dispatch_settings_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
+  if not (Rbac.can_admin m.auth_session) then
+    match norm.key with
+    | Keymap.Input.Escape ->
+        Some
+          ( {
+              m with
+              nav = { m.nav with overlay = None; return_overlay = None };
+            }
+          , [] )
+    | Keymap.Input.Char _
+    | Keymap.Input.Enter
+    | Keymap.Input.Tab
+    | Keymap.Input.Backspace
+    | Keymap.Input.Delete
+    | Keymap.Input.Insert
+    | Keymap.Input.Up
+    | Keymap.Input.Down
+    | Keymap.Input.Left
+    | Keymap.Input.Right
+    | Keymap.Input.Home
+    | Keymap.Input.End
+    | Keymap.Input.Page_up
+    | Keymap.Input.Page_down
+    | Keymap.Input.Function _ -> (
+        match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+        | Some act when Keymap.equal_action act Keymap.Quit_app ->
+            Some (Update_actions.execute_action ~now m Keymap.Quit_app)
+        | Some _ | None ->
+            let reason =
+              match Rbac.decide m.auth_session Rbac.Bridged_token_admin with
+              | Rbac.Denied r -> r
+              | Rbac.Allowed -> Rbac.Requires_admin
+            in
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Rbac.deny_reason_say reason) m
+              , [] ))
+  else
   let norm = Keymap.replay_ime_event norm in
   let has_tree = Config_store.is_two_pane_width ~cols:m.viewport.cols in
   match norm.key with
@@ -1063,7 +1101,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
         match Model.active_inspector m with
         | Some (Nav.Skill_inspector ref_s) -> (
             match printable_char with
-            | Some "R" ->
+            | Some "R" -> (
+                match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+                | Rbac.Denied reason ->
+                    (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+                | Rbac.Allowed ->
                 ( Model.with_toast ~now ~level:Model.Toast_info
                     (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
                        ~en:"Refreshing skill catalog…")
@@ -1071,8 +1113,12 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 , [
                     Cmd.Http_post
                       { epoch = m.epoch; req = Cmd.Post_skills_refresh };
-                  ] )
+                  ] ))
             | Some "p" -> (
+                match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+                | Rbac.Denied reason ->
+                    (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+                | Rbac.Allowed ->
                 match
                   Runtime_store.skill_editor_loaded_for ~reference:ref_s
                     m.runtime
@@ -1133,59 +1179,80 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_addons_browser -> (
                     if m.nav.pane_index = 1 then
-                      match
-                        ( Runtime_store.selected_browser_client m.runtime
-                        , Runtime_store.selected_browser_tab m.runtime )
-                      with
-                      | Some cl, Some tb ->
-                          ( Model.with_toast ~now ~level:Model.Toast_info
-                              (Say.make
-                                 ~ko:
-                                   (Printf.sprintf "브라우저 장면 로드 중 (#%d)…"
-                                      tb.id)
-                                 ~en:
-                                   (Printf.sprintf "Fetching browser scene (#%d)…"
-                                      tb.id))
-                              m
-                          , [
-                              Cmd.Http_post
-                                {
-                                  epoch = m.epoch;
-                                  req =
-                                    Cmd.Post_browser_scene
-                                      {
-                                        client_id = cl.client_id;
-                                        tab_id = tb.id;
-                                        view = `Content;
-                                      };
-                                };
-                            ] )
-                      | Some _, None | None, (Some _ | None) -> (m, [])
+                      match Rbac.decide m.auth_session Rbac.Single_user_read with
+                      | Rbac.Denied reason ->
+                          ( Model.with_toast ~now ~level:Model.Toast_warning
+                              (Rbac.deny_reason_say reason) m
+                          , [] )
+                      | Rbac.Allowed -> (
+                          match
+                            ( Runtime_store.selected_browser_client m.runtime
+                            , Runtime_store.selected_browser_tab m.runtime )
+                          with
+                          | Some cl, Some tb ->
+                              ( Model.with_toast ~now ~level:Model.Toast_info
+                                  (Say.make
+                                     ~ko:
+                                       (Printf.sprintf
+                                          "브라우저 장면 로드 중 (#%d)…" tb.id)
+                                     ~en:
+                                       (Printf.sprintf
+                                          "Fetching browser scene (#%d)…" tb.id))
+                                  m
+                              , [
+                                  Cmd.Http_post
+                                    {
+                                      epoch = m.epoch;
+                                      req =
+                                        Cmd.Post_browser_scene
+                                          {
+                                            client_id = cl.client_id;
+                                            tab_id = tb.id;
+                                            view = `Content;
+                                          };
+                                    };
+                                ] )
+                          | Some _, None | None, (Some _ | None) -> (m, []))
                     else if not m.runtime.addon_catalog_mode then
-                      match Runtime_store.selected_addon_instance m.runtime with
-                      | Some inst ->
-                          ( Model.with_toast ~now ~level:Model.Toast_info
-                              (Say.make
-                                 ~ko:("애드온 관측 트리거 중: " ^ inst.instance_id)
-                                 ~en:
-                                   ("Triggering addon observe: " ^ inst.instance_id))
-                              m
-                          , [
-                              Cmd.Http_post
-                                {
-                                  epoch = m.epoch;
-                                  req =
-                                    Cmd.Post_lane_addon_observe
-                                      { instance_id = inst.instance_id };
-                                };
-                            ] )
-                      | None -> (m, [])
+                      match Rbac.decide m.auth_session Rbac.Single_user_write with
+                      | Rbac.Denied reason ->
+                          ( Model.with_toast ~now ~level:Model.Toast_warning
+                              (Rbac.deny_reason_say reason) m
+                          , [] )
+                      | Rbac.Allowed -> (
+                          match
+                            Runtime_store.selected_addon_instance m.runtime
+                          with
+                          | Some inst ->
+                              ( Model.with_toast ~now ~level:Model.Toast_info
+                                  (Say.make
+                                     ~ko:
+                                       ("애드온 관측 트리거 중: "
+                                        ^ inst.instance_id)
+                                     ~en:
+                                       ("Triggering addon observe: "
+                                        ^ inst.instance_id))
+                                  m
+                              , [
+                                  Cmd.Http_post
+                                    {
+                                      epoch = m.epoch;
+                                      req =
+                                        Cmd.Post_lane_addon_observe
+                                          { instance_id = inst.instance_id };
+                                    };
+                                ] )
+                          | None -> (m, []))
                     else (m, []))
                 | Some "D"
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_addons_browser
                        && (not m.runtime.addon_catalog_mode)
-                       && m.nav.pane_index = 0 ->
+                       && m.nav.pane_index = 0 -> (
+                    match Rbac.decide m.auth_session Rbac.Single_user_read with
+                    | Rbac.Denied reason ->
+                        (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+                    | Rbac.Allowed ->
                     let lane_id =
                       Option.map
                         (fun (inst : Wire_runtime.addon_instance) ->
@@ -1204,11 +1271,15 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                               Cmd.Get_lane_addon_slice
                                 { run_id = None; lane_id };
                           };
-                      ] )
+                      ] ))
                 | Some "W"
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_addons_browser
                        && m.nav.pane_index = 1 -> (
+                    match Rbac.decide m.auth_session Rbac.Single_user_read with
+                    | Rbac.Denied reason ->
+                        (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+                    | Rbac.Allowed ->
                     match
                       ( Runtime_store.selected_browser_client m.runtime
                       , Runtime_store.selected_browser_tab m.runtime )
@@ -1238,7 +1309,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                          Nav.Runtime_tools_usage
                        && Runtime_store.equal_tools_subview
                             m.runtime.tools_subview
-                            Runtime_store.Tools_keeper_skills ->
+                            Runtime_store.Tools_keeper_skills -> (
+                    match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+                    | Rbac.Denied reason ->
+                        (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+                    | Rbac.Allowed ->
                     ( Model.with_toast ~now ~level:Model.Toast_info
                         (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
                            ~en:"Refreshing skill catalog…")
@@ -1246,7 +1321,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                     , [
                         Cmd.Http_post
                           { epoch = m.epoch; req = Cmd.Post_skills_refresh };
-                      ] )
+                      ] ))
                 | Some _ | None -> (m, []))
             | Nav.Keepers -> (
                 match printable_char with
@@ -1296,7 +1371,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
 
 let dispatch_keeper_config_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
-  if Config_store.is_editing_field m.config then
+  if not (Rbac.can_admin m.auth_session) then None
+  else if Config_store.is_editing_field m.config then
     match norm.key with
     | Keymap.Input.Backspace ->
         Some

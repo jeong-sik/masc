@@ -1187,7 +1187,7 @@ let apply_sse_event ~now (m : Model.t) = function
             if Nav.equal_workspace next.nav.workspace Nav.Runtime
                && (Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
                    || Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_failover_lanes)
-            then [ get_cmd next.epoch Cmd.Get_fusion_runs ]
+            then Rbac_policy.filter_cmds next.auth_session [ get_cmd next.epoch Cmd.Get_fusion_runs ]
             else []
           in
           ({ next with runtime }, cmds)
@@ -1200,7 +1200,9 @@ let apply_sse_event ~now (m : Model.t) = function
       in
       let m' = { m with freshness } in
       match delivery.decoded with
-      | Wire_observer.Event ev -> apply_observer_event m' ev
+      | Wire_observer.Event ev ->
+          let next, cmds = apply_observer_event m' ev in
+          (next, Rbac_policy.filter_cmds next.auth_session cmds)
       | Wire_observer.Undecodable reason ->
           let incidents, _ =
             Incidents.push ~occurred_at_unix:m'.freshness.last_wall_unix
@@ -1259,8 +1261,45 @@ let apply_sse_freshness ~now ~stream ~freshness (m : Model.t) =
       Update_http.handle_workspace_mismatch ~now
         ~expected:(Some expected_instance) ~observed:(Some observed_instance)
         ~message:"SSE stream reported 409 workspace_mismatch" local
-  | Health.Connecting | Health.Live _ | Health.Reconnecting _
-  | Health.Stale _ | Health.Disconnected _ -> (local, [])
+  | Health.Reconnecting { reason = Health.Http_status 401; _ }
+  | Health.Disconnected { reason = Health.Http_status 401; _ } ->
+      let next_session =
+        let auth_methods = Rbac.auth_methods_of_session local.auth_session in
+        if Rbac.is_multi_account local.auth_session then
+          Rbac.Multi_account_signed_out
+            {
+              auth_methods;
+              reason = Rbac.Signed_out (Some "SSE stream returned HTTP 401");
+            }
+        else
+          Rbac.Single_user_auth_required
+            {
+              auth_methods;
+              reason = Rbac.Token_invalid "SSE stream returned HTTP 401";
+            }
+      in
+      Update_http.apply_auth_session_transition ~now ~next_session local
+  | Health.Reconnecting { reason = Health.Http_status 403; _ }
+  | Health.Disconnected { reason = Health.Http_status 403; _ } ->
+      Update_http.maybe_recheck_auth ~now local
+  | Health.Reconnecting
+      {
+        reason =
+          ( Health.Connect_refused | Health.Timeout | Health.Timeout_detail _
+          | Health.Http_status _ | Health.Stream_eof | Health.Protocol_error _
+          | Health.Other_io _ );
+        _;
+      }
+  | Health.Disconnected
+      {
+        reason =
+          ( Health.Connect_refused | Health.Timeout | Health.Timeout_detail _
+          | Health.Http_status _ | Health.Stream_eof | Health.Protocol_error _
+          | Health.Other_io _ );
+        _;
+      }
+  | Health.Connecting | Health.Live _ | Health.Stale _ ->
+      (local, [])
 
 let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
   match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with

@@ -3721,7 +3721,9 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
                (Ops_common.say model ~ko:"승인 · 샌드박스 정책 요약"
                   ~en:"Active Approval & Sandbox Policy"))
           with
-          hotkey = Some "[Ctrl+,] Settings";
+          hotkey =
+            if Rbac.can_admin model.auth_session then Some "[Ctrl+,] Settings"
+            else None;
         }
       in
       let p_inner = Card.draw ~cache grid ~rect:right_rect ~theme pol_spec in
@@ -4272,7 +4274,10 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
                    ~en:"Uncertain Late-Approval Attempts (HITL Recovery)")
                 (List.length late_rows)))
         with
-        hotkey = Some "/gate ack-uncertain · /gate restore-late";
+        hotkey =
+          if Rbac.can_single_user_token_admin model.auth_session then
+            Some "/gate ack-uncertain · /gate restore-late"
+          else None;
       }
     in
     let b_inner = Card.draw ~cache grid ~rect:bot_rect ~theme b_spec in

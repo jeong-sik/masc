@@ -1184,6 +1184,11 @@ let render_with_history_rows
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
+    match Rbac_policy.decide_workspace model.auth_session Nav.Keepers with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache ~rect
+          ~theme ~model ~title:(Nav.workspace_label Nav.Keepers) ~reason
+    | Rbac.Allowed ->
     let bp = Ops_common.layout_bp model in
     let all_ks = Fleet_store.filtered_keepers model.fleet in
     let selected_keeper_name_opt = Model.selected_keeper_name model in
@@ -1271,6 +1276,12 @@ let render_with_history_rows
               hotkey =
                 Some (Ops_common.say model ~ko:"[/] 필터" ~en:"[/] Filter");
               footer_hint =
+                (if
+                   not
+                     (Rbac.is_allowed model.auth_session
+                        Rbac.Single_user_token_admin_only)
+                 then None
+                 else
                 Some
                   (match model.keeper_stop_armed with
                   | Some (armed_name, _) ->
@@ -1310,7 +1321,7 @@ let render_with_history_rows
                       else
                         Ops_common.say model
                           ~ko:"[W] 깨우기 · [D] 중지"
-                          ~en:"[W] Wake · [D] Stop");
+                          ~en:"[W] Wake · [D] Stop"));
               focused = Model.pane_focused model 0;
             }
           in
@@ -1396,6 +1407,12 @@ let render_with_history_rows
               (Ops_common.say model ~ko:"[Enter/z] 확대 · [ / ] 모드"
                  ~en:"[Enter/z] Zoom · [ / ] Mode");
           footer_hint =
+            (if
+               not
+                 (Rbac.is_allowed model.auth_session
+                    Rbac.Single_user_token_admin_only)
+             then None
+             else
             Some
               (match model.keeper_stop_armed with
               | Some (armed_name, _) ->
@@ -1410,7 +1427,7 @@ let render_with_history_rows
                   else
                     Ops_common.say model
                       ~ko:"[W] 깨우기 · [D] 중지"
-                      ~en:"[W] Wake · [D] Stop");
+                      ~en:"[W] Wake · [D] Stop"));
           focused = Model.body_has_focus model;
         }
       in
@@ -1422,7 +1439,7 @@ let render_with_history_rows
 
 (* The same screens without kept chat history rows: every call lays the
    history out again. *)
-let render ~model ~cache ~rect grid =
+let render ~(model : Model.t) ~cache ~rect grid =
   render_with_history_rows ~history_rows:None ~model ~cache ~rect grid
 
 let render_dive_with_history_rows

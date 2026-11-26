@@ -277,7 +277,7 @@ let empty_wiki_lint : Wire_knowledge.wiki_index_lint =
 
 let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
     ?(with_attention = true) () : Model.t =
-  let m0 = Model.initial ~cols ~rows ~lang () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
   let keepers =
     [
       mk_keeper ~name:"alpha" ~company:"platform"
@@ -2253,7 +2253,7 @@ let test_journeys_slash_palette_filter () =
     (List.length (Infra_store.filtered_repositories inf_r))
 
 let test_removed_pipeline_goal_requires_selection () =
-  let initial = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let base_path = Filename.get_temp_dir_name () in
   let workspace : Wire_common.workspace_identity =
     { instance_id = Some "fixture"; base_path;
@@ -3506,13 +3506,86 @@ let test_journeys_tab_multipane_dives_safety () =
       scope = Wire_common.Public_health;
       gc = None;
       active_keepers = Some 1;
+      account_mode = Rbac.Single_user;
+      auth_methods = Rbac.default_auth_methods;
     }
   in
-  let m_auth_ok, _ =
+  let m_auth_probing, cmds_auth_probe =
     Update.step ~now:t0 m_auth
       (Msg.Server_health_result { epoch = m_auth.epoch; result = Ok dummy_health })
   in
-  Alcotest.(check bool) "R13 Ok health clears Auth_gate" true
+  Alcotest.(check bool)
+    "R13 Public /health alone keeps Auth_gate open until shell auth verifies"
+    true
+    (Option.equal Nav.equal_overlay m_auth_probing.nav.overlay
+       (Some (Nav.System_gate Nav.Auth_gate)));
+  Alcotest.(check bool) "R13 Single-user /health emits Get_dashboard_shell probe"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_dashboard_shell; _ } -> true
+         | _ -> false)
+       cmds_auth_probe);
+  let valid_shell : Wire_fleet.dashboard_shell =
+    {
+      generated_at_unix = None;
+      project = Some "masc";
+      version = Some "0.1.0";
+      counts =
+        {
+          agents = 0;
+          tasks = 0;
+          tasks_done_24h = 0;
+          keepers = 0;
+          persisted_keepers = Observed.unreported;
+          configured_keepers = Observed.unreported;
+          total_runtimes = 0;
+        };
+      scorecard_24h =
+        {
+          tasks_done_24h = Observed.unreported;
+          tasks_done_total = Observed.unreported;
+          tasks_in_progress = Observed.unreported;
+          tasks_claimed = Observed.unreported;
+          tasks_awaiting_verification = Observed.unreported;
+          tasks_todo = Observed.unreported;
+          tasks_cancelled = Observed.unreported;
+          goals_completed_24h = Observed.unreported;
+          verifications_passed_24h = Observed.unreported;
+          verifications_rejected_24h = Observed.unreported;
+          board_posts_24h = Observed.unreported;
+          turns_24h = Observed.unreported;
+          cost_24h_usd = Observed.unreported;
+        };
+      groups = [];
+      auth =
+        Some
+          {
+            enabled = true;
+            require_token = true;
+            token_present = true;
+            token_valid = true;
+            token_agent = Some "admin";
+            requested_agent = None;
+            effective_agent = Some "admin";
+            effective_role = Some Rbac.Admin;
+            effective_admin = Some true;
+            auth_error_code = None;
+            auth_error_detail = None;
+            can_keeper_msg = true;
+            keeper_msg_error = None;
+          };
+    }
+  in
+  let m_auth_ok, _ =
+    Update.step ~now:t0 m_auth_probing
+      (Msg.Http_reply
+         {
+           epoch = m_auth_probing.epoch;
+           reply = Msg.Reply_dashboard_shell (Ok valid_shell);
+         })
+  in
+  Alcotest.(check bool) "R13 Verified dashboard shell clears Auth_gate" true
     (Option.is_none m_auth_ok.nav.overlay);
   let g_auth = render_full ~model:m_auth in
   let txt_auth = grid_all_text g_auth in
@@ -9121,7 +9194,7 @@ let test_keeper_lifecycle_keymap_matrix () =
 
 let test_p1_shortcut_and_classifier_regressions () =
   let t0 = Clock.Mono.of_ns 5_000_000_000L in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let step m kev = Update.step ~now:t0 m (Msg.Key_event kev) in
 
   (* 1. [d] on Keeper_memory & Knowledge_memory switches to View_diff (never Keeper_purge_confirm). *)

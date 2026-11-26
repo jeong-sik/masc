@@ -629,6 +629,22 @@ type shell_group = {
   keepers : string list;
 }
 
+type shell_auth_summary = {
+  enabled : bool;
+  require_token : bool;
+  token_present : bool;
+  token_valid : bool;
+  token_agent : string option;
+  requested_agent : string option;
+  effective_agent : string option;
+  effective_role : Rbac.role option;
+  effective_admin : bool option;
+  auth_error_code : string option;
+  auth_error_detail : string option;
+  can_keeper_msg : bool;
+  keeper_msg_error : string option;
+}
+
 type dashboard_shell = {
   generated_at_unix : float option;
   project : string option;
@@ -636,6 +652,7 @@ type dashboard_shell = {
   counts : shell_counts;
   scorecard_24h : daily_scorecard;
   groups : shell_group list;
+  auth : shell_auth_summary option;
 }
 
 let keeper_health_of_string raw =
@@ -1953,6 +1970,45 @@ let decode_shell_group json =
   let* keepers = required_string_list json "keepers" in
   Ok { group; keeper_count; keepers }
 
+let decode_shell_auth_summary json =
+  let* enabled = required_bool_field json "enabled" in
+  let* require_token = required_bool_field json "require_token" in
+  let* token_present = required_bool_field json "token_present" in
+  let* token_valid = required_bool_field json "token_valid" in
+  let* token_agent = optional_nonblank_string json "token_agent" in
+  let* requested_agent = optional_nonblank_string json "requested_agent" in
+  let* effective_agent = optional_nonblank_string json "effective_agent" in
+  let* effective_role_raw = optional_nonblank_string json "effective_role" in
+  let* effective_role =
+    match effective_role_raw with
+    | None -> Ok None
+    | Some raw -> (
+        match Rbac.role_of_string raw with
+        | Ok role -> Ok (Some role)
+        | Error msg -> Error ("auth.effective_role: " ^ msg))
+  in
+  let* effective_admin = optional_bool_field json "effective_admin" in
+  let* auth_error_code = optional_nonblank_string json "auth_error_code" in
+  let* auth_error_detail = optional_nonblank_string json "auth_error_detail" in
+  let* can_keeper_msg = required_bool_field json "can_keeper_msg" in
+  let* keeper_msg_error = optional_nonblank_string json "keeper_msg_error" in
+  Ok
+    {
+      enabled;
+      require_token;
+      token_present;
+      token_valid;
+      token_agent;
+      requested_agent;
+      effective_agent;
+      effective_role;
+      effective_admin;
+      auth_error_code;
+      auth_error_detail;
+      can_keeper_msg;
+      keeper_msg_error;
+    }
+
 let decode_dashboard_shell ~observed_at json =
   let* meta, body = unwrap_v2_or_raw json in
   let* generated_at_unix =
@@ -2008,6 +2064,15 @@ let decode_dashboard_shell ~observed_at json =
   in
   let* group_items = optional_list_field body "groups" in
   let* groups = decode_list "groups" decode_shell_group group_items in
+  let* auth =
+    match optional_object_field body "auth" with
+    | Ok None -> Ok None
+    | Ok (Some auth_json) -> (
+        match decode_shell_auth_summary auth_json with
+        | Ok summary -> Ok (Some summary)
+        | Error msg -> Error msg)
+    | Error _ as err -> err
+  in
   Ok
     {
       generated_at_unix;
@@ -2025,6 +2090,7 @@ let decode_dashboard_shell ~observed_at json =
         };
       scorecard_24h;
       groups;
+      auth;
     }
 
 type fleet_stream_reading = {

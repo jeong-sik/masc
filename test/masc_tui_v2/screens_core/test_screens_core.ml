@@ -113,7 +113,7 @@ let mk_keeper ~name ~company ~health ?(turns = 120) ?(ctx = 0.42) () :
   }
 
 let populated_model ~cols ~rows ~lang =
-  let m0 = Model.initial ~cols ~rows ~lang () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
   let now_unix = 1763701200.0 in
   let keepers =
     [
@@ -169,6 +169,7 @@ let populated_model ~cols ~rows ~lang =
         };
       scorecard_24h = scorecard;
       groups = [];
+      auth = None;
     }
   in
   let fleet_reading : Wire_fleet.fleet_stream_reading =
@@ -911,6 +912,8 @@ let populated_model ~cols ~rows ~lang =
             minor_collections = Some 4200;
           };
       active_keepers = Some 8;
+      account_mode = Rbac.Single_user;
+      auth_methods = Rbac.default_auth_methods;
     }
   in
   let m1 =
@@ -964,7 +967,7 @@ let render_full ~model ~cols ~rows =
 let test_compact_chrome_auto_fold () =
   (* 90x28 on tabbed workspace Work, idle & empty draft & no approval strip -> 3 chrome rows (10.7%) *)
   let m_work =
-    let m = Model.initial ~cols:90 ~rows:28 ~lang:Say.Lang_ko () in
+    let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:28 ~lang:Say.Lang_ko () in
     { m with nav = { m.nav with workspace = Nav.Work } }
   in
   let l_idle = Chrome.compute_layout ~model:m_work ~cols:90 ~rows:28 in
@@ -976,7 +979,7 @@ let test_compact_chrome_auto_fold () =
     (Option.is_some l_idle.sub_tab_bar);
 
   (* Pulse has 0 sub-tab rows -> 2 chrome rows when composer folded *)
-  let m_pulse = Model.initial ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
+  let m_pulse = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
   let l_pulse = Chrome.compute_layout ~model:m_pulse ~cols:90 ~rows:28 in
   Alcotest.(check int) "90x28 Pulse idle chrome_rows = 2" 2 l_pulse.chrome_rows;
   Alcotest.(check bool) "90x28 Pulse has no sub_tab_bar" true
@@ -1007,7 +1010,7 @@ let test_compact_chrome_auto_fold () =
     l_voice.composer_folded;
 
   (* Wide 140x40 keeps persistent collapsed composer bar *)
-  let m_wide = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m_wide = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let l_wide = Chrome.compute_layout ~model:m_wide ~cols:140 ~rows:40 in
   Alcotest.(check bool) "Wide 140x40 composer not folded" false
     l_wide.composer_folded;
@@ -1023,7 +1026,7 @@ let test_footer_never_overflows () =
         (fun cols ->
           let rows = if cols >= 140 then 40 else 28 in
           let m_pop = populated_model ~cols ~rows ~lang in
-          let m_empty = Model.initial ~cols ~rows ~lang () in
+          let m_empty = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
           let variants =
             [
               ("pop_idle", m_pop);
@@ -1166,7 +1169,7 @@ let test_pulse_populated_and_empty () =
           assert_contains ~label:lbl ~needle:unattrib txt;
 
           (* Unobserved initial Pulse: Panel A honestly shows unreported, NOT false-green All clear *)
-          let m_empty = Model.initial ~cols ~rows ~lang () in
+          let m_empty = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
           let g_empty, _ = render_full ~model:m_empty ~cols ~rows in
           let lbl_e = Printf.sprintf "pulse_empty_%dx%d" cols rows in
           assert_clean_grid ~label:lbl_e g_empty;
@@ -1726,18 +1729,18 @@ let test_no_default_leak_no_dup_diff_and_micro_grid_dims () =
   (* 1. Empty model NEVER leaks "@_default" across Composer, Compact, Micro, Ctrl+T *)
   List.iter
     (fun (lang, expected_none) ->
-      let m_wide = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let m_wide = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang () in
       let g_wide, _ = render_full ~model:m_wide ~cols:140 ~rows:40 in
       let txt_wide = grid_all_text g_wide in
       assert_not_contains ~label:"no_default_wide" ~needle:"_default" txt_wide;
       assert_contains ~label:"display_none_wide" ~needle:expected_none txt_wide;
 
-      let m_compact = Model.initial ~cols:90 ~rows:28 ~lang () in
+      let m_compact = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:28 ~lang () in
       let g_compact, _ = render_full ~model:m_compact ~cols:90 ~rows:28 in
       assert_not_contains ~label:"no_default_compact" ~needle:"_default"
         (grid_all_text g_compact);
 
-      let m_micro = Model.initial ~cols:60 ~rows:18 ~lang () in
+      let m_micro = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:60 ~rows:18 ~lang () in
       let g_micro, _ = render_full ~model:m_micro ~cols:60 ~rows:18 in
       let txt_micro = grid_all_text g_micro in
       assert_not_contains ~label:"no_default_micro" ~needle:"_default" txt_micro;
@@ -2111,7 +2114,7 @@ let test_v25_pulse_honest_observed_and_no_fabricated_zeros () =
   (* P1 #1: Unloaded/unreported Pulse NEVER fabricates 0.00 C, 0.0%, $0.00, 0 calls, or PR 0 *)
   List.iter
     (fun lang ->
-      let m_empty = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let m_empty = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang () in
       let g_e, _ = render_full ~model:m_empty ~cols:140 ~rows:40 in
       assert_clean_grid ~label:"v25_pulse_honest_empty" g_e;
       let txt_e = grid_all_text g_e in
@@ -2939,7 +2942,7 @@ let test_p1_pulse_collapsed_company_highlight_and_scroll () =
       mk_k "org-zeta" "zeta-1";
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:Clock.Mono.zero ks
@@ -3054,7 +3057,7 @@ let test_memory_activity_journal_window () =
       after = [ { memory_id = "fact-1"; claim = Some "visible claim" } ]; reason = None }
   in
   let render ~journal_lines ~rows =
-    let model = Model.initial ~lang:Say.Lang_en () in
+    let model = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en () in
     let activity : Wire_knowledge.keeper_memory_activity =
       { keeper; limit = 3; journal_lines; undecodable_lines = 0; events = [ event ]; notes = [] }
     in
@@ -3080,7 +3083,7 @@ let test_memory_activity_journal_window () =
 let test_memory_health_os_read_errors () =
   let keeper = "alpha" in
   let health_lines result =
-    let model = Model.initial () in
+    let model = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     let knowledge = model.knowledge |> Knowledge_store.set_keeper_memory_subview Kmem_health in
     let reply = Msg.Reply_keeper_memory_os_internals { keeper; result } in
     let model, _ =
@@ -3230,19 +3233,19 @@ let test_feature_wave1_honest_ssot_chrome_transitions () =
 
 let test_build_commit_display_in_help_and_settings () =
   (* 1. Pure Model build-label & mismatch helpers *)
-  let m_bare = Model.initial ~tui_version:"0.81.0" ~tui_commit:None () in
+  let m_bare = Model.initial ~auth_session:Rbac.single_user_local_admin ~tui_version:"0.81.0" ~tui_commit:None () in
   Alcotest.(check string) "tui_build_label without commit" "v0.81.0"
     (Model.tui_build_label m_bare);
   Alcotest.(check (option string)) "server_build_label when unknown" None
     (Model.server_build_label m_bare);
   Alcotest.(check bool) "no mismatch when commits missing" false
     (Model.build_commit_mismatch m_bare);
-  let m_short = Model.initial ~tui_version:"0.81.0" ~tui_commit:(Some "abc") () in
+  let m_short = Model.initial ~auth_session:Rbac.single_user_local_admin ~tui_version:"0.81.0" ~tui_commit:(Some "abc") () in
   Alcotest.(check string) "tui_build_label safe on short commit" "v0.81.0 (abc)"
     (Model.tui_build_label m_short);
   let m_full =
     let m0 =
-      Model.initial ~tui_version:"0.81.0"
+      Model.initial ~auth_session:Rbac.single_user_local_admin ~tui_version:"0.81.0"
         ~tui_commit:(Some "2a58dc5799999999999999999999999999999999") ()
     in
     {
@@ -4225,7 +4228,7 @@ let test_render_util_redaction_linear_and_embedded_cap () =
 
 let test_layer2_pulse_honesty_degradation_and_waiting_verifications () =
   let t0 = Clock.Mono.of_ns 5_000_000_000L in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let deg : Wire_fleet.fleet_degradation =
     { since_unix = 1795253000.0; reason = "store read timeout" }
   in

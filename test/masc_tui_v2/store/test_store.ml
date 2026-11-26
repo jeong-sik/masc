@@ -74,6 +74,8 @@ let sample_health ?(instance = "inst-2") () : Wire_common.server_health =
         };
     gc = None;
     active_keepers = Some 1;
+    account_mode = Rbac.Single_user;
+    auth_methods = Rbac.default_auth_methods;
   }
 
 let sample_ask ?(id = "ask-1") ?(keeper = "alpha") () : Wire_work.ask_row =
@@ -141,7 +143,8 @@ let has_get_health cmds =
       | Cmd.Http_get
           {
             req =
-              ( Cmd.Get_dashboard_shell
+              ( Cmd.Get_auth_whoami
+              | Cmd.Get_dashboard_shell
               | Cmd.Get_keepers_roster
               | Cmd.Get_keeper_turns
               | Cmd.Get_keeper_turn_records _
@@ -330,7 +333,7 @@ let has_quit cmds =
 
 (* 1. Epoch stale-reply rejection *)
 let test_epoch_stale_reply_rejection () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let old_epoch = m0.epoch in
   let new_epoch = Epoch.next old_epoch in
   let m1 = { m0 with epoch = new_epoch } in
@@ -379,7 +382,7 @@ let test_epoch_stale_reply_rejection () =
 
 (* 2. 3-channel state separation & Attention urgency/fast-path *)
 let test_three_channel_separation () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -656,7 +659,7 @@ let test_three_channel_separation () =
     (List.length m_remembered.work.recent_decisions_24h)
 
 let test_exact_settlement_releases_last_attention_selection () =
-  let m = Model.initial ~cols:140 ~rows:40 () in
+  let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let inbox = { m with nav = { m.nav with workspace = Nav.Work; sidebar_focused = false };
                        work = Work_store.set_tab Nav.Work_inbox m.work } in
   let reply (m : Model.t) response =
@@ -698,7 +701,7 @@ let test_exact_settlement_releases_last_attention_selection () =
 
 (* 3. Compact composer auto-fold, draft preservation & transmission lifecycle *)
 let test_compact_composer_and_drafts () =
-  let m0 = Model.initial ~cols:90 ~rows:28 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:28 () in
   Alcotest.(check bool) "90x28 is Compact" true
     (Model.equal_breakpoint m0.breakpoint Model.Compact);
   Alcotest.(check bool) "Compact idle+empty folds" true
@@ -746,7 +749,7 @@ let test_compact_composer_and_drafts () =
   Alcotest.(check string) "micro viewport preserves draft untouched" "keep"
     (Drafts.draft_for ~keeper:"alpha" m15.drafts).text;
   (* Typing before any keeper selected cannot POST to synthetic _default *)
-  let m_nokeep = Model.initial () in
+  let m_nokeep = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m_nokeep = { m_nokeep with drafts = Drafts.insert_text "early" m_nokeep.drafts } in
   let m_nokeep2, cmds_nokeep =
     Update.execute_action ~now:t0 m_nokeep Keymap.Submit_followup
@@ -874,7 +877,7 @@ let test_compact_composer_and_drafts () =
 (* A new epoch may face another server process, whose log seqs start from
    zero again; the next log stream must open without the old cursor. *)
 let test_new_epoch_forgets_log_cursor () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1 =
     { m0 with infra = { m0.infra with Infra_store.last_log_seq = Some 50 } }
   in
@@ -891,7 +894,7 @@ let test_new_epoch_forgets_log_cursor () =
    them. Each open request then waits for the history, the way a stream that
    closed without a terminal does, and an unanswered /btw fails. *)
 let test_new_epoch_detaches_chat_streams () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let typed =
     m0.drafts |> Drafts.set_active_keeper "alpha" |> Drafts.insert_text "hello"
   in
@@ -930,7 +933,7 @@ let test_new_epoch_detaches_chat_streams () =
    instance had accepted the request, so it waits for the history; a request
    refused on its first POST was never accepted and fails. *)
 let test_chat_stream_409_from_another_instance () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let mismatch =
     Msg.Workspace_mismatch
       {
@@ -992,7 +995,7 @@ let test_chat_stream_409_from_another_instance () =
 
 (* 4. 409 workspace_mismatch recovery without loop *)
 let test_workspace_mismatch_recovery () =
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let infra =
     Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
       ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
@@ -1136,7 +1139,7 @@ let test_workspace_mismatch_recovery () =
 
 (* 5. Subscriptions.plan bounded across all 6 workspaces + zero idle polling *)
 let test_subscriptions_bounded_and_zero_polling () =
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let check_plan label m ~expected_view =
     let plan = Subscriptions.plan m in
     let persistent = List.filter Subscriptions.is_persistent plan in
@@ -1288,7 +1291,7 @@ let test_subscriptions_bounded_and_zero_polling () =
 
 (* 6. Keymap actions & all 27 Slash commands *)
 let test_keymap_and_slash_commands () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   (* 1..6 switch workspaces *)
   let m_work, _ = Update.step ~now:t0 m0 (Msg.Key_event (char_key "2")) in
   Alcotest.(check bool) "'2' switches to Work" true
@@ -1423,7 +1426,7 @@ let test_theme_slash_cycles_all_presets () =
   in
   List.iter2
     (fun preset expected ->
-      let m = Model.initial ~theme_preset:preset () in
+      let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~theme_preset:preset () in
       let m_after, _ = Update.execute_slash ~now:t1 m (Slash.Theme None) in
       Alcotest.(check string)
         ("/theme from " ^ Theme.preset_name preset)
@@ -1433,7 +1436,7 @@ let test_theme_slash_cycles_all_presets () =
 
 (* 7. Knowledge defaults & Config strict inline editing *)
 let test_knowledge_and_config_store () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   Alcotest.(check bool) "Board defaults to signal_only=true" true
     m0.knowledge.board_signal_only;
   let schema : Wire_config.config_schema =
@@ -1507,7 +1510,7 @@ let test_knowledge_and_config_store () =
       P2-1 config target isolation & bool toggle, P2-2 mixed-tab selection *)
 let test_verifier_regressions () =
   (* P1-3: Keeper_asks_changed and Agent_input_required emit single global Get_asks *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let _, cmds_ask1 =
     Update.step ~now:t0 m0
       (Msg.Sse_event
@@ -2161,7 +2164,7 @@ let test_verifier_regressions () =
     true (Option.is_none (Work_store.selected_open_ask w_mix1))
 
 let test_round1_settings_and_overlay_transitions () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   (* P1-5: I -> Esc -> Ctrl+K -> Esc -> ? -> Esc *)
   let m_inc, _ = Update.step ~now:t0 m0 (Msg.Key_event (char_key "I")) in
   Alcotest.(check bool) "I opens Incidents" true
@@ -2277,7 +2280,7 @@ let test_round1_settings_and_overlay_transitions () =
 
 let test_round2_store_regressions () =
   (* R2-P1-1: open_global_settings resets BOTH target AND active_tab to Settings_general_ui *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m_stale_tab =
     {
       m0 with
@@ -2299,12 +2302,12 @@ let test_round2_store_regressions () =
     (Option.equal Nav.equal_overlay m_set.nav.overlay
        (Some (Nav.Settings Nav.Settings_general_ui)));
 
-  (* R2-P1-2: Model.initial ?wall_unix seeds last_wall_unix immediately on frame 1 *)
-  let m_wall = Model.initial ~wall_unix:1_795_252_092.0 () in
-  Alcotest.(check (float 0.001)) "Model.initial seeds last_wall_unix"
+  (* R2-P1-2: Model.initial ~auth_session:Rbac.single_user_local_admin ?wall_unix seeds last_wall_unix immediately on frame 1 *)
+  let m_wall = Model.initial ~auth_session:Rbac.single_user_local_admin ~wall_unix:1_795_252_092.0 () in
+  Alcotest.(check (float 0.001)) "Model.initial ~auth_session:Rbac.single_user_local_admin seeds last_wall_unix"
     1_795_252_092.0 m_wall.freshness.last_wall_unix;
-  let m_bad_wall = Model.initial ~wall_unix:(-5.0) () in
-  Alcotest.(check (float 0.001)) "Model.initial clamps negative wall_unix to 0.0"
+  let m_bad_wall = Model.initial ~auth_session:Rbac.single_user_local_admin ~wall_unix:(-5.0) () in
+  Alcotest.(check (float 0.001)) "Model.initial ~auth_session:Rbac.single_user_local_admin clamps negative wall_unix to 0.0"
     0.0 m_bad_wall.freshness.last_wall_unix;
 
   (* R2-P1-5: [4] Keepers auto-fetches Get_chat_history for selected keeper + Get_sandboxes,
@@ -2625,7 +2628,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
   (* 2. View_fetches on Pulse fetches telemetry + scorecard sources *)
   let wall_slot = 1_795_251_600 in
   let m0 =
-    Model.initial ~cols:140 ~rows:40 ~wall_unix:(Float.of_int (wall_slot + 300)) ()
+    Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~wall_unix:(Float.of_int (wall_slot + 300)) ()
   in
   let pulse_cmds = Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m0) in
   let has_path expected =
@@ -3095,6 +3098,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
           cost_24h_usd = Observed.unreported;
         };
       groups = [];
+      auth = None;
     }
   in
   let kc_initial : Wire_runtime.keeper_costs_window =
@@ -3329,7 +3333,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
     (Config_store.field_sub_group cfg_hashed f_cc1_bind2)
 
 let test_p0_actions_settings_safety_and_wired_cmds () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
   let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
 
@@ -5056,7 +5060,7 @@ let test_nav_fix2_pulse_company_row_stepping () =
       grouped_keeper ~group:"org-gamma" "gamma-2";
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -5153,7 +5157,7 @@ let test_nav_fix3_runtime_efficiency_company_grouped_display_order () =
       velocity = [];
     }
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -5405,7 +5409,7 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           trace_tools = [];
         })
   in
-  let m0 = Model.initial ~cols:120 ~rows:30 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:30 () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
@@ -5476,7 +5480,7 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
     (bound - 1) m_home_dn.fleet.chat_scroll_offset
 
 let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   (* 1. Work_inbox with 3 Attention items moves attention.triage_index *)
   let work_inbox =
     m0.work
@@ -5581,7 +5585,7 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
     (Work_store.equal_task_status_filter Work_store.Status_all
        w_cycled.task_status_filter);
   let m_tasks =
-    let m = Model.initial ~cols:140 ~rows:40 () in
+    let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     { m with nav = { m.nav with workspace = Nav.Work }; work = w_ts }
   in
   let m_space, _ =
@@ -5955,7 +5959,7 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
     inc_up1.scroll_offset
 
 let test_nav_left_right_subtab_cycling_and_guards () =
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
   (* 1. Keepers: '['/']' cycle Companies -> Attention -> Pulse_wall; Left/Right move spatially (Sidebar <-> Pane 0 <-> Pane 1) *)
   let m_k = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
@@ -6159,7 +6163,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
           ~content:"Final persisted assistant reply." 1_700_000_099.0;
       ]
   in
-  let m0 = Model.initial ~cols:80 ~rows:24 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:80 ~rows:24 () in
   let base_fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
@@ -6514,7 +6518,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
     (g_multi.body_h < g_compact.body_h);
 
   (* (e) Display_origin_inline removes separate header rows at wide width *)
-  let m_wide = Model.initial ~cols:140 ~rows:40 () in
+  let m_wide = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let f_wide =
     m_wide.fleet
     |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
@@ -6549,7 +6553,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
     true (r_inline < r_bare);
 
   (* (f) The prose column follows the card width on a wide terminal *)
-  let m_ultra0 = Model.initial ~cols:240 ~rows:60 () in
+  let m_ultra0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:240 ~rows:60 () in
   let m_ultra =
     {
       m_ultra0 with
@@ -6569,7 +6573,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
     (g_ultra.prose_w <= card_w)
 
 let test_p1_work_inbox_ask_approval_sync () =
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let work_inbox =
     m0.work
     |> Work_store.set_tab Nav.Work_inbox
@@ -6706,7 +6710,7 @@ let test_p1_pulse_collapsed_company_dive_and_scroll () =
       grouped_keeper ~group:"org-zeta" "zeta-1";
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -7085,7 +7089,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
 
   (* 3. Update_nav.apply_move allows live Up/Down while filter_focused = true,
      and blocks Left/Right so cursor/tab cycling never hijacks filter typing *)
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let m_filt =
     {
       m0 with
@@ -7107,7 +7111,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
    tab from Knowledge (whose own fetches never ask for schedules) proves the
    request comes from the tab itself, and a schedule change refetches them. *)
 let test_keepers_views_request_active_schedules () =
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let is_active_schedules = function
     | Cmd.Http_get { req = Cmd.Get_schedules { cursor = None } as req; _ } ->
         String.equal (Cmd.get_request_path req)
@@ -7165,7 +7169,7 @@ let test_keepers_views_request_active_schedules () =
 
 let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
   let t0 = Clock.Mono.of_ns 10_000_000_000L in
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   (* 1. Keeper_memory dive triggers Get_keeper_memory_os_internals *)
   let m_kmem =
     {
@@ -7428,7 +7432,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       trace_tools = [];
     }
   in
-  let m0 = Model.initial ~cols:120 ~rows:36 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:36 () in
   let m0 =
     {
       m0 with
@@ -8134,7 +8138,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     }
   in
   let m0 =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Knowledge; pane_index = 0 };
@@ -8694,7 +8698,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check int) "zoomed 3->기억 j advances right-pane activity cursor" 1
     m_zoomed_j.knowledge.selected_activity_index;
   let m_keepers_zoomed =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let fleet =
       base.fleet
       |> Fleet_store.apply_keepers ~observed_at:t0
@@ -8966,7 +8970,7 @@ let test_agent_core_activity_skips_only_telemetry () =
            | _ -> false)
          m.infra.activity_events)
   in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1 = deliver Wire_observer.Telemetry m0 in
   Alcotest.(check int) "telemetry adds no activity row" (core_rows m0)
     (core_rows m1);
@@ -8981,7 +8985,7 @@ let test_fetch_failure_lands_on_panel_slot () =
   let step_reply r (m : Model.t) =
     fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
   in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1 =
     step_reply (Msg.Reply_asks (Error (Msg.Decode_error "asks[0]: drift"))) m0
   in
@@ -9020,7 +9024,7 @@ let test_failure_is_asked_again_for_a_new_question () =
   | Observed.Loading _ | Observed.Value _ | Observed.Absent
   | Observed.Unreported ->
       Alcotest.fail "a stale failure stays a failure");
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let failed, _ =
     Update.step ~now:t1 m0
       (Msg.Http_reply
@@ -9074,7 +9078,7 @@ let test_failure_is_asked_again_for_a_new_question () =
 (* Each answer lands in its own target's slot: one keeper's failure or 404
    does not touch another keeper's slot. *)
 let test_answers_land_on_their_own_target () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let reply (m : Model.t) r =
     fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
   in
@@ -9162,7 +9166,7 @@ let test_answers_land_on_their_own_target () =
          false)
 
 let test_sandbox_fleet_denial_clears_selected_rows () =
-  let m = Model.initial () in
+  let m = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let roster_fallback =
     Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
       ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
@@ -9218,7 +9222,7 @@ let test_sandbox_fleet_denial_clears_selected_rows () =
   ignore (check_fleet_denial { m with infra = roster_fallback } 403 : Model.t)
 
 let test_sandbox_probe_reopens_named_absence () =
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m =
     { initial with
       fleet =
@@ -9300,7 +9304,7 @@ let test_sandbox_probe_reopens_named_absence () =
     [] (named_requests cmds)
 
 let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let initial =
     { base with
       nav = { base.nav with workspace = Nav.Infra };
@@ -9470,7 +9474,7 @@ let test_wiki_index_reply_requests_selected_page () =
          (Msg.Http_reply
             { epoch = m.epoch; reply = Msg.Reply_wiki_index (Ok index) }))
   in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let on_wiki_tab =
     {
       m0 with
@@ -9662,7 +9666,7 @@ let test_infra_changes_follow_the_selected_repository () =
   Alcotest.(check (list string)) "the moved-to repository's answer is listed"
     [ "README.md" ] (paths inf4);
   (* Typing into the Repos filter can move the cursor too. *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let on_repos =
     { m0 with nav = { m0.nav with workspace = Nav.Infra }; infra = inf1 }
   in
@@ -9715,7 +9719,7 @@ let sent_get req cmds =
 let keeper_costs_req = Cmd.Get_keeper_costs { window_minutes = 1440 }
 
 let test_roster_keeps_unreadable_keepers_apart () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let roster : Wire_fleet.keepers_roster =
     {
       keepers = [ sample_keeper "alpha" ];
@@ -9749,7 +9753,7 @@ let test_roster_keeps_unreadable_keepers_apart () =
     (List.length m2.fleet.unreadable_keepers)
 
 let test_context_tab_reads_turn_records_and_costs () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -9872,7 +9876,7 @@ let test_context_tab_reads_turn_records_and_costs () =
         false)
 
 let test_keepers_view_reads_keeper_costs () =
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m_k = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
   Alcotest.(check bool) "the Keepers table reads cost and tokens from keeper-costs"
     true
@@ -9913,7 +9917,7 @@ let test_context_display_keeps_estimates_and_reasons_apart () =
     = Fleet_store.Context_unavailable Wire_fleet.Context_cumulative_usage)
 
 let test_candle_fallback_never_makes_a_zero_ledger () =
-  let w0 = (Model.initial ()).work in
+  let w0 = (Model.initial ~auth_session:Rbac.single_user_local_admin ()).work in
   let ledger summary =
     (Work_store.apply_candle_ledger_fallback ~observed_at:t0 ~summary
        ~balances:[ ("alpha", 5000) ] w0)
@@ -9951,7 +9955,7 @@ let test_candle_fallback_never_makes_a_zero_ledger () =
         false);
   (* A token that gets no Candle summary stays Unreported after the 404, and
      the Candle tab does not ask the route that answered 404 again. *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let on_candle =
     {
       m0 with
@@ -10017,7 +10021,7 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
           m.fleet;
     }
   in
-  let m0 = Model.initial ~cols:120 ~rows:36 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:36 () in
   let m0 =
     {
       m0 with
@@ -10152,7 +10156,7 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
   Alcotest.(check bool) "the late steer fallback warns" true (warned g1)
 
 let test_feature_wave1_store_and_polish_nits () =
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
 
   (* === Feature 1: Artifacts auto-detail fetch, stale guard, [y]/[H]/[e]/[o] === *)
@@ -10776,7 +10780,7 @@ let test_feature_wave1_store_and_polish_nits () =
   | _ -> Alcotest.fail "Item 6: expected active_artifact_detail = Observed.Failed on zoomed Artifacts")
 
 let test_pr54465_p2_fixes () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let t0 = Clock.Mono.of_ns 1_000_000_000L in
   let t1 = Clock.Mono.of_ns 2_000_000_000L in
   let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
@@ -10939,7 +10943,7 @@ let test_pr54465_p2_fixes () =
     (Incidents.count m_addons_err.incidents > Incidents.count m_bl.incidents)
 
 let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let t0 = Clock.Mono.of_ns 1_000_000_000L in
   let t1 = Clock.Mono.of_ns 2_000_000_000L in
   let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
@@ -11089,7 +11093,7 @@ let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
 
 let test_unified_navigation_sidebar_focus_ring_and_mouse () =
   let t0 = Clock.Mono.of_ns 1_000_000_000L in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let step m msg = Update.step ~now:t0 m msg in
   let press_key m k = step m (Msg.Key_event (key k)) in
   let press_shift_tab m =
@@ -11155,7 +11159,7 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
   let m_b2, _ = press_char m_b1 "b" in
   Alcotest.(check bool) "Second 'b' collapses docked sidebar" false
     (Model.sidebar_visible m_b2);
-  let m_narrow = Model.initial ~cols:96 ~rows:28 () in
+  let m_narrow = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:96 ~rows:28 () in
   Alcotest.(check bool) "Narrow hides sidebar by default" false
     (Model.sidebar_visible m_narrow);
   let m_drawer, _ = press_char m_narrow "b" in
@@ -11265,7 +11269,7 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
     (Option.is_none m_wheel_settings.nav.overlay);
   (* Review regression 3: Compact Auto_folded_pill click above footer does NOT
      falsely focus composer when Model.composer_rect is None *)
-  let m_compact = Model.initial ~cols:85 ~rows:26 ~lang:Say.Lang_ko () in
+  let m_compact = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:85 ~rows:26 ~lang:Say.Lang_ko () in
   Alcotest.(check bool) "Compact Pulse idle has no composer_rect" true
     (Option.is_none (Model.composer_rect m_compact));
   let m_compact_click, _ =
@@ -11444,7 +11448,7 @@ let in_alpha_chat (m : Model.t) =
   }
 
 let test_reopen_keeper_queue_and_reconcile () =
-  let model = in_alpha_chat (Model.initial ()) in
+  let model = in_alpha_chat (Model.initial ~auth_session:Rbac.single_user_local_admin ()) in
   let drafts = Drafts.set_active_keeper "alpha" model.drafts in
   let model, cmds = Update.execute_action ~now:t0 { model with drafts } Keymap.Open_queue_context in
   Alcotest.(check bool) "fresh drawer asks for the selected keeper's server queue" true
@@ -11561,7 +11565,7 @@ let test_reopen_keeper_queue_and_reconcile () =
 
 let test_exact_operation_absence_recovery () =
   let keeper = "alpha" in
-  let initial = in_alpha_chat (Model.initial ()) in
+  let initial = in_alpha_chat (Model.initial ~auth_session:Rbac.single_user_local_admin ()) in
   let send (m : Model.t) now =
     let drafts = Drafts.insert_text "one original input" (Drafts.set_active_keeper keeper m.drafts) in
     let sent, cmds = Update.execute_action ~now { m with drafts } Keymap.Submit_followup in
@@ -11668,7 +11672,7 @@ let test_exact_operation_absence_recovery () =
     ((row after_terminal).state = Drafts.Delivered)
 
 let test_cut_reply_reads_the_operation_journal () =
-  let m0 = in_alpha_chat (Model.initial ()) in
+  let m0 = in_alpha_chat (Model.initial ~auth_session:Rbac.single_user_local_admin ()) in
   let history =
     [
       chat_row ~id:"u-cut" ~role:Wire_fleet.Role_user ?provenance:(operation_provenance "op-cut" Accepted_user)
@@ -11774,7 +11778,7 @@ let test_cut_reply_reads_the_operation_journal () =
     "a history reply under another tab reads no journal" []
     (journal_gets memory_cmds);
   (* The Keepers split shows the selected keeper's Chat pane. *)
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let with_roster, _ =
     Update.step ~now:t1 base
       (Msg.Http_reply
@@ -11803,7 +11807,7 @@ let test_cut_reply_journal_failures () =
       failure_row ~id:"f-broken" ~operation_id:"op-broken";
     ]
   in
-  let m1, _ = history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ())) in
+  let m1, _ = history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ~auth_session:Rbac.single_user_local_admin ())) in
   let incidents_before = Incidents.count m1.incidents in
   let gone, _ =
     journal_reply ~operation_id:"op-gone" ~from:Wire_chat_journal.From_start
@@ -11847,7 +11851,7 @@ let test_cut_reply_journal_failures () =
 let test_cut_reply_failure_after_the_first_page () =
   let history = [ failure_row ~id:"f-long" ~operation_id:"op-long" ] in
   let m0, _ =
-    history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ()))
+    history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ~auth_session:Rbac.single_user_local_admin ()))
   in
   let cursor : Wire_chat_journal.cursor = { last_seq = 1; next_offset = 240 } in
   let page2 = Wire_chat_journal.After cursor in
@@ -11998,7 +12002,7 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
   let drafts0, btw_id =
     Drafts.start_btw ~now:t0 ~keeper ~prompt:"status?" Drafts.empty
   in
-  let m0 = { (Model.initial ()) with drafts = drafts0 } in
+  let m0 = { (Model.initial ~auth_session:Rbac.single_user_local_admin ()) with drafts = drafts0 } in
   let feed_btw m chunk =
     fst
       (Update.step ~now:t0 m
@@ -12073,7 +12077,7 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
       grouped_keeper ~group:"org-b" "no-pulse-keeper";
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~wall_unix:now_unix () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~wall_unix:now_unix () in
   let shell_stub : Wire_fleet.dashboard_shell =
     {
       generated_at_unix = Some now_unix;
@@ -12106,6 +12110,7 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
           cost_24h_usd = Observed.unreported;
         };
       groups = [];
+      auth = None;
     }
   in
   let fleet =
@@ -12231,7 +12236,7 @@ let test_media_viewer_follows_artifact_dive_target () =
     |> Knowledge_store.select_artifact_by_id ~id_or_sha:art_dive.id
   in
   let m0 =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       knowledge;
@@ -12426,7 +12431,7 @@ let test_single_slot_dive_error_target_guards () =
     }
   in
   let m_fusion_b =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     let rt =
       base.runtime
       |> Runtime_store.set_tab Nav.Runtime_fusion
@@ -12495,7 +12500,7 @@ let test_single_slot_dive_error_target_guards () =
      poisoning verification_evidence or verification_evidence_auth_denied,
      still routes Workspace_mismatch, and applies matching B errors. *)
   let m_verif_b =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       nav =
@@ -12592,7 +12597,7 @@ let test_single_slot_dive_error_target_guards () =
     m_v_500.work.verification_evidence_auth_denied;
   (* (c) Keepers > Trace (Trace_runtime) B ignores delayed Error for A, accepts B. *)
   let m_trace_b =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       fleet =
@@ -12650,7 +12655,7 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
   (* UX-01: Pulse Attention [Y]/[N]/[J] honors triage_index and clears blocking Inbox filter *)
   let a1 = mk_approval ~id:"apr-1" ~keeper:"alpha" ~tool_name:"shell_exec" in
   let a2 = mk_approval ~id:"apr-2" ~keeper:"beta" ~tool_name:"git_push" in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let attn =
     Attention.rebuild ~asks:[] ~tool_approvals:[ a1; a2 ] ~gate_pending:[]
       ~goals:[] m0.attention
@@ -12913,7 +12918,7 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
 
   (* UX-09: CLI --lang / --theme override survives boot Reply_tui_preferences *)
   let m_cli =
-    Model.initial ~lang:Say.Lang_ko ~theme_preset:Theme.Paper_light
+    Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_ko ~theme_preset:Theme.Paper_light
       ~cli_lang_override:true ~cli_theme_override:true ()
   in
   let server_prefs : Wire_config.tui_preferences =
@@ -12952,7 +12957,7 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
 let test_ux_batch2_modals_settings_overlays () =
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
   let has_cmd pred cmds = List.exists pred cmds in
-  let m_base = Model.initial ~cols:120 ~rows:34 () in
+  let m_base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:34 () in
   let k_alpha = grouped_keeper ~group:"org-a" "alpha" in
   let k_beta = grouped_keeper ~group:"org-a" "beta" in
   let m_fleet =
@@ -13552,7 +13557,7 @@ let test_ux_batch2_modals_settings_overlays () =
     (targets moved_up second.notes_hash)
 
 let test_ux_batch3_work_keepers_chat_mouse () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
 
   (* UX-20: Keepers collapsed company header re-expands via Space and Enter *)
@@ -13824,7 +13829,7 @@ let test_ux_batch3_work_keepers_chat_mouse () =
       review_observation = None;
     }
   in
-  let m_pipe_tiny_base = Model.initial ~cols:140 ~rows:24 ~lang:Say.Lang_en () in
+  let m_pipe_tiny_base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:24 ~lang:Say.Lang_en () in
   let m_pipe_tiny =
     {
       m_pipe_tiny_base with
@@ -14017,7 +14022,7 @@ let test_ux_batch3_work_keepers_chat_mouse () =
     last_idx m_clicked.nav.pane_index
 
 let test_ux_batch4_knowledge_runtime_infra () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let mk_key key : Keymap.Input.key_event =
     { key; mods = Keymap.Input.no_mods }
   in
@@ -14357,7 +14362,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
      | None -> false);
   let m_narrow_logs =
     {
-      (Model.initial ~cols:96 ~rows:30 ~lang:Say.Lang_en ()) with
+      (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:96 ~rows:30 ~lang:Say.Lang_en ()) with
       nav = { m0.nav with workspace = Nav.Infra };
       infra = inf_logs;
     }
@@ -14663,7 +14668,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
     |> Knowledge_store.set_pending_artifact_revision (Some ("art-1", Some 2))
   in
   let m_locked =
-    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
     {
       m0 with
       attention = base_attention;
@@ -14778,7 +14783,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
 
   (* P1-7: Micro teleport_blocked opens visible overlay without mutating hidden workspace *)
   let m_micro_tool =
-    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:20 () in
     let attention =
       Attention.empty
       |> Attention.rebuild ~asks:[] ~tool_approvals:[ sample_tool_approval ]
@@ -14796,7 +14801,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
   Alcotest.(check bool) "Micro J preserves hidden workspace" true
     (Nav.equal_workspace m_micro_after_j.nav.workspace Nav.Pulse);
   let m_micro_ask =
-    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:20 () in
     let attention =
       Attention.empty
       |> Attention.rebuild ~asks:[ sample_ask ] ~tool_approvals:[]
@@ -14812,7 +14817,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
     (Nav.equal_workspace m_micro_after_j_ask.nav.workspace Nav.Pulse);
   (* P1-7: Enlarging terminal defensively clears System_gate Micro_viewport *)
   let m_gated =
-    let m0 = Model.initial ~cols:70 ~rows:20 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:70 ~rows:20 () in
     {
       m0 with
       nav = { m0.nav with overlay = Some (Nav.System_gate Nav.Micro_viewport) };
@@ -14826,13 +14831,13 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
 
   (* P2-9: open_overlay initializes inline_modal & orphaned overlay does not trap Esc/Ctrl+Q *)
   let m_open_inl, _ =
-    Update_nav.open_overlay (Model.initial ~cols:120 ~rows:40 ())
+    Update_nav.open_overlay (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 ())
       (Nav.Inline_action (Nav.Task_cancel "t-9"))
   in
   Alcotest.(check bool) "open_overlay (Inline_action _) populates inline_modal"
     true (Option.is_some m_open_inl.inline_modal);
   let m_orphan =
-    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
     {
       m0 with
       nav =
@@ -14868,7 +14873,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
   (* P2-9 in Micro breakpoint: the first Ctrl+Q clears the orphaned
      Inline_action and arms quit, the second one quits *)
   let m_micro_orphan =
-    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:20 () in
     {
       m0 with
       nav =
@@ -14896,7 +14901,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
 
   (* P2-10: Duplicate Enter on submitting inline modal + scoped Reply_action_ack *)
   let m_comment, _ =
-    Update_nav.open_inline_modal (Model.initial ~cols:120 ~rows:40 ())
+    Update_nav.open_inline_modal (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 ())
       (Nav.Board_comment { post_id = "p-10"; parent_id = None })
   in
   let m_comment, _ = Update.step ~now:t0 m_comment (char_key "h") in
@@ -15038,7 +15043,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
   (* Reply_action_ack-backed modal (Task_cancel "t-10"): only matching for_modal
      unlocks on Error or closes on Ok! *)
   let m_tc0 =
-    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
     let m_open, _ = Update_nav.open_inline_modal m0 (Nav.Task_cancel "t-10") in
     {
       m_open with
@@ -15158,7 +15163,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
    | Error err -> Alcotest.fail (Cut_reply.page_error_to_string err));
   (* Through Update.step: repeated cursor stops emitting Get_chat_operation_events
      and marks slot as non-retryable Observed.Failed *)
-  let m_cut0 = Model.initial ~cols:120 ~rows:40 () in
+  let m_cut0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
   let m_cut1, cmds_cut1 =
     Update.step ~now:t0 m_cut0
       (Msg.Http_reply
@@ -15235,7 +15240,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
 let test_keeper_board_quarantine_recovery () =
   let module Q = Board_quarantine in
   let keeper = "alpha" in
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m =
     {
       base with
@@ -15369,7 +15374,7 @@ let test_ux_sweep_12_fixes () =
     }
   in
   let base_with_ws =
-    let m0 = Model.initial ~cols:150 ~rows:42 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:150 ~rows:42 () in
     {
       m0 with
       server_identity =
@@ -16934,7 +16939,7 @@ let test_ux_sweep_12_fixes () =
 let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let open Chat_transcript in
   let keeper = "alpha-leader" and request_id = "activity-request" in
-  let model = Model.initial ~cols:56 ~rows:20 () in
+  let model = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:56 ~rows:20 () in
   let model =
     { model with fleet = Fleet_store.start_chat_stream ~keeper ~request_id model.fleet }
   in
@@ -17199,7 +17204,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
     }
   in
   let m0 =
-    let base = Model.initial ~cols:120 ~rows:36 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:36 () in
     {
       base with
       nav =
@@ -17723,7 +17728,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
 
 let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   let keeper = "alpha" in
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let base =
     { base with nav = { base.nav with workspace = Nav.Keepers };
       server_identity =
@@ -17886,7 +17891,7 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
 let test_interrupt_reply_and_stream_completion_are_request_scoped () =
   let keeper = "alpha-leader" in
   let m_chat_run =
-    let base = Model.initial ~cols:120 ~rows:36 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:36 () in
     let base =
       {
         base with
@@ -18174,7 +18179,7 @@ let test_timeout_detail_retryable_and_update_parity () =
     cases;
   (* Update.ml: Server_health_result treats Timeout_detail identically to Timeout
      (does not mark server_offline or trigger Start_local_server, records incident) *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let td_err =
     Msg.Transport
       (Health.Timeout_detail
@@ -18327,7 +18332,7 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
     | Ok p -> p
     | Error e -> Alcotest.fail ("decode_turn_records failed: " ^ e)
   in
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let kc =
     Keeper_context_store.empty
     |> Keeper_context_store.apply_turn_records ~observed_at:t1 ~keeper tr_page
@@ -18537,7 +18542,7 @@ let test_runtime_lane_crud_requests_and_cas () =
        rev1)
     (Yojson.Safe.to_string (Cmd.post_request_body delete_req));
   (* 3. Store state setup on 5 Runtime > Failover Lanes *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m_lanes0 =
     {
       m0 with
@@ -19027,7 +19032,7 @@ let test_work_and_board_crud_requests_and_guards () =
       updated_at = None;
     }
   in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m_base =
     {
       m0 with
@@ -19498,7 +19503,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
       workspace_sha256 = Some "sha-ws";
     }
   in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let k_paused = { (sample_keeper ~health:Wire_fleet.Keeper_paused "alpha") with paused = true } in
   let k_offline = { (sample_keeper ~health:Wire_fleet.Keeper_offline "beta") with paused = false } in
   let k_live = sample_keeper ~health:Wire_fleet.Keeper_healthy "gamma" in
@@ -19901,7 +19906,7 @@ let test_oauth_poll_lifecycle () =
   let now = Clock.Mono.of_ns 1_000_000_000L in
   let later = Clock.Mono.after_s now 2. in
   let keeper = "alpha" and provider = "linear" in
-  let initial = Model.initial ~wall_unix:100. () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin ~wall_unix:100. () in
   let reply ~at (m : Model.t) reply =
     Update.step ~now:at m (Msg.Http_reply { epoch = m.epoch; reply })
   in
@@ -20025,7 +20030,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
     {|{"kind":"key","key":"enter"}|}
     (Yojson.Safe.to_string (Cmd.post_request_body key_req));
   (* 2. Setup_login_output auto-opens first https:// URL once & deduplicates subsequent URLs *)
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let m1, out1_cmds =
     Update.step ~now:t0 m0
       (Msg.Setup_login_output
@@ -20443,7 +20448,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
 
 let test_skill_mutation_reference () =
   let now = Clock.Mono.zero in
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let reference_json name source revision =
     `Assoc [ "identity", `Assoc [ "source_id", `String source; "package_id", `String name; "name", `String name ];
              "content_revision", `String revision ]
@@ -20506,7 +20511,7 @@ let test_skill_mutation_reference () =
 
 let test_preset_denial_refresh () =
   let now = Clock.Mono.zero in
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let view, _ = Update_actions.execute_slash ~now initial (Slash.Preset Slash.Preset_list) in
   let deny (m : Model.t) = fst (Update.step ~now m
     (Msg.Http_reply {epoch = m.epoch; reply = Msg.Reply_presets
@@ -20528,7 +20533,7 @@ let test_layer1_input_esc_focus_traps () =
      while explicit Ctrl+X remains retryable on the same active operation. *)
   let keeper = "alpha" in
   let m_chat_run =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     let base =
       {
         base with
@@ -20631,7 +20636,7 @@ let test_layer1_input_esc_focus_traps () =
 
   (* #3: Universal pane_index clamp on Update.step + Tab recovery from stale pane_index *)
   let m_tasks0 =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Work; pane_index = 2 };
@@ -20645,7 +20650,7 @@ let test_layer1_input_esc_focus_traps () =
     "#3: Update.step clamps stale pane_index=2 down to focusable_pane_count - 1 (1)"
     1 m_tasks_clamped.nav.pane_index;
   let m_stale_1pane =
-    let base = Model.initial ~cols:100 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:30 () in
     {
       base with
       nav =
@@ -20669,7 +20674,7 @@ let test_layer1_input_esc_focus_traps () =
 
   (* #7: Board_recovery Esc cascade & sub-tab cleanup *)
   let m_br0 =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       fleet =
@@ -20711,7 +20716,7 @@ let test_layer1_input_esc_focus_traps () =
 
   (* #8: Alt+] sub-tab switch clears filter_focused *)
   let m_flt =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Work; filter_focused = true };
@@ -20728,7 +20733,7 @@ let test_layer1_input_esc_focus_traps () =
 
   (* #10: Async Voice_transcript appends text without hijacking overlay/filter/Micro focus *)
   let m_ov_voice =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav =
@@ -20748,7 +20753,7 @@ let test_layer1_input_esc_focus_traps () =
     false (Drafts.is_focused m_ov_after.drafts);
   Alcotest.(check bool) "#10: Settings overlay stays open" true
     (Option.is_some m_ov_after.nav.overlay);
-  let m_micro_voice = Model.initial ~cols:60 ~rows:20 () in
+  let m_micro_voice = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:60 ~rows:20 () in
   let m_micro_after, _ =
     Update.step ~now:t0 m_micro_voice
       (Msg.Voice_event (Msg.Voice_transcript "micro voice"))
@@ -20778,7 +20783,7 @@ let test_layer1_input_esc_focus_traps () =
     }
   in
   let m_art_n =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let knowledge =
       Knowledge_store.empty
       |> Knowledge_store.set_tab Nav.Knowledge_artifacts
@@ -20881,7 +20886,7 @@ let test_layer1_input_esc_focus_traps () =
     }
   in
   let m_set_wide =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let config =
       Config_store.empty
       |> Config_store.set_tab Nav.Settings_providers_models
@@ -20981,7 +20986,7 @@ let test_layer1_input_esc_focus_traps () =
     (Option.equal Nav.equal_overlay clean_jump.nav.overlay (Some Nav.Ask_answer));
   (* Btw_query left via Ctrl+K clears drafts.btw *)
   let m_btw =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav = { base.nav with overlay = Some (Nav.Inline_action Nav.Btw_query) };
@@ -21005,7 +21010,7 @@ let test_layer1_input_esc_focus_traps () =
   (* #19a: Ask_answer [?] opens Help and [Esc] restores Ask_answer with ask_modal intact *)
   let ask = sample_ask ~id:"ask-help-1" ~keeper:"alpha" () in
   let m_ask =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     {
       base with
       nav = { base.nav with overlay = Some Nav.Ask_answer };
@@ -21045,7 +21050,7 @@ let test_layer1_input_esc_focus_traps () =
 
   (* #19c: Micro viewport allows [/] inside Settings while keeping bare Micro blocked *)
   let m_micro_set =
-    let base = Model.initial ~cols:60 ~rows:20 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:60 ~rows:20 () in
     {
       base with
       nav =
@@ -21061,7 +21066,7 @@ let test_layer1_input_esc_focus_traps () =
   Alcotest.(check bool) "#19c: [/] focuses search in Settings on Micro viewport"
     true m_micro_set_flt.nav.filter_focused;
   let m_micro_bare_flt, _ =
-    Update.step ~now:t0 (Model.initial ~cols:60 ~rows:20 ())
+    Update.step ~now:t0 (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:60 ~rows:20 ())
       (Msg.Key_event (char_key "/"))
   in
   Alcotest.(check bool) "#19c: [/] stays blocked on bare Micro viewport" false
@@ -21073,7 +21078,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   (* #4: Pulse pane_rects matches left-column [Attention; Companies; Goals] + right full World *)
   let m_pulse =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let work =
       base.work
       |> Work_store.apply_asks ~observed_at:t0
@@ -21152,7 +21157,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_tools_usage =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     let runtime =
       base.runtime
       |> Runtime_store.set_tab Nav.Runtime_tools_usage
@@ -21171,7 +21176,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     m_tu_dn.runtime.scroll_offset m_tu_clamped.runtime.scroll_offset;
 
   let m_tool_dive =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     let runtime =
       base.runtime
       |> Runtime_store.apply_tool_detail_series ~observed_at:t0 ~tool:"bash"
@@ -21236,7 +21241,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_kp_tc_base =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     let fleet =
       base.fleet
       |> Fleet_store.apply_roster ~observed_at:t0
@@ -21288,7 +21293,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   (* #12: Non-destructive sidebar browsing preserves active inspector until Enter *)
   let m_in_dive =
-    let base = Model.initial ~cols:140 ~rows:36 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
     {
       base with
       nav =
@@ -21322,7 +21327,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     { base_g with measure = long_txt; procedure = long_txt }
   in
   let m_gd =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     let m_seeded =
       {
         base with
@@ -21353,7 +21358,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
         })
   in
   let m_inb_empty =
-    let base = Model.initial ~cols:140 ~rows:26 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:26 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Work };
@@ -21400,7 +21405,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
       ~status:Health.Resolved Incidents.empty
   in
   let m_inc =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with overlay = Some Nav.Incidents };
@@ -21420,7 +21425,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   let ask = sample_ask ~id:"ask-ret-1" ~keeper:"alpha" () in
   let m_ask_ov =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with overlay = Some Nav.Ask_answer };
@@ -21437,7 +21442,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   (* #15e: Infra > Code right_mode & Runtime > Addons catalog_mode exit on Esc *)
   let m_code_git =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
@@ -21454,7 +21459,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
        Infra_store.Code_file);
 
   let m_addon_cat =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Runtime };
@@ -21482,7 +21487,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_art =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Knowledge };
@@ -21540,7 +21545,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_mem =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     let k0 =
       Knowledge_store.empty
       |> Knowledge_store.set_tab Nav.Knowledge_memory
@@ -21565,7 +21570,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   List.iter
     (fun kt ->
       let m_k =
-        let base = Model.initial () in
+        let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
         {
           base with
           nav = { base.nav with workspace = Nav.Keepers };
@@ -21579,7 +21584,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   (* Work > Pipeline cannot submit a verdict before observing the verification queue. *)
   let m_wp_empty =
-    let base = Model.initial ~cols:140 ~rows:30 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:30 () in
     {
       base with
       nav = { base.nav with workspace = Nav.Work; pane_index = 1 };
@@ -21627,7 +21632,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     }
   in
   let m_tks =
-    let base = Model.initial ~cols:140 ~rows:26 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:26 () in
     let runtime =
       {
         (base.runtime
@@ -21647,7 +21652,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
 
   (* #20b & #20c: Verification_inspector tab resets on open_inspector; has_active_memory_reading is scoped *)
   let m_vtab =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       work =
@@ -21679,7 +21684,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
       }
   in
   let m_stale_mr =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       nav = { base.nav with workspace = Nav.Work };
@@ -21719,7 +21724,7 @@ let test_keeper_lifecycle_controls_and_guards () =
       ~health:Wire_fleet.Keeper_healthy
   in
   let m0 =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let base =
       {
         base with
@@ -21971,7 +21976,7 @@ let test_keeper_lifecycle_controls_and_guards () =
     | _ -> false);
   (* 1e. Empty roster -> honest warning toast, zero POST *)
   let m_empty, _ =
-    Update.step ~now:t0 (Model.initial ~cols:140 ~rows:40 ())
+    Update.step ~now:t0 (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ())
       (Msg.Key_event (char_key "4"))
   in
   let m_empty_w, cmds_empty_w =
@@ -22546,7 +22551,7 @@ let test_keeper_lifecycle_controls_and_guards () =
   let k_ops_beta = { k_offline with company = "ops" } in
   let k_ops_gamma = { k_live with company = "ops" } in
   let m_multi =
-    let base = Model.initial ~cols:140 ~rows:40 () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
     let m_r, _ =
       Update.step ~now:t0 base
         (Msg.Http_reply
@@ -23379,7 +23384,7 @@ let test_hidden_music_command () =
   (* English UI: the description of /model holds the letters of "music" in
      order. The default Korean UI has no such match, so it would pass even
      without the Slash.filter guard. *)
-  let m = Model.initial ~lang:Say.Lang_en () in
+  let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en () in
   let requested raw =
     match Slash.parse raw with
     | Ok parsed -> snd (Update.execute_slash ~now:t0 m parsed)
@@ -23525,7 +23530,7 @@ let test_hidden_score_command () =
   in
   (* English UI: "score" matches six listed commands there, so only the
      Slash.filter guard keeps the popup from running one of them. *)
-  let base = Model.initial ~lang:Say.Lang_en () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en () in
   let viewing : Model.t =
     {
       base with
@@ -23626,7 +23631,7 @@ let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last
 
 let test_compact_chat_phase_preserves_wait_and_turn_freshness () =
   let keeper = "alpha" and request_id = "draining" in
-  let base = Model.initial () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let snapshot state =
     let row : Wire_fleet.keeper_turn_row = { keeper_name = keeper; chat_control_token = None; state } in
     Fleet_store.apply_turns ~observed_at:t0 [row] base.fleet
@@ -23917,7 +23922,7 @@ let test_discord_reply_source_and_receipt () =
     | _ -> Alcotest.fail "Discord chat source failed decoding"
   in
   let keeper = "alpha" in
-  let start = Model.initial () in
+  let start = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let start =
     { start with
       nav = { start.nav with workspace = Nav.Keepers; zoomed = true };
@@ -24042,7 +24047,7 @@ let test_uncached_knowledge_jumps () =
   in
   let listed = post "post-listed" in
   let far = post "post-far" in
-  let m0 = Model.initial () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let on_board board =
     {
       m0 with
@@ -24650,7 +24655,7 @@ let () =
             `Quick
             (fun () ->
               let t0 = Clock.Mono.zero in
-              let m0 = Model.initial () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
               let ws : Wire_common.workspace_identity =
                 {
                   base_path = "/tmp/w4";
@@ -25054,10 +25059,69 @@ let () =
           Alcotest.test_case "Goal and Execution receipts retain their source"
             `Quick (fun () ->
               let initial = Model.initial () in
-              let loading, _ =
+              let probing, _ =
                 Update.step ~now:t0 initial
                   (Msg.Server_health_result
                      { epoch = initial.epoch; result = Ok (sample_health ()) })
+              in
+              let admin_shell : Wire_fleet.dashboard_shell =
+                {
+                  generated_at_unix = None;
+                  project = Some "masc";
+                  version = Some "0.77.1";
+                  counts =
+                    {
+                      agents = 1;
+                      tasks = 0;
+                      tasks_done_24h = 0;
+                      keepers = 1;
+                      persisted_keepers = Observed.unreported;
+                      configured_keepers = Observed.unreported;
+                      total_runtimes = 1;
+                    };
+                  scorecard_24h =
+                    {
+                      tasks_done_24h = Observed.unreported;
+                      tasks_done_total = Observed.unreported;
+                      tasks_in_progress = Observed.unreported;
+                      tasks_claimed = Observed.unreported;
+                      tasks_awaiting_verification = Observed.unreported;
+                      tasks_todo = Observed.unreported;
+                      tasks_cancelled = Observed.unreported;
+                      goals_completed_24h = Observed.unreported;
+                      verifications_passed_24h = Observed.unreported;
+                      verifications_rejected_24h = Observed.unreported;
+                      board_posts_24h = Observed.unreported;
+                      turns_24h = Observed.unreported;
+                      cost_24h_usd = Observed.unreported;
+                    };
+                  groups = [];
+                  auth =
+                    Some
+                      {
+                        enabled = false;
+                        require_token = false;
+                        token_present = false;
+                        token_valid = false;
+                        token_agent = None;
+                        requested_agent = None;
+                        effective_agent = None;
+                        effective_role = Some Rbac.Admin;
+                        effective_admin = Some true;
+                        auth_error_code = None;
+                        auth_error_detail = None;
+                        can_keeper_msg = true;
+                        keeper_msg_error = None;
+                      };
+                }
+              in
+              let loading, _ =
+                Update.step ~now:t0 probing
+                  (Msg.Http_reply
+                     {
+                       epoch = probing.epoch;
+                       reply = Msg.Reply_dashboard_shell (Ok admin_shell);
+                     })
               in
               Alcotest.(check bool) "Inbox reads are pending after bootstrap"
                 true
@@ -25121,7 +25185,7 @@ let () =
               in
               let a_task = task "ta" a.id Wire_work.Todo in
               let b_task = task "tb" b.id done_status in
-              let initial = Model.initial () in
+              let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
               let initial =
                 { initial.work with goal_sort_mode = Work_store.Goal_sort_progress }
               in
@@ -25150,7 +25214,7 @@ let () =
                 (Some b.id) (selected changed));
           Alcotest.test_case "Verification replies belong to the current filter and request"
             `Quick (fun () ->
-              let base = Model.initial ~cols:150 ~rows:44 () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:150 ~rows:44 () in
               let initial =
                 { base with nav = { base.nav with workspace = Nav.Work };
                   work = Work_store.set_tab Nav.Work_pipeline base.work }
@@ -25225,7 +25289,7 @@ let () =
             "Wave 4 Layer 2: HITL Gate CRUD/modes/retry, Tools quality & MCP executor"
             `Quick (fun () ->
               let t0 = Clock.Mono.of_ns 1_000_000L in
-              let m0 = Model.initial ~cols:120 ~rows:40 () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
               let ws : Wire_common.workspace_identity =
                 {
                   instance_id = Some "inst-1";
@@ -25672,7 +25736,7 @@ let () =
           Alcotest.test_case
             "Wave 4 Layer 3: Skills Editor/CRUD, Prompts, Presets, Runtime Params & Async Requests"
             `Quick (fun () ->
-              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
               let ref_json =
                 `Assoc
                   [
@@ -26106,7 +26170,7 @@ let () =
           Alcotest.test_case
             "Wave 4 Layer 4: Runtime Lanes CRUD, Exact Run Dive, Add-ons & Browser Operator"
             `Quick (fun () ->
-              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
               let revision = String.make 64 'a' in
               let m0 = { m0 with runtime = { m0.runtime with runtime_config_raw =
                   Observed.value ~observed_at:t0
@@ -26584,7 +26648,7 @@ let () =
             "Settings tui.* enum SSOT, no-teleport arrows, preserved row & unified < / > artifact revisions"
             `Quick (fun () ->
               let m0 =
-                let base = Model.initial () in
+                let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
                 {
                   base with
                   viewport = { cols = 140; rows = 40 };
@@ -27202,7 +27266,7 @@ let () =
             "Epoch transition clears stuck MCP form/result, pending addon decl, and interrupting turn tokens"
             `Quick
             (fun () ->
-              let m0 = Model.initial () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
               let m1, _ =
                 Update.step ~now:t0 m0
                   (Msg.Server_health_result
@@ -27262,7 +27326,7 @@ let () =
               let step m msg = Update.step ~now:t0 m msg in
               let step_k m k = step m (Msg.Key_event k) in
               (* 1. can_zoom_current_view enabled across Work/Runtime/Infra master-detail tabs *)
-              let base = Model.initial ~cols:140 ~rows:36 () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
               Alcotest.(check bool) "Pulse stays non-zoomable" false
                 (Model.can_zoom_current_view base);
               let m_work_tasks =
@@ -27324,7 +27388,7 @@ let () =
                 false (Model.can_zoom_current_view m_rt_eff);
               (* 2. Compact 80x24 Infra_sandboxes: detail_visible flips false -> true on zoom *)
               let compact_sb =
-                let c = Model.initial ~cols:80 ~rows:24 () in
+                let c = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:80 ~rows:24 () in
                 {
                   c with
                   nav = { c.nav with workspace = Nav.Infra };
@@ -27467,7 +27531,7 @@ let () =
             (fun () ->
               let step m msg = Update.step ~now:t0 m msg in
               let step_k m k = step m (Msg.Key_event k) in
-              let base = Model.initial ~cols:140 ~rows:36 () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
               (* 1. Runtime_failover_lanes: [Space] pane 0 toggles outside probes; pane 1 / zoomed toggles raw JSON *)
               let rt_lanes =
                 base.runtime
@@ -27617,7 +27681,7 @@ let () =
             (fun () ->
               let step m msg = Update.step ~now:t0 m msg in
               let step_k m k = step m (Msg.Key_event k) in
-              let base = Model.initial ~cols:140 ~rows:36 () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
               (* 1. Incidents overlay: [Space] toggles show_dismissed on list, toggles raw JSON when zoomed; Esc 3-step unwind *)
               let incs, _ =
                 Incidents.push ~occurred_at_unix:1_795_254_000.0
@@ -27781,7 +27845,7 @@ let () =
                   (Cmd.flatten cmds)
               in
               let m0 =
-                let base = Model.initial ~cols:120 ~rows:36 () in
+                let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:36 () in
                 {
                   base with
                   fleet =
@@ -28858,7 +28922,7 @@ let () =
             (fun () ->
               let step_k m k = Update.step ~now:t0 m (Msg.Key_event k) in
               let base =
-                let m0 = Model.initial ~cols:140 ~rows:36 () in
+                let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
                 {
                   m0 with
                   fleet =
@@ -28907,7 +28971,7 @@ let () =
                    (Cmd.flatten cmds_model));
               (* 2. Narrow-screen (80x24) zoomed Keepers > Chat bare Esc unzooms instead of killing server-observed Turn_token, while Ctrl+X interrupts *)
               let narrow_chat =
-                let m_n = Model.initial ~cols:80 ~rows:24 () in
+                let m_n = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:80 ~rows:24 () in
                 {
                   m_n with
                   nav = { m_n.nav with workspace = Nav.Keepers; zoomed = true };
@@ -29121,7 +29185,7 @@ let () =
               Alcotest.(check int) "Keymap has zero collisions after Trace bindings" 0
                 (List.length (Keymap.collisions ()));
               let base =
-                let m0 = Model.initial ~cols:140 ~rows:36 () in
+                let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 () in
                 {
                   m0 with
                   fleet =
@@ -29395,7 +29459,7 @@ let () =
                   share_version = 1;
                 }
               in
-              let base0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+              let base0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
               let k0 =
                 Knowledge_store.empty
                 |> Knowledge_store.set_tab Nav.Knowledge_board
@@ -29546,7 +29610,7 @@ let () =
                 }
               in
               let m0 =
-                let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+                let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
                 {
                   base with
                   nav = { base.nav with workspace = Nav.Work; pane_index = 0 };
@@ -29663,7 +29727,7 @@ let () =
               (* #54821 review: one pane rect per focusable pane when the zoomed
                  goal has a single pane (narrow raw JSON). *)
               let narrow =
-                let base = Model.initial ~cols:80 ~rows:36 ~lang:Say.Lang_en () in
+                let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:80 ~rows:36 ~lang:Say.Lang_en () in
                 { m0 with breakpoint = base.breakpoint; viewport = base.viewport }
               in
               let with_json (m : Model.t) =
@@ -29695,7 +29759,7 @@ let () =
                 { key = k; mods = Keymap.Input.no_mods }
               in
               let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
-              let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
               (* 1. Depth-1 replacement preserves original workspace return frame; single Esc returns cleanly *)
               let m_origin =
                 {
@@ -29984,7 +30048,7 @@ let () =
             "Infra_sandboxes [e] opens keeper Sandbox settings and [S] opens runtime SSH pools settings"
             `Quick
             (fun () ->
-              let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+              let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
               let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
               let infra_with_alpha =
                 Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
@@ -30164,7 +30228,7 @@ let () =
           Alcotest.test_case
             "Terminal_focus blur dims visual focus while preserving logical focus & restores cleanly"
             `Quick (fun () ->
-              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
               let m0 =
                 {
                   m0 with
@@ -30271,7 +30335,7 @@ let () =
                        ~has_keeper:true ~inner_h:22))
                 Nav.all_keeper_tabs;
               (* 2. Chat_transcript.keeper_content_rect_size consumes hero SSOT *)
-              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
               let fleet =
                 m0.fleet
                 |> Fleet_store.apply_keepers ~observed_at:t0
@@ -30425,7 +30489,10 @@ let () =
             "Round 3 PR7: async_requests SSE, approval events, warming tools_dashboard"
             `Quick
             (fun () ->
-              let m0 = Model.initial ~cols:140 ~rows:36 () in
+              let m0 =
+                Model.initial ~auth_session:Rbac.single_user_local_admin
+                  ~cols:140 ~rows:36 ()
+              in
               let m_async =
                 {
                   m0 with
@@ -30649,7 +30716,10 @@ let () =
               let t0 = Clock.Mono.of_ns 1_000_000L in
               let keeper = "alpha" in
               let m0 =
-                let m = Model.initial ~cols:140 ~rows:40 () in
+                let m =
+                  Model.initial ~auth_session:Rbac.single_user_local_admin
+                    ~cols:140 ~rows:40 ()
+                in
                 let fleet =
                   m.fleet
                   |> Fleet_store.apply_keepers ~observed_at:t0
@@ -30954,7 +31024,10 @@ let () =
               let t0 = Clock.Mono.of_ns 2_000_000L in
               let keeper = "alpha" in
               let m0 =
-                let m = Model.initial ~cols:140 ~rows:40 () in
+                let m =
+                  Model.initial ~auth_session:Rbac.single_user_local_admin
+                    ~cols:140 ~rows:40 ()
+                in
                 let fleet =
                   m.fleet
                   |> Fleet_store.apply_keepers ~observed_at:t0

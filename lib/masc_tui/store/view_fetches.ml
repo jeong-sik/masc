@@ -2,9 +2,12 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 let read_board_quarantines ~now ~keeper (m : Model.t) =
-  let board_recovery, generation = Board_recovery.read ~keeper ~now m.knowledge.board_recovery in
-  { m with knowledge = { m.knowledge with board_recovery } },
-  [Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_board_quarantines { keeper; generation } }]
+  let req = Cmd.Get_board_quarantines { keeper; generation = 0 } in
+  if not (Rbac_policy.can_fetch_get m.auth_session req) then (m, [])
+  else
+    let board_recovery, generation = Board_recovery.read ~keeper ~now m.knowledge.board_recovery in
+    { m with knowledge = { m.knowledge with board_recovery } },
+    [Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_board_quarantines { keeper; generation } }]
 
 let needs_fetch ~force obs =
   if force then true
@@ -57,7 +60,8 @@ let sandbox_detail_fetch ?keeper (m : Model.t) =
   | Some target
     when Option.fold ~none:true ~some:(String.equal target) keeper
          && Infra_store.keeper_sandbox_needed ~force:false ~keeper:target m.infra ->
-      [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper = target } } ]
+      Rbac_policy.filter_cmds m.auth_session
+        [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper = target } } ]
   | Some _ | None -> []
 
 let needs_keeper_turn ~force ~keeper (m : Model.t) =
@@ -1582,12 +1586,14 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     | None ->
         []
   in
-  get_cmds @ post_cmds @ mcp_schema_cmds @ skill_read_cmds
+  Rbac_policy.filter_cmds m.auth_session
+    (get_cmds @ post_cmds @ mcp_schema_cmds @ skill_read_cmds)
 
 let overlay_fetches (m : Model.t) =
   List.map
     (fun req -> Cmd.Http_get { epoch = m.epoch; req })
     (fetches_for_overlay ~force:false m)
+  |> Rbac_policy.filter_cmds m.auth_session
 
 (* The keeper's Chat transcript is on screen on the Keepers workspace Chat tab
    with no dive open. *)
@@ -1604,6 +1610,7 @@ let cut_reply_fetches ~keeper (m : Model.t) =
     List.map
       (fun req -> Cmd.Http_get { epoch = m.epoch; req })
       (cut_reply_reqs ~force:false ~keeper m)
+    |> Rbac_policy.filter_cmds m.auth_session
   else []
 
 let active_chat_keeper (m : Model.t) =
@@ -1626,6 +1633,18 @@ let hydrate_chat_tool_results ?(allow_next_page = false) ?keeper (m : Model.t) =
   in
   match (target_opt, Chat_transcript.tools_mode m) with
   | None, _ | Some _, Masc_tui_keymap.Slash.Tools_compact -> (m, [])
+  | Some keeper, (Masc_tui_keymap.Slash.Tools_results | Masc_tui_keymap.Slash.Tools_full)
+    when not
+           (Rbac_policy.can_fetch_get m.auth_session
+              (Cmd.Get_keeper_tool_result
+                 {
+                   keeper;
+                   execution_id = "";
+                   offset = None;
+                   max_bytes = None;
+                   source_id = None;
+                 })) ->
+      (m, [])
   | ( Some keeper
     , (Masc_tui_keymap.Slash.Tools_results | Masc_tui_keymap.Slash.Tools_full) ) ->
       let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
@@ -1718,6 +1737,7 @@ let selected_wiki_page_fetch (m : Model.t) =
     List.map
       (fun req -> Cmd.Http_get { epoch = m.epoch; req })
       (selected_wiki_page_reqs ~force:false m)
+    |> Rbac_policy.filter_cmds m.auth_session
   else []
 
 let bootstrap_fetches (m : Model.t) =
@@ -1741,6 +1761,7 @@ let bootstrap_fetches (m : Model.t) =
   in
   dedup_reqs (core_reqs @ view_reqs)
   |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+  |> Rbac_policy.filter_cmds m.auth_session
 
 let keeper_lifecycle_refresh_fetches ~name (m : Model.t) =
   let tab_reqs =
@@ -1753,3 +1774,4 @@ let keeper_lifecycle_refresh_fetches ~name (m : Model.t) =
   in
   dedup_reqs (Cmd.Get_keepers_roster :: tab_reqs)
   |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+  |> Rbac_policy.filter_cmds m.auth_session

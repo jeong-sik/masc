@@ -158,7 +158,7 @@ let assert_grid_invariants ~label (grid : Cell_grid.t) =
 (* --- Rich Fixture Model Covering Knowledge, Runtime, and Infra --- *)
 
 let make_rich_model ~lang ~cols ~rows =
-  let m0 = Model.initial ~cols ~rows ~lang () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
   let freshness = { m0.freshness with last_wall_unix = now_unix } in
   (* Fleet keepers + Done tasks for Company & Cost/Solved join *)
   let keeper_a : Wire_fleet.keeper_summary =
@@ -1845,7 +1845,7 @@ let test_infra_all_tabs_and_dives () =
 
 let test_empty_loading_and_failed_observed_states () =
   (* Ensure zero crashes when every Observed.t is Loading / Unreported / Failed *)
-  let m_empty = Model.initial ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
+  let m_empty = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
   let m_failed =
     {
       m_empty with
@@ -2285,7 +2285,7 @@ let assert_no_cobalt_selection ~label (grid : Cell_grid.t) =
 
 let test_v25_runtime_efficiency_real_charts () =
   (* Live 8935 scenario: efficiency is Unreported, models/metrics + keeper_costs + tool_series drive all 3 panels *)
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let freshness = { m0.freshness with last_wall_unix = now_unix } in
   let buckets =
     List.init 24 (fun i ->
@@ -2435,7 +2435,7 @@ let test_v25_runtime_efficiency_real_charts () =
     true (ts_braille >= 20)
 
 let test_v25_runtime_quotas_aliases_and_collapsed_unreported () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let freshness = { m0.freshness with last_wall_unix = now_unix } in
   let mk_unrep id disp =
     {
@@ -2868,7 +2868,7 @@ let test_p1_5_infra_sandboxes_404_fallback_honesty () =
         snap.microvm_guests);
   List.iter
     (fun lang ->
-      let m0 = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang () in
       let m =
         {
           m0 with
@@ -2936,7 +2936,7 @@ let test_p1_5_infra_sandboxes_404_fallback_honesty () =
     [ Say.Lang_ko; Say.Lang_en ]
 
 let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let freshness = { m0.freshness with last_wall_unix = now_unix } in
   (* 32 active keepers in fleet roster *)
   let active_keepers =
@@ -3357,7 +3357,7 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
   in
   List.iter
     (fun lang ->
-      let m0 = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang () in
       let freshness = { m0.freshness with last_wall_unix = now_unix } in
       let rt_base =
         m0.runtime
@@ -3537,7 +3537,7 @@ let assert_strictly_increasing ~label xs =
   check xs
 
 let test_nav_display_order_monotonic_screen_rows () =
-  let m0 = Model.initial ~cols:140 ~rows:44 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:44 ~lang:Say.Lang_en () in
   let mk_keeper group name : Wire_fleet.keeper_summary =
     {
       name;
@@ -3815,7 +3815,7 @@ let test_feature_wave1_domain_renders () =
     (contains_sub ~needle:"MASC Events" ~haystack:txt_logs)
 
 let test_pr54465_p2_render_regressions () =
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let art_a : Wire_knowledge.artifact_entry =
     {
       id = "art-fail-01";
@@ -4343,7 +4343,7 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
     (contains_sub ~needle:"#54666" ~haystack:txt_repo
      && contains_sub ~needle:"passing/approved/mergeable" ~haystack:txt_repo);
 
-  let compact = Model.initial ~cols:90 ~rows:20 ~lang:Say.Lang_en () in
+  let compact = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:90 ~rows:20 ~lang:Say.Lang_en () in
   let compact =
     { compact with infra = m_repo.infra;
       nav = { compact.nav with workspace = Nav.Infra; pane_index = 2 } }
@@ -4446,7 +4446,7 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
 let test_runtime_quotas_grouped_paused_runtimes_parity () =
   let tz_offset_sec = 9 * 3600 in
   let m0 =
-    Model.initial ~lang:Say.Lang_ko ~cols:140 ~rows:40 ~tz_offset_sec ()
+    Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_ko ~cols:140 ~rows:40 ~tz_offset_sec ()
   in
   let now_unix = 1795658400.0 in
   let now_mono = Clock.Mono.of_ns 1_000_000_000L in
@@ -4590,7 +4590,7 @@ let test_pr2_rail_focus_and_runtime_p3_invariants () =
   let peek : Nav.file_peek =
     { keeper = "keeper-a"; path = "lib/sample.ml"; line = 2 }
   in
-  let m0 = Model.initial ~lang:Say.Lang_en ~cols:90 ~rows:24 () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en ~cols:90 ~rows:24 () in
   let infra =
     m0.infra
     |> Infra_store.open_file_peek ~keeper:peek.keeper ~path:peek.path
@@ -4700,7 +4700,7 @@ let test_pr2_rail_focus_and_runtime_p3_invariants () =
   in
   List.iter
     (fun (lang, expected_avail, expected_rl) ->
-      let m_rt0 = Model.initial ~lang ~cols:140 ~rows:40 () in
+      let m_rt0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang ~cols:140 ~rows:40 () in
       let rt =
         m_rt0.runtime
         |> Runtime_store.set_tab Nav.Runtime_quotas_credits

@@ -3490,11 +3490,19 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Theme.of_preset model.theme_preset in
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
-    match model.infra.active_tab with
-    | Nav.Infra_sandboxes -> render_sandboxes ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Infra_repos_changes ->
-        render_repos_changes ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Infra_code ->
-        render_code ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Infra_activity_logs ->
-        render_activity_logs ~model ~cache ~rect:body ~theme ~bp grid
+    match Rbac_policy.decide_infra_tab model.auth_session model.infra.active_tab with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache
+          ~rect:body ~theme ~model
+          ~title:(Nav.infra_tab_label model.infra.active_tab)
+          ~reason
+    | Rbac.Allowed -> (
+        match model.infra.active_tab with
+        | Nav.Infra_sandboxes ->
+            render_sandboxes ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Infra_repos_changes ->
+            render_repos_changes ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Infra_code ->
+            render_code ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Infra_activity_logs ->
+            render_activity_logs ~model ~cache ~rect:body ~theme ~bp grid)

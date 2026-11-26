@@ -234,6 +234,8 @@ type t = {
   nav : nav_state;
   freshness : freshness_state;
   server_identity : server_identity;
+  auth_session : Rbac.auth_session;
+  last_auth_recheck_mono : Clock.Mono.t option;
   attention : Attention.t;
   incidents : Incidents.t;
   drafts : Drafts.t;
@@ -523,7 +525,8 @@ let is_too_small_viewport { cols; rows } = cols < 40 || rows < 12
 let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     ?(theme_preset = Theme.Midnight) ?(cli_lang_override = false)
     ?(cli_theme_override = false) ?(tz_offset_sec = 0) ?(wall_unix = 0.0)
-    ?(tui_version = "") ?(tui_commit = None) () =
+    ?(tui_version = "") ?(tui_commit = None)
+    ?(auth_session = Rbac.Probing_health) () =
   let viewport = { cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = classify_viewport viewport in
   let last_wall_unix =
@@ -586,6 +589,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         last_mismatch_epoch = None;
         autostart_attempted = false;
       };
+    auth_session;
+    last_auth_recheck_mono = None;
     attention = Attention.empty;
     incidents = Incidents.empty;
     drafts = Drafts.empty;
@@ -756,52 +761,69 @@ let uses_keeper_split ~width m =
   (equal_breakpoint m.breakpoint Wide || equal_breakpoint m.breakpoint Standard)
   && width >= 104 && not (is_zoomed_active m)
 
+let fast_approval_entry_allowed (session : Rbac.auth_session)
+    (e : Attention.entry) =
+  match e.payload with
+  | Attention.Payload_tool_approval _ | Attention.Payload_ask _ ->
+      Rbac.is_allowed session Rbac.Single_user_role_admin
+  | Attention.Payload_gate _ | Attention.Payload_goal_confirmation _ ->
+      Rbac.is_allowed session Rbac.Single_user_token_admin_only
+
 let fast_approval_strip_item m =
-  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
+  if
+    is_too_small_viewport m.viewport
+    || equal_breakpoint m.breakpoint Micro
+    || not (Rbac.is_allowed m.auth_session Rbac.Single_user_role_admin)
+  then
     None
   else
-    match m.nav.overlay with
-    | Some (Nav.System_gate _) -> None
-    | Some
-        ( Nav.Palette
-        | Nav.Settings _
-        | Nav.Incidents
-        | Nav.Queue_context _
-        | Nav.Inline_action _
-        | Nav.Ask_answer
-        | Nav.Help )
-    | None ->
-        if
-          Option.is_none m.nav.inspector
-          && Nav.equal_workspace m.nav.workspace Nav.Work
-          && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
-        then
-          match
-            Attention.current_filtered_item ~query:m.work.filter_query
-              m.attention
-          with
-          | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> (
-              match e.payload with
-              | Attention.Payload_tool_approval _
-              | Attention.Payload_gate _
-              | Attention.Payload_goal_confirmation _ ->
-                  Some e
-              | Attention.Payload_ask _ -> None)
-          | Some _ | None -> None
-        else if
-          Option.is_none m.nav.inspector
-          && Nav.equal_workspace m.nav.workspace Nav.Pulse
-          && equal_pulse_pane (active_pulse_pane m) Pulse_attention
-        then
-          match Attention.current_filtered_item ~query:"" m.attention with
-          | Some e when not (Attention.is_in_flight ~id:e.id m.attention) ->
-              Some e
-          | Some _ | None -> None
-        else if
-          Option.is_some m.attention.selected_id
-          && Option.is_none (Attention.current_triage_item m.attention)
-        then None
-        else Attention.top_fast_path m.attention
+    let candidate =
+      match m.nav.overlay with
+      | Some (Nav.System_gate _) -> None
+      | Some
+          ( Nav.Palette
+          | Nav.Settings _
+          | Nav.Incidents
+          | Nav.Queue_context _
+          | Nav.Inline_action _
+          | Nav.Ask_answer
+          | Nav.Help )
+      | None ->
+          if
+            Option.is_none m.nav.inspector
+            && Nav.equal_workspace m.nav.workspace Nav.Work
+            && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+          then
+            match
+              Attention.current_filtered_item ~query:m.work.filter_query
+                m.attention
+            with
+            | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> (
+                match e.payload with
+                | Attention.Payload_tool_approval _
+                | Attention.Payload_gate _
+                | Attention.Payload_goal_confirmation _ ->
+                    Some e
+                | Attention.Payload_ask _ -> None)
+            | Some _ | None -> None
+          else if
+            Option.is_none m.nav.inspector
+            && Nav.equal_workspace m.nav.workspace Nav.Pulse
+            && equal_pulse_pane (active_pulse_pane m) Pulse_attention
+          then
+            match Attention.current_filtered_item ~query:"" m.attention with
+            | Some e when not (Attention.is_in_flight ~id:e.id m.attention) ->
+                Some e
+            | Some _ | None -> None
+          else if
+            Option.is_some m.attention.selected_id
+            && Option.is_none (Attention.current_triage_item m.attention)
+          then None
+          else Attention.top_fast_path m.attention
+    in
+    match candidate with
+    | Some e when fast_approval_entry_allowed m.auth_session e -> Some e
+    | Some _ | None -> None
 
 let composer_mode m =
   if

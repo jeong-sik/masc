@@ -97,3 +97,16 @@ val redact_plain_text_secrets : string -> string
     credential token patterns on plain-text diagnostic fallbacks. *)
 
 val string_of_transport_error : lang:Say.lang -> Health.transport_error -> string
+
+val draw_locked_panel :
+  Cell_grid.t ->
+  cache:Card.Cache.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  model:Model.t ->
+  title:Say.t ->
+  reason:Rbac.deny_reason ->
+  unit
+(** Render a truthful RBAC-locked card naming the required capability, current
+    session mode/role/binding, and actionable guidance instead of empty tables
+    or speculative 403 errors. *)

@@ -24,5 +24,20 @@ val record_http_incident :
     other HTTP/transport/decode errors strictly in Channel 3 [incidents]
     without degrading Channel 2 live health. *)
 
+val apply_auth_session_transition :
+  now:Clock.Mono.t ->
+  next_session:Rbac.auth_session ->
+  Model.t ->
+  Model.t * Cmd.t list
+(** Transition [model.auth_session] to [next_session], handling initial auth
+    completion, [Nav.Auth_gate] entry on auth loss, and in-place privilege
+    demotion / identity-switch cleanup (epoch bump, modal/editor teardown,
+    restricted cache purge, and SSE stream resync). *)
+
+val maybe_recheck_auth : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+(** Issue a throttled background session re-probe ([Get_dashboard_shell] in
+    single-user mode or [Get_auth_whoami] in multi-account mode) after an
+    unexpected 403/401 on an authenticated session. *)
+
 val apply_http_reply :
   now:Clock.Mono.t -> Model.t -> Msg.http_reply -> Model.t * Cmd.t list

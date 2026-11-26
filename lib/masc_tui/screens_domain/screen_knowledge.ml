@@ -117,12 +117,19 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           H.make_badge ~glyph:Glyph.Delta_up ~tone:Theme.Status_ok
             (format_karma_badge ~lang p)
         in
+        let can_board_write =
+          Rbac.is_allowed model.auth_session Rbac.Single_user_write
+        in
         let hotkey =
           match selected with
           | Some _ ->
-              Say.make
-                ~ko:"[v] 본문 · < / > 댓글 이동 · [c] 답글 · + / - 투표(2회)"
-                ~en:"[v] Post · < / > Comment · [c] Reply · + / - Vote (2x)"
+              if can_board_write then
+                Say.make
+                  ~ko:"[v] 본문 · < / > 댓글 이동 · [c] 답글 · + / - 투표(2회)"
+                  ~en:"[v] Post · < / > Comment · [c] Reply · + / - Vote (2x)"
+              else
+                Say.make ~ko:"[v] 본문 · < / > 댓글 이동"
+                  ~en:"[v] Post · < / > Comment"
           | None -> Say.make ~ko:"[v] 본문" ~en:"[v] Post"
         in
         let inner =
@@ -219,14 +226,21 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         (preview_title, Some (chain_subtitle p), Some karma_b)
   in
   let inner =
+    let can_board_write =
+      Rbac.is_allowed model.auth_session Rbac.Single_user_write
+    in
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?subtitle ?badge
          ~hotkey:
            (Say.resolve lang
               (if zoomed then
-                 Say.make
-                   ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · +/- 투표"
-                   ~en:"[v] Comments · < / > Step · [c] Reply · +/- Vote"
+                 if can_board_write then
+                   Say.make
+                     ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · +/- 투표"
+                     ~en:"[v] Comments · < / > Step · [c] Reply · +/- Vote"
+                 else
+                   Say.make ~ko:"[v] 댓글 전문 · < / > 댓글"
+                     ~en:"[v] Comments · < / > Step"
                else
                  Say.make
                    ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글"
@@ -2463,7 +2477,8 @@ let briefing_status_display ~lang = function
       , Say.resolve lang (Say.make ~ko:"조회 불가" ~en:"Unavailable") )
 
 let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp ~lang ~(k : Knowledge_store.t) ~focused =
+    ~bp ~lang ~(auth_session : Rbac.auth_session) ~(k : Knowledge_store.t)
+    ~focused =
   let wm_opt = Observed.to_option k.world_memory in
   let conflicts_n = match wm_opt with Some w -> w.conflicts_count | None -> 0 in
   let badge =
@@ -2479,10 +2494,17 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
            (Say.resolve lang (Say.make ~ko:"충돌 0" ~en:"0 conflicts")))
   in
+  let wm_hotkey =
+    if Rbac.is_allowed auth_session Rbac.Single_user_token_admin_only then
+      Some
+        (Say.resolve lang
+           (Say.make ~ko:"[a] 사서 복구 · [A] 상세 · [D] rev고정"
+              ~en:"[a] Recover · [A] Act · [D] Pin rev"))
+    else None
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ?badge ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세 · [D] rev고정" ~en:"[a] Recover · [A] Act · [D] Pin rev"))
+      (H.card_spec ?badge ~focused ?hotkey:wm_hotkey
          (Say.resolve lang
             (Say.make ~ko:"월드 MVCC 메모리 · 경합 충돌"
                ~en:"World MVCC Memory & Conflicts")))
@@ -3215,8 +3237,8 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
         ~top_ratio:0.48 bp body_rect
     in
-    draw_world_and_librarian ~grid ~cache ~rect:left_rect ~theme ~bp ~lang ~k
-      ~focused:(Model.pane_focused model 0);
+    draw_world_and_librarian ~grid ~cache ~rect:left_rect ~theme ~bp ~lang
+      ~auth_session:model.auth_session ~k ~focused:(Model.pane_focused model 0);
     draw_right ~rect:right_rect ~focused:(Model.pane_focused model 1)
 
 (* --- 4. Top-Level Workspace Render & Dive Render --- *)
@@ -3227,12 +3249,22 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Theme.of_preset model.theme_preset in
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
-    match model.knowledge.active_tab with
-    | Nav.Knowledge_board ->
-        render_board ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Knowledge_wiki ->
-        render_wiki ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Knowledge_artifacts ->
-        render_artifacts ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Knowledge_memory ->
-        render_memory ~model ~cache ~rect:body ~theme ~bp grid
+    match
+      Rbac_policy.decide_knowledge_tab model.auth_session
+        model.knowledge.active_tab
+    with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache
+          ~rect:body ~theme ~model
+          ~title:(Nav.knowledge_tab_label model.knowledge.active_tab)
+          ~reason
+    | Rbac.Allowed -> (
+        match model.knowledge.active_tab with
+        | Nav.Knowledge_board ->
+            render_board ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Knowledge_wiki ->
+            render_wiki ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Knowledge_artifacts ->
+            render_artifacts ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Knowledge_memory ->
+            render_memory ~model ~cache ~rect:body ~theme ~bp grid)

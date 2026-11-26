@@ -467,6 +467,22 @@ type shell_group = {
   keepers : string list;
 }
 
+type shell_auth_summary = {
+  enabled : bool;
+  require_token : bool;
+  token_present : bool;
+  token_valid : bool;
+  token_agent : string option;
+  requested_agent : string option;
+  effective_agent : string option;
+  effective_role : Rbac.role option;
+  effective_admin : bool option;
+  auth_error_code : string option;
+  auth_error_detail : string option;
+  can_keeper_msg : bool;
+  keeper_msg_error : string option;
+}
+
 type dashboard_shell = {
   generated_at_unix : float option;
   project : string option;
@@ -474,6 +490,7 @@ type dashboard_shell = {
   counts : shell_counts;
   scorecard_24h : daily_scorecard;
   groups : shell_group list;
+  auth : shell_auth_summary option;
 }
 
 val classify_company_single : group:string option -> string -> string option

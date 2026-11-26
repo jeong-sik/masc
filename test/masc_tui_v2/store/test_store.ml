@@ -30367,7 +30367,17 @@ let () =
                            Runtime_store.Tools_prompts_presets)
                       with
                       pp_section = Runtime_store.Sec_async_requests;
-                      async_requests = Observed.value ~observed_at:t0 [];
+                      async_requests =
+                        Observed.value ~observed_at:t0
+                          {
+                            Wire_runtime.status = "ok";
+                            active = 0;
+                            runtime_owned = 0;
+                            ownership_unknown = 0;
+                            record_errors_count = 0;
+                            requests = [];
+                            error_detail = None;
+                          };
                     };
                 }
               in

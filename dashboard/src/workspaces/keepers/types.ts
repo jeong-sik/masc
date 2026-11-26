@@ -146,6 +146,17 @@ export interface KeeperTurnBreakdown {
   readonly ok: number
   readonly rested: number
   readonly failed: number
+  /** What started those turns. The server's causes add up to its outcomes
+   *  (`Keeper_tool_surface_ops` recent_turns slots). */
+  readonly causes: KeeperTurnCauses
+}
+
+export interface KeeperTurnCauses {
+  readonly scheduled: number
+  readonly reacted: number
+  readonly chat: number
+  readonly own: number
+  readonly unknown: number
 }
 
 export interface KeeperTurnPreparation {

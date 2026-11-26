@@ -411,6 +411,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           ${turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0) && html`
             <div class="kp-diag-row">
               <strong>24h 턴 내역</strong>: 성공 ${turnBreakdown.ok} · 휴식 ${turnBreakdown.rested} · 실패 ${turnBreakdown.failed}
+              <div class="kp-diag-lane-meta">시작 계기: 예약 ${turnBreakdown.causes.scheduled} · 반응 ${turnBreakdown.causes.reacted} · 채팅 ${turnBreakdown.causes.chat} · 스스로 ${turnBreakdown.causes.own} · 모름 ${turnBreakdown.causes.unknown}</div>
             </div>
           `}
         </div>

@@ -5147,7 +5147,8 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                    :: List.map
                         (fun (rr : Wire_runtime.tool_quality_rate_row) ->
                           plain
-                            (Printf.sprintf "  %-23s %5d  %5.1f%%" rr.name
+                            (Printf.sprintf "  %s %5d  %5.1f%%"
+                               (Grapheme.pad_right ~width:23 rr.name)
                                rr.calls rr.success_pct))
                         (H.safe_take 10 tq.by_runtime))
             in

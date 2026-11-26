@@ -79,6 +79,7 @@ let extract_http_error_reason ~body ~(api_error : Wire_common.api_error option)
     let s =
       Chat_transcript.scrub_secrets_in_text s
       |> Text_util.sanitize_single_line
+      |> Chat_transcript.scrub_secrets_in_text
     in
     if String.equal s "" then None
     else if Masc_tui_term.Grapheme.display_width s > 140 then

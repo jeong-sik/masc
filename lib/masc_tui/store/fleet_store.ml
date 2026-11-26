@@ -1636,16 +1636,6 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
           let has_exact =
             List.exists (fun tool -> String.equal tool.tool_use_id tool_use_id) b.tools
           in
-          let prefer_awaiting =
-            (not has_exact)
-            && Option.is_none tool_name
-            && List.exists
-                 (fun tool ->
-                   is_open_tool tool
-                   && Option.equal String.equal tool.progress_label
-                        (Some "awaiting approval"))
-                 b.tools
-          in
           let matched_fallback = ref false in
           let tools =
             List.map
@@ -1656,13 +1646,11 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
                     (not !matched_fallback)
                     && is_open_tool tool
                     &&
-                    if prefer_awaiting then
-                      Option.equal String.equal tool.progress_label
-                        (Some "awaiting approval")
-                    else
-                      match tool_name with
-                      | Some name -> String.equal tool.tool_name name
-                      | None -> true
+                    match tool_name with
+                    | Some name -> String.equal tool.tool_name name
+                    | None ->
+                        Option.equal String.equal tool.progress_label
+                          (Some "awaiting approval")
                 in
                 if hit then (
                   matched_fallback := true;

@@ -730,6 +730,15 @@ val keeper_diagnostic_banner : name:string -> t -> keeper_banner_row list
     disposition). Benign server values (["pass"], ["direct_message"]) are
     suppressed so healthy keepers render zero banner rows. *)
 
+val keeper_hero_height :
+  embedded:bool -> tab:Nav.keeper_tab -> has_keeper:bool -> inner_h:int -> int
+(** Exact number of top rows [Keeper_dive.render_tabs_body] deducts for the
+    keeper hero/preview header ([1] for the compact preview bar in embedded
+    split view when [inner_h >= 10]; [5] for the multi-row hero + telemetry
+    strip when zoomed on non-Chat/non-Memory tabs with [inner_h >= 22]; [0]
+    otherwise). Shared by {!Keeper_dive}, {!Chat_transcript}, and
+    {!Memory_diagram} so scroll limits and image placement stay in sync. *)
+
 val keeper_diagnostic_banner_height : name:string -> avail_h:int -> t -> int
 (** Exact number of rows [Keeper_dive.render_tabs_body] deducts for
     {!keeper_diagnostic_banner}, shared by {!Chat_transcript} and

@@ -4957,7 +4957,13 @@ and execute_action ~now (m : Model.t) action =
           in
           (closed, cmds)
       | None ->
-          if Option.is_some m.knowledge.armed_vote then
+          if
+            Option.is_some m.knowledge.armed_vote
+            && Option.is_none (Model.active_inspector m)
+            && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+            && Nav.equal_knowledge_tab m.knowledge.active_tab
+                 Nav.Knowledge_board
+          then
             ( {
                 m with
                 knowledge = Knowledge_store.clear_armed_vote m.knowledge;

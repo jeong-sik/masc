@@ -294,9 +294,11 @@ let keeper_memory_content_of_tabs_body ~(model : Model.t) ~name ~bp ~embedded
   if Rect.is_empty inner then Rect.empty
   else
     let after_hero =
-      if embedded && has_keeper && inner.h >= 10 then
-        snd (Rect.split_v inner ~top_h:1)
-      else inner
+      let hero_h =
+        Model.keeper_hero_height ~embedded ~tab:Nav.Keeper_memory ~has_keeper
+          ~inner_h:inner.h
+      in
+      if hero_h > 0 then snd (Rect.split_v inner ~top_h:hero_h) else inner
     in
     let content_rect =
       if embedded && model.nav.pane_index = 0 && after_hero.h >= 3 then

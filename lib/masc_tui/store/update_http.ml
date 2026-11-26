@@ -6130,15 +6130,17 @@ let apply_http_reply ~now (m : Model.t) reply =
             Infra_store.apply_git_diff ~observed_at:now ~scope ~path diff m.infra;
         }
       , [] )
-  | Msg.Reply_git_diff { scope = _; path = _; result = Error err } ->
+  | Msg.Reply_git_diff { scope; path; result = Error err } ->
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
-               {
-                 x with
-                 code =
-                   { x.code with git_diff = failed_slot err x.code.git_diff };
-               }))
+               if not (Infra_store.git_diff_target_matches ~scope ~path x) then x
+               else
+                 {
+                   x with
+                   code =
+                     { x.code with git_diff = failed_slot err x.code.git_diff };
+                 }))
         ~source:Health.Source_client_http ~ko:"Git diff 조회"
         ~en:"Git diff fetch" err
   | Msg.Reply_memory_health_keeper { keeper; result = Ok row } ->

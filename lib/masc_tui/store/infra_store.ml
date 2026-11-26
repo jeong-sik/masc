@@ -1059,6 +1059,9 @@ let select_review_change ~delta t =
             active_file_path = Some c.path;
             pending_jump_line = None;
             git_scroll_offset = 0;
+            (* The slot holds the last file's diff or failure. A
+               non-retryable failure there would stop this file's fetch. *)
+            git_diff = Observed.absent;
           };
       }
   | Some _ | None -> t
@@ -1782,11 +1785,12 @@ let apply_git_log ~observed_at ~scope ~path commits t =
         { t.code with git_log = Observed.value ~observed_at (scope, path, commits) };
     }
 
+let git_diff_target_matches ~scope ~path t =
+  Wire_infra.equal_workspace_scope scope t.code.scope
+  && path_matches_active_code ~path t
+
 let apply_git_diff ~observed_at ~scope ~path diff t =
-  if
-    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
-    || not (path_matches_active_code ~path t)
-  then t
+  if not (git_diff_target_matches ~scope ~path t) then t
   else
     {
       t with

@@ -143,6 +143,46 @@ let test_enter_opens_the_line_at_the_top_of_the_diff () =
     m.infra.code.pending_jump_line;
   Alcotest.(check (list string)) "file read" [ "a.ml" ] (file_reads cmds)
 
+let not_found = Msg.Http_error { status = 404; body = ""; api_error = None }
+
+let a_diff_failed () =
+  let m, _ =
+    reply (reviewing_model ())
+      (Msg.Reply_git_status
+         { scope = Wire_infra.Ws_project; result = Ok (status [ "a.ml"; "b.ml" ]) })
+  in
+  fst
+    (reply m
+       (Msg.Reply_git_diff
+          { scope = Wire_infra.Ws_project; path = "a.ml"; result = Error not_found }))
+
+let is_failed (slot : _ Observed.t) =
+  match slot with
+  | Observed.Failed _ -> true
+  | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false
+
+let test_a_failed_diff_does_not_stop_the_next_file () =
+  let failed = a_diff_failed () in
+  Alcotest.(check bool) "a.ml failed" true (is_failed failed.infra.code.git_diff);
+  let m, cmds = Update.step ~now:t0 failed (Msg.Key_event (char_key ">")) in
+  Alcotest.(check (option string)) "second change selected" (Some "b.ml")
+    m.infra.code.active_file_path;
+  Alcotest.(check (list string)) "its diff is read" [ "b.ml" ] (diff_reads cmds)
+
+let test_a_late_failure_does_not_land_on_another_file () =
+  let m, _ =
+    reply (reviewing_model ())
+      (Msg.Reply_git_status
+         { scope = Wire_infra.Ws_project; result = Ok (status [ "a.ml"; "b.ml" ]) })
+  in
+  let m, _ = Update.step ~now:t0 m (Msg.Key_event (char_key ">")) in
+  let m, _ =
+    reply m
+      (Msg.Reply_git_diff
+         { scope = Wire_infra.Ws_project; path = "a.ml"; result = Error not_found })
+  in
+  Alcotest.(check bool) "b.ml is not marked failed" false (is_failed m.infra.code.git_diff)
+
 let () =
   Alcotest.run "code_review"
     [ ( "layout",
@@ -158,4 +198,8 @@ let () =
           Alcotest.test_case "hunk key scrolls" `Quick
             test_hunk_key_scrolls_to_the_next_header;
           Alcotest.test_case "enter opens the line" `Quick
-            test_enter_opens_the_line_at_the_top_of_the_diff ] ) ]
+            test_enter_opens_the_line_at_the_top_of_the_diff;
+          Alcotest.test_case "a failed diff does not stop the next file" `Quick
+            test_a_failed_diff_does_not_stop_the_next_file;
+          Alcotest.test_case "a late failure stays on its file" `Quick
+            test_a_late_failure_does_not_land_on_another_file ] ) ]

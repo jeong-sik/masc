@@ -392,6 +392,11 @@ val apply_git_log :
   Wire_infra.git_log_commit list ->
   t ->
   t
+val git_diff_target_matches :
+  scope:Wire_infra.workspace_scope -> path:string -> t -> bool
+(** [true] when a diff reply for [scope] and [path] belongs to the file the
+    Code tab shows now. A reply for any other file is late and is dropped. *)
+
 val apply_git_diff :
   observed_at:Clock.Mono.t ->
   scope:Wire_infra.workspace_scope ->

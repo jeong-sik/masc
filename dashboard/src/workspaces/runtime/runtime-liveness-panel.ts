@@ -14,7 +14,7 @@ import {
 import type { RuntimeResolution } from './types'
 
 const PILL_STYLE = {
-  padding: '1px var(--sp-2)',
+  padding: 'var(--sp-0) var(--sp-2)',
   borderRadius: 'var(--radius-pill)',
   fontWeight: 600,
   whiteSpace: 'nowrap',
@@ -77,8 +77,13 @@ function LivenessRow({ row, nowUnix }: { row: RuntimeLivenessRow; nowUnix: numbe
   `
 }
 
-export function RuntimeLivenessPanel({ runtimes }: { runtimes: readonly RuntimeResolution[] }) {
-  const nowUnix = Date.now() / 1000
+export function RuntimeLivenessPanel({
+  runtimes,
+  nowUnix = Date.now() / 1000,
+}: {
+  runtimes: readonly RuntimeResolution[]
+  nowUnix?: number
+}) {
   const rows = collectRuntimeLiveness(runtimes, nowUnix)
   if (rows.length === 0) return null
   const anyRefused = rows.some((row) => row.block?.kind === 'credential_refused')

@@ -31,7 +31,12 @@ import {
 } from '../../core'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { isUtilizationSpent } from '../../lib/quota-window'
-import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives'
+import {
+  PopoverMenu,
+  UPlotChart,
+  type PopoverMenuItem,
+  type UPlotSeriesSpec,
+} from '../../components/primitives'
 import {
   causeBadgeStyle,
   formatAccountEmailEntry,
@@ -203,10 +208,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
   const [tier3Expanded, setTier3Expanded] = useState(false)
-  const [pausedPanelOpen, setPausedPanelOpen] = useState(true)
+  const [pausedPanelPref, setPausedPanelPref] = useState<boolean | null>(null)
+  const [inventoryOpen, setInventoryOpen] = useState(false)
   const [pausedSortBy, setPausedSortBy] = useState<QuotaRestSortKey>('release')
   const [pausedCauseFilter, setPausedCauseFilter] = useState<QuotaRestCauseFilter>('all')
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
+  const [nowUnix, setNowUnix] = useState(() => Date.now() / 1000)
   const [credForm, setCredForm] = useState<CredentialFormState | null>(null)
   const [verifyModelInput, setVerifyModelInput] = useState<string>('')
   const [loginReceipt, setLoginReceipt] = useState<LoginReceiptState | null>(null)
@@ -218,8 +225,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     mountedRef.current = true
+    const timer = window.setInterval(() => {
+      setNowUnix(Date.now() / 1000)
+    }, 30_000)
     return () => {
       mountedRef.current = false
+      window.clearInterval(timer)
       rawConfigAbortRef.current?.abort()
     }
   }, [])
@@ -271,14 +282,18 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }, [providerDays, accountMode])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
+  useEffect(() => {
+    if (resolvedData) setNowUnix(Date.now() / 1000)
+  }, [resolvedData])
+
   const restingProviders = useMemo(
-    () => restingProviderIds(resolvedData?.runtimes ?? []),
-    [resolvedData],
+    () => restingProviderIds(resolvedData?.runtimes ?? [], nowUnix),
+    [resolvedData, nowUnix],
   )
 
   const partitioned = useMemo(
-    () => partitionQuotaScopes(resolvedData?.provider_usage_windows ?? [], restingProviders),
-    [resolvedData, restingProviders],
+    () => partitionQuotaScopes(resolvedData?.provider_usage_windows ?? [], restingProviders, nowUnix),
+    [resolvedData, restingProviders, nowUnix],
   )
 
   const accountEmails = useMemo(
@@ -370,8 +385,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
       accountEmails,
       sortBy: pausedSortBy,
       causeFilter: 'all',
+      nowUnix,
     }),
-    [resolvedData, providerDisplayNames, accountEmails, pausedSortBy],
+    [resolvedData, providerDisplayNames, accountEmails, pausedSortBy, nowUnix],
   )
 
   const effectiveCauseFilter: QuotaRestCauseFilter =
@@ -387,8 +403,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
           accountEmails,
           sortBy: pausedSortBy,
           causeFilter: effectiveCauseFilter,
+          nowUnix,
         })),
-    [basePausedGrouped, effectiveCauseFilter, resolvedData, providerDisplayNames, accountEmails, pausedSortBy],
+    [basePausedGrouped, effectiveCauseFilter, resolvedData, providerDisplayNames, accountEmails, pausedSortBy, nowUnix],
   )
 
   const togglePausedGroup = (provider: string) => {
@@ -685,8 +702,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const renderScopeCard = (scope: ProviderUsageScope, idx: number) => {
-    const cls = classifyQuotaScope(scope)
-    const pct = maxUtilizationPct(scope)
+    const cls = classifyQuotaScope(scope, nowUnix)
+    const pct = maxUtilizationPct(scope, nowUnix)
     const pid = primaryProviderId(scope)
     const name = scopeDisplayName(scope)
     const accounts = scope.providers
@@ -754,7 +771,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                       <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
                         <span class="mono">${windowKindLabel(w.window)} ${w.limit_id ? `(${w.limit_id})` : ''}</span>
                         <span class="mono tnum">
-                          ${labelVal} · 리셋 ${formatResetCountdown(w.resets_at)}
+                          ${labelVal} · 리셋 ${formatResetCountdown(w.resets_at, nowUnix)}
                         </span>
                       </div>
                       <div style=${{ height: '6px', borderRadius: 'var(--radius-pill)', background: 'var(--bg-3)', overflow: 'hidden' }}>
@@ -801,14 +818,85 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const pausedGroups = pausedGrouped.groups
   const presentCauses = KNOWN_CAUSE_FILTERS.filter((c) => (pausedSummary.causeCounts[c] ?? 0) > 0)
   const allVisibleExpanded = pausedGroups.length > 0 && pausedGroups.every((g) => expandedGroups.has(g.provider))
+  const pausedPanelOpen = pausedPanelPref ?? pausedSummary.hasPaymentRefused
   const globalSoonestRelease = pausedSummary.soonestUntil !== null
-    ? formatReleaseSummary(pausedSummary.soonestUntil, pausedSummary.soonestResetStated)
+    ? formatReleaseSummary(pausedSummary.soonestUntil, pausedSummary.soonestResetStated, nowUnix)
     : null
-  const pausedKpiTone = pausedSummary.hasPaymentRefused
+  const pausedKpiTone = pausedSummary.hasPaymentRefused || pausedSummary.hasCredentialRefused
     ? 'bad'
-    : pausedSummary.restingCount > 0
+    : pausedSummary.availableCount < pausedSummary.totalRegistered
       ? 'warn'
       : 'ok'
+  const enabledIntegrationsCount = integrations.filter((i) => i.enabled !== false).length
+  const sortLabelMap: Readonly<Record<QuotaRestSortKey, string>> = {
+    release: '해제 임박순',
+    count: '런타임 많은순',
+    name: '이름순',
+  }
+  const activeFilterSuffix = effectiveCauseFilter !== 'all'
+    ? ` · ${quotaRestCauseMeta(effectiveCauseFilter).shortLabel}`
+    : pausedSortBy !== 'release'
+      ? ` · ${sortLabelMap[pausedSortBy]}`
+      : ''
+  const pausedControlItems: readonly PopoverMenuItem[] = [
+    {
+      id: 'sort-release',
+      label: '정렬: 해제 임박순',
+      active: pausedSortBy === 'release',
+      testId: 'paused-sort-release',
+      onSelect: () => setPausedSortBy('release'),
+    },
+    {
+      id: 'sort-count',
+      label: '정렬: 런타임 많은순',
+      active: pausedSortBy === 'count',
+      testId: 'paused-sort-count',
+      onSelect: () => setPausedSortBy('count'),
+    },
+    {
+      id: 'sort-name',
+      label: '정렬: 이름순',
+      active: pausedSortBy === 'name',
+      testId: 'paused-sort-name',
+      onSelect: () => setPausedSortBy('name'),
+    },
+    ...(presentCauses.length >= 2
+      ? [
+          {
+            id: 'filter-all',
+            label: `사유: 전체 (${pausedSummary.restingCount})`,
+            active: effectiveCauseFilter === 'all',
+            testId: 'paused-filter-all',
+            separatorBefore: true,
+            onSelect: () => setPausedCauseFilter('all'),
+          },
+          ...presentCauses.map((cause) => {
+            const meta = quotaRestCauseMeta(cause)
+            const count = pausedSummary.causeCounts[cause] ?? 0
+            return {
+              id: `filter-${cause}`,
+              label: `사유: ${meta.shortLabel} (${count})`,
+              active: effectiveCauseFilter === cause,
+              testId: `paused-filter-${cause}`,
+              onSelect: () => setPausedCauseFilter(cause),
+            }
+          }),
+        ]
+      : []),
+    {
+      id: 'toggle-expand-all',
+      label: allVisibleExpanded ? '모두 접기' : '모두 펼치기',
+      testId: 'paused-expand-all-toggle',
+      separatorBefore: true,
+      onSelect: () => {
+        if (allVisibleExpanded) {
+          setExpandedGroups(new Set())
+        } else {
+          setExpandedGroups(new Set(pausedGroups.map((g) => g.provider)))
+        }
+      },
+    },
+  ]
 
   return html`
     <div class="ov" data-testid="runtime-quotas-tab">
@@ -866,15 +954,23 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <div class="ov-kpi-v">${partitioned.tier3Unreported.length}</div>
         </div>
         <div class="ov-kpi" data-testid="kpi-paused-runtimes">
-          <div class="ov-kpi-k">일시 중지 런타임</div>
+          <div class="ov-kpi-k">
+            ${pausedSummary.blockedCount > pausedSummary.restingCount
+              ? '일시 중지 런타임 · 차단'
+              : '일시 중지 런타임'}
+          </div>
           <div class=${`ov-kpi-v ${pausedKpiTone}`}>
             ${pausedSummary.totalRegistered > 0
-              ? `${pausedSummary.restingCount} / ${pausedSummary.totalRegistered}`
-              : String(pausedSummary.restingCount)}
+              ? `${pausedSummary.blockedCount} / ${pausedSummary.totalRegistered}`
+              : String(pausedSummary.blockedCount)}
           </div>
           ${pausedSummary.totalRegistered > 0 && html`
             <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', marginTop: 'var(--sp-0)' }}>
-              전체 ${pausedSummary.totalRegistered} · 가용 ${pausedSummary.availableCount}
+              전체 ${pausedSummary.totalRegistered} · 가용 ${pausedSummary.availableCount}${pausedSummary.credentialRefusedCount > 0
+                ? ` · 인증 거부 ${pausedSummary.credentialRefusedCount}`
+                : ''}${pausedSummary.rateLimitedCount > 0
+                ? ` · 속도 제한 ${pausedSummary.rateLimitedCount}`
+                : ''}
             </div>
           `}
         </div>
@@ -893,152 +989,66 @@ export function QuotasTab(props: WorkspaceViewProps) {
             background: pausedSummary.hasPaymentRefused ? 'var(--err-soft)' : 'var(--warn-soft)',
           }}
         >
-          <button
-            type="button"
-            data-testid="paused-panel-toggle"
-            aria-expanded=${pausedPanelOpen}
-            onClick=${() => setPausedPanelOpen((v) => !v)}
-            style=${{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 'var(--sp-2)',
-              flexWrap: 'wrap',
-              width: '100%',
-              padding: 0,
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--fg-1)',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-13)', fontWeight: 600 }}>
-              <span aria-hidden="true">${pausedPanelOpen ? '▾' : '▸'}</span>
-              ${pausedPanelOpen
-                ? html`
-                    <span>일시 중지 런타임 (${pausedSummary.restingCount}/${pausedSummary.totalRegistered})</span>
-                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 500, color: 'var(--fg-2)' }}>
-                      ${pausedSummary.groupCount}개 계정 · 가용 ${pausedSummary.availableCount}
-                    </span>
-                  `
-                : html`
-                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-12)' }}>
-                      일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease
-                        ? ` · 가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}`
-                        : ''}
-                    </span>
-                  `}
-            </span>
-            ${pausedPanelOpen && globalSoonestRelease && html`
-              <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: globalSoonestRelease.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
-                가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}
+          <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              class="ap-disclosure-trigger"
+              data-testid="paused-panel-toggle"
+              aria-expanded=${pausedPanelOpen}
+              onClick=${() => setPausedPanelPref(!pausedPanelOpen)}
+              style=${{
+                flex: '1 1 240px',
+                padding: 'var(--sp-1) var(--sp-2)',
+                color: 'var(--fg-1)',
+              }}
+            >
+              <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-13)', fontWeight: 600 }}>
+                <span aria-hidden="true">${pausedPanelOpen ? '▾' : '▸'}</span>
+                ${pausedPanelOpen
+                  ? html`
+                      <span>일시 중지 런타임 (${pausedSummary.restingCount}/${pausedSummary.totalRegistered})</span>
+                      <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 500, color: 'var(--fg-2)' }}>
+                        ${pausedSummary.groupCount}개 계정 · 가용 ${pausedSummary.availableCount}
+                      </span>
+                    `
+                  : html`
+                      <span class="mono tnum" style=${{ fontSize: 'var(--fs-12)' }}>
+                        일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease
+                          ? ` · 가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}`
+                          : ''}
+                      </span>
+                    `}
               </span>
+            </button>
+
+            ${pausedPanelOpen && html`
+              <div style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', flexShrink: 0 }}>
+                ${globalSoonestRelease && html`
+                  <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: globalSoonestRelease.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
+                    가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}
+                  </span>
+                `}
+                <${PopoverMenu}
+                  triggerLabel=${`정렬·필터${activeFilterSuffix} ▾`}
+                  triggerTestId="paused-controls-trigger"
+                  popoverTestId="paused-controls-menu"
+                  align="right"
+                  ariaLabel="일시 중지 런타임 정렬 및 사유 필터"
+                  items=${pausedControlItems}
+                />
+              </div>
             `}
-          </button>
+          </div>
 
           ${pausedPanelOpen && html`
             <p style=${{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
               할당량 소진·결제 거절로 자동 우회 중인 런타임입니다. 해제 시각이 지나면 자동으로 다시 호출됩니다.
             </p>
 
-            <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                <div class="ap-viewseg" role="group" aria-label="정렬 기준">
-                  <button
-                    type="button"
-                    data-testid="paused-sort-release"
-                    class=${`ap-viewbtn ${pausedSortBy === 'release' ? 'on' : ''}`}
-                    aria-pressed=${pausedSortBy === 'release'}
-                    onClick=${() => setPausedSortBy('release')}
-                  >
-                    해제 임박순
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="paused-sort-count"
-                    class=${`ap-viewbtn ${pausedSortBy === 'count' ? 'on' : ''}`}
-                    aria-pressed=${pausedSortBy === 'count'}
-                    onClick=${() => setPausedSortBy('count')}
-                  >
-                    런타임 많은순
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="paused-sort-name"
-                    class=${`ap-viewbtn ${pausedSortBy === 'name' ? 'on' : ''}`}
-                    aria-pressed=${pausedSortBy === 'name'}
-                    onClick=${() => setPausedSortBy('name')}
-                  >
-                    이름순
-                  </button>
-                </div>
-
-                ${presentCauses.length >= 2 && html`
-                  <div role="group" aria-label="일시 중지 사유 필터" style=${{ display: 'inline-flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      data-testid="paused-filter-all"
-                      class="btn-ghost"
-                      aria-pressed=${effectiveCauseFilter === 'all'}
-                      onClick=${() => setPausedCauseFilter('all')}
-                      style=${{
-                        padding: 'var(--sp-0) var(--sp-2)',
-                        fontSize: 'var(--fs-11)',
-                        ...(effectiveCauseFilter === 'all'
-                          ? { background: 'var(--bg-4)', borderColor: 'var(--line-2)', color: 'var(--fg-1)', fontWeight: 600 }
-                          : {}),
-                      }}
-                    >
-                      전체 (${pausedSummary.restingCount})
-                    </button>
-                    ${presentCauses.map((cause) => {
-                      const meta = quotaRestCauseMeta(cause)
-                      const count = pausedSummary.causeCounts[cause] ?? 0
-                      const active = effectiveCauseFilter === cause
-                      return html`
-                        <button
-                          key=${cause}
-                          type="button"
-                          data-testid=${`paused-filter-${cause}`}
-                          class="btn-ghost"
-                          aria-pressed=${active}
-                          onClick=${() => setPausedCauseFilter(cause)}
-                          style=${{
-                            padding: 'var(--sp-0) var(--sp-2)',
-                            fontSize: 'var(--fs-11)',
-                            ...(active ? { ...causeBadgeStyle(meta.tone), fontWeight: 600 } : {}),
-                          }}
-                        >
-                          ${meta.shortLabel} (${count})
-                        </button>
-                      `
-                    })}
-                  </div>
-                `}
-              </div>
-
-              <button
-                type="button"
-                class="btn-ghost"
-                data-testid="paused-expand-all-toggle"
-                style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
-                onClick=${() => {
-                  if (allVisibleExpanded) {
-                    setExpandedGroups(new Set())
-                  } else {
-                    setExpandedGroups(new Set(pausedGroups.map((g) => g.provider)))
-                  }
-                }}
-              >
-                ${allVisibleExpanded ? '모두 접기' : '모두 펼치기'}
-              </button>
-            </div>
-
             <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
               ${pausedGroups.map((group) => {
                 const isOpen = expandedGroups.has(group.provider)
-                const rel = formatReleaseSummary(group.soonestUntil, group.soonestResetStated)
+                const rel = formatReleaseSummary(group.soonestUntil, group.soonestResetStated, nowUnix)
                 const hasPayment = group.causes.includes('payment_refused')
                 const showEstimated = rel.isEstimated
                 return html`
@@ -1049,26 +1059,18 @@ export function QuotasTab(props: WorkspaceViewProps) {
                       border: `1px solid ${hasPayment ? 'var(--err-border)' : 'var(--line-1)'}`,
                       borderRadius: 'var(--radius-sm)',
                       background: 'var(--bg-1)',
-                      overflow: 'hidden',
                     }}
                   >
                     <button
                       type="button"
+                      class="ap-disclosure-trigger"
                       aria-expanded=${isOpen}
                       onClick=${() => togglePausedGroup(group.provider)}
                       style=${{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 'var(--sp-2)',
                         flexWrap: 'wrap',
-                        width: '100%',
                         padding: 'var(--sp-2) var(--sp-3)',
-                        border: 'none',
-                        background: 'transparent',
+                        borderRadius: 'var(--radius-sm)',
                         color: 'var(--fg-1)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
                       }}
                     >
                       <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
@@ -1087,7 +1089,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                               key=${cause}
                               style=${{
                                 ...causeBadgeStyle(meta.tone),
-                                padding: '1px var(--sp-2)',
+                                padding: 'var(--sp-0) var(--sp-2)',
                                 borderRadius: 'var(--radius-pill)',
                                 fontSize: 'var(--fs-11)',
                                 fontWeight: 600,
@@ -1111,7 +1113,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                           <span
                             title="제공자가 정확한 리셋 시각을 명시하지 않아 서버 재시도 예정 시각을 표시합니다."
                             style=${{
-                              padding: '1px var(--sp-1)',
+                              padding: 'var(--sp-0) var(--sp-1)',
                               borderRadius: 'var(--radius-sm)',
                               border: '1px solid var(--line-2)',
                               background: 'var(--bg-2)',
@@ -1134,12 +1136,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
                           gap: 'var(--sp-1)',
                           padding: 'var(--sp-2) var(--sp-3)',
                           borderTop: '1px solid var(--line-1)',
+                          borderBottomLeftRadius: 'var(--radius-sm)',
+                          borderBottomRightRadius: 'var(--radius-sm)',
                           background: 'var(--bg-2)',
                         }}
                       >
                         ${group.runtimes.map((rt) => {
                           const rMeta = quotaRestCauseMeta(rt.quota_rest.cause)
-                          const rRel = formatReleaseSummary(rt.quota_rest.until, rt.quota_rest.reset_stated)
+                          const rRel = formatReleaseSummary(rt.quota_rest.until, rt.quota_rest.reset_stated, nowUnix)
                           const shortId = stripProviderPrefix(rt.id, group.provider)
                           return html`
                             <div
@@ -1162,20 +1166,20 @@ export function QuotasTab(props: WorkspaceViewProps) {
                                   ${shortId}
                                 </span>
                                 ${rt.is_default && html`
-                                  <span style=${{ padding: '1px var(--sp-1)', borderRadius: 'var(--radius-pill)', background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)', fontSize: 'var(--fs-11)', fontWeight: 600 }}>
+                                  <span style=${{ padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)', fontSize: 'var(--fs-11)', fontWeight: 600 }}>
                                     기본
                                   </span>
                                 `}
                               </span>
                               <span class="mono tnum" style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-11)' }}>
-                                <span style=${{ ...causeBadgeStyle(rMeta.tone), padding: '1px var(--sp-2)', borderRadius: 'var(--radius-pill)', fontWeight: 600 }}>
+                                <span style=${{ ...causeBadgeStyle(rMeta.tone), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontWeight: 600 }}>
                                   ${rMeta.shortLabel}
                                 </span>
                                 <span style=${{ color: rRel.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
                                   ${rRel.countdown}${rRel.localTime ? ` (${rRel.localTime})` : ''}
                                 </span>
                                 ${rRel.isEstimated && html`
-                                  <span style=${{ padding: '1px var(--sp-1)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--fg-3)' }}>
+                                  <span style=${{ padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--fg-3)' }}>
                                     예상
                                   </span>
                                 `}
@@ -1214,7 +1218,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         </section>
       `}
 
-      <${RuntimeLivenessPanel} runtimes=${resolvedData?.runtimes ?? []} />
+      <${RuntimeLivenessPanel} runtimes=${resolvedData?.runtimes ?? []} nowUnix=${nowUnix} />
 
       <!-- Provider Usage History UPlotChart (Strictly days=1|7|14 & HTTP 200 unavailable honesty) -->
       <section aria-label="제공자 사용량 이력">
@@ -1498,104 +1502,112 @@ export function QuotasTab(props: WorkspaceViewProps) {
         </section>
       `}
 
-      <!-- Provider Credentials & OAuth Inventory -->
-      <section class="wka-card" aria-label="제공자 자격 증명 목록">
-        <div class="wka-h">
-          <h3>
+      <!-- Provider Credentials & OAuth Inventory (default-collapsed via .ap-disclosure) -->
+      <section class="ap-disclosure" data-testid="provider-inventory-disclosure" aria-label="제공자 자격 증명 목록">
+        <button
+          type="button"
+          class="ap-disclosure-trigger"
+          data-testid="provider-inventory-toggle"
+          aria-expanded=${inventoryOpen}
+          onClick=${() => setInventoryOpen((v) => !v)}
+        >
+          <span>
             ${accountMode === 'multi_account'
-              ? '내 제공자 계정 (/api/v1/auth/provider-accounts)'
-              : '제공자 연동 & 자격 증명 (/api/v1/setup/inventory)'}
-          </h3>
-          <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            ${accountMode === 'multi_account' ? `${multiAccounts.length}개 계정` : `${integrations.length}개 제공자`}
+              ? `내 제공자 계정 (${multiAccounts.length}개 계정)`
+              : `제공자 연동 & 자격 증명 (${integrations.length}개 제공자 · 활성 ${enabledIntegrationsCount})`}
           </span>
-        </div>
+          <span aria-hidden="true">${inventoryOpen ? '▾' : '▸'}</span>
+        </button>
 
-        ${accountMode === 'multi_account' && html`
-          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)', flexWrap: 'wrap' }}>
-            <label style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>검증용 모델 (선택 시 우선 적용):</label>
-            <input
-              type="text"
-              aria-label="검증할 모델 ID"
-              placeholder="예: gpt-5-codex (비우면 통합 기본 모델)"
-              value=${verifyModelInput}
-              onInput=${(e: Event) => setVerifyModelInput((e.target as HTMLInputElement).value)}
-              class="mono"
-              style=${{ flex: '1 1 200px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-12)' }}
-            />
-          </div>
-        `}
+        ${inventoryOpen && html`
+          <div class="ap-disclosure-body" data-testid="provider-inventory-body">
+            ${accountMode === 'multi_account' && html`
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <label style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>검증용 모델 (선택 시 우선 적용):</label>
+                <input
+                  type="text"
+                  aria-label="검증할 모델 ID"
+                  placeholder="예: gpt-5-codex (비우면 통합 기본 모델)"
+                  value=${verifyModelInput}
+                  onInput=${(e: Event) => setVerifyModelInput((e.target as HTMLInputElement).value)}
+                  class="mono"
+                  style=${{ flex: '1 1 200px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-12)' }}
+                />
+              </div>
+            `}
 
-        ${accountMode === 'multi_account'
-          ? (multiAccounts.length === 0
-            ? html`<div class="dtable-absent">연결된 개인 제공자 계정이 없습니다.</div>`
-            : html`
-                <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-                  ${multiAccounts.map((acc, i) => {
-                    const pid = acc.integration_id ?? acc.provider ?? acc.provider_account_id ?? acc.id ?? `acct-${i}`
-                    const ref = acc.provider_account_id ?? acc.account_ref ?? acc.id ?? pid
-                    const statusLabel = acc.removal
-                      ? `removal:${acc.removal}`
-                      : acc.replacement
-                        ? `replacement:${acc.replacement}`
-                        : acc.key
-                          ? `${acc.kind ?? 'key'} (${acc.key})`
-                          : (acc.status ?? (acc.kind === 'login' ? 'login' : acc.verified ? 'verified' : 'active'))
-                    return html`
-                      <div key=${ref} style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', flexWrap: 'wrap' }}>
-                        <div>
-                          <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${acc.display_name ?? acc.label ?? pid}</div>
-                          <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                            ${ref} · ${statusLabel}
-                          </div>
-                        </div>
-                        <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                          <button type="button" class="btn-ghost" onClick=${() => void handleVerifyAccount(pid, acc.provider_account_id ?? acc.account_ref)}>검증</button>
-                          <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(pid)}>Re-auth</button>
-                          <button type="button" class="btn-ghost" onClick=${() => void handleRemoveKey(ref)} style=${{ color: 'var(--err-fg)' }}>제거</button>
-                        </div>
-                      </div>
-                    `
-                  })}
-                </div>
-              `)
-          : (integrations.length === 0
-            ? html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '등록된 제공자 인벤토리가 없습니다.'}</div>`
-            : html`
-                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 'var(--sp-2)' }}>
-                  ${integrations.map((integ) => html`
-                    <div key=${integ.id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
-                      <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)' }}>
-                        <div>
-                          <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${integ.display_name}</div>
-                          <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                            ${integ.id} · ${integ.credential_kind ?? integ.protocol ?? '없음'}
-                          </div>
-                          ${accountLine(accountEmails.get(integ.id)) !== null && html`
-                            <div data-testid="provider-account-line" class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
-                              ${accountLine(accountEmails.get(integ.id))}
+            ${accountMode === 'multi_account'
+              ? (multiAccounts.length === 0
+                ? html`<div class="dtable-absent">연결된 개인 제공자 계정이 없습니다.</div>`
+                : html`
+                    <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                      ${multiAccounts.map((acc, i) => {
+                        const pid = acc.integration_id ?? acc.provider ?? acc.provider_account_id ?? acc.id ?? `acct-${i}`
+                        const ref = acc.provider_account_id ?? acc.account_ref ?? acc.id ?? pid
+                        const statusLabel = acc.removal
+                          ? `removal:${acc.removal}`
+                          : acc.replacement
+                            ? `replacement:${acc.replacement}`
+                            : acc.key
+                              ? `${acc.kind ?? 'key'} (${acc.key})`
+                              : (acc.status ?? (acc.kind === 'login' ? 'login' : acc.verified ? 'verified' : 'active'))
+                        return html`
+                          <div key=${ref} style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', flexWrap: 'wrap' }}>
+                            <div>
+                              <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${acc.display_name ?? acc.label ?? pid}</div>
+                              <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                ${ref} · ${statusLabel}
+                              </div>
                             </div>
-                          `}
+                            <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                              <button type="button" class="btn-ghost" onClick=${() => void handleVerifyAccount(pid, acc.provider_account_id ?? acc.account_ref)}>검증</button>
+                              <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(pid)}>Re-auth</button>
+                              <button type="button" class="btn-ghost" onClick=${() => void handleRemoveKey(ref)} style=${{ color: 'var(--err-fg)' }}>제거</button>
+                            </div>
+                          </div>
+                        `
+                      })}
+                    </div>
+                  `)
+              : (integrations.length === 0
+                ? html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '등록된 제공자 인벤토리가 없습니다.'}</div>`
+                : html`
+                    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 'var(--sp-2)' }}>
+                      ${integrations.map((integ) => html`
+                        <div key=${integ.id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                          <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)' }}>
+                            <div>
+                              <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${integ.display_name}</div>
+                              <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                ${integ.id} · ${integ.credential_kind ?? integ.protocol ?? '없음'}
+                              </div>
+                              ${accountLine(accountEmails.get(integ.id)) !== null && html`
+                                <div data-testid="provider-account-line" class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                                  ${accountLine(accountEmails.get(integ.id))}
+                                </div>
+                              `}
+                            </div>
+                            <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
+                              ${integ.enabled === false ? '비활성' : '활성'}
+                            </span>
+                          </div>
+                          <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                            <button type="button" class="btn-ghost" onClick=${() => setCredForm({ providerId: integ.id, secret: '', mode: 'api_key' })}>
+                              API 키
+                            </button>
+                            <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
+                              CLI OAuth
+                            </button>
+                            <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
+                              Open Config Key
+                            </button>
+                          </div>
                         </div>
-                        <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
-                          ${integ.enabled === false ? '비활성' : '활성'}
-                        </span>
-                      </div>
-                      <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                        <button type="button" class="btn-ghost" onClick=${() => setCredForm({ providerId: integ.id, secret: '', mode: 'api_key' })}>
-                          API 키
-                        </button>
-                        <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
-                          CLI OAuth
-                        </button>
-                        <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
-                          Open Config Key
-                        </button>
-                      </div>
+                      `)}
                     </div>
                   `)}
-                </div>
-              `)}
+          </div>
+        `}
       </section>
     </div>
   `

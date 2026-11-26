@@ -229,6 +229,13 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
       html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
+    const laneConfigToggle = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="lane-config-toggle"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    })
+    expect(laneConfigToggle.getAttribute('aria-expanded')).toBe('false')
+    laneConfigToggle.click()
     await vi.waitFor(() => {
       expect(container.querySelector('[data-lane-row="failover:coding"]')).not.toBeNull()
       expect(container.querySelector('[data-lane-row="exact_output:verifier_exact"]')).not.toBeNull()
@@ -372,6 +379,8 @@ candidates = ["safe.model"]
       container,
     )
     await flushUi(50)
+    ;(container.querySelector('[data-testid="lane-config-toggle"]') as HTMLButtonElement).click()
+    await flushUi(15)
 
     const editBtn = container.querySelector('[data-lane-row="failover:coding"] button') as HTMLButtonElement
     editBtn.click()
@@ -432,6 +441,8 @@ candidates = ["safe.model"]
       return found
     }
     const editor = () => {
+      const toggle = container.querySelector<HTMLButtonElement>('[data-testid="lane-config-toggle"]')
+      if (toggle?.getAttribute('aria-expanded') === 'false') toggle.click()
       const edit = container.querySelector<HTMLButtonElement>('[data-lane-row="failover:coding"] button')
       if (!edit || edit.disabled) throw new Error('Lane editor is not ready')
       edit.click()
@@ -741,6 +752,8 @@ candidates = ["safe.model"]
       container,
     )
     await flushUi(50)
+    ;(container.querySelector('[data-testid="provider-inventory-toggle"]') as HTMLButtonElement).click()
+    await flushUi(15)
 
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === '검증')).toBe(false)
 
@@ -787,6 +800,8 @@ candidates = ["safe.model"]
       container,
     )
     await flushUi(50)
+    ;(container.querySelector('[data-testid="provider-inventory-toggle"]') as HTMLButtonElement).click()
+    await flushUi(15)
 
     const reAuthBtn = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.trim() === 'Re-auth',
@@ -958,7 +973,11 @@ candidates = ["safe.model"]
     const button = (label: string) =>
       [...container.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)
     const panel = () => container.querySelector('[data-testid="setup-login-panel"]')?.textContent
-    await vi.waitFor(() => expect(button('CLI OAuth')).toBeDefined())
+    await vi.waitFor(() => {
+      const invToggle = container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')
+      if (invToggle?.getAttribute('aria-expanded') === 'false') invToggle.click()
+      expect(button('CLI OAuth')).toBeDefined()
+    })
     button('CLI OAuth')!.click()
     await vi.waitFor(() => expect(panel()).toContain('login-1'))
     button('로그인 취소')!.click()

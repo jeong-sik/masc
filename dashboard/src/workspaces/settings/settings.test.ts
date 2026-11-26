@@ -148,7 +148,18 @@ describe('workspaces/settings', () => {
       html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${(p: WorkspaceInspectPayload) => inspected.push(p)} />`,
       container,
     )
-    await flushUi(40)
+    const selectEl = await vi.waitFor(() => {
+      const el = container.querySelector<HTMLSelectElement>('select[aria-label="server.log_level"]')
+      expect(el).not.toBeNull()
+      return el!
+    }, { timeout: 3000 })
+
+    // Verify root uses .set-shell without inline padding: 0 hack and AppearancePanel has no double marginBottom
+    const rootEl = container.querySelector('[data-testid="settings-workspace"]') as HTMLElement
+    expect(rootEl.classList.contains('set-shell')).toBe(true)
+    expect(rootEl.style.padding).toBe('')
+    const appearanceEl = container.querySelector('[data-testid="settings-appearance-panel"]') as HTMLElement
+    expect(appearanceEl.style.marginBottom).toBe('')
 
     // Verify all 7 TUI categories exist in left category rail
     const navButtons = Array.from(container.querySelectorAll('nav button'))
@@ -172,7 +183,6 @@ describe('workspaces/settings', () => {
     expect(activeContrast.value).toBe('high')
 
     // Stage local edit on server.log_level -> Preview Diff (dry_run: true)
-    const selectEl = container.querySelector('select[aria-label="server.log_level"]') as HTMLSelectElement
     selectEl.value = 'debug'
     selectEl.dispatchEvent(new Event('change', { bubbles: true }))
     await flushUi(20)
@@ -309,9 +319,11 @@ describe('workspaces/settings', () => {
       html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(40)
-
-    const selectEl = container.querySelector('select[aria-label="server.log_level"]') as HTMLSelectElement
+    const selectEl = await vi.waitFor(() => {
+      const el = container.querySelector<HTMLSelectElement>('select[aria-label="server.log_level"]')
+      expect(el).not.toBeNull()
+      return el!
+    }, { timeout: 3000 })
     selectEl.value = 'warn'
     selectEl.dispatchEvent(new Event('change', { bubbles: true }))
     await flushUi(15)

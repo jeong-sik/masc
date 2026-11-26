@@ -18,6 +18,7 @@ import {
   type AuthSession,
 } from '../../core/auth'
 import { startObserverStream } from '../../core/observer'
+import { isMobileViewport } from '../../shell/shell-state'
 import type { WorkspaceViewProps } from '../types'
 import { AllowlistTab } from './allowlist-tab'
 import { InvitesTab } from './invites-tab'
@@ -28,20 +29,40 @@ import { ProfileSessionsTab } from './profile-tab'
 
 const ADMIN_TABS = new Set(['members', 'invites', 'allowlist'])
 
-function ProviderSeparationCallout({ onNavigate }: { readonly onNavigate: (path: string) => void }): VNode {
+function ProviderSeparationNote({ onNavigate }: { readonly onNavigate: (path: string) => void }): VNode {
   return html`
-    <aside class="ap-separation-callout" role="note" data-testid="account-provider-callout">
-      <div>
-        <strong>Operator identity & workspace access</strong> — manage LLM Provider keys in Runtime → Quotas.
-      </div>
+    <p
+      class="ap-muted"
+      role="note"
+      data-testid="account-provider-callout"
+      style=${{
+        margin: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        flexWrap: 'wrap',
+        fontSize: 'var(--fs-12)',
+      }}
+    >
+      <span>Operator identity & workspace access — manage LLM Provider keys in</span>
       <button
         type="button"
-        class="btn-ghost"
         onClick=${() => onNavigate('/runtime/quotas')}
+        style=${{
+          padding: 0,
+          border: 'none',
+          background: 'transparent',
+          color: 'var(--info-fg)',
+          fontSize: 'var(--fs-12)',
+          fontWeight: 500,
+          textDecoration: 'underline',
+          textUnderlineOffset: '2px',
+          cursor: 'pointer',
+        }}
       >
         Runtime → Quotas
       </button>
-    </aside>
+    </p>
   `
 }
 
@@ -95,18 +116,16 @@ function MultiAccountSignInGate({
 
 export function AccountWorkspace(props: WorkspaceViewProps): VNode {
   const session = authSession.value
+  const mobile = isMobileViewport.value
   const activeTab = props.subroute || 'profile'
 
   return html`
     <div class="ap-workspace ap-account-workspace" data-testid="account-workspace">
       <header class="ap-workspace-head">
-        <div>
-          <span class="ap-eyebrow">SYSTEM · OPERATOR IDENTITY</span>
-          <h1 class="ap-workspace-title">Account & Workspace Access</h1>
-        </div>
+        <span class="ap-eyebrow">SYSTEM · OPERATOR IDENTITY</span>
+        <h1 class="ap-workspace-title">Account & Workspace Access</h1>
+        <${ProviderSeparationNote} onNavigate=${props.onNavigate} />
       </header>
-
-      <${ProviderSeparationCallout} onNavigate=${props.onNavigate} />
 
       ${session.kind === 'probing' && html`
         <section class="ap-card" role="status">
@@ -158,31 +177,33 @@ export function AccountWorkspace(props: WorkspaceViewProps): VNode {
         const isAdmin = session.role === 'admin'
         const isAdminTab = ADMIN_TABS.has(activeTab)
         return html`
-          <div class="ap-acct-tabs" role="tablist" aria-label="Account sections">
-            ${([
-              { id: 'profile', label: 'Profile & Sessions', adminOnly: false },
-              { id: 'pats', label: 'Personal Access Tokens', adminOnly: false },
-              { id: 'members', label: 'Members', adminOnly: true },
-              { id: 'invites', label: 'Invites', adminOnly: true },
-              { id: 'allowlist', label: 'Allowlist', adminOnly: true },
-            ] as const).map((tab) => {
-              const locked = tab.adminOnly && !isAdmin
-              return html`
-                <button
-                  key=${tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected=${activeTab === tab.id ? 'true' : 'false'}
-                  class=${`ap-acct-tab${activeTab === tab.id ? ' is-active' : ''}${locked ? ' is-locked' : ''}`}
-                  data-rbac-locked=${locked ? 'true' : undefined}
-                  onClick=${() => props.onNavigate(`/account/${tab.id}`)}
-                >
-                  <span>${tab.label}</span>
-                  ${locked && html`<span class="ap-acct-lock" aria-label="관리자 전용">🔒</span>`}
-                </button>
-              `
-            })}
-          </div>
+          ${mobile && html`
+            <div class="ap-acct-tabs" role="tablist" aria-label="Account sections">
+              ${([
+                { id: 'profile', label: 'Profile & Sessions', adminOnly: false },
+                { id: 'pats', label: 'Personal Access Tokens', adminOnly: false },
+                { id: 'members', label: 'Members', adminOnly: true },
+                { id: 'invites', label: 'Invites', adminOnly: true },
+                { id: 'allowlist', label: 'Allowlist', adminOnly: true },
+              ] as const).map((tab) => {
+                const locked = tab.adminOnly && !isAdmin
+                return html`
+                  <button
+                    key=${tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected=${activeTab === tab.id ? 'true' : 'false'}
+                    class=${`ap-acct-tab${activeTab === tab.id ? ' is-active' : ''}${locked ? ' is-locked' : ''}`}
+                    data-rbac-locked=${locked ? 'true' : undefined}
+                    onClick=${() => props.onNavigate(`/account/${tab.id}`)}
+                  >
+                    <span>${tab.label}</span>
+                    ${locked && html`<span class="ap-acct-lock" aria-label="관리자 전용">🔒</span>`}
+                  </button>
+                `
+              })}
+            </div>
+          `}
 
           ${isAdminTab && !isAdmin
             ? html`

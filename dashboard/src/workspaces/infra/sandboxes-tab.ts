@@ -203,10 +203,48 @@ function probeStateStyle(kind: InfraSandboxesData['probe_state']['kind']) {
   }
 }
 
+function formatMetricScalar(val: unknown): string | null {
+  if (typeof val === 'number' && Number.isFinite(val)) {
+    return Number.isInteger(val) ? String(val) : val.toFixed(1)
+  }
+  if (typeof val === 'boolean') return val ? 'true' : 'false'
+  if (typeof val === 'string') {
+    const trimmed = val.trim()
+    if (!trimmed) return null
+    return trimmed.length > 28 ? `${trimmed.slice(0, 27)}…` : trimmed
+  }
+  return null
+}
+
+export function summarizeJsonMetrics(raw: Record<string, unknown> | null): string {
+  if (!raw) return '미보고'
+  const pairs: string[] = []
+  const collect = (obj: Record<string, unknown>, depth: number) => {
+    for (const [k, v] of Object.entries(obj)) {
+      const scalar = formatMetricScalar(v)
+      if (scalar !== null) {
+        pairs.push(`${k}: ${scalar}`)
+      } else if (depth === 0 && v && typeof v === 'object' && !Array.isArray(v)) {
+        collect(v as Record<string, unknown>, 1)
+      }
+    }
+  }
+  collect(raw, 0)
+  if (pairs.length === 0) {
+    const keyCount = Object.keys(raw).length
+    return keyCount > 0 ? `${keyCount}개 항목` : '비어 있음'
+  }
+  const head = pairs.slice(0, 3).join(' · ')
+  return pairs.length > 3 ? `${head} (+${pairs.length - 3})` : head
+}
+
 export function SandboxesTab(props: WorkspaceViewProps) {
   const obs = resourceCache.observe<InfraSandboxesData>('infra:sandboxes').value
   const [probing, setProbing] = useState(false)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const [shimParityPref, setShimParityPref] = useState<boolean | null>(null)
+  const [volumeGcOpen, setVolumeGcOpen] = useState(false)
+  const [hostStorageOpen, setHostStorageOpen] = useState(false)
   const openKeeperSandboxConfig = useCallback((keeper: string) => {
     const normalized = normalizeKeeperName(keeper)
     if (!normalized) return
@@ -513,6 +551,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   const activeSshObs = data
     ? (data.summary.ssh_active_sessions === null ? observedUnreported() : observedValue(data.summary.ssh_active_sessions))
     : observedUnreported()
+  const shimParityOpen = shimParityPref ?? (data ? data.shim_parity.status !== 'matched' : false)
 
   return html`
     <div class="ov" data-testid="infra-sandboxes-tab">
@@ -594,24 +633,37 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             </div>
           </section>
 
-          <!-- Shim Parity Card -->
-          <section class="wka-card" data-testid="sandbox-shim-parity" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-            <div class="wka-h">
-              <h3>Shim Parity 검증</h3>
-              <span
-                class="mono"
-                style=${{ ...parityBadgeStyle(data.shim_parity.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
-              >
-                ${data.shim_parity.status}
+          <!-- Shim Parity Disclosure (default-collapsed when matched) -->
+          <section class="ap-disclosure" data-testid="sandbox-shim-parity" aria-label="Shim Parity 검증">
+            <button
+              type="button"
+              class="ap-disclosure-trigger"
+              data-testid="sandbox-shim-parity-toggle"
+              aria-expanded=${shimParityOpen}
+              onClick=${() => setShimParityPref(!shimParityOpen)}
+            >
+              <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <span>Shim Parity:</span>
+                <span
+                  class="mono"
+                  style=${{ ...parityBadgeStyle(data.shim_parity.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
+                >
+                  ${data.shim_parity.status}
+                </span>
               </span>
-            </div>
-            <div class="mono" style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', fontSize: 'var(--fs-11)', color: 'var(--fg-2)', overflowWrap: 'anywhere' }}>
-              <span>build: ${data.shim_parity.build_identity ?? '없음'}</span>
-              <span>shim: ${data.shim_parity.shim_identity ?? '없음'}</span>
-              <span>server: ${data.shim_parity.server_identity ?? '없음'}</span>
-            </div>
-            ${data.shim_parity.detail && html`
-              <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>${data.shim_parity.detail}</div>
+              <span aria-hidden="true">${shimParityOpen ? '▾' : '▸'}</span>
+            </button>
+            ${shimParityOpen && html`
+              <div class="ap-disclosure-body" data-testid="sandbox-shim-parity-body">
+                <div class="mono" style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', fontSize: 'var(--fs-11)', color: 'var(--fg-2)', overflowWrap: 'anywhere' }}>
+                  <span>build: ${data.shim_parity.build_identity ?? '없음'}</span>
+                  <span>shim: ${data.shim_parity.shim_identity ?? '없음'}</span>
+                  <span>server: ${data.shim_parity.server_identity ?? '없음'}</span>
+                </div>
+                ${data.shim_parity.detail && html`
+                  <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>${data.shim_parity.detail}</div>
+                `}
+              </div>
             `}
           </section>
 
@@ -693,14 +745,30 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             />
           </section>
 
-          <!-- Volume GC & Host Storage -->
+          <!-- Volume GC & Host Storage (default-collapsed JSON with 1-line metric summaries) -->
           <section style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
-            <div class="wka-card">
-              <div class="wka-h">
-                <h3>Volume GC 리포트</h3>
+            <div class="ap-disclosure" data-testid="sandbox-volume-gc">
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', paddingRight: 'var(--sp-2)' }}>
+                <button
+                  type="button"
+                  class="ap-disclosure-trigger"
+                  data-testid="sandbox-volume-gc-toggle"
+                  aria-expanded=${volumeGcOpen}
+                  style=${{ flex: '1 1 auto', minWidth: 0 }}
+                  onClick=${() => setVolumeGcOpen((v) => !v)}
+                >
+                  <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
+                    <span>Volume GC 리포트</span>
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 400, color: 'var(--fg-3)' }}>
+                      ${summarizeJsonMetrics(data.volume_gc_report)}
+                    </span>
+                  </span>
+                  <span aria-hidden="true">${volumeGcOpen ? '▾' : '▸'}</span>
+                </button>
                 <button
                   type="button"
                   class="btn-ghost"
+                  style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)', flexShrink: 0 }}
                   onClick=${() => props.onInspect({
                     title: 'Volume GC Report',
                     kind: 'volume_gc',
@@ -711,17 +779,37 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                   [⤢] 원본
                 </button>
               </div>
-              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
-                ${data.volume_gc_report ? JSON.stringify(data.volume_gc_report, null, 2) : '없음'}
-              </pre>
+              ${volumeGcOpen && html`
+                <div class="ap-disclosure-body" data-testid="sandbox-volume-gc-body">
+                  <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
+                    ${data.volume_gc_report ? JSON.stringify(data.volume_gc_report, null, 2) : '없음'}
+                  </pre>
+                </div>
+              `}
             </div>
 
-            <div class="wka-card">
-              <div class="wka-h">
-                <h3>호스트 스토리지</h3>
+            <div class="ap-disclosure" data-testid="sandbox-host-storage">
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', paddingRight: 'var(--sp-2)' }}>
+                <button
+                  type="button"
+                  class="ap-disclosure-trigger"
+                  data-testid="sandbox-host-storage-toggle"
+                  aria-expanded=${hostStorageOpen}
+                  style=${{ flex: '1 1 auto', minWidth: 0 }}
+                  onClick=${() => setHostStorageOpen((v) => !v)}
+                >
+                  <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
+                    <span>호스트 스토리지</span>
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 400, color: 'var(--fg-3)' }}>
+                      ${summarizeJsonMetrics(data.host_storage)}
+                    </span>
+                  </span>
+                  <span aria-hidden="true">${hostStorageOpen ? '▾' : '▸'}</span>
+                </button>
                 <button
                   type="button"
                   class="btn-ghost"
+                  style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)', flexShrink: 0 }}
                   onClick=${() => props.onInspect({
                     title: 'Host Storage',
                     kind: 'host_storage',
@@ -732,9 +820,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                   [⤢] 원본
                 </button>
               </div>
-              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
-                ${data.host_storage ? JSON.stringify(data.host_storage, null, 2) : '없음'}
-              </pre>
+              ${hostStorageOpen && html`
+                <div class="ap-disclosure-body" data-testid="sandbox-host-storage-body">
+                  <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
+                    ${data.host_storage ? JSON.stringify(data.host_storage, null, 2) : '없음'}
+                  </pre>
+                </div>
+              `}
             </div>
           </section>
         </div>

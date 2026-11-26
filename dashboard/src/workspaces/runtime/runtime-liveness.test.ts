@@ -4,6 +4,7 @@ import {
   collectRuntimeLiveness,
   runtimeIsAvailable,
   runtimeLivenessBlock,
+  runtimeStandingBadge,
 } from './runtime-liveness'
 import type { RuntimeResolution } from './types'
 
@@ -78,6 +79,40 @@ describe('runtime liveness', () => {
     ], { sortBy: 'release', causeFilter: 'all', nowUnix: NOW })
     expect(grouped.summary.totalRegistered).toBe(5)
     expect(grouped.summary.restingCount).toBe(1)
+    expect(grouped.summary.blockedCount).toBe(3)
     expect(grouped.summary.availableCount).toBe(2)
+    expect(grouped.summary.credentialRefusedCount).toBe(1)
+    expect(grouped.summary.hasCredentialRefused).toBe(true)
+    expect(grouped.summary.rateLimitedCount).toBe(1)
+  })
+
+  it('returns standing liveness badges in TUI precedence: credential_refused > quota_rest > active rate_limited', () => {
+    const quota_rest = { cause: 'provider_quota_refused', reset_stated: true, until: NOW + 300 } as const
+    expect(runtimeStandingBadge(runtime('all-three', {
+      credential_refused_at: NOW - 10,
+      quota_rest,
+      rate_limited: true,
+      rate_limit_resets_at: NOW + 60,
+    }), NOW)).toEqual({ kind: 'credential_refused', label: '인증 거부', tone: 'bad' })
+
+    expect(runtimeStandingBadge(runtime('rest-and-limit', {
+      quota_rest,
+      rate_limited: true,
+      rate_limit_resets_at: NOW + 60,
+    }), NOW)).toEqual({ kind: 'quota_rest', label: '일시 중지', tone: 'warn' })
+
+    expect(runtimeStandingBadge(runtime('payment', {
+      quota_rest: { cause: 'payment_refused', reset_stated: false, until: NOW + 60 },
+    }), NOW)).toEqual({ kind: 'quota_rest', label: '일시 중지', tone: 'bad' })
+
+    expect(runtimeStandingBadge(runtime('limited', {
+      rate_limited: true,
+      rate_limit_resets_at: NOW + 60,
+    }), NOW)).toEqual({ kind: 'rate_limited', label: '속도 제한', tone: 'warn' })
+
+    expect(runtimeStandingBadge(runtime('expired-limit', {
+      rate_limited: true,
+      rate_limit_resets_at: NOW - 1,
+    }), NOW)).toBeNull()
   })
 })

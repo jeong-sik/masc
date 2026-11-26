@@ -9,6 +9,7 @@ import {
   sessionEpoch,
   workspaceTargets,
 } from '../../core/auth'
+import { resetShellStateForTests, viewportWidth } from '../../shell/shell-state'
 import { AccountWorkspace } from './index'
 import {
   decodeAllowlist,
@@ -34,6 +35,8 @@ describe('Unified /account wire parsers & workspace surface', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     resetAuthStateForTests()
+    resetShellStateForTests()
+    viewportWidth.value = 1280
   })
 
   afterEach(() => {
@@ -163,6 +166,19 @@ describe('Unified /account wire parsers & workspace surface', () => {
 
     expect(container.querySelector('[data-testid="account-admin-locked"]')).not.toBeNull()
     expect(fetchSpy).not.toHaveBeenCalled()
+
+    // Desktop (>=768px) omits duplicate .ap-acct-tabs (TopBar owns Account sub-tabs) and collapses callout to 1-line note
+    expect(container.querySelector('.ap-acct-tabs')).toBeNull()
+    expect(container.querySelector('.ap-separation-callout')).toBeNull()
+    const note = container.querySelector('[data-testid="account-provider-callout"]')
+    expect(note?.tagName).toBe('P')
+    expect(note?.getAttribute('role')).toBe('note')
+
+    // Mobile (<768px) keeps .ap-acct-tabs accessible
+    await act(async () => {
+      viewportWidth.value = 390
+    })
+    expect(container.querySelector('.ap-acct-tabs')).not.toBeNull()
   })
 
   it('allows Admins to inspect members and send disable / revoke-admin / delete mutations', async () => {

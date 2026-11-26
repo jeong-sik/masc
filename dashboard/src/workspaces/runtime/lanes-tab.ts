@@ -53,14 +53,18 @@ import {
   loadLaneRun,
   loadLaneRunsPage,
   loadRuntimeResolved,
+  restingProviderIds,
   toObservedNumber,
   type FusionTopology,
   type RuntimeProbePayload,
   type RuntimeProbeProviderRow,
+  type RuntimeResolution,
   type RuntimeResolvedPayload,
   type WorkspaceViewProps,
 } from './types'
 import { laneRunCompletionGap, persistenceStateLabel } from './lane-run-view'
+import { causeBadgeStyle } from './quota-rest-groups'
+import { runtimeStandingBadge } from './runtime-liveness'
 
 type LanesMode = 'failover' | 'exact' | 'fusion'
 
@@ -175,6 +179,8 @@ function statusPillStyle(status: string) {
 export function LanesTab(props: WorkspaceViewProps) {
   const [mode, setMode] = useState<LanesMode>(() => resolveInitialMode(props.entityTab))
   const [probeFilter, setProbeFilter] = useState<'all' | 'active_lane' | 'outside_lane'>('all')
+  const [laneConfigOpen, setLaneConfigOpen] = useState(false)
+  const [nowUnix, setNowUnix] = useState(() => Date.now() / 1000)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err' | 'lane-source-error'; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -357,7 +363,15 @@ export function LanesTab(props: WorkspaceViewProps) {
   const probeData = probeObs.kind === 'value' ? probeObs.data : null
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowUnix(Date.now() / 1000)
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     if (resolvedData) {
+      setNowUnix(Date.now() / 1000)
       if (!defaultRouteInput && resolvedData.default_route) {
         setDefaultRouteInput(resolvedData.default_route)
       }
@@ -369,6 +383,19 @@ export function LanesTab(props: WorkspaceViewProps) {
       }
     }
   }, [resolvedData])
+
+  const runtimeById = useMemo(() => {
+    const map = new Map<string, RuntimeResolution>()
+    for (const rt of resolvedData?.runtimes ?? []) {
+      map.set(rt.id, rt)
+    }
+    return map
+  }, [resolvedData])
+
+  const attentionProviders = useMemo(
+    () => restingProviderIds(resolvedData?.runtimes ?? [], nowUnix),
+    [resolvedData, nowUnix],
+  )
 
   const probePartition = useMemo(
     () => partitionProbeRows(resolvedData, probeData),
@@ -482,7 +509,7 @@ export function LanesTab(props: WorkspaceViewProps) {
         const stage = r.stage && (fusionStageText.get(r.stage) ?? r.stage)
         const accepted = r.status === 'running' && r.stage === 'accepted'
         return html`
-          <span class="inline-flex items-center gap-1" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-12)', fontWeight: 'var(--fw-600)' }}>
+          <span class="inline-flex items-center gap-1" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-12)', fontWeight: 600 }}>
             ${r.status === 'running' && !accepted && fusionLive && html`<${InlineSpinner} size="xs" />`}
             ${accepted ? '접수됨' : fusionStatusText[r.status]}
           </span>
@@ -825,6 +852,34 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const exactData = exactObs.kind === 'value' ? exactObs.data : null
   const fusionData = fusionObs.kind === 'value' ? fusionObs.data : null
+  const effectiveLaneConfigOpen = laneConfigOpen
+    || laneEditor !== null
+    || laneDeleteConfirm !== null
+    || lanePreview !== null
+    || laneCasConflict !== null
+
+  const renderRuntimeBadge = (runtimeId: string, testId?: string) => {
+    const rt = runtimeById.get(runtimeId)
+    const badge = rt ? runtimeStandingBadge(rt, nowUnix) : null
+    if (!badge) return null
+    return html`
+      <span
+        data-testid=${testId}
+        data-liveness-kind=${badge.kind}
+        class="mono"
+        style=${{
+          ...causeBadgeStyle(badge.tone),
+          padding: 'var(--sp-0) var(--sp-1)',
+          borderRadius: 'var(--radius-pill)',
+          fontSize: 'var(--fs-10)',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        ${badge.label}
+      </span>
+    `
+  }
 
   return html`
     <div class="ov" data-testid="runtime-lanes-tab">
@@ -911,443 +966,491 @@ export function LanesTab(props: WorkspaceViewProps) {
             </div>
           </section>
 
-          <!-- Inline Default Route & Keeper Assignment Controls -->
-          <section style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
-            <form class="wka-card" onSubmit=${handleSaveDefaultRoute} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-              <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>기본 라우트 설정 (/runtime/config/routing)</h3>
-              <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-                <input
-                  type="text"
-                  aria-label="기본 라우트 ID"
-                  value=${defaultRouteInput}
-                  onInput=${(e: Event) => setDefaultRouteInput((e.target as HTMLInputElement).value)}
-                  placeholder="lane 또는 runtime ID"
-                  style=${{ flex: 1, minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                />
-                <button type="submit" class="btn-primary" disabled=${busy === 'routing'}>적용</button>
-              </div>
-            </form>
-
-            <form class="wka-card" onSubmit=${handleSaveAssignment} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-              <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>Keeper 런타임 할당 (/runtime/config/assignment)</h3>
-              <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  aria-label="Keeper 이름"
-                  value=${assignKeeper}
-                  onInput=${(e: Event) => setAssignKeeper((e.target as HTMLInputElement).value)}
-                  placeholder="keeper"
-                  style=${{ flex: '1 1 120px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                />
-                <input
-                  type="text"
-                  aria-label="할당할 Runtime ID"
-                  value=${assignRuntime}
-                  onInput=${(e: Event) => setAssignRuntime((e.target as HTMLInputElement).value)}
-                  placeholder="runtime_id (비우면 기본값)"
-                  style=${{ flex: '1 1 140px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                />
-                <button type="submit" class="btn-primary" disabled=${busy === 'assignment'}>할당</button>
-              </div>
-            </form>
-          </section>
-
-          <!-- Visual Runtime Lane CRUD (/api/v1/runtime/config/raw + /raw/preview, zero $EDITOR) -->
-          <section class="wka-card" data-testid="visual-lane-crud" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-            <div class="wka-h">
-              <div>
-                <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>선언된 레인 CRUD (Failover · Exact Output · CAS Diff)</h3>
-                <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                  ${rawConfig
-                    ? `runtime.toml rev ${rawConfig.sourceRevision.slice(0, 12)} · ${declaredTomlLanes.length}개 레인`
-                    : `${declaredTomlLanes.length}개 레인 (raw 스냅샷 대기 중)`}
-                </span>
-              </div>
-              <button
-                type="button"
-                class="btn-primary"
-                disabled=${!rawConfig}
-                onClick=${() => {
-                  setLaneDeleteConfirm(null)
-                  discardLanePreview()
-                  setLaneEditor({
-                    mode: 'create',
-                    kind: 'failover',
-                    id: '',
-                    candidates: availableRuntimeIds[0] ? [availableRuntimeIds[0]] : [],
-                    newCandidate: '',
-                    maxOutputTokens: '8192',
-                    maxOutputTokensEdited: false,
-                  })
-                }}
-              >
-                + 새 레인
-              </button>
-            </div>
-
-            ${laneCasConflict && html`
-              <div class="ap-error" role="alert" data-testid="lane-cas-conflict" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                <span>⚠ 409 CAS 충돌: ${laneCasConflict}</span>
-                <button
-                  type="button"
-                  class="btn-primary"
-                  onClick=${() => {
-                    setLaneCasConflict(null)
-                    discardLanePreview()
-                    loadFailover(false, 'manual')
-                  }}
-                >
-                  최신 runtime.toml 다시 불러오기
-                </button>
-              </div>
-            `}
-
-            ${declaredTomlLanes.length === 0
-              ? html`<div class="dtable-absent">선언된 레인이 없습니다. "+ 새 레인"을 눌러 첫 레인을 만드세요.</div>`
-              : html`
-                  <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-                    ${declaredTomlLanes.map((lane) => html`
-                      <div
-                        key=${`${lane.kind}:${lane.id}`}
-                        data-lane-row=${`${lane.kind}:${lane.id}`}
-                        style=${{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: 'var(--sp-2)',
-                          padding: 'var(--sp-2) var(--sp-3)',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid var(--line-1)',
-                          background: 'var(--bg-2)',
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', minWidth: 0 }}>
-                          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                            <span class="mono" style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${lane.id}</span>
-                            <span class="mono" style=${{ fontSize: 'var(--fs-10)', padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', background: lane.kind === 'failover' ? 'var(--brass-soft)' : 'var(--info-soft)', color: lane.kind === 'failover' ? 'var(--brass-1)' : 'var(--info-fg)' }}>
-                              ${lane.kind}
-                            </span>
-                            ${lane.maxOutputTokens !== undefined && html`
-                              <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>max_tokens=${lane.maxOutputTokens}</span>
-                            `}
-                          </div>
-                          <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)', overflowWrap: 'anywhere' }}>
-                            ${lane.candidates.length > 0 ? lane.candidates.join(' → ') : '(후보 없음)'}
-                          </div>
-                        </div>
-                        <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            disabled=${!rawConfig}
-                            onClick=${() => {
-                              setLaneDeleteConfirm(null)
-                              discardLanePreview()
-                              setLaneEditor({
-                                mode: 'edit',
-                                kind: lane.kind,
-                                id: lane.id,
-                                candidates: [...lane.candidates],
-                                newCandidate: '',
-                                maxOutputTokens: lane.maxOutputTokens ? String(lane.maxOutputTokens) : '',
-                                maxOutputTokensEdited: false,
-                              })
-                            }}
-                          >
-                            편집
-                          </button>
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            disabled=${!rawConfig}
-                            style=${{ color: 'var(--err-fg)' }}
-                            onClick=${() => {
-                              setLaneEditor(null)
-                              discardLanePreview()
-                              setLaneDeleteConfirm({ kind: lane.kind, id: lane.id })
-                            }}
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      </div>
-                    `)}
-                  </div>
+          <!-- Default-Collapsed Routing & Lane CRUD Configuration (keeps Virtualized Probes above the fold) -->
+          <section class="ap-disclosure" data-testid="lane-config-disclosure" aria-label="라우팅 및 레인 설정">
+            <button
+              type="button"
+              class="ap-disclosure-trigger"
+              data-testid="lane-config-toggle"
+              aria-expanded=${effectiveLaneConfigOpen}
+              onClick=${() => setLaneConfigOpen(!effectiveLaneConfigOpen)}
+            >
+              <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <span>라우팅 · 레인 설정 (기본: ${resolvedData?.default_route ?? '없음'} · 레인 ${declaredTomlLanes.length}개)</span>
+                ${laneCasConflict && html`
+                  <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}>CAS 충돌</span>
                 `}
+              </span>
+              <span aria-hidden="true">${effectiveLaneConfigOpen ? '▾' : '▸'}</span>
+            </button>
 
-            ${laneEditor && html`
-              <form
-                data-testid="lane-editor-form"
-                onSubmit=${handlePreviewLaneEditor}
-                style=${{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--sp-2)',
-                  padding: 'var(--sp-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--brass-border)',
-                  background: 'var(--bg-1)',
-                }}
-              >
-                <div class="wka-h">
-                  <strong style=${{ fontSize: 'var(--fs-13)' }}>
-                    ${laneEditor.mode === 'create' ? '새 레인 생성' : `레인 편집 · ${laneEditor.id}`}
-                  </strong>
-                  <button type="button" class="btn-ghost" onClick=${() => { setLaneEditor(null); discardLanePreview() }}>닫기</button>
-                </div>
+            ${effectiveLaneConfigOpen && html`
+              <div class="ap-disclosure-body" data-testid="lane-config-body">
+                <datalist id="lane-runtime-candidates">
+                  ${availableRuntimeIds.map((rid) => {
+                    const rt = runtimeById.get(rid)
+                    const badge = rt ? runtimeStandingBadge(rt, nowUnix) : null
+                    return html`<option key=${rid} value=${rid} label=${badge ? `${rid} (${badge.label})` : undefined} />`
+                  })}
+                </datalist>
 
-                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
-                  <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
-                    <span>레인 종류</span>
-                    <select
-                      aria-label="레인 종류"
-                      disabled=${laneEditor.mode === 'edit'}
-                      value=${laneEditor.kind}
-                      onChange=${(e: Event) => {
-                        const kind = (e.target as HTMLSelectElement).value as EditableLaneKind
-                        setLaneEditor((cur) => (cur ? { ...cur, kind } : null))
-                        discardLanePreview()
-                      }}
-                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                    >
-                      <option value="failover">Failover Lane ([runtime.lanes.*])</option>
-                      <option value="exact_output">Exact Output Lane ([runtime.exact_output_lanes.*])</option>
-                    </select>
-                  </label>
-
-                  <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
-                    <span>레인 ID</span>
-                    <input
-                      type="text"
-                      aria-label="레인 ID"
-                      required
-                      disabled=${laneEditor.mode === 'edit'}
-                      placeholder="예: coding-fast"
-                      value=${laneEditor.id}
-                      onInput=${(e: Event) => {
-                        const id = (e.target as HTMLInputElement).value
-                        setLaneEditor((cur) => (cur ? { ...cur, id } : null))
-                        discardLanePreview()
-                      }}
-                      class="mono"
-                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                    />
-                  </label>
-
-                  ${laneEditor.kind === 'exact_output' && html`
-                    <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
-                      <span>max_output_tokens (선택)</span>
-                      <input
-                        type="number"
-                        aria-label="max_output_tokens"
-                        value=${laneEditor.maxOutputTokens}
-                        onInput=${(e: Event) => {
-                          const maxOutputTokens = (e.target as HTMLInputElement).value
-                          setLaneEditor((cur) => (cur ? { ...cur, maxOutputTokens, maxOutputTokensEdited: true } : null))
-                          discardLanePreview()
-                        }}
-                        class="mono tnum"
-                        style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                      />
-                    </label>
-                  `}
-                </div>
-
-                <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-                  <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
-                    후보 Runtime 순서 (${laneEditor.candidates.length}개 · 위에서 아래로 우선순위)
-                  </span>
-                  ${laneEditor.candidates.map((cand, idx) => html`
-                    <div key=${`${cand}-${idx}`} data-lane-candidate=${cand} style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', padding: 'var(--sp-1) var(--sp-2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line-1)', background: 'var(--bg-2)' }}>
-                      <span class="mono" style=${{ fontSize: 'var(--fs-12)' }}>${idx + 1}. ${cand}</span>
-                      <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-                        <button
-                          type="button"
-                          class="btn-ghost"
-                          aria-label=${`${cand} 위로 이동`}
-                          disabled=${idx === 0}
-                          onClick=${() => {
-                            setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'up') } : null))
-                            discardLanePreview()
-                          }}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          class="btn-ghost"
-                          aria-label=${`${cand} 아래로 이동`}
-                          disabled=${idx === laneEditor.candidates.length - 1}
-                          onClick=${() => {
-                            setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'down') } : null))
-                            discardLanePreview()
-                          }}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          class="btn-ghost"
-                          aria-label=${`${cand} 후보 제거`}
-                          style=${{ color: 'var(--err-fg)' }}
-                          onClick=${() => {
-                            setLaneEditor((cur) => (cur ? { ...cur, candidates: cur.candidates.filter((_, i) => i !== idx) } : null))
-                            discardLanePreview()
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
+                <!-- Inline Default Route & Keeper Assignment Controls -->
+                <section style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
+                  <form class="wka-card" onSubmit=${handleSaveDefaultRoute} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                    <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>기본 라우트 설정 (/runtime/config/routing)</h3>
+                      ${renderRuntimeBadge(defaultRouteInput.trim(), 'default-route-liveness-badge')}
                     </div>
-                  `)}
+                    <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+                      <input
+                        type="text"
+                        list="lane-runtime-candidates"
+                        aria-label="기본 라우트 ID"
+                        value=${defaultRouteInput}
+                        onInput=${(e: Event) => setDefaultRouteInput((e.target as HTMLInputElement).value)}
+                        placeholder="lane 또는 runtime ID"
+                        style=${{ flex: 1, minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      />
+                      <button type="submit" class="btn-primary" disabled=${busy === 'routing'}>적용</button>
+                    </div>
+                  </form>
 
-                  <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                    <input
-                      type="text"
-                      list="lane-runtime-candidates"
-                      aria-label="추가할 후보 Runtime ID"
-                      placeholder="provider.model-id"
-                      value=${laneEditor.newCandidate}
-                      onInput=${(e: Event) => {
-                        const newCandidate = (e.target as HTMLInputElement).value
-                        setLaneEditor((cur) => (cur ? { ...cur, newCandidate } : null))
-                      }}
-                      onKeyDown=${(e: KeyboardEvent) => {
-                        if (e.isComposing || e.keyCode === 229) return
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          const next = laneEditor.newCandidate.trim()
-                          if (!next) return
-                          setLaneEditor((cur) => {
-                            if (!cur) return null
-                            if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
-                            return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
-                          })
-                          discardLanePreview()
-                        }
-                      }}
-                      class="mono"
-                      style=${{ flex: '1 1 200px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                    />
-                    <datalist id="lane-runtime-candidates">
-                      ${availableRuntimeIds.map((rid) => html`<option key=${rid} value=${rid} />`)}
-                    </datalist>
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      onClick=${() => {
-                        const next = laneEditor.newCandidate.trim()
-                        if (!next) return
-                        setLaneEditor((cur) => {
-                          if (!cur) return null
-                          if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
-                          return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
-                        })
-                        discardLanePreview()
-                      }}
-                    >
-                      + 후보 추가
-                    </button>
-                  </div>
-                </div>
+                  <form class="wka-card" onSubmit=${handleSaveAssignment} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                    <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>Keeper 런타임 할당 (/runtime/config/assignment)</h3>
+                      ${renderRuntimeBadge(assignRuntime.trim(), 'assign-runtime-liveness-badge')}
+                    </div>
+                    <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        aria-label="Keeper 이름"
+                        value=${assignKeeper}
+                        onInput=${(e: Event) => setAssignKeeper((e.target as HTMLInputElement).value)}
+                        placeholder="keeper"
+                        style=${{ flex: '1 1 120px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      />
+                      <input
+                        type="text"
+                        list="lane-runtime-candidates"
+                        aria-label="할당할 Runtime ID"
+                        value=${assignRuntime}
+                        onInput=${(e: Event) => setAssignRuntime((e.target as HTMLInputElement).value)}
+                        placeholder="runtime_id (비우면 기본값)"
+                        style=${{ flex: '1 1 140px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      />
+                      <button type="submit" class="btn-primary" disabled=${busy === 'assignment'}>할당</button>
+                    </div>
+                  </form>
+                </section>
 
-                <div style=${{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
-                  <button type="submit" class="btn-primary" disabled=${busy === 'lane-preview'}>
-                    ${busy === 'lane-preview' ? '검증 중…' : 'Diff 미리보기 (Preview)'}
-                  </button>
-                </div>
-              </form>
-            `}
-
-            ${laneDeleteConfirm && html`
-              <div
-                data-testid="lane-delete-confirm"
-                role="alert"
-                style=${{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--sp-2)',
-                  flexWrap: 'wrap',
-                  padding: 'var(--sp-2) var(--sp-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--err-border)',
-                  background: 'var(--err-soft)',
-                }}
-              >
-                <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}>
-                  <strong>${laneDeleteConfirm.id}</strong> (${laneDeleteConfirm.kind}) 레인을 <code>runtime.toml</code>에서 삭제할까요?
-                </span>
-                <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-                  <button type="button" class="btn-ghost" onClick=${() => setLaneDeleteConfirm(null)}>취소</button>
-                  <button
-                    type="button"
-                    class="btn-primary"
-                    disabled=${busy === 'lane-preview'}
-                    onClick=${() => void handlePreviewLaneDelete(laneDeleteConfirm.kind, laneDeleteConfirm.id)}
-                  >
-                    삭제 Diff 미리보기
-                  </button>
-                </div>
-              </div>
-            `}
-
-            ${lanePreview && html`
-              <div
-                data-testid="lane-diff-preview"
-                style=${{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--sp-2)',
-                  padding: 'var(--sp-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--info-border)',
-                  background: 'var(--bg-1)',
-                }}
-              >
-                <div class="wka-h">
-                  <strong style=${{ fontSize: 'var(--fs-12)' }}>Unified Diff 미리보기 · ${lanePreview.label}</strong>
-                  <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-                    <button type="button" class="btn-ghost" onClick=${() => discardLanePreview()}>취소</button>
+                <!-- Visual Runtime Lane CRUD (/api/v1/runtime/config/raw + /raw/preview, zero $EDITOR) -->
+                <section class="wka-card" data-testid="visual-lane-crud" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
+                  <div class="wka-h" style=${{ marginBottom: 0 }}>
+                    <div>
+                      <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>선언된 레인 CRUD (Failover · Exact Output · CAS Diff)</h3>
+                      <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                        ${rawConfig
+                          ? `runtime.toml rev ${rawConfig.sourceRevision.slice(0, 12)} · ${declaredTomlLanes.length}개 레인`
+                          : `${declaredTomlLanes.length}개 레인 (raw 스냅샷 대기 중)`}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       class="btn-primary"
-                      disabled=${!lanePreview.canSave || busy === 'lane-apply'}
-                      onClick=${() => void handleApplyLanePreview()}
+                      disabled=${!rawConfig}
+                      onClick=${() => {
+                        setLaneDeleteConfirm(null)
+                        discardLanePreview()
+                        setLaneEditor({
+                          mode: 'create',
+                          kind: 'failover',
+                          id: '',
+                          candidates: availableRuntimeIds[0] ? [availableRuntimeIds[0]] : [],
+                          newCandidate: '',
+                          maxOutputTokens: '8192',
+                          maxOutputTokensEdited: false,
+                        })
+                      }}
                     >
-                      ${busy === 'lane-apply' ? '저장 중…' : '변경 적용 (CAS Save)'}
+                      + 새 레인
                     </button>
                   </div>
-                </div>
-                ${lanePreview.runtimeValidation && html`
-                  <div class="ap-error" role="alert">런타임 검증 오류: ${lanePreview.runtimeValidation}</div>
-                `}
-                ${lanePreview.validationIssues.length > 0 && html`
-                  <div class="ap-error" role="alert" data-testid="lane-validation-issues">
-                    ${lanePreview.validationIssues.map((issue, idx) => html`
-                      <div key=${idx}>스키마 검증 오류: ${issue}</div>
-                    `)}
-                  </div>
-                `}
-                ${!lanePreview.canSave && !lanePreview.runtimeValidation && lanePreview.validationIssues.length === 0 && html`
-                  <div class="ap-error" role="alert">서버 미리보기 검증(can_save=false)을 통과하지 못해 저장할 수 없습니다.</div>
-                `}
-                <pre
-                  class="mono"
-                  style=${{
-                    margin: 0,
-                    padding: 'var(--sp-2)',
-                    background: 'var(--bg-0)',
-                    border: '1px solid var(--line-1)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: 'var(--fs-11)',
-                    overflowX: 'auto',
-                    lineHeight: 1.45,
-                  }}
-                >
-                  ${lanePreview.diff}
-                </pre>
+
+                  ${laneCasConflict && html`
+                    <div class="ap-error" role="alert" data-testid="lane-cas-conflict" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <span>⚠ 409 CAS 충돌: ${laneCasConflict}</span>
+                      <button
+                        type="button"
+                        class="btn-primary"
+                        onClick=${() => {
+                          setLaneCasConflict(null)
+                          discardLanePreview()
+                          loadFailover(false, 'manual')
+                        }}
+                      >
+                        최신 runtime.toml 다시 불러오기
+                      </button>
+                    </div>
+                  `}
+
+                  ${declaredTomlLanes.length === 0
+                    ? html`<div class="dtable-absent">선언된 레인이 없습니다. "+ 새 레인"을 눌러 첫 레인을 만드세요.</div>`
+                    : html`
+                        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                          ${declaredTomlLanes.map((lane) => html`
+                            <div
+                              key=${`${lane.kind}:${lane.id}`}
+                              data-lane-row=${`${lane.kind}:${lane.id}`}
+                              style=${{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 'var(--sp-2)',
+                                padding: 'var(--sp-2) var(--sp-3)',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--line-1)',
+                                background: 'var(--bg-2)',
+                                flexWrap: 'wrap',
+                              }}
+                            >
+                              <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', minWidth: 0 }}>
+                                <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                                  <span class="mono" style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${lane.id}</span>
+                                  <span class="mono" style=${{ fontSize: 'var(--fs-10)', padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', background: lane.kind === 'failover' ? 'var(--brass-soft)' : 'var(--info-soft)', color: lane.kind === 'failover' ? 'var(--brass-1)' : 'var(--info-fg)' }}>
+                                    ${lane.kind}
+                                  </span>
+                                  ${lane.maxOutputTokens !== undefined && html`
+                                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>max_tokens=${lane.maxOutputTokens}</span>
+                                  `}
+                                </div>
+                                <div class="mono" style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', flexWrap: 'wrap', fontSize: 'var(--fs-11)', color: 'var(--fg-2)', overflowWrap: 'anywhere' }}>
+                                  ${lane.candidates.length === 0
+                                    ? '(후보 없음)'
+                                    : lane.candidates.map((cand, idx) => html`
+                                        <span key=${`${cand}-${idx}`} style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+                                          ${idx > 0 && html`<span aria-hidden="true" style=${{ color: 'var(--fg-4)' }}>→</span>`}
+                                          <span>${cand}</span>
+                                          ${renderRuntimeBadge(cand)}
+                                        </span>
+                                      `)}
+                                </div>
+                              </div>
+                              <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexShrink: 0 }}>
+                                <button
+                                  type="button"
+                                  class="btn-ghost"
+                                  disabled=${!rawConfig}
+                                  onClick=${() => {
+                                    setLaneDeleteConfirm(null)
+                                    discardLanePreview()
+                                    setLaneEditor({
+                                      mode: 'edit',
+                                      kind: lane.kind,
+                                      id: lane.id,
+                                      candidates: [...lane.candidates],
+                                      newCandidate: '',
+                                      maxOutputTokens: lane.maxOutputTokens ? String(lane.maxOutputTokens) : '',
+                                      maxOutputTokensEdited: false,
+                                    })
+                                  }}
+                                >
+                                  편집
+                                </button>
+                                <button
+                                  type="button"
+                                  class="btn-ghost"
+                                  disabled=${!rawConfig}
+                                  style=${{ color: 'var(--err-fg)' }}
+                                  onClick=${() => {
+                                    setLaneEditor(null)
+                                    discardLanePreview()
+                                    setLaneDeleteConfirm({ kind: lane.kind, id: lane.id })
+                                  }}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            </div>
+                          `)}
+                        </div>
+                      `}
+
+                  ${laneEditor && html`
+                    <form
+                      data-testid="lane-editor-form"
+                      onSubmit=${handlePreviewLaneEditor}
+                      style=${{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 'var(--sp-2)',
+                        padding: 'var(--sp-3)',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--brass-border)',
+                        background: 'var(--bg-1)',
+                      }}
+                    >
+                      <div class="wka-h" style=${{ marginBottom: 0 }}>
+                        <strong style=${{ fontSize: 'var(--fs-13)' }}>
+                          ${laneEditor.mode === 'create' ? '새 레인 생성' : `레인 편집 · ${laneEditor.id}`}
+                        </strong>
+                        <button type="button" class="btn-ghost" onClick=${() => { setLaneEditor(null); discardLanePreview() }}>닫기</button>
+                      </div>
+
+                      <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
+                        <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                          <span>레인 종류</span>
+                          <select
+                            aria-label="레인 종류"
+                            disabled=${laneEditor.mode === 'edit'}
+                            value=${laneEditor.kind}
+                            onChange=${(e: Event) => {
+                              const kind = (e.target as HTMLSelectElement).value as EditableLaneKind
+                              setLaneEditor((cur) => (cur ? { ...cur, kind } : null))
+                              discardLanePreview()
+                            }}
+                            style=${{ minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                          >
+                            <option value="failover">Failover Lane ([runtime.lanes.*])</option>
+                            <option value="exact_output">Exact Output Lane ([runtime.exact_output_lanes.*])</option>
+                          </select>
+                        </label>
+
+                        <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                          <span>레인 ID</span>
+                          <input
+                            type="text"
+                            aria-label="레인 ID"
+                            required
+                            disabled=${laneEditor.mode === 'edit'}
+                            placeholder="예: coding-fast"
+                            value=${laneEditor.id}
+                            onInput=${(e: Event) => {
+                              const id = (e.target as HTMLInputElement).value
+                              setLaneEditor((cur) => (cur ? { ...cur, id } : null))
+                              discardLanePreview()
+                            }}
+                            class="mono"
+                            style=${{ minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                          />
+                        </label>
+
+                        ${laneEditor.kind === 'exact_output' && html`
+                          <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                            <span>max_output_tokens (선택)</span>
+                            <input
+                              type="number"
+                              aria-label="max_output_tokens"
+                              value=${laneEditor.maxOutputTokens}
+                              onInput=${(e: Event) => {
+                                const maxOutputTokens = (e.target as HTMLInputElement).value
+                                setLaneEditor((cur) => (cur ? { ...cur, maxOutputTokens, maxOutputTokensEdited: true } : null))
+                                discardLanePreview()
+                              }}
+                              class="mono tnum"
+                              style=${{ minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                            />
+                          </label>
+                        `}
+                      </div>
+
+                      <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+                        <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+                          후보 Runtime 순서 (${laneEditor.candidates.length}개 · 위에서 아래로 우선순위)
+                        </span>
+                        ${laneEditor.candidates.map((cand, idx) => html`
+                          <div key=${`${cand}-${idx}`} data-lane-candidate=${cand} style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', padding: 'var(--sp-1) var(--sp-2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line-1)', background: 'var(--bg-2)' }}>
+                            <span class="mono" style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-12)' }}>
+                              <span>${idx + 1}. ${cand}</span>
+                              ${renderRuntimeBadge(cand)}
+                            </span>
+                            <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+                              <button
+                                type="button"
+                                class="btn-ghost"
+                                aria-label=${`${cand} 위로 이동`}
+                                disabled=${idx === 0}
+                                onClick=${() => {
+                                  setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'up') } : null))
+                                  discardLanePreview()
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                class="btn-ghost"
+                                aria-label=${`${cand} 아래로 이동`}
+                                disabled=${idx === laneEditor.candidates.length - 1}
+                                onClick=${() => {
+                                  setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'down') } : null))
+                                  discardLanePreview()
+                                }}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                class="btn-ghost"
+                                aria-label=${`${cand} 후보 제거`}
+                                style=${{ color: 'var(--err-fg)' }}
+                                onClick=${() => {
+                                  setLaneEditor((cur) => (cur ? { ...cur, candidates: cur.candidates.filter((_, i) => i !== idx) } : null))
+                                  discardLanePreview()
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </div>
+                        `)}
+
+                        <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            list="lane-runtime-candidates"
+                            aria-label="추가할 후보 Runtime ID"
+                            placeholder="provider.model-id"
+                            value=${laneEditor.newCandidate}
+                            onInput=${(e: Event) => {
+                              const newCandidate = (e.target as HTMLInputElement).value
+                              setLaneEditor((cur) => (cur ? { ...cur, newCandidate } : null))
+                            }}
+                            onKeyDown=${(e: KeyboardEvent) => {
+                              if (e.isComposing || e.keyCode === 229) return
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                const next = laneEditor.newCandidate.trim()
+                                if (!next) return
+                                setLaneEditor((cur) => {
+                                  if (!cur) return null
+                                  if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
+                                  return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
+                                })
+                                discardLanePreview()
+                              }
+                            }}
+                            class="mono"
+                            style=${{ flex: '1 1 200px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                          />
+                          ${renderRuntimeBadge(laneEditor.newCandidate.trim())}
+                          <button
+                            type="button"
+                            class="btn-ghost"
+                            onClick=${() => {
+                              const next = laneEditor.newCandidate.trim()
+                              if (!next) return
+                              setLaneEditor((cur) => {
+                                if (!cur) return null
+                                if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
+                                return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
+                              })
+                              discardLanePreview()
+                            }}
+                          >
+                            + 후보 추가
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style=${{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
+                        <button type="submit" class="btn-primary" disabled=${busy === 'lane-preview'}>
+                          ${busy === 'lane-preview' ? '검증 중…' : 'Diff 미리보기 (Preview)'}
+                        </button>
+                      </div>
+                    </form>
+                  `}
+
+                  ${laneDeleteConfirm && html`
+                    <div
+                      data-testid="lane-delete-confirm"
+                      role="alert"
+                      style=${{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 'var(--sp-2)',
+                        flexWrap: 'wrap',
+                        padding: 'var(--sp-2) var(--sp-3)',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--err-border)',
+                        background: 'var(--err-soft)',
+                      }}
+                    >
+                      <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}>
+                        <strong>${laneDeleteConfirm.id}</strong> (${laneDeleteConfirm.kind}) 레인을 <code>runtime.toml</code>에서 삭제할까요?
+                      </span>
+                      <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+                        <button type="button" class="btn-ghost" onClick=${() => setLaneDeleteConfirm(null)}>취소</button>
+                        <button
+                          type="button"
+                          class="btn-primary"
+                          disabled=${busy === 'lane-preview'}
+                          onClick=${() => void handlePreviewLaneDelete(laneDeleteConfirm.kind, laneDeleteConfirm.id)}
+                        >
+                          삭제 Diff 미리보기
+                        </button>
+                      </div>
+                    </div>
+                  `}
+
+                  ${lanePreview && html`
+                    <div
+                      data-testid="lane-diff-preview"
+                      style=${{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 'var(--sp-2)',
+                        padding: 'var(--sp-3)',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--info-border)',
+                        background: 'var(--bg-1)',
+                      }}
+                    >
+                      <div class="wka-h" style=${{ marginBottom: 0 }}>
+                        <strong style=${{ fontSize: 'var(--fs-12)' }}>Unified Diff 미리보기 · ${lanePreview.label}</strong>
+                        <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+                          <button type="button" class="btn-ghost" onClick=${() => discardLanePreview()}>취소</button>
+                          <button
+                            type="button"
+                            class="btn-primary"
+                            disabled=${!lanePreview.canSave || busy === 'lane-apply'}
+                            onClick=${() => void handleApplyLanePreview()}
+                          >
+                            ${busy === 'lane-apply' ? '저장 중…' : '변경 적용 (CAS Save)'}
+                          </button>
+                        </div>
+                      </div>
+                      ${lanePreview.runtimeValidation && html`
+                        <div class="ap-error" role="alert">런타임 검증 오류: ${lanePreview.runtimeValidation}</div>
+                      `}
+                      ${lanePreview.validationIssues.length > 0 && html`
+                        <div class="ap-error" role="alert" data-testid="lane-validation-issues">
+                          ${lanePreview.validationIssues.map((issue, idx) => html`
+                            <div key=${idx}>스키마 검증 오류: ${issue}</div>
+                          `)}
+                        </div>
+                      `}
+                      ${!lanePreview.canSave && !lanePreview.runtimeValidation && lanePreview.validationIssues.length === 0 && html`
+                        <div class="ap-error" role="alert">서버 미리보기 검증(can_save=false)을 통과하지 못해 저장할 수 없습니다.</div>
+                      `}
+                      <pre
+                        class="mono"
+                        style=${{
+                          margin: 0,
+                          padding: 'var(--sp-2)',
+                          background: 'var(--bg-0)',
+                          border: '1px solid var(--line-1)',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: 'var(--fs-11)',
+                          overflowX: 'auto',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        ${lanePreview.diff}
+                      </pre>
+                    </div>
+                  `}
+                </section>
               </div>
             `}
           </section>
@@ -1381,7 +1484,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                 aria-hidden="true"
                 style=${{
                   display: 'grid',
-                  gridTemplateColumns: '78px minmax(0, 1.3fr) minmax(0, 1.3fr) 128px 64px 76px',
+                  gridTemplateColumns: '78px minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(170px, 1fr) 64px 76px',
                   gap: 'var(--sp-2)',
                   padding: 'var(--sp-2) var(--sp-3)',
                   background: 'var(--bg-2)',
@@ -1394,7 +1497,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                 <span>대역</span>
                 <span>RUNTIME ID</span>
                 <span>제공자 / 모델</span>
-                <span>프로브 상태</span>
+                <span>프로브 · 상태</span>
                 <span style=${{ textAlign: 'right' }}>HTTP</span>
                 <span style=${{ textAlign: 'right' }}>지연</span>
               </div>
@@ -1409,52 +1512,82 @@ export function LanesTab(props: WorkspaceViewProps) {
                     ${probeObs.kind === 'loading' ? '프로브 불러오는 중…' : '표시할 런타임 프로브가 없습니다.'}
                   </div>
                 `}
-                renderItem=${(r: ProbePartitionRow) => html`
-                  <div
-                    style=${{
-                      display: 'grid',
-                      gridTemplateColumns: '78px minmax(0, 1.3fr) minmax(0, 1.3fr) 128px 64px 76px',
-                      gap: 'var(--sp-2)',
-                      alignItems: 'center',
-                      height: '44px',
-                      padding: '0 var(--sp-3)',
-                      borderBottom: '1px solid var(--line-1)',
-                      fontSize: 'var(--fs-12)',
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      class="mono"
+                renderItem=${(r: ProbePartitionRow) => {
+                  const rt = runtimeById.get(r.runtime_id)
+                  const liveness = rt ? runtimeStandingBadge(rt, nowUnix) : null
+                  const providerAttention = attentionProviders.has(r.provider_id)
+                  const accentColor = liveness?.tone === 'bad'
+                    ? 'var(--err)'
+                    : (liveness !== null || providerAttention)
+                      ? 'var(--warn)'
+                      : null
+                  return html`
+                    <div
+                      data-probe-runtime=${r.runtime_id}
+                      data-provider-attention=${providerAttention ? 'true' : undefined}
                       style=${{
-                        fontSize: 'var(--fs-10)',
-                        padding: 'var(--sp-0) var(--sp-1)',
-                        borderRadius: 'var(--radius-pill)',
-                        background: r.scopeBand === 'active_lane' ? 'var(--brass-soft)' : 'var(--idle-soft)',
-                        color: r.scopeBand === 'active_lane' ? 'var(--brass-1)' : 'var(--fg-3)',
-                        textAlign: 'center',
+                        display: 'grid',
+                        gridTemplateColumns: '78px minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(170px, 1fr) 64px 76px',
+                        gap: 'var(--sp-2)',
+                        alignItems: 'center',
+                        height: '44px',
+                        padding: '0 var(--sp-3)',
+                        borderBottom: '1px solid var(--line-1)',
+                        borderLeft: accentColor ? `3px solid ${accentColor}` : undefined,
+                        fontSize: 'var(--fs-12)',
+                        minWidth: 0,
                       }}
                     >
-                      ${r.scopeBand === 'active_lane' ? 'ACTIVE' : 'OUTSIDE'}
-                    </span>
-                    <span class="mono" style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      ${r.runtime_id}
-                    </span>
-                    <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-2)' }}>
-                      ${r.provider_display_name} · <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${r.model_id}</span>
-                    </span>
-                    <span>
-                      <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
-                        ${r.status}
+                      <span
+                        class="mono"
+                        style=${{
+                          fontSize: 'var(--fs-10)',
+                          padding: 'var(--sp-0) var(--sp-1)',
+                          borderRadius: 'var(--radius-pill)',
+                          background: r.scopeBand === 'active_lane' ? 'var(--brass-soft)' : 'var(--idle-soft)',
+                          color: r.scopeBand === 'active_lane' ? 'var(--brass-1)' : 'var(--fg-3)',
+                          textAlign: 'center',
+                        }}
+                      >
+                        ${r.scopeBand === 'active_lane' ? 'ACTIVE' : 'OUTSIDE'}
                       </span>
-                    </span>
-                    <span class="mono tnum" style=${{ textAlign: 'right', color: r.http_status === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
-                      ${r.http_status === null ? '미보고' : r.http_status}
-                    </span>
-                    <span class="mono tnum" style=${{ textAlign: 'right', color: r.latency_ms === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
-                      ${r.latency_ms === null ? '미보고' : formatMs(r.latency_ms)}
-                    </span>
-                  </div>
-                `}
+                      <span class="mono" style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        ${r.runtime_id}
+                      </span>
+                      <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: providerAttention ? 'var(--warn-fg)' : 'var(--fg-2)' }}>
+                        ${r.provider_display_name} · <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${r.model_id}</span>
+                      </span>
+                      <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', minWidth: 0, overflow: 'hidden' }}>
+                        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', whiteSpace: 'nowrap' }}>
+                          ${r.status}
+                        </span>
+                        ${liveness && html`
+                          <span
+                            data-testid=${`probe-liveness-${r.runtime_id}`}
+                            data-liveness-kind=${liveness.kind}
+                            class="mono"
+                            style=${{
+                              ...causeBadgeStyle(liveness.tone),
+                              padding: 'var(--sp-0) var(--sp-1)',
+                              borderRadius: 'var(--radius-pill)',
+                              fontSize: 'var(--fs-10)',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            ${liveness.label}
+                          </span>
+                        `}
+                      </span>
+                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.http_status === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
+                        ${r.http_status === null ? '미보고' : r.http_status}
+                      </span>
+                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.latency_ms === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
+                        ${r.latency_ms === null ? '미보고' : formatMs(r.latency_ms)}
+                      </span>
+                    </div>
+                  `
+                }}
               />
             </div>
           </section>

@@ -30,6 +30,7 @@ import {
   parseProviderUsageHistoryResponse,
   type ProviderUsageHistoryResponse,
 } from '../../api/provider-usage-history'
+import { runtimeIsAvailable } from './runtime-liveness'
 
 export type { ProviderUsageHistoryPoint, ProviderUsageHistoryResponse } from '../../api/provider-usage-history'
 
@@ -707,13 +708,16 @@ export interface PartitionedQuotas {
   readonly tier3Unreported: readonly ProviderUsageScope[]
 }
 
-/** Provider ids with at least one runtime resting on quota. Compared with
- *  `scope.providers[].id`, so it is keyed by `provider_id`, never by the
- *  display name in `provider`. */
-export function restingProviderIds(runtimes: readonly RuntimeResolution[]): ReadonlySet<string> {
+/** Provider ids with at least one unavailable runtime (quota rest, refused
+ *  credential, or active rate limit). Compared with `scope.providers[].id`, so
+ *  it is keyed by `provider_id`, never by the display name in `provider`. */
+export function restingProviderIds(
+  runtimes: readonly RuntimeResolution[],
+  nowSec: number = Date.now() / 1000,
+): ReadonlySet<string> {
   const ids = new Set<string>()
   for (const rt of runtimes) {
-    if (rt.quota_rest !== null) ids.add(rt.provider_id)
+    if (!runtimeIsAvailable(rt, nowSec)) ids.add(rt.provider_id)
   }
   return ids
 }

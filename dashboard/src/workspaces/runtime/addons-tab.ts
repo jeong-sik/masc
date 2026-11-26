@@ -575,8 +575,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
   `
 
   return html`
-    <div class="ov" data-testid="runtime-addons-tab">
-      <header class="ov-head">
+    <div class="ov ov--split" data-testid="runtime-addons-tab">
+      <header class="ov-head" style=${{ flexShrink: 0 }}>
         <div>
           <span class="ov-eyebrow">5 RUNTIME · LANE-ADDONS & BROWSER</span>
           <h1>Lane-Addons 인스턴스 & Browser Lane 클라이언트</h1>
@@ -587,18 +587,23 @@ export function AddonsTab(props: WorkspaceViewProps) {
         <div
           role="status"
           class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
+          style=${{
+            flexShrink: 0,
+            ...(banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : {}),
+          }}
         >
           ${banner.text}
         </div>
       `}
 
-      <${MasterDetail}
-        masterLabel="Lane-Addons 인스턴스"
-        detailLabel="Browser Lane 클라이언트"
-        master=${leftPane}
-        detail=${rightPane}
-      />
+      <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
+        <${MasterDetail}
+          masterLabel="Lane-Addons 인스턴스"
+          detailLabel="Browser Lane 클라이언트"
+          master=${leftPane}
+          detail=${rightPane}
+        />
+      </div>
     </div>
   `
 }

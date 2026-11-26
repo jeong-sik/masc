@@ -1,4 +1,4 @@
-import { runtimeIsAvailable } from './runtime-liveness'
+import { runtimeIsAvailable, runtimeLivenessBlock } from './runtime-liveness'
 import type { RuntimeQuotaRest, RuntimeResolution, SetupAccountEmail } from './types'
 
 export type QuotaRestSortKey = 'release' | 'count' | 'name'
@@ -38,12 +38,16 @@ export interface PausedRuntimeGroup {
 export interface PausedRuntimesSummary {
   readonly totalRegistered: number
   readonly restingCount: number
+  readonly blockedCount: number
   readonly availableCount: number
+  readonly credentialRefusedCount: number
+  readonly rateLimitedCount: number
   readonly groupCount: number
   readonly soonestUntil: number | null
   readonly soonestResetStated: boolean
   readonly causeCounts: Readonly<Record<string, number>>
   readonly hasPaymentRefused: boolean
+  readonly hasCredentialRefused: boolean
 }
 
 export interface GroupedRestingRuntimes {
@@ -245,10 +249,20 @@ export function groupRestingRuntimes(
   // A refused credential or a live rate limit stops a runtime answering as
   // surely as a quota rest, so it is not counted as available either.
   const nowUnix = opts.nowUnix ?? Date.now() / 1000
-  const availableCount = allRuntimes.filter((rt) => runtimeIsAvailable(rt, nowUnix)).length
+  let availableCount = 0
+  let credentialRefusedCount = 0
+  let rateLimitedCount = 0
+  for (const rt of allRuntimes) {
+    const block = runtimeLivenessBlock(rt, nowUnix)
+    if (block?.kind === 'credential_refused') credentialRefusedCount += 1
+    else if (block?.kind === 'rate_limited' && rt.quota_rest === null) rateLimitedCount += 1
+    if (runtimeIsAvailable(rt, nowUnix)) availableCount += 1
+  }
+  const blockedCount = totalRegistered - availableCount
   const groupCount = restingByProvider.size
   const globalSoonest = findSoonest(allResting)
   const hasPaymentRefused = (causeCounts['payment_refused'] ?? 0) > 0
+  const hasCredentialRefused = credentialRefusedCount > 0
 
   const groups: PausedRuntimeGroup[] = []
   for (const [provider, rawList] of restingByProvider.entries()) {
@@ -304,12 +318,16 @@ export function groupRestingRuntimes(
     summary: {
       totalRegistered,
       restingCount,
+      blockedCount,
       availableCount,
+      credentialRefusedCount,
+      rateLimitedCount,
       groupCount,
       soonestUntil: globalSoonest.until,
       soonestResetStated: globalSoonest.resetStated,
       causeCounts,
       hasPaymentRefused,
+      hasCredentialRefused,
     },
     groups,
   }

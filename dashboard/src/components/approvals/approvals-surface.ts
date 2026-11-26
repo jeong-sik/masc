@@ -29,6 +29,7 @@ import type {
 import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
+import { approvalPhaseView, decisionSourceLabel, judgeLaneText, type ApprovalPhaseView } from '../../lib/gate-approval-labels'
 import { approvalOriginSummary, approvalContinuationLabel } from '../../lib/keeper-approval-origin'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import {
@@ -177,15 +178,6 @@ function approvalWorkSummary(item: KeeperApprovalQueueItem): string | null {
     item.task_id ? `task ${item.task_id}` : null,
     item.goal_id ? `goal ${item.goal_id}` : null,
   ])
-}
-
-function decisionSourceLabel(source: GateDecisionSource | null | undefined): string {
-  switch (source) {
-    case 'always_allowed': return 'Always Allowed'
-    case 'auto_judge': return 'Auto Judge'
-    case 'human_operator': return 'Human'
-    default: return '판단 주체 미확인'
-  }
 }
 
 function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
@@ -390,47 +382,8 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
   ].filter((row): row is { label: string; value: string } => Boolean(row?.value))
 }
 
-type ApprovalPhase = {
-  key: 'queued' | 'judging' | 'human_required' | 'blocked'
-  label: string
-  detail: string
-  severity: 'sev-info' | 'sev-warn' | 'sev-bad'
-}
-
-// A durable queue row can remain for hours after Auto Judge has already
-// stopped. Project the closed summary/disposition states instead of calling
-// every row "Human HITL": age is queue age, never model execution duration.
-function approvalPhase(item: KeeperApprovalQueueItem): ApprovalPhase {
-  switch (item.phase) {
-    case 'blocked':
-      return {
-        key: 'blocked',
-        label: '● Auto Judge blocked',
-        detail: 'Auto Judge 종료 실패 · 재개나 Human 판단 필요',
-        severity: 'sev-bad',
-      }
-    case 'human_required':
-      return {
-        key: 'human_required',
-        label: '● Human required',
-        detail: 'Auto Judge 완료 · Human 판단 필요',
-        severity: 'sev-warn',
-      }
-    case 'judging':
-      return {
-        key: 'judging',
-        label: '● Auto Judging',
-        detail: 'Auto Judge 판정 중',
-        severity: 'sev-info',
-      }
-    case 'queued':
-      return {
-        key: 'queued',
-        label: '● Queue waiting',
-        detail: '판정 시작 대기',
-        severity: 'sev-warn',
-      }
-  }
+function approvalPhase(item: KeeperApprovalQueueItem): ApprovalPhaseView {
+  return approvalPhaseView(item.phase)
 }
 
 // Open this keeper's workspace conversation (work.ts idiom).
@@ -917,14 +870,12 @@ function ApAside({
             ? judgeLane.status === 'available'
               ? html`
                   <div class="wka-auto-stat mono" data-testid="gate-judge-lane">
-                    판정 모델 ${judgeLane.slots[0]}${judgeLane.slots.length > 1
-                      ? ` (+${judgeLane.slots.length - 1} failover)`
-                      : ''}
+                    ${judgeLaneText(judgeLane)}
                   </div>
                 `
               : html`
                   <div class="ap-env-warn mono" data-testid="gate-judge-lane">
-                    판정 lane ${judgeLane.lane_id} 확인 불가: ${judgeLane.reason}
+                    ${judgeLaneText(judgeLane)}
                   </div>
                 `
             : null}

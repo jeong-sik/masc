@@ -19,6 +19,7 @@ import { formatObserved, resourceCache, type FetchReason, type Observed } from '
 import { apiGet, apiMutate } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { InlineSpinner } from '../../components/common/inline-spinner'
+import { formatDuration } from '../../lib/format-time'
 import { MasterDetail, TargetLockedAction, VirtualList } from '../../components/primitives'
 import {
   GOAL_PHASES,
@@ -31,6 +32,7 @@ import {
   decodeGoalConfirmation,
   decodeGoalItem,
   formatRelativeTime,
+  goalActivitySourceLabel,
   goalPhaseLabel,
   goalPhaseTone,
   isMultiAccountSession,
@@ -39,6 +41,7 @@ import {
   toExpectedWorkspaceBody,
   validateNewGoalInput,
   type GoalAction,
+  type GoalActivity,
   type GoalConfirmationEvidence,
   type GoalItem,
   type GoalPhase,
@@ -69,6 +72,17 @@ const verificationListKey = 'work:goals:verification'
 const goalTopics: readonly string[] = ['goal', 'goals', 'goal_updated', 'planning']
 const verificationTopics: readonly string[] = ['verification', 'verification_requests', 'backlog', 'task', 'tasks']
 const emptyRows: readonly never[] = []
+
+function goalActivityText(activity: GoalActivity): string {
+  switch (activity.kind) {
+    case 'observed':
+      return `${formatDuration(activity.stagnationSeconds)} 전 · ${goalActivitySourceLabel(activity.source)}`
+    case 'unavailable':
+      return '기록된 활동 없음'
+    case 'unknown':
+      return '확인 불가'
+  }
+}
 
 function flattenGoalTree(nodes: unknown[], read: {
   goals: GoalItem[]
@@ -770,6 +784,12 @@ export function GoalsTab(props: WorkspaceViewProps) {
                   <div class="wk-row-meta">
                     <span class="mono">P${g.priority}</span>
                     <span class="tnum">Tasks: ${formatObserved(g.linkedTaskCount)}</span>
+                    ${g.pendingApprovalCount !== null && g.pendingApprovalCount > 0 && html`
+                      <span class="wk-badge wk-badge--warn tnum">승인 대기 ${g.pendingApprovalCount}</span>
+                    `}
+                    ${g.activity.kind === 'observed' && html`
+                      <span class="tnum" title=${g.activity.lastActivityAt ?? ''}>마지막 활동 ${formatDuration(g.activity.stagnationSeconds)} 전</span>
+                    `}
                     ${g.criterionVerdict.kind === 'viable' && html`<span class="wk-badge wk-badge--ok">기준 적합</span>`}
                     ${g.criterionVerdict.kind === 'needs_revision' && html`<span class="wk-badge wk-badge--err">기준 수정 필요</span>`}
                   </div>
@@ -837,6 +857,14 @@ export function GoalsTab(props: WorkspaceViewProps) {
             <div class="wk-kv">
               <span class="wk-kv-k">기준 리비전</span>
               <span class="wk-kv-v mono">${selectedGoal.criterionRevision ?? '없음'}</span>
+            </div>
+            <div class="wk-kv">
+              <span class="wk-kv-k">승인 대기</span>
+              <span class="wk-kv-v tnum">${selectedGoal.pendingApprovalCount === null ? '확인 불가' : `${selectedGoal.pendingApprovalCount}건`}</span>
+            </div>
+            <div class="wk-kv">
+              <span class="wk-kv-k">마지막 활동</span>
+              <span class="wk-kv-v tnum">${goalActivityText(selectedGoal.activity)}</span>
             </div>
           </div>
 

@@ -1100,6 +1100,39 @@ export function TasksTab(props: WorkspaceViewProps) {
                 </section>
               `}
 
+              ${selectedTask.handoff.kind === 'unreadable' && html`
+                <div class="wk-notice wk-notice--warn" role="note">이 태스크에 남은 인계 메모를 읽을 수 없습니다. 원본 검사에서 값을 확인하세요.</div>
+              `}
+              ${selectedTask.handoff.kind === 'readable' && html`
+                <section class="wk-section" aria-label="인계 메모">
+                  <h3 class="wk-section-title">인계 메모 (handoff)</h3>
+                  <div class="wk-kv-grid">
+                    <div class="wk-kv">
+                      <span class="wk-kv-k">넘긴 이유</span>
+                      <span class="wk-kv-v">${selectedTask.handoff.context.reason ?? '없음'}</span>
+                    </div>
+                    <div class="wk-kv">
+                      <span class="wk-kv-k">다음 단계</span>
+                      <span class="wk-kv-v">${selectedTask.handoff.context.next_step ?? '없음'}</span>
+                    </div>
+                    <div class="wk-kv">
+                      <span class="wk-kv-k">실패 유형</span>
+                      <span class="wk-kv-v">${selectedTask.handoff.context.failure_mode ?? '없음'}</span>
+                    </div>
+                    <div class="wk-kv">
+                      <span class="wk-kv-k">남긴 이 / 시각</span>
+                      <span class="wk-kv-v">${selectedTask.handoff.context.updated_by ?? '없음'} · ${formatRelativeTime(selectedTask.handoff.context.updated_at)}</span>
+                    </div>
+                  </div>
+                  ${selectedTask.handoff.context.summary && html`<${MarkdownContent} class="wk-prose" text=${selectedTask.handoff.context.summary} />`}
+                  ${(selectedTask.handoff.context.evidence_refs?.length ?? 0) > 0 && html`
+                    <ul class="wk-prose">
+                      ${selectedTask.handoff.context.evidence_refs?.map((ref) => html`<li key=${ref} class="mono">${ref}</li>`)}
+                    </ul>
+                  `}
+                </section>
+              `}
+
               <section class="wk-section" aria-label="태스크 작업 제어">
                 <h3 class="wk-section-title">Lifecycle Actions</h3>
                 <div class="wk-actions">

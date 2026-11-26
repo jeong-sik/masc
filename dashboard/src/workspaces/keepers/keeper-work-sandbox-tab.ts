@@ -143,22 +143,24 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
                     <span class="kp-kv-v">${sandbox.probe_kind}</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  onClick=${() => props.onInspect({
-                    title: `Sandbox · ${keeperName}`,
-                    subtitle: sandbox.backend,
-                    kind: 'sandbox',
-                    data: sandbox.summary,
-                  })}
-                >
-                  샌드박스 원시 상태 보기
-                </button>
-                ${sandboxRead.received && html`<button
-                  type="button" class="btn-ghost"
-                  onClick=${() => void sandboxRead.refresh()}
-                >샌드박스 다시 읽기</button>`}
+                <div class="kp-pill-row">
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => props.onInspect({
+                      title: `Sandbox · ${keeperName}`,
+                      subtitle: sandbox.backend,
+                      kind: 'sandbox',
+                      data: sandbox.summary,
+                    })}
+                  >
+                    샌드박스 원시 상태 보기
+                  </button>
+                  ${sandboxRead.received && html`<button
+                    type="button" class="btn-ghost"
+                    onClick=${() => void sandboxRead.refresh()}
+                  >샌드박스 다시 읽기</button>`}
+                </div>
               `
             : sandboxRead.received && html`<div class="kp-lifecycle-bar">
                 <span>현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.</span>

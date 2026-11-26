@@ -31,7 +31,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib/verification-coverage'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
 import {
   asNonEmptyString,
   asSafeInt,
@@ -785,6 +785,9 @@ export function TasksTab(props: WorkspaceViewProps) {
         { label: '실행 태스크', observation: executionObs, retained: execution?.retained },
       ])
 
+  const activeChipItem = chipItems.find((c) => c.id === chip) ?? chipItems[0]!
+  const activeChipDisplay = activeChipItem.id === 'all' ? '전체' : activeChipItem.label
+
   const masterPane = html`
     <div class="wk-pane-col">
       <div class="wk-pane-head">
@@ -807,49 +810,54 @@ export function TasksTab(props: WorkspaceViewProps) {
       </div>
 
       <div class="wk-filter-bar">
-        <div class="wk-chips" role="group" aria-label="태스크 상태 필터">
-          ${chipItems.map((c) => html`
-            <button
-              key=${c.id}
-              type="button"
-              class="wk-chip"
-              aria-pressed=${chip === c.id}
-              onClick=${() => setChip(c.id)}
-            >
-              ${c.label} <span class="wk-chip-count">${c.count}</span>
-            </button>
-          `)}
-        </div>
-        ${chip === 'schedules' && html`
-          <div class="wk-chips" role="group" aria-label="예약 범위 필터">
-            <button
-              type="button"
-              class="wk-chip"
-              aria-pressed=${schedulesActiveOnly}
-              onClick=${() => setSchedulesActiveOnly(true)}
-            >
-              활성만
-            </button>
-            <button
-              type="button"
-              class="wk-chip"
-              aria-pressed=${!schedulesActiveOnly}
-              onClick=${() => setSchedulesActiveOnly(false)}
-            >
-              전체 이력
-            </button>
-          </div>
-        `}
-        ${chip !== 'schedules' && html`
-          <input
-            type="search"
-            class="wk-input"
-            placeholder="태스크 제목, ID, 담당 Keeper, Goal ID 검색…"
-            value=${query}
-            onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-            aria-label="태스크 검색"
+        <div class="wk-filter-row">
+          <${PopoverMenu}
+            triggerLabel=${`상태: ${activeChipDisplay} (${activeChipItem.count}) ▾`}
+            triggerClassName="btn-ghost"
+            triggerTestId="tasks-status-filter"
+            popoverTestId="tasks-status-filter-menu"
+            ariaLabel="태스크 상태 필터"
+            items=${chipItems.map((c) => ({
+              id: c.id,
+              testId: `tasks-filter-${c.id}`,
+              label: `${c.id === 'all' ? '전체' : c.label} (${c.count})`,
+              active: chip === c.id,
+              separatorBefore: c.id === 'schedules',
+              onSelect: () => setChip(c.id),
+            }))}
           />
-        `}
+          ${chip === 'schedules'
+            ? html`
+                <div class="wk-chips" role="group" aria-label="예약 범위 필터">
+                  <button
+                    type="button"
+                    class="wk-chip"
+                    aria-pressed=${schedulesActiveOnly}
+                    onClick=${() => setSchedulesActiveOnly(true)}
+                  >
+                    활성만
+                  </button>
+                  <button
+                    type="button"
+                    class="wk-chip"
+                    aria-pressed=${!schedulesActiveOnly}
+                    onClick=${() => setSchedulesActiveOnly(false)}
+                  >
+                    전체 이력
+                  </button>
+                </div>
+              `
+            : html`
+                <input
+                  type="search"
+                  class="wk-input wk-filter-search"
+                  placeholder="태스크 제목, ID, 담당 Keeper, Goal ID 검색…"
+                  value=${query}
+                  onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+                  aria-label="태스크 검색"
+                />
+              `}
+        </div>
       </div>
 
       ${showCreateTask && chip !== 'schedules' && html`
@@ -1307,54 +1315,67 @@ export function TasksTab(props: WorkspaceViewProps) {
                     `}
               </section>
 
-              <section class="wk-section" aria-label="태스크 이력 타임라인">
-                <div class="wk-section-head">
-                  <h3 class="wk-section-title">Task History Timeline (Cursor Paginated)</h3>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    onClick=${() => void loadHistoryPage(selectedTask.id, null, false)}
-                  >
-                    처음부터 다시 읽기
-                  </button>
-                </div>
-                ${historyCurrent && historySourceChanged && html`
-                  <div class="wk-notice wk-notice--warn" role="alert">
-                    ${historyError}
+              <details
+                class="ap-disclosure"
+                data-testid="task-history-disclosure"
+                aria-label="태스크 이력 타임라인"
+                open=${(historyCurrent && Boolean(historyError)) || undefined}
+              >
+                <summary class="ap-disclosure-trigger">
+                  <span>
+                    이력 ${historyCurrent && !historyLoading ? `${historyEvents.length}건` : '…'} · Task History Timeline
+                  </span>
+                  <span aria-hidden="true">▸</span>
+                </summary>
+                <div class="ap-disclosure-body">
+                  <div class="wk-section-head">
+                    <span class="wk-muted-sm">Cursor Paginated raw timeline</span>
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      onClick=${() => void loadHistoryPage(selectedTask.id, null, false)}
+                    >
+                      처음부터 다시 읽기
+                    </button>
                   </div>
-                `}
-                ${historyCurrent && !historySourceChanged && historyError && html`
-                  <div class="wk-notice wk-notice--err" role="alert">${historyError}</div>
-                `}
-                ${!historyCurrent || (historyLoading && historyEvents.length === 0)
-                  ? html`<span class="dtable-absent" role="status"><${InlineSpinner} /> 이력 불러오는 중…</span>`
-                  : historyEvents.length === 0
-                    ? historyError ? null : html`<span class="dtable-absent">기록된 이력이 없습니다.</span>`
-                    : html`
-                        <ol class="wk-timeline">
-                          ${historyEvents.map((ev, idx) => html`
-                            <li key=${`${ev.source}-${ev.offset}-${idx}`} class="wk-timeline-item">
-                              <div class="wk-row-top">
-                                <span class="mono wk-sub-id">
-                                  ${ev.source} · offset ${ev.offset}
-                                </span>
-                              </div>
-                              <pre class="wk-code-preview">${typeof ev.event === 'string' ? ev.event : JSON.stringify(ev.event, null, 2)}</pre>
-                            </li>
-                          `)}
-                        </ol>
-                        ${historyNextCursor && html`
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            disabled=${historyLoading}
-                            onClick=${() => void loadHistoryPage(selectedTask.id, historyNextCursor, true)}
-                          >
-                            ${historyLoading ? '불러오는 중…' : '이전 이력 더 불러오기'}
-                          </button>
+                  ${historyCurrent && historySourceChanged && html`
+                    <div class="wk-notice wk-notice--warn" role="alert">
+                      ${historyError}
+                    </div>
+                  `}
+                  ${historyCurrent && !historySourceChanged && historyError && html`
+                    <div class="wk-notice wk-notice--err" role="alert">${historyError}</div>
+                  `}
+                  ${!historyCurrent || (historyLoading && historyEvents.length === 0)
+                    ? html`<span class="dtable-absent" role="status"><${InlineSpinner} /> 이력 불러오는 중…</span>`
+                    : historyEvents.length === 0
+                      ? historyError ? null : html`<span class="dtable-absent">기록된 이력이 없습니다.</span>`
+                      : html`
+                          <ol class="wk-timeline">
+                            ${historyEvents.map((ev, idx) => html`
+                              <li key=${`${ev.source}-${ev.offset}-${idx}`} class="wk-timeline-item">
+                                <div class="wk-row-top">
+                                  <span class="mono wk-sub-id">
+                                    ${ev.source} · offset ${ev.offset}
+                                  </span>
+                                </div>
+                                <pre class="wk-code-preview">${typeof ev.event === 'string' ? ev.event : JSON.stringify(ev.event, null, 2)}</pre>
+                              </li>
+                            `)}
+                          </ol>
+                          ${historyNextCursor && html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              disabled=${historyLoading}
+                              onClick=${() => void loadHistoryPage(selectedTask.id, historyNextCursor, true)}
+                            >
+                              ${historyLoading ? '불러오는 중…' : '이전 이력 더 불러오기'}
+                            </button>
+                          `}
                         `}
-                      `}
-              </section>
+                </div>
+              </details>
             </div>
           `
         })()

@@ -187,6 +187,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   const bundle = readPulseBundle(win)
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
   const [refreshing, setRefreshing] = useState(false)
+  const [openSparklines, setOpenSparklines] = useState<ReadonlySet<string>>(() => new Set())
 
   const refresh = useCallback(async (reason: 'mount' | 'route' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
@@ -507,17 +508,41 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                                 })}
                               </div>
 
-                              <div class="pulse-spark-wrap">
-                                <${UPlotChart}
-                                  id=${`pulse-spark-${group.company}`}
-                                  title=${`${group.company} · 24h 턴 추이`}
-                                  data=${group.sparklineData}
-                                  series=${SPARKLINE_SERIES}
-                                  height=${92}
-                                  syncCrosshair=${true}
-                                  emptyLabel="해당 구간 턴 기록 없음"
-                                />
-                              </div>
+                              <details
+                                class="ap-disclosure pulse-spark-disclosure"
+                                data-testid="pulse-sparkline-disclosure"
+                                open=${openSparklines.has(group.company) || undefined}
+                                onToggle=${(e: Event) => {
+                                  const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                                  setOpenSparklines((prev) => {
+                                    if (prev.has(group.company) === nextOpen) return prev
+                                    const next = new Set(prev)
+                                    if (nextOpen) next.add(group.company)
+                                    else next.delete(group.company)
+                                    return next
+                                  })
+                                }}
+                              >
+                                <summary class="ap-disclosure-trigger">
+                                  <span>추이 보기 · ${group.company} (${turnFmt.short} turns/24h)</span>
+                                  <span aria-hidden="true">${openSparklines.has(group.company) ? '▾' : '▸'}</span>
+                                </summary>
+                                <div class="ap-disclosure-body">
+                                  ${openSparklines.has(group.company) && html`
+                                    <div class="pulse-spark-wrap">
+                                      <${UPlotChart}
+                                        id=${`pulse-spark-${group.company}`}
+                                        title=${`${group.company} · 24h 턴 추이`}
+                                        data=${group.sparklineData}
+                                        series=${SPARKLINE_SERIES}
+                                        height=${92}
+                                        syncCrosshair=${true}
+                                        emptyLabel="해당 구간 턴 기록 없음"
+                                      />
+                                    </div>
+                                  `}
+                                </div>
+                              </details>
                             </article>
                           `
                         })}
@@ -725,13 +750,10 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                   `}
           </section>
 
-          <!-- World Memory & Candle Pulse Digest -->
-          <section class="pulse-card" aria-label="World Memory 및 Candle 요약">
-            <div class="pulse-card-head">
-              <h2>World Memory & Candle Digest</h2>
-            </div>
-            <div class="pulse-digest-grid">
-              <div class="pulse-digest-box">
+          <!-- World Memory & Candle Pulse Digest (flat cards, no nested h2 or double padding) -->
+          ${(() => {
+            const worldMemoryCard = html`
+              <section class="pulse-card" aria-label="World Memory">
                 <div class="pulse-card-head">
                   <h2>World Memory</h2>
                   <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/knowledge/memory')}>
@@ -762,52 +784,75 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                         </div>
                       </div>
                     `}
-              </div>
+              </section>
+            `
 
-              <div class="pulse-digest-box" data-accent=${showCandleBalance ? 'brass' : undefined}>
-                <div class="pulse-card-head">
-                  <h2>Candle Economy</h2>
-                  <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/candle')}>
-                    Candle →
-                  </button>
+            if (showCandleBalance && candleDigest !== null) {
+              return html`
+                <div class="pulse-digest-grid" aria-label="World Memory 및 Candle 요약">
+                  ${worldMemoryCard}
+                  <section class="pulse-card" data-accent="brass" aria-label="Candle Economy">
+                    <div class="pulse-card-head">
+                      <h2>Candle Economy</h2>
+                      <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/candle')}>
+                        Candle →
+                      </button>
+                    </div>
+                    <div class="pulse-kv-grid">
+                      <div class="pulse-kv">
+                        <span class="pulse-kv-k">Circulating</span>
+                        <span class="pulse-kv-v">
+                          ${formatObserved(formatMilliCandle(candleDigest.circulating_milli))} C
+                        </span>
+                      </div>
+                      <div class="pulse-kv">
+                        <span class="pulse-kv-k">Holders</span>
+                        <span class="pulse-kv-v">${candleDigest.active_keepers}</span>
+                      </div>
+                      <div class="pulse-kv">
+                        <span class="pulse-kv-k">Events</span>
+                        <span class="pulse-kv-v">${candleDigest.total_events}</span>
+                      </div>
+                      <div class="pulse-kv">
+                        <span class="pulse-kv-k">Half-life</span>
+                        <span class="pulse-kv-v">
+                          ${candleDigest.half_life_hours !== null ? `${candleDigest.half_life_hours}h` : '없음'}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
                 </div>
-                ${candleDigest === null
-                  ? html`<div class="pulse-empty">${formatObserved(bundle.candle)}</div>`
-                  : !showCandleBalance
-                    ? html`
-                        <div class="pulse-empty">
-                          ${candleDigest.policy_configuration === 'enabled'
-                            ? '발행된 Candle 원장 기록 없음'
-                            : `Candle 정책 비활성 (${candleDigest.policy_configuration}${candleDigest.disabled_reason ? `: ${candleDigest.disabled_reason}` : ''})`}
-                        </div>
-                      `
-                    : html`
-                        <div class="pulse-kv-grid">
-                          <div class="pulse-kv">
-                            <span class="pulse-kv-k">Circulating</span>
-                            <span class="pulse-kv-v">
-                              ${formatObserved(formatMilliCandle(candleDigest.circulating_milli))} C
-                            </span>
-                          </div>
-                          <div class="pulse-kv">
-                            <span class="pulse-kv-k">Holders</span>
-                            <span class="pulse-kv-v">${candleDigest.active_keepers}</span>
-                          </div>
-                          <div class="pulse-kv">
-                            <span class="pulse-kv-k">Events</span>
-                            <span class="pulse-kv-v">${candleDigest.total_events}</span>
-                          </div>
-                          <div class="pulse-kv">
-                            <span class="pulse-kv-k">Half-life</span>
-                            <span class="pulse-kv-v">
-                              ${candleDigest.half_life_hours !== null ? `${candleDigest.half_life_hours}h` : '없음'}
-                            </span>
-                          </div>
-                        </div>
-                      `}
-              </div>
-            </div>
-          </section>
+              `
+            }
+
+            const candleEmptyStatus = candleDigest === null
+              ? formatObserved(bundle.candle)
+              : candleDigest.policy_configuration === 'enabled'
+                ? '발행된 Candle 원장 기록 없음'
+                : `Candle 정책 비활성 (${candleDigest.policy_configuration}${candleDigest.disabled_reason ? `: ${candleDigest.disabled_reason}` : ''})`
+
+            return html`
+              ${worldMemoryCard}
+              <details
+                class="ap-disclosure pulse-candle-disclosure"
+                data-testid="pulse-candle-disclosure"
+                aria-label="Candle Economy"
+              >
+                <summary class="ap-disclosure-trigger">
+                  <span>Candle Economy · ${candleEmptyStatus}</span>
+                  <span aria-hidden="true">▸</span>
+                </summary>
+                <div class="ap-disclosure-body">
+                  <div class="pulse-card-head">
+                    <span class="pulse-empty">${candleEmptyStatus}</span>
+                    <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/candle')}>
+                      Candle →
+                    </button>
+                  </div>
+                </div>
+              </details>
+            `
+          })()}
         </div>
       </div>
     </div>

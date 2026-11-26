@@ -608,7 +608,8 @@ describe('Streaming <details> Stability & Tools: full Bounded Auto-Hydration', (
     // Default Tools: summary -> zero eager /tool-result fetches
     expect(requestedExecIds).toHaveLength(0)
 
-    // Click Tools toggle: summary -> full
+    // Open 표시 ▾ PopoverMenu and click Tools toggle: summary -> full
+    fireEvent.click(container.querySelector('[data-testid="chat-display-menu"]') as HTMLButtonElement)
     const toggleBtn = container.querySelector('[data-testid="chat-toggle-tools"]') as HTMLButtonElement
     fireEvent.click(toggleBtn)
     expect(toggleBtn.textContent).toContain('전체')
@@ -726,7 +727,8 @@ describe('Streaming <details> Stability & Tools: full Bounded Auto-Hydration', (
       expect(view.container.querySelector('[data-testid="chat-tool-card"]')).not.toBeNull()
     })
 
-    // Switch to Tools: full mode and confirm keeper-alpha hydrates its persisted tool card
+    // Switch to Tools: full mode via 표시 ▾ PopoverMenu and confirm keeper-alpha hydrates its persisted tool card
+    fireEvent.click(view.container.querySelector('[data-testid="chat-display-menu"]') as HTMLButtonElement)
     const toggleBtn = view.container.querySelector('[data-testid="chat-toggle-tools"]') as HTMLButtonElement
     fireEvent.click(toggleBtn)
     expect(toggleBtn.textContent).toContain('전체')
@@ -897,10 +899,15 @@ describe('KeeperToolCallInspector & Work/Debug Companion QuickPeekDrawer Wiring'
 
     cleanup()
 
-    // 3. Render the inspector payload and verify preview-while-loading -> page 0 -> page 1 -> raw JSON toggle
+    // 3. Render the inspector payload and verify primary meta inline + secondary meta collapsed + preview-while-loading -> page 0 -> page 1 -> raw JSON toggle
     const insp = render(html`${workInspected[0]!.render!()}`)
-    expect(insp.container.querySelector('[data-testid="tool-call-inspector-meta"]')?.textContent).toContain('exec: exec-inspect-1')
-    expect(insp.container.querySelector('[data-testid="tool-call-inspector-meta"]')?.textContent).toContain('Turn #7')
+    expect(insp.container.querySelector('[data-testid="tool-call-inspector-meta"]')?.textContent).toContain('Read')
+    expect(insp.container.querySelector('[data-testid="tool-call-inspector-meta"]')?.textContent).toContain('42ms')
+    const secondaryMeta = insp.container.querySelector('[data-testid="tool-call-inspector-secondary-meta"]') as HTMLDetailsElement | null
+    expect(secondaryMeta).not.toBeNull()
+    expect(secondaryMeta?.open).toBe(false)
+    expect(secondaryMeta?.textContent).toContain('exec: exec-inspect-1')
+    expect(secondaryMeta?.textContent).toContain('Turn #7')
     expect(insp.container.querySelector('[data-testid="tool-call-inspector-input"]')?.textContent).toContain('lib/keeper/keeper_agent_run.ml')
     // Preview shows immediately while page 0 is still loading
     expect(insp.container.querySelector('[data-testid="tool-call-inspector-loading"]')).not.toBeNull()

@@ -11,6 +11,7 @@ import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconn
 import { formatObserved, resourceCache, type Observed } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
 import { keeperPortraitUrl, kSigil } from '../../components/keeper-badge'
+import { PopoverMenu, type PopoverMenuItem } from '../../components/primitives/popover-menu'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import {
   bootKeeperAction,
@@ -188,18 +189,74 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     keeper.operator_disposition && keeper.operator_disposition !== 'pass'
       ? keeper.operator_disposition
       : null
-  const hasDiagnostics = Boolean(
-    keeper.directory_issue
+  const hasBlockingFault = Boolean(
+    resting
+    || keeper.directory_issue
     || keeper.runtime_blocker_summary
-    || resting
-    || keeper.last_failure
-    || actionableDisposition
     || approvalModeRestoreError
-    || laneFailures.length > 0
     || waitingUnavailable
     || (waitingSummary && waitingSummary.count > 0)
+    || actionableDisposition,
+  )
+  const hasDiagnostics = Boolean(
+    hasBlockingFault
+    || keeper.last_failure
+    || laneFailures.length > 0
     || (turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0)),
   )
+  const diagSummaryParts: string[] = []
+  if (keeper.directory_issue) diagSummaryParts.push(`설정 오류: ${keeper.directory_issue}`)
+  if (keeper.runtime_blocker_summary) diagSummaryParts.push(`차단: ${keeper.runtime_blocker_summary}`)
+  if (resting) diagSummaryParts.push(`경로 휴식 (${keeper.runtime_path_rest?.runtime_id ?? keeper.runtime_id})`)
+  if (approvalModeRestoreError) diagSummaryParts.push('승인 모드 복구 오류')
+  if (waitingUnavailable) diagSummaryParts.push('대기 목록 읽기 실패')
+  else if (waitingSummary && waitingSummary.count > 0) diagSummaryParts.push(`대기 ${waitingSummary.count}건`)
+  if (actionableDisposition) diagSummaryParts.push(`조치: ${actionableDisposition}`)
+  if (laneFailures.length > 0) diagSummaryParts.push(`폴백 시도 ${laneFailures.length}건`)
+  if (turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0)) {
+    diagSummaryParts.push(`24h 실패 ${turnBreakdown.failed} · 휴식 ${turnBreakdown.rested}`)
+  }
+  if (diagSummaryParts.length === 0 && keeper.last_failure) {
+    diagSummaryParts.push(`최근 실패: ${keeper.last_failure.cause}`)
+  }
+  const diagSummaryText = diagSummaryParts.slice(0, 2).join(' · ') || '런타임 진단 상세'
+  const turnStatusLabel = props.turnStatus === 'loading'
+    ? '조회 중…'
+    : props.turnStatus === 'failed'
+      ? '조회 실패'
+      : keeper.active_turn
+        ? `실행 중 (${keeper.active_turn.lane})`
+        : '유휴'
+  const metaTriggerClass = approvalMode === 'yolo'
+    ? 'kp-meta-trigger kp-meta-trigger--bad'
+    : props.turnStatus === 'failed'
+      ? 'kp-meta-trigger kp-meta-trigger--warn'
+      : 'kp-meta-trigger'
+  const metaTriggerLabel = approvalMode === 'yolo'
+    ? '상태 · ⚠ YOLO ▾'
+    : props.turnStatus === 'failed'
+      ? '상태 · ⚠ ▾'
+      : '상태 ▾'
+  const overflowActionItems: PopoverMenuItem[] = [
+    ...(booted && keeper.active_turn === null
+      ? [{
+          id: 'interrupt',
+          label: 'Interrupt Turn',
+          description: '유휴 상태에서도 턴 중단 신호 전송',
+          disabled: busyAction !== null,
+          onSelect: () => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name)),
+        }]
+      : []),
+    {
+      id: 'delete',
+      label: 'Delete',
+      description: 'Keeper 및 모든 아티팩트 영구 삭제',
+      danger: true,
+      separatorBefore: booted && keeper.active_turn === null,
+      disabled: busyAction !== null,
+      onSelect: () => setDeleteOpen(true),
+    },
+  ]
 
   const runLifecycle = async (
     label: string,
@@ -269,8 +326,6 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               <span class="kp-pill" data-tone=${failing ? 'bad' : resting || keeper.paused ? 'warn' : 'ok'}>
                 ${failing ? `⚠ ${keeper.health}` : resting ? '⏸ 휴식 중' : keeper.paused ? 'Paused' : keeper.health}
               </span>
-              <span class="kp-pill" data-tone="info">${keeper.phase}</span>
-              <span class="kp-pill">${keeper.runtime_id}</span>
               <span
                 class="kp-pill"
                 data-ctx="true"
@@ -301,17 +356,37 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                   대기 목록 읽기 실패
                 </span>
               `}
-              ${props.turnStatus === 'loading' && html`<span class="kp-pill">턴 상태 조회 중…</span>`}
-              ${props.turnStatus === 'failed' && html`<span class="kp-pill" data-tone="warn">턴 상태 조회 실패</span>`}
-              ${approvalMode === 'yolo' && html`
-                <span
-                  class="kp-pill"
-                  data-tone="bad"
-                  title="도구 승인 자동 통과 모드(yolo) 활성화됨"
-                >
-                  ⚠ YOLO
-                </span>
-              `}
+              <${PopoverMenu}
+                triggerLabel=${metaTriggerLabel}
+                triggerClassName=${metaTriggerClass}
+                triggerTestId="keeper-meta-menu"
+                popoverTestId="keeper-meta-popover"
+                popoverClassName="kp-meta-popover"
+                role="dialog"
+                ariaLabel="Keeper 런타임 상태 세부정보"
+                triggerTitle=${`Phase: ${keeper.phase} · Runtime: ${keeper.runtime_id}`}
+              >
+                <div class="kp-meta-row">
+                  <span class="kp-meta-key">Phase</span>
+                  <span class="kp-meta-val">${keeper.phase}</span>
+                </div>
+                <div class="kp-meta-row">
+                  <span class="kp-meta-key">Runtime</span>
+                  <span class="kp-meta-val">${keeper.runtime_id}</span>
+                </div>
+                <div class="kp-meta-row">
+                  <span class="kp-meta-key">턴 상태</span>
+                  <span class="kp-meta-val">${turnStatusLabel}</span>
+                </div>
+                ${approvalMode !== null && html`
+                  <div class="kp-meta-row">
+                    <span class="kp-meta-key">도구 승인</span>
+                    <span class="kp-meta-val">
+                      ${approvalMode === 'yolo' ? '⚠ YOLO (자동 통과)' : approvalMode}
+                    </span>
+                  </div>
+                `}
+              <//>
             </div>
           </div>
         </div>
@@ -348,7 +423,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                   Pause
                 </button>
               `)}
-          ${(booted || keeper.active_turn !== null) && html`
+          ${keeper.active_turn !== null && html`
             <button
               type="button"
               class="btn-ghost"
@@ -358,93 +433,104 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               Interrupt Turn
             </button>
           `}
-          <button
-            type="button"
-            class="kp-btn-danger"
-            disabled=${busyAction !== null}
-            onClick=${() => setDeleteOpen(true)}
-          >
-            Delete
-          </button>
+          <${PopoverMenu}
+            align="right"
+            triggerLabel="⋯"
+            triggerClassName="btn-ghost"
+            triggerTestId="keeper-actions-menu"
+            popoverTestId="keeper-actions-popover"
+            ariaLabel="Keeper 추가 작업"
+            items=${overflowActionItems}
+          />
         </div>
       </div>
 
       ${hasDiagnostics && html`
-        <div
+        <details
           class="kp-diag-banner"
+          open=${hasBlockingFault || undefined}
           data-tone=${failing ? 'bad' : resting || Boolean(approvalModeRestoreError) ? 'warn' : 'info'}
+          data-blocking=${hasBlockingFault ? 'true' : 'false'}
           role="status"
           aria-label="Keeper 런타임 진단"
         >
-          ${keeper.directory_issue && html`
-            <div class="kp-diag-row"><strong>설정 오류</strong>: ${keeper.directory_issue}</div>
-          `}
-          ${keeper.runtime_blocker_summary && html`
-            <div class="kp-diag-row">
-              <strong>차단 사유</strong>: ${keeper.runtime_blocker_summary}
-              ${keeper.runtime_blocker_signature && html` <span class="kp-roster-sub">(${keeper.runtime_blocker_signature})</span>`}
-              ${keeper.runtime_blocker_class && html` <span class="kp-roster-sub">[${keeper.runtime_blocker_class}]</span>`}
-            </div>
-          `}
-          ${resting && keeper.runtime_path_rest && html`
-            <div class="kp-diag-row">
-              <strong>경로 휴식</strong>: ${keeper.runtime_path_rest.runtime_id ?? keeper.runtime_id}
-              ${keeper.runtime_path_rest.release_at ? ` · 해제 ${keeper.runtime_path_rest.release_at}` : ''}
-              ${keeper.runtime_path_rest.release_basis ? ` (${keeper.runtime_path_rest.release_basis})` : ''}
-            </div>
-          `}
-          ${(keeper.last_failure || actionableDisposition || (keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message'))) && html`
-            <div class="kp-diag-row">
-              ${keeper.last_failure ? `최근 실패: ${keeper.last_failure.cause}` : ''}
-              ${actionableDisposition ? `${keeper.last_failure ? ' · ' : ''}조치: ${actionableDisposition}${keeper.operator_disposition_reason ? ` (${keeper.operator_disposition_reason})` : ''}` : ''}
-              ${keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message') ? `${keeper.last_failure || actionableDisposition ? ' · ' : ''}다음 단계: ${keeper.next_action}` : ''}
-            </div>
-          `}
-          ${waitingSummary && waitingSummary.count > 0 && html`
-            <div class="kp-diag-row">
-              <strong>대기 항목</strong>: ${waitingSummary.count}건
-              ${waitingSummary.due_at ? ` (가장 이른 예정 ${formatDueAt(waitingSummary.due_at)})` : ''}
-              ${waitingSummary.heads.map((head) => html`
-                <div class="kp-diag-lane-meta" key=${`${head.source}:${head.next_action}`}>
-                  <span>${head.what}</span>
-                  <span>다음: ${head.next_action}</span>
-                  ${head.due_at ? html`<span>예정 ${formatDueAt(head.due_at)}</span>` : null}
-                </div>
-              `)}
-            </div>
-          `}
-          ${waitingUnavailable && html`
-            <div class="kp-diag-row">
-              <strong>대기 항목</strong>: 대기 목록을 읽지 못했어요. 대기가 없다는 뜻이 아니에요.
-              ${waitingUnavailable.reason ? ` · ${waitingUnavailable.reason}` : ''}
-            </div>
-          `}
-          ${laneFailures.length > 0 && html`
-            <div class="kp-diag-row">
-              <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
-              <div class="kp-diag-lane-detail">
-                ${laneFailures.map((f, idx) => html`
-                  <div class="kp-diag-lane" key=${`${f.runtime_id ?? 'lane'}:${f.attempt ?? idx}:${f.summary}`}>
-                    <span>${f.runtime_id ?? 'lane'}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}${f.fault_kind ? ` · ${f.fault_kind}` : ''}</span>
-                    ${f.summary ? html`<div>${f.summary}</div>` : null}
-                    ${(f.failure_kind || f.failure_detail || f.provider || f.network_kind)
-                      ? html`<div class="kp-diag-lane-meta">${f.failure_kind ? html`<span>kind:${f.failure_kind}</span>` : null}${f.provider ? html`<span>provider:${f.provider}</span>` : null}${f.network_kind ? html`<span>network:${f.network_kind}</span>` : null}${f.failure_detail ? html`<span>${f.failure_detail}</span>` : null}</div>`
-                      : null}
+          <summary class="kp-diag-summary">
+            <span class="kp-diag-summary-text">
+              ${hasBlockingFault ? '런타임 진단' : '진단 이력'} · ${diagSummaryText}
+            </span>
+            <span class="kp-diag-chevron" aria-hidden="true">▸</span>
+          </summary>
+          <div class="kp-diag-body">
+            ${keeper.directory_issue && html`
+              <div class="kp-diag-row"><strong>설정 오류</strong>: ${keeper.directory_issue}</div>
+            `}
+            ${keeper.runtime_blocker_summary && html`
+              <div class="kp-diag-row">
+                <strong>차단 사유</strong>: ${keeper.runtime_blocker_summary}
+                ${keeper.runtime_blocker_signature && html` <span class="kp-roster-sub">(${keeper.runtime_blocker_signature})</span>`}
+                ${keeper.runtime_blocker_class && html` <span class="kp-roster-sub">[${keeper.runtime_blocker_class}]</span>`}
+              </div>
+            `}
+            ${resting && keeper.runtime_path_rest && html`
+              <div class="kp-diag-row">
+                <strong>경로 휴식</strong>: ${keeper.runtime_path_rest.runtime_id ?? keeper.runtime_id}
+                ${keeper.runtime_path_rest.release_at ? ` · 해제 ${keeper.runtime_path_rest.release_at}` : ''}
+                ${keeper.runtime_path_rest.release_basis ? ` (${keeper.runtime_path_rest.release_basis})` : ''}
+              </div>
+            `}
+            ${(keeper.last_failure || actionableDisposition || (keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message'))) && html`
+              <div class="kp-diag-row">
+                ${keeper.last_failure ? `최근 실패: ${keeper.last_failure.cause}` : ''}
+                ${actionableDisposition ? `${keeper.last_failure ? ' · ' : ''}조치: ${actionableDisposition}${keeper.operator_disposition_reason ? ` (${keeper.operator_disposition_reason})` : ''}` : ''}
+                ${keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message') ? `${keeper.last_failure || actionableDisposition ? ' · ' : ''}다음 단계: ${keeper.next_action}` : ''}
+              </div>
+            `}
+            ${waitingSummary && waitingSummary.count > 0 && html`
+              <div class="kp-diag-row">
+                <strong>대기 항목</strong>: ${waitingSummary.count}건
+                ${waitingSummary.due_at ? ` (가장 이른 예정 ${formatDueAt(waitingSummary.due_at)})` : ''}
+                ${waitingSummary.heads.map((head) => html`
+                  <div class="kp-diag-lane-meta" key=${`${head.source}:${head.next_action}`}>
+                    <span>${head.what}</span>
+                    <span>다음: ${head.next_action}</span>
+                    ${head.due_at ? html`<span>예정 ${formatDueAt(head.due_at)}</span>` : null}
                   </div>
                 `)}
               </div>
-            </div>
-          `}
-          ${approvalModeRestoreError && html`
-            <div class="kp-diag-row"><strong>승인 모드 복구 오류</strong>: ${approvalModeRestoreError}</div>
-          `}
-          ${turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0) && html`
-            <div class="kp-diag-row">
-              <strong>24h 턴 내역</strong>: 성공 ${turnBreakdown.ok} · 휴식 ${turnBreakdown.rested} · 실패 ${turnBreakdown.failed}
-              <div class="kp-diag-lane-meta">시작 계기: 예약 ${turnBreakdown.causes.scheduled} · 반응 ${turnBreakdown.causes.reacted} · 채팅 ${turnBreakdown.causes.chat} · 스스로 ${turnBreakdown.causes.own} · 모름 ${turnBreakdown.causes.unknown}</div>
-            </div>
-          `}
-        </div>
+            `}
+            ${waitingUnavailable && html`
+              <div class="kp-diag-row">
+                <strong>대기 항목</strong>: 대기 목록을 읽지 못했어요. 대기가 없다는 뜻이 아니에요.
+                ${waitingUnavailable.reason ? ` · ${waitingUnavailable.reason}` : ''}
+              </div>
+            `}
+            ${laneFailures.length > 0 && html`
+              <div class="kp-diag-row">
+                <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
+                <div class="kp-diag-lane-detail">
+                  ${laneFailures.map((f, idx) => html`
+                    <div class="kp-diag-lane" key=${`${f.runtime_id ?? 'lane'}:${f.attempt ?? idx}:${f.summary}`}>
+                      <span>${f.runtime_id ?? 'lane'}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}${f.fault_kind ? ` · ${f.fault_kind}` : ''}</span>
+                      ${f.summary ? html`<div>${f.summary}</div>` : null}
+                      ${(f.failure_kind || f.failure_detail || f.provider || f.network_kind)
+                        ? html`<div class="kp-diag-lane-meta">${f.failure_kind ? html`<span>kind:${f.failure_kind}</span>` : null}${f.provider ? html`<span>provider:${f.provider}</span>` : null}${f.network_kind ? html`<span>network:${f.network_kind}</span>` : null}${f.failure_detail ? html`<span>${f.failure_detail}</span>` : null}</div>`
+                        : null}
+                    </div>
+                  `)}
+                </div>
+              </div>
+            `}
+            ${approvalModeRestoreError && html`
+              <div class="kp-diag-row"><strong>승인 모드 복구 오류</strong>: ${approvalModeRestoreError}</div>
+            `}
+            ${turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0) && html`
+              <div class="kp-diag-row">
+                <strong>24h 턴 내역</strong>: 성공 ${turnBreakdown.ok} · 휴식 ${turnBreakdown.rested} · 실패 ${turnBreakdown.failed}
+                <div class="kp-diag-lane-meta">시작 계기: 예약 ${turnBreakdown.causes.scheduled} · 반응 ${turnBreakdown.causes.reacted} · 채팅 ${turnBreakdown.causes.chat} · 스스로 ${turnBreakdown.causes.own} · 모름 ${turnBreakdown.causes.unknown}</div>
+              </div>
+            `}
+          </div>
+        </details>
       `}
 
       ${statusMessage && html`
@@ -457,7 +543,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
         </div>
       `}
 
-      <nav class="kp-tabs" role="tablist" aria-label="Keeper 상세 탭">
+      <nav class="kp-tabs" role="tablist" aria-label="Keeper 상세 탭" data-mobile-only="true">
         ${KEEPER_ENTITY_TABS.map((tab) => html`
           <button
             key=${tab}

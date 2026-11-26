@@ -1346,7 +1346,11 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       html`<${KeepersWorkspace} subroute="" entityId="code-reviewer-sister" entityTab="chat" onNavigate=${onNavigate} onInspect=${vi.fn()} />`,
     )
     await waitFor(() => expect(ws.getByRole('heading', { name: 'code-reviewer-sister' })).toBeTruthy())
-    expect(ws.queryByText('턴 상태 조회 중…')).toBeTruthy()
+    expect(ws.container.querySelector('main.kp-stage')).toBeNull()
+    expect(ws.container.querySelector('section.kp-stage[aria-label="Keeper 워크스페이스"]')).not.toBeNull()
+    fireEvent.click(ws.getByTestId('keeper-meta-menu'))
+    expect(ws.getByTestId('keeper-meta-popover').textContent).toContain('조회 중…')
+    fireEvent.click(ws.getByTestId('keeper-meta-menu'))
     expect(ws.container.querySelectorAll('*').length).toBeLessThan(1200)
     fireEvent.click(ws.getByRole('tab', { name: 'Memory' }))
     expect(onNavigate).toHaveBeenCalledWith('/keepers/code-reviewer-sister/memory')
@@ -1939,8 +1943,26 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     )
     expect(r1.queryByRole('button', { name: 'Boot' })).toBeNull()
     expect(r1.queryByRole('button', { name: 'Pause' })).not.toBeNull()
-    expect(r1.queryByRole('button', { name: 'Interrupt Turn' })).not.toBeNull()
+    // Idle booted keeper tucks Interrupt Turn and Delete into the ⋯ overflow menu
+    expect(r1.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
+    fireEvent.click(r1.getByTestId('keeper-actions-menu'))
+    expect(r1.getByTestId('keeper-actions-popover').textContent).toContain('Interrupt Turn')
+    expect(r1.getByTestId('keeper-actions-popover').textContent).toContain('Delete')
     r1.unmount()
+
+    // Active turn keeps Interrupt Turn inline for immediate emergency stop
+    const activeTurnKeeper = makeRosterKeeper({
+      keepalive_running: true,
+      status: 'running',
+      phase: 'running',
+      paused: false,
+      active_turn: { lane: 'chat_operation', started_at_unix: 1_700_000_000 },
+    })
+    const rActive = render(
+      html`<${KeeperHeader} keeper=${activeTurnKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(rActive.queryByRole('button', { name: 'Interrupt Turn' })).not.toBeNull()
+    rActive.unmount()
 
     const pausedKeeper = makeRosterKeeper({ keepalive_running: false, status: 'paused', phase: 'paused', paused: true })
     expect(isKeeperBooted(pausedKeeper)).toBe(true)
@@ -1960,6 +1982,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(r3.queryByRole('button', { name: 'Boot' })).not.toBeNull()
     expect(r3.queryByRole('button', { name: 'Pause' })).toBeNull()
     expect(r3.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
+    fireEvent.click(r3.getByTestId('keeper-actions-menu'))
+    expect(r3.getByTestId('keeper-actions-popover').textContent).not.toContain('Interrupt Turn')
+    expect(r3.getByTestId('keeper-actions-popover').textContent).toContain('Delete')
     r3.unmount()
 
     expect(isKeeperBooted(makeRosterKeeper({ keepalive_running: false, status: 'crashed', phase: 'crashed', paused: false }))).toBe(false)
@@ -2463,5 +2488,82 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(workerView.queryByTestId('keeper-sandbox-config-btn')).toBeNull()
     expect(workerView.queryByTestId('keeper-sandbox-infra-btn')).toBeNull()
     resetAuthStateForTests()
+  })
+
+  it('auto-opens diagnostics banner for blocking faults, collapses historical-only diagnostics by default, and collapses Memory recovery tools until opened', () => {
+    const blockingKeeper = makeRosterKeeper({
+      health: 'failing',
+      phase: 'failing',
+      runtime_blocker_summary: 'provider 429',
+    })
+    const blockingView = render(
+      html`<${KeeperHeader} keeper=${blockingKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    const blockingBanner = blockingView.container.querySelector('details.kp-diag-banner') as HTMLDetailsElement | null
+    expect(blockingBanner).not.toBeNull()
+    expect(blockingBanner?.open).toBe(true)
+    blockingView.unmount()
+
+    // Failing keeper with ZERO rendered diagnostic rows must NOT show an empty "런타임 진단 상세" banner
+    const bareFailingKeeper = makeRosterKeeper({
+      health: 'failing',
+      phase: 'failing',
+      runtime_blocker_summary: null,
+      directory_issue: null,
+      last_failure: null,
+    })
+    const bareFailingView = render(
+      html`<${KeeperHeader} keeper=${bareFailingKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(bareFailingView.container.querySelector('details.kp-diag-banner')).toBeNull()
+    bareFailingView.unmount()
+
+    const historicalKeeper = makeRosterKeeper({
+      health: 'healthy',
+      phase: 'running',
+      turns_24h_breakdown: { ok: 10, rested: 1, failed: 2, causes: { scheduled: 1, reacted: 0, chat: 1, own: 0, unknown: 0 } },
+    })
+    const histView = render(
+      html`<${KeeperHeader} keeper=${historicalKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    const histBanner = histView.container.querySelector('details.kp-diag-banner') as HTMLDetailsElement | null
+    expect(histBanner).not.toBeNull()
+    expect(histBanner?.open).toBe(false)
+    expect(histBanner?.querySelector('summary')?.textContent).toContain('24h 실패 2')
+    histView.unmount()
+
+    // Memory recovery & retraction tools default collapsed
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        keeper: 'code-reviewer-sister',
+        ordinary: { present: false },
+        source_bound: { present: false },
+        returned: 0,
+        undecodable_lines: 0,
+        entries: [],
+        activity: { events: [], notes: [] },
+        compaction: { present: false },
+        canonical_turns: { present: false },
+        memory_digest: { present: false },
+        librarian_molt: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    const memView = render(html`<${KeeperMemoryTab} keeperName="code-reviewer-sister" />`)
+    const memDisclosure = memView.container.querySelector('[data-testid="memory-tools-disclosure"]') as HTMLDetailsElement | null
+    expect(memDisclosure).not.toBeNull()
+    expect(memDisclosure?.open).toBe(false)
+    memView.unmount()
+
+    // Chat display popover cycling toggles render as honest role="menuitem" actions (not menuitemradio)
+    const chatView = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    fireEvent.click(chatView.getByTestId('chat-display-menu'))
+    for (const testId of ['chat-toggle-thinking', 'chat-toggle-tools', 'chat-toggle-internal']) {
+      const item = chatView.getByTestId(testId)
+      expect(item.getAttribute('role')).toBe('menuitem')
+      expect(item.getAttribute('aria-checked')).toBeNull()
+    }
+    chatView.unmount()
   })
 })

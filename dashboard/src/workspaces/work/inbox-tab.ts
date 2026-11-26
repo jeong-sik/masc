@@ -326,12 +326,12 @@ function isCurrent(observation: Observed<unknown>, problem?: string | null): boo
   return observation.kind === 'value' && !observation.stale && problem == null
 }
 
-function renderSourceAlert(label: string, observation: Observed<unknown>, problem?: string | null) {
+function renderSourceAlert(label: string, observation: Observed<unknown>, problem?: string | null, inset = true) {
   if (observation.kind === 'loading') return null
   const reason = observation.kind === 'failed' ? observation.error.message
     : observation.kind === 'absent' || observation.kind === 'unreported' ? observation.reason : problem
   if (reason || observation.kind !== 'value') {
-    return html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${label} 조회 불가${reason ? ` · ${reason}` : ''}</div>`
+    return html`<div class=${inset ? 'wk-notice wk-notice--err wk-inset' : 'wk-notice wk-notice--err'} role="alert">${label} 조회 불가${reason ? ` · ${reason}` : ''}</div>`
   }
   return null
 }
@@ -838,9 +838,9 @@ export function InboxTab(props: WorkspaceViewProps) {
             ${auditSyncPill}
           </div>
         </div>
-        ${renderSourceAlert('Channel Gate 결정 이력', gateObs, gate?.auditError)}
+        ${renderSourceAlert('Channel Gate 결정 이력', gateObs, gate?.auditError, false)}
         ${gate?.auditPartial && html`
-          <div class="wk-notice wk-notice--warn wk-inset" role="note">조회 범위 제한으로 최근 24시간의 결정 이력이 일부만 표시됩니다.</div>
+          <div class="wk-notice wk-notice--warn" role="note">조회 범위 제한으로 최근 24시간의 결정 이력이 일부만 표시됩니다.</div>
         `}
         ${(current.audit || audit.length > 0) && html`
           <${DataTable}
@@ -994,37 +994,60 @@ export function InboxTab(props: WorkspaceViewProps) {
                     <span class="wk-badge">${q.mode === 'multi' ? '복수 선택' : '단일 선택'}</span>
                   </div>
                   <${MarkdownContent} class="wk-prose" text=${q.prompt} />
-                  ${q.choices.length > 0 && html`
-                    <div class="wk-chips">
-                      ${q.choices.map((c) => {
-                        const active = chosenIds.includes(c.choiceId)
-                        return html`
-                          <div key=${c.choiceId}>
-                            <button
-                              type="button"
-                              class="wk-chip"
-                              aria-pressed=${active}
-                              onClick=${() => {
-                                const nextIds = q.mode === 'single'
-                                  ? (active ? [] : [c.choiceId])
-                                  : active
-                                    ? chosenIds.filter((id) => id !== c.choiceId)
-                                    : [...chosenIds, c.choiceId]
-                                setQuestionDraft(
-                                  selectedEntry.item.askId,
-                                  q.questionId,
-                                  nextIds.length === 0 ? null : { kind: 'chose', choiceIds: nextIds },
-                                )
-                              }}
-                            >
-                              ${c.label}
-                            </button>
-                            ${c.description && html`<${MarkdownContent} class="wk-prose" text=${c.description} />`}
+                  ${q.choices.length > 0 && (() => {
+                    const hasDescriptions = q.choices.some((c) => Boolean(c.description))
+                    const toggleChoice = (choiceId: string, active: boolean) => {
+                      const nextIds = q.mode === 'single'
+                        ? (active ? [] : [choiceId])
+                        : active
+                          ? chosenIds.filter((id) => id !== choiceId)
+                          : [...chosenIds, choiceId]
+                      setQuestionDraft(
+                        selectedEntry.item.askId,
+                        q.questionId,
+                        nextIds.length === 0 ? null : { kind: 'chose', choiceIds: nextIds },
+                      )
+                    }
+                    return hasDescriptions
+                      ? html`
+                          <div class="wk-ask-choices">
+                            ${q.choices.map((c) => {
+                              const active = chosenIds.includes(c.choiceId)
+                              return html`
+                                <div key=${c.choiceId} class="wk-ask-choice-card" data-selected=${active ? 'true' : 'false'}>
+                                  <button
+                                    type="button"
+                                    class="wk-chip"
+                                    aria-pressed=${active}
+                                    onClick=${() => toggleChoice(c.choiceId, active)}
+                                  >
+                                    ${c.label}
+                                  </button>
+                                  ${c.description && html`<${MarkdownContent} class="wk-prose" text=${c.description} />`}
+                                </div>
+                              `
+                            })}
                           </div>
                         `
-                      })}
-                    </div>
-                  `}
+                      : html`
+                          <div class="wk-chips">
+                            ${q.choices.map((c) => {
+                              const active = chosenIds.includes(c.choiceId)
+                              return html`
+                                <button
+                                  key=${c.choiceId}
+                                  type="button"
+                                  class="wk-chip"
+                                  aria-pressed=${active}
+                                  onClick=${() => toggleChoice(c.choiceId, active)}
+                                >
+                                  ${c.label}
+                                </button>
+                              `
+                            })}
+                          </div>
+                        `
+                  })()}
                   <div class="wk-field">
                     <label for=${`ask-text-${q.questionId}`}>직접 입력 ${q.freeTextHint ? `(${q.freeTextHint})` : '(선택)'}</label>
                     <input

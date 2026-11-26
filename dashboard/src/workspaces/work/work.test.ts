@@ -588,18 +588,22 @@ describe('workspaces/work', () => {
       html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    const chip = (name: string) => [...container.querySelectorAll<HTMLButtonElement>('.wk-chip')]
-      .find((el) => el.textContent?.trim().startsWith(name))!
+    const filterTrigger = () => container.querySelector<HTMLButtonElement>('[data-testid="tasks-status-filter"]')!
+    const selectTaskFilter = async (id: string) => {
+      filterTrigger().click()
+      await flushUi()
+      container.querySelector<HTMLButtonElement>(`[data-testid="tasks-filter-${id}"]`)!.click()
+      await flushUi()
+    }
     await flushUi()
 
     expect(container.querySelector('[role="status"] [data-inline-spinner]')).not.toBeNull()
     expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).toContain('Observed execution task')
-    expect(chip('All').textContent).toContain('—')
+    expect(filterTrigger().textContent).toContain('—')
 
-    chip('Schedules').click()
-    await flushUi()
+    await selectTaskFilter('schedules')
     expect(container.querySelector('[aria-label="예약 자동화 목록"]')?.textContent).toContain('Observed schedule')
-    chip('All').click()
+    await selectTaskFilter('all')
     finishPlanning(jsonResponse({ error: { message: 'Planning offline' } }, 503))
     await flushUi()
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('계획 목록 조회 불가')
@@ -611,7 +615,7 @@ describe('workspaces/work', () => {
       .find((el) => el.textContent?.trim() === '새로고침')!
     refresh.click()
     await flushUi()
-    expect(chip('All').textContent).toContain('0')
+    expect(filterTrigger().textContent).toContain('(0)')
     expect(container.textContent).toContain('조건에 맞는 태스크가 없습니다.')
     expect(container.textContent).not.toContain('계획 목록 조회 불가')
 
@@ -623,7 +627,7 @@ describe('workspaces/work', () => {
     refresh.click()
     await flushUi()
     expect(container.textContent).toContain('실행 태스크 · 마지막 조회 결과')
-    expect(chip('All').textContent).toContain('—')
+    expect(filterTrigger().textContent).toContain('—')
     expect(container.textContent).not.toContain('조건에 맞는 태스크가 없습니다.')
 
     execution = jsonResponse({ tasks: [], task_counts: { shown: 0, total: 7 } })
@@ -1276,10 +1280,12 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('rejected')
     expect(container.textContent).toContain('Missing regression test')
 
-    const schedChip = [...container.querySelectorAll('button.wk-chip')].find((b) =>
-      b.textContent?.startsWith('Schedules'),
-    ) as HTMLButtonElement
-    schedChip.click()
+    const filterTrigger = container.querySelector<HTMLButtonElement>('[data-testid="tasks-status-filter"]')!
+    filterTrigger.click()
+    await flushUi()
+    const schedItem = container.querySelector<HTMLButtonElement>('[data-testid="tasks-filter-schedules"]')!
+    expect(schedItem.getAttribute('role')).toBe('menuitemradio')
+    schedItem.click()
     await flushUi(3)
 
     const allHistBtn = [...container.querySelectorAll('button.wk-chip')].find((b) =>
@@ -1493,5 +1499,249 @@ describe('workspaces/work', () => {
     expect(container.textContent).not.toContain('Persistent confirmation evidence body')
     expect(confirmBtn()).toBeUndefined()
     expect(container.querySelector('[role="alert"]')).not.toBeNull()
+  })
+
+  it('uses PopoverMenu for Goals phase filter and secondary detail actions, and collapses 0-hold Candle diagnostics by default', async () => {
+    const onNavigate = vi.fn()
+    const onInspect = vi.fn()
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({
+          tree: [
+            {
+              id: 'goal-ux-1',
+              title: 'Ship UX Polish',
+              priority: 1,
+              phase: 'Executing',
+              measure: { kind: 'done_when', condition: 'All checks pass' },
+              procedure: 'Run vitest',
+              linked_tasks: [],
+            },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) {
+        return jsonResponse({ requests: [] })
+      }
+      if (url.startsWith('/api/v1/candle/ledger')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 1000,
+          data: {
+            ledger_state: 'present',
+            total_events: 1,
+            balance_error: null,
+            policy: {
+              configuration: 'enabled',
+              disabled_reason: null,
+              pricing_mode: 'supply_scaled',
+              half_life: { mode: 'decay', half_life_hours: 168, half_life_sec: 604800 },
+              half_life_sec: 604800,
+            },
+            supply: {
+              issued_milli: '1000',
+              burned_milli: '0',
+              circulating_milli: '1000',
+              total_supply_milli: '1000',
+              active_keepers: 1,
+            },
+            balances: [],
+            recent_events: [],
+            diagnostics: {
+              held_windows_count: 0,
+              unattributed_count: 0,
+              backlog_fenced_count: 0,
+              zero_linked_tasks_goals: 0,
+              items: [],
+            },
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${WorkWorkspace} subroute="goals" onNavigate=${onNavigate} onInspect=${onInspect} />`, container)
+    await flushUi(3)
+
+    // Phase filter uses PopoverMenu with menuitemradio options
+    const phaseTrigger = container.querySelector<HTMLButtonElement>('[data-testid="goals-phase-filter"]')!
+    expect(phaseTrigger.textContent).toContain('단계: 전체 (1)')
+    phaseTrigger.click()
+    await flushUi()
+    const execItem = container.querySelector<HTMLButtonElement>('[data-testid="goals-phase-Executing"]')!
+    expect(execItem.getAttribute('role')).toBe('menuitemradio')
+    execItem.click()
+    await flushUi()
+    expect(phaseTrigger.textContent).toContain('단계: Executing (1)')
+
+    // Secondary Goal detail actions folded into ⋯ PopoverMenu
+    const actionsTrigger = container.querySelector<HTMLButtonElement>('[data-testid="goal-detail-actions"]')!
+    actionsTrigger.click()
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('[data-testid="goal-action-candle"]')!.click()
+    expect(onNavigate).toHaveBeenCalledWith('/work/candle/goal-ux-1')
+
+    // 0-hold Candle diagnostics defaults collapsed
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${WorkWorkspace} subroute="candle" onNavigate=${onNavigate} onInspect=${onInspect} />`, container)
+    await flushUi(3)
+    const diagDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="candle-diagnostics-disclosure"]')
+    expect(diagDisclosure).not.toBeNull()
+    expect(diagDisclosure?.open).toBe(false)
+  })
+
+  it('distinguishes current proven, stale historical, and default-expanded refuted Goal verification evidence disclosures', async () => {
+    const makeCriterion = (revision: string, title: string) => ({
+      revision,
+      title,
+      measure: { kind: 'done_when', condition: 'All checks pass' },
+      procedure: 'Run verification suite',
+    })
+    const makeVerdict = (overrides: {
+      outcome: 'proven' | 'refuted'
+      reason: string | null
+      revision: string
+      title: string
+      evidence: string
+      actor: string
+    }) => ({
+      outcome: overrides.outcome,
+      reason: overrides.reason,
+      request_id: `vr-${overrides.revision}`,
+      verification_run_id: `vrun-${overrides.revision}`,
+      criterion: makeCriterion(overrides.revision, overrides.title),
+      authority: { kind: 'system_llm_agent', actor: overrides.actor },
+      evidence: overrides.evidence,
+      recorded_at: '2026-11-26T06:00:00Z',
+    })
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({
+          tree: [
+            {
+              id: 'goal-proven-1',
+              title: 'Current Proven Goal',
+              priority: 1,
+              phase: 'Completed',
+              measure: { kind: 'done_when', condition: 'All checks pass' },
+              procedure: 'Run verification suite',
+              linked_task_count: 0,
+              tasks: [],
+              verification: {
+                goal_id: 'goal-proven-1',
+                updated_at: '2026-11-26T06:00:00Z',
+                completion: {
+                  state: 'proof_proven',
+                  verdict: makeVerdict({
+                    outcome: 'proven',
+                    reason: null,
+                    revision: 'crev-1',
+                    title: 'Current Proven Goal',
+                    evidence: 'Current proven evidence details',
+                    actor: 'verifier-alpha',
+                  }),
+                },
+              },
+            },
+            {
+              id: 'goal-stale-1',
+              title: 'Stale Proof Goal',
+              priority: 2,
+              phase: 'Executing',
+              measure: { kind: 'done_when', condition: 'All checks pass' },
+              procedure: 'Run verification suite',
+              linked_task_count: 0,
+              tasks: [],
+              verification: {
+                goal_id: 'goal-stale-1',
+                updated_at: '2026-11-26T06:00:00Z',
+                completion: {
+                  state: 'stale_criterion',
+                  historical_completion: {
+                    state: 'proof_proven',
+                    verdict: makeVerdict({
+                      outcome: 'proven',
+                      reason: null,
+                      revision: 'crev-old',
+                      title: 'Stale Proof Goal',
+                      evidence: 'Prior criterion evidence body',
+                      actor: 'verifier-beta',
+                    }),
+                  },
+                },
+              },
+            },
+            {
+              id: 'goal-refuted-1',
+              title: 'Refuted Proof Goal',
+              priority: 1,
+              phase: 'Executing',
+              measure: { kind: 'done_when', condition: 'All checks pass' },
+              procedure: 'Run verification suite',
+              linked_task_count: 0,
+              tasks: [],
+              verification: {
+                goal_id: 'goal-refuted-1',
+                updated_at: '2026-11-26T06:00:00Z',
+                completion: {
+                  state: 'proof_refuted',
+                  verdict: makeVerdict({
+                    outcome: 'refuted',
+                    reason: 'Regression in p95 latency (240ms exceeded 200ms threshold)',
+                    revision: 'crev-3',
+                    title: 'Refuted Proof Goal',
+                    evidence: 'Latency benchmark trace',
+                    actor: 'verifier-gamma',
+                  }),
+                },
+              },
+            },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) {
+        return jsonResponse({ requests: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${WorkWorkspace} subroute="goals" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(4)
+
+    // 1. Current proven: uses "검증 증거" (not "이전") and stays collapsed by default
+    const provenDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="goal-verification-evidence-disclosure"]')
+    expect(provenDisclosure).not.toBeNull()
+    expect(provenDisclosure?.open).toBe(false)
+    const provenSummary = provenDisclosure?.querySelector('summary')?.textContent ?? ''
+    expect(provenSummary).toContain('검증 증거')
+    expect(provenSummary).not.toContain('이전')
+
+    // 2. Stale historical proof: explicitly labeled "이전 기준 검증 기록" and collapsed by default
+    const staleRow = [...container.querySelectorAll<HTMLButtonElement>('button.wk-goal-row')]
+      .find((b) => b.textContent?.includes('Stale Proof Goal'))!
+    staleRow.click()
+    await flushUi(3)
+    const staleDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="goal-verification-evidence-disclosure"]')
+    expect(staleDisclosure).not.toBeNull()
+    expect(staleDisclosure?.open).toBe(false)
+    expect(staleDisclosure?.querySelector('summary')?.textContent).toContain('이전 기준 검증 기록')
+
+    // 3. Refuted proof: labeled "검증 반증 사유", defaults expanded (open=true) showing proof.reason immediately
+    const refutedRow = [...container.querySelectorAll<HTMLButtonElement>('button.wk-goal-row')]
+      .find((b) => b.textContent?.includes('Refuted Proof Goal'))!
+    refutedRow.click()
+    await flushUi(3)
+    const refutedDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="goal-verification-evidence-disclosure"]')
+    expect(refutedDisclosure).not.toBeNull()
+    expect(refutedDisclosure?.open).toBe(true)
+    const refutedSummary = refutedDisclosure?.querySelector('summary')?.textContent ?? ''
+    expect(refutedSummary).toContain('검증 반증 사유')
+    expect(refutedSummary).not.toContain('이전')
+    expect(refutedDisclosure?.textContent).toContain('Regression in p95 latency (240ms exceeded 200ms threshold)')
   })
 })

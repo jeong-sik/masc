@@ -20,7 +20,7 @@ import type uPlot from 'uplot'
 import { isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { formatObserved, observedValue, resourceCache } from '../../core/resource-cache'
-import { TIME_WINDOWS, setTimeWindow, timeWindow, type TimeWindow } from '../../core/time-window'
+import { timeWindow, type TimeWindow } from '../../core/time-window'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -101,6 +101,26 @@ function loadMemoryDiff(win: TimeWindow, reason: 'mount' | 'manual') {
     }),
     { ttlMs: 12_000, topics: MEMORY_TOPICS, reason },
   )
+}
+
+function summarizeDiffEntry(entry: unknown, idx: number): string {
+  if (typeof entry === 'string') {
+    const trimmed = entry.trim()
+    return trimmed ? trimmed.slice(0, 96) : `항목 #${idx + 1}`
+  }
+  if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+    const rec = entry as Record<string, unknown>
+    const parts: string[] = []
+    for (const key of ['claim', 'summary', 'title', 'claim_id', 'id', 'path', 'keeper', 'category']) {
+      const val = rec[key]
+      if (typeof val === 'string' && val.trim()) {
+        parts.push(val.trim())
+        if (parts.length >= 2) break
+      }
+    }
+    if (parts.length > 0) return parts.join(' · ').slice(0, 120)
+  }
+  return `항목 #${idx + 1}`
 }
 
 export function MemoryTab(_props: WorkspaceViewProps) {
@@ -385,19 +405,6 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           `}
         </div>
         <div class="kn-actions">
-          <div class="kn-chips" role="group" aria-label="전역 시간 창 (timeWindow)">
-            ${TIME_WINDOWS.map((w) => html`
-              <button
-                key=${w}
-                type="button"
-                class="kn-chip mono"
-                aria-pressed=${activeWin === w}
-                onClick=${() => setTimeWindow(w)}
-              >
-                ${w}
-              </button>
-            `)}
-          </div>
           <button type="button" class="btn-ghost" onClick=${() => void refresh()}>새로고침</button>
         </div>
       </div>
@@ -511,14 +518,14 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         `}
 
         ${world && visibleSection === 'conflicts' && html`
-          <section class="kn-section" aria-label="Side-by-Side Active Conflicts Inspector">
+          <div class="kn-stack-2" role="region" aria-label="Side-by-Side Active Conflicts Inspector">
             <div class="kn-notice kn-notice--info" role="note">
               읽기 전용 충돌 검사기 (Read-Only): 현재 서버에는 World Memory 충돌 해소 쓰기 API가 노출되어 있지 않습니다. 허위 해소 버튼을 제공하지 않으며, 각 Keeper의 원천 사실과 경합 주장을 나란히 비교할 수 있습니다.
             </div>
             ${world.activeConflicts.length === 0
-              ? html`<span class="dtable-absent">활성 메모리 충돌이 없습니다 (0).</span>`
+              ? html`<div class="kn-section"><span class="dtable-absent">활성 메모리 충돌이 없습니다 (0).</span></div>`
               : world.activeConflicts.map((cf) => html`
-                  <div key=${cf.conflictId} class="kn-section kn-surface-alt">
+                  <section key=${cf.conflictId} class="kn-section">
                     <div class="kn-section-head">
                       <strong>${cf.description || cf.conflictId}</strong>
                       <span class="kn-badge kn-badge--warn">경합 주장 ${cf.memberCount}건</span>
@@ -539,9 +546,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                         </article>
                       `)}
                     </div>
-                  </div>
+                  </section>
                 `)}
-          </section>
+          </div>
         `}
 
         ${visibleSection === 'diff' && html`
@@ -567,7 +574,15 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             ${diffData !== null && (activeDiffList.length === 0
               ? html`<span class="dtable-absent">${activeWin} 기간 내 ${diffSubTab} 항목이 없습니다.</span>`
               : activeDiffList.map((entry, idx) => html`
-                  <pre key=${idx} class="kn-diff-box">${JSON.stringify(entry, null, 2)}</pre>
+                  <details key=${idx} class="ap-disclosure" data-testid="memory-diff-entry">
+                    <summary class="ap-disclosure-trigger">
+                      <span class="kn-diff-summary-text">${summarizeDiffEntry(entry, idx)}</span>
+                      <span class="mono kn-sub-id">JSON ▸</span>
+                    </summary>
+                    <div class="ap-disclosure-body">
+                      <pre class="kn-diff-box">${JSON.stringify(entry, null, 2)}</pre>
+                    </div>
+                  </details>
                 `))}
           </section>
         `}

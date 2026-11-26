@@ -629,7 +629,11 @@ candidates = ["safe.model"]
     expect(container.querySelector('[data-testid="chat-tool-card"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="chat-memory-card"]')).toBeNull()
     expect(container.querySelector('[data-testid="chat-autonomous-card"]')).toBeNull()
-    // Toolbar shows hidden internal count (2)
+    // Open 표시 ▾ PopoverMenu; display menu shows hidden internal count (2)
+    const displayMenuBtn = container.querySelector('[data-testid="chat-display-menu"]') as HTMLButtonElement
+    expect(displayMenuBtn).not.toBeNull()
+    displayMenuBtn.click()
+    await flushUi(10)
     expect(container.querySelector('[data-testid="chat-toggle-internal"]')!.textContent).toContain('(2)')
 
     // Manually opening a collapsed <details> card persists across unrelated re-renders (never snapped shut)

@@ -22,7 +22,7 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
-import { MasterDetail, TargetLockedAction, VirtualList } from '../../components/primitives'
+import { MasterDetail, PopoverMenu, TargetLockedAction, VirtualList } from '../../components/primitives'
 import {
   GOAL_PHASES,
   asNonEmptyString,
@@ -420,6 +420,12 @@ export function GoalsTab(props: WorkspaceViewProps) {
   const proof = verification?.state === 'stale' ? verification.historical
     : verification?.state === 'current' && selectedGoal?.phase !== 'Awaiting_confirmation'
       ? verification.completion : null
+  const isStaleProof = verification?.state === 'stale'
+  const proofHeading = isStaleProof
+    ? '이전 기준 검증 기록'
+    : proof?.state === 'refuted'
+      ? '검증 반증 사유'
+      : '검증 증거'
 
   const loadConfirmation = useCallback(async (goalId: string, source: Observed<GoalListRead>) => {
     if (multiAccount || !isEpochCurrent(epoch) || source.kind !== 'value' || source.stale) return
@@ -702,35 +708,38 @@ export function GoalsTab(props: WorkspaceViewProps) {
       </div>
 
       <div class="wk-filter-bar">
-        <input
-          type="search"
-          class="wk-input"
-          placeholder="목표 제목, ID, 측정 조건 검색…"
-          value=${query}
-          onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          aria-label="목표 검색"
-        />
-        <div class="wk-chips" role="group" aria-label="목표 단계 필터">
-          <button
-            type="button"
-            class="wk-chip"
-            aria-pressed=${phaseFilter === 'ALL'}
-            onClick=${() => setPhaseFilter('ALL')}
-          >
-            All <span class="wk-chip-count">${goalCountsKnown ? phaseCounts.ALL : '—'}</span>
-          </button>
-          ${GOAL_PHASES.map((phase) => html`
-            <button
-              key=${phase}
-              type="button"
-              class="wk-chip"
-              aria-pressed=${phaseFilter === phase}
-              onClick=${() => setPhaseFilter(phase)}
-            >
-              ${goalPhaseLabel(phase)}
-              <span class="wk-chip-count">${goalCountsKnown ? phaseCounts[phase] : '—'}</span>
-            </button>
-          `)}
+        <div class="wk-filter-row">
+          <${PopoverMenu}
+            triggerLabel=${`단계: ${phaseFilter === 'ALL' ? '전체' : goalPhaseLabel(phaseFilter)} (${goalCountsKnown ? phaseCounts[phaseFilter] : '—'}) ▾`}
+            triggerClassName="btn-ghost"
+            triggerTestId="goals-phase-filter"
+            popoverTestId="goals-phase-filter-menu"
+            ariaLabel="목표 단계 필터"
+            items=${[
+              {
+                id: 'ALL',
+                testId: 'goals-phase-ALL',
+                label: `전체 (${goalCountsKnown ? phaseCounts.ALL : '—'})`,
+                active: phaseFilter === 'ALL',
+                onSelect: () => setPhaseFilter('ALL'),
+              },
+              ...GOAL_PHASES.map((phase) => ({
+                id: phase,
+                testId: `goals-phase-${phase}`,
+                label: `${goalPhaseLabel(phase)} (${goalCountsKnown ? phaseCounts[phase] : '—'})`,
+                active: phaseFilter === phase,
+                onSelect: () => setPhaseFilter(phase),
+              })),
+            ]}
+          />
+          <input
+            type="search"
+            class="wk-input wk-filter-search"
+            placeholder="목표 제목, ID, 측정 조건 검색…"
+            value=${query}
+            onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+            aria-label="목표 검색"
+          />
         </div>
         ${goalRead && goalRead.rejectedCount > 0 && html`
           <div class="wk-notice wk-notice--warn" role="status">
@@ -913,34 +922,40 @@ export function GoalsTab(props: WorkspaceViewProps) {
                 ${goalPhaseLabel(selectedGoal.phase)}
                 ${selectedGoal.resumePhase ? ` (보존: ${selectedGoal.resumePhase})` : ''}
               </span>
-              <button
-                type="button"
-                class="btn-ghost"
-                aria-label="목표 ID 복사"
-                title="목표 ID 복사"
-                onClick=${() => void copyText('목표 ID', selectedGoal.id)}
-              >
-                ID 복사
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => props.onNavigate(`/work/candle/${encodeURIComponent(selectedGoal.id)}`)}
-              >
-                Candle 지급 보기 →
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => props.onInspect({
-                  title: `Goal: ${selectedGoal.title}`,
-                  subtitle: `${selectedGoal.id} · ${selectedGoal.phase}`,
-                  kind: 'goal',
-                  data: selectedGoal,
-                })}
-              >
-                원본 검사
-              </button>
+              <${PopoverMenu}
+                align="right"
+                triggerLabel="⋯"
+                triggerClassName="btn-ghost"
+                triggerTestId="goal-detail-actions"
+                popoverTestId="goal-detail-actions-menu"
+                ariaLabel="목표 추가 작업"
+                items=${[
+                  {
+                    id: 'copy-id',
+                    testId: 'goal-action-copy-id',
+                    label: 'ID 복사',
+                    description: selectedGoal.id,
+                    onSelect: () => void copyText('목표 ID', selectedGoal.id),
+                  },
+                  {
+                    id: 'candle',
+                    testId: 'goal-action-candle',
+                    label: 'Candle 지급 보기 →',
+                    onSelect: () => props.onNavigate(`/work/candle/${encodeURIComponent(selectedGoal.id)}`),
+                  },
+                  {
+                    id: 'inspect',
+                    testId: 'goal-action-inspect',
+                    label: '원본 검사',
+                    onSelect: () => props.onInspect({
+                      title: `Goal: ${selectedGoal.title}`,
+                      subtitle: `${selectedGoal.id} · ${selectedGoal.phase}`,
+                      kind: 'goal',
+                      data: selectedGoal,
+                    }),
+                  },
+                ]}
+              />
             </div>
           </div>
 
@@ -1110,25 +1125,38 @@ export function GoalsTab(props: WorkspaceViewProps) {
           `}
 
           ${(proof?.state === 'proven' || proof?.state === 'refuted') && html`
-            <section class="wk-section" aria-label="목표 검증 증거">
-              <div class="wk-section-head">
-                <h3 class="wk-section-title">${verification?.state === 'stale' ? '이전 기준의 검증 증거' : '목표 검증 증거'}</h3>
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  aria-label="검증 증거 복사"
-                  title="검증 증거 복사"
-                  onClick=${() => void copyText('검증 증거', proof.evidence)}
-                >
-                  증거 복사
-                </button>
+            <details
+              key=${selectedGoal.id}
+              class="ap-disclosure"
+              data-testid="goal-verification-evidence-disclosure"
+              aria-label=${isStaleProof ? '이전 기준 검증 기록' : '목표 검증 증거'}
+              open=${proof.state === 'refuted'}
+            >
+              <summary class="ap-disclosure-trigger">
+                <span>
+                  ${proofHeading} · ${proof.state === 'proven' ? '증명됨' : '반증됨'} (${proof.actor})
+                </span>
+                <span aria-hidden="true">▸</span>
+              </summary>
+              <div class="ap-disclosure-body">
+                <div class="wk-section-head">
+                  <div class="wk-muted-sm">
+                    ${proof.state === 'proven' ? '증명됨' : '반증됨'} · ${proof.actor} · ${formatRelativeTime(proof.recordedAt)}
+                  </div>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    aria-label="검증 증거 복사"
+                    title="검증 증거 복사"
+                    onClick=${() => void copyText('검증 증거', proof.evidence)}
+                  >
+                    증거 복사
+                  </button>
+                </div>
+                <${MarkdownContent} class="wk-prose" text=${proof.evidence} />
+                ${proof.state === 'refuted' && html`<${MarkdownContent} class="wk-notice" text=${proof.reason} />`}
               </div>
-              <div class="wk-muted-sm">
-                ${proof.state === 'proven' ? '증명됨' : '반증됨'} · ${proof.actor} · ${formatRelativeTime(proof.recordedAt)}
-              </div>
-              <${MarkdownContent} class="wk-prose" text=${proof.evidence} />
-              ${proof.state === 'refuted' && html`<${MarkdownContent} class="wk-notice" text=${proof.reason} />`}
-            </section>
+            </details>
           `}
 
           <section class="wk-section" aria-label="연결된 태스크">

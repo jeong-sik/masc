@@ -676,7 +676,15 @@ describe('workspaces/knowledge', () => {
     const iframe = container.querySelector('iframe.kn-artifact-frame') as HTMLIFrameElement
     expect(iframe).not.toBeNull()
     expect(iframe.getAttribute('sandbox')).toBe('')
-    expect(container.textContent).toContain(sha)
+    const shaEl = container.querySelector('[data-testid="artifact-sha256"]')
+    expect(shaEl).not.toBeNull()
+    expect(shaEl?.textContent).toContain(sha)
+    expect(container.querySelector('[data-testid="artifact-sha-copy"]')).toBeNull()
+    // Secondary actions (SHA-256 복사, 메타데이터) folded into ⋯ PopoverMenu
+    container.querySelector<HTMLButtonElement>('[data-testid="artifact-detail-actions"]')!.click()
+    await flushUi()
+    expect(container.querySelector('[data-testid="artifact-action-copy-sha"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="artifact-action-metadata"]')).not.toBeNull()
   })
 
   it('World Memory handles MVCC & legacy shapes, passes scope=world synced to timeWindow, shows read-only conflicts, and executes Librarian recovery acts', async () => {
@@ -1343,5 +1351,136 @@ describe('workspaces/knowledge', () => {
       },
       { timeout: 2000 },
     )
+  })
+
+  it('uses PopoverMenu for Wiki tag filter, collapses Wiki links & Memory diff JSON, and removes duplicate timeWindow chips in Memory tab', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki?')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            pages_total: 1,
+            pages_readable: 1,
+            pages_unreadable: 0,
+            pages: [
+              {
+                slug: 'design-notes',
+                file: 'design-notes.md',
+                title: 'Design Notes',
+                summary: 'Summary',
+                source: 'observation',
+                author: 'sangsu',
+                created: '2026-11-25T00:00:00Z',
+                updated: '2026-11-26T00:00:00Z',
+                revision: 1,
+                tags: ['ux', 'dashboard'],
+                backlink_count: 1,
+                outgoing_link_count: 1,
+                sources_count: 1,
+                hearsay_count: 0,
+                sha256: 'sha-design',
+              },
+            ],
+            unreadable_pages: [],
+            tags: [{ tag: 'ux', count: 3 }, { tag: 'dashboard', count: 2 }],
+            sources: { observation: 1 },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki/design-notes')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            slug: 'design-notes',
+            file: 'design-notes.md',
+            sha256: 'sha-design',
+            frontmatter: {
+              title: 'Design Notes',
+              summary: 'Summary',
+              source: 'observation',
+              revision: 1,
+              author: 'sangsu',
+              created: '2026-11-25T00:00:00Z',
+              updated: '2026-11-26T00:00:00Z',
+              tags: ['ux'],
+              sources: [],
+              hearsay: [],
+            },
+            body_markdown: '# Hello Wiki',
+            backlinks: ['overview'],
+            outgoing_links: [{ kind: 'page', target: 'architecture', text: 'Architecture', exists: true }],
+            lint_findings: [],
+          },
+        })
+      }
+      if (url === '/api/v1/memory/world') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            source_kind: 'world_memory_db',
+            inventory: { ledger_sha256: 'sha-world', claims_count: 1, facts_count: 1, conflicts_count: 0, excluded_count: 0 },
+            claims: [],
+            active_conflicts: [],
+            briefing: { status: 'current', text: 'Briefing', source_ids_count: 1 },
+            writers: { mode: 'running', error_count: 0, warn_count: 0, rows: [] },
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/memory/diff')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            range: { window: '24h', from_rev: 1, to_rev: 2, from_unix: null, to_unix: null },
+            counts: { added: 1, updated: 0, retracted: 0, incomplete_batches: 0, aborted_batches: 0 },
+            retrieval_heat: { hot: 1, warm: 0, cold: 0, never_retrieved: 0 },
+            added: [{ claim_id: 'c-1', claim: 'Compact UI saves vertical space' }],
+            updated: [],
+            retracted: [],
+            ticks: [],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(3)
+
+    // Wiki tags are inside a PopoverMenu, and Backlinks/Outgoing links default collapsed
+    const tagTrigger = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-filter"]')!
+    expect(tagTrigger.textContent).toContain('태그 (2)')
+    tagTrigger.click()
+    await flushUi()
+    expect(container.querySelector('[data-testid="wiki-tag-ux"]')?.getAttribute('role')).toBe('menuitemradio')
+    const linksDisclosure = container.querySelector<HTMLDetailsElement>('[data-testid="wiki-links-disclosure"]')
+    expect(linksDisclosure).not.toBeNull()
+    expect(linksDisclosure?.open).toBe(false)
+    expect(linksDisclosure?.querySelector('summary')?.textContent).toContain('Backlinks 1 · Outgoing 1')
+
+    // Memory tab removes duplicate timeWindow chips and collapses Temporal Diff raw JSON
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${KnowledgeWorkspace} subroute="memory" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(3)
+
+    expect(container.querySelector('[aria-label="전역 시간 창 (timeWindow)"]')).toBeNull()
+    const diffTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((b) => b.textContent?.includes('Temporal Diff'))!
+    diffTab.click()
+    await flushUi()
+    const diffEntry = container.querySelector<HTMLDetailsElement>('[data-testid="memory-diff-entry"]')
+    expect(diffEntry).not.toBeNull()
+    expect(diffEntry?.open).toBe(false)
+    expect(diffEntry?.querySelector('summary')?.textContent).toContain('Compact UI saves vertical space')
   })
 })

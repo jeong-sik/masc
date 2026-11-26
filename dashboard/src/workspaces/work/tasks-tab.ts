@@ -1386,7 +1386,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       master=${masterPane}
       detail=${detailPane}
       hasSelection=${chip === 'schedules' ? selectedSchedule !== null : selectedTask !== null}
-      selectionKey=${chip === 'schedules' ? `sched:${selectedScheduleId ?? ''}` : `task:${selectedTaskId ?? ''}`}
+      selectionKey=${chip === 'schedules' ? selectedScheduleId : selectedTaskId}
+      linkedKey=${props.entityId ?? null}
       masterLabel=${chip === 'schedules' ? '예약 목록' : '태스크 목록'}
       detailLabel=${chip === 'schedules' ? '예약 상세' : '태스크 상세'}
       emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">항목을 선택하세요.</span></div>`}

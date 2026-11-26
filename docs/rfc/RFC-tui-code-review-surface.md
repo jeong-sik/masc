@@ -111,21 +111,27 @@ related: []
 
   ```ocaml
   (* Keeper_file_target *)
-  type t = private { keeper : string; relative_path : string; read_range : line_range option }
+  type t = private { relative_path : string; lines : line_range option }
   ```
 
+- 키퍼 이름은 넣지 않는다. 도구 기록 쪽은 키퍼별로 나뉘어 있어서 행이 어느 키퍼 것인지 이미 안다.
+- `lines` 는 그 호출이 건드린 줄이다(1부터, 양끝 포함). 읽기는 돌려준 줄, 쓰기는 새 내용 전체, 고치기는 첫 번째로 바꾼 곳의 새 범위다. 범위를 모르면 비운다.
+
 - `relative_path` 는 `Keeper_alerting_path.confined_relative_path confined` 다(`keeper_alerting_path.mli:144`). TUI 는 이것을 `Ws_keeper keeper` 범위의 경로로 쓴다. 서버의 `Ws_keeper` 기준 폴더는 `Keeper_sandbox.host_root_abs_of_meta` 다(`server_routes_http_routes_workspace.ml:101-115`).
-- 값을 만드는 곳은 `confined` 가 보이는 파일 도구 실행 지점이다. 쓰기·고치기 도구와 읽기 도구(`keeper_tool_filesystem_runtime_read.ml`, `_owned_read.ml`) 모두 넣는다. 읽기 도구는 읽은 줄 범위를 `read_range` 로 싣는다.
-- 기록 행에 `file_target` 필드로 저장한다. 파일 도구가 아닌 호출에는 필드가 없다. 필드가 없다는 것은 「대상 파일 없음」이다. 다른 값으로 채우지 않는다.
-- TUI 는 `tool_call_entry` 에 `file_target` 과 `file_change_evidence` 를 디코드해 싣는다. 떠 있는 창의 첫 줄은 고친 범위의 시작 줄, 없으면 읽은 범위의 시작 줄, 둘 다 없으면 파일 처음이다.
+- 값을 만드는 곳은 `confined` 가 보이는 파일 도구 실행 지점이다. 쓰기·고치기 도구와 읽기 도구(`keeper_tool_filesystem_runtime_read.ml`, `_owned_read.ml`) 모두 넣는다.
+- 기록 행에 `file_target` 필드로 저장한다. 모양은 `{"path": "<상대 경로>", "lines": {"start_line": n, "end_line": m}}` 이고 `lines` 는 없을 수 있다. 파일 도구가 아닌 호출에는 필드가 없다. 필드가 없다는 것은 「대상 파일 없음」이다. 다른 값으로 채우지 않는다.
+- TUI 는 `tool_call_entry.file_target` 으로 디코드한다. 경로가 비었거나 줄 범위가 1부터가 아니면 그 쪽 전체를 디코드 실패로 본다. 떠 있는 창의 첫 줄은 `lines` 의 시작 줄, 없으면 파일 처음이다.
 
 ### D4. 떠 있는 파일 창
 
-- 새 overlay `Nav.File_peek of file_peek` 를 둔다.
+- 새 inspector `Nav.File_inspector of file_peek` 를 둔다. overlay 로 두면 overlay 를 따지는 match 약 90곳이 모두 바뀐다. inspector 는 이미 「지금 화면 위에 떠서 `Esc` 로 돌아가는 화면」이고 match 가 약 40곳이다.
 
   ```ocaml
-  type file_peek = { scope : Wire_infra.workspace_scope; path : string; line : int option }
+  type file_peek = { keeper : string; path : string; line : int }
   ```
+
+- 범위는 늘 `Ws_keeper keeper` 라서 `scope` 대신 `keeper` 를 싣는다. 대상 줄이 없으면 `line = 1` 이다.
+- 내용은 `Infra_store.file_peek` 칸에 둔다. Code 탭의 `open_file` 과 칸을 나눠서, 창을 열어도 Code 탭에서 보던 파일이 바뀌지 않는다.
 
 - 여는 곳: 키퍼 도구 기록 행 중 D3 의 대상 파일 필드가 있는 행에서 `o`. 필드가 없는 행에서는 `o` 가 아무 요청도 내지 않고 상태 줄에 「이 도구 기록에는 대상 파일이 없어요」를 띄운다.
 - 창은 지금 화면 위에 뜬다. 뒤 화면의 상태는 바뀌지 않는다. `Esc` 로 닫으면 원래 자리로 돌아간다.

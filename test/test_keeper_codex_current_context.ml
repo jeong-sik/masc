@@ -1882,8 +1882,9 @@ let test_p1_7_endpoint_owned_rejects_symlinks_without_chmod () =
        Fs_compat.mkdir_p workspaces_leaf;
        Unix.symlink outside (Filename.concat workspaces_leaf identity);
        (match
-          Keeper_codex_runtime.For_testing.native_cwd
+          Keeper_native_cwd.resolve
             ~base_path:base_leaf ~keeper_name ~sandbox_profile:None
+            Keeper_native_cwd.Codex_app_server
         with
         | Ok path -> fail ("leaf symlink was accepted as Codex cwd: " ^ path)
         | Error _ -> ());
@@ -1896,10 +1897,11 @@ let test_p1_7_endpoint_owned_rejects_symlinks_without_chmod () =
        Fs_compat.mkdir_p official_parent;
        Unix.symlink outside (Filename.concat official_parent "codex-workspaces");
        (match
-          Keeper_codex_runtime.For_testing.native_cwd
+          Keeper_native_cwd.resolve
             ~base_path:base_parent
             ~keeper_name
             ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm)
+            Keeper_native_cwd.Codex_app_server
         with
         | Ok path -> fail ("intermediate symlink was accepted as Codex cwd: " ^ path)
         | Error _ -> ());
@@ -1909,12 +1911,13 @@ let test_p1_7_endpoint_owned_rejects_symlinks_without_chmod () =
          ((Unix.stat outside).Unix.st_perm land 0o777);
        (* 3. Clean Endpoint_owned directory succeeds with 0o700 permissions. *)
        match
-         Keeper_codex_runtime.For_testing.native_cwd
+         Keeper_native_cwd.resolve
            ~base_path:base_clean
            ~keeper_name
            ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm)
+           Keeper_native_cwd.Codex_app_server
        with
-       | Error err -> fail ("clean Endpoint_owned workspace failed: " ^ Agent_core.Error.to_string err)
+       | Error detail -> fail ("clean Endpoint_owned workspace failed: " ^ detail)
        | Ok cwd ->
          let expected =
            List.fold_left

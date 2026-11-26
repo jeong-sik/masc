@@ -732,6 +732,38 @@ for line in sys.stdin:
     check (option string) "full" None (host_allowlist Runtime_native_tools.Native_full))
 ;;
 
+(* base_path is the operator's checkout, so an ACP host at read or full runs
+   in the Keeper's private folder, the rule Codex follows (#39444). At none
+   the pool key keeps base_path: that host makes an empty folder when it
+   spawns. *)
+let test_acp_read_and_full_run_in_the_keepers_private_folder () =
+  let base_path = Filename.temp_dir "acp-native-cwd-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let keeper_name = "keeper-a" in
+    let cwd posture =
+      match
+        Keeper_acp_runtime.For_testing.native_cwd_of_posture ~base_path ~keeper_name
+          ~required_native_posture:(Some posture) posture
+      with
+      | Ok dir -> dir
+      | Error err -> fail (Agent_core.Error.to_string err)
+    in
+    let private_folder =
+      List.fold_left Filename.concat
+        (Common.masc_dir_from_base_path ~base_path:(Unix.realpath base_path))
+        [ "official-clients"; "acp-workspaces"
+        ; Agent_core_sha256.(to_hex (digest_string keeper_name)) ]
+    in
+    check string "read runs in the Keeper's private folder" private_folder
+      (cwd Runtime_native_tools.Native_read);
+    check string "full runs in the same folder" private_folder
+      (cwd Runtime_native_tools.Native_full);
+    check int "the folder is the current user's alone" 0o700
+      ((Unix.lstat private_folder).Unix.st_perm land 0o777);
+    check string "none keeps base_path in the pool key" base_path
+      (cwd Runtime_native_tools.Native_none))
+;;
+
 (* The name the bridge of the Keeper [keeper-a] has under [driver]. *)
 let bridge_name_of driver = Runtime_acp_client.bridge_server_name driver ~owner:"keeper-a"
 
@@ -6247,6 +6279,8 @@ let () =
             test_muse_start_spawns_the_host_with_the_posture_toolset
         ; test_case "vibe start spawns the host with the posture allowlist" `Quick
             test_vibe_start_spawns_the_host_with_the_posture_allowlist
+        ; test_case "acp read and full run in the Keeper's private folder" `Quick
+            test_acp_read_and_full_run_in_the_keepers_private_folder
         ; test_case "server record reads every field from the bridge" `Quick
             test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
         ; test_case "bridge server name per driver" `Quick test_bridge_server_names

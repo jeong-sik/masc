@@ -111,7 +111,12 @@ stdio for official subscription CLIs, selected by `driver`: `antigravity`
 (`command = "agy"`, `args = ["acp"]`), `kimi_code` (`command = "kimi"`,
 `args = ["acp"]`), `mistral_vibe` (`command = "vibe-acp"`), and `muse_code`
 (`command = "muse"`, `args = ["acp"]`). Each Keeper owns
-an isolated child process and loopback HTTP MCP bridge. `driver` and
+an isolated child process and loopback HTTP MCP bridge. At native posture
+`none` the host runs in an empty temporary folder. At `read` and `full` it
+runs where a Codex Keeper does, never in the base path: the Keeper's sandbox
+host tree when its sandbox mounts one, otherwise
+`<base-path>/.masc/official-clients/acp-workspaces/<SHA-256 of the Keeper
+name>`, a `0700` folder every ACP driver of that Keeper shares. `driver` and
 `is-non-interactive = true` are required; `account-home` is refused. Use
 `strip-env` when a host API-key variable must be removed so the client uses its
 subscription login (for example, `strip-env = ["MISTRAL_API_KEY"]` on `vibe-acp`

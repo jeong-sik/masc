@@ -1999,6 +1999,32 @@ let seed_past_max_context
         | Some _ | None -> { read with Keeper_carried_front.seed = Some moved_to })
 ;;
 
+(* The cwd a [Native_read] or [Native_full] host runs in, by the rule Codex
+   follows ({!Keeper_native_cwd}): never base_path. A [Native_none] host runs
+   in an empty folder made when it spawns, and its pool key keeps base_path.
+   A posture the caller required has no Keeper file to read a sandbox from,
+   as on the Codex path. *)
+let native_cwd_of_posture ~base_path ~keeper_name ~required_native_posture native_posture =
+  match (native_posture : Runtime_native_tools.posture) with
+  | Native_none -> Ok base_path
+  | Native_read | Native_full ->
+    let* sandbox_profile =
+      match (required_native_posture : Runtime_native_tools.posture option) with
+      | Some _ -> Ok None
+      | None ->
+        let* defaults =
+          Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path keeper_name
+          |> Result.map_error (fun error ->
+            config_error ~field:"keeper.sandbox_profile"
+              (Keeper_types_profile.keeper_toml_load_error_to_string error))
+        in
+        Ok defaults.sandbox_profile
+    in
+    Keeper_native_cwd.resolve ~base_path ~keeper_name ~sandbox_profile Keeper_native_cwd.Acp
+    |> Result.map_error (config_error ~field:"acp.native_workspace")
+;;
+
 let run_without_lifecycle
       ~on_guidance_prepared
       ~result_scope
@@ -2108,6 +2134,10 @@ let run_without_lifecycle
         ~client_label:runtime_label
         ~default:Runtime_native_tools.Native_none
         ~none_supported:(Runtime_execution.supports_native_none (Runtime_execution.Acp config))
+  in
+  (* Before the session claim, so a refusal leaves no claim to settle. *)
+  let* native_cwd =
+    native_cwd_of_posture ~base_path ~keeper_name ~required_native_posture native_posture
   in
   let* () = on_guidance_prepared () in
   let* () =
@@ -2567,7 +2597,7 @@ let run_without_lifecycle
     ; tool_surface_sha256
     ; process_config_sha256 =
         process_config_sha256 ~native_posture ~skills_dirs ~agent_compaction config
-    ; cwd = base_path
+    ; cwd = native_cwd
     ; dangerously_skip_permissions =
         (native_posture = Runtime_native_tools.Native_full)
     }
@@ -3142,7 +3172,7 @@ let run_without_lifecycle
            | Runtime_native_tools.Native_none ->
              Acp.create_isolated_workspace ~sw ~prefix:("keeper-" ^ keeper_name) ()
            | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
-             Ok base_path)
+             Ok key.cwd)
           |> Result.map_error (fun err ->
             recovery_failure := recovery_failure_of_acp_error err;
             acp_error_to_core_error err)
@@ -3842,6 +3872,7 @@ let run
 module For_testing = struct
   let acp_error_to_core_error = acp_error_to_core_error
   let should_evict_persistent_child_on_error = should_evict_persistent_child_on_error
+  let native_cwd_of_posture = native_cwd_of_posture
   let recovery_failure_of_acp_error = recovery_failure_of_acp_error
   let classify_prompt_error = classify_prompt_error
   let api_usage_of_acp_usage = api_usage_of_acp_usage

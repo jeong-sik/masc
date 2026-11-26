@@ -1025,6 +1025,44 @@ let adjust_scroll = Store_scroll.adjust_scroll
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0; diff_scroll_offset = 0 }
 
+let review_changes t =
+  match Observed.to_option t.code.git_status with
+  | Some (sc, (st : Wire_infra.git_status_snapshot))
+    when Wire_infra.equal_workspace_scope sc t.code.scope ->
+      st.changes
+  | Some _ | None -> []
+
+let review_selected_index t =
+  match t.code.active_file_path with
+  | None -> None
+  | Some path ->
+      List.find_index
+        (fun (c : Wire_infra.git_status_change) -> String.equal c.path path)
+        (review_changes t)
+
+let select_review_change ~delta t =
+  let changes = review_changes t in
+  let total = List.length changes in
+  let target =
+    match review_selected_index t with
+    | Some i -> clamp_index total (i + delta)
+    | None -> if delta >= 0 then 0 else total - 1
+  in
+  match List.nth_opt changes target with
+  | Some (c : Wire_infra.git_status_change)
+    when not (Option.equal String.equal t.code.active_file_path (Some c.path)) ->
+      {
+        t with
+        code =
+          {
+            t.code with
+            active_file_path = Some c.path;
+            pending_jump_line = None;
+            git_scroll_offset = 0;
+          };
+      }
+  | Some _ | None -> t
+
 let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Infra_sandboxes ->
@@ -1653,44 +1691,6 @@ let open_file_for_current t =
          && path_matches_active_code ~path:p t ->
       Some content
   | Some _ | None -> None
-
-let review_changes t =
-  match Observed.to_option t.code.git_status with
-  | Some (sc, (st : Wire_infra.git_status_snapshot))
-    when Wire_infra.equal_workspace_scope sc t.code.scope ->
-      st.changes
-  | Some _ | None -> []
-
-let review_selected_index t =
-  match t.code.active_file_path with
-  | None -> None
-  | Some path ->
-      List.find_index
-        (fun (c : Wire_infra.git_status_change) -> String.equal c.path path)
-        (review_changes t)
-
-let select_review_change ~delta t =
-  let changes = review_changes t in
-  let total = List.length changes in
-  let target =
-    match review_selected_index t with
-    | Some i -> clamp_index total (i + delta)
-    | None -> if delta >= 0 then 0 else total - 1
-  in
-  match List.nth_opt changes target with
-  | Some (c : Wire_infra.git_status_change)
-    when not (Option.equal String.equal t.code.active_file_path (Some c.path)) ->
-      {
-        t with
-        code =
-          {
-            t.code with
-            active_file_path = Some c.path;
-            pending_jump_line = None;
-            git_scroll_offset = 0;
-          };
-      }
-  | Some _ | None -> t
 
 let review_diff_rows ~cols t =
   match Observed.to_option t.code.git_diff with

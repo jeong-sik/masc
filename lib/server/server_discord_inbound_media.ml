@@ -178,7 +178,18 @@ let load ~base_path ~clock ~keeper_name (source : Keeper_chat_operation_payload.
        in
        resolve ~max_bytes:(Keeper_vision_tool.max_image_bytes ())
          ~is_bound ~fetch_original ~fetch_bytes ~channel_id ~message_id ~author_id ~attachment_ids)
-  | _, _ -> unavailable attachment_ids Original_mismatch
+  (* Only a Discord continuation that names its original message can be read
+     back. Every other connector is named so a new one must decide here
+     whether its attachments can be read. *)
+  | _, ( Keeper_continuation_channel.Discord { reply_to_message_id = None; _ }
+       | Keeper_continuation_channel.Dashboard _
+       | Keeper_continuation_channel.Slack _
+       | Keeper_continuation_channel.Telegram _
+       | Keeper_continuation_channel.Imessage _
+       | Keeper_continuation_channel.Gate _
+       | Keeper_continuation_channel.Keeper _
+       | Keeper_continuation_channel.Unrouted _ ) ->
+    unavailable attachment_ids Original_mismatch
 ;;
 
 module For_testing = struct

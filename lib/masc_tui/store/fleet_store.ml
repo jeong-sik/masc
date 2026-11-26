@@ -1400,6 +1400,7 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_provider_retry _
   | Wire_fleet.Chunk_continuation_checkpoint _
   | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_tool_approval_event _
   | Wire_fleet.Chunk_stream_protocol_error _
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
@@ -1434,6 +1435,7 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_provider_retry _
   | Wire_fleet.Chunk_continuation_checkpoint _
   | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_tool_approval_event _
   | Wire_fleet.Chunk_stream_protocol_error _
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
@@ -1561,6 +1563,61 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
               { tool with progress_label = Some progress_label;
                           tool_name = Option.value tool_name ~default:tool.tool_name }
           | Tool_unfinished | Tool_settled -> tool) t
+  | Wire_fleet.Chunk_tool_approval_event
+      { operation_id; tool_use_id; tool_name; status_label; refresh_approvals = _ } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun b ->
+          let is_open_tool tool =
+            match tool.tool_state with
+            | Tool_pending | Tool_result_pending _ -> true
+            | Tool_unfinished | Tool_settled -> false
+          in
+          let has_exact =
+            List.exists (fun tool -> String.equal tool.tool_use_id tool_use_id) b.tools
+          in
+          let prefer_awaiting =
+            (not has_exact)
+            && Option.is_none tool_name
+            && List.exists
+                 (fun tool ->
+                   is_open_tool tool
+                   && Option.equal String.equal tool.progress_label
+                        (Some "awaiting approval"))
+                 b.tools
+          in
+          let matched_fallback = ref false in
+          let tools =
+            List.map
+              (fun tool ->
+                let hit =
+                  if has_exact then String.equal tool.tool_use_id tool_use_id
+                  else
+                    (not !matched_fallback)
+                    && is_open_tool tool
+                    &&
+                    if prefer_awaiting then
+                      Option.equal String.equal tool.progress_label
+                        (Some "awaiting approval")
+                    else
+                      match tool_name with
+                      | Some name -> String.equal tool.tool_name name
+                      | None -> true
+                in
+                if hit then (
+                  matched_fallback := true;
+                  match tool.tool_state with
+                  | Tool_pending | Tool_result_pending _ ->
+                      {
+                        tool with
+                        progress_label = Some status_label;
+                        tool_name = Option.value tool_name ~default:tool.tool_name;
+                      }
+                  | Tool_unfinished | Tool_settled -> tool)
+                else tool)
+              b.tools
+          in
+          { b with tools })
+        t
   | Wire_fleet.Chunk_stream_protocol_error { operation_id; kind; reason } ->
       update_live_stream ~keeper ~request_id ~operation_id
         (fun buf -> { buf with protocol_warning = Some (protocol_warning kind reason) }) t
@@ -1596,6 +1653,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
         | Wire_fleet.Chunk_provider_retry _
         | Wire_fleet.Chunk_continuation_checkpoint _
         | Wire_fleet.Chunk_native_tool_progress _
+        | Wire_fleet.Chunk_tool_approval_event _
         | Wire_fleet.Chunk_stream_protocol_error _
         | Wire_fleet.Chunk_text_delta _
         | Wire_fleet.Chunk_thinking_delta _
@@ -1908,6 +1966,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             | Wire_fleet.Chunk_provider_retry _
             | Wire_fleet.Chunk_continuation_checkpoint _
             | Wire_fleet.Chunk_native_tool_progress _
+            | Wire_fleet.Chunk_tool_approval_event _
             | Wire_fleet.Chunk_stream_protocol_error _
             | Wire_fleet.Chunk_tool_quarantined _
             | Wire_fleet.Chunk_tool_block_end _

@@ -360,12 +360,26 @@ let apply_dataset_invalidation (m : Model.t) ds =
         {
           m.runtime with
           tool_series = Observed.mark_stale m.runtime.tool_series;
+          tool_series_summary =
+            Observed.mark_stale m.runtime.tool_series_summary;
+          tool_quality = Observed.mark_stale m.runtime.tool_quality;
           tools_catalog = Observed.mark_stale m.runtime.tools_catalog;
+          tools_dashboard = Observed.mark_stale m.runtime.tools_dashboard;
         }
       in
       let cmds =
         match ws with
-        | Nav.Runtime -> [ get_cmd e (Cmd.Get_tools_catalog { keeper = None }) ]
+        | Nav.Runtime ->
+            let keeper_names =
+              match Observed.to_option m.fleet.keepers with
+              | Some ks ->
+                  List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+              | None -> []
+            in
+            let surface_keeper =
+              Runtime_store.selected_tools_surface_keeper ~keeper_names runtime
+            in
+            [ get_cmd e (Cmd.Get_tools_catalog { keeper = surface_keeper }) ]
         | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
       in
       ({ m with runtime }, cmds)
@@ -552,8 +566,31 @@ let apply_observation_changed (m : Model.t)
           in
           ({ m with fleet }, cmds)
       | `Workspace -> (m, []))
+  | `Async_requests ->
+      let runtime =
+        {
+          m.runtime with
+          async_requests = Observed.mark_stale m.runtime.async_requests;
+          async_requests_absent = false;
+        }
+      in
+      let next = { m with runtime } in
+      let viewing_async =
+        Option.is_none (Model.active_inspector next)
+        && Nav.equal_workspace next.nav.workspace Nav.Runtime
+        && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_tools_usage
+        && Runtime_store.equal_tools_subview next.runtime.tools_subview
+             Runtime_store.Tools_prompts_presets
+        && Runtime_store.equal_prompts_presets_section next.runtime.pp_section
+             Runtime_store.Sec_async_requests
+      in
+      let cmds =
+        if viewing_async && not next.runtime.async_requests_auth_denied then
+          [ get_cmd e Cmd.Get_async_requests ]
+        else []
+      in
+      (next, cmds)
   | `Skills
-  | `Async_requests
   | `Skill_usage
   | `Skill_activations
   | `Tlc_results
@@ -783,12 +820,65 @@ let apply_observer_event (m : Model.t) = function
   | Wire_observer.Keeper_chat_queue_changed keeper ->
       let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
       let queue = { queue with read = Observed.mark_stale queue.read } in
-      let next = { m with fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet } in
+      let slot_matches =
+        match m.runtime.keeper_waiting_inventory with
+        | Observed.Value { data = k, _; _ } -> String.equal k keeper
+        | Observed.Loading _ | Observed.Absent | Observed.Unreported
+        | Observed.Failed _ ->
+            true
+      in
+      let runtime =
+        if slot_matches then
+          {
+            m.runtime with
+            keeper_waiting_inventory =
+              Observed.mark_stale m.runtime.keeper_waiting_inventory;
+            keeper_waiting_inventory_absent = false;
+          }
+        else m.runtime
+      in
+      let next =
+        { m with fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet; runtime }
+      in
       let reads =
         if Option.equal String.equal (keeper_queue_target m) (Some keeper)
         then [get_cmd m.epoch (Cmd.Get_chat_queue { keeper })] else []
       in
-      (next, reads @ View_fetches.chat_status_fetches ~keeper next)
+      let waiting_cmds =
+        let viewing_waiting =
+          match Model.active_inspector next with
+          | Some _ -> false
+          | None -> (
+              match next.nav.workspace with
+              | Nav.Keepers ->
+                  Option.equal String.equal (Model.selected_keeper_name next)
+                    (Some keeper)
+                  || Option.equal String.equal (Model.target_keeper next)
+                       (Some keeper)
+              | Nav.Runtime
+                when Nav.equal_runtime_tab next.runtime.active_tab
+                       Nav.Runtime_tools_usage
+                     && Runtime_store.equal_tools_subview
+                          next.runtime.tools_subview Runtime_store.Tools_quality_gate
+                ->
+                  let keeper_names =
+                    match Observed.to_option next.fleet.keepers with
+                    | Some ks ->
+                        List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+                    | None -> []
+                  in
+                  Option.equal String.equal
+                    (Runtime_store.selected_tools_surface_keeper ~keeper_names
+                       next.runtime)
+                    (Some keeper)
+              | Nav.Runtime | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Infra ->
+                  false)
+        in
+        if viewing_waiting then
+          [ get_cmd next.epoch (Cmd.Get_keeper_waiting_inventory { keeper }) ]
+        else []
+      in
+      (next, reads @ waiting_cmds @ View_fetches.chat_status_fetches ~keeper next)
   | Wire_observer.Keeper_waiting_inventory_changed { keeper; queue_kind = _ } ->
       let slot_matches =
         match m.runtime.keeper_waiting_inventory with
@@ -1166,6 +1256,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_provider_retry _
       | Wire_fleet.Chunk_continuation_checkpoint _
       | Wire_fleet.Chunk_native_tool_progress _
+      | Wire_fleet.Chunk_tool_approval_event _
       | Wire_fleet.Chunk_stream_protocol_error _
       | Wire_fleet.Chunk_thinking_delta _
       | Wire_fleet.Chunk_thinking_snapshot _
@@ -1275,6 +1366,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_provider_retry _
       | Wire_fleet.Chunk_continuation_checkpoint _
       | Wire_fleet.Chunk_native_tool_progress _
+      | Wire_fleet.Chunk_tool_approval_event _
       | Wire_fleet.Chunk_stream_protocol_error _
       | Wire_fleet.Chunk_tool_quarantined _
       | Wire_fleet.Chunk_tool_block_end _
@@ -1287,6 +1379,15 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
           View_fetches.hydrate_chat_tool_results ~keeper next
         in
         (next, cmds @ tool_cmds)
+    | Wire_fleet.Chunk_tool_approval_event { refresh_approvals = true; _ } ->
+        let work =
+          {
+            next.work with
+            tool_approvals = Observed.mark_stale next.work.tool_approvals;
+          }
+        in
+        ({ next with work }, cmds @ [ get_cmd next.epoch Cmd.Get_tool_approvals ])
+    | Wire_fleet.Chunk_tool_approval_event { refresh_approvals = false; _ }
     | Wire_fleet.Chunk_tool_end { execution_id = None; _ }
     | Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _

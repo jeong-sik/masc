@@ -21561,6 +21561,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   (* #18d: Tools_keeper_skills pane 0 preserves scroll_offset when pane 1 skills is empty *)
   let tools_snap : Wire_runtime.tools_dashboard_snapshot =
     {
+      is_warming = false;
       entries = [];
       total_calls = 0;
       distinct_tools_called = 0;
@@ -30384,5 +30385,193 @@ let () =
               Alcotest.(check int)
                 "zoomed view expands 4 PRs (+4 rows over 0-PR header)"
                 (zoomed_0 + 4) zoomed_4);
+          Alcotest.test_case
+            "Round 3 PR7: async_requests SSE, approval events, warming tools_dashboard"
+            `Quick
+            (fun () ->
+              let m0 = Model.initial ~cols:140 ~rows:36 () in
+              let m_async =
+                {
+                  m0 with
+                  nav = { m0.nav with workspace = Nav.Runtime };
+                  runtime =
+                    {
+                      (m0.runtime
+                      |> Runtime_store.set_tab Nav.Runtime_tools_usage
+                      |> Runtime_store.set_tools_subview
+                           Runtime_store.Tools_prompts_presets)
+                      with
+                      pp_section = Runtime_store.Sec_async_requests;
+                      async_requests =
+                        Observed.value ~observed_at:t0
+                          {
+                            Wire_runtime.status = "ok";
+                            active = 0;
+                            runtime_owned = 0;
+                            ownership_unknown = 0;
+                            record_errors_count = 0;
+                            requests = [];
+                            error_detail = None;
+                          };
+                    };
+                }
+              in
+              let ev_async =
+                Msg.Sse_observer_delivery
+                  {
+                    cursor = None;
+                    decoded =
+                      Wire_observer.Event
+                        (Wire_observer.Observation_changed
+                           { topic = `Async_requests; scope = `Workspace });
+                  }
+              in
+              let m_async', cmds_async =
+                Update.step ~now:t1 m_async
+                  (Msg.Sse_event { epoch = m_async.epoch; event = ev_async })
+              in
+              Alcotest.(check bool) "`Async_requests marks async_requests stale"
+                true
+                (Observed.is_stale m_async'.runtime.async_requests);
+              Alcotest.(check bool) "`Async_requests dispatches Get_async_requests"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_async_requests; _ } -> true
+                     | _ -> false)
+                   (Cmd.flatten cmds_async));
+              let step_chunk m chunk =
+                Update.step ~now:t1 m
+                  (Msg.Chat_stream_chunk
+                     {
+                       epoch = m.epoch;
+                       keeper = "alpha";
+                       request_id = "req-apr";
+                       is_btw = false;
+                       chunk;
+                     })
+              in
+              let m_s1, _ =
+                step_chunk m0
+                  (Wire_fleet.Chunk_tool_start
+                     {
+                       operation_id = Some "op-apr";
+                       tool_use_id = "scope-1-block-0";
+                       stream_scope = Some 1;
+                       tool_name = "tool_a";
+                       args_preview = None;
+                     })
+              in
+              let m_s2, _ =
+                step_chunk m_s1
+                  (Wire_fleet.Chunk_tool_start
+                     {
+                       operation_id = Some "op-apr";
+                       tool_use_id = "scope-1-block-1";
+                       stream_scope = Some 1;
+                       tool_name = "tool_b";
+                       args_preview = None;
+                     })
+              in
+              let m_s3, cmds_apr1 =
+                step_chunk m_s2
+                  (Wire_fleet.Chunk_tool_approval_event
+                     {
+                       operation_id = Some "op-apr";
+                       tool_use_id = "toolu_b";
+                       tool_name = Some "tool_b";
+                       status_label = "awaiting approval";
+                       refresh_approvals = true;
+                     })
+              in
+              Alcotest.(check bool)
+                "approval requested dispatches Get_tool_approvals" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_tool_approvals; _ } -> true
+                     | _ -> false)
+                   (Cmd.flatten cmds_apr1));
+              let m_s4, _ =
+                step_chunk m_s3
+                  (Wire_fleet.Chunk_tool_approval_event
+                     {
+                       operation_id = Some "op-apr";
+                       tool_use_id = "toolu_b";
+                       tool_name = None;
+                       status_label = "approval: approved";
+                       refresh_approvals = true;
+                     })
+              in
+              let tools =
+                match Fleet_store.String_map.find_opt "alpha" m_s4.fleet.chat_streams with
+                | Some buf -> buf.tools
+                | None -> Alcotest.fail "missing alpha chat stream"
+              in
+              let find_label name =
+                match
+                  List.find_opt
+                    (fun (tc : Fleet_store.active_tool_call) ->
+                      String.equal tc.tool_name name)
+                    tools
+                with
+                | Some tc -> tc.progress_label
+                | None -> Alcotest.fail ("missing tool " ^ name)
+              in
+              Alcotest.(check (option string))
+                "sibling running tool_a untouched by tool_b approval settlement"
+                None (find_label "tool_a");
+              Alcotest.(check (option string))
+                "awaiting tool_b receives approval settled label"
+                (Some "approval: approved") (find_label "tool_b");
+              let ready_dash : Wire_runtime.tools_dashboard_snapshot =
+                {
+                  is_warming = false;
+                  entries = [];
+                  total_calls = 42;
+                  distinct_tools_called = 3;
+                  registered_count = 7;
+                  effective_keeper_surface = None;
+                  volume_gc_summary = None;
+                  keeper_cleanup_summary = None;
+                }
+              in
+              let warming_dash =
+                {
+                  ready_dash with
+                  is_warming = true;
+                  total_calls = 0;
+                  distinct_tools_called = 0;
+                  registered_count = 0;
+                }
+              in
+              let m_ready =
+                {
+                  m0 with
+                  runtime =
+                    Runtime_store.apply_tools_dashboard ~observed_at:t0
+                      ready_dash m0.runtime;
+                }
+              in
+              let m_warm, _ =
+                Update.step ~now:t1 m_ready
+                  (Msg.Http_reply
+                     {
+                       epoch = m_ready.epoch;
+                       reply =
+                         Msg.Reply_tools_dashboard
+                           { keeper = None; result = Ok warming_dash };
+                     })
+              in
+              Alcotest.(check bool)
+                "warming tools_dashboard marks existing slot stale" true
+                (Observed.is_stale m_warm.runtime.tools_dashboard);
+              let kept_count =
+                match Observed.to_option m_warm.runtime.tools_dashboard with
+                | Some d -> d.registered_count
+                | None -> -1
+              in
+              Alcotest.(check int)
+                "warming tools_dashboard preserves existing snapshot data" 7
+                kept_count);
         ] );
     ]

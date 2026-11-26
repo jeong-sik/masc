@@ -1332,16 +1332,23 @@ let build_progress_rows ~(theme : Theme.t) ~(model : Model.t) ~rail_rgb
       List.concat_map
         (function
           | Chat_transcript.Progress_single activity -> [ activity_row ~indent:"  " activity ]
-          | Chat_transcript.Progress_batch { members; _ } ->
+          | Chat_transcript.Progress_batch { size; members } ->
               let running = List.length members in
+              let header_text =
+                if size > running then
+                  Ops_common.say model
+                    ~ko:(Printf.sprintf "동시 실행 %d/%d개" running size)
+                    ~en:(Printf.sprintf "%d/%d running in batch" running size)
+                else
+                  Ops_common.say model
+                    ~ko:(Printf.sprintf "동시 실행 %d개" running)
+                    ~en:(Printf.sprintf "%d running at once" running)
+              in
               let header =
                 single_span_row ~rail_rgb
                   ~prefix:("  " ^ Glyph.to_utf8 Glyph.Tree_tee ^ " ")
                   ~prefix_fg:theme.status_active ~prefix_attrs:Attr.bold
-                  ~text:
-                    (Ops_common.say model
-                       ~ko:(Printf.sprintf "동시 실행 %d개" running)
-                       ~en:(Printf.sprintf "%d running at once" running))
+                  ~text:header_text
                   ~text_fg:theme.status_active ~attrs:Attr.bold
                   ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
               in

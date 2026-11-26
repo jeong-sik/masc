@@ -4260,6 +4260,18 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 요약 조회"
         ~en:"Tool series summary fetch" err
   | Msg.Reply_tools_dashboard { keeper = req_keeper; result = Ok snap } ->
+      if snap.is_warming then
+        ( {
+            m with
+            runtime =
+              {
+                m.runtime with
+                tools_dashboard =
+                  Observed.mark_stale m.runtime.tools_dashboard;
+              };
+          }
+        , [] )
+      else
       let keeper_names =
         match Observed.to_option m.fleet.keepers with
         | Some ks ->

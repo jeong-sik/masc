@@ -3459,8 +3459,8 @@ let test_agui_chat_stream_and_history_provenance () =
         tool_use_id
     | _ -> Alcotest.fail "expected scoped Chunk_tool_start from KEEPER_NATIVE_TOOL_START"
   in
-  Alcotest.(check string) "native tool uses the stream occurrence when a provider ID is also present"
-    "scope-1-block-0" native_occurrence;
+  Alcotest.(check string) "native tool uses namespaced stream occurrence when a provider ID is also present"
+    "native:scope-1-block-0" native_occurrence;
   let native_end =
     expect_ok "CUSTOM KEEPER_NATIVE_TOOL_END error_reported -> ok=Some false"
       (Wire_fleet.decode_chat_stream_chunk
@@ -3485,6 +3485,49 @@ let test_agui_chat_stream_and_history_provenance () =
       Alcotest.(check string) "native tool completion settles its original occurrence"
         native_occurrence tool_use_id
   | _ -> Alcotest.fail "expected native Chunk_tool_end with ok=Some false");
+  let native_nonzero =
+    expect_ok "CUSTOM KEEPER_NATIVE_TOOL_END completion_reported with nonzero exit_code -> ok=Some false"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.95,
+              "name": "KEEPER_NATIVE_TOOL_END",
+              "value": {
+                "toolCallId": "nt-2",
+                "toolCallName": "Bash",
+                "completion": { "kind": "completion_reported", "exit_code": 2 }
+              }
+            }|}))
+  in
+  (match native_nonzero with
+  | Wire_fleet.Chunk_tool_end { tool_use_id = "native:nt-2"; ok = Some false; _ } -> ()
+  | _ -> Alcotest.fail "expected ok=Some false for nonzero native exit_code");
+  let approval_req =
+    expect_ok "CUSTOM KEEPER_TOOL_APPROVAL_REQUESTED decodes Chunk_tool_approval_event"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.96,
+              "name": "KEEPER_TOOL_APPROVAL_REQUESTED",
+              "value": {
+                "tool_call_id": "tc-apr-1",
+                "approval_id": "apr-1",
+                "tool_call_name": "masc_git_push",
+                "args": "{}",
+                "question": "Allow?",
+                "because": "policy"
+              }
+            }|}))
+  in
+  (match approval_req with
+  | Wire_fleet.Chunk_tool_approval_event
+      { tool_use_id = "tc-apr-1"; tool_name = Some "masc_git_push"; refresh_approvals = true; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_approval_event for KEEPER_TOOL_APPROVAL_REQUESTED");
   let provider_only =
     expect_ok "native tool without occurrence coordinates"
       (Wire_fleet.decode_chat_stream_chunk (parse_json
@@ -3493,7 +3536,7 @@ let test_agui_chat_stream_and_history_provenance () =
   in
   (match provider_only with
   | Wire_fleet.Chunk_tool_start { tool_use_id; stream_scope = None; _ } ->
-      Alcotest.(check string) "provider ID identifies an unscoped native tool" "nt-1" tool_use_id
+      Alcotest.(check string) "provider ID identifies an unscoped native tool" "native:nt-1" tool_use_id
   | _ -> Alcotest.fail "expected unscoped native Chunk_tool_start");
   let reply_details =
     expect_ok "CUSTOM KEEPER_REPLY_DETAILS"
@@ -5018,6 +5061,45 @@ let test_wave2_live_wire_codecs () =
       (Wire_runtime.decode_tools_dashboard ~observed_at:t0 legacy_tools_json)
   in
   Alcotest.(check int) "legacy flat fallback 1 tool" 1 (List.length dash_legacy.entries);
+  (* Warming tools dashboard, shared alias aggregation, deferred_count exclusion, and masc_ prefix classification *)
+  let warming_dash =
+    expect_ok "decode_tools_dashboard is_warming"
+      (Wire_runtime.decode_tools_dashboard ~observed_at:t0
+         (parse_json {|{ "is_warming": true }|}))
+  in
+  Alcotest.(check bool) "warming flag preserved" true warming_dash.is_warming;
+  Alcotest.(check int) "warming has empty entries" 0 (List.length warming_dash.entries);
+  let alias_dash =
+    expect_ok "decode_tools_dashboard aggregates alias rows and excludes deferred_count"
+      (Wire_runtime.decode_tools_dashboard ~observed_at:t0
+         (parse_json
+            {|{
+              "tool_inventory": {
+                "tools": [
+                  { "name": "shared_read" },
+                  { "name": "untracked_tool" }
+                ]
+              },
+              "tool_usage": {
+                "by_tool": [
+                  { "name": "internal_a", "public_names": ["shared_read"], "call_count": 5, "failure_count": 1, "deferred_count": 1, "p95_ms": 20.0 },
+                  { "name": "internal_b", "public_names": ["shared_read"], "call_count": 5, "failure_count": 1, "deferred_count": 1, "p95_ms": 40.0 }
+                ]
+              }
+            }|}))
+  in
+  let e_shared = List.nth alias_dash.entries 0 in
+  let e_untracked = List.nth alias_dash.entries 1 in
+  Alcotest.(check (option int)) "alias calls summed to 10" (Some 10)
+    (Observed.to_option e_shared.calls_count);
+  Alcotest.(check (option (float 0.01))) "failure_rate_pct excludes 2 deferred calls (2/8 = 25%)"
+    (Some 25.0) (Observed.to_option e_shared.failure_rate_pct);
+  Alcotest.(check bool) "untracked tool stays Observed.unreported" true
+    (e_untracked.calls_count = Observed.Unreported);
+  let dom_read, fam_read = Wire_runtime.classify_tool_domain_family "masc_read" in
+  Alcotest.(check string) "masc_read domain is run" "run"
+    (Wire_runtime.tool_domain_to_string dom_read);
+  Alcotest.(check string) "masc_read family is files" "files" fam_read;
 
   (* 7. Live /api/v1/skills (nested reference.identity + profile + object rejections/shadows) *)
   let skills_json =
@@ -6183,7 +6265,7 @@ let test_wave4_layer1_wire_codecs () =
   | Wire_fleet.Chunk_native_tool_progress
       {
         operation_id = Some "op-1";
-        tool_use_id = "scope-1-block-0";
+        tool_use_id = "native:scope-1-block-0";
         tool_name = Some "Bash";
         progress_label = "512B out";
       } ->

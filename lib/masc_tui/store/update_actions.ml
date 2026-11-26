@@ -8241,7 +8241,7 @@ and execute_action ~now (m : Model.t) action =
                   | Some _ | None -> (m, []))
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Keepers
-                  && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                  && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_config
                 then (

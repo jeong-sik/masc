@@ -2373,6 +2373,7 @@ type effective_keeper_surface =
     }
 
 type tools_dashboard_snapshot = {
+  is_warming : bool;
   entries : tool_catalog_entry list;
   total_calls : int;
   distinct_tools_called : int;
@@ -2425,8 +2426,19 @@ let tool_domain_rank = function
 let classify_tool_domain_family name =
   let lc = String.lowercase_ascii (String.trim name) in
   let has p = String.starts_with ~prefix:p lc in
-  if has "masc_board" || has "board_" then (Domain_board, "board")
-  else if has "masc_goal" || has "masc_task" || has "masc_schedule" || has "masc_verify" || has "masc_verif" || has "masc_plan" then
+  let stripped =
+    if String.starts_with ~prefix:"masc_" lc then
+      String.sub lc 5 (String.length lc - 5)
+    else if String.starts_with ~prefix:"tool_" lc then
+      String.sub lc 5 (String.length lc - 5)
+    else lc
+  in
+  let has_s p = String.starts_with ~prefix:p stripped in
+  if has "masc_board" || has_s "board_" then (Domain_board, "board")
+  else if
+    has "masc_goal" || has "masc_task" || has "masc_schedule"
+    || has "masc_verify" || has "masc_verif" || has "masc_plan"
+  then
     let fam =
       if has "masc_goal" then "goals"
       else if has "masc_task" then "tasks"
@@ -2434,18 +2446,28 @@ let classify_tool_domain_family name =
       else "verification"
     in
     (Domain_work, fam)
-  else if has "masc_run" || has "execute" || has "bash" || has "shell" || has "read" || has "write" || has "edit" || has "grep" || has "glob" || has "web_" || has "browser_" then
+  else if
+    has "masc_run" || has_s "execute" || has_s "bash" || has_s "shell"
+    || has_s "read" || has_s "write" || has_s "edit" || has_s "grep"
+    || has_s "glob" || has_s "web_" || has_s "browser_"
+  then
     let fam =
-      if has "browser_" || has "web_" then "web & browser"
-      else if has "read" || has "write" || has "edit" || has "grep" || has "glob" then "files"
+      if has_s "browser_" || has_s "web_" then "web & browser"
+      else if
+        has_s "read" || has_s "write" || has_s "edit" || has_s "grep"
+        || has_s "glob"
+      then "files"
       else "exec"
     in
     (Domain_run, fam)
-  else if has "keeper_" && (has "keeper_memory" || has "keeper_journal" || has "keeper_note" || has "keeper_self") then
-    (Domain_keeper_self, "memory & reflection")
+  else if
+    has "keeper_"
+    && (has "keeper_memory" || has "keeper_journal" || has "keeper_note"
+        || has "keeper_self")
+  then (Domain_keeper_self, "memory & reflection")
   else if has "keeper_" || has "masc_keeper" then (Domain_keeper_ops, "keeper")
   else if has "masc_" then
-    let rest = String.sub lc 5 (String.length lc - 5) in
+    let rest = stripped in
     let fam =
       match String.index_opt rest '_' with
       | Some idx when idx > 0 -> String.sub rest 0 idx
@@ -2459,6 +2481,7 @@ type usage_row = {
   u_public_names : string list;
   u_calls : int;
   u_failures : int;
+  u_deferred : int;
   u_p95_ms : float option;
 }
 
@@ -2468,8 +2491,10 @@ let decode_usage_row json =
   let* u_calls = required_nonnegative_int_field json "call_count" in
   let* fail_opt = optional_int_field json "failure_count" in
   let u_failures = max 0 (Option.value ~default:0 fail_opt) in
+  let* deferred_opt = optional_int_field json "deferred_count" in
+  let u_deferred = max 0 (Option.value ~default:0 deferred_opt) in
   let* u_p95_ms = optional_finite_float json "p95_ms" in
-  Ok { u_name; u_public_names; u_calls; u_failures; u_p95_ms }
+  Ok { u_name; u_public_names; u_calls; u_failures; u_deferred; u_p95_ms }
 
 let decode_effective_keeper_surface json =
   match json with
@@ -2604,30 +2629,55 @@ let decode_tools_dashboard ~observed_at json =
   let keeper_cleanup_summary =
     summary_of_obj [ "keeper_cleanup"; "keeper_cleanup_status" ]
   in
+  let* is_warming =
+    if has_field body "is_warming" then required_bool_field body "is_warming"
+    else Ok false
+  in
+  if is_warming then
+    Ok
+      {
+        is_warming = true;
+        entries = [];
+        total_calls = 0;
+        distinct_tools_called = 0;
+        registered_count = 0;
+        effective_keeper_surface = eff_surface;
+        volume_gc_summary;
+        keeper_cleanup_summary;
+      }
+  else
   match inv_opt with
   | Some inv ->
       let* raw_tools = required_list_field inv "tools" in
-      let* usage_rows, total_calls, distinct_tools_called, registered_count =
+      let* usage_rows, never_called, total_calls, distinct_tools_called, registered_count =
         match usage_opt with
-        | None -> Ok ([], 0, 0, List.length raw_tools)
+        | None -> Ok ([], [], 0, 0, List.length raw_tools)
         | Some u ->
             let* by_tool_raw = optional_list_field u "by_tool" in
             let* by_tool = decode_list "by_tool" decode_usage_row by_tool_raw in
+            let* never_raw = optional_list_field u "never_called" in
+            let* never_called =
+              decode_list "never_called" decode_tool_names never_raw
+            in
             let* tc = optional_int_field u "total_calls" in
             let* dc = optional_int_field u "distinct_tools_called" in
             let* rc = optional_int_field u "registered_count" in
             Ok
               ( by_tool,
+                never_called,
                 Option.value ~default:0 tc,
                 Option.value ~default:(List.length by_tool) dc,
                 Option.value ~default:(List.length raw_tools) rc )
       in
-      let usage_tbl = Hashtbl.create (max 16 (List.length usage_rows * 2)) in
-      List.iter
-        (fun (u : usage_row) ->
-          Hashtbl.replace usage_tbl u.u_name u;
-          List.iter (fun pn -> Hashtbl.replace usage_tbl pn u) u.u_public_names)
-        usage_rows;
+      let usage_names (u : usage_row) : tool_names =
+        { internal_name = u.u_name; public_names = u.u_public_names }
+      in
+      let merge_p95 a b =
+        match a, b with
+        | Some x, Some y -> Some (Float.max x y)
+        | Some x, None | None, Some x -> Some x
+        | None, None -> None
+      in
       let decode_inv_item item =
         let* name = required_nonblank_string item "name" in
         let* description = optional_nonblank_string item "description" in
@@ -2642,24 +2692,56 @@ let decode_tools_dashboard ~observed_at json =
         in
         let family = Option.value ~default:def_fam family_opt in
         let calls_count, failure_count, failure_rate_pct, p95_ms, public_names =
-          match Hashtbl.find_opt usage_tbl name with
-          | Some u ->
-              let rate =
-                if u.u_calls > 0 then
-                  float_of_int u.u_failures *. 100.0 /. float_of_int u.u_calls
-                else 0.0
+          match rows_named name ~names_of:usage_names usage_rows with
+          | _ :: _ as rows ->
+              let calls =
+                List.fold_left (fun acc (u : usage_row) -> acc + u.u_calls) 0 rows
               in
-              ( Observed.value ~observed_at u.u_calls,
-                u.u_failures,
-                Observed.value ~observed_at rate,
-                u.u_p95_ms,
-                u.u_public_names )
-          | None ->
-              ( Observed.value ~observed_at 0,
-                0,
-                Observed.value ~observed_at 0.0,
-                None,
-                [] )
+              let failures =
+                List.fold_left (fun acc (u : usage_row) -> acc + u.u_failures) 0 rows
+              in
+              let deferred =
+                List.fold_left (fun acc (u : usage_row) -> acc + u.u_deferred) 0 rows
+              in
+              let p95 =
+                List.fold_left
+                  (fun acc (u : usage_row) -> merge_p95 acc u.u_p95_ms)
+                  None rows
+              in
+              let pnames =
+                List.concat_map (fun (u : usage_row) -> u.u_public_names) rows
+                |> List.sort_uniq String.compare
+              in
+              let completed = max 0 (calls - deferred) in
+              let rate_obs =
+                if completed > 0 then
+                  Observed.value ~observed_at
+                    (float_of_int failures *. 100.0 /. float_of_int completed)
+                else Observed.absent
+              in
+              ( Observed.value ~observed_at calls,
+                failures,
+                rate_obs,
+                p95,
+                pnames )
+          | [] -> (
+              match rows_named name ~names_of:Fun.id never_called with
+              | _ :: _ as matched ->
+                  let pnames =
+                    List.concat_map (fun (n : tool_names) -> n.public_names) matched
+                    |> List.sort_uniq String.compare
+                  in
+                  ( Observed.value ~observed_at 0,
+                    0,
+                    Observed.absent,
+                    None,
+                    pnames )
+              | [] ->
+                  ( Observed.unreported,
+                    0,
+                    Observed.unreported,
+                    None,
+                    [] ))
         in
         Ok
           {
@@ -2680,6 +2762,7 @@ let decode_tools_dashboard ~observed_at json =
       let* entries = decode_list "tool_inventory.tools" decode_inv_item raw_tools in
       Ok
         {
+          is_warming = false;
           entries;
           total_calls;
           distinct_tools_called;
@@ -2731,6 +2814,7 @@ let decode_tools_dashboard ~observed_at json =
       in
       Ok
         {
+          is_warming = false;
           entries;
           total_calls;
           distinct_tools_called = List.length entries;

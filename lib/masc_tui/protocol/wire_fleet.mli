@@ -854,6 +854,13 @@ type chat_stream_chunk =
       tool_name : string option;
       progress_label : string;
     }
+  | Chunk_tool_approval_event of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      status_label : string;
+      refresh_approvals : bool;
+    }
   | Chunk_stream_protocol_error of {
       operation_id : string option;
       kind : string;

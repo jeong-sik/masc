@@ -2071,10 +2071,7 @@ let cycle_sub_tab (m : Model.t) dir =
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Keepers ->
-              let zoomed_keeper =
-                m.nav.zoomed
-                && Option.is_some (Model.selected_keeper_name m)
-              in
+              let zoomed_keeper = Model.is_zoomed_active m in
               if m.nav.pane_index >= 1 || zoomed_keeper then
                 let fleet = Fleet_store.cycle_keeper_dive_tab dir m.fleet in
                 let drafts =
@@ -2091,13 +2088,25 @@ let cycle_sub_tab (m : Model.t) dir =
                     keeper_detail_scroll_offset = 0;
                   }
                 in
+                let config = Config_store.cancel_edit_field m.config in
                 let knowledge =
+                  let k =
+                    m.knowledge
+                    |> Knowledge_store.close_memory_reading
+                    |> Knowledge_store.close_memory_diagram
+                  in
+                  let k =
+                    {
+                      k with
+                      board_recovery = Board_recovery.close k.board_recovery;
+                    }
+                  in
                   if Nav.equal_keeper_tab fleet.keeper_dive_tab Nav.Keeper_memory
-                  then m.knowledge
-                  else Knowledge_store.unpin_memory_diff_revs m.knowledge
+                  then k
+                  else Knowledge_store.unpin_memory_diff_revs k
                 in
                 let next =
-                  { m with nav; drafts; fleet; knowledge }
+                  { m with nav; drafts; fleet; config; knowledge }
                   |> sync_config_for_keeper_view
                 in
                 (next, View_fetches.fetches_for_current_view next)
@@ -9467,6 +9476,8 @@ let runtime_tools_quality_pane0_max_scroll (m : Model.t) =
              else 2 + Int.min 12 (List.length tq.failure_categories))
           + (if tq.by_keeper = [] then 0
              else 2 + Int.min 10 (List.length tq.by_keeper))
+          + (if tq.by_runtime = [] then 0
+             else 2 + Int.min 10 (List.length tq.by_runtime))
         in
         max 0 (total_lines - lc.h)
 
@@ -10813,10 +10824,12 @@ let close_inspector ?(preserve_overlay = false) (m : Model.t) =
               json_scroll_offset = 0;
             };
           ask_modal = restored_ask_modal;
+          config = Config_store.cancel_edit_field m.config;
           knowledge =
             {
               (m.knowledge
-              |> Knowledge_store.unpin_memory_diff_revs
+              |> Knowledge_store.clear_armed_vote
+              |> Knowledge_store.close_memory_reading
               |> Knowledge_store.clear_pending_artifact_revision
               |> Knowledge_store.close_memory_diagram
               |> Knowledge_store.clear_pending_wiki_edit)
@@ -13304,12 +13317,13 @@ let apply_move (m : Model.t) dir =
                         when Runtime_store.equal_tools_subview rt.tools_subview
                                Runtime_store.Tools_usage_calls ->
                           true
+                      | Nav.Runtime_tools_usage, 0
+                        when Runtime_store.equal_tools_subview rt.tools_subview
+                               Runtime_store.Tools_keeper_skills ->
+                          true
                       | Nav.Runtime_tools_usage, (0 | 1)
                         when Runtime_store.equal_tools_subview rt.tools_subview
-                               Runtime_store.Tools_keeper_skills
-                             || Runtime_store.equal_tools_subview
-                                  rt.tools_subview
-                                  Runtime_store.Tools_quality_gate ->
+                               Runtime_store.Tools_quality_gate ->
                           true
                       | Nav.Runtime_tools_usage, 1
                         when Runtime_store.equal_tools_subview rt.tools_subview

@@ -722,6 +722,7 @@ type effective_keeper_surface =
     }
 
 type tools_dashboard_snapshot = {
+  is_warming : bool;
   entries : tool_catalog_entry list;
   total_calls : int;
   distinct_tools_called : int;

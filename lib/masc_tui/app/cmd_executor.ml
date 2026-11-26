@@ -3947,6 +3947,7 @@ let execute_post_stream t ~epoch req =
                          | Wire_fleet.Chunk_provider_retry _
                          | Wire_fleet.Chunk_continuation_checkpoint _
                          | Wire_fleet.Chunk_native_tool_progress _
+                         | Wire_fleet.Chunk_tool_approval_event _
                          | Wire_fleet.Chunk_stream_protocol_error _
                          | Wire_fleet.Chunk_text_delta _
                          | Wire_fleet.Chunk_thinking_delta _

@@ -489,6 +489,7 @@ let cycle_tools_window t =
     gate_tool_events = Observed.mark_stale t.gate_tool_events;
     gate_tool_events_absent = false;
     scroll_offset = 0;
+    detail_scroll_offset = 0;
   }
 
 let selected_tools_surface_keeper ~keeper_names t =
@@ -2439,6 +2440,8 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                              2 + Int.min 12 (List.length tq.failure_categories))
                         + (if tq.by_keeper = [] then 0
                            else 2 + Int.min 10 (List.length tq.by_keeper))
+                        + (if tq.by_runtime = [] then 0
+                           else 2 + Int.min 10 (List.length tq.by_runtime))
                       in
                       max 0 (total_lines - vis)
                   | None -> 0)

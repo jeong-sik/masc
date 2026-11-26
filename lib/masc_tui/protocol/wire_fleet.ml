@@ -2318,6 +2318,13 @@ type chat_stream_chunk =
       tool_name : string option;
       progress_label : string;
     }
+  | Chunk_tool_approval_event of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      status_label : string;
+      refresh_approvals : bool;
+    }
   | Chunk_stream_protocol_error of {
       operation_id : string option;
       kind : string;
@@ -3029,20 +3036,31 @@ let resolve_tool_reference json =
 
 let resolve_tool_use_id json = Result.map fst (resolve_tool_reference json)
 
+let native_tool_id_prefix = "native:"
+
+let namespace_native_tool_id id =
+  if String.starts_with ~prefix:native_tool_id_prefix id then id
+  else native_tool_id_prefix ^ id
+
 let decode_native_completion_ok completion =
   let* kind = optional_nonblank_string completion "kind" in
-  match kind with
-  | Some ("error_reported" | "decline_reported") -> Ok (Some false)
-  | Some "completion_reported" -> Ok (Some true)
-  | Some "result_received" -> (
-      let* is_err = optional_bool_field completion "is_error" in
-      match is_err with
-      | Some true -> Ok (Some false)
-      | Some false -> Ok (Some true)
-      | None -> Ok None)
-  | Some ("end_observed" | "completion_unrecorded" | "unrecognized_status") | None ->
-      Ok None
-  | Some _ -> Ok None
+  let* exit_code = optional_int_field completion "exit_code" in
+  match exit_code with
+  | Some code when code <> 0 -> Ok (Some false)
+  | Some _ | None -> (
+      match kind with
+      | Some ("error_reported" | "decline_reported") -> Ok (Some false)
+      | Some "completion_reported" -> Ok (Some true)
+      | Some "result_received" -> (
+          let* is_err = optional_bool_field completion "is_error" in
+          match is_err with
+          | Some true -> Ok (Some false)
+          | Some false -> Ok (Some true)
+          | None -> Ok None)
+      | Some ("end_observed" | "completion_unrecorded" | "unrecognized_status")
+      | None ->
+          Ok None
+      | Some _ -> Ok None)
 
 let optional_thinking_owner value =
   if has_field value "response" then
@@ -3175,7 +3193,8 @@ let decode_custom_chat_chunk json =
            })
   | "KEEPER_NATIVE_TOOL_START" ->
       let* value = required_object_field json "value" in
-      let* tool_use_id, stream_scope = resolve_tool_reference value in
+      let* raw_tool_use_id, stream_scope = resolve_tool_reference value in
+      let tool_use_id = namespace_native_tool_id raw_tool_use_id in
       let* name_opt = optional_nonblank_string value "toolCallName" in
       let tool_name = Option.value name_opt ~default:"native_tool" in
       Ok
@@ -3189,7 +3208,8 @@ let decode_custom_chat_chunk json =
            })
   | "KEEPER_NATIVE_TOOL_END" ->
       let* value = required_object_field json "value" in
-      let* tool_use_id = resolve_tool_use_id value in
+      let* raw_tool_use_id = resolve_tool_use_id value in
+      let tool_use_id = namespace_native_tool_id raw_tool_use_id in
       let* tool_name = optional_nonblank_string value "toolCallName" in
       let* exec_camel = optional_nonblank_string value "executionId" in
       let* exec_snake = optional_nonblank_string value "execution_id" in
@@ -3276,7 +3296,8 @@ let decode_custom_chat_chunk json =
       match value_opt with
       | None -> Ok Chunk_ignored
       | Some value -> (
-          let* tool_use_id = resolve_tool_use_id value in
+          let* raw_tool_use_id = resolve_tool_use_id value in
+          let tool_use_id = namespace_native_tool_id raw_tool_use_id in
           let* tool_name = optional_nonblank_string value "toolCallName" in
           let* progress_opt = optional_object_field value "progress" in
           let progress_label =
@@ -3341,6 +3362,72 @@ let decode_custom_chat_chunk json =
           let* block = required_nonnegative_int_field occurrence "toolCallBlockIndex" in
           Ok (Chunk_tool_quarantined
                 { operation_id = outer_op_id; tool_use_id = scoped_tool_use_id scope block; kind; reason }))
+  | "KEEPER_TOOL_APPROVAL_REQUESTED" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value ->
+          let* tool_use_id =
+            match resolve_tool_use_id value with
+            | Ok id -> Ok id
+            | Error _ -> required_nonblank_string value "tool_call_id"
+          in
+          let* tool_name =
+            match optional_nonblank_string value "tool_call_name" with
+            | Ok (Some _ as x) -> Ok x
+            | Ok None -> optional_nonblank_string value "toolCallName"
+            | Error _ as err -> err
+          in
+          Ok
+            (Chunk_tool_approval_event
+               {
+                 operation_id = outer_op_id;
+                 tool_use_id;
+                 tool_name;
+                 status_label = "awaiting approval";
+                 refresh_approvals = true;
+               }))
+  | "KEEPER_TOOL_APPROVAL_SETTLED" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value ->
+          let* tool_use_id =
+            match resolve_tool_use_id value with
+            | Ok id -> Ok id
+            | Error _ -> required_nonblank_string value "tool_call_id"
+          in
+          let* outcome_opt = optional_nonblank_string value "outcome" in
+          let status_label =
+            match outcome_opt with
+            | Some o -> "approval: " ^ o
+            | None -> "approval settled"
+          in
+          Ok
+            (Chunk_tool_approval_event
+               {
+                 operation_id = outer_op_id;
+                 tool_use_id;
+                 tool_name = None;
+                 status_label;
+                 refresh_approvals = true;
+               }))
+  | "KEEPER_TOOL_CALL_ADMITTED" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value ->
+          let* tool_use_id = resolve_tool_use_id value in
+          let* tool_name = optional_nonblank_string value "toolCallName" in
+          Ok
+            (Chunk_tool_approval_event
+               {
+                 operation_id = outer_op_id;
+                 tool_use_id;
+                 tool_name;
+                 status_label = "admitted";
+                 refresh_approvals = false;
+               }))
   | "KEEPER_CONNECTED"
   | "KEEPER_STREAM_MESSAGE_DELTA"
   | "KEEPER_STREAM_PING"
@@ -3350,9 +3437,6 @@ let decode_custom_chat_chunk json =
   | "KEEPER_MEDIA_DELTA"
   | "KEEPER_CHAT_BATCH_BOUND"
   | "KEEPER_EXTERNAL_EFFECT_COMPLETED"
-  | "KEEPER_TOOL_APPROVAL_REQUESTED"
-  | "KEEPER_TOOL_APPROVAL_SETTLED"
-  | "KEEPER_TOOL_CALL_ADMITTED"
   | "KEEPER_TOOL_TRANSCRIPT_COMMITTED" ->
       Ok Chunk_ignored
   | other -> Error (Printf.sprintf "unknown CUSTOM chat stream event %S" other)

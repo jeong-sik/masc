@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DASHBOARD_NAV_ITEMS,
   DASHBOARD_SURFACES,
-  PRIMARY_DASHBOARD_NAV_ITEMS,
-  PRIMARY_DASHBOARD_SURFACES,
-  VISIBLE_DASHBOARD_NAV_ITEMS,
   defaultParamsForTab,
   isSectionlessSurface,
   normalizeRouteParams,
@@ -16,7 +14,7 @@ describe('dashboard surface navigation', () => {
 
   it('exposes Keepers as a top-level v2 workspace without nested sections', () => {
     expect(defaultParamsForTab('keepers')).toEqual({})
-    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('keepers')
+    expect(DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('keepers')
     expect(sectionItemsForTab('keepers')).toEqual([])
     expect(visibleSectionItemsForTab('keepers')).toEqual([])
 
@@ -26,7 +24,7 @@ describe('dashboard surface navigation', () => {
 
   it('exposes Board as a top-level v2 surface without workspace section baggage', () => {
     expect(defaultParamsForTab('board')).toEqual({})
-    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('board')
+    expect(DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('board')
     expect(sectionItemsForTab('board')).toEqual([])
     expect(visibleSectionItemsForTab('board')).toEqual([])
 
@@ -52,35 +50,6 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the primary shell aligned to active surfaces after IDE and Lab retirement', () => {
-    expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
-      'overview',
-      'keepers',
-      'monitoring',
-      'workspace',
-      'approvals',
-      'schedule',
-      'board',
-      'fusion',
-      'logs',
-      'connectors',
-      'settings',
-    ])
-    expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
-      'Overview',
-      'Keepers',
-      'Monitor',
-      'Work',
-      'Gate',
-      'Schedule',
-      'Board',
-      'Fusion',
-      'Logs',
-      'Connectors',
-      'Settings',
-    ])
-  })
-
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
     const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'schedule', 'approvals', 'fusion'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
@@ -103,7 +72,7 @@ describe('dashboard surface navigation', () => {
 
   it('exposes Schedule as a dedicated top-level surface without section baggage', () => {
     expect(defaultParamsForTab('schedule')).toEqual({})
-    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('schedule')
+    expect(DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('schedule')
     expect(sectionItemsForTab('schedule')).toEqual([])
     expect(visibleSectionItemsForTab('schedule')).toEqual([])
 

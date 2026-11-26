@@ -130,9 +130,18 @@
   (ppx_deriving (>= 5.2))
   (ppxlib (>= 0.30))
   (sqlite3 (>= 5.4.2))
-  (mirage-crypto (>= 1.0))
-  (mirage-crypto-rng (>= 1.0))
-  (mirage-crypto-pk (>= 1.0))
+  ; 2.4.1 is the floor for the mirage-crypto family. Before 2.4.0 the NIST
+  ; curves read their precomputed tables at secret-dependent offsets
+  ; (OSEC-2026-17), and the HTTPS listener signs every TLS 1.3 handshake with
+  ; its default self-signed P-256 key. 2.2.0 and 2.3.0 fixed OSEC-2026-12 (AEAD plaintext before the
+  ; tag check), -13 and -15 (ECDSA public keys) and -14 (RSA Invalid_argument).
+  ; masc calls no Mirage_crypto_ec function. tls does for key exchange, and
+  ; x509 does for signatures, so the floor is named here. The four packages
+  ; pin one another at {=version}.
+  (mirage-crypto (>= 2.4.1))
+  (mirage-crypto-rng (>= 2.4.1))
+  (mirage-crypto-pk (>= 2.4.1))
+  (mirage-crypto-ec (>= 2.4.1))
   ; tls 2.1.4 and later need x509 1.2.0. Its CN constructor takes a
   ; Common_name.t where 1.1.1 and earlier took a string, so the sources that
   ; build a name (lib/server/server_tls_material.ml) compile against 1.2 only.
@@ -152,7 +161,9 @@
   (eio (>= 1.0))
   (eio_main (>= 1.0))
   (eio_posix (>= 0.16))
-  (cstruct (>= 6.0))
+  ; Before 6.3.0, filter_map, reverse tail and cuts, and find/find_sub on a
+  ; view with an offset returned bytes from the wrong place (OSEC-2026-20).
+  (cstruct (>= 6.3.0))
   (digestif (>= 1.1))
   (eqaf (>= 0.10))
   optint

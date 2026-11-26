@@ -54,7 +54,7 @@ depends: [
   "cppo" {= "1.8.0"}
   "crunch" {= "4.0.0"}
   "csexp" {= "1.5.2"}
-  "cstruct" {= "6.2.0"}
+  "cstruct" {= "6.3.0"}
   "ctypes" {= "0.24.0"}
   "decompress" {= "1.5.3"}
   "digestif" {= "1.3.0"}
@@ -115,11 +115,10 @@ depends: [
   "menhirCST" {= "20250912"}
   "menhirLib" {= "20250912"}
   "menhirSdk" {= "20250912"}
-  "mirage-crypto" {= "1.2.0"}
-  "mirage-crypto-ec" {= "1.2.0"}
-  "mirage-crypto-pk" {= "1.2.0"}
-  "mirage-crypto-rng" {= "1.2.0"}
-  "mirage-crypto-rng-eio" {= "1.2.0"}
+  "mirage-crypto" {= "2.4.1"}
+  "mirage-crypto-ec" {= "2.4.1"}
+  "mirage-crypto-pk" {= "2.4.1"}
+  "mirage-crypto-rng" {= "2.4.1"}
   "mtime" {= "2.1.0"}
   "num" {= "1.6"}
   "ocaml" {= "5.5.2"}
@@ -237,11 +236,11 @@ pin-depends: [
   ]
   [
   "grpc-direct.0.2.6"
-  "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
+  "git+https://github.com/jeong-sik/grpc-direct.git#9ec21f97d174a31af5d3a3398325cab850b01ce5"
 ]
   [
   "grpc-direct-core.0.2.6"
-  "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
+  "git+https://github.com/jeong-sik/grpc-direct.git#9ec21f97d174a31af5d3a3398325cab850b01ce5"
 ]
   [
     "mcp_protocol.1.3.0"

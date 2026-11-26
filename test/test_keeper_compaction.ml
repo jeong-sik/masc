@@ -93,6 +93,23 @@ let agent_core_turn ~turn ~prompt ?tool ~answer () =
 
 let turn_name turn ordinal = A.In_turn { turn = Ids.Turn_id.of_string turn; ordinal }
 let name_t = testable (fun fmt n -> Format.pp_print_string fmt (A.name_to_string n)) A.equal_name
+
+let placement_t =
+  testable
+    (fun fmt -> function
+       | A.Covers_none -> Format.pp_print_string fmt "Covers_none"
+       | A.Covers_through index -> Format.fprintf fmt "Covers_through %d" index
+       | A.Not_in_list -> Format.pp_print_string fmt "Not_in_list")
+    ( = )
+;;
+
+let front_t =
+  testable
+    (fun fmt -> function
+       | A.Front index -> Format.fprintf fmt "Front %d" index
+       | A.Front_at_least index -> Format.fprintf fmt "Front_at_least %d" index)
+    ( = )
+;;
 let names atoms = Array.to_list (Array.map (fun (atom : A.atom) -> atom.name) atoms)
 
 let hard_limit =
@@ -297,16 +314,76 @@ let test_covered_end_reads_names_only () =
   let atoms = A.atoms_of_messages (named_history ()) in
   let through turn extent = Some (A.Through_turn { turn = Ids.Turn_id.of_string turn; extent }) in
   let up_to ordinal = A.Up_to { ordinal; settled = None } in
-  check int "a whole turn ends at its first run" 6 (A.covered_end (through "t#1" A.Whole_turn) atoms);
-  check int "up to an ordinal" 3 (A.covered_end (through "t#1" (up_to 1)) atoms);
-  check int "up to an ordinal past a later turn" 9 (A.covered_end (through "t#1" (up_to 5)) atoms);
-  check int "a later whole turn" 8 (A.covered_end (through "t#2" A.Whole_turn) atoms);
-  check int "a turn the list does not hold covers nothing" (-1)
+  check placement_t "a whole turn ends at its first run" (A.Covers_through 6)
+    (A.covered_end (through "t#1" A.Whole_turn) atoms);
+  check placement_t "up to an ordinal" (A.Covers_through 3)
+    (A.covered_end (through "t#1" (up_to 1)) atoms);
+  check placement_t "up to an ordinal past a later turn" (A.Covers_through 9)
+    (A.covered_end (through "t#1" (up_to 5)) atoms);
+  check placement_t "a later whole turn" (A.Covers_through 8)
+    (A.covered_end (through "t#2" A.Whole_turn) atoms);
+  check placement_t "a turn the list does not hold is not placed" A.Not_in_list
     (A.covered_end (through "t#9" A.Whole_turn) atoms);
-  check int "leading atoms" 0 (A.covered_end (Some (A.Through_leading 0)) atoms);
-  check int "leading atoms stop at the first turn" 1
+  check placement_t "leading atoms" (A.Covers_through 0)
+    (A.covered_end (Some (A.Through_leading 0)) atoms);
+  check placement_t "leading atoms stop at the first turn" (A.Covers_through 1)
     (A.covered_end (Some (A.Through_leading 7)) atoms);
-  check int "no boundary" (-1) (A.covered_end None atoms)
+  check placement_t "no boundary" A.Covers_none (A.covered_end None atoms)
+;;
+
+(* One turn as the list rebuilt from the canonical turn store holds it: its
+   user message, unless the row's prompt was blank, and its final answer. *)
+let canonical_turn ~turn ?prompt ~answer () =
+  let open Agent_core.Types in
+  (match prompt with
+   | Some text -> [ message ~metadata:(stamped turn) User [ Text text ] ]
+   | None -> [])
+  @ [ message ~metadata:(stamped turn) Assistant [ Text answer ] ]
+;;
+
+(* A history boundary inside a turn did not reach the turn's final answer. In
+   the canonical turn list it covers the turn's user message, or only the
+   turns before it when the row's prompt was blank. A latest boundary whose
+   turn the list does not hold leaves the front a lower bound. *)
+let test_front_reads_the_other_kind_by_turn () =
+  let atoms =
+    A.atoms_of_messages
+      (canonical_turn ~turn:"c#1" ~prompt:"ask c#1" ~answer:"answer c#1" ()
+       @ canonical_turn ~turn:"c#2" ~answer:"answer c#2" ()
+       @ canonical_turn ~turn:"c#3" ~prompt:"ask c#3" ~answer:"answer c#3" ())
+  in
+  check (list name_t) "the blank-prompt turn holds only its answer"
+    [ turn_name "c#1" 0; turn_name "c#1" 1; turn_name "c#2" 0; turn_name "c#3" 0; turn_name "c#3" 1 ]
+    (names atoms);
+  let coverage turn extent =
+    Some { A.through = Some (A.Through_turn { turn = Ids.Turn_id.of_string turn; extent }); beyond = [] }
+  in
+  let inside = A.Up_to { ordinal = 2; settled = None } in
+  let history ?(canonical = None) turn extent =
+    { A.message_history = coverage turn extent; canonical_turns = canonical }
+  in
+  let front latest = A.front ~frame:A.Canonical_turns latest atoms in
+  check front_t "inside a turn with a prompt: its user message" (A.Front 3)
+    (front (history "c#3" inside));
+  check front_t "inside a turn without one: the turns before it" (A.Front 1)
+    (front (history "c#2" inside));
+  check front_t "a whole turn: all of it" (A.Front 2) (front (history "c#2" A.Whole_turn));
+  check front_t "a turn the list does not hold: a lower bound" (A.Front_at_least (-1))
+    (front (history "c#9" A.Whole_turn));
+  check front_t "the furthest placed boundary under one that is not" (A.Front_at_least 1)
+    (front (history ~canonical:(coverage "c#1" A.Whole_turn) "c#9" A.Whole_turn));
+  let starting_without_a_prompt =
+    A.atoms_of_messages
+      (canonical_turn ~turn:"c#2" ~answer:"answer c#2" ()
+       @ canonical_turn ~turn:"c#3" ~prompt:"ask c#3" ~answer:"answer c#3" ())
+  in
+  check front_t "a list that opens on that turn covers nothing" (A.Front (-1))
+    (A.front ~frame:A.Canonical_turns (history "c#2" inside) starting_without_a_prompt);
+  check front_t "the same kind reads the boundary by ordinal" (A.Front 2)
+    (A.front
+       ~frame:A.Message_history
+       (history "c#2" (A.Up_to { ordinal = 0; settled = None }))
+       atoms)
 ;;
 
 let three_turns () =
@@ -942,7 +1019,8 @@ let test_split_turn_is_covered_up_to_the_boundary () =
             { turn = Ids.Turn_id.of_string "s#1"
             ; extent = A.Up_to { ordinal = 3; settled = None }
             }));
-  check int "the covered end is the boundary" 5 (A.covered_end anchor.coverage.through atoms);
+  check placement_t "the covered end is the boundary" (A.Covers_through 5)
+    (A.covered_end anchor.coverage.through atoms);
   check (option string) "the consumer starts at the live turn" (Some "s#3")
     (first_turn_of (after_anchor anchor messages));
   check bool "the same eviction commits nothing" true
@@ -1411,10 +1489,122 @@ let test_a_lagging_kind_neither_rewinds_the_summary_nor_the_cut () =
   check string "the last request moves on to l#3's" "ask l#3" ahead.active_intent
 ;;
 
-(* The rollover compacts the list the next fresh session starts from: the
-   handoff list when the canonical turn store holds one, and otherwise the
-   message history it is given, whether the store is empty or unreadable. *)
-let test_acp_rollover_compacts_the_list_the_next_session_starts_from () =
+(* A history epoch that stops inside a turn covered the turn's user message,
+   not its final answer. A canonical row with a blank prompt rebuilds as the
+   answer alone, so the rollover still has that answer to summarize. *)
+let test_a_turn_without_a_prompt_row_keeps_its_answer_in_the_summary () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "blank-prompt-row" in
+  List.iteri
+    (fun i (turn, prompt) ->
+       ignore
+         (commit_row ~keepers_dir ~keeper_id ~turn ~prompt ~answer:("answer " ^ turn) (float_of_int i)
+          : Store.canonical_turn))
+    [ "b#1", "ask b#1"; "b#2", ""; "b#3", "ask b#3"; "b#4", "ask b#4" ];
+  let history =
+    agent_core_turn ~turn:"b#1" ~prompt:"ask b#1" ~answer:"answer b#1" ()
+    @ agent_core_turn ~turn:"b#2" ~prompt:"look at this" ~tool:"read" ~answer:"answer b#2" ()
+    @ agent_core_turn ~turn:"b#3" ~prompt:"ask b#3" ~answer:"answer b#3" ()
+  in
+  let partial = committed (compact ~keepers_dir ~keeper_id ~prefix:4 history) in
+  check bool "the history epoch stops at b#2's tool round" true
+    (partial.coverage.through
+     = Some
+         (A.Through_turn
+            { turn = Ids.Turn_id.of_string "b#2"
+            ; extent = A.Up_to { ordinal = 1; settled = Some (Ids.Turn_id.of_string "b#1") }
+            }));
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
+  check (list name_t) "the rollover evicts b#2's answer and b#3"
+    [ turn_name "b#2" 0; turn_name "b#3" 0; turn_name "b#3" 1 ]
+    (List.filteri (fun index _ -> index < prefix) (names (A.atoms_of_messages messages)));
+  let rollover =
+    committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages)
+  in
+  check bool "the summary takes b#2's final answer" true
+    (List.mem "b#2/0 assistant said \"answer b#2\"" (summary_lines rollover));
+  check string "the last request is b#3's" "ask b#3" rollover.active_intent
+;;
+
+(* A history epoch can settle a turn whose canonical row is missing because
+   its commit failed. The watermark then keeps every row, and the list a
+   rollover rebuilds holds turns the summary already holds, but not the
+   boundary's turn. The front there is only a lower bound: held turns join the
+   observations again, yet the last request stays, and a turn the summary does
+   not hold still moves it on. *)
+let test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "missing-row" in
+  commit_rows ~keepers_dir ~keeper_id [ "h#1"; "h#2"; "h#3" ];
+  commit_rows ~keepers_dir ~keeper_id [ "h#5"; "h#6" ];
+  let history =
+    List.concat_map
+      (fun turn -> agent_core_turn ~turn ~prompt:("ask " ^ turn) ~answer:("answer " ^ turn) ())
+      [ "h#1"; "h#2"; "h#3"; "h#4"; "h#5"; "h#6" ]
+  in
+  let settled = committed (compact ~keepers_dir ~keeper_id ~prefix:8 history) in
+  check bool "the history epoch covers h#4 whole" true
+    (settled.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "h#4"; extent = A.Whole_turn }));
+  check string "its last request is h#4's" "ask h#4" settled.active_intent;
+  check (list string) "no row carries h#4, so every row stays"
+    [ "h#1"; "h#2"; "h#3"; "h#5"; "h#6" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let roll ?keep_ratio () =
+    let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+    let messages, prefix =
+      Keeper_acp_runtime.For_testing.split_older_for_rollover ?keep_ratio rebuilt
+    in
+    committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages)
+  in
+  let behind = roll ~keep_ratio:0.5 () in
+  check string "a rollover through h#3's prompt keeps h#4's request" "ask h#4"
+    behind.active_intent;
+  let past = roll () in
+  check string "a rollover through h#5 moves it on to h#5's" "ask h#5" past.active_intent;
+  check bool "h#5's answer joins the summary" true
+    (List.mem "h#5/1 assistant said \"answer h#5\"" (summary_lines past));
+  (* A row the history never held, such as a bridged turn, lies before a turn
+     the summary holds: it is older than that turn, so it does not set the
+     request either, though its answer joins the summary. *)
+  let keeper_id = "missing-row-and-unheld-row" in
+  commit_rows ~keepers_dir ~keeper_id [ "u#1"; "x#2"; "u#3" ];
+  commit_rows ~keepers_dir ~keeper_id [ "u#5" ];
+  let history =
+    List.concat_map
+      (fun turn -> agent_core_turn ~turn ~prompt:("ask " ^ turn) ~answer:("answer " ^ turn) ())
+      [ "u#1"; "u#3"; "u#4"; "u#5" ]
+  in
+  let settled = committed (compact ~keepers_dir ~keeper_id ~prefix:6 history) in
+  check string "the history epoch's last request is u#4's" "ask u#4" settled.active_intent;
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix =
+    Keeper_acp_runtime.For_testing.split_older_for_rollover ~keep_ratio:0.5 rebuilt
+  in
+  check (list name_t) "the rollover evicts u#1 and the unheld x#2"
+    [ turn_name "u#1" 0; turn_name "u#1" 1; turn_name "x#2" 0; turn_name "x#2" 1 ]
+    (List.filteri (fun index _ -> index < prefix) (names (A.atoms_of_messages messages)));
+  let behind =
+    committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages)
+  in
+  check string "the unheld row keeps u#4's request" "ask u#4" behind.active_intent;
+  check bool "its answer joins the summary" true
+    (List.mem "x#2/1 assistant said \"answer x#2\"" (summary_lines behind))
+;;
+
+(* A rollover and an overflow retry both open a fresh session, which starts
+   from the handoff list when the canonical turn store holds one and
+   otherwise from the message history: both compact that list, whether the
+   store is empty or unreadable. An unreadable compaction store skips the
+   compaction, which would fail on the same store. *)
+let test_acp_producers_compact_the_list_the_next_session_starts_from () =
   with_pool
   @@ fun () ->
   with_keepers_dir
@@ -1426,43 +1616,77 @@ let test_acp_rollover_compacts_the_list_the_next_session_starts_from () =
          agent_core_turn ~turn ~prompt:("ask " ^ turn) ~tool:"grep" ~answer:("answer " ^ turn) ())
       turns
   in
-  let roll keeper_id =
-    Keeper_acp_runtime.For_testing.compact_for_rollover
-      ~keepers_dir
-      ~keeper_id
-      ~used_tokens:180_000
-      ~limit_tokens:200_000
-      ~initial_messages:history
+  let input_limit =
+    Result.get_ok
+      (Llm_provider.Input_budget.of_agent_window ~model_id:"acp-test" ~max_context_tokens:200_000)
+  in
+  let producers =
+    [ ( "rollover"
+      , fun keeper_id ->
+          Keeper_acp_runtime.For_testing.compact_for_rollover
+            ~keepers_dir
+            ~keeper_id
+            ~used_tokens:180_000
+            ~limit_tokens:200_000
+            ~initial_messages:history )
+    ; ( "overflow"
+      , fun keeper_id ->
+          Keeper_acp_runtime.For_testing.compact_once_for_overflow
+            ~already_compacted:(ref false)
+            ~keepers_dir
+            ~keeper_id
+            ~input_limit
+            ~previous_capacity:400_000
+            ~refused_sent_bytes:None
+            ~capacity:200_000
+            ~initial_messages:history )
+    ]
   in
   let archives_a_tool_round keeper_id =
     List.exists
       (fun (_, _, json) -> contains ~needle:"call-k#1-grep" json)
       (archived_atoms ~keepers_dir ~keeper_id)
   in
-  let with_rows = "rollover-with-rows" in
-  commit_rows ~keepers_dir ~keeper_id:with_rows turns;
-  roll with_rows;
-  check (list string) "with rows it compacts the canonical turn list" [ "canonical_turns" ]
-    (epoch_frames ~keepers_dir ~keeper_id:with_rows);
-  check bool "which holds no tool round" false (archives_a_tool_round with_rows);
-  let without_rows = "rollover-without-rows" in
-  roll without_rows;
-  check (list string) "without rows it compacts the message history" [ "message_history" ]
-    (epoch_frames ~keepers_dir ~keeper_id:without_rows);
-  check bool "the history it was given" true (archives_a_tool_round without_rows);
-  let unreadable = "rollover-unreadable-rows" in
+  List.iter
+    (fun (producer, compact_for) ->
+       let with_rows = producer ^ "-with-rows" in
+       commit_rows ~keepers_dir ~keeper_id:with_rows turns;
+       compact_for with_rows;
+       check (list string) (producer ^ ": with rows it compacts the canonical turn list")
+         [ "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:with_rows);
+       check bool (producer ^ ": which holds no tool round") false (archives_a_tool_round with_rows);
+       let without_rows = producer ^ "-without-rows" in
+       compact_for without_rows;
+       check (list string) (producer ^ ": without rows it compacts the message history")
+         [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:without_rows);
+       check bool (producer ^ ": the history it was given") true (archives_a_tool_round without_rows);
+       let unreadable = producer ^ "-unreadable-rows" in
+       exec_all
+         (Store.db_path ~keepers_dir ~keeper_id:unreadable)
+         [ "CREATE TABLE canonical_turns (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
+            turn_id TEXT NOT NULL UNIQUE, parent_turn_id TEXT, runtime_kind TEXT NOT NULL, \
+            runtime_id TEXT NOT NULL, user_input TEXT NOT NULL, tool_calls_json TEXT NOT NULL, \
+            assistant_output TEXT NOT NULL, usage_json TEXT NOT NULL, \
+            compaction_epoch_id INTEGER, created_at REAL NOT NULL)"
+         ];
+       compact_for unreadable;
+       check (list string) (producer ^ ": an unreadable store leaves the message history too")
+         [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:unreadable);
+       check bool (producer ^ ": compacted from the history it was given") true
+         (archives_a_tool_round unreadable))
+    producers;
+  let broken = "unreadable-compaction-store" in
   exec_all
-    (Store.db_path ~keepers_dir ~keeper_id:unreadable)
-    [ "CREATE TABLE canonical_turns (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
-       turn_id TEXT NOT NULL UNIQUE, parent_turn_id TEXT, runtime_kind TEXT NOT NULL, \
-       runtime_id TEXT NOT NULL, user_input TEXT NOT NULL, tool_calls_json TEXT NOT NULL, \
-       assistant_output TEXT NOT NULL, usage_json TEXT NOT NULL, \
-       compaction_epoch_id INTEGER, created_at REAL NOT NULL)"
+    (C.db_path ~keepers_dir ~keeper_id:broken)
+    [ "CREATE TABLE compaction_epochs (epoch_id INTEGER PRIMARY KEY, \
+       covers_through_turn TEXT NOT NULL, anchor_json TEXT NOT NULL, \
+       trigger_json TEXT NOT NULL, evicted_turn_ids_json TEXT NOT NULL, \
+       previous_epoch_id INTEGER)"
     ];
-  roll unreadable;
-  check (list string) "an unreadable store leaves the message history too" [ "message_history" ]
-    (epoch_frames ~keepers_dir ~keeper_id:unreadable);
-  check bool "compacted from the history it was given" true (archives_a_tool_round unreadable)
+  check bool "an unreadable compaction store skips the compaction" true
+    (match Keeper_acp_runtime.For_testing.next_start_list ~keepers_dir ~keeper_id:broken ~history with
+     | Error (C.Schema_not_current { found = 0L; _ }) -> true
+     | Ok _ | Error _ -> false)
 ;;
 
 let test_canonical_turn_store_compaction_watermark_and_failover () =
@@ -1767,6 +1991,8 @@ let () =
     [ ( "atom names and coverage"
       , [ test_case "names follow turns and continue on re-entry" `Quick test_atom_names_follow_turns
         ; test_case "covered end reads names only" `Quick test_covered_end_reads_names_only
+        ; test_case "front reads the other kind by turn" `Quick
+            test_front_reads_the_other_kind_by_turn
         ; test_case "advance names the boundary, settled turn and beyond" `Quick
             test_advance_names_the_boundary
         ; test_case "settled turn stops at an open earlier turn" `Quick
@@ -1813,8 +2039,12 @@ let () =
             test_history_compaction_archives_what_a_rollover_did_not
         ; test_case "a lagging kind neither rewinds the summary nor the cut" `Quick
             test_a_lagging_kind_neither_rewinds_the_summary_nor_the_cut
-        ; test_case "ACP rollover compacts the list the next session starts from" `Quick
-            test_acp_rollover_compacts_the_list_the_next_session_starts_from
+        ; test_case "a turn without a prompt row keeps its answer in the summary" `Quick
+            test_a_turn_without_a_prompt_row_keeps_its_answer_in_the_summary
+        ; test_case "a boundary turn missing from the rows keeps the last request" `Quick
+            test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request
+        ; test_case "ACP producers compact the list the next session starts from" `Quick
+            test_acp_producers_compact_the_list_the_next_session_starts_from
         ; test_case "compaction watermark, cycle guard & failover hydration" `Quick
             test_canonical_turn_store_compaction_watermark_and_failover
         ; test_case "hydration: suppressed terminal effect, multi-block & repeated prompts" `Quick

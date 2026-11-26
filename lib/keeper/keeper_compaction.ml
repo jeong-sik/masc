@@ -259,10 +259,56 @@ let first_nonblank_text (blocks : Agent_core.Types.content_block list) =
     blocks
 ;;
 
+(* Index of the last atom of [atoms] whose turn an observation of [previous]
+   names, or [-1]. Observations of atoms still archived past a boundary
+   ([beyond]) do not count: they are tool rounds of a turn in progress, whose
+   request the summary has not taken. *)
+let last_held_index
+      ~(previous : compaction_anchor option)
+      ~(latest : Keeper_compaction_atom.latest)
+      (atoms : Keeper_compaction_atom.atom array)
+  =
+  match previous with
+  | None -> -1
+  | Some anchor ->
+    let in_progress : (string, unit) Hashtbl.t = Hashtbl.create 8 in
+    List.iter
+      (fun (coverage : Keeper_compaction_atom.coverage) ->
+         List.iter
+           (fun name -> Hashtbl.replace in_progress (Keeper_compaction_atom.name_to_string name) ())
+           coverage.beyond)
+      (List.filter_map Fun.id [ latest.message_history; latest.canonical_turns ]);
+    let turns : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+    let leading : (int, unit) Hashtbl.t = Hashtbl.create 8 in
+    List.iter
+      (fun (_, (name : Keeper_compaction_atom.name)) ->
+         if not (Hashtbl.mem in_progress (Keeper_compaction_atom.name_to_string name))
+         then (
+           match name with
+           | In_turn { turn; ordinal = _ } -> Hashtbl.replace turns (Ids.Turn_id.to_string turn) ()
+           | Leading position -> Hashtbl.replace leading position ()))
+      anchor.observations;
+    let held (atom : Keeper_compaction_atom.atom) =
+      match atom.name with
+      | In_turn { turn; ordinal = _ } -> Hashtbl.mem turns (Ids.Turn_id.to_string turn)
+      | Leading position -> Hashtbl.mem leading position
+    in
+    let rec scan index =
+      if index < 0 then -1 else if held atoms.(index) then index else scan (index - 1)
+    in
+    scan (Array.length atoms - 1)
+;;
+
 (* Fold the newly archived atoms onto the previous anchor: its observations
-   are kept and the new atoms' observations follow, each naming its atom. The
-   active intent is the last conversational user text seen so far. *)
-let fold_anchor ~(previous : compaction_anchor option) ~coverage ~(fresh : archived_atom list) =
+   are kept and the observations of [fresh] follow, each naming its atom. The
+   active intent is the last conversational user text of [intent_atoms], a
+   tail of [fresh], or the previous one when they hold none. *)
+let fold_anchor
+      ~(previous : compaction_anchor option)
+      ~coverage
+      ~(fresh : archived_atom list)
+      ~(intent_atoms : archived_atom list)
+  =
   let active_intent =
     List.fold_left
       (fun intent (atom : archived_atom) ->
@@ -274,7 +320,7 @@ let fold_anchor ~(previous : compaction_anchor option) ~coverage ~(fresh : archi
            intent
            atom.messages)
       (Option.fold ~none:"" ~some:(fun a -> a.active_intent) previous)
-      fresh
+      intent_atoms
   in
   let observations =
     List.concat_map
@@ -1167,8 +1213,17 @@ let compact_evicted_messages
                archived for this kind but stays out of the summary: the
                summary already passed its turn, and folding it again would
                put an older turn after newer ones. *)
-            let summarized_end =
-              Keeper_compaction_atom.furthest_covered_end ~frame latest atoms
+            let front = Keeper_compaction_atom.front ~frame latest atoms in
+            let summarized_end = Keeper_compaction_atom.front_index front in
+            (* A front that is only a lower bound may lie before turns the
+               summary holds. Their atoms join the observations again, but
+               none at or before the last of them sets the active intent:
+               its request is no newer than the summary's. *)
+            let intent_floor =
+              match front with
+              | Keeper_compaction_atom.Front _ -> summarized_end
+              | Keeper_compaction_atom.Front_at_least _ ->
+                Int.max summarized_end (last_held_index ~previous ~latest atoms)
             in
             let archived =
               List.map
@@ -1180,13 +1235,18 @@ let compact_evicted_messages
                      } ))
                 fresh
             in
-            let unsummarized =
+            let unsummarized = List.filter (fun (index, _) -> index > summarized_end) archived in
+            let intent_atoms =
               List.filter_map
-                (fun (index, atom) -> if index > summarized_end then Some atom else None)
-                archived
+                (fun (index, atom) -> if index > intent_floor then Some atom else None)
+                unsummarized
             in
             let anchor =
-              fold_anchor ~previous ~coverage ~fresh:unsummarized
+              fold_anchor
+                ~previous
+                ~coverage
+                ~fresh:(List.map snd unsummarized)
+                ~intent_atoms
               |> redact_anchor effective_redact
               |> bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes:budget
             in
@@ -1231,11 +1291,11 @@ let messages_after_front ~latest messages =
       messages
   in
   let atoms = Keeper_compaction_atom.atoms_of_messages messages in
+  (* A front that is only a lower bound cuts no later than it: the list keeps
+     what the summary may already hold, and loses nothing. *)
   let covered =
-    Keeper_compaction_atom.furthest_covered_end
-      ~frame:Keeper_compaction_atom.Message_history
-      latest
-      atoms
+    Keeper_compaction_atom.front_index
+      (Keeper_compaction_atom.front ~frame:Keeper_compaction_atom.Message_history latest atoms)
   in
   let covered_pos = if covered < 0 then -1 else atoms.(covered).last_position in
   let cut_pos = Int.max inline_pos covered_pos in

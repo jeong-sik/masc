@@ -250,10 +250,15 @@ let is_leading atom =
   | In_turn _ -> false
 ;;
 
+type placement =
+  | Covers_none
+  | Covers_through of int
+  | Not_in_list
+
 let covered_end through atoms =
   let count = Array.length atoms in
   match through with
-  | None -> -1
+  | None -> Covers_none
   | Some (Through_leading last) ->
     (* Leading atoms are a prefix of the list and [Leading j] sits at index j. *)
     let rec scan index =
@@ -261,10 +266,11 @@ let covered_end through atoms =
       then scan (index + 1)
       else index - 1
     in
-    scan 0
+    let last_covered = scan 0 in
+    if last_covered < 0 then Covers_none else Covers_through last_covered
   | Some (Through_turn { turn; extent }) ->
     (match first_index_naming atoms turn with
-     | None -> -1
+     | None -> Not_in_list
      | Some first ->
        (match extent with
         | Whole_turn ->
@@ -273,7 +279,7 @@ let covered_end through atoms =
             then run_end (index + 1)
             else index
           in
-          run_end first
+          Covers_through (run_end first)
         | Up_to { ordinal = limit; settled = _ } ->
           (* The turn's ordinals rise along the list, so the last of its atoms
              at or under [limit] is the end. The first one has ordinal 0. *)
@@ -286,7 +292,7 @@ let covered_end through atoms =
                 scan (index + 1) index
               | In_turn _ | Leading _ -> scan (index + 1) best)
           in
-          scan first first))
+          Covers_through (scan first first)))
 ;;
 
 type latest =
@@ -300,32 +306,71 @@ let latest_over frame { message_history; canonical_turns } =
   | Canonical_turns -> canonical_turns
 ;;
 
-(* A turn's prompt is its ordinal 0 in both kinds of list. Past it, the
-   canonical list holds only the final answer, while the message history may
-   hold tool rounds before it. *)
-let through_read_in ~written_over ~read_in through =
-  match written_over, read_in with
-  | Message_history, Message_history | Canonical_turns, Canonical_turns -> through
-  | Canonical_turns, Message_history ->
-    (* A rollover keeps at least two atoms of at most two per turn, so its
-       boundary is a whole turn or a turn's prompt. Any other ordinal would
-       land no later in the history than it meant. *)
-    through
-  | Message_history, Canonical_turns ->
-    (match through with
-     | Through_turn { turn; extent = Up_to { ordinal = _; settled } } ->
-       Through_turn { turn; extent = Up_to { ordinal = 0; settled } }
-     | Through_turn { turn = _; extent = Whole_turn } | Through_leading _ -> through)
+let opens_with_user_message atom =
+  match atom.messages with
+  | [] -> false
+  | (first : Agent_core.Types.message) :: _ ->
+    (match first.role with
+     | User -> true
+     | System | Assistant | Tool -> false)
 ;;
 
-let furthest_covered_end ~frame latest atoms =
-  let read_over written_over =
-    let through =
-      Option.bind (latest_over written_over latest) (fun coverage -> coverage.through)
-    in
-    covered_end (Option.map (through_read_in ~written_over ~read_in:frame) through) atoms
+(* Both kinds keep the conversation's turns in the same order, so a boundary
+   read in the other kind covers that list's atoms before its turn. Inside the
+   turn they differ: the canonical list holds the turn as its user message,
+   when the prompt was not blank, and its final answer, while the message
+   history holds the user message, the tool rounds and the final answer. *)
+let place_over ~written_over ~read_in through atoms =
+  match written_over, read_in with
+  | Message_history, Message_history | Canonical_turns, Canonical_turns ->
+    covered_end through atoms
+  | Canonical_turns, Message_history ->
+    (* A rollover keeps at least two atoms of at most two per turn, so its
+       boundary is a whole turn or a turn's user message: the turn's first
+       atom in the history too. *)
+    covered_end through atoms
+  | Message_history, Canonical_turns ->
+    (match through with
+     | Some (Through_turn { turn; extent = Up_to _ }) ->
+       (* The history stopped inside [turn], before its final answer: of the
+          turn, only a user message is covered. *)
+       (match first_index_naming atoms turn with
+        | None -> Not_in_list
+        | Some first when opens_with_user_message atoms.(first) -> Covers_through first
+        | Some 0 -> Covers_none
+        | Some first -> Covers_through (first - 1))
+     | Some (Through_turn { turn = _; extent = Whole_turn })
+     | Some (Through_leading _)
+     | None -> covered_end through atoms)
+;;
+
+type front =
+  | Front of int
+  | Front_at_least of int
+
+let front_index = function
+  | Front index | Front_at_least index -> index
+;;
+
+let front ~frame latest atoms =
+  let place written_over =
+    place_over
+      ~written_over
+      ~read_in:frame
+      (Option.bind (latest_over written_over latest) (fun coverage -> coverage.through))
+      atoms
   in
-  Int.max (read_over Message_history) (read_over Canonical_turns)
+  let index_of = function
+    | Covers_through index -> index
+    | Covers_none | Not_in_list -> -1
+  in
+  let history = place Message_history in
+  let canonical = place Canonical_turns in
+  let index = Int.max (index_of history) (index_of canonical) in
+  match history, canonical with
+  | Not_in_list, (Covers_none | Covers_through _ | Not_in_list)
+  | (Covers_none | Covers_through _), Not_in_list -> Front_at_least index
+  | (Covers_none | Covers_through _), (Covers_none | Covers_through _) -> Front index
 ;;
 
 (* The boundary a producer writes when its evicted prefix ends at [index].
@@ -402,7 +447,16 @@ let advance ~previous atoms { prefix; later } =
     | None ->
       let later = Index_set.of_list later in
       let previous_through = Option.bind previous (fun coverage -> coverage.through) in
-      let previous_end = covered_end previous_through atoms in
+      let previous_end =
+        match covered_end previous_through atoms with
+        | Covers_through index -> index
+        | Covers_none -> -1
+        | Not_in_list ->
+          (* No atom of the list is known to be archived, so the fresh atoms
+             count from the front and may repeat what an earlier epoch
+             archived (RFC §5.4). Nothing is lost. *)
+          -1
+      in
       let previous_beyond : (string, unit) Hashtbl.t = Hashtbl.create 8 in
       Option.iter
         (fun coverage ->

@@ -1,10 +1,11 @@
 (** Provider-neutral anchored compaction of a Keeper's conversation history.
 
     {1 Core invariants}
-    - {b Immutable anchors}: each compaction epoch folds only the newly evicted
-      atoms onto an immutable {!compaction_anchor}. Each observation names the
-      atom it came from ({!Keeper_compaction_atom.name}), and the atoms are
-      archived verbatim in per-Keeper SQLite WAL
+    - {b Immutable anchors}: each compaction epoch folds the newly evicted
+      atoms past the summary's front onto an immutable {!compaction_anchor}.
+      Each observation names the atom it came from
+      ({!Keeper_compaction_atom.name}) in the list that folded it, and the
+      atoms are archived verbatim in per-Keeper SQLite WAL
       ([<keepers_dir>/<keeper_id>.compaction.db]).
     - {b Coverage by name}: an anchor records the front of the conversation it
       covers as a {!Keeper_compaction_atom.coverage}, named by Keeper turn and
@@ -12,7 +13,7 @@
       ({!Keeper_compaction_atom.frame}). A producer reads the coverage of the
       latest epoch over its own kind of list to decide what to archive; the
       summary and the per-turn consumer read the furthest of the two kinds'
-      latest boundaries ({!Keeper_compaction_atom.furthest_covered_end}).
+      latest boundaries ({!Keeper_compaction_atom.front}).
       Each finds a boundary in its own message list by reading message
       metadata; nothing is serialized or hashed to compare.
     - {b Structural triggers only}: compaction triggers strictly from an
@@ -186,9 +187,23 @@ val prefix_eviction_of_window
     [Ok None].
 
     The summary folds onto the latest epoch of either kind, and only the new
-    atoms past the furthest front either kind has reached join it. A new atom
-    at or before that front is archived but left out of the summary, so the
-    summary never steps back to an older turn.
+    atoms past the furthest front either kind has reached
+    ({!Keeper_compaction_atom.front}) join it. A new atom at or before that
+    front is archived but left out of the summary.
+
+    Two cases still put a turn out of order or twice in the observations:
+    - Completed tool rounds the Agent Core window drops from the turn in
+      progress ([eviction.later]) join the summary when dropped, so turns the
+      window evicts afterwards follow them.
+    - A latest boundary may name a turn [messages] does not hold
+      ({!Keeper_compaction_atom.Front_at_least}): a missing canonical row, or a
+      row that keeps its ACP turn id. The front is then a lower bound, and new
+      atoms past it may belong to turns the summary holds. They join the
+      observations again, but no atom at or before the last one whose turn an
+      observation of the latest anchor names sets the active intent: its
+      request is no newer than the summary's. Observations of tool rounds
+      still archived past a boundary ([beyond]) do not count, because the
+      summary has not taken their turn's request.
 
     The new atoms are secret-redacted and archived verbatim. The committed
     anchor is always bounded via {!bound_anchor_to_budget} (falling back to
@@ -208,9 +223,11 @@ val compact_evicted_messages
   -> (compaction_anchor option, store_error) result
 
 (** The part of [messages], a message history, after both the furthest front
-    [latest] covers ({!Keeper_compaction_atom.furthest_covered_end}) and the
-    last inline compaction anchor message. Returns [messages] unchanged when
-    neither is in it. Reads message metadata once; nothing is serialized or
+    [latest] covers ({!Keeper_compaction_atom.front}) and the last inline
+    compaction anchor message. Returns [messages] unchanged when neither is in
+    it. A latest boundary whose turn [messages] does not hold cuts nothing, so
+    the cut may land before the previous call's; it never lands past what the
+    summary holds. Reads message metadata once; nothing is serialized or
     hashed. *)
 val messages_after_front
   :  latest:Keeper_compaction_atom.latest

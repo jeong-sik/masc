@@ -185,6 +185,17 @@ module For_testing : sig
     -> Agent_core.Types.message list
     -> Agent_core.Types.message list * int
 
+  (** The list a rollover and an overflow retry compact: the handoff list when
+      it holds anything, else [history]. [Error] when the compaction store
+      cannot be read, which the compaction would hit too. *)
+  val next_start_list
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> history:Agent_core.Types.message list
+    -> ( Keeper_compaction_atom.frame * Agent_core.Types.message list
+         , Keeper_compaction.store_error )
+         result
+
   val compact_for_rollover
     :  keepers_dir:string
     -> keeper_id:string

@@ -10,10 +10,9 @@
     history, an official client's start seed, the ACP list rebuilt from the
     canonical turn store. A producer carries on only coverage written over the
     same kind of list ({!frame}). The summary and the per-turn consumer read
-    the furthest of the two kinds' latest boundaries
-    ({!furthest_covered_end}). Finding a boundary compares names, so it reads
-    metadata only; nothing is serialized or hashed. See RFC
-    compaction-anchor-names-a-turn-atom. *)
+    the furthest of the two kinds' latest boundaries ({!front}). Finding a
+    boundary compares names, so it reads metadata only; nothing is serialized
+    or hashed. See RFC compaction-anchor-names-a-turn-atom. *)
 
 type name =
   | Leading of int
@@ -101,19 +100,29 @@ type atom =
 val atoms_of_messages : Agent_core.Types.message list -> atom array
 (** Name every atom of the list, in order. Pinned messages belong to no atom. *)
 
-val covered_end : through option -> atom array -> int
-(** Index of the last atom [through] covers in [atoms], or [-1] when it covers
-    none of them.
+(** Where a boundary lands in a list. *)
+type placement =
+  | Covers_none  (** No boundary, or one that covers none of the list's atoms. *)
+  | Covers_through of int  (** Index of the last atom the boundary surely covers. *)
+  | Not_in_list
+      (** The boundary names a turn no atom of the list names. Usually the
+          list starts after that turn, because the canonical turn store pruned
+          its row; but the list may also hold the turn under another id, or
+          lack it. *)
+
+val covered_end : through option -> atom array -> placement
+(** Where [through] lands in [atoms].
 
     - {!Through_leading} [k] covers the leading atoms through [k].
-    - {!Through_turn} covers nothing when no atom names its turn. Otherwise it
-      covers every atom before the turn's first atom, then under {!Whole_turn}
-      the turn's first run of atoms, and under {!Up_to} the turn's atoms
-      through the one with the largest ordinal not above [ordinal].
+    - {!Through_turn} is {!Not_in_list} when no atom names its turn. Otherwise
+      it covers every atom before the turn's first atom, then under
+      {!Whole_turn} the turn's first run of atoms, and under {!Up_to} the
+      turn's atoms through the one with the largest ordinal not above
+      [ordinal].
 
-    A boundary that is missing from the list covers nothing rather than a
-    guessed span, so a list that does not hold the boundary is never cut
-    past what the anchor summarized. *)
+    A boundary that is missing from the list gets no guessed span, so a list
+    that does not hold the boundary is never cut past what the anchor
+    summarized. *)
 
 (** The coverage of the latest epoch written over each kind of list. *)
 type latest =
@@ -123,17 +132,33 @@ type latest =
 
 val latest_over : frame -> latest -> coverage option
 
-val furthest_covered_end : frame:frame -> latest -> atom array -> int
-(** Index of the last atom of [atoms], a list of kind [frame], that the
-    furthest of [latest]'s two boundaries surely covers, or [-1] when neither
-    covers any. The summary fold and the per-turn consumer read the front this
-    way. Which atoms are archived still comes from each kind's own coverage.
+(** How far the summary has reached in a list. *)
+type front =
+  | Front of int
+      (** Both kinds' latest boundaries land in the list: the summary holds
+          its atoms through this index, and no later ones ([-1]: none). *)
+  | Front_at_least of int
+      (** A latest boundary names a turn the list does not hold: the summary
+          holds the atoms through this index and may hold later ones. *)
 
-    A boundary written over the other kind of list is read by its turn. A
-    canonical turn list boundary is a whole turn or a turn's prompt; both name
-    the same place in the message history. A message-history boundary inside a
-    turn surely covers only that turn's prompt in the canonical turn list,
-    which holds the turn as its prompt and its final answer. *)
+val front_index : front -> int
+
+val front : frame:frame -> latest -> atom array -> front
+(** The front of [atoms], a list of kind [frame]: the furthest of [latest]'s
+    two boundaries. The summary fold and the per-turn consumer read it. Which
+    atoms are archived still comes from each kind's own coverage.
+
+    A boundary written over the other kind of list is read by its turn. Both
+    kinds keep the conversation's turns in the same order, so it covers that
+    list's atoms before its turn. Inside the turn the kinds differ: the
+    canonical turn list holds a turn as its user message (none when the prompt
+    was blank) and its final answer.
+
+    - A canonical turn list boundary is a whole turn or a turn's user message,
+      the turn's first atom in the message history too.
+    - A message-history boundary inside a turn did not reach the final answer.
+      In the canonical turn list it covers the turn's user message, or only
+      the turns before when the turn has no user message there. *)
 
 (** Atoms a producer dropped from its list: every atom before [prefix], and
     [later] atoms at or past [prefix]. *)

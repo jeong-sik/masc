@@ -1802,12 +1802,49 @@ let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message li
     without_preamble, max 1 (atom_count - keep_recent))
 ;;
 
-(* The next fresh session starts from the handoff list, or from the message
-   history when there is none, so the rollover compacts that list. The
-   history is [initial_messages], which the overflow producer compacts too.
-   A projected start window would not do: a boundary covers everything
-   before it, so the turns in front of the window would count as archived
-   and the watermark would prune their rows. *)
+(* The list the next fresh session starts from. After a rollover or an
+   overflow retry the start prefers the handoff list when it holds anything,
+   else the run's message history ({!hydrate_start_messages}); both producers
+   compact that list, so they write over one kind of list while the handoff
+   list holds anything. [history] is [initial_messages]. A projected start
+   window would not do: a boundary covers everything before it, so the turns
+   in front of the window would count as archived and the watermark would
+   prune their rows. *)
+let next_start_list ~keepers_dir ~keeper_id ~history =
+  match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
+  | Ok handoff when handoff.messages <> [] ->
+    Ok (Keeper_compaction_atom.Canonical_turns, handoff.messages)
+  | Ok _ -> Ok (Keeper_compaction_atom.Message_history, history)
+  | Error (Keeper_canonical_turn_store.Compaction_store err) ->
+    (* The compaction would fail on the same store. *)
+    Error err
+  | Error
+      ((Keeper_canonical_turn_store.Sqlite_error _
+       | Keeper_canonical_turn_store.Corrupt_record _
+       | Keeper_canonical_turn_store.Schema_not_current _) as err) ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "ACP compaction uses the message history; handoff list unreadable: %s"
+      (Keeper_canonical_turn_store.store_error_to_string err);
+    Ok (Keeper_compaction_atom.Message_history, history)
+;;
+
+let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
+  let* frame, source_messages = next_start_list ~keepers_dir ~keeper_id ~history in
+  let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
+  if prefix = 0
+  then Ok None
+  else
+    Keeper_compaction.compact_evicted_messages
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~frame
+      ~messages
+      ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
+      ()
+;;
+
 let compact_for_rollover
       ?keep_ratio
       ~keepers_dir
@@ -1816,42 +1853,25 @@ let compact_for_rollover
       ~initial_messages
       ()
   =
-  let frame, source_messages =
-    match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
-    | Ok handoff when handoff.messages <> [] ->
-      Keeper_compaction_atom.Canonical_turns, handoff.messages
-    | Ok _ -> Keeper_compaction_atom.Message_history, initial_messages
-    | Error err ->
-      Log.Keeper.warn
-        ~keeper_name:keeper_id
-        "ACP rollover compacts the message history; handoff list unreadable: %s"
-        (Keeper_canonical_turn_store.store_error_to_string err);
-      Keeper_compaction_atom.Message_history, initial_messages
+  let trigger =
+    Keeper_compaction.Provider_counted_window
+      { used_tokens = rollover.used_tokens; limit_tokens = rollover.limit_tokens }
   in
-  let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
-  if prefix = 0
-  then ()
-  else (
-    let trigger =
-      Keeper_compaction.Provider_counted_window
-        { used_tokens = rollover.used_tokens; limit_tokens = rollover.limit_tokens }
-    in
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id
-        ~trigger
-        ~frame
-        ~messages
-        ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
-        ()
-    with
-    | Ok _ -> ()
-    | Error err ->
-      Log.Keeper.warn
-        ~keeper_name:keeper_id
-        "proactive ACP context rollover compaction skipped: %s"
-        (Keeper_compaction.store_error_to_string err))
+  match
+    compact_next_start_list
+      ?keep_ratio
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~history:initial_messages
+      ()
+  with
+  | Ok (Some _ | None) -> ()
+  | Error err ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "proactive ACP context rollover compaction skipped: %s"
+      (Keeper_compaction.store_error_to_string err)
 ;;
 
 let effective_held_for_resume ~resume_system_notice previously_held =
@@ -3676,29 +3696,27 @@ let compact_once_for_overflow_with
   =
   if not !already_compacted
   then (
-    let messages, prefix = split_older_for_rollover ?keep_ratio initial_messages in
-    if prefix > 0
-    then (
-      let trigger =
-        overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
-      in
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir
-          ~keeper_id
-          ~trigger
-          ~frame:Keeper_compaction_atom.Message_history
-          ~messages
-          ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
-          ()
-      with
-      | Ok (Some _) -> already_compacted := true
-      | Ok None -> ()
-      | Error err ->
-        Log.Keeper.warn
-          ~keeper_name:keeper_id
-          "ACP context overflow compaction skipped: %s"
-          (Keeper_compaction.store_error_to_string err)))
+    (* The retry starts a fresh session ([force_fresh_retry]), so this shrinks
+       the same list a rollover does. *)
+    let trigger =
+      overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
+    in
+    match
+      compact_next_start_list
+        ?keep_ratio
+        ~keepers_dir
+        ~keeper_id
+        ~trigger
+        ~history:initial_messages
+        ()
+    with
+    | Ok (Some _) -> already_compacted := true
+    | Ok None -> ()
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "ACP context overflow compaction skipped: %s"
+        (Keeper_compaction.store_error_to_string err))
 ;;
 
 let compact_once_for_overflow
@@ -3932,6 +3950,8 @@ module For_testing = struct
   let rollover_marker_matches = rollover_marker_matches
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
+
+  let next_start_list = next_start_list
 
   let compact_for_rollover ~keepers_dir ~keeper_id ~used_tokens ~limit_tokens ~initial_messages =
     compact_for_rollover

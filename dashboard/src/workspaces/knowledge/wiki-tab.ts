@@ -66,7 +66,6 @@ export function WikiTab(props: WorkspaceViewProps) {
   // Active Page & Editor / CAS Recovery
   const [selectedSlug, setSelectedSlug] = useState<string | null>(props.entityId ?? null)
   const [pageDetail, setPageDetail] = useState<WikiPageData | null>(null)
-  const [pageLoading, setPageLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
   const pageAbortRef = useRef<AbortController | null>(null)
 
@@ -179,11 +178,9 @@ export function WikiTab(props: WorkspaceViewProps) {
 
   const loadPage = useCallback(async (slug: string, signal?: AbortSignal) => {
     const startEpoch = currentSessionEpoch()
-    setPageLoading(true)
     setPageError(null)
     const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`, { signal })
     if (!mountedRef.current || signal?.aborted || !isEpochCurrent(startEpoch)) return null
-    setPageLoading(false)
     if (!res.ok) {
       setPageError(res.error.message)
       return null
@@ -355,7 +352,7 @@ export function WikiTab(props: WorkspaceViewProps) {
           </button>
         </div>
         <div class="kn-actions">
-          <button type="button" class="btn-primary" onClick=${startNewPage}>+ 새 페이지</button>
+          <button type="button" class="btn-primary" data-opens-detail onClick=${startNewPage}>+ 새 페이지</button>
           <button type="button" class="btn-ghost" onClick=${() => void loadIndex('manual')}>새로고침</button>
         </div>
       </div>
@@ -453,6 +450,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                     type="button"
                     class="kn-row-btn"
                     data-selected=${selectedSlug === r.slug ? 'true' : 'false'}
+                    data-opens-detail
                     onClick=${() => {
                       setCreatingNew(false)
                       setSelectedSlug(r.slug)
@@ -541,6 +539,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                         key=${`${f.kind}-${f.subject}-${idx}`}
                         type="button"
                         class="kn-row-btn kn-card-row"
+                        data-opens-detail=${(f.page ?? f.subject) ? true : undefined}
                         onClick=${() => {
                           const target = f.page ?? f.subject
                           if (target) {
@@ -579,6 +578,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                     key=${entry.idx}
                     type="button"
                     class="kn-row-btn kn-card-row"
+                    data-opens-detail
                     onClick=${() => {
                       setCreatingNew(false)
                       setSelectedSlug(entry.page)
@@ -600,6 +600,10 @@ export function WikiTab(props: WorkspaceViewProps) {
     </div>
   `
 
+  // A selected page with nothing read of it and no error is one being read:
+  // from the first render, before the effect that reads it has run.
+  const pageLoading = selectedSlug !== null && !creatingNew && pageDetail === null && pageError === null
+
   const detailPane = editing
     ? html`
         <div class="kn-detail-pad">
@@ -618,7 +622,12 @@ export function WikiTab(props: WorkspaceViewProps) {
               <button type="button" class="btn-primary" disabled=${saving} onClick=${() => void submitSave()}>
                 ${saving ? '저장 중…' : 'CAS 저장 (PUT)'}
               </button>
-              <button type="button" class="btn-ghost" onClick=${() => { setEditing(false); setCreatingNew(false); setCasConflict(null) }}>
+              <button
+                type="button"
+                class="btn-ghost"
+                data-opens-master=${creatingNew ? true : undefined}
+                onClick=${() => { setEditing(false); setCreatingNew(false); setCasConflict(null) }}
+              >
                 취소
               </button>
             </div>
@@ -865,6 +874,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       detail=${detailPane}
       hasSelection=${editing || pageDetail !== null || pageLoading || pageError !== null}
       selectionKey=${creatingNew ? '__new__' : selectedSlug}
+      linkedKey=${props.entityId ?? null}
       masterLabel="Wiki 인덱스"
       detailLabel="Wiki 본문"
       emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 페이지를 선택하거나 "+ 새 페이지"를 눌러 문서를 작성하세요.</span></div>`}

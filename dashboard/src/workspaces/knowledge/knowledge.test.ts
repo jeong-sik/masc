@@ -1483,4 +1483,337 @@ describe('workspaces/knowledge', () => {
     expect(diffEntry?.open).toBe(false)
     expect(diffEntry?.querySelector('summary')?.textContent).toContain('Compact UI saves vertical space')
   })
+
+  it('Wiki pane switch: "+ 새 페이지" shows the editor, the second time as the first', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1,
+      data: {
+        pages_total: 0, pages_readable: 0, pages_unreadable: 0,
+        pages: [], unreadable_pages: [], tags: [], sources: {},
+        lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+      },
+    })) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+    const paneButtons = () => [...container.querySelectorAll<HTMLButtonElement>('.md-switch-btn')]
+    const newPage = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === '+ 새 페이지')!
+
+    // No page yet: the list, and no detail to switch to.
+    expect(paneButtons().map((b) => b.textContent)).toEqual(['Wiki 인덱스', 'Wiki 본문'])
+    expect(shownPane()).toBe('master')
+    expect(paneButtons()[1]!.disabled).toBe(true)
+
+    newPage().click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+    expect(container.querySelector('.md-detail textarea')).not.toBeNull()
+
+    paneButtons()[0]!.click()
+    await flushUi(2)
+    expect(shownPane()).toBe('master')
+
+    // The new page is what is selected already: the button still shows it.
+    newPage().click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+
+    // Given up, it leaves the reader where it was asked for.
+    const cancel = [...container.querySelectorAll<HTMLButtonElement>('.md-detail button')].find((b) => b.textContent?.trim() === '취소')!
+    cancel.click()
+    await flushUi(2)
+    expect(shownPane()).toBe('master')
+  })
+
+  it('Wiki pane switch: a new page given up shows the list, not the page that was selected before it', async () => {
+    const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1732430000 }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            pages_total: 1, pages_readable: 1, pages_unreadable: 0,
+            pages: [{
+              slug: 'page-a', file: 'page-a.md', title: 'Page A', summary: '', source: 'observation',
+              author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
+              revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: 'sha-page-a',
+            }],
+            unreadable_pages: [], tags: [], sources: { observation: 1 },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      if (url === '/api/v1/wiki/page-a') {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            page: 'page-a', slug: 'page-a', file: 'page-a.md',
+            frontmatter: {
+              title: 'Page A', summary: '', source: 'observation', author: 'librarian',
+              created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z', revision: 1, tags: [],
+            },
+            sha256: 'sha-page-a', body_markdown: 'Body of page-a',
+            outgoing_links: [], backlinks: [], sources: { references: [], hearsay: [] }, lint_findings: [],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+    const buttonNamed = (scope: string, label: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((b) => b.textContent?.trim() === label)!
+
+    // The first page is selected on load. Nobody picked it.
+    expect(shownPane()).toBe('master')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Body of page-a')
+
+    buttonNamed('.md-master', '+ 새 페이지').click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+
+    buttonNamed('.md-detail', '취소').click()
+    await flushUi(2)
+    expect(shownPane()).toBe('master')
+
+    // Giving up an edit of the page is not leaving it.
+    container.querySelector<HTMLButtonElement>('.md-master [role="listitem"] button')!.click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+    buttonNamed('.md-detail', 'CAS 편집').click()
+    await flushUi(2)
+    buttonNamed('.md-detail', '취소').click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+  })
+
+  it('Board opens on the detail pane for a link to a post, where a post that cannot be read says so', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [] })
+      if (url.pathname === '/api/v1/board/post-gone') return jsonResponse({ error: 'post not found' }, 404)
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="board" entityId="post-gone" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    expect(container.querySelector('.md-detail [role="alert"]')).not.toBeNull()
+  })
+
+  it('Wiki opens on the detail for a link to one page', async () => {
+    const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1732430000 }
+    const row = (slug: string, title: string) => ({
+      slug, file: `${slug}.md`, title, summary: '', source: 'observation',
+      author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
+      revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: `sha-${slug}`,
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            pages_total: 2, pages_readable: 2, pages_unreadable: 0,
+            pages: [row('page-a', 'Page A'), row('page-b', 'Page B')],
+            unreadable_pages: [], tags: [], sources: { observation: 2 },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      if (url === '/api/v1/wiki/page-b') {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            page: 'page-b', slug: 'page-b', file: 'page-b.md',
+            frontmatter: {
+              title: 'Page B', summary: '', source: 'observation', author: 'librarian',
+              created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z', revision: 1, tags: [],
+            },
+            sha256: 'sha-page-b', body_markdown: 'Body of the linked page',
+            outgoing_links: [], backlinks: ['page-a'], sources: { references: [], hearsay: [] }, lint_findings: [],
+          },
+        })
+      }
+      if (url === '/api/v1/wiki/page-a') {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            page: 'page-a', slug: 'page-a', file: 'page-a.md',
+            frontmatter: {
+              title: 'Page A', summary: '', source: 'observation', author: 'librarian',
+              created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z', revision: 1, tags: [],
+            },
+            sha256: 'sha-page-a', body_markdown: 'Body of the page that links to it',
+            outgoing_links: [], backlinks: [], sources: { references: [], hearsay: [] }, lint_findings: [],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" entityId="page-b" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+
+    // As it is first drawn, before anything is read: the page, on its way.
+    expect(shownPane()).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Wiki 페이지 불러오는 중…')
+
+    await flushUi()
+    expect(shownPane()).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Body of the linked page')
+
+    // A backlink followed from the page is read where the page was.
+    container.querySelector<HTMLButtonElement>('.md-detail .kn-chips .kn-chip')!.click()
+    await flushUi()
+    expect(shownPane()).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Body of the page that links to it')
+  })
+
+  it('Artifacts opens on the detail for a link to one artifact', async () => {
+    const artifact = (id: string, title: string) => ({
+      id, revision: 1, title, summary: '', format: 'markdown', author: 'sangsu',
+      created_at: '2026-11-24T05:00:00Z', body: { _blob: { sha256: 'b'.repeat(64), bytes: 64 } },
+      task_id: null, goal_id: null,
+    })
+    const first = artifact(`artifact-${'1'.repeat(32)}`, 'First report')
+    const linked = artifact(`artifact-${'2'.repeat(32)}`, 'Linked report')
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/published-artifacts') return jsonResponse({ artifacts: [first, linked], diagnostics: [] })
+      if (url.startsWith(`/api/v1/published-artifacts/${linked.id}`)) {
+        return jsonResponse({ artifact: linked, content: 'Text of the linked report', revisions: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="artifacts" entityId=${linked.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+
+    // As it is first drawn, before anything is read: the artifact, on its way.
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('아티팩트 본문 불러오는 중…')
+
+    await flushUi()
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    expect(container.querySelector('.md-detail')!.textContent).toContain('Linked report')
+  })
+
+  it('Wiki pane switch: a search result, a lint finding and a log entry each show their page, picked again or not', async () => {
+    const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1732430000 }
+    const row = (slug: string, title: string) => ({
+      slug, file: `${slug}.md`, title, summary: '', source: 'observation',
+      author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
+      revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: `sha-${slug}`,
+    })
+    const page = (slug: string, title: string) => ({
+      page: slug, slug, file: `${slug}.md`,
+      frontmatter: {
+        title, summary: '', source: 'observation', author: 'librarian',
+        created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z', revision: 1, tags: [],
+      },
+      sha256: `sha-${slug}`, body_markdown: `Body of ${slug}`,
+      outgoing_links: [], backlinks: [], sources: { references: [], hearsay: [] }, lint_findings: [],
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki/search?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            query: 'b', count: 1, limit: 30,
+            results: [{
+              slug: 'page-b', title: 'Page B', summary: '', source: 'observation', updated: '2026-11-24T05:00:00Z',
+              revision: 1, tags: [], score: 1, match_tier: 'whole_query', snippets: [],
+            }],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki/lint')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            pages_total: 2, pages_unreadable: 0, log_hole_suppressed: false, log_unknown_action: 0, log_unreadable_line: 0,
+            counts: { broken_link: 1 }, duplicate_title_candidates: [],
+            findings: [{ kind: 'broken_link', subject: 'page-a', page: 'page-a', reason: 'Link to a page that is not there' }],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki/log?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            total_lines: 1, unknown_action: 0, unreadable_line: 0, limit: 100,
+            entries: [{ idx: 0, written_at_unix: 1732430000, action: 'updated', revision: 1, page: 'page-b', author: 'librarian', note: null }],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            pages_total: 2, pages_readable: 2, pages_unreadable: 0,
+            pages: [row('page-a', 'Page A'), row('page-b', 'Page B')],
+            unreadable_pages: [], tags: [], sources: { observation: 2 },
+            lint: { total_findings: 1, counts: { broken_link: 1 }, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      if (url === '/api/v1/wiki/page-a') return jsonResponse({ ...envelope, data: page('page-a', 'Page A') })
+      if (url === '/api/v1/wiki/page-b') return jsonResponse({ ...envelope, data: page('page-b', 'Page B') })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const shownPane = () => container.querySelector('.md-split')!.getAttribute('data-pane')
+    const toList = async () => {
+      container.querySelector<HTMLButtonElement>('.md-switch-btn')!.click()
+      await flushUi(2)
+      expect(shownPane()).toBe('master')
+    }
+    const view = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.md-master [role="tab"]')]
+      .find((b) => b.textContent?.trim().startsWith(label))!
+    const detailText = () => container.querySelector('.md-detail')!.textContent
+
+    expect(shownPane()).toBe('master')
+
+    const search = container.querySelector<HTMLInputElement>('.md-master input[type="search"]')!
+    search.value = 'b'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(2)
+    search.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi()
+    const result = () => container.querySelector<HTMLButtonElement>('.kn-search-results .kn-row-btn')!
+    result().click()
+    await flushUi()
+    expect(shownPane()).toBe('detail')
+    expect(detailText()).toContain('Body of page-b')
+
+    // The page of the result is the selected one now: picking it again shows it again.
+    await toList()
+    result().click()
+    await flushUi(2)
+    expect(shownPane()).toBe('detail')
+
+    await toList()
+    view('Lint').click()
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('.md-master .kn-card-row')!.click()
+    await flushUi()
+    expect(shownPane()).toBe('detail')
+    expect(detailText()).toContain('Body of page-a')
+
+    await toList()
+    view('Log').click()
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('.md-master .kn-card-row')!.click()
+    await flushUi()
+    expect(shownPane()).toBe('detail')
+    expect(detailText()).toContain('Body of page-b')
+  })
 })

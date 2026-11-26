@@ -7601,6 +7601,7 @@ and execute_action ~now (m : Model.t) action =
         | None -> (m, [])
       else if
         Option.is_none m.nav.overlay
+        && (not (Model.sidebar_has_focus m))
         && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Infra
         && Infra_store.code_review_active m.infra

@@ -656,11 +656,17 @@ describe('workspaces/infra', () => {
     expect(renderedLogRows).toBeGreaterThan(0)
     expect(renderedLogRows).toBeLessThan(60)
 
-    // Clicking a row opens K/V detail inspector & calls onInspect
+    // Clicking a row opens K/V detail inspector in QuickPeekDrawer via onInspect
+    // without rendering a duplicate inline bottom K/V card inside the logs tab
     ;(container.querySelector('.v2-logs-row') as HTMLElement).click()
     await flushUi(15)
-    expect(container.querySelector('[data-testid="logs-kv-inspector"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="logs-kv-inspector"]')).toBeNull()
     expect(onInspect).toHaveBeenCalledTimes(1)
+    const inspectPayload = onInspect.mock.calls[0]?.[0] as { render?: () => unknown } | undefined
+    const drawerHost = document.createElement('div')
+    render(html`${inspectPayload?.render?.()}`, drawerHost)
+    expect(drawerHost.querySelector('[data-testid="logs-kv-inspector"]')).not.toBeNull()
+    expect(drawerHost.textContent).toContain('Structured K/V Details')
 
     // Pause toggle pauses live updates and buffers incoming events until resumed
     const pauseBtn = container.querySelector('[data-testid="logs-pause-toggle"]') as HTMLButtonElement

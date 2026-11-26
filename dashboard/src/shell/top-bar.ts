@@ -254,23 +254,14 @@ function AccountWorkspaceSwitcher(): VNode {
               </div>
             `}
 
-            ${session.kind === 'multi_account_signed_out' && html`
+            ${session.kind === 'multi_account_signed_out' && (session.authMethods.google || session.authMethods.github) && html`
               <div class="ap-switcher-oauth">
-                ${(session.authMethods.google || session.authMethods.github) && html`
-                  <a href="/" class="btn-primary ap-w-full" data-testid="switcher-signin-link">
-                    Sign In (${[
-                      session.authMethods.google ? 'Google' : '',
-                      session.authMethods.github ? 'GitHub' : '',
-                    ].filter(Boolean).join(' / ')})
-                  </a>
-                `}
-                <button
-                  type="button"
-                  class="ap-popover-item"
-                  onClick=${() => { setOpen(false); navigate('/account') }}
-                >
-                  Open Sign-In Gate →
-                </button>
+                <a href="/" class="btn-primary ap-w-full" data-testid="switcher-signin-link">
+                  Sign In (${[
+                    session.authMethods.google ? 'Google' : '',
+                    session.authMethods.github ? 'GitHub' : '',
+                  ].filter(Boolean).join(' / ')})
+                </a>
               </div>
             `}
 
@@ -356,7 +347,9 @@ function AccountWorkspaceSwitcher(): VNode {
               class="ap-popover-item ap-popover-foot-action"
               onClick=${() => { setOpen(false); navigate('/account') }}
             >
-              Manage Account & Workspaces →
+              ${session.kind === 'multi_account_signed_out'
+                ? 'Open Sign-In Gate →'
+                : 'Manage Account & Workspaces →'}
             </button>
           </div>
 
@@ -491,7 +484,9 @@ export function TopBar(): VNode {
   const overlay = activeOverlay.value
   const win = timeWindow.value
 
-  // L1 sub-tabs: workspace subtabs (max 5) OR Keeper entity tabs when on `/keepers/:name/*`
+  // L1 sub-tabs: workspace subtabs (max 5) OR Keeper entity tabs when on `/keepers/:name/*`.
+  // Account subtabs (Profile / PATs / Members / Invites / Allowlist) only apply when
+  // signed into a multi-account session; other auth states ignore subroutes in AccountWorkspace.
   const subtabs = route.workspace === 'keepers' && route.entityId
     ? KEEPER_ENTITY_TABS.map((tab) => ({
         id: tab,
@@ -500,13 +495,15 @@ export function TopBar(): VNode {
         active: route.entityTab === tab,
         locked: false,
       }))
-    : navDef.subtabs.map((tab) => ({
-        id: tab.id,
-        label: tab.label,
-        path: tab.path,
-        active: route.subroute === tab.id,
-        locked: isAdminLockedForSession(tab.access, session),
-      }))
+    : route.workspace === 'account' && session.kind !== 'multi_account_signed_in'
+      ? []
+      : navDef.subtabs.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          path: tab.path,
+          active: route.subroute === tab.id,
+          locked: isAdminLockedForSession(tab.access, session),
+        }))
 
   const renderSubtabLink = (tab: (typeof subtabs)[number]) => {
     const subtabBadge = route.workspace === 'work' && tab.id === 'inbox'

@@ -149,7 +149,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       cell: (r) => html`
         <button
           type="button"
-          class="btn-ghost"
+          class="btn-ghost btn-compact"
           onClick=${() => {
             setRetractId(r.memory_id)
             if (!retractReason) setRetractReason('operator_cleanup')

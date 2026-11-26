@@ -3,8 +3,8 @@
 
 import './styles/tokens.generated.css'
 import './styles/base.css'
-import './styles/shell.css'
 import './styles/primitives.css'
+import './styles/shell.css'
 import './styles/charts.css'
 import './styles/chat.css'
 import './styles/surfaces.css'

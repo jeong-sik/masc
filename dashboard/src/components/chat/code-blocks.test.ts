@@ -4,12 +4,36 @@
 // IntersectionObserver never fires, so the diagram stays a placeholder. jsdom
 // (no IntersectionObserver -> immediate render, DOMPurify supported) exercises
 // the real render path, matching markdown-renderer.test.ts / dompurify.test.ts.
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationEntry } from '../../types'
 import { ChatTranscript } from './primitives'
+
+const DASHBOARD_SRC = resolve(process.cwd(), 'src')
+const ENTRY_STYLESHEET_IMPORT = /^import '\.\/(styles\/[\w-]+\.css)'$/gm
+
+// Chat chrome classes whose box styling (border, radius, background, spacing)
+// lives in a global stylesheet. ChatTranscript is a shared component, so these
+// rules ship with the entry bundle (main.ts imports), not one workspace's sheet.
+const ENTRY_STYLED_CHAT_CLASSES = ['chat-transcript', 'chat-bubble', 'chat-block-code'] as const
+
+function entryStylesheetText(): string {
+  const entry = readFileSync(resolve(DASHBOARD_SRC, 'main.ts'), 'utf8')
+  // Group 1 is not optional in ENTRY_STYLESHEET_IMPORT, so every match has it.
+  return Array.from(entry.matchAll(ENTRY_STYLESHEET_IMPORT), (match) =>
+    readFileSync(resolve(DASHBOARD_SRC, match[1]!), 'utf8'),
+  ).join('\n')
+}
+
+// A rule whose selector ends on the bare class (`.x {` or `.x,`) styles the
+// element itself; `.x .child`, `.x:hover` and `.x-suffix` do not count.
+function definesClassRule(css: string, className: string): boolean {
+  return new RegExp(String.raw`(?:^|[\s,}])\.${className}\s*[,{]`, 'm').test(css)
+}
 
 function entry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
@@ -63,6 +87,23 @@ describe('ChatCodeBlock Shiki highlighting', () => {
     const copy = code?.querySelector('button[aria-label="코드 복사"]')
     expect(copy).not.toBeNull()
     expect(copy?.textContent?.trim()).toBe('복사')
+  })
+
+  it('renders code and mermaid blocks with chat chrome classes that the entry bundle styles', () => {
+    render(
+      renderBlocks([
+        { t: 'code', cap: 'config.ml', html: 'let x = 1', source: 'let x = 1' },
+        { t: 'mermaid', source: 'graph TD; A-->B;', caption: 'flow' },
+      ]),
+      container,
+    )
+
+    expect(container.querySelectorAll('.chat-block-code[data-chat-block="code"]')).toHaveLength(2)
+    const css = entryStylesheetText()
+    for (const className of ENTRY_STYLED_CHAT_CLASSES) {
+      expect(container.querySelector(`.${className}`), className).not.toBeNull()
+      expect(definesClassRule(css, className), className).toBe(true)
+    }
   })
 
   it('copies the plain source text, not escaped HTML', async () => {

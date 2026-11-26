@@ -559,6 +559,17 @@ describe('workspaces/runtime', () => {
     expect(renderedProbeRows).toBeGreaterThan(0)
     expect(renderedProbeRows).toBeLessThan(60)
 
+    // The 640px-min probe track scrolls sideways on narrow screens; the scroll
+    // container must take keyboard focus and carry its own accessible name.
+    const probeScroller = container.querySelector('[data-testid="failover-probes-list"]') as HTMLElement
+    expect(probeScroller.style.overflowX).toBe('auto')
+    expect(probeScroller.firstElementChild?.classList.contains('v2-failover-probes-track')).toBe(true)
+    expect(probeScroller.getAttribute('role')).toBe('region')
+    expect(probeScroller.getAttribute('aria-label')).toBe('런타임 프로브 표')
+    expect(probeScroller.tabIndex).toBe(0)
+    probeScroller.focus()
+    expect(document.activeElement).toBe(probeScroller)
+
     // Switch to Exact Output tab and click row -> opens onInspect Quick-Peek Drawer
     const exactTabBtn = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
       b.textContent?.trim() === 'Exact Output',

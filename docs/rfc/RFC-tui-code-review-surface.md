@@ -130,7 +130,7 @@ related: []
   type file_peek = { keeper : string; path : string; line : int }
   ```
 
-- 범위는 늘 `Ws_keeper keeper` 라서 `scope` 대신 `keeper` 를 싣는다. 대상 줄이 없으면 `line = 1` 이다.
+- `Nav` 는 `masc_tui_core` 에 있고 `Wire_infra` 는 그 위의 `masc_tui_protocol` 에 있다. 그래서 `Nav` 값은 `Wire_infra` 타입을 싣지 않는다. 범위는 늘 `Ws_keeper keeper` 라서 `scope` 대신 `keeper` 문자열을 싣는다. 대상 줄이 없으면 `line = 1` 이다.
 - 내용은 `Infra_store.file_peek` 칸에 둔다. Code 탭의 `open_file` 과 칸을 나눠서, 창을 열어도 Code 탭에서 보던 파일이 바뀌지 않는다.
 
 - 여는 곳: 키퍼 도구 기록 행 중 D3 의 대상 파일 필드가 있는 행에서 `o`. 필드가 없는 행에서는 `o` 가 아무 요청도 내지 않고 상태 줄에 「이 도구 기록에는 대상 파일이 없어요」를 띄운다.

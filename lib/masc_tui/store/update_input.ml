@@ -3452,9 +3452,14 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
         (Model.extend_mouse_selection ~x:(col - 1) ~y:(row - 1) m, []))
     | Keymap.Input.Left_release { col; row } -> (
         match m.mouse_selection with
-        | Model.Dragging { anchor; cursor } ->
-            if Model.equal_cell_pos anchor cursor then
-              (Model.clear_mouse_selection m, [])
-            else (Model.settle_mouse_selection m, [])
-        | Model.Settled _ -> (m, [])
-        | Model.No_selection -> apply_left_press m (col - 1) (row - 1))
+        | Model.Dragging _ ->
+            let m1 =
+              Model.extend_mouse_selection ~x:(col - 1) ~y:(row - 1) m
+            in
+            (match m1.mouse_selection with
+            | Model.Dragging { anchor; cursor } ->
+                if Model.equal_cell_pos anchor cursor then
+                  (Model.clear_mouse_selection m1, [])
+                else (Model.settle_mouse_selection m1, [])
+            | Model.No_selection | Model.Settled _ -> (m1, []))
+        | Model.Settled _ | Model.No_selection -> (m, []))

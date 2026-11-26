@@ -98,6 +98,31 @@ let test_update_drag_flow () =
   check "click without drag clears" true
     (Model.equal_mouse_selection_state m5.mouse_selection Model.No_selection)
 
+let test_release_after_nav_no_double_click () =
+  (* Regression: pressing a view-switching cell (top rail [b] toggle) navigates
+     on press; the following release must not run the click a second time. *)
+  let m = Model.initial ~cols:140 ~rows:40 () in
+  let m1 = press m 2 1 in
+  let after_press = m1.nav.sidebar_open in
+  let m2 = release m1 2 1 in
+  check "release does not re-toggle sidebar" true
+    (Option.equal Bool.equal after_press m2.nav.sidebar_open);
+  check "release leaves no selection" true
+    (Model.equal_mouse_selection_state m2.mouse_selection Model.No_selection)
+
+let test_release_settles_at_release_cell () =
+  (* P3: release extends to its own cell before settling when drag events are
+     sparse (no drag event ever arrived). *)
+  let m = fresh () in
+  let m1 = press m 5 4 in
+  let m2 = release m1 9 7 in
+  check "release settles at release cell" true
+    (match m2.mouse_selection with
+    | Model.Settled { anchor; cursor; _ } ->
+        Model.equal_cell_pos anchor { x = 4; y = 3 }
+        && Model.equal_cell_pos cursor { x = 8; y = 6 }
+    | _ -> false)
+
 let test_key_wheel_clear () =
   let m = fresh () in
   let m1 = press m 5 4 in
@@ -181,5 +206,9 @@ let () =
             test_paint_trims_to_text;
           Alcotest.test_case "paint keeps wide glyphs" `Quick
             test_paint_keeps_wide_glyphs;
+          Alcotest.test_case "release after nav does not double-click"
+            `Quick test_release_after_nav_no_double_click;
+          Alcotest.test_case "release settles at release cell"
+            `Quick test_release_settles_at_release_cell;
         ] );
     ]

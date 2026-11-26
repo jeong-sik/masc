@@ -472,6 +472,26 @@ let context_rollover_threshold_opt_field ~(path : string) (tbl : Otoml.t)
     tbl
 ;;
 
+(* The point at which an ACP host compacts its own session during a turn, as
+   a fraction of the lane's limit. A host that reached the limit has nothing
+   left to compact into, and Muse Code takes the value as a soft fraction that
+   must stay below its hard fraction of 1.0, so both ends are open. *)
+let agent_compaction_threshold_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  let key = "agent-compaction-threshold" in
+  match number_opt_field ~path ~key tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when Float.is_finite value && value > 0.0 && value < 1.0 ->
+    Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "%s must be a finite number in (0, 1); got %g" key value))
+;;
+
 let compaction_keep_ratio_opt_field ~(path : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
@@ -588,6 +608,7 @@ let model_keys =
   ; "context-rollover-threshold"
   ; "tail-window-atoms"
   ; "compaction-keep-ratio"
+  ; "agent-compaction-threshold"
   ; Runtime_schema.explicit_context_cache_ttl_s_key
   ]
 ;;
@@ -682,6 +703,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let context_rollover_result = context_rollover_threshold_opt_field ~path tbl in
     let tail_window_result = positive_int_opt_field ~path ~key:"tail-window-atoms" tbl in
     let keep_ratio_result = compaction_keep_ratio_opt_field ~path tbl in
+    let agent_compaction_result = agent_compaction_threshold_opt_field ~path tbl in
     let explicit_context_cache_ttl_s_result =
       positive_int_opt_field
         ~path
@@ -735,6 +757,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* context_rollover_threshold = context_rollover_result in
     let* tail_window_atoms = tail_window_result in
     let* compaction_keep_ratio = keep_ratio_result in
+    let* agent_compaction_threshold = agent_compaction_result in
     let* explicit_context_cache_ttl_s = explicit_context_cache_ttl_s_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
@@ -756,6 +779,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; context_rollover_threshold
         ; tail_window_atoms
         ; compaction_keep_ratio
+        ; agent_compaction_threshold
         ; turn_timeout_s
         ; explicit_context_cache_ttl_s
         ; capabilities

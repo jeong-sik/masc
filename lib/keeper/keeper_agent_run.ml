@@ -1110,8 +1110,8 @@ let run_turn
                ~tool_name:request.tool_name);
           decision
         in
-        { gate with
-          identity_tool_index = s.Keeper_run_tools_hooks.identity_tool_index
+        { Keeper_tool_approval_gate.identity_tool_index =
+            s.Keeper_run_tools_hooks.identity_tool_index
         ; pre_tool_use
         ; tool_approval
         })

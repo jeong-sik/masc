@@ -29,6 +29,7 @@ import {
 } from '../../core'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives'
 import {
+  causeBadgeStyle,
   formatReleaseSummary,
   groupRestingRuntimes,
   quotaRestCauseMeta,
@@ -36,10 +37,12 @@ import {
   type QuotaRestCauseFilter,
   type QuotaRestSortKey,
 } from './quota-rest-groups'
+import { RuntimeLivenessPanel } from './runtime-liveness-panel'
 import {
   classifyQuotaScope,
   formatResetCountdown,
   formatUnixTime,
+  loadRuntimeResolved,
   maxUtilizationPct,
   partitionQuotaScopes,
   windowKindLabel,
@@ -170,12 +173,6 @@ function costBadgeStyle(kind: ReturnType<typeof classifyQuotaScope>['kind']) {
   }
 }
 
-function causeBadgeStyle(tone: 'warn' | 'bad') {
-  return tone === 'bad'
-    ? { background: 'var(--err-soft)', border: '1px solid var(--err-border)', color: 'var(--err-fg)' }
-    : { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
-}
-
 const KNOWN_CAUSE_FILTERS: readonly RuntimeQuotaRest['cause'][] = [
   'payment_refused',
   'provider_quota_refused',
@@ -209,7 +206,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const loadAll = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<RuntimeResolvedPayload>(
       'runtime:resolved',
-      (signal) => apiGet<RuntimeResolvedPayload>('/api/v1/runtime/resolved', { signal }),
+      loadRuntimeResolved,
       { ttlMs: 15_000, topics: ['runtime', 'provider_usage', 'config'], reason },
     )
     void resourceCache.fetch<ProviderUsageHistoryResponse>(
@@ -1197,6 +1194,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
           `}
         </section>
       `}
+
+      <${RuntimeLivenessPanel} runtimes=${resolvedData?.runtimes ?? []} />
 
       <!-- Provider Usage History UPlotChart (Strictly days=1|7|14 & HTTP 200 unavailable honesty) -->
       <section aria-label="제공자 사용량 이력">

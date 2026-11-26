@@ -37,19 +37,30 @@ function usageWindowKey(window: ProviderUsageWindow): string {
   return `${window.window.kind}-${label}-${window.limit_id ?? ''}`
 }
 
-function usageWindowText(window: ProviderUsageWindow): string {
-  const utilization = window.utilization
-  const value = utilization.unit === 'credit_unlimited'
-    ? 'Credit unlimited'
-    : utilization.unit === 'credit_balance'
-      ? `Credit ${utilization.currency} ${utilization.remaining.toFixed(2)} 남음${utilization.total == null
-      ? ''
-      : ` · ${utilization.currency} ${(utilization.total - utilization.remaining).toFixed(2)}/${utilization.currency} ${utilization.total.toFixed(2)} 사용`}`
-    : utilization.unit === 'usd'
-      ? `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
+function usageValueText(utilization: ProviderUsageWindow['utilization']): string {
+  switch (utilization.unit) {
+    case 'credit_unlimited':
+      return 'Credit unlimited'
+    case 'credit_retracted':
+      // The provider revoked an earlier Credit balance; no balance stands now.
+      return 'Credit 잔액 철회됨'
+    case 'credit_balance':
+      return `Credit ${utilization.currency} ${utilization.remaining.toFixed(2)} 남음${utilization.total == null
+        ? ''
+        : ` · ${utilization.currency} ${(utilization.total - utilization.remaining).toFixed(2)}/${utilization.currency} ${utilization.total.toFixed(2)} 사용`}`
+    case 'usd':
+      return `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
         ? ' · 키 한도 없음'
         : ` / $${utilization.limit.toFixed(4)} 한도 · $${(utilization.limit - utilization.value).toFixed(4)} 남음`}`
-      : `${number(utilization.unit === 'fraction' ? Math.trunc(utilization.value * 100) : utilization.value, '%')} 사용`
+    case 'fraction':
+      return `${number(Math.trunc(utilization.value * 100), '%')} 사용`
+    case 'percent':
+      return `${number(utilization.value, '%')} 사용`
+  }
+}
+
+function usageWindowText(window: ProviderUsageWindow): string {
+  const value = usageValueText(window.utilization)
   const reset = window.resets_at == null ? ''
     : window.resets_at * 1000 <= Date.now()
       ? ' · 리셋 시각 경과, 새 보고 없음'

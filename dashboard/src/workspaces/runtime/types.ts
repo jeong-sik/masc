@@ -1,6 +1,8 @@
 import type { ComponentChildren } from 'preact'
+import type { Result } from '../../lib/result'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
+  apiGet,
   authSession,
   currentSessionEpoch,
   getObserverSseInstanceId,
@@ -11,6 +13,7 @@ import {
   observedValue,
   parseSseBlock,
   resolveWorkspaceUrl,
+  type ApiError,
   type Observed,
   type ObserverFrame,
 } from '../../core'
@@ -91,6 +94,18 @@ export interface RuntimeQuotaRest {
   readonly until: number
 }
 
+export type RuntimeAttemptFailure =
+  | 'server_error'
+  | 'provider_capacity'
+  | 'network_transient'
+  | 'provider_timeout'
+
+export interface RuntimeFailedAttempt {
+  readonly noted_at: number
+  readonly failure: RuntimeAttemptFailure
+  readonly recorded_by: string
+}
+
 export interface RuntimeResolution {
   readonly id: string
   readonly provider: string
@@ -101,6 +116,12 @@ export interface RuntimeResolution {
   readonly is_local: boolean
   readonly is_default: boolean
   readonly quota_rest: RuntimeQuotaRest | null
+  // Liveness facts the server keeps apart from quota_rest. Absent means the
+  // payload did not say; it is not read as healthy.
+  readonly credential_refused_at?: number | null
+  readonly rate_limited?: boolean
+  readonly rate_limit_resets_at?: number | null
+  readonly failed_attempt?: RuntimeFailedAttempt | null
 }
 
 export interface RuntimeLaneSnapshot {
@@ -137,6 +158,17 @@ export interface RuntimeResolvedPayload {
   readonly assignments: readonly RuntimeAssignment[]
   readonly provider_usage_windows_since?: number
   readonly provider_usage_windows?: readonly ProviderUsageScope[]
+}
+
+/** GET /api/v1/runtime/resolved decoded at the boundary. A payload the schema
+ *  rejects arrives as a decode error, not as a partly read value. The Quotas
+ *  and Lanes tabs share the `runtime:resolved` cache entry, so both load it
+ *  through this one function. */
+export async function loadRuntimeResolved(
+  signal: AbortSignal,
+): Promise<Result<RuntimeResolvedPayload, ApiError>> {
+  const { parseRuntimeResolvedResponse } = await import('../../api/schemas/runtime-resolved')
+  return apiGet('/api/v1/runtime/resolved', { signal, decode: parseRuntimeResolvedResponse })
 }
 
 export interface ProviderUsageHistoryPoint {

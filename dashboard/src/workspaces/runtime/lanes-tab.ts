@@ -49,6 +49,7 @@ import {
   FUSION_TOPOLOGIES,
   formatMs,
   formatUnixTime,
+  loadRuntimeResolved,
   toObservedNumber,
   type ExactLaneRunRow,
   type ExactLaneRunsPayload,
@@ -248,7 +249,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   const loadFailover = (forceProbe = false, reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<RuntimeResolvedPayload>(
       'runtime:resolved',
-      (signal) => apiGet<RuntimeResolvedPayload>('/api/v1/runtime/resolved', { signal }),
+      loadRuntimeResolved,
       { ttlMs: 15_000, topics: ['runtime', 'config'], reason },
     )
     void resourceCache.fetch<RuntimeProbePayload>(

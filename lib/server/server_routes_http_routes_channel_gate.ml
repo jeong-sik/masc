@@ -110,17 +110,16 @@ let metric_context_of_json json =
   in
   (channel, field "channel_workspace_id", field "keeper_name")
 
-let record_validation_error_metric ~duration_ms body_str message =
-  let fallback () =
+let record_validation_error_metric_of_json ~duration_ms ?json message =
+  match json with
+  | None ->
     Channel_gate_metrics.record_attempt
       ~channel:"unknown"
       ~workspace_id:""
       ~keeper:""
       ~duration_ms
       (Channel_gate_metrics.Validation_error message)
-  in
-  try
-    let json = Yojson.Safe.from_string body_str in
+  | Some json ->
     let channel, workspace_id, keeper = metric_context_of_json json in
     Channel_gate_metrics.record_attempt
       ~channel
@@ -128,29 +127,28 @@ let record_validation_error_metric ~duration_ms body_str message =
       ~keeper
       ~duration_ms
       (Channel_gate_metrics.Validation_error message)
-  with
-  | Yojson.Json_error _ -> fallback ()
 
-let record_internal_error_metric ~duration_ms body_str exn =
-  let fallback () =
-    Channel_gate_metrics.record_internal_error_exn
-      ~channel:"unknown"
-      ~workspace_id:""
-      ~keeper:""
-      ~duration_ms exn
+let record_validation_error_metric ~duration_ms body_str message =
+  let json =
+    try Some (Yojson.Safe.from_string body_str)
+    with Yojson.Json_error _ -> None
   in
-  try
-    let json = Yojson.Safe.from_string body_str in
-    match Channel_gate.inbound_of_json json with
-    | Ok msg ->
-        Channel_gate_metrics.record_internal_error_exn
-          ~channel:msg.channel
-          ~workspace_id:msg.channel_workspace_id
-          ~keeper:msg.keeper_name
-          ~duration_ms exn
-    | Error _ -> fallback ()
-  with
-  | Yojson.Json_error _ -> fallback ()
+  record_validation_error_metric_of_json ~duration_ms ?json message
+
+let record_internal_error_metric ~duration_ms ?msg exn =
+  match msg with
+  | Some (msg : Channel_gate.inbound_message) ->
+      Channel_gate_metrics.record_internal_error_exn
+        ~channel:msg.channel
+        ~workspace_id:msg.channel_workspace_id
+        ~keeper:msg.keeper_name
+        ~duration_ms exn
+  | None ->
+      Channel_gate_metrics.record_internal_error_exn
+        ~channel:"unknown"
+        ~workspace_id:""
+        ~keeper:""
+        ~duration_ms exn
 
 let request_elapsed_ms request_started =
   Keeper_timing.elapsed_duration_ms ~start_time:request_started
@@ -165,15 +163,17 @@ let handle_gate_message ~clock state request reqd =
         ~clock
         ~config:workspace_scope.config
     in
+    let parsed_msg = ref None in
     let result =
       try
         let json = Yojson.Safe.from_string body_str in
         match Channel_gate.inbound_of_json json with
         | Error e ->
             let duration_ms = request_elapsed_ms request_started in
-            record_validation_error_metric ~duration_ms body_str e;
+            record_validation_error_metric_of_json ~duration_ms ~json e;
             Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
+            parsed_msg := Some msg;
             (match Channel_gate.handle_inbound ~dispatch msg with
             | Ok out -> Ok out
             | Error gate_err ->
@@ -181,13 +181,13 @@ let handle_gate_message ~clock state request reqd =
       with
       | Yojson.Json_error _e ->
           let duration_ms = request_elapsed_ms request_started in
-          record_validation_error_metric ~duration_ms body_str "invalid json";
+          record_validation_error_metric_of_json ~duration_ms "invalid json";
           Error (Channel_gate.Validation Channel_gate.Empty_content, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           (* Log details server-side, return generic message to client *)
           let duration_ms = request_elapsed_ms request_started in
-          record_internal_error_metric ~duration_ms body_str exn;
+          record_internal_error_metric ~duration_ms ?msg:!parsed_msg exn;
           Log.Misc.error "channel_gate internal error: %s" (Printexc.to_string exn);
           Error (Channel_gate.Internal "", "internal error")
     in

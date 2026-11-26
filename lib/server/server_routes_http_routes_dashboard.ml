@@ -212,6 +212,7 @@ end
 (* The tool-quality read index could not be read; carries the index's detail
    across the cache compute boundary to the route below. *)
 exception Tool_quality_log_unavailable of string
+exception Workspace_memory_inventory_unavailable of string
 
 let add_routes ~sw ~clock router =
   router
@@ -713,11 +714,18 @@ let add_routes ~sw ~clock router =
            | Ok () ->
              let cache_key =
                Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
-             respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-               (Pool_work.io ~name:__FUNCTION__ (fun () ->
-                 match Workspace_memory_ledger_view.inventory ~base_path () with
-                 | Ok json -> json
-                 | Error detail -> `Assoc [ "error", `String detail ])))
+             (match
+                Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s
+                  (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                     match Workspace_memory_ledger_view.inventory ~base_path () with
+                     | Ok json -> json
+                     | Error detail ->
+                       raise (Workspace_memory_inventory_unavailable detail)))
+              with
+              | payload -> Server_cached_read_http.respond ~request:req reqd payload
+              | exception Workspace_memory_inventory_unavailable detail ->
+                Http.Response.json_value ~status:`Service_unavailable ~request:req
+                  (`Assoc [ "error", `String detail ]) reqd))
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-context" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -1070,8 +1078,9 @@ let add_routes ~sw ~clock router =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
              (match float_of_string_opt s with
-              | Some value -> Some (max 0.1 (min 168.0 value))
-              | None -> None)
+              | Some value when Float.is_finite value && value > 0.0 ->
+                Some (Float.max 0.1 (Float.min 168.0 value))
+              | Some _ | None -> None)
            | None -> None
          in
          let sampling = Dashboard_http_tool_quality.select_sampling ~n ?window_hours () in

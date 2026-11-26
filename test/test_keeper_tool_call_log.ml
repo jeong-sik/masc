@@ -3430,6 +3430,57 @@ let test_read_index_rejects_unlistable_month () =
       (tool_names (index_rows store ~keeper_name:"alice" ())))
 ;;
 
+let test_read_window_result_rejects_unreadable_month_and_day_file () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"winerr";
+    let day_path =
+      match Dated_jsonl.range_day_file_paths_result store
+              ~since:"1970-01-01" ~until:"9999-12-31" with
+      | Ok [ path ] -> path
+      | Ok _ -> Alcotest.fail "expected one ledger day file"
+      | Error error -> Alcotest.fail (Dated_jsonl.read_error_to_string error)
+    in
+    let month_path = Filename.dirname day_path in
+    let expected =
+      match Keeper_tool_call_log.read_window_result ~keeper_name:"alice" ~window_hours:1.0 () with
+      | Ok rows -> List.length rows
+      | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+        Alcotest.fail ("expected readable window before fault injection: " ^ detail)
+    in
+    Alcotest.(check int) "baseline window count" 2 expected;
+    (* 1. Replace selected month directory with a regular file (fails even as root). *)
+    let saved_month = month_path ^ ".saved" in
+    Unix.rename month_path saved_month;
+    let oc = open_out_bin month_path in
+    close_out oc;
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.remove month_path;
+        Unix.rename saved_month month_path)
+      (fun () ->
+        match Keeper_tool_call_log.read_window_result ~keeper_name:"alice" ~window_hours:1.0 () with
+        | Error (Keeper_tool_call_log.Index_unavailable _) -> ()
+        | Ok _ -> Alcotest.fail "unreadable month dir returned Ok [] instead of Index_unavailable");
+    (* 2. Replace selected day file with a directory (Non_regular_file even as root). *)
+    let saved_day = day_path ^ ".saved" in
+    Unix.rename day_path saved_day;
+    Unix.mkdir day_path 0o700;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.rmdir day_path;
+        Unix.rename saved_day day_path)
+      (fun () ->
+        match Keeper_tool_call_log.read_window_result ~keeper_name:"alice" ~window_hours:1.0 () with
+        | Error (Keeper_tool_call_log.Index_unavailable _) -> ()
+        | Ok _ -> Alcotest.fail "unreadable day file returned Ok [] instead of Index_unavailable");
+    (* 3. Recovers cleanly once files are restored. *)
+    match Keeper_tool_call_log.read_window_result ~keeper_name:"alice" ~window_hours:1.0 () with
+    | Ok rows -> Alcotest.(check int) "window count recovers" 2 (List.length rows)
+    | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+      Alcotest.fail ("window read did not recover after restore: " ^ detail))
+;;
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "invocation observation",
@@ -3626,6 +3677,8 @@ let () =
             test_read_index_recovers_after_scan_io_failure
         ; eio_test "unlistable month is an error, not a deleted ledger"
             test_read_index_rejects_unlistable_month
+        ; eio_test "read_window_result rejects unreadable month dir and day file"
+            test_read_window_result_rejects_unreadable_month_and_day_file
         ] )
     ; ( "async_append",
         [ eio_env_test "committed flush reports maintenance failures after draining"

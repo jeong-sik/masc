@@ -282,12 +282,30 @@ let test_committed_snapshot_observer () =
     M.record (make_result ~name:"retired" ~success:true ~duration_ms:1.0);
     Alcotest.(check (list int)) "withdrawal is idempotent" [0; 2; 1] !seen)
 
+let test_non_finite_and_negative_durations_sanitized () =
+  setup ();
+  M.record (make_result ~name:"sanitized" ~success:true ~duration_ms:Float.nan);
+  M.record (make_result ~name:"sanitized" ~success:true ~duration_ms:Float.infinity);
+  M.record (make_result ~name:"sanitized" ~success:true ~duration_ms:(-5.0));
+  M.record (make_result ~name:"sanitized" ~success:true ~duration_ms:40.0);
+  match M.stats_for "sanitized" with
+  | None -> Alcotest.fail "expected sanitized stats"
+  | Some s ->
+    Alcotest.(check int) "all 4 calls counted" 4 s.call_count;
+    Alcotest.(check bool) "mean_ms is finite" true (Float.is_finite s.mean_ms);
+    Alcotest.(check (float 1e-9)) "mean_ms averages sanitized durations" 10.0 s.mean_ms;
+    Alcotest.(check bool) "p50_ms is non-negative finite" true
+      (Float.is_finite s.p50_ms && s.p50_ms >= 0.0);
+    Alcotest.(check (float 1e-9)) "p99_ms sees valid duration" 40.0 s.p99_ms
+
 let () =
   Alcotest.run "Tool_metrics" [
     "recording", [
       Alcotest.test_case "record and stats" `Quick test_record_and_stats;
       Alcotest.test_case "unknown tool" `Quick test_unknown_tool;
       Alcotest.test_case "committed snapshot observer" `Quick test_committed_snapshot_observer;
+      Alcotest.test_case "non-finite and negative durations sanitized" `Quick
+        test_non_finite_and_negative_durations_sanitized;
     ];
     "percentiles", [
       Alcotest.test_case "p50/p95/p99" `Quick test_percentiles;

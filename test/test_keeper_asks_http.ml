@@ -55,6 +55,48 @@ let wire_response ~clock ?meth ?body ~router target =
   let status,body = wire_raw_response ~clock ?meth ?body ~router target in
   status,Yojson.Safe.from_string body
 
+(* Simulates a client closing the SSE socket on the very first write so
+   [Server_sse_response.send] returns [Closed] while concurrent [on_source]
+   fibers and the trailing [Followup_completed] still execute. Any exception
+   escaping the router (such as [Eio.Mutex.Poisoned]) is captured explicitly. *)
+let wire_close_on_first_write ~clock ?(http_version="HTTP/1.0") ~router target =
+  let handler_exn = ref None in
+  let saw_write = ref false in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    try
+      Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)
+    with exn ->
+      handler_exn := Some (Printexc.to_string exn);
+      raise exn) in
+  let raw = Printf.sprintf "GET %s %s\r\nHost: localhost:8935\r\nContent-Length: 0\r\n\r\n"
+      target http_version in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  let await_wakeup register =
+    let ready, resolve = Eio.Promise.create () in
+    register connection (fun () -> Eio.Promise.resolve resolve ());
+    Eio.Promise.await ready in
+  let write_closed = ref false in
+  let rec read_loop off = match Httpun.Server_connection.next_read_operation connection with
+    | `Read ->
+      let consumed = Httpun.Server_connection.read_eof connection input ~off
+          ~len:(Bigstringaf.length input - off) in
+      read_loop (off + consumed)
+    | `Yield -> await_wakeup Httpun.Server_connection.yield_reader; read_loop off
+    | `Close ->
+      if not !write_closed then Httpun.Server_connection.report_exn connection End_of_file in
+  let rec write_loop () = match Httpun.Server_connection.next_write_operation connection with
+    | `Write _ ->
+      saw_write := true;
+      Httpun.Server_connection.report_write_result connection `Closed;
+      write_loop ()
+    | `Yield -> await_wakeup Httpun.Server_connection.yield_writer; write_loop ()
+    | `Close _ -> write_closed := true in
+  (match Eio.Time.with_timeout clock connection_patience_s (fun () ->
+     Ok (Eio.Fiber.both (fun () -> read_loop 0) write_loop)) with
+   | Ok () -> ()
+   | Error `Timeout -> failf "%s: early-close connection hung" target);
+  !saw_write, !handler_exn
+
 let test_original_questions_are_bound_to_receiving_workspace () =
   let dir = Filename.temp_file "masc-asks-http-" "" in
   Sys.remove dir;
@@ -207,6 +249,14 @@ let test_original_questions_are_bound_to_receiving_workspace () =
         (match states, List.rev states with
          | "started" :: _, "complete" :: _ -> List.length frames >= 5
          | _ -> false);
+      let saw_write, early_close_exn =
+        wire_close_on_first_write ~clock ~router
+          (followup_path ^ "&answer_progress_stream=true")
+      in
+      check bool "early-close stream attempted initial SSE write" true saw_write;
+      check (option string)
+        "early client close completes concurrent followup fibers without poisoning send_mu"
+        None early_close_exn;
       List.iter (fun suffix ->
         let status,_ = wire_response ~router (followup_path ^ suffix) in
         check int "ambiguous stream selection is rejected" 400 status)

@@ -445,7 +445,7 @@ type t =
   ; caller_unobserved_count : int
   }
 
-let finish builder =
+let finish ?(max_callers = Some top_caller_limit) builder =
   let shape = builder.shape in
   let width_s = seconds_of_width shape.width in
   let buckets =
@@ -483,7 +483,9 @@ let finish builder =
   let by_caller =
     callers
     |> List.sort most_failures_first
-    |> List.take top_caller_limit
+    |> (match max_callers with
+        | Some limit -> List.take limit
+        | None -> Fun.id)
     |> List.map (fun (caller, accumulator) ->
       { caller; usage = stat_of_accumulator accumulator })
   in

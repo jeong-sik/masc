@@ -200,24 +200,18 @@ let background_refresh_unavailable_domains_mu = Stdlib.Mutex.create ()
 let current_domain_id () = (Domain.self () :> int)
 
 let background_refresh_domain_unavailable () =
-  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
-    (fun () -> Hashtbl.mem background_refresh_unavailable_domains (current_domain_id ()))
+  Stdlib.Mutex.protect background_refresh_unavailable_domains_mu (fun () ->
+    Hashtbl.mem background_refresh_unavailable_domains (current_domain_id ()))
 ;;
 
 let background_refresh_mark_domain_unavailable () =
-  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
-    (fun () -> Hashtbl.replace background_refresh_unavailable_domains (current_domain_id ()) ())
+  Stdlib.Mutex.protect background_refresh_unavailable_domains_mu (fun () ->
+    Hashtbl.replace background_refresh_unavailable_domains (current_domain_id ()) ())
 ;;
 
 let background_refresh_clear_unavailable_domains_for_tests () =
-  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
-    (fun () -> Hashtbl.clear background_refresh_unavailable_domains)
+  Stdlib.Mutex.protect background_refresh_unavailable_domains_mu (fun () ->
+    Hashtbl.clear background_refresh_unavailable_domains)
 ;;
 
 let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =

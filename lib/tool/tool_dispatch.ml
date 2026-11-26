@@ -160,7 +160,17 @@ let run_pre_hooks ~schema ~name ~args =
 let notify_dispatch_observers observers
     (outcome : Dispatch_outcome.t)
     (result : Tool_result.result option) : unit =
-  List.iter (fun hook -> hook outcome result) observers
+  List.iter
+    (fun hook ->
+       try hook outcome result
+       with
+       | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+         raise exn
+       | exn ->
+         Printf.eprintf
+           "[tool_dispatch] dispatch observer raised: %s\n%!"
+           (Printexc.to_string exn))
+    observers
 
 let run_dispatch_observers outcome result =
   notify_dispatch_observers

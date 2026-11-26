@@ -705,17 +705,17 @@ let read_series_rows db ~window ?tool_name add =
       add sample))
 ;;
 
-let read_series ~masc_root ~window ?tool_name () =
+let read_series ~masc_root ~window ?tool_name ?max_callers () =
   let builder = Tool_metrics_series.builder window in
   let path = database_path ~masc_root in
   if not (Sys.file_exists path)
-  then Ok (Tool_metrics_series.finish builder)
+  then Ok (Tool_metrics_series.finish ?max_callers builder)
   else (
     let* _row_count =
       with_read_only_db ~path (fun db -> read_series_rows db ~window ?tool_name
         (Tool_metrics_series.add builder))
     in
-    Ok (Tool_metrics_series.finish builder))
+    Ok (Tool_metrics_series.finish ?max_callers builder))
 ;;
 
 type series_observation = {

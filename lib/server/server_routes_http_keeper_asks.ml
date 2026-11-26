@@ -184,32 +184,39 @@ let ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id frame =
     "answer_progress",`Assoc (["state",`String phase;"answered_at",`Float identity.answered_at;
       "stimulus_id",`String identity.stimulus_id] @ fields)]
 
-exception Ask_followup_stream_closed
-
 let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
   let response = ref None in
+  let stream_closed = ref false in
+  let send_mu = Eio.Mutex.create () in
   let send frame =
-    let output = match !response with
-      | Some output -> output
-      | None ->
-        let output = Server_sse_response.respond ~sw ~clock
-            ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
-            (Httpun.Response.create
-               ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
-        response := Some output;
-        output in
-    let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
-    match Server_sse_response.send output
-        (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
-    | Server_sse_response.Written -> ()
-    | Closed | Stalled -> raise Ask_followup_stream_closed in
+    Eio.Mutex.use_rw ~protect:true send_mu (fun () ->
+      if !stream_closed then ()
+      else
+        let output = match !response with
+          | Some output -> output
+          | None ->
+            let output = Server_sse_response.respond ~sw ~clock
+                ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+                (Httpun.Response.create
+                   ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
+            response := Some output;
+            output in
+        let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
+        match Server_sse_response.send output
+            (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
+        | Server_sse_response.Written -> ()
+        | Closed | Stalled -> stream_closed := true) in
   (* A close says the response is complete, so only a stream that ran to its
      end is closed. A [send] that did not go out has closed the response
-     itself. Any other exception leaves the response as it is and goes to
-     the request's error handling (Server_http_ingress): a 500 when nothing
-     was sent yet, a cut response after the first frame. *)
-  let close () = Option.iter Server_sse_response.close !response in
+     itself and recorded [stream_closed] without raising inside [send_mu], so
+     concurrent [on_source] fibers and the final [Followup_completed] no-op
+     instead of poisoning the mutex. Any other exception leaves the response as
+     it is and goes to the request's error handling (Server_http_ingress): a
+     500 when nothing was sent yet, a cut response after the first frame. *)
+  let close () =
+    Eio.Mutex.use_rw ~protect:true send_mu (fun () ->
+      if not !stream_closed then Option.iter Server_sse_response.close !response) in
   match
     if not state_ready then
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
@@ -225,7 +232,6 @@ let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~ke
         {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id})
   with
   | () -> close ()
-  | exception Ask_followup_stream_closed -> ()
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
   | exception exn ->
     (* The request's error handling logs the exception without the Ask. *)

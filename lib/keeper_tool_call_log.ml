@@ -1557,12 +1557,13 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
         Keeper_tool_call_file_change.seal_tally tally))
 ;;
 
-let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
-  if window_hours <= 0.0
-  then []
+let read_window_result ?keeper_name ~(window_hours : float) () :
+    (Yojson.Safe.t list, index_error) result =
+  if not (Float.is_finite window_hours) || window_hours <= 0.0
+  then Ok []
   else (
     match store () with
-    | None -> []
+    | None -> Error (Index_unavailable "keeper tool-call log store is not initialized")
     | Some store ->
       let now = Time_compat.now () in
       let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
@@ -1573,18 +1574,37 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
         | Some k -> String.equal k name
         | None -> false
       in
-      Dated_jsonl.read_range store ~since:since_date ~until:until_date
-      |> List.filter (fun json ->
-        let in_window =
-          match ts_of_entry json with
-          | Some ts -> ts >= since_ts
-          | None -> false
-        in
-        in_window
-        &&
-        match keeper_name with
-        | None -> true
-        | Some name -> keeper_matches name json))
+      let acc = ref [] in
+      match
+        Dated_jsonl.iter_range_entries_result
+          store
+          ~since:since_date
+          ~until:until_date
+          (fun entry ->
+             match entry with
+             | Dated_jsonl.Malformed_json _ -> ()
+             | Dated_jsonl.Parsed json ->
+               let in_window =
+                 match ts_of_entry json with
+                 | Some ts -> ts >= since_ts
+                 | None -> false
+               in
+               let matches_keeper =
+                 match keeper_name with
+                 | None -> true
+                 | Some name -> keeper_matches name json
+               in
+               if in_window && matches_keeper then acc := json :: !acc)
+      with
+      | Ok () -> Ok (List.rev !acc)
+      | Error detail ->
+        Error (Index_unavailable (Dated_jsonl.read_error_to_string detail)))
+;;
+
+let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
+  match read_window_result ?keeper_name ~window_hours () with
+  | Ok rows -> rows
+  | Error (Index_unavailable _) -> []
 ;;
 
 (* A Keeper's newest call is looked for among this many of the ledger's

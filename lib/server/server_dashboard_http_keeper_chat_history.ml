@@ -165,10 +165,7 @@ module Head_page_cache = struct
     }
   ;;
 
-  let with_lock t f =
-    Stdlib.Mutex.lock t.mu;
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.mu) f
-  ;;
+  let with_lock t f = Stdlib.Mutex.protect t.mu f ;;
 
   let rec prune_order_head t ~now =
     match Queue.peek_opt t.order with

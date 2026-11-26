@@ -187,7 +187,7 @@ let handle_attached_tools = (fun state req reqd ->
       let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
       match Server_utils.query_param req "keeper" with
       | None ->
-        Http.Response.json_value ~compress:true ~request:req
+        Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req
           (`Assoc [ "error", `String "keeper is required" ])
           reqd
       | Some keeper ->
@@ -206,13 +206,18 @@ let handle_attached_tools = (fun state req reqd ->
    the install, the same as one this server registered. *)
 let handle_attempt_status = (fun state _agent_name req reqd ->
       let field = Server_utils.query_param req in
-      let json = match field "keeper", field "provider", field "attempt_id" with
-        | Some keeper, Some provider_id, Some attempt_id ->
-            Server_keeper_oauth.attempt_status_json
-              ~base_path:(Mcp_server.workspace_config state).Workspace.base_path
-              ~now:(Time_compat.now ()) ~keeper ~provider_id ~attempt_id
-        | _ -> `Assoc ["error", `String "keeper, provider and attempt_id are required"] in
-      Http.Response.json_value ~compress:true ~request:req json reqd)
+      match field "keeper", field "provider", field "attempt_id" with
+      | Some keeper, Some provider_id, Some attempt_id ->
+        let json =
+          Server_keeper_oauth.attempt_status_json
+            ~base_path:(Mcp_server.workspace_config state).Workspace.base_path
+            ~now:(Time_compat.now ()) ~keeper ~provider_id ~attempt_id
+        in
+        Http.Response.json_value ~compress:true ~request:req json reqd
+      | _ ->
+        Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req
+          (`Assoc [ "error", `String "keeper, provider and attempt_id are required" ])
+          reqd)
 ;;
 
 (* The same authority as starting a login, and for the same reason the

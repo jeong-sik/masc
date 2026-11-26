@@ -116,6 +116,15 @@ let register_operation_live_sink ~base_path ~keeper_name ~operation_id sink =
         else Hashtbl.replace operation_live_sinks key remaining)
 ;;
 
+let note_operation_wire_terminal_if_live ~base_path ~keeper_name ~operation_id =
+  let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
+  Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+    if Hashtbl.mem operation_live_sinks key
+    then
+      Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+        Hashtbl.replace operation_wire_streams key Wire_terminal_sent))
+;;
+
 let publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event =
   let key = operation_stream_key ~base_path ~keeper_name ~operation_id in
   let sinks =
@@ -3116,7 +3125,8 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
          ~code:(Some Keeper_chat_events.public_error_code)
          Ag_ui.Run_error in
        (match wire with
-        | Some Wire_started -> note_operation_wire_event ~base_path ~keeper_name ~operation_id event
+        | Some Wire_started ->
+          note_operation_wire_terminal_if_live ~base_path ~keeper_name ~operation_id
         | Some Wire_terminal_sent | None -> ());
        Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq ~event;
        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event)

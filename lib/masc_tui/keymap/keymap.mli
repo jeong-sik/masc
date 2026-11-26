@@ -202,5 +202,7 @@ val footer_hints :
 val format_footer_line : footer_hint list -> string
 
 val help_entries : scope_chain:scope list -> lang:Say.lang -> help_group list
+val compact_help_group : lang:Say.lang -> help_group -> help_group
+val compact_help_entries : scope_chain:scope list -> lang:Say.lang -> help_group list
 val palette_commands : lang:Say.lang -> palette_command list
 val render_markdown_reference : ?lang:Say.lang -> unit -> string

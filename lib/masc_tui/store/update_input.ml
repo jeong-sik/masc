@@ -152,7 +152,7 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
     | Some _ ->
         (None, true)
     | None ->
-        let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+        let zoomed = Model.is_zoomed_active m in
         (Model.selected_keeper_name m, not zoomed)
   in
   match name_opt, m.config.dry_run_preview with
@@ -1294,13 +1294,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 | Some _ | None -> (m, []))
             | Nav.Infra | Nav.Pulse -> (m, [])))
 
-let keeper_config_target_name (m : Model.t) =
-  match Model.active_inspector m with
-  | Some _ -> None
-  | None ->
-      if Model.is_keeper_config_active m then Model.selected_keeper_name m
-      else None
-
 let dispatch_keeper_config_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   if Config_store.is_editing_field m.config then
@@ -1401,23 +1394,27 @@ let dispatch_keeper_config_key ~now (m : Model.t)
         Some (Update_nav.apply_move m Keymap.Down)
     | Keymap.Input.Char "J" when is_printable_key norm ->
         let max_scroll = keeper_config_dry_run_max_scroll m in
-        Some
-          ( {
-              m with
-              config =
-                Config_store.move_dry_run_scroll ~max_scroll ~delta:1 m.config;
-            }
-          , [] )
+        if max_scroll > 0 then
+          Some
+            ( {
+                m with
+                config =
+                  Config_store.move_dry_run_scroll ~max_scroll ~delta:1 m.config;
+              }
+            , [] )
+        else None
     | Keymap.Input.Char "K" when is_printable_key norm ->
         let max_scroll = keeper_config_dry_run_max_scroll m in
-        Some
-          ( {
-              m with
-              config =
-                Config_store.move_dry_run_scroll ~max_scroll ~delta:(-1)
-                  m.config;
-            }
-          , [] )
+        if max_scroll > 0 then
+          Some
+            ( {
+                m with
+                config =
+                  Config_store.move_dry_run_scroll ~max_scroll ~delta:(-1)
+                    m.config;
+              }
+            , [] )
+        else None
     | Keymap.Input.Char "g" when is_printable_key norm ->
         Some (Update_nav.apply_move m Keymap.Home)
     | Keymap.Input.Char "G" when is_printable_key norm ->
@@ -1434,30 +1431,6 @@ let dispatch_keeper_config_key ~now (m : Model.t)
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.literal reason) m
               , [] ))
-    | Keymap.Input.Char "d" when is_printable_key norm -> (
-        if Config_store.dirty_count m.config > 0 then
-          match Config_store.build_patch_request ~dry_run:true m.config with
-          | Ok req ->
-              let config = Config_store.mark_dry_run_loading m.config in
-              Some
-                ( { m with config }
-                , [
-                    Cmd.Http_post
-                      { epoch = m.epoch; req = Cmd.Post_config_patch req };
-                  ] )
-          | Error reason ->
-              Some
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.literal reason) m
-                , [] )
-        else
-          Some
-            ( Model.with_toast ~now ~level:Model.Toast_info
-                (Say.make
-                   ~ko:"변경된 필드가 없습니다 ([←→] 값 변경 · [Enter] 편집)"
-                   ~en:"No staged changes ([←→] cycle · [Enter] edit)")
-                m
-            , [] ))
     | Keymap.Input.Char " " when is_printable_key norm -> (
         match Config_store.keeper_selected_field ~lang:m.lang m.config with
         | Some f when f.writable && f.kind = Wire_config.Field_bool ->
@@ -1506,32 +1479,6 @@ let dispatch_keeper_config_key ~now (m : Model.t)
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.literal reason) m
               , [] ))
-    | Keymap.Input.Char "e" when is_printable_key norm -> (
-        match keeper_config_target_name m with
-        | Some name ->
-            let config =
-              m.config
-              |> Config_store.set_target (Wire_config.Target_keeper name)
-              |> Config_store.set_tab Nav.Settings_keepers_companies
-            in
-            Some
-              (Update_nav.open_overlay { m with config }
-                 (Nav.Settings Nav.Settings_keepers_companies))
-        | None -> None)
-    | Keymap.Input.Char "a" when is_printable_key norm -> (
-        match keeper_config_target_name m with
-        | Some name ->
-            let runtime_default =
-              match Observed.to_option m.runtime.runtime_config_raw with
-              | Some meta ->
-                  Option.value (List.assoc_opt name meta.assignments)
-                    ~default:""
-              | None -> ""
-            in
-            Some
-              (Update_actions.open_runtime_assign_modal m ~keeper_default:name
-                 ~runtime_default ())
-        | None -> None)
     | Keymap.Input.Char _
     | Keymap.Input.Tab
     | Keymap.Input.Backspace
@@ -2574,22 +2521,28 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                  && Option.is_none
                                       (Model.fast_approval_strip_item m) -> (
                               match Work_store.selected_goal m.work with
-                              | Some g ->
+                              | Some g
+                                when Update_nav.goal_dive_measure_max_scroll
+                                       ~goal_id:g.id m
+                                     > 0 ->
                                   Some
                                     ( Update_nav.scroll_goal_dive_measure
                                         ~delta:1 ~goal_id:g.id m
                                     , [] )
-                              | None -> None)
+                              | Some _ | None -> None)
                           | None, Keymap.Input.Char "K"
                             when is_printable_key replayed
                                  && Model.is_work_goal_zoomed m -> (
                               match Work_store.selected_goal m.work with
-                              | Some g ->
+                              | Some g
+                                when Update_nav.goal_dive_measure_max_scroll
+                                       ~goal_id:g.id m
+                                     > 0 ->
                                   Some
                                     ( Update_nav.scroll_goal_dive_measure
                                         ~delta:(-1) ~goal_id:g.id m
                                     , [] )
-                              | None -> None)
+                              | Some _ | None -> None)
                           | None, Keymap.Input.Down
                             when replayed.mods.shift && (not replayed.mods.ctrl)
                                  && (not replayed.mods.alt)
@@ -2729,7 +2682,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        || (Nav.equal_workspace m.nav.workspace
                                              Nav.Keepers
                                           && (m.nav.pane_index >= 1
-                                             || m.nav.zoomed)
+                                             || Model.is_zoomed_active m)
                                           && Nav.equal_keeper_tab
                                                m.fleet.keeper_dive_tab
                                                Nav.Keeper_work_sandbox

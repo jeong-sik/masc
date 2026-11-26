@@ -3057,7 +3057,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   ignore (H.draw_pills ~grid ~rect:header_rect ~theme header_pills);
   let left_rect, right_rect =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if Model.is_zoomed_active model then
       (Rect.empty, body_rect)
     else
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
@@ -4719,7 +4719,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     Runtime_store.selected_tools_surface_keeper ~keeper_names rt
   in
   let left_rect, right_rect =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if Model.is_zoomed_active model then
       (Rect.empty, rect)
     else
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
@@ -5061,7 +5061,7 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       render_tools_keeper_skills ~grid ~cache ~rect:body_rect ~theme ~bp ~model
   | Runtime_store.Tools_quality_gate ->
       let left_rect, right_rect =
-        if model.nav.zoomed && Model.can_zoom_current_view model then
+        if Model.is_zoomed_active model then
           (Rect.empty, body_rect)
         else
           Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
@@ -5085,45 +5085,56 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
             H.draw_observed_placeholder ~grid ~rect:lc ~theme ~lang
               rt.tool_quality
         | Some tq ->
+            let plain s = (Update_nav.Line_plain, s) in
+            let sec s = (Update_nav.Line_section, s) in
             let lines =
               [
-                Printf.sprintf
-                  "Total=%d · OK=%d (%.1f%%) · Fail=%d · Deferred=%d · Unsettled=%d · Malformed=%d"
-                  tq.total tq.success tq.success_rate tq.failure tq.deferred
-                  tq.unsettled tq.malformed;
-                Printf.sprintf "Sample=%s · Updated=%s" tq.sampling_mode
-                  tq.generated_at;
-                "";
-                Say.resolve lang
-                  (Say.make ~ko:"── 상위 도구 (호출수 · 성공률 · 평균ms · 절단)"
-                     ~en:"── Top Tools (calls · ok% · avg_ms · trunc)");
+                plain
+                  (Printf.sprintf
+                     "Total=%d · OK=%d (%.1f%%) · Fail=%d · Deferred=%d · Unsettled=%d · Malformed=%d"
+                     tq.total tq.success tq.success_rate tq.failure tq.deferred
+                     tq.unsettled tq.malformed);
+                plain
+                  (Printf.sprintf "Sample=%s · Updated=%s" tq.sampling_mode
+                     tq.generated_at);
+                plain "";
+                sec
+                  (Say.resolve lang
+                     (Say.make
+                        ~ko:"── 상위 도구 (호출수 · 성공률 · 평균ms · 절단)"
+                        ~en:"── Top Tools (calls · ok% · avg_ms · trunc)"));
               ]
               @ List.map
                   (fun (r : Wire_runtime.tool_quality_tool_row) ->
-                    Printf.sprintf "  %-28s %5d  %5.1f%%  %6.0fms  trunc=%d"
-                      r.name r.calls r.success_pct r.avg_ms
-                      r.output_truncated_count)
+                    plain
+                      (Printf.sprintf "  %-28s %5d  %5.1f%%  %6.0fms  trunc=%d"
+                         r.name r.calls r.success_pct r.avg_ms
+                         r.output_truncated_count))
                   (H.safe_take 20 tq.by_tool)
               @ (if tq.failure_categories = [] then []
                  else
-                   ""
-                   :: Say.resolve lang
-                        (Say.make ~ko:"── 실패 범주 (Failure Categories)"
-                           ~en:"── Failure Categories")
+                   plain ""
+                   :: sec
+                        (Say.resolve lang
+                           (Say.make ~ko:"── 실패 범주 (Failure Categories)"
+                              ~en:"── Failure Categories"))
                    :: List.map
                         (fun (fc : Wire_runtime.tool_quality_failure_cat) ->
-                          Printf.sprintf "  [%4d] %s" fc.count
-                            (H.redact_secrets_in_text fc.category))
+                          plain
+                            (Printf.sprintf "  [%4d] %s" fc.count
+                               (H.redact_secrets_in_text fc.category)))
                         (H.safe_take 12 tq.failure_categories))
               @ (if tq.by_keeper = [] then []
                  else
-                   ""
-                   :: Say.resolve lang
-                        (Say.make ~ko:"── 키퍼별 성공률" ~en:"── By Keeper")
+                   plain ""
+                   :: sec
+                        (Say.resolve lang
+                           (Say.make ~ko:"── 키퍼별 성공률" ~en:"── By Keeper"))
                    :: List.map
                         (fun (rk : Wire_runtime.tool_quality_rate_row) ->
-                          Printf.sprintf "  @%-22s %5d  %5.1f%%" rk.name
-                            rk.calls rk.success_pct)
+                          plain
+                            (Printf.sprintf "  @%-22s %5d  %5.1f%%" rk.name
+                               rk.calls rk.success_pct))
                         (H.safe_take 10 tq.by_keeper))
             in
             let skip =
@@ -5133,14 +5144,27 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
             let bg = Color.of_rgb theme.surface_1 in
             let st_primary = Typography.primary ~bg theme in
             List.iteri
-              (fun idx line ->
+              (fun idx (tone, line) ->
                 if idx >= skip && idx - skip < lc.h then
                   let py = lc.y + idx - skip in
-                  match Card.legacy_rule_label line with
-                  | Some lbl ->
+                  match tone with
+                  | Update_nav.Line_section ->
+                      let lbl =
+                        Option.value (Card.legacy_rule_label line)
+                          ~default:(String.trim line)
+                      in
                       Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:lc
                         ~y:py ~theme
-                  | None ->
+                  | Update_nav.Line_accent ->
+                      ignore
+                        (Cell_grid.put_text ~clip:lc grid ~x:lc.x ~y:py
+                           ~style:(Typography.accent ~bg theme)
+                           (Grapheme.truncate_to_width ~max_width:lc.w line))
+                  | Update_nav.Line_plain
+                  | Update_nav.Line_selected
+                  | Update_nav.Line_ok
+                  | Update_nav.Line_warn
+                  | Update_nav.Line_error ->
                       ignore
                         (Cell_grid.put_text ~clip:lc grid ~x:lc.x ~y:py
                            ~style:st_primary
@@ -5173,32 +5197,38 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       let rc = H.pad_content ~bp right_inner in
       if not (Rect.is_empty rc) then begin
+        let plain s = (Update_nav.Line_plain, s) in
+        let sec s = (Update_nav.Line_section, s) in
         let gate_lines =
           match rt.gate_tool_events with
           | Observed.Loading _ ->
               [
-                Say.resolve lang
-                  (Say.make ~ko:"게이트 도구 이벤트 불러오는 중…"
-                     ~en:"Loading gate tool events…");
+                plain
+                  (Say.resolve lang
+                     (Say.make ~ko:"게이트 도구 이벤트 불러오는 중…"
+                        ~en:"Loading gate tool events…"));
               ]
           | Observed.Failed { reason; _ } ->
               [
-                Say.resolve lang
-                  (Say.make ~ko:"게이트 도구 이벤트 오류: "
-                     ~en:"Gate tool events error: ")
-                ^ H.redact_secrets_in_text reason;
+                plain
+                  (Say.resolve lang
+                     (Say.make ~ko:"게이트 도구 이벤트 오류: "
+                        ~en:"Gate tool events error: ")
+                  ^ H.redact_secrets_in_text reason);
               ]
           | Observed.Absent ->
               [
-                Say.resolve lang
-                  (Say.make ~ko:"게이트 도구 이벤트 엔드포인트 없음 (404)"
-                     ~en:"Gate tool events endpoint absent (404)");
+                plain
+                  (Say.resolve lang
+                     (Say.make ~ko:"게이트 도구 이벤트 엔드포인트 없음 (404)"
+                        ~en:"Gate tool events endpoint absent (404)"));
               ]
           | Observed.Unreported ->
               [
-                Say.resolve lang
-                  (Say.make ~ko:"게이트 도구 이벤트: 미보고"
-                     ~en:"Gate tool events: unreported");
+                plain
+                  (Say.resolve lang
+                     (Say.make ~ko:"게이트 도구 이벤트: 미보고"
+                        ~en:"Gate tool events: unreported"));
               ]
           | Observed.Value { data = ev; _ } ->
               let q_line =
@@ -5219,31 +5249,36 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                     Printf.sprintf "Queue: unreported (win=%dm)"
                       ev.window_minutes
               in
-              q_line
+              plain q_line
               :: (if ev.tool_rejections = [] then
                     [
-                      Say.resolve lang
-                        (Say.make ~ko:"  최근 거부된 도구 호출 없음"
-                           ~en:"  No recent tool rejections");
+                      plain
+                        (Say.resolve lang
+                           (Say.make ~ko:"  최근 거부된 도구 호출 없음"
+                              ~en:"  No recent tool rejections"));
                     ]
                   else
-                    Say.resolve lang
-                      (Say.make ~ko:"── 도구 거부 상위" ~en:"── Top Tool Rejections")
+                    sec
+                      (Say.resolve lang
+                         (Say.make ~ko:"── 도구 거부 상위"
+                            ~en:"── Top Tool Rejections"))
                     :: List.map
                          (fun (r : Wire_work.gate_tool_rejection_row) ->
-                           Printf.sprintf "  [%3d] %s · %s" r.count r.tool
-                             (H.redact_secrets_in_text r.reason))
+                           plain
+                             (Printf.sprintf "  [%3d] %s · %s" r.count r.tool
+                                (H.redact_secrets_in_text r.reason)))
                          (H.safe_take 12 ev.tool_rejections))
         in
         let wait_lines =
           match sel_keeper with
           | None -> []
           | Some keeper -> (
-              ""
-              :: Say.resolve lang
-                   (Say.make
-                      ~ko:("── 대기 인벤토리 (@" ^ keeper ^ ")")
-                      ~en:("── Waiting Inventory (@" ^ keeper ^ ")"))
+              plain ""
+              :: sec
+                   (Say.resolve lang
+                      (Say.make
+                         ~ko:("── 대기 인벤토리 (@" ^ keeper ^ ")")
+                         ~en:("── Waiting Inventory (@" ^ keeper ^ ")")))
               ::
               match rt.keeper_waiting_inventory with
               | Observed.Value { data = k, inv; _ }
@@ -5254,50 +5289,58 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                       | Some s -> Printf.sprintf "%.0fs" s
                       | None -> "—"
                     in
-                    Printf.sprintf "  rows=%d/%d · waiting_keepers=%d · oldest=%s"
-                      inv.row_count inv.total_row_count inv.waiting_keeper_count
-                      oldest_s
+                    plain
+                      (Printf.sprintf
+                         "  rows=%d/%d · waiting_keepers=%d · oldest=%s"
+                         inv.row_count inv.total_row_count
+                         inv.waiting_keeper_count oldest_s)
                   in
                   if inv.rows = [] then
                     [
                       hdr;
-                      Say.resolve lang
-                        (Say.make ~ko:"  대기 중인 항목 없음 (유휴)"
-                           ~en:"  No waiting items (idle)");
+                      plain
+                        (Say.resolve lang
+                           (Say.make ~ko:"  대기 중인 항목 없음 (유휴)"
+                              ~en:"  No waiting items (idle)"));
                     ]
                   else
                     hdr
                     :: List.map
                          (fun (w : Wire_runtime.keeper_waiting_row) ->
-                           Printf.sprintf "  [%s] %s — %s (%s)" w.source
-                             w.waiting_on
-                             (H.redact_secrets_in_text w.what)
-                             (H.redact_secrets_in_text w.next_action))
+                           plain
+                             (Printf.sprintf "  [%s] %s — %s (%s)" w.source
+                                w.waiting_on
+                                (H.redact_secrets_in_text w.what)
+                                (H.redact_secrets_in_text w.next_action)))
                          (H.safe_take 20 inv.rows)
               | Observed.Loading _ ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"  대기 인벤토리 불러오는 중…"
-                         ~en:"  Loading waiting inventory…");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"  대기 인벤토리 불러오는 중…"
+                            ~en:"  Loading waiting inventory…"));
                   ]
               | Observed.Failed { reason; _ } ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"  대기 인벤토리 오류: "
-                         ~en:"  Waiting inventory error: ")
-                    ^ H.redact_secrets_in_text reason;
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"  대기 인벤토리 오류: "
+                            ~en:"  Waiting inventory error: ")
+                      ^ H.redact_secrets_in_text reason);
                   ]
               | Observed.Absent ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"  대기 인벤토리 미지원 (404)"
-                         ~en:"  Waiting inventory absent (404)");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"  대기 인벤토리 미지원 (404)"
+                            ~en:"  Waiting inventory absent (404)"));
                   ]
               | Observed.Value _ | Observed.Unreported ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"  대기 인벤토리 미보고"
-                         ~en:"  Waiting inventory unreported");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"  대기 인벤토리 미보고"
+                            ~en:"  Waiting inventory unreported"));
                   ])
         in
         let all_lines = gate_lines @ wait_lines in
@@ -5309,14 +5352,27 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         let bg = Color.of_rgb theme.surface_1 in
         let st_primary = Typography.primary ~bg theme in
         List.iteri
-          (fun idx line ->
+          (fun idx (tone, line) ->
             if idx >= skip && idx - skip < rc.h then
               let py = rc.y + idx - skip in
-              match Card.legacy_rule_label line with
-              | Some lbl ->
+              match tone with
+              | Update_nav.Line_section ->
+                  let lbl =
+                    Option.value (Card.legacy_rule_label line)
+                      ~default:(String.trim line)
+                  in
                   Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
                     ~y:py ~theme
-              | None ->
+              | Update_nav.Line_accent ->
+                  ignore
+                    (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                       ~style:(Typography.accent ~bg theme)
+                       (Grapheme.truncate_to_width ~max_width:rc.w line))
+              | Update_nav.Line_plain
+              | Update_nav.Line_selected
+              | Update_nav.Line_ok
+              | Update_nav.Line_warn
+              | Update_nav.Line_error ->
                   ignore
                     (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
                        ~style:st_primary
@@ -5325,7 +5381,7 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       end
   | Runtime_store.Tools_prompts_presets ->
       let left_rect, right_rect =
-        if model.nav.zoomed && Model.can_zoom_current_view model then
+        if Model.is_zoomed_active model then
           (Rect.empty, body_rect)
         else
           Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.46
@@ -5570,15 +5626,18 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       let rc = H.pad_content ~bp right_inner in
       if not (Rect.is_empty rc) then begin
+        let plain s = (Update_nav.Line_plain, s) in
+        let sec s = (Update_nav.Line_section, s) in
         let detail_lines =
           match rt.pp_section with
           | Runtime_store.Sec_prompts -> (
               match Runtime_store.selected_prompt_item rt with
               | None ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"선택된 프롬프트가 없습니다"
-                         ~en:"No prompt selected");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"선택된 프롬프트가 없습니다"
+                            ~en:"No prompt selected"));
                   ]
               | Some p ->
                   let vars =
@@ -5587,35 +5646,40 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                   in
                   let hdr =
                     [
-                      Printf.sprintf "Key: %s · Source: %s%s" p.key p.source
-                        (if p.override_default_moved then " [DEFAULT MOVED]"
-                         else "");
-                      Printf.sprintf "Category: %s · Surface: %s · Vars: %s"
-                        p.category p.operator_surface vars;
-                      "Description: " ^ H.redact_secrets_in_text p.description;
-                      "── Effective Prompt Body";
+                      plain
+                        (Printf.sprintf "Key: %s · Source: %s%s" p.key p.source
+                           (if p.override_default_moved then " [DEFAULT MOVED]"
+                            else ""));
+                      plain
+                        (Printf.sprintf "Category: %s · Surface: %s · Vars: %s"
+                           p.category p.operator_surface vars);
+                      plain ("Description: " ^ H.redact_secrets_in_text p.description);
+                      sec "── Effective Prompt Body";
                     ]
                   in
                   hdr
-                  @ String.split_on_char '\n'
-                      (H.redact_secrets_in_text p.effective))
+                  @ List.map plain
+                      (String.split_on_char '\n'
+                         (H.redact_secrets_in_text p.effective)))
           | Runtime_store.Sec_presets -> (
               match Runtime_store.selected_preset_manifest rt with
               | None ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"선택된 프리셋이 없습니다 ([n]으로 생성)"
-                         ~en:"No preset selected (press [n] to create)");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"선택된 프리셋이 없습니다 ([n]으로 생성)"
+                            ~en:"No preset selected (press [n] to create)"));
                   ]
               | Some pm ->
                   let base =
                     [
-                      Printf.sprintf "Preset: %s (%s)" pm.name pm.created_at;
-                      "Description: " ^ H.redact_secrets_in_text pm.description;
-                      Printf.sprintf
-                        "Overrides: %d · Keepers: %d · Assignments: %d · Lanes: %d"
-                        pm.override_count (List.length pm.keepers)
-                        pm.assignment_count pm.lane_count;
+                      plain (Printf.sprintf "Preset: %s (%s)" pm.name pm.created_at);
+                      plain ("Description: " ^ H.redact_secrets_in_text pm.description);
+                      plain
+                        (Printf.sprintf
+                           "Overrides: %d · Keepers: %d · Assignments: %d · Lanes: %d"
+                           pm.override_count (List.length pm.keepers)
+                           pm.assignment_count pm.lane_count);
                     ]
                   in
                   let extra =
@@ -5624,52 +5688,61 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                         match rt.preset_detail with
                         | Observed.Loading _ ->
                             [
-                              "";
-                              Say.resolve lang
-                                (Say.make ~ko:"프리셋 상세 불러오는 중…"
-                                   ~en:"Loading preset detail…");
+                              plain "";
+                              plain
+                                (Say.resolve lang
+                                   (Say.make ~ko:"프리셋 상세 불러오는 중…"
+                                      ~en:"Loading preset detail…"));
                             ]
                         | Observed.Failed { reason; _ } ->
                             [
-                              "";
-                              Say.resolve lang
-                                (Say.make
-                                   ~ko:("프리셋 상세 조회 실패: " ^ H.redact_secrets_in_text reason)
-                                   ~en:("Preset detail failed: " ^ H.redact_secrets_in_text reason));
+                              plain "";
+                              plain
+                                (Say.resolve lang
+                                   (Say.make
+                                      ~ko:("프리셋 상세 조회 실패: " ^ H.redact_secrets_in_text reason)
+                                      ~en:("Preset detail failed: " ^ H.redact_secrets_in_text reason)));
                             ]
                         | Observed.Value _
                         | Observed.Absent
                         | Observed.Unreported ->
                             [
-                              "";
-                              Say.resolve lang
-                                (Say.make ~ko:"[Enter]를 눌러 상세 diff 로드"
-                                   ~en:"Press [Enter] to load full preset diff");
+                              plain "";
+                              plain
+                                (Say.resolve lang
+                                   (Say.make ~ko:"[Enter]를 눌러 상세 diff 로드"
+                                      ~en:"Press [Enter] to load full preset diff"));
                             ])
                     | Some d ->
                         [
-                          "── Saved Settings & Default Comparison";
-                          Printf.sprintf "  saved_settings: %s%s"
-                            d.saved_settings_status
-                            (match d.saved_settings_reason with
-                            | Some r -> " (" ^ H.redact_secrets_in_text r ^ ")"
-                            | None -> "");
-                          Printf.sprintf "  default_prompts: %s (%d changes)"
-                            d.default_prompts_status
-                            d.default_prompts_changes_count;
-                          "  directory: " ^ d.directory;
-                          "── Prompt Overrides: "
-                          ^ (if d.override_keys = [] then "none"
-                             else String.concat ", " d.override_keys);
-                          "── Keeper Instructions: "
-                          ^ (if d.keeper_files = [] then "none"
-                             else String.concat ", " d.keeper_files);
-                          "── Exact Lanes: "
-                          ^ (if d.lane_ids = [] then "none"
-                             else String.concat ", " d.lane_ids);
+                          sec "── Saved Settings & Default Comparison";
+                          plain
+                            (Printf.sprintf "  saved_settings: %s%s"
+                               d.saved_settings_status
+                               (match d.saved_settings_reason with
+                               | Some r -> " (" ^ H.redact_secrets_in_text r ^ ")"
+                               | None -> ""));
+                          plain
+                            (Printf.sprintf "  default_prompts: %s (%d changes)"
+                               d.default_prompts_status
+                               d.default_prompts_changes_count);
+                          plain ("  directory: " ^ d.directory);
+                          sec
+                            ("── Prompt Overrides: "
+                            ^ (if d.override_keys = [] then "none"
+                               else String.concat ", " d.override_keys));
+                          sec
+                            ("── Keeper Instructions: "
+                            ^ (if d.keeper_files = [] then "none"
+                               else String.concat ", " d.keeper_files));
+                          sec
+                            ("── Exact Lanes: "
+                            ^ (if d.lane_ids = [] then "none"
+                               else String.concat ", " d.lane_ids));
                         ]
                         @ List.map
-                            (fun (k, r) -> Printf.sprintf "  assign @%s -> %s" k r)
+                            (fun (k, r) ->
+                              plain (Printf.sprintf "  assign @%s -> %s" k r))
                             (H.safe_take 12 d.assignments)
                   in
                   base @ extra)
@@ -5677,38 +5750,45 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
               match Runtime_store.selected_runtime_param rt with
               | None ->
                   [
-                    Say.resolve lang
-                      (Say.make ~ko:"선택된 파라미터가 없습니다"
-                         ~en:"No runtime parameter selected");
+                    plain
+                      (Say.resolve lang
+                         (Say.make ~ko:"선택된 파라미터가 없습니다"
+                            ~en:"No runtime parameter selected"));
                   ]
               | Some p ->
                   [
-                    Printf.sprintf "Param: %s (%s)" p.key
-                      (if p.has_override then "overridden" else "default");
-                    "Current: "
-                    ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.current);
-                    "Default: "
-                    ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.default);
-                    "Type: " ^ Option.value p.value_type ~default:"unknown";
-                    "Choices: "
-                    ^ (if p.choices = [] then "free-form"
-                       else String.concat ", " p.choices);
-                    "Description: "
-                    ^ H.redact_secrets_in_text
-                        (Option.value p.description ~default:"—");
+                    plain
+                      (Printf.sprintf "Param: %s (%s)" p.key
+                         (if p.has_override then "overridden" else "default"));
+                    plain
+                      ("Current: "
+                      ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.current));
+                    plain
+                      ("Default: "
+                      ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.default));
+                    plain ("Type: " ^ Option.value p.value_type ~default:"unknown");
+                    plain
+                      ("Choices: "
+                      ^ (if p.choices = [] then "free-form"
+                         else String.concat ", " p.choices));
+                    plain
+                      ("Description: "
+                      ^ H.redact_secrets_in_text
+                          (Option.value p.description ~default:"—"));
                   ])
           | Runtime_store.Sec_async_requests -> (
               let summary_hdr =
                 match Observed.to_option rt.async_requests with
                 | Some snap ->
                     [
-                      Printf.sprintf
-                        "Broker: %s · active=%d · runtime_owned=%d · unknown=%d · errors=%d"
-                        snap.status snap.active snap.runtime_owned
-                        snap.ownership_unknown snap.record_errors_count;
+                      plain
+                        (Printf.sprintf
+                           "Broker: %s · active=%d · runtime_owned=%d · unknown=%d · errors=%d"
+                           snap.status snap.active snap.runtime_owned
+                           snap.ownership_unknown snap.record_errors_count);
                     ]
                     @ (match snap.error_detail with
-                      | Some e -> [ "Error: " ^ H.redact_secrets_in_text e ]
+                      | Some e -> [ plain ("Error: " ^ H.redact_secrets_in_text e) ]
                       | None -> [])
                 | None -> []
               in
@@ -5716,32 +5796,37 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                 match Runtime_store.selected_async_request rt with
                 | None ->
                     [
-                      Say.resolve lang
-                        (Say.make ~ko:"활성 비동기 요청 없음"
-                           ~en:"No active async requests");
+                      plain
+                        (Say.resolve lang
+                           (Say.make ~ko:"활성 비동기 요청 없음"
+                              ~en:"No active async requests"));
                     ]
                 | Some r ->
                     [
-                      "── Request Detail";
-                      "Request ID: " ^ r.request_id;
-                      Printf.sprintf "Keeper: @%s · Submitted By: %s"
-                        r.keeper_name r.submitted_by;
-                      Printf.sprintf "Status: %s · Ownership: %s" r.status
-                        (Option.value r.worker_ownership ~default:"—");
-                      Printf.sprintf "Elapsed: %s · Ok: %s"
-                        (match r.elapsed_sec with
-                        | Some s -> Printf.sprintf "%.1fs" s
-                        | None -> "—")
-                        (match r.ok with
-                        | Some true -> "true"
-                        | Some false -> "false"
-                        | None -> "pending");
+                      sec "── Request Detail";
+                      plain ("Request ID: " ^ r.request_id);
+                      plain
+                        (Printf.sprintf "Keeper: @%s · Submitted By: %s"
+                           r.keeper_name r.submitted_by);
+                      plain
+                        (Printf.sprintf "Status: %s · Ownership: %s" r.status
+                           (Option.value r.worker_ownership ~default:"—"));
+                      plain
+                        (Printf.sprintf "Elapsed: %s · Ok: %s"
+                           (match r.elapsed_sec with
+                           | Some s -> Printf.sprintf "%.1fs" s
+                           | None -> "—")
+                           (match r.ok with
+                           | Some true -> "true"
+                           | Some false -> "false"
+                           | None -> "pending"));
                     ]
                     @ (match r.result_preview with
                       | Some pv ->
-                          "── Result Preview"
-                          :: String.split_on_char '\n'
-                               (H.redact_secrets_in_text pv)
+                          sec "── Result Preview"
+                          :: List.map plain
+                               (String.split_on_char '\n'
+                                  (H.redact_secrets_in_text pv))
                       | None -> [])
               in
               summary_hdr @ sel_lines)
@@ -5755,14 +5840,27 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         let bg = Color.of_rgb theme.surface_1 in
         let st_primary = Typography.primary ~bg theme in
         List.iteri
-          (fun idx line ->
+          (fun idx (tone, line) ->
             if idx >= skip && idx - skip < rc.h then
               let py = rc.y + idx - skip in
-              match Card.legacy_rule_label line with
-              | Some lbl ->
+              match tone with
+              | Update_nav.Line_section ->
+                  let lbl =
+                    Option.value (Card.legacy_rule_label line)
+                      ~default:(String.trim line)
+                  in
                   Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
                     ~y:py ~theme
-              | None ->
+              | Update_nav.Line_accent ->
+                  ignore
+                    (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                       ~style:(Typography.accent ~bg theme)
+                       (Grapheme.truncate_to_width ~max_width:rc.w line))
+              | Update_nav.Line_plain
+              | Update_nav.Line_selected
+              | Update_nav.Line_ok
+              | Update_nav.Line_warn
+              | Update_nav.Line_error ->
                   ignore
                     (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
                        ~style:st_primary
@@ -6418,18 +6516,24 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
               let skip = Int.min max_skip (Int.max 0 rt.detail_scroll_offset) in
               let y = ref rc.y and bot = Rect.bottom rc in
               List.iter
-                (fun ln ->
+                (fun (ln : Update_nav.styled_line) ->
                   if !y < bot then begin
                     let st =
-                      if
-                        String.starts_with ~prefix:"Exported tools" ln
-                        || String.starts_with ~prefix:"Contributions" ln
-                      then H.accent_style ~theme ~attrs:Attr.bold ()
-                      else H.text_style ~theme ()
+                      match ln.tone with
+                      | Update_nav.Line_section | Update_nav.Line_accent ->
+                          H.accent_style ~theme ~attrs:Attr.bold ()
+                      | Update_nav.Line_error ->
+                          H.status_style ~theme Theme.Status_critical
+                      | Update_nav.Line_warn ->
+                          H.status_style ~theme Theme.Status_attention
+                      | Update_nav.Line_ok ->
+                          H.status_style ~theme Theme.Status_ok
+                      | Update_nav.Line_selected | Update_nav.Line_plain ->
+                          H.text_style ~theme ()
                     in
                     ignore
                       (H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:rc.w
-                         ~style:st ln);
+                         ~style:st ln.text);
                     incr y
                   end)
                 (Store_scroll.drop skip lines)
@@ -7340,32 +7444,39 @@ let render_inspector
                 | Some xs -> List.length xs
                 | None -> 0
               in
+              let plain s = (Update_nav.Line_plain, s) in
+              let sec s = (Update_nav.Line_section, s) in
+              let warn s = (Update_nav.Line_warn, s) in
               let preview_lines =
                 match Observed.to_option rt.skill_editor_preview with
                 | None -> []
                 | Some pv ->
                     let diag_part =
-                      if pv.diagnostics = [] then [ "  preview: valid (0 diagnostics)" ]
+                      if pv.diagnostics = [] then
+                        [ plain "  preview: valid (0 diagnostics)" ]
                       else
                         List.map
-                          (fun d -> "  [DIAG] " ^ H.redact_secrets_in_text d)
+                          (fun d -> warn ("  [DIAG] " ^ H.redact_secrets_in_text d))
                           pv.diagnostics
                     in
-                    ("── Preview" :: diag_part)
+                    sec "── Preview" :: diag_part
               in
               let all_lines =
                 [
-                  Printf.sprintf "Reference: %s · Access: %s · Rev: %s"
-                    loaded.reference
-                    (Wire_runtime.skill_access_to_string loaded.access)
-                    loaded.snapshot_revision;
-                  Printf.sprintf "Writable Sources: %s · Authoring Tools: %d"
-                    sources_s tools_n;
+                  plain
+                    (Printf.sprintf "Reference: %s · Access: %s · Rev: %s"
+                       loaded.reference
+                       (Wire_runtime.skill_access_to_string loaded.access)
+                       loaded.snapshot_revision);
+                  plain
+                    (Printf.sprintf "Writable Sources: %s · Authoring Tools: %d"
+                       sources_s tools_n);
                 ]
                 @ preview_lines
-                @ ("── SKILL.md Source"
-                  :: String.split_on_char '\n'
-                       (H.redact_secrets_in_text loaded.source_text))
+                @ (sec "── SKILL.md Source"
+                  :: List.map plain
+                       (String.split_on_char '\n'
+                          (H.redact_secrets_in_text loaded.source_text)))
               in
               let skip =
                 Int.max 0
@@ -7376,21 +7487,44 @@ let render_inspector
               let y = ref content.y and bot = Rect.bottom content in
               let bg = Color.of_rgb theme.surface_1 in
               List.iter
-                (fun ln ->
+                (fun (tone, ln) ->
                   if !y < bot then begin
-                    (match Card.legacy_rule_label ln with
-                    | Some lbl ->
-                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
-                          ~rect:content ~y:!y ~theme
-                    | None ->
-                        let st =
-                          if String.starts_with ~prefix:"  [DIAG]" ln then
-                            H.status_style ~theme Theme.Status_attention
-                          else H.text_style ~theme ()
-                        in
-                        ignore
-                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                             ~max_w:content.w ~style:st ln));
+                    (match tone with
+                     | Update_nav.Line_section ->
+                         let lbl =
+                           Option.value (Card.legacy_rule_label ln)
+                             ~default:(String.trim ln)
+                         in
+                         Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                           ~rect:content ~y:!y ~theme
+                     | Update_nav.Line_accent ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w
+                              ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                              ln)
+                     | Update_nav.Line_warn ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w
+                              ~style:(H.status_style ~theme Theme.Status_attention)
+                              ln)
+                     | Update_nav.Line_error ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w
+                              ~style:(H.status_style ~theme Theme.Status_critical)
+                              ln)
+                     | Update_nav.Line_ok ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w
+                              ~style:(H.status_style ~theme Theme.Status_ok)
+                              ln)
+                     | Update_nav.Line_selected | Update_nav.Line_plain ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w ~style:(H.text_style ~theme ()) ln));
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)
@@ -7437,23 +7571,30 @@ let render_inspector
                 | Some e -> Printf.sprintf "%.2fs" e
                 | None -> "—"
               in
+              let plain s = (Update_nav.Line_plain, s) in
+              let sec s = (Update_nav.Line_section, s) in
               let json_lines heading j_opt =
                 match j_opt with
                 | None -> []
                 | Some j ->
-                    ("── " ^ heading)
-                    :: String.split_on_char '\n'
-                         (H.redact_secrets_in_text (Yojson.Safe.pretty_to_string j))
+                    sec ("── " ^ heading)
+                    :: List.map plain
+                         (String.split_on_char '\n'
+                            (H.redact_secrets_in_text
+                               (Yojson.Safe.pretty_to_string j)))
               in
               let all_lines =
                 [
-                  Printf.sprintf "Run ID: %s · Kind: %s · Lane: %s"
-                    detail.run_id detail.run_kind detail.lane;
-                  Printf.sprintf "Status: %s · Elapsed: %s · Slot: %s"
-                    detail.status elapsed_s (opt_s detail.selected_slot);
-                  Printf.sprintf "Subject: %s · Actor: %s · Skill Evidence: %s"
-                    (opt_s detail.subject_id) (opt_s detail.actor)
-                    (opt_s detail.skill_evidence_state);
+                  plain
+                    (Printf.sprintf "Run ID: %s · Kind: %s · Lane: %s"
+                       detail.run_id detail.run_kind detail.lane);
+                  plain
+                    (Printf.sprintf "Status: %s · Elapsed: %s · Slot: %s"
+                       detail.status elapsed_s (opt_s detail.selected_slot));
+                  plain
+                    (Printf.sprintf "Subject: %s · Actor: %s · Skill Evidence: %s"
+                       (opt_s detail.subject_id) (opt_s detail.actor)
+                       (opt_s detail.skill_evidence_state));
                 ]
                 @ json_lines "Input" detail.input_json
                 @ json_lines "Output" detail.output_json
@@ -7468,16 +7609,30 @@ let render_inspector
               let y = ref content.y and bot = Rect.bottom content in
               let bg = Color.of_rgb theme.surface_1 in
               List.iter
-                (fun ln ->
+                (fun (tone, ln) ->
                   if !y < bot then begin
-                    (match Card.legacy_rule_label ln with
-                    | Some lbl ->
-                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
-                          ~rect:content ~y:!y ~theme
-                    | None ->
-                        ignore
-                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                             ~max_w:content.w ~style:(H.text_style ~theme ()) ln));
+                    (match tone with
+                     | Update_nav.Line_section ->
+                         let lbl =
+                           Option.value (Card.legacy_rule_label ln)
+                             ~default:(String.trim ln)
+                         in
+                         Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                           ~rect:content ~y:!y ~theme
+                     | Update_nav.Line_accent ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w
+                              ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                              ln)
+                     | Update_nav.Line_plain
+                     | Update_nav.Line_selected
+                     | Update_nav.Line_ok
+                     | Update_nav.Line_warn
+                     | Update_nav.Line_error ->
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                              ~max_w:content.w ~style:(H.text_style ~theme ()) ln));
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)

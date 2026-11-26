@@ -840,7 +840,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Context_primary_action ~key_display:"c"
         ~hint_label:(Say.make ~ko:"확인/댓글/채팅" ~en:"Check/Reply/Chat")
-        ~help_desc:(Say.make ~ko:"산출물 확인 체크 / 보드 댓글 작성 / 키퍼 빠른 채팅 / 목표 완료 요청" ~en:"Artifact check toggle / Board comment / Quick keeper chat / Goal complete")
+        ~help_desc:(Say.make ~ko:"산출물 확인 / 보드 댓글·복구 / 키퍼·Inbox 빠른 채팅 / 목표 완료 / 작업 전이 / 애드온·브라우저 실행" ~en:"Artifact check / Board comment or recovery / Quick chat (Keepers/Inbox) / Goal complete / Task transition / Addon & Browser act")
         ~footer_priority:0 (bare_char 'c');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_artifact_share ~key_display:"P"
@@ -895,17 +895,17 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_approve_or_assign ~key_display:"a"
         ~hint_label:(Say.make ~ko:"승인/배정/전환" ~en:"Approve/Toggle")
-        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / OAuth 전환 / 활동 로그 Acting 레일 토글" ~en:"Approve goal/verification, assign runtime, toggle OAuth, or toggle Acting rail")
+        ~help_desc:(Say.make ~ko:"목표·검증·하네스 승인 / 보드 댓글 / 사서 라이터 재개 / 런타임 배정 / 프리셋 복원 / OAuth·키퍼 생명주기 / Acting 레일 토글" ~en:"Approve goal/verification/harness, board comment, resume writer, assign runtime, restore preset, OAuth/keeper lifecycle, or toggle Acting rail")
         ~footer_priority:0 (bare_char 'a');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_reject_or_cancel ~key_display:"x"
         ~hint_label:(Say.make ~ko:"반려/취소" ~en:"Reject/Cancel")
-        ~help_desc:(Say.make ~ko:"작업 취소 / 검증 반려 / 목표 일시중지" ~en:"Cancel task, reject verification, or pause goal")
+        ~help_desc:(Say.make ~ko:"작업 취소 / 검증·하네스 반려 / 목표 일시중지 / 승인 규칙·레인·스킬·프리셋 삭제 / 프롬프트·파라미터 초기화 / 애드온 분리 / 키퍼 생명주기" ~en:"Cancel task, reject verification/harness, pause goal, delete gate rule/lane/skill/preset, clear prompt/param, detach addon, or keeper lifecycle")
         ~footer_priority:0 (bare_char 'x');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Edit_or_export ~key_display:"e"
         ~hint_label:(Say.make ~ko:"편집/증거" ~en:"Edit/Evidence")
-        ~help_desc:(Say.make ~ko:"레인·위키·키퍼·샌드박스 설정 편집 / 산출물 내보내기 / 퓨전 보드 증거 / 기억 변천" ~en:"Edit lane, wiki, keeper, or sandbox config / export artifact / Fusion evidence / Memory Evolution")
+        ~help_desc:(Say.make ~ko:"목표·레인·위키·스킬·프롬프트·파라미터·키퍼·샌드박스·애드온 편집 / 도구 실행 / CLI 로그인 입력 / 산출물 내보내기 / 퓨전 증거 / 기억 변천" ~en:"Edit goal/lane/wiki/skill/prompt/param/keeper/sandbox/addon, execute tool, CLI login input, export artifact, Fusion evidence, or Memory Evolution")
         ~footer_priority:0 (bare_char 'e');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Delete_selected ~key_display:"d"
@@ -930,7 +930,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Copy_hash ~key_display:"H"
         ~hint_label:(Say.make ~ko:"SHA 복사" ~en:"Copy SHA")
-        ~help_desc:(Say.make ~ko:"산출물 SHA-256 다이제스트 복사" ~en:"Copy artifact SHA-256 digest")
+        ~help_desc:(Say.make ~ko:"산출물 SHA-256 / 하네스 판정 notes_hash 복사" ~en:"Copy artifact SHA-256 digest or Harness notes_hash")
         ~footer_priority:0 (bare_char 'H');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Dismiss_errors ~key_display:"X"
@@ -1401,6 +1401,76 @@ let contextual_help_entries ~lang =
       slash_twin = None;
       action = Cycle_view_mode;
     };
+    {
+      keys = [ "R" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[스킬/레인/보드] 스킬 카탈로그 새로고침 / 레인 이름 변경 / 보드 답글"
+             ~en:"[Skills/Lanes/Board] Refresh skill catalog / rename lane / reply on board");
+      slash_twin = None;
+      action = Refresh;
+    };
+    {
+      keys = [ "O" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[애드온·브라우저] 애드온 관측 트리거 / 브라우저 장면 조회"
+             ~en:"[Addons & Browser] Trigger addon observe / fetch browser scene");
+      slash_twin = None;
+      action = Context_primary_action;
+    };
+    {
+      keys = [ "D" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[레인/애드온] Exact 레인 실행 상세 열기 / 애드온 슬라이스 조회"
+             ~en:"[Lanes/Addons] Open Exact lane run detail / fetch addon slice");
+      slash_twin = None;
+      action = Dive_selected;
+    };
+    {
+      keys = [ "W" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[브라우저] 선택한 브라우저 탭 스크린샷 캡처"
+             ~en:"[Browser] Capture selected browser tab screenshot");
+      slash_twin = None;
+      action = Context_primary_action;
+    };
+    {
+      keys = [ "C" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[Work Inbox] 선택한 대기 항목의 키퍼 채팅으로 이동"
+             ~en:"[Work Inbox] Jump to selected attention item's Keeper chat");
+      slash_twin = None;
+      action = Context_primary_action;
+    };
+    {
+      keys = [ "p" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[스킬 인스펙터] SKILL.md 미리보기 검증 실행"
+             ~en:"[Skill Inspector] Validate SKILL.md preview");
+      slash_twin = None;
+      action = Probe_sandbox;
+    };
+    {
+      keys = [ "J/K"; "S-↑↓" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[목표 상세 / 키퍼 설정] 성공 조건·Dry-run 미리보기 스크롤"
+             ~en:"[Goal Dive / Keeper Config] Scroll measure or dry-run preview");
+      slash_twin = None;
+      action = Move Down;
+    };
   ]
 
 let help_entries ~scope_chain ~lang =
@@ -1466,6 +1536,140 @@ let help_entries ~scope_chain ~lang =
               entries;
             })
     all_categories
+
+let compact_help_group ~lang (grp : help_group) : help_group =
+  let seen_ws = ref false in
+  let seen_move = ref false in
+  let seen_ask = ref false in
+  let entries =
+    List.filter_map
+      (fun (e : help_entry) ->
+        match e.action with
+        | Switch_workspace _ ->
+            if !seen_ws then None
+            else begin
+              seen_ws := true;
+              Some
+                {
+                  e with
+                  keys = [ "1..6"; "Ctrl/Alt+1..6"; "F1..F6" ];
+                  desc =
+                    Say.resolve lang
+                      (Say.make ~ko:"워크스페이스 전환 (1..6)"
+                         ~en:"Switch workspace (1..6)");
+                  slash_twin = Some "/pulse../infra";
+                }
+            end
+        | Move _ when equal_help_category grp.category Cat_navigation ->
+            if !seen_move then None
+            else begin
+              seen_move := true;
+              Some
+                {
+                  e with
+                  keys = [ "j/k"; "↑↓←→"; "PgUp/Dn"; "g/G/Home/End" ];
+                  desc =
+                    Say.resolve lang
+                      (Say.make
+                         ~ko:"선택·페이지 이동 · 좌/우 패인 이동 (PgUp/PgDn/Home/End)"
+                         ~en:"Move / page scroll / pane switch (PgUp/PgDn/Home/End)");
+                  slash_twin = None;
+                }
+            end
+        | Ask_select_choice _ ->
+            if !seen_ask then None
+            else begin
+              seen_ask := true;
+              Some
+                {
+                  e with
+                  keys = [ "a..d" ];
+                  desc =
+                    Say.resolve lang
+                      (Say.make ~ko:"Ask 선택지 빠른 응답 (단일 1문항)"
+                         ~en:"Quick Ask choice (single-question)");
+                  slash_twin = None;
+                }
+            end
+        | Submit_steer ->
+            Some { e with keys = [ "Alt+↵"; "Ctrl+↵" ] }
+        | Composer_newline ->
+            Some { e with keys = [ "S-Enter"; "Ctrl+J" ] }
+        | Move _
+        | Toggle_sidebar
+        | Sub_tab _
+        | Cycle_focus_pane _
+        | Focus_composer
+        | Focus_filter
+        | Dive_selected
+        | Confirm_selected
+        | Pop_back_or_close
+        | Open_settings
+        | Teleport_blocked
+        | Open_incidents
+        | Voice_ptt_toggle
+        | Fast_approve_top
+        | Fast_deny_top
+        | Open_help
+        | Open_palette
+        | Open_keeper_switcher
+        | Open_model_switcher
+        | Toggle_tool_details
+        | Open_queue_context
+        | Toggle_thinking
+        | Cycle_origin_mode
+        | Composer_kill_word
+        | Submit_followup
+        | Toggle_expand
+        | Create_new
+        | Refresh
+        | Open_external
+        | Copy_selected
+        | Toggle_zoom
+        | Cycle_memory_view
+        | Toggle_memory_sort
+        | Cycle_signal_or_source
+        | Cycle_sort_or_speak
+        | Cycle_hearth_or_overrule
+        | Cycle_time_window
+        | Cycle_view_mode
+        | Context_primary_action
+        | Toggle_artifact_share
+        | Step_revision _
+        | Step_context_item _
+        | Launch_fusion
+        | Toggle_unreported
+        | Unbind_connector
+        | Entity_approve_or_assign
+        | Entity_reject_or_cancel
+        | Edit_or_export
+        | Configure_provider_key
+        | Account_login
+        | Poll_account_login
+        | Copy_hash
+        | Dismiss_errors
+        | Board_vote _
+        | Toggle_memory_scope
+        | Copy_public_url
+        | Probe_sandbox
+        | Refresh_browser_tabs
+        | Open_memory_recovery
+        | Search_prev_match
+        | Toggle_memory_chart
+        | Open_external_editor
+        | Interrupt_turn
+        | Delete_selected
+        | Link_task_goal
+        | Keeper_wake_or_online
+        | Keeper_stop_armed
+        | Quit_app ->
+            Some e)
+      grp.entries
+  in
+  { grp with entries }
+
+let compact_help_entries ~scope_chain ~lang =
+  help_entries ~scope_chain ~lang |> List.map (compact_help_group ~lang)
 
 let palette_commands ~lang =
   List.fold_left

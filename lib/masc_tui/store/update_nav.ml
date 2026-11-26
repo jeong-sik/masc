@@ -3372,7 +3372,7 @@ let launch_memory_diagram_chart ~now ~keeper ~(content_rect : Rect.t) ~kind
   let nav =
     match Model.active_inspector m, m.nav.workspace with
     | None, (Nav.Knowledge | Nav.Keepers)
-      when (not m.nav.zoomed) && Model.focusable_pane_count m > 1 ->
+      when (not (Model.is_zoomed_active m)) && Model.focusable_pane_count m > 1 ->
         { m.nav with pane_index = 1 }
     | ( None
       , ( Nav.Pulse
@@ -4060,12 +4060,13 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop))
       | Nav.Keepers -> (
           match m.fleet.selected_collapsed_company with
-          | Some company when m.nav.pane_index = 0 && not m.nav.zoomed ->
+          | Some company
+            when m.nav.pane_index = 0 && not (Model.is_zoomed_active m) ->
               Enter_expand_company company
           | Some _ | None ->
           match Model.selected_keeper_name m with
           | Some name
-            when (m.nav.pane_index >= 1 || m.nav.zoomed)
+            when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                  && (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_trace
                     || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
@@ -4077,7 +4078,7 @@ let enter_plan (m : Model.t) : enter_plan =
                             Knowledge_store.Kmem_facts_tree)) ->
               keeper_enter_plan ~name ~tab:m.fleet.keeper_dive_tab m
           | Some name ->
-              if m.nav.pane_index >= 1 || m.nav.zoomed then
+              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then
                 if
                   Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
                   && Knowledge_store.equal_keeper_memory_subview
@@ -4175,20 +4176,20 @@ let enter_plan (m : Model.t) : enter_plan =
       | Nav.Knowledge -> (
           match m.knowledge.active_tab with
           | Nav.Knowledge_board ->
-              if m.nav.pane_index >= 1 || m.nav.zoomed then Enter_noop
+              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then Enter_noop
               else if
                 Option.is_some
                   (Knowledge_store.board_detail_post m.knowledge)
               then Enter_toggle_zoom
               else Enter_noop
           | Nav.Knowledge_wiki ->
-              if m.nav.pane_index >= 1 || m.nav.zoomed then Enter_noop
+              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then Enter_noop
               else if
                 Option.is_some (Knowledge_store.selected_wiki_page m.knowledge)
               then Enter_toggle_zoom
               else Enter_noop
           | Nav.Knowledge_artifacts ->
-              if m.nav.pane_index >= 1 || m.nav.zoomed then Enter_noop
+              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then Enter_noop
               else if
                 Option.is_some (Knowledge_store.selected_artifact m.knowledge)
               then Enter_toggle_zoom
@@ -4238,7 +4239,7 @@ let enter_plan (m : Model.t) : enter_plan =
                   (Knowledge_store.equal_memory_subview
                      m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
               then Enter_noop
-              else if m.nav.pane_index = 1 || m.nav.zoomed then
+              else if m.nav.pane_index = 1 || Model.is_zoomed_active m then
                 memory_reading_plan ~keeper_opt:m.knowledge.memory_diff_keeper
                   ~otherwise:diff_plan m
               else
@@ -4308,7 +4309,7 @@ let enter_plan (m : Model.t) : enter_plan =
               match Runtime_store.selected_fusion_run m.runtime with
               | None -> Enter_noop
               | Some run ->
-                  if m.nav.zoomed then
+                  if Model.is_zoomed_active m then
                     let post_id_opt =
                       match
                         Runtime_store.fusion_detail_for ~run_id:run.run_id
@@ -4407,12 +4408,12 @@ let enter_plan (m : Model.t) : enter_plan =
                 review_jump
                   ~scroll:
                     (if m.nav.pane_index = 0
-                        && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                        && not (Model.is_zoomed_active m)
                      then 0
                      else m.infra.code.git_scroll_offset)
               else if
                 m.nav.pane_index = 0
-                && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                && not (Model.is_zoomed_active m)
               then
                 match Infra_store.selected_code_tree_node m.infra with
                 | None -> Enter_noop
@@ -4472,64 +4473,96 @@ let enter_plan (m : Model.t) : enter_plan =
                     Enter_noop)
           | Nav.Infra_repos_changes -> Enter_noop))
 
+let reset_knowledge_zoom_transient (k : Knowledge_store.t) =
+  k |> Knowledge_store.reset_thread_view |> Knowledge_store.clear_armed_vote
+  |> Knowledge_store.clear_pending_wiki_edit
+  |> Knowledge_store.set_artifact_search ""
+
+let unzoom_view (m : Model.t) : Model.t =
+  let knowledge =
+    if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
+      reset_knowledge_zoom_transient m.knowledge
+    else Knowledge_store.clear_armed_vote m.knowledge
+  in
+  let m0 =
+    {
+      m with
+      knowledge;
+      nav =
+        {
+          m.nav with
+          zoomed = false;
+          pre_zoom_pane_index = None;
+          json_scroll_offset = 0;
+        };
+      infra = { m.infra with show_raw_json = false };
+    }
+  in
+  let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
+  let restored =
+    match m.nav.pre_zoom_pane_index with
+    | Some p -> max 0 (min max_pane p)
+    | None -> max 0 (min max_pane m0.nav.pane_index)
+  in
+  { m0 with nav = { m0.nav with pane_index = restored } }
+
+let toggle_zoom_view (m : Model.t) : Model.t * bool * Cmd.t list =
+  if not (Model.can_zoom_current_view m) then
+    if m.nav.zoomed then (unzoom_view m, false, [])
+    else (m, false, [])
+  else if m.nav.zoomed then (unzoom_view m, false, [])
+  else
+    let z_pane =
+      if
+        Nav.equal_workspace m.nav.workspace Nav.Keepers
+        && Model.keeper_preview_has_inner_split m
+        && m.nav.pane_index >= 2
+      then 1
+      else 0
+    in
+    let drafts =
+      if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+        match Model.selected_keeper_name m with
+        | Some name -> Drafts.set_active_keeper name m.drafts
+        | None -> m.drafts
+      else m.drafts
+    in
+    let work =
+      if Nav.equal_workspace m.nav.workspace Nav.Work then
+        match m.work.active_tab with
+        | Nav.Work_pipeline -> Work_store.reset_goal_dive_state m.work
+        | Nav.Work_tasks -> Work_store.reset_task_dive_scroll m.work
+        | Nav.Work_schedules
+        | Nav.Work_inbox
+        | Nav.Work_candle_scorecard
+        | Nav.Work_harness ->
+            m.work
+      else m.work
+    in
+    let next =
+      {
+        m with
+        drafts;
+        work;
+        knowledge = Knowledge_store.clear_armed_vote m.knowledge;
+        nav =
+          {
+            m.nav with
+            zoomed = true;
+            pre_zoom_pane_index = Some m.nav.pane_index;
+            pane_index = z_pane;
+            json_scroll_offset = 0;
+          };
+      }
+    in
+    (next, true, View_fetches.fetches_for_current_view next)
+
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
   | Enter_toggle_zoom ->
-      if not (Model.can_zoom_current_view m) then (m, [])
-      else if m.nav.zoomed then
-        let m0 =
-          {
-            m with
-            nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
-            knowledge = Knowledge_store.clear_armed_vote m.knowledge;
-            infra = { m.infra with show_raw_json = false };
-          }
-        in
-        let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
-        let restored =
-          match m.nav.pre_zoom_pane_index with
-          | Some p -> max 0 (min max_pane p)
-          | None -> max 0 (min max_pane m0.nav.pane_index)
-        in
-        ({ m0 with nav = { m0.nav with pane_index = restored } }, [])
-      else
-        let drafts =
-          if Nav.equal_workspace m.nav.workspace Nav.Keepers then
-            match Model.selected_keeper_name m with
-            | Some name -> Drafts.set_active_keeper name m.drafts
-            | None -> m.drafts
-          else m.drafts
-        in
-        let work =
-          if Nav.equal_workspace m.nav.workspace Nav.Work then
-            match m.work.active_tab with
-            | Nav.Work_pipeline -> Work_store.reset_goal_dive_state m.work
-            | Nav.Work_tasks -> Work_store.reset_task_dive_scroll m.work
-            | Nav.Work_schedules
-            | Nav.Work_inbox
-            | Nav.Work_candle_scorecard
-            | Nav.Work_harness ->
-                m.work
-          else m.work
-        in
-        let next =
-          {
-            m with
-            drafts;
-            work;
-            knowledge = Knowledge_store.clear_armed_vote m.knowledge;
-            nav =
-              {
-                m.nav with
-                zoomed = true;
-                pre_zoom_pane_index = Some m.nav.pane_index;
-                pane_index = 0;
-                json_scroll_offset = 0;
-              };
-          }
-        in
-        (next, View_fetches.fetches_for_current_view next)
+      let next, _, cmds = toggle_zoom_view m in
+      (next, cmds)
   | Enter_jump_keeper { name; tab; trace_section } ->
       jump_to_keeper ?tab ?trace_section m name
   | Enter_jump_knowledge_thread post_id ->
@@ -7157,103 +7190,11 @@ let help_max_scroll (m : Model.t) =
     in
     let content_h = max 1 (inner_h - header_h) in
     let compact_count (grp : Keymap.help_group) =
-      let seen_ws = ref false in
-      let seen_move = ref false in
-      let seen_ask = ref false in
-      let n_entries =
-        List.fold_left
-          (fun acc (e : Keymap.help_entry) ->
-            match e.action with
-            | Keymap.Switch_workspace _ ->
-                if !seen_ws then acc
-                else (
-                  seen_ws := true;
-                  acc + 1)
-            | Keymap.Move _ ->
-                if !seen_move then acc
-                else (
-                  seen_move := true;
-                  acc + 1)
-            | Keymap.Ask_select_choice _ ->
-                if !seen_ask then acc
-                else (
-                  seen_ask := true;
-                  acc + 1)
-            | Keymap.Toggle_sidebar
-            | Keymap.Sub_tab _
-            | Keymap.Cycle_focus_pane _
-            | Keymap.Focus_composer
-            | Keymap.Focus_filter
-            | Keymap.Dive_selected
-            | Keymap.Confirm_selected
-            | Keymap.Pop_back_or_close
-            | Keymap.Open_settings
-            | Keymap.Teleport_blocked
-            | Keymap.Open_incidents
-            | Keymap.Voice_ptt_toggle
-            | Keymap.Fast_approve_top
-            | Keymap.Fast_deny_top
-            | Keymap.Open_help
-            | Keymap.Open_palette
-            | Keymap.Open_keeper_switcher
-            | Keymap.Open_model_switcher
-            | Keymap.Toggle_tool_details
-            | Keymap.Open_queue_context
-            | Keymap.Toggle_thinking
-            | Keymap.Cycle_origin_mode
-            | Keymap.Composer_kill_word
-            | Keymap.Composer_newline
-            | Keymap.Submit_steer
-            | Keymap.Submit_followup
-            | Keymap.Toggle_expand
-            | Keymap.Create_new
-            | Keymap.Refresh
-            | Keymap.Open_external
-            | Keymap.Copy_selected
-            | Keymap.Toggle_zoom
-            | Keymap.Cycle_memory_view
-            | Keymap.Toggle_memory_sort
-            | Keymap.Cycle_signal_or_source
-            | Keymap.Cycle_sort_or_speak
-            | Keymap.Cycle_hearth_or_overrule
-            | Keymap.Cycle_time_window
-            | Keymap.Cycle_view_mode
-            | Keymap.Context_primary_action
-            | Keymap.Toggle_artifact_share
-            | Keymap.Step_revision _
-            | Keymap.Step_context_item _
-            | Keymap.Launch_fusion
-            | Keymap.Toggle_unreported
-            | Keymap.Unbind_connector
-            | Keymap.Entity_approve_or_assign
-            | Keymap.Entity_reject_or_cancel
-            | Keymap.Edit_or_export
-            | Keymap.Configure_provider_key
-            | Keymap.Account_login
-            | Keymap.Poll_account_login
-            | Keymap.Copy_hash
-            | Keymap.Dismiss_errors
-            | Keymap.Board_vote _
-            | Keymap.Toggle_memory_scope
-            | Keymap.Copy_public_url
-            | Keymap.Probe_sandbox
-            | Keymap.Refresh_browser_tabs
-            | Keymap.Open_memory_recovery
-            | Keymap.Search_prev_match
-            | Keymap.Toggle_memory_chart
-            | Keymap.Open_external_editor
-            | Keymap.Interrupt_turn
-            | Keymap.Delete_selected
-            | Keymap.Link_task_goal
-            | Keymap.Keeper_wake_or_online
-            | Keymap.Keeper_stop_armed
-            | Keymap.Quit_app ->
-                acc + 1)
-          0 grp.entries
-      in
-      1 + n_entries + 1
+      1 + List.length grp.entries + 1
     in
-    let groups = Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang:m.lang in
+    let groups =
+      Keymap.compact_help_entries ~scope_chain:Keymap.all_scopes ~lang:m.lang
+    in
     let is_left_cat = function
       | Keymap.Cat_navigation | Keymap.Cat_actions -> true
       | Keymap.Cat_overlays | Keymap.Cat_composer | Keymap.Cat_approval -> false
@@ -7841,10 +7782,10 @@ let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
   List.rev !lines
 
 let addon_catalog_preview_lines ~width (p : Wire_runtime.addon_package_preview)
-    : string list =
+    : styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
   push (Printf.sprintf "%s (%s @ %s)" p.title p.id p.revision);
   push ("Manifest: " ^ p.manifest_path);
   push
@@ -7859,12 +7800,14 @@ let addon_catalog_preview_lines ~width (p : Wire_runtime.addon_package_preview)
   | None, None -> ());
   Option.iter (fun d -> push ("Directory: " ^ d)) p.directory;
   if p.command <> [] then
-    List.iter push
+    List.iter (fun s -> push s)
       (wrap_lines ~width:w ("Command: " ^ String.concat " " p.command));
-  push (Printf.sprintf "Exported tools (%d):" (List.length p.exported_tools));
+  push ~tone:Line_accent
+    (Printf.sprintf "Exported tools (%d):" (List.length p.exported_tools));
   List.iter (fun t -> push ("  · " ^ t)) p.exported_tools;
   if p.contributions <> [] then (
-    push (Printf.sprintf "Contributions (%d):" (List.length p.contributions));
+    push ~tone:Line_accent
+      (Printf.sprintf "Contributions (%d):" (List.length p.contributions));
     List.iter (fun c -> push ("  · " ^ c)) p.contributions);
   List.rev !lines
 
@@ -8215,16 +8158,20 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
       List.rev !lines
 
 let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
-    string list =
+    styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
   match ks.logs_subview with
   | Keeper_context_store.Logs_metrics ->
-      push ("── Keeper Metrics: " ^ name ^ " ([v] Sandbox Logs) ──");
+      push ~tone:Line_section
+        ("── Keeper Metrics: " ^ name ^ " ([v] Sandbox Logs) ──");
       (match ks.metrics with
       | Observed.Failed { reason; _ } ->
-          push ("  [error] " ^ reason)
+          push ~tone:Line_error ("  [error] " ^ reason)
       | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
           push "  (loading /api/v1/keepers/:name/metrics...)"
       | Observed.Value { data = snap; _ } ->
@@ -8237,12 +8184,13 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
             (Printf.sprintf "  Scanned rows: %d · Skipped: %d" snap.scanned_rows
                snap.skipped_rows);
           if snap.top_tools <> [] then (
-            push "── Top Tools ──";
+            push ~tone:Line_section "── Top Tools ──";
             List.iter
               (fun (tool, cnt) ->
                 push (Printf.sprintf "  %-30s %d calls" tool cnt))
               snap.top_tools);
-          push (Printf.sprintf "── Recent Points (%d) ──" (List.length snap.series));
+          push ~tone:Line_section
+            (Printf.sprintf "── Recent Points (%d) ──" (List.length snap.series));
           List.iter
             (fun (pt : Wire_keeper_context.keeper_metrics_point) ->
               let cost_s =
@@ -8257,10 +8205,11 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
             snap.series);
       List.rev !lines
   | Keeper_context_store.Logs_sandbox ->
-      push ("── Remote Sandbox Logs: " ^ name ^ " ([v] Metrics) ──");
+      push ~tone:Line_section
+        ("── Remote Sandbox Logs: " ^ name ^ " ([v] Metrics) ──");
       (match ks.sandbox_logs with
       | Observed.Failed { reason; _ } ->
-          push ("  [error] " ^ reason)
+          push ~tone:Line_error ("  [error] " ^ reason)
       | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
           push "  (loading /api/v1/gate/keeper-sandbox-logs...)"
       | Observed.Value { data = sl; _ } ->
@@ -8279,45 +8228,55 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
                   | Some false -> "stopped"
                   | None -> "unknown"
                 in
-                push
+                push ~tone:Line_section
                   (Printf.sprintf "── Instance %s (%s · %s) ──"
                      inst.instance_name inst.instance_id run_s);
-                Option.iter (fun e -> push ("  error: " ^ e)) inst.error;
+                Option.iter
+                  (fun e -> push ~tone:Line_error ("  error: " ^ e))
+                  inst.error;
                 if not (String.equal (String.trim inst.stdout) "") then (
-                  push "  [stdout]";
+                  push ~tone:Line_ok "  [stdout]";
                   List.iter
-                    (fun ln -> List.iter push (wrap_lines ~width:w ("  " ^ ln)))
+                    (fun ln -> push_all (wrap_lines ~width:w ("  " ^ ln)))
                     (String.split_on_char '\n' inst.stdout));
                 if not (String.equal (String.trim inst.stderr) "") then (
-                  push "  [stderr]";
+                  push ~tone:Line_warn "  [stderr]";
                   List.iter
-                    (fun ln -> List.iter push (wrap_lines ~width:w ("  " ^ ln)))
+                    (fun ln -> push_all (wrap_lines ~width:w ("  " ^ ln)))
                     (String.split_on_char '\n' inst.stderr)))
               sl.instances);
       List.rev !lines
 
-let keeper_identity_lines ~width ~name (m : Model.t) : string list =
+let keeper_identity_lines ~width ~name (m : Model.t) : styled_line list =
   let w = max 20 width in
   let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
   let entries = keeper_identity_entries m ~name in
   let sel = clamp_index (List.length entries) ks.identity_selected_idx in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
-  push
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
+  push ~tone:Line_section
     ("── Keeper Identity: " ^ name
    ^ " ([l] Login · [L] Poll · [r] Refresh · [a/Enter] Toggle · [U] Disconnect \
       · [K] GitHub PAT · [y] Copy) ──");
   if ks.oauth_auth_denied then
-    push "  [CanAdmin required] OAuth identity endpoints returned 401/403";
+    push ~tone:Line_warn
+      "  [CanAdmin required] OAuth identity endpoints returned 401/403";
   (match Observed.to_option m.keeper_context.oauth_providers with
   | Some p ->
       Option.iter (fun u -> push ("  OAuth callback: " ^ u)) p.callback_url;
-      Option.iter (fun pr -> push ("  Callback problem: " ^ pr)) p.callback_problem
+      Option.iter
+        (fun pr -> push ~tone:Line_warn ("  Callback problem: " ^ pr))
+        p.callback_problem
   | None -> ());
-  push "── Providers & GitHub ──";
+  push ~tone:Line_section "── Providers & GitHub ──";
   List.iteri
     (fun idx entry ->
-      let mark = if idx = sel then ">" else " " in
+      let is_sel = idx = sel in
+      let mark = if is_sel then ">" else " " in
+      let tone = if is_sel then Line_selected else Line_plain in
       match entry with
       | Identity_oauth { provider; label; attached; enabled } ->
           let st = if attached then "attached" else "unattached" in
@@ -8327,7 +8286,9 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
             | Some false -> "disabled"
             | None -> "-"
           in
-          push (Printf.sprintf "%s [OAuth] %s (%s) · %s · %s" mark label provider st en)
+          push ~tone
+            (Printf.sprintf "%s [OAuth] %s (%s) · %s · %s" mark label provider st
+               en)
       | Identity_github ->
           let gh_s =
             if ks.github_auth_denied then "CanAdmin required (401/403)"
@@ -8342,14 +8303,14 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
                   in
                   Printf.sprintf "%s (%s)" eff g.hostname
           in
-          push (Printf.sprintf "%s [GitHub] %s" mark gh_s))
+          push ~tone (Printf.sprintf "%s [GitHub] %s" mark gh_s))
     entries;
   (match ks.oauth_pending_login with
   | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
-      push
+      push ~tone:Line_section
         (Printf.sprintf "── OAuth Login Pending (%s · attempt=%s) ──"
            ex.provider_label ex.attempt_id);
-      List.iter push (wrap_lines ~width:w ("  URL: " ^ ex.authorize_url));
+      push_all (wrap_lines ~width:w ("  URL: " ^ ex.authorize_url));
       push "  Press [y] to copy URL · [L] to poll attempt status"
   | Some (Wire_keeper_context.Oauth_login_direct d) ->
       push
@@ -8367,16 +8328,20 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
       List.iter
         (fun (p : Wire_keeper_context.oauth_attached_provider) ->
           if p.tools <> [] then
-            List.iter push
+            push_all
               (wrap_lines ~width:w
                  (Printf.sprintf "  [%s tools (%d)]: %s" p.provider
                     (List.length p.tools) (String.concat ", " p.tools)));
-          Option.iter (fun pr -> push ("  [" ^ p.provider ^ " problem]: " ^ pr)) p.problem)
+          Option.iter
+            (fun pr ->
+              push ~tone:Line_warn ("  [" ^ p.provider ^ " problem]: " ^ pr))
+            p.problem)
         att.providers
   | None -> ());
-  push "── GitHub Identity Detail ──";
+  push ~tone:Line_section "── GitHub Identity Detail ──";
   if ks.github_auth_denied then
-    push "  [CanAdmin required] GitHub identity endpoint returned 401/403"
+    push ~tone:Line_warn
+      "  [CanAdmin required] GitHub identity endpoint returned 401/403"
   else (
     match Observed.to_option ks.github_identity with
     | None -> push "  (loading /api/v1/keepers/:name/github-identity...)"
@@ -8392,7 +8357,9 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
              (Option.value ~default:"-" g.effective.login));
         if g.effective.scopes <> [] then
           push ("  Scopes: " ^ String.concat ", " g.effective.scopes);
-        Option.iter (fun e -> push ("  Effective error: " ^ e)) g.effective.error);
+        Option.iter
+          (fun e -> push ~tone:Line_warn ("  Effective error: " ^ e))
+          g.effective.error);
   if
     ks.github_login.running
     || Option.is_some ks.github_login.device_url
@@ -8400,18 +8367,21 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
     || ks.github_login.output_lines <> []
     || Option.is_some ks.github_login.error
   then (
-    push
+    push ~tone:Line_section
       (Printf.sprintf "── GitHub Device Flow (%s) ──"
          (if ks.github_login.running then "running..." else "finished"));
     Option.iter
       (fun u -> push ("  Verification URL: " ^ u))
       ks.github_login.device_url;
     Option.iter
-      (fun c -> push ("  One-time code: " ^ c ^ "  ([y] copy code)"))
+      (fun c ->
+        push ~tone:Line_ok ("  One-time code: " ^ c ^ "  ([y] copy code)"))
       ks.github_login.device_code;
-    Option.iter (fun e -> push ("  Error: " ^ e)) ks.github_login.error;
+    Option.iter
+      (fun e -> push ~tone:Line_warn ("  Error: " ^ e))
+      ks.github_login.error;
     List.iter
-      (fun ln -> List.iter push (wrap_lines ~width:w ("  | " ^ ln)))
+      (fun ln -> push_all (wrap_lines ~width:w ("  | " ^ ln)))
       (take_n 12 (List.rev ks.github_login.output_lines)));
   List.rev !lines
 
@@ -9433,7 +9403,7 @@ let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
-  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+  let zoomed = Model.is_zoomed_active m in
   let body_rect =
     match
       Masc_tui_ui.Layout.split_v br
@@ -9628,7 +9598,7 @@ let runtime_detail_max_scroll (m : Model.t) =
 let infra_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
-  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+  let zoomed = Model.is_zoomed_active m in
   match m.infra.active_tab with
   | Nav.Infra_sandboxes -> (
       match Infra_store.selected_sandbox_keeper m.infra with
@@ -10060,7 +10030,7 @@ let memory_reading_max_scroll (m : Model.t) =
               when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
               ->
                 let zoomed_keeper =
-                  m.nav.zoomed && Model.can_zoom_current_view m
+                  Model.is_zoomed_active m
                 in
                 let cw, ch =
                   Chat_transcript.keeper_content_rect_size
@@ -10082,7 +10052,7 @@ let memory_reading_max_scroll (m : Model.t) =
                   | _ -> br
                 in
                 let right_rect =
-                  if m.nav.zoomed then body_after_bar
+                  if Model.is_zoomed_active m then body_after_bar
                   else
                     snd
                       (Masc_tui_ui.Layout.adaptive_split_2
@@ -10309,7 +10279,7 @@ let clamp_for_pane (m : Model.t) =
       match Model.active_inspector m with
       | Some _ -> m
       | None -> (
-          let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+          let zoomed = Model.is_zoomed_active m in
           match m.nav.workspace with
           | Nav.Work ->
               if Model.is_work_goal_zoomed m || Model.is_work_task_zoomed m then
@@ -10866,73 +10836,74 @@ let hidden_verif_toast_msg (m : Model.t) =
             Say.make ~ko:"검증 목록 일부를 확인하지 못했습니다" ~en:"Verification coverage is incomplete"
           else Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows")
 
-let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
-  let max_scroll =
-    match
-      List.find_opt
-        (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
-        (Work_store.goals m.work)
-    with
-    | None -> 0
-    | Some g ->
-        let bp = ui_bp m in
-        let br = ui_body_rect m in
-        let theme = Theme.of_preset m.theme_preset in
-        let main_card_rect, _ =
-          split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json br
-        in
-        let inner = ui_card_inner main_card_rect in
-        if Rect.is_empty inner then 0
-        else
-          let y = ref inner.y in
-          let bot = Rect.bottom inner in
-          if inner.h >= 8 then begin
-            let has_sub =
-              match g.last_review_note with
-              | Some n when not (String.equal (String.trim n) "") -> true
-              | Some _ | None -> Option.is_some g.criterion_revision
-            in
-            let band_h = if has_sub then 2 else 1 in
-            y := !y + band_h + if inner.h >= 14 then 1 else 0
-          end;
-          let content = ops_pad_content inner in
-          let action_h = if bot - !y >= 6 then 1 else 0 in
-          let body_bot = bot - action_h in
-          if !y < body_bot then begin
-            let step_h =
-              match g.phase with
-              | Wire_work.Paused _ | Wire_work.Blocked _
-                when min 2 (body_bot - !y) >= 2 ->
-                  2
-              | Wire_work.Executing
-              | Wire_work.Verifying
-              | Wire_work.Awaiting_confirmation
-              | Wire_work.Paused _
-              | Wire_work.Blocked _
-              | Wire_work.Completed
-              | Wire_work.Dropped ->
-                  1
-            in
-            y := !y + step_h
-          end;
-          let rem_h = max 0 (body_bot - !y) in
-          let md_h =
-            if rem_h <= 0 then 0
-            else
-              min 7
-                (min rem_h (if rem_h >= 2 then max 2 (rem_h / 3) else rem_h))
+let goal_dive_measure_max_scroll ~goal_id (m : Model.t) =
+  match
+    List.find_opt
+      (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
+      (Work_store.goals m.work)
+  with
+  | None -> 0
+  | Some g ->
+      let bp = ui_bp m in
+      let br = ui_body_rect m in
+      let theme = Theme.of_preset m.theme_preset in
+      let main_card_rect, _ =
+        split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json br
+      in
+      let inner = ui_card_inner main_card_rect in
+      if Rect.is_empty inner then 0
+      else
+        let y = ref inner.y in
+        let bot = Rect.bottom inner in
+        if inner.h >= 8 then begin
+          let has_sub =
+            match g.last_review_note with
+            | Some n when not (String.equal (String.trim n) "") -> true
+            | Some _ | None -> Option.is_some g.criterion_revision
           in
-          if md_h <= 0 || content.w <= 0 then 0
+          let band_h = if has_sub then 2 else 1 in
+          y := !y + band_h + if inner.h >= 14 then 1 else 0
+        end;
+        let content = ops_pad_content inner in
+        let action_h = if bot - !y >= 6 then 1 else 0 in
+        let body_bot = bot - action_h in
+        if !y < body_bot then begin
+          let step_h =
+            match g.phase with
+            | Wire_work.Paused _ | Wire_work.Blocked _
+              when min 2 (body_bot - !y) >= 2 ->
+                2
+            | Wire_work.Executing
+            | Wire_work.Verifying
+            | Wire_work.Awaiting_confirmation
+            | Wire_work.Paused _
+            | Wire_work.Blocked _
+            | Wire_work.Completed
+            | Wire_work.Dropped ->
+                1
+          in
+          y := !y + step_h
+        end;
+        let rem_h = max 0 (body_bot - !y) in
+        let md_h =
+          if rem_h <= 0 then 0
           else
-            let md_src =
-              Printf.sprintf "**%s:** %s\n\n**%s:** %s"
-                (Say.resolve m.lang (Say.make ~ko:"성공 조건" ~en:"Measure"))
-                (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
-                (Say.resolve m.lang (Say.make ~ko:"측정 절차" ~en:"Procedure"))
-                (Chat_transcript.rewrite_masc_links_for_markdown g.procedure)
-            in
-            markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
-  in
+            min 7
+              (min rem_h (if rem_h >= 2 then max 2 (rem_h / 3) else rem_h))
+        in
+        if md_h <= 0 || content.w <= 0 then 0
+        else
+          let md_src =
+            Printf.sprintf "**%s:** %s\n\n**%s:** %s"
+              (Say.resolve m.lang (Say.make ~ko:"성공 조건" ~en:"Measure"))
+              (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
+              (Say.resolve m.lang (Say.make ~ko:"측정 절차" ~en:"Procedure"))
+              (Chat_transcript.rewrite_masc_links_for_markdown g.procedure)
+          in
+          markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
+
+let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
+  let max_scroll = goal_dive_measure_max_scroll ~goal_id m in
   let detail_scroll_offset =
     Store_scroll.clamp_scroll ~max_scroll (m.work.detail_scroll_offset + delta)
   in
@@ -11476,8 +11447,8 @@ let apply_move (m : Model.t) dir =
         when Nav.equal_workspace m.nav.workspace Nav.Keepers
              && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
              && (Model.focusable_pane_count m >= 2
-                || (m.nav.zoomed && Model.can_zoom_current_view m)) -> (
-          let embedded = not (m.nav.zoomed && Model.can_zoom_current_view m) in
+                || (Model.is_zoomed_active m)) -> (
+          let embedded = not (Model.is_zoomed_active m) in
           match Model.selected_keeper_name m with
           | Some name ->
               let max_scroll =
@@ -12353,7 +12324,7 @@ let apply_move (m : Model.t) dir =
                       ({ m with knowledge }, [])
                     else
                     let zoomed_keeper =
-                      m.nav.zoomed && Model.can_zoom_current_view m
+                      Model.is_zoomed_active m
                     in
                     if pane_index >= 1 || zoomed_keeper then
                       let embedded = not zoomed_keeper in
@@ -12579,7 +12550,7 @@ let apply_move (m : Model.t) dir =
                       (next, cmds)
                 | Nav.Work -> (
                     let zoomed_work =
-                      m.nav.zoomed && Model.can_zoom_current_view m
+                      Model.is_zoomed_active m
                     in
                     match m.work.active_tab with
                     | Nav.Work_inbox ->
@@ -12959,7 +12930,7 @@ let apply_move (m : Model.t) dir =
                         , [] ))
                 | Nav.Knowledge ->
                     let eff_pane =
-                      if m.nav.zoomed && Model.can_zoom_current_view m then 1
+                      if Model.is_zoomed_active m then 1
                       else pane_index
                     in
                     let prev_mem_keeper = m.knowledge.memory_diff_keeper in
@@ -13150,7 +13121,7 @@ let apply_move (m : Model.t) dir =
                     (next, nav_cmds)
                 | Nav.Runtime ->
                     let pane_index =
-                      if m.nav.zoomed && Model.can_zoom_current_view m then 1
+                      if Model.is_zoomed_active m then 1
                       else pane_index
                     in
                     let rt = sync_runtime_companies_if_needed m in
@@ -13710,7 +13681,7 @@ let apply_move (m : Model.t) dir =
                     ({ m with runtime = next_rt }, tab_cmds)
                 | Nav.Infra ->
                     let pane_index =
-                      if m.nav.zoomed && Model.can_zoom_current_view m then
+                      if Model.is_zoomed_active m then
                         match m.infra.active_tab with
                         | Nav.Infra_repos_changes
                           when Infra_store.repo_changes m.infra <> [] ->

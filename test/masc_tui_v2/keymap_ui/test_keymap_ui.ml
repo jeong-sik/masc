@@ -275,12 +275,50 @@ let test_keymap_footer_width_budget () =
     scopes;
   let help = Keymap.help_entries ~scope_chain:(List.hd scopes) ~lang:Say.Lang_en in
   Alcotest.(check bool) "help groups non-empty" true (List.length help >= 3);
+  let compact_all =
+    Keymap.compact_help_entries ~scope_chain:Keymap.all_scopes ~lang:Say.Lang_en
+  in
+  let find_entry act =
+    compact_all
+    |> List.concat_map (fun (g : Keymap.help_group) -> g.entries)
+    |> List.find_opt (fun (e : Keymap.help_entry) -> Keymap.equal_action e.action act)
+  in
+  (match find_entry Keymap.Open_settings with
+  | Some e ->
+      Alcotest.(check bool) "Open_settings keeps Alt+," true
+        (List.exists (String.equal "Alt+,") e.keys);
+      Alcotest.(check bool) "Open_settings keeps F10" true
+        (List.exists (String.equal "F10") e.keys)
+  | None -> Alcotest.fail "Open_settings missing from compact_help_entries");
+  (match find_entry (Keymap.Switch_workspace Nav.Pulse) with
+  | Some e ->
+      Alcotest.(check bool) "Switch_workspace preserves Ctrl/Alt+1..6" true
+        (List.exists (String.equal "Ctrl/Alt+1..6") e.keys);
+      Alcotest.(check bool) "Switch_workspace preserves F1..F6" true
+        (List.exists (String.equal "F1..F6") e.keys)
+  | None -> Alcotest.fail "Switch_workspace missing from compact_help_entries");
+  let compact_keys =
+    compact_all
+    |> List.concat_map (fun (g : Keymap.help_group) ->
+           List.concat_map (fun (e : Keymap.help_entry) -> e.keys) g.entries)
+  in
+  List.iter
+    (fun k ->
+      Alcotest.(check bool) ("compact help keeps " ^ k) true
+        (List.exists (String.equal k) compact_keys))
+    [ "PgUp/Dn"; "g/G/Home/End"; "R"; "O"; "D"; "W"; "C"; "p"; "J/K" ];
   let palette = Keymap.palette_commands ~lang:Say.Lang_ko in
   Alcotest.(check bool) "palette commands non-empty" true
     (List.length palette >= 15);
   let md = Keymap.render_markdown_reference ~lang:Say.Lang_en () in
   Alcotest.(check bool) "markdown reference includes Ctrl+K" true
-    (contains_sub ~needle:"`Ctrl+K`" ~haystack:md)
+    (contains_sub ~needle:"`Ctrl+K`" ~haystack:md);
+  Alcotest.(check bool) "markdown reference documents Harness notes_hash on H" true
+    (contains_sub ~needle:"notes_hash" ~haystack:md);
+  Alcotest.(check bool) "markdown reference includes contextual R/O/D/W/C/p" true
+    (contains_sub ~needle:"`O`" ~haystack:md
+     && contains_sub ~needle:"`C`" ~haystack:md
+     && contains_sub ~needle:"`J/K/S-↑↓`" ~haystack:md)
 
 (* --- 2. Slash Commands Tests --- *)
 

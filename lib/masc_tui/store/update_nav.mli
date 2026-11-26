@@ -288,7 +288,11 @@ val post_keeper_operator_note :
   Model.t -> Model.t * Cmd.t list
 
 val clamp_for_pane : Model.t -> Model.t
+val goal_dive_measure_max_scroll : goal_id:string -> Model.t -> int
 val scroll_goal_dive_measure : delta:int -> goal_id:string -> Model.t -> Model.t
+val reset_knowledge_zoom_transient : Knowledge_store.t -> Knowledge_store.t
+val unzoom_view : Model.t -> Model.t
+val toggle_zoom_view : Model.t -> Model.t * bool * Cmd.t list
 val incidents_detail_max_scroll : Model.t -> int
 val pin_memory_diff_range : Model.t -> Model.t * Cmd.t list
 val hidden_verif_toast_msg : Model.t -> Say.t
@@ -330,15 +334,15 @@ val fusion_detail_lines :
   width:int -> Model.t -> run_id:string -> styled_line list
 val harness_verdict_detail_lines : width:int -> Model.t -> styled_line list
 val addon_catalog_preview_lines :
-  width:int -> Wire_runtime.addon_package_preview -> string list
+  width:int -> Wire_runtime.addon_package_preview -> styled_line list
 val knowledge_memory_subview_lines :
   width:int -> Knowledge_store.t -> styled_line list
 val keeper_memory_subview_lines :
   width:int -> name:string -> Knowledge_store.t -> styled_line list
 val keeper_logs_lines :
-  width:int -> name:string -> Keeper_context_store.keeper_state -> string list
+  width:int -> name:string -> Keeper_context_store.keeper_state -> styled_line list
 val keeper_identity_lines :
-  width:int -> name:string -> Model.t -> string list
+  width:int -> name:string -> Model.t -> styled_line list
 val verification_dive_tab_lines :
   width:int -> Model.t -> Wire_work.verification_request -> styled_line list
 val code_right_pane_line_count : Model.t -> int

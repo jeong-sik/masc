@@ -3734,23 +3734,52 @@ let render_logs_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       let skip = Int.min max_skip (Int.max 0 ks.logs_scroll_offset) in
       let y = ref content.y and bot = Rect.bottom content in
       List.iter
-        (fun ln ->
+        (fun (ln : Update_nav.styled_line) ->
           if !y < bot then begin
-            (match Card.legacy_rule_label ln with
-            | Some lbl ->
+            (match ln.tone with
+            | Update_nav.Line_section ->
+                let lbl =
+                  Option.value (Card.legacy_rule_label ln.text)
+                    ~default:(String.trim ln.text)
+                in
                 Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
                   ~y:!y ~theme
-            | None ->
-                let st =
-                  if String.starts_with ~prefix:"  stderr:" ln then
-                    Typography.status ~bg theme Theme.Status_attention
-                  else if String.starts_with ~prefix:"  stdout:" ln then
-                    Typography.status ~bg theme Theme.Status_ok
-                  else Typography.structure ~bg theme
-                in
+            | Update_nav.Line_accent ->
                 ignore
                   (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                     ~max_w:content.w ~style:st ln));
+                     ~max_w:content.w
+                     ~style:
+                       (Typography.status ~bg ~bold:true theme
+                          Theme.Status_active)
+                     ln.text)
+            | Update_nav.Line_error ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.status ~bg theme Theme.Status_critical)
+                     ln.text)
+            | Update_nav.Line_warn ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.status ~bg theme Theme.Status_attention)
+                     ln.text)
+            | Update_nav.Line_ok ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.status ~bg theme Theme.Status_ok)
+                     ln.text)
+            | Update_nav.Line_selected ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:(Typography.anchor ~bg theme)
+                     ln.text)
+            | Update_nav.Line_plain ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:(Typography.structure ~bg theme)
+                     ln.text));
             incr y
           end)
         (Store_scroll.drop skip lines)
@@ -3772,41 +3801,61 @@ let render_identity_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
       let skip = Int.min max_skip (Int.max 0 ks.identity_scroll_offset) in
       let y = ref content.y and bot = Rect.bottom content in
       List.iter
-        (fun ln ->
+        (fun (ln : Update_nav.styled_line) ->
           if !y < bot then begin
-            let is_sel = String.starts_with ~prefix:">" ln in
-            if is_sel then begin
-              let row_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
-              let row_bg = Color.of_rgb theme.selection_bg in
-              Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
-                ~style:
-                  (Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
-                ();
-              ignore
-                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                   ~max_w:content.w
-                   ~style:(Typography.anchor ~bg:row_bg theme)
-                   ln)
-            end
-            else (
-              match Card.legacy_rule_label ln with
-              | Some lbl ->
-                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
-                    ~y:!y ~theme
-              | None ->
-                  let st =
-                    if
-                      String.starts_with ~prefix:"  [CanAdmin" ln
-                      || String.starts_with ~prefix:"  Error:" ln
-                      || String.starts_with ~prefix:"  Effective error:" ln
-                    then Typography.status ~bg theme Theme.Status_attention
-                    else if String.starts_with ~prefix:"  One-time code:" ln then
-                      Typography.status ~bg ~bold:true theme Theme.Status_ok
-                    else Typography.structure ~bg theme
-                  in
-                  ignore
-                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                       ~max_w:content.w ~style:st ln));
+            (match ln.tone with
+            | Update_nav.Line_selected ->
+                let row_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
+                let row_bg = Color.of_rgb theme.selection_bg in
+                Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
+                  ~style:
+                    (Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg
+                       ())
+                  ();
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.anchor ~bg:row_bg theme)
+                     ln.text)
+            | Update_nav.Line_section ->
+                let lbl =
+                  Option.value (Card.legacy_rule_label ln.text)
+                    ~default:(String.trim ln.text)
+                in
+                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                  ~y:!y ~theme
+            | Update_nav.Line_accent ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:
+                       (Typography.status ~bg ~bold:true theme
+                          Theme.Status_active)
+                     ln.text)
+            | Update_nav.Line_error ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.status ~bg theme Theme.Status_critical)
+                     ln.text)
+            | Update_nav.Line_warn ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(Typography.status ~bg theme Theme.Status_attention)
+                     ln.text)
+            | Update_nav.Line_ok ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:
+                       (Typography.status ~bg ~bold:true theme Theme.Status_ok)
+                     ln.text)
+            | Update_nav.Line_plain ->
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:(Typography.structure ~bg theme)
+                     ln.text));
             incr y
           end)
         (Store_scroll.drop skip lines)
@@ -4029,7 +4078,7 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
     let board_recovery_open =
       Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox
       && ((not embedded) || Model.pane_focused model 1
-          || (model.nav.zoomed && Model.can_zoom_current_view model))
+          || (Model.is_zoomed_active model))
       && Board_recovery.shown ~keeper:name model.knowledge.board_recovery
     in
     let trace_sec =

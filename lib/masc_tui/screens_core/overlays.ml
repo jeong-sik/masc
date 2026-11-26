@@ -4835,15 +4835,13 @@ let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0)
               ~rect ~y:py ~theme
         | Help_entry e ->
             let rr = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
-            let keys_s =
-              let shown_keys =
-                match e.keys with
-                | a :: b :: c :: _ -> [ a; b; c ]
-                | xs -> xs
-              in
-              " " ^ String.concat "/" shown_keys ^ " "
-            in
-            let key_col_w = Int.min 18 (Int.max 9 (rect.w / 3)) in
+            let keys_s = " " ^ String.concat "/" e.keys ^ " " in
+            let base_key_w = Int.min 20 (Int.max 9 (rect.w / 2)) in
+            let keys_w = Grapheme.display_width keys_s in
+            let desc_w = Grapheme.display_width e.desc in
+            let min_desc_w = Int.min desc_w 10 in
+            let max_key_w = Int.max base_key_w (rect.w - min_desc_w - 2) in
+            let key_col_w = Int.min max_key_w (Int.max base_key_w keys_w) in
             ignore
               (Cell_grid.put_text ~clip:rr grid ~x:(rect.x + 1) ~y:py
                  ~style:key_st
@@ -4869,238 +4867,6 @@ let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0)
                 (Cell_grid.put_text ~clip:rr grid ~x:sx ~y:py ~style:whisper_st
                    slash_s)
     done
-
-let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
-  let seen_ws = ref false in
-  let seen_move = ref false in
-  let seen_ask = ref false in
-  let entries =
-    List.filter_map
-      (fun (e : Keymap.help_entry) ->
-        match e.action with
-        | Keymap.Switch_workspace _ ->
-            if !seen_ws then None
-            else begin
-              seen_ws := true;
-              Some
-                {
-                  e with
-                  keys = [ "1..6"; "Alt+1..6" ];
-                  desc =
-                    Say.resolve lang
-                      (Say.make ~ko:"워크스페이스 전환 (1..6)"
-                         ~en:"Switch workspace (1..6)");
-                  slash_twin = Some "/pulse../infra";
-                }
-            end
-        | Keymap.Move _ ->
-            if !seen_move then None
-            else begin
-              seen_move := true;
-              Some
-                {
-                  e with
-                  keys = [ "j/k"; "↑↓←→" ];
-                  desc =
-                    Say.resolve lang
-                      (Say.make ~ko:"선택 이동 · 좌/우 패인 이동 (g/G)"
-                         ~en:"Move / spatial pane switch (g/G)");
-                  slash_twin = None;
-                }
-            end
-        | Keymap.Ask_select_choice _ ->
-            if !seen_ask then None
-            else begin
-              seen_ask := true;
-              Some
-                {
-                  e with
-                  keys = [ "a..d" ];
-                  desc =
-                    Say.resolve lang
-                      (Say.make ~ko:"Ask 선택지 빠른 응답 (단일 1문항)"
-                         ~en:"Quick Ask choice (single-question)");
-                  slash_twin = None;
-                }
-            end
-        | Keymap.Submit_steer ->
-            Some
-              {
-                e with
-                keys = [ "Alt+↵"; "Ctrl+↵" ];
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"내 요청을 끊고 Steer"
-                       ~en:"Steer: cut your own running request");
-              }
-        | Keymap.Composer_newline ->
-            Some
-              {
-                e with
-                keys = [ "S-Enter"; "Ctrl+J" ];
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"줄바꿈 삽입" ~en:"Insert newline");
-              }
-        | Keymap.Pop_back_or_close ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"닫기 / 상세 복귀 / 포커스 해제"
-                       ~en:"Close overlay / pop dive / blur");
-              }
-        | Keymap.Open_palette ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"통합 명령·엔티티 팔레트"
-                       ~en:"Command & Entity Palette");
-              }
-        | Keymap.Fast_deny_top ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"대기 승인 거절 / 질문 건너뛰기"
-                       ~en:"Deny top approval / skip Ask");
-              }
-        | Keymap.Open_external ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"PR/문서/경로 외부 앱 열기"
-                       ~en:"Open linked PR/doc externally");
-              }
-        | Keymap.Copy_selected ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"선택 항목 클립보드 복사"
-                       ~en:"Copy selection (OSC 52)");
-              }
-        | Keymap.Teleport_blocked ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"대기·차단 키퍼로 즉시 이동"
-                       ~en:"Jump to top blocked item");
-              }
-        | Keymap.Open_incidents ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"과거 장애·진단 이력 서랍"
-                       ~en:"Historical Incidents drawer");
-              }
-        | Keymap.Open_keeper_switcher ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"키퍼·채팅 빠른 전환"
-                       ~en:"Keeper/Chat switcher");
-              }
-        | Keymap.Open_queue_context ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"키퍼 큐·컨텍스트 서랍"
-                       ~en:"Queue & Context drawer");
-              }
-        | Keymap.Cycle_origin_mode ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"채팅 발신 표시 모드 순환"
-                       ~en:"Cycle chat origin mode");
-              }
-        | Keymap.Toggle_thinking ->
-            Some
-              {
-                e with
-                desc =
-                  Say.resolve lang
-                    (Say.make ~ko:"추론 블록 표시 순환"
-                       ~en:"Cycle thinking display");
-              }
-        | Keymap.Toggle_sidebar
-        | Keymap.Sub_tab _
-        | Keymap.Cycle_focus_pane _
-        | Keymap.Focus_composer
-        | Keymap.Focus_filter
-        | Keymap.Dive_selected
-        | Keymap.Confirm_selected
-        | Keymap.Open_settings
-        | Keymap.Voice_ptt_toggle
-        | Keymap.Fast_approve_top
-        | Keymap.Open_help
-        | Keymap.Open_model_switcher
-        | Keymap.Toggle_tool_details
-        | Keymap.Composer_kill_word
-        | Keymap.Submit_followup
-        | Keymap.Toggle_expand
-        | Keymap.Create_new
-        | Keymap.Refresh
-        | Keymap.Toggle_zoom
-        | Keymap.Cycle_memory_view
-        | Keymap.Toggle_memory_sort
-        | Keymap.Cycle_signal_or_source
-        | Keymap.Cycle_sort_or_speak
-        | Keymap.Cycle_hearth_or_overrule
-        | Keymap.Cycle_time_window
-        | Keymap.Cycle_view_mode
-        | Keymap.Context_primary_action
-        | Keymap.Toggle_artifact_share
-        | Keymap.Step_revision _
-        | Keymap.Step_context_item _
-        | Keymap.Launch_fusion
-        | Keymap.Toggle_unreported
-        | Keymap.Unbind_connector
-        | Keymap.Entity_approve_or_assign
-        | Keymap.Entity_reject_or_cancel
-        | Keymap.Edit_or_export
-        | Keymap.Configure_provider_key
-        | Keymap.Account_login
-        | Keymap.Poll_account_login
-        | Keymap.Copy_hash
-        | Keymap.Dismiss_errors
-        | Keymap.Board_vote _
-        | Keymap.Toggle_memory_scope
-        | Keymap.Copy_public_url
-        | Keymap.Probe_sandbox
-        | Keymap.Refresh_browser_tabs
-        | Keymap.Open_memory_recovery
-        | Keymap.Search_prev_match
-        | Keymap.Toggle_memory_chart
-        | Keymap.Open_external_editor
-        | Keymap.Interrupt_turn
-        | Keymap.Delete_selected
-        | Keymap.Link_task_goal
-        | Keymap.Keeper_wake_or_online
-        | Keymap.Keeper_stop_armed
-        | Keymap.Quit_app ->
-            Some e)
-      grp.entries
-  in
-  { grp with entries }
 
 let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
@@ -5205,8 +4971,7 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       in
       let scroll = model.nav.help_scroll_offset in
       let groups =
-        Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang
-        |> List.map (compact_help_group ~lang)
+        Keymap.compact_help_entries ~scope_chain:Keymap.all_scopes ~lang
       in
       let is_left_cat = function
         | Keymap.Cat_navigation | Keymap.Cat_actions -> true

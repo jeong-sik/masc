@@ -1370,6 +1370,7 @@ export interface StreamKeeperChatCallbacks {
     readonly executionId: string
     readonly toolCallId?: string
     readonly streamKey?: string
+    readonly isError?: boolean
   }) => void
   readonly onToolResult?: (toolCallId: string, content: string, streamKey?: string) => void
   readonly onNativeToolProgress?: (info: {
@@ -1497,6 +1498,14 @@ function extractToolOccurrenceKey(rec: Record<string, unknown>): string | undefi
     return `occ:${scope}:${blockIndex}`
   }
   return undefined
+}
+
+function prefixNativeStreamKey(key: string | undefined): string | undefined {
+  return key ? `native:${key}` : undefined
+}
+
+function prefixNativeToolCallId(id: string | null): string | undefined {
+  return id ? `native:${id}` : undefined
 }
 
 function extractThinkingBlockKey(val: Record<string, unknown>): string {
@@ -1847,21 +1856,22 @@ export async function streamKeeperChat(params: {
                   executionId,
                   toolCallId: asStr(val.toolCallId) ?? undefined,
                   streamKey: extractToolOccurrenceKey(val),
+                  isError: typeof val.isError === 'boolean' ? val.isError : undefined,
                 })
               }
             } else if (name === 'KEEPER_NATIVE_TOOL_START' && val) {
               params.callbacks.onToolStart?.(
                 asStr(val.toolCallName) ?? 'native_tool',
-                asStr(val.toolCallId) ?? undefined,
-                extractToolOccurrenceKey(val),
+                prefixNativeToolCallId(asStr(val.toolCallId)),
+                prefixNativeStreamKey(extractToolOccurrenceKey(val)),
               )
             } else if (name === 'KEEPER_NATIVE_TOOL_PROGRESS' && val && isRecord(val.progress)) {
               const progressLabel = formatNativeProgressLabel(val.progress)
               if (progressLabel) {
                 params.callbacks.onNativeToolProgress?.({
                   toolName: asStr(val.toolCallName) ?? undefined,
-                  toolCallId: asStr(val.toolCallId) ?? undefined,
-                  streamKey: extractToolOccurrenceKey(val),
+                  toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
+                  streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
                   progressLabel,
                 })
               }
@@ -1869,8 +1879,8 @@ export async function streamKeeperChat(params: {
               const completion = isRecord(val.completion) ? formatNativeCompletionSummary(val.completion) : { status: 'completed' as const }
               params.callbacks.onNativeToolEnd?.({
                 toolName: asStr(val.toolCallName) ?? undefined,
-                toolCallId: asStr(val.toolCallId) ?? undefined,
-                streamKey: extractToolOccurrenceKey(val),
+                toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
+                streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
                 status: completion.status,
                 summary: completion.summary,
               })

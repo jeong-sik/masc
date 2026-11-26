@@ -27,7 +27,8 @@ import {
   quotaRestCauseMeta,
   stripProviderPrefix,
 } from './quota-rest-groups'
-import { classifyQuotaScope, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
+import { classifyQuotaScope, formatIsoTime, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
+import { decodeToolsCatalogPayload } from './tools-tab'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -1507,5 +1508,53 @@ describe('workspaces/runtime', () => {
     expect(laneRow.textContent).toContain('인증 거부')
     expect(laneRow.textContent).toContain('속도 제한')
     expect(laneRow.textContent).toContain('일시 중지')
+  })
+
+  it('decodes OCaml tool_inventory + tool_usage.by_tool, handles is_warming, and formats ISO last_seen', () => {
+    const warming = decodeToolsCatalogPayload({ is_warming: true, tool_inventory: { count: 0, tools: [] }, tool_usage: {} })
+    expect(warming.isWarming).toBe(true)
+    expect(warming.rows).toEqual([])
+
+    const decoded = decodeToolsCatalogPayload({
+      is_warming: false,
+      tool_inventory: {
+        count: 2,
+        tools: [
+          { name: 'Execute', description: 'Run shell', category: 'sandbox' },
+          { name: 'Read', description: 'Read file', category: 'fs' },
+        ],
+      },
+      tool_usage: {
+        by_tool: [
+          {
+            name: 'tool_execute',
+            public_names: ['Execute'],
+            call_count: 10,
+            failure_count: 2,
+            deferred_count: 2,
+            p95_ms: 420,
+          },
+        ],
+      },
+    })
+    expect(decoded.isWarming).toBe(false)
+    expect(decoded.rows).toHaveLength(2)
+    expect(decoded.rows[0]).toMatchObject({
+      name: 'Execute',
+      calls: 10,
+      failure_count: 2,
+      deferred_count: 2,
+      failure_rate: 25,
+      p95_ms: 420,
+    })
+    expect(decoded.rows[1]).toMatchObject({
+      name: 'Read',
+      calls: null,
+      failure_rate: null,
+      p95_ms: null,
+    })
+
+    expect(formatIsoTime('2026-11-26T12:34:56Z')).toBe('11-26 12:34:56')
+    expect(formatIsoTime(null)).toBe('미보고')
   })
 })

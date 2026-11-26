@@ -35,9 +35,9 @@ import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } fro
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
   formatCompactNumber,
+  formatIsoTime,
   formatMs,
   formatPercent,
-  formatUnixTime,
   openViewSseStream,
   snapshotUnavailableReason,
   toObservedNumber,
@@ -82,36 +82,131 @@ const TOOL_SERIES_SPECS: readonly UPlotSeriesSpec[] = [
   { label: '실패 수', colorToken: '--err-fg', width: 2, fillAlpha: 0.1 },
 ]
 
-function normalizeToolsPayload(raw: unknown): readonly DashboardToolRow[] {
-  if (!raw || typeof raw !== 'object') return []
+interface ToolUsageAggregate {
+  calls: number
+  failureCount: number
+  deferredCount: number
+  p95Ms: number | null
+}
+
+function addToolUsageEntry(map: Map<string, ToolUsageAggregate>, key: string, entry: Record<string, unknown>): void {
+  const calls = typeof entry.call_count === 'number' && Number.isFinite(entry.call_count)
+    ? entry.call_count
+    : typeof entry.calls === 'number' && Number.isFinite(entry.calls)
+      ? entry.calls
+      : 0
+  const failureCount = typeof entry.failure_count === 'number' && Number.isFinite(entry.failure_count)
+    ? entry.failure_count
+    : 0
+  const deferredCount = typeof entry.deferred_count === 'number' && Number.isFinite(entry.deferred_count)
+    ? entry.deferred_count
+    : 0
+  const p95Ms = typeof entry.p95_ms === 'number' && Number.isFinite(entry.p95_ms) && calls > 0
+    ? entry.p95_ms
+    : null
+  const existing = map.get(key)
+  if (existing) {
+    existing.calls += calls
+    existing.failureCount += failureCount
+    existing.deferredCount += deferredCount
+    if (p95Ms !== null) {
+      existing.p95Ms = existing.p95Ms === null ? p95Ms : Math.max(existing.p95Ms, p95Ms)
+    }
+  } else {
+    map.set(key, { calls, failureCount, deferredCount, p95Ms })
+  }
+}
+
+function buildUsageMap(toolUsage: unknown): Map<string, ToolUsageAggregate> {
+  const map = new Map<string, ToolUsageAggregate>()
+  if (!toolUsage || typeof toolUsage !== 'object' || Array.isArray(toolUsage)) return map
+  const rec = toolUsage as Record<string, unknown>
+  const rows = Array.isArray(rec.by_tool)
+    ? rec.by_tool
+    : Array.isArray(rec.top_20)
+      ? rec.top_20
+      : []
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const entry = raw as Record<string, unknown>
+    const internalName = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : null
+    if (internalName) addToolUsageEntry(map, internalName, entry)
+    if (Array.isArray(entry.public_names)) {
+      for (const pub of entry.public_names) {
+        if (typeof pub === 'string' && pub.trim() && pub.trim() !== internalName) {
+          addToolUsageEntry(map, pub.trim(), entry)
+        }
+      }
+    }
+  }
+  return map
+}
+
+export function decodeToolsCatalogPayload(raw: unknown): {
+  readonly rows: readonly DashboardToolRow[]
+  readonly isWarming: boolean
+} {
+  if (!raw || typeof raw !== 'object') return { rows: [], isWarming: false }
   const rec = raw as Record<string, unknown>
-  const list = Array.isArray(rec.tools)
-    ? rec.tools
-    : Array.isArray(rec.entries)
-      ? rec.entries
-      : Array.isArray(raw)
-        ? raw
-        : []
-  return list
+  const isWarming = rec.is_warming === true
+  const inventory = rec.tool_inventory && typeof rec.tool_inventory === 'object' && !Array.isArray(rec.tool_inventory)
+    ? (rec.tool_inventory as Record<string, unknown>)
+    : null
+  const list = inventory && Array.isArray(inventory.tools)
+    ? inventory.tools
+    : Array.isArray(rec.tools)
+      ? rec.tools
+      : Array.isArray(rec.entries)
+        ? rec.entries
+        : Array.isArray(raw)
+          ? raw
+          : []
+  const usageMap = buildUsageMap(rec.tool_usage)
+  const rows = list
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => ({
-      name: typeof item.name === 'string' ? item.name : String(item.tool ?? 'unknown'),
-      description: typeof item.description === 'string' ? item.description : null,
-      calls: typeof item.calls === 'number'
+    .map((item) => {
+      const name = typeof item.name === 'string' ? item.name : String(item.tool ?? 'unknown')
+      const joined = usageMap.get(name)
+      const inlineCalls = typeof item.calls === 'number'
         ? item.calls
         : typeof item.call_count === 'number'
           ? item.call_count
-          : null,
-      failure_count: typeof item.failure_count === 'number' ? item.failure_count : 0,
-      failure_rate: typeof item.failure_rate === 'number'
+          : null
+      const calls = inlineCalls ?? (joined ? joined.calls : null)
+      const failureCount = typeof item.failure_count === 'number'
+        ? item.failure_count
+        : (joined ? joined.failureCount : 0)
+      const deferredCount = typeof item.deferred_count === 'number'
+        ? item.deferred_count
+        : (joined ? joined.deferredCount : 0)
+      const inlineFailureRate = typeof item.failure_rate === 'number'
         ? item.failure_rate
         : typeof item.failure_rate_pct === 'number'
           ? item.failure_rate_pct
-          : null,
-      p95_ms: typeof item.p95_ms === 'number' ? item.p95_ms : null,
-      domain: typeof item.domain === 'string' ? item.domain : undefined,
-      family: typeof item.family === 'string' ? item.family : undefined,
-    }))
+          : null
+      const settledCalls = calls !== null ? Math.max(0, calls - deferredCount) : 0
+      const failureRate = inlineFailureRate
+        ?? (joined && settledCalls > 0 ? (failureCount / settledCalls) * 100 : null)
+      const p95Ms = typeof item.p95_ms === 'number'
+        ? item.p95_ms
+        : (joined ? joined.p95Ms : null)
+      return {
+        name,
+        description: typeof item.description === 'string' ? item.description : null,
+        calls,
+        failure_count: failureCount,
+        deferred_count: deferredCount,
+        failure_rate: failureRate,
+        p95_ms: p95Ms,
+        domain: typeof item.domain === 'string' ? item.domain : undefined,
+        family: typeof item.family === 'string'
+          ? item.family
+          : typeof item.category === 'string'
+            ? item.category
+            : undefined,
+      }
+    })
+  return { rows, isWarming }
 }
 
 export function ToolsTab({ onInspect }: WorkspaceViewProps) {
@@ -375,12 +470,16 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     ]
   }, [activeSeries])
 
+  const decodedCatalog = useMemo(
+    () => (toolsObs.kind === 'value' ? decodeToolsCatalogPayload(toolsObs.data) : { rows: [] as readonly DashboardToolRow[], isWarming: false }),
+    [toolsObs],
+  )
   const toolRows = useMemo(() => {
-    const all = toolsObs.kind === 'value' ? normalizeToolsPayload(toolsObs.data) : []
+    const all = decodedCatalog.rows
     const q = search.trim().toLowerCase()
     if (!q) return all
     return all.filter((t) => t.name.toLowerCase().includes(q) || (t.description ?? '').toLowerCase().includes(q))
-  }, [toolsObs, search])
+  }, [decodedCatalog, search])
 
   const toolColumns = useMemo<readonly DataTableColumn<DashboardToolRow>[]>(() => [
     {
@@ -444,7 +543,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       id: 'lastSeen',
       header: '최근 관측',
       numeric: true,
-      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTime(r.last_seen_unix)}</span>`,
+      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatIsoTime(r.last_seen)}</span>`,
     },
   ], [])
 
@@ -744,7 +843,11 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             virtualizeThreshold=${30}
             maxHeight=${400}
             caption="도구 카탈로그"
-            emptyLabel=${toolsObs.kind === 'loading' ? '도구 불러오는 중…' : '등록된 도구가 없습니다.'}
+            emptyLabel=${toolsObs.kind === 'loading'
+              ? '도구 불러오는 중…'
+              : decodedCatalog.isWarming
+                ? '도구 카탈로그 준비 중…'
+                : '등록된 도구가 없습니다.'}
           />
         </div>
       `}

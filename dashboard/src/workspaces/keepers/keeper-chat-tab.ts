@@ -186,7 +186,11 @@ function OpenWorkRows({ activities, live }: {
         ? row(piece.activity, `s${index}`)
         : html`
           <li class="kp-open-work-batch" key=${`b${index}`}>
-            <span class="kp-open-work-batch-head">동시 실행 ${piece.members.length}개</span>
+            <span class="kp-open-work-batch-head">
+              ${piece.members.length < piece.batchSize
+                ? `동시 실행 ${piece.members.length}/${piece.batchSize}개 진행 중`
+                : `동시 실행 ${piece.members.length}개`}
+            </span>
             <ul class="kp-open-work">
               ${piece.members.map((member, memberIndex) => row(member, `b${index}:${memberIndex}`))}
             </ul>
@@ -1469,21 +1473,26 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               toolCalls: snapshotTools,
             }))
           },
-          onToolResultReady: ({ executionId, toolCallId, streamKey }) => {
+          onToolResultReady: ({ executionId, toolCallId, streamKey, isError }) => {
+            const readyStatus = isError === true
+              ? 'error'
+              : isError === false
+                ? 'completed'
+                : 'result_ready'
             liveTools = upsertStreamToolCall(
               liveTools,
               { toolCallId, streamKey },
               (cur) => ({
                 ...cur,
                 executionId,
-                status: cur.status === 'error' ? 'error' : 'completed',
+                status: cur.status === 'error' ? 'error' : readyStatus,
               }),
               () => ({
                 id: toolCallId,
                 streamKey,
                 executionId,
                 name: 'tool',
-                status: 'completed',
+                status: readyStatus,
               }),
             )
             const matchedIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
@@ -1657,6 +1666,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onError: (msg) => {
+            const settleOnError = (tc: ChatToolBlock): ChatToolBlock =>
+              tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
+                ? { ...tc, status: 'error' }
+                : tc
+            liveTools = liveTools.map(settleOnError)
+            const snapshotTools = liveTools.length > 0 ? liveTools : undefined
             updateEntryById(userId, (m) => ({
               ...m,
               deliveryState: acceptedByServer ? 'Delivered' : 'Failed',
@@ -1665,24 +1680,21 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               ...m,
               deliveryState: 'Failed',
               errorDetail: msg,
+              toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnError),
             }))
           },
           onFinished: () => {
             markUserDelivered()
-            liveTools = liveTools.map((tc) =>
+            const settleOnFinish = (tc: ChatToolBlock): ChatToolBlock =>
               tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
-                ? { ...tc, status: 'completed' }
-                : tc,
-            )
+                ? { ...tc, status: tc.executionId || tc.result !== undefined ? 'completed' : 'interrupted' }
+                : tc
+            liveTools = liveTools.map(settleOnFinish)
             const snapshotTools = liveTools.length > 0 ? liveTools : undefined
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
-              toolCalls: snapshotTools ?? m.toolCalls?.map((tc) =>
-                tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
-                  ? { ...tc, status: 'completed' }
-                  : tc,
-              ),
+              toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnFinish),
             }))
           },
         },
@@ -2126,7 +2138,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
     const displayResult = tb.result ?? (cachedRes?.status === 'loaded' ? cachedRes.displayContent : undefined)
     const effectiveStatus =
-      cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
+      cachedRes?.status === 'loaded'
+        ? (cachedRes.isError ? 'error' : 'completed')
+        : tb.status
     const statusMeta = toolStatusMeta(effectiveStatus)
     const delegateInfo = extractDelegateCardInfo({
       ...tb,

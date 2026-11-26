@@ -1271,6 +1271,8 @@ export function applyKeeperStreamEvent(
           updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, error: 'Stored tool ownership is unavailable; authoritative recovery is required' }))
           return null
         }
+        const rawIsError = (event.value as { readonly isError?: unknown }).isError
+        const resultIsError = typeof rawIsError === 'boolean' ? rawIsError : undefined
         const toolCallId = nonBlankToolCallId(event.value.toolCallId) ?? undefined
         const executionId = event.value.executionId
         if (!executionId.trim()) return 'KEEPER_TOOL_RESULT_READY missing executionId'
@@ -1343,7 +1345,7 @@ export function applyKeeperStreamEvent(
             return { ...entry, traceSteps: entry.traceSteps?.map(step => step.kind === 'tool'
               && (step.toolOccurrenceId === toolEntry.id || step.executionId === executionId)
               ? { ...step, toolOccurrenceId: executionOwner.id, executionId,
-                status: step.status === 'err' ? 'err' as const : 'ok' as const }
+                status: resultIsError === true || step.status === 'err' ? 'err' as const : 'ok' as const }
               : step) }
           }))
           return null
@@ -1356,6 +1358,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           toolEntry.id,
           executionId,
+          resultIsError,
         )
         updateThreadEntry(keeperName, toolEntry.id, entry => ({
           ...entry,
@@ -1773,6 +1776,19 @@ export function applyKeeperStreamEvent(
       admitStreamEvent(keeperName, assistantEntryId, event)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
+      updateThreadEntry(keeperName, assistantEntryId, entry => {
+        const steps = entry.traceSteps
+        if (!steps || !steps.some(step => step.kind === 'tool' && step.status === 'pending')) {
+          return entry
+        }
+        return {
+          ...entry,
+          traceSteps: steps.map(step =>
+            step.kind === 'tool' && step.status === 'pending'
+              ? { ...step, status: 'err' as const }
+              : step),
+        }
+      })
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'

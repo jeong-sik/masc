@@ -459,12 +459,47 @@ describe('Keepers AG-UI Live Stream & On-Demand Tool Result Hydration', () => {
       'args-delta:occ:0:1:{"pattern":"foo"}',
       'tool-end:occ:0:0',
       'result-ready:occ:0:0:exec-0',
-      'tool-start:web_search:occ:0:2',
-      'native-prog:occ:0:2:실행 중 (5s)',
-      'native-end:occ:0:2:completed',
+      'tool-start:web_search:native:occ:0:2',
+      'native-prog:native:occ:0:2:실행 중 (5s)',
+      'native-end:native:occ:0:2:completed',
       'text:Done.',
       'finished',
     ])
+  })
+
+  it('keeps MASC and native tool calls with identical occurrence indices distinct and honors isError on KEEPER_TOOL_RESULT_READY', async () => {
+    const frames = [
+      { type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'call_0', toolCallName: 'Execute' },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_START', value: { toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'call_0', toolCallName: 'web_search' } },
+      { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'call_0', executionId: 'exec-err-1', isError: true } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: { toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'call_0', toolCallName: 'web_search', completion: { kind: 'completion_reported', exit_code: 0 } } },
+      { type: 'RUN_FINISHED' },
+    ]
+    const sse = frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')
+    const mockFetch = vi.fn(async () => new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+
+    const starts: Array<{ name: string; id?: string; key?: string }> = []
+    const ready: Array<{ key?: string; isError?: boolean }> = []
+    const nativeEnds: Array<{ id?: string; key?: string; status: string }> = []
+    await streamKeeperChat({
+      keeper: 'code-reviewer-sister',
+      message: 'Check collision',
+      operationId: 'op-collision-1',
+      mode: { kind: 'queue' },
+      fetchImpl: mockFetch as unknown as typeof fetch,
+      callbacks: {
+        onToolStart: (name, id, key) => starts.push({ name, id, key }),
+        onToolResultReady: (info) => ready.push({ key: info.streamKey, isError: info.isError }),
+        onNativeToolEnd: (info) => nativeEnds.push({ id: info.toolCallId, key: info.streamKey, status: info.status }),
+      },
+    })
+
+    expect(starts).toEqual([
+      { name: 'Execute', id: 'call_0', key: 'occ:0:0' },
+      { name: 'web_search', id: 'native:call_0', key: 'native:occ:0:0' },
+    ])
+    expect(ready).toEqual([{ key: 'occ:0:0', isError: true }])
+    expect(nativeEnds).toEqual([{ id: 'native:call_0', key: 'native:occ:0:0', status: 'completed' }])
   })
 
   it('hydrates live KEEPER_TOOL_RESULT_READY and persisted role=tool cards on toggle via /tool-result', async () => {

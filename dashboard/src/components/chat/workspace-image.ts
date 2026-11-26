@@ -5,7 +5,7 @@ import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { authSession, getSingleUserToken, resolveWorkspaceUrl, sessionEpoch } from '../../core/auth'
 import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { parseUrl } from '../../lib/parse-url'
-import { ChatPreviewModal } from './primitives'
+import { ChatPreviewModal } from '../primitives/chat-preview-modal'
 
 // Match the server ceiling of KeeperGeneratedMedia.max_bytes (50 MiB).
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024

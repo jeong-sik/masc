@@ -122,11 +122,13 @@ type ToolActivity = Extract<TurnOpenActivity, { readonly kind: 'tool' }>
 
 export type OpenWorkPiece =
   | { readonly kind: 'single'; readonly activity: TurnOpenActivity }
-  | { readonly kind: 'batch'; readonly members: readonly ToolActivity[] }
+  | { readonly kind: 'batch'; readonly batchSize: number; readonly members: readonly ToolActivity[] }
 
-function concurrentBatchOf(activity: TurnOpenActivity): number | null {
+function concurrentBatchOf(activity: TurnOpenActivity): { readonly index: number; readonly size: number } | null {
   if (activity.kind !== 'tool' || activity.cohort === null) return null
-  return activity.cohort.concurrent && activity.cohort.batch_size > 1 ? activity.cohort.batch_index : null
+  return activity.cohort.concurrent && activity.cohort.batch_size > 1
+    ? { index: activity.cohort.batch_index, size: activity.cohort.batch_size }
+    : null
 }
 
 /** Server order, except that the open calls of one concurrent batch sit
@@ -141,13 +143,19 @@ export function openWorkPieces(activities: readonly TurnOpenActivity[]): readonl
       pieces.push({ kind: 'single', activity })
       continue
     }
-    const at = batchAt.get(batch)
+    const at = batchAt.get(batch.index)
     if (at === undefined) {
-      batchAt.set(batch, pieces.length)
-      pieces.push({ kind: 'batch', members: [activity] })
+      batchAt.set(batch.index, pieces.length)
+      pieces.push({ kind: 'batch', batchSize: batch.size, members: [activity] })
     } else {
       const piece = pieces[at]
-      if (piece?.kind === 'batch') pieces[at] = { kind: 'batch', members: [...piece.members, activity] }
+      if (piece?.kind === 'batch') {
+        pieces[at] = {
+          kind: 'batch',
+          batchSize: Math.max(piece.batchSize, batch.size),
+          members: [...piece.members, activity],
+        }
+      }
     }
   }
   return pieces

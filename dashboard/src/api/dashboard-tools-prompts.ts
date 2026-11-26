@@ -965,16 +965,20 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ? `?keeper=${encodeURIComponent(opts.keeperName)}`
     : ''
   const raw = await get<DashboardToolsResponse>(`/api/v1/dashboard/tools${keeperQuery}`, { signal: opts?.signal })
-  const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
-    ...t,
-    category: t.category ?? 'uncategorized',
-    tier: t.tier ?? '(unknown tier)',
-    // Tool-layer decoupling groundwork: surface membership is consumer-owned
-    // metadata, not an wake constraint. Totalize here so the field is
-    // never absent downstream; consumers keep working with [] and the surface
-    // filter simply degrades to zero counts. Mirrors category/tier above.
-    surfaces: t.surfaces ?? [],
-  }))
+  const normalizedTools = raw.tool_inventory?.tools?.map(t => {
+    const wire = t as DashboardToolInventoryItem & { requiredPermission?: string | null }
+    return {
+      ...t,
+      required_permission: wire.required_permission ?? wire.requiredPermission ?? null,
+      category: t.category ?? 'uncategorized',
+      tier: t.tier ?? '(unknown tier)',
+      // Tool-layer decoupling groundwork: surface membership is consumer-owned
+      // metadata, not an wake constraint. Totalize here so the field is
+      // never absent downstream; consumers keep working with [] and the surface
+      // filter simply degrades to zero counts. Mirrors category/tier above.
+      surfaces: t.surfaces ?? [],
+    }
+  })
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined

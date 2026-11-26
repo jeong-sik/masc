@@ -262,10 +262,11 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     : (modelsObs.kind === 'value' ? modelsObs.data : null)
   const live = win === '24h' && sseInstanceId !== null && streamLive
   const snapshotError = !effectiveModels ? snapshotUnavailableReason(modelsObs) : null
+  const modelsWindowLabel = win === '30d' ? '7d 상한' : win
   const seriesSource = live ? '● LIVE SSE (models/metrics/stream)'
     : snapshotError ? '○ UNAVAILABLE'
     : modelsObs.kind === 'loading' && !effectiveModels ? '◐ LOADING'
-    : `○ SNAPSHOT (${win})`
+    : `○ SNAPSHOT (${modelsWindowLabel})`
 
 
   const buckets = useMemo(() => aggregateModelBuckets(effectiveModels), [effectiveModels])
@@ -356,20 +357,32 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       for (const row of effObs.data.keepers) effByName.set(row.keeper, row)
     }
 
+    const resolveEffCacheHitPct = (
+      eff: KeeperEfficiencyPayload['keepers'][number] | undefined,
+    ): Observed<number> => {
+      if (!eff) return observedUnreported()
+      if (typeof eff.cache_hit_pct === 'number' && Number.isFinite(eff.cache_hit_pct)) {
+        return observedValue(Math.min(100, Math.max(0, eff.cache_hit_pct)))
+      }
+      if (eff.cache_hit_pct === null) {
+        return observedUnreported()
+      }
+      if (typeof eff.cache_read_tokens === 'number' && eff.input_tokens > 0) {
+        return observedValue(Math.min(100, (eff.cache_read_tokens / eff.input_tokens) * 100))
+      }
+      return observedUnreported()
+    }
+
     if (costsObs.kind === 'value') {
       for (const c of costsObs.data.keepers) {
         const eff = effByName.get(c.keeper_name)
-        const cachePct = eff && typeof eff.cache_read_tokens === 'number' && eff.input_tokens > 0
-          ? observedValue(Math.min(100, (eff.cache_read_tokens / eff.input_tokens) * 100))
-          : observedUnreported()
-
         map.set(c.keeper_name, {
           keeper: c.keeper_name,
-          turns: eff ? observedValue(eff.turns) : observedValue(c.sample_count),
+          turns: eff ? observedValue(eff.turns) : observedUnreported(),
           totalTokens: c.tokens_reported_samples > 0 && c.total_tokens !== null
             ? observedValue(c.total_tokens)
             : observedUnreported(),
-          cacheHitPct: cachePct,
+          cacheHitPct: resolveEffCacheHitPct(eff),
           spendUsd: c.cost_reported_samples > 0 && c.total_cost_usd !== null
             ? observedValue(c.total_cost_usd)
             : observedUnreported(),
@@ -383,15 +396,14 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     if (effObs.kind === 'value') {
       for (const eff of effObs.data.keepers) {
         if (map.has(eff.keeper)) continue
-        const cachePct = typeof eff.cache_read_tokens === 'number' && eff.input_tokens > 0
-          ? observedValue(Math.min(100, (eff.cache_read_tokens / eff.input_tokens) * 100))
-          : observedUnreported()
+        // Keep 24h spend/token/p95 columns strictly scoped to the 24h cost ledger
+        // instead of mixing MTD totals or fabricating $0.00 for unreported subscription spend.
         map.set(eff.keeper, {
           keeper: eff.keeper,
           turns: observedValue(eff.turns),
-          totalTokens: observedValue(eff.input_tokens + eff.output_tokens),
-          cacheHitPct: cachePct,
-          spendUsd: observedValue(eff.cost_usd),
+          totalTokens: observedUnreported(),
+          cacheHitPct: resolveEffCacheHitPct(eff),
+          spendUsd: observedUnreported(),
           toolCalls: observedValue(eff.calls),
           toolErrors: observedValue(eff.failed),
           p95LatencyMs: observedUnreported(),
@@ -412,7 +424,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'turns',
-      header: '턴',
+      header: '월간 턴',
       numeric: true,
       sortable: true,
       observed: (r) => r.turns,
@@ -420,7 +432,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'tokens',
-      header: '토큰',
+      header: '토큰 (24h)',
       numeric: true,
       sortable: true,
       observed: (r) => r.totalTokens,
@@ -428,7 +440,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'cacheHit',
-      header: '캐시 적중 %',
+      header: '월간 캐시 %',
       numeric: true,
       sortable: true,
       observed: (r) => r.cacheHitPct,
@@ -436,7 +448,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'spend',
-      header: '비용 (USD)',
+      header: '비용 (24h USD)',
       numeric: true,
       sortable: true,
       observed: (r) => r.spendUsd,
@@ -444,7 +456,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'tools',
-      header: '도구 호출',
+      header: '월간 도구 호출',
       numeric: true,
       sortable: true,
       observed: (r) => r.toolCalls,
@@ -452,7 +464,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'errors',
-      header: '도구 실패',
+      header: '월간 도구 실패',
       numeric: true,
       sortable: true,
       observed: (r) => r.toolErrors,
@@ -460,7 +472,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     },
     {
       id: 'p95',
-      header: 'p95 지연',
+      header: 'p95 지연 (24h)',
       numeric: true,
       sortable: true,
       observed: (r) => r.p95LatencyMs,
@@ -491,7 +503,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           <div class="ov-kpi-v ok">${formatObserved(kpis.cacheHitObs, (v) => formatPercent(v))}</div>
         </div>
         <div class="ov-kpi">
-          <div class="ov-kpi-k">기간 비용 (${win})</div>
+          <div class="ov-kpi-k">기간 비용 (${modelsWindowLabel})</div>
           <div class="ov-kpi-v volt">${formatObserved(kpis.spendObs, (v) => formatUsd(v))}</div>
         </div>
         <div class="ov-kpi">

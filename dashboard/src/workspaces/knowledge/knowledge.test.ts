@@ -2031,6 +2031,19 @@ describe('workspaces/knowledge', () => {
           generated_at_unix: 1732430000,
           data: {
             slug: 'ops-runbook',
+            file: 'ops-runbook.md',
+            sha256: 'sha-2',
+            frontmatter: {
+              title: 'Ops Runbook',
+              summary: 'Summary',
+              source: 'observation',
+              revision: 2,
+              author: 'sangsu',
+              created: '2026-11-25T00:00:00Z',
+              updated: '2026-11-26T00:00:00Z',
+              tags: ['ops'],
+            },
+            body_markdown: 'Updated body',
             backlinks: 'not-an-array',
           },
         })
@@ -2096,6 +2109,116 @@ describe('workspaces/knowledge', () => {
       expect(pageCalls).toBe(2)
       expect(container.textContent).toContain('backlinks')
       expect(container.textContent).not.toContain('Good body')
+    })
+  })
+
+  it('rejects Wiki page payload missing required frontmatter as a decode error and clears stale pageDetail', async () => {
+    let pageCalls = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki/ops-runbook') && init?.method === 'PUT') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430002,
+          data: { slug: 'ops-runbook', revision: 2, sha256: 'sha-2', action: 'updated' },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki/ops-runbook')) {
+        pageCalls += 1
+        if (pageCalls === 1) {
+          return jsonResponse({
+            schema_version: 1,
+            instance_id: 'inst-1',
+            generated_at_unix: 1732430000,
+            data: {
+              slug: 'ops-runbook',
+              file: 'ops-runbook.md',
+              sha256: 'sha-1',
+              frontmatter: {
+                title: 'Ops Runbook',
+                summary: 'Summary',
+                source: 'observation',
+                revision: 1,
+                author: 'sangsu',
+                created: '2026-11-25T00:00:00Z',
+                updated: '2026-11-26T00:00:00Z',
+                tags: ['ops'],
+              },
+              body_markdown: 'Stable initial body',
+              backlinks: [],
+              outgoing_links: [],
+              lint_findings: [],
+            },
+          })
+        }
+        // Server schema drift: required frontmatter omitted completely
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430002,
+          data: {
+            slug: 'ops-runbook',
+            file: 'ops-runbook.md',
+            sha256: 'sha-2',
+            body_markdown: 'Body without frontmatter',
+            backlinks: [],
+            outgoing_links: [],
+            lint_findings: [],
+          },
+        })
+      }
+      if (url.startsWith('/api/v1/wiki?') || url === '/api/v1/wiki') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            pages: [{
+              slug: 'ops-runbook',
+              file: 'ops-runbook.md',
+              title: 'Ops Runbook',
+              summary: 'Summary',
+              source: 'observation',
+              tags: ['ops'],
+              revision: 1,
+              updated: '2026-11-26T00:00:00Z',
+              backlink_count: 0,
+              outgoing_link_count: 0,
+              sources_count: 0,
+              hearsay_count: 0,
+              sha256: 'sha-1',
+            }],
+            unreadable_pages: [],
+            tags: [],
+            sources: {},
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Stable initial body')
+    })
+
+    const editBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('CAS 편집'))!
+    editBtn.click()
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('CAS 저장 (PUT)')
+    })
+    const saveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('CAS 저장 (PUT)'))!
+    saveBtn.click()
+    await vi.waitFor(() => {
+      expect(pageCalls).toBe(2)
+      const alert = container.querySelector('[role="alert"]')
+      expect(alert?.textContent).toContain('frontmatter')
+      expect(alert?.textContent).toContain('undefined')
+      expect(container.textContent).not.toContain('Stable initial body')
     })
   })
 })

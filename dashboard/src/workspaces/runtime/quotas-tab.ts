@@ -251,7 +251,6 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
   }, [])
 
-  const epoch = sessionEpoch.value
   const loadAll = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
     const curSession = authSession.peek()
     const multiSignedIn = curSession.kind === 'multi_account_signed_in'

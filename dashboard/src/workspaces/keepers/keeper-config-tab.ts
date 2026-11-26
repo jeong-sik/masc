@@ -297,7 +297,12 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       name,
       value: secretValue,
     })
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    if (
+      !mountedRef.current
+      || activeKeeperRef.current !== targetKeeper
+      || !isEpochCurrent(startEpoch)
+      || isAdminLockedForSession('admin', authSession.peek())
+    ) return
     if (!res.ok) {
       setSecretError(`저장 실패: ${res.error.message}`)
       return
@@ -318,7 +323,12 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       scope: secretScope,
       name,
     })
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    if (
+      !mountedRef.current
+      || activeKeeperRef.current !== targetKeeper
+      || !isEpochCurrent(startEpoch)
+      || isAdminLockedForSession('admin', authSession.peek())
+    ) return
     if (!res.ok) {
       setSecretError(`삭제 실패: ${res.error.message}`)
       return

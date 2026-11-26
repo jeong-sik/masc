@@ -35,6 +35,18 @@ export function expectOptionalArrayField<T>(
   return value as readonly T[]
 }
 
+export function expectRequiredArrayField<T>(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): readonly T[] {
+  const value = record[field]
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: "${field}" 필드는 필수 배열입니다 (${describeWireType(value)} 수신).`)
+  }
+  return value as readonly T[]
+}
+
 export function expectOptionalRecordField(
   record: Record<string, unknown>,
   field: string,
@@ -46,4 +58,54 @@ export function expectOptionalRecordField(
     throw new Error(`${context}: "${field}" 필드는 객체여야 합니다 (${describeWireType(value)} 수신).`)
   }
   return value
+}
+
+export function expectRequiredRecordField(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): Record<string, unknown> {
+  const value = record[field]
+  if (!isJsonRecord(value)) {
+    throw new Error(`${context}: "${field}" 필드는 필수 객체입니다 (${describeWireType(value)} 수신).`)
+  }
+  return value
+}
+
+export function expectRequiredStringField(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): string {
+  const value = record[field]
+  if (typeof value !== 'string') {
+    throw new Error(`${context}: "${field}" 필드는 필수 문자열입니다 (${describeWireType(value)} 수신).`)
+  }
+  return value
+}
+
+export function expectRequiredNumberField(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): number {
+  const value = record[field]
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${context}: "${field}" 필드는 필수 숫자입니다 (${describeWireType(value)} 수신).`)
+  }
+  return value
+}
+
+export function expectRecordElements<T>(
+  items: readonly unknown[],
+  field: string,
+  context: string,
+): readonly T[] {
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i]
+    if (!isJsonRecord(item)) {
+      throw new Error(`${context}: "${field}[${i}]" 항목은 객체여야 합니다 (${describeWireType(item)} 수신).`)
+    }
+  }
+  return items as readonly T[]
 }

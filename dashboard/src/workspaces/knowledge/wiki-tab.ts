@@ -23,6 +23,9 @@ import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primiti
 import {
   expectOptionalArrayField,
   expectOptionalRecordField,
+  expectRequiredNumberField,
+  expectRequiredRecordField,
+  expectRequiredStringField,
   expectWireRecord,
 } from '../../lib/wire-decode'
 import { isAdminLockedForSession } from '../../routes/router'
@@ -121,15 +124,25 @@ function decodeWikiSearchData(raw: unknown): WikiSearchData {
 function decodeWikiPageData(raw: unknown): WikiPageData {
   const ctx = 'GET /api/v1/wiki/:slug'
   const rec = expectWireRecord(raw, ctx)
-  const fmRec = expectOptionalRecordField(rec, 'frontmatter', ctx)
+  const slug = expectRequiredStringField(rec, 'slug', ctx)
+  const sha256 = expectRequiredStringField(rec, 'sha256', ctx)
+  const body_markdown = expectRequiredStringField(rec, 'body_markdown', ctx)
+  const fmRec = expectRequiredRecordField(rec, 'frontmatter', ctx)
+  const title = expectRequiredStringField(fmRec, 'title', `${ctx} frontmatter`)
+  const revision = expectRequiredNumberField(fmRec, 'revision', `${ctx} frontmatter`)
   const tags = expectOptionalArrayField<string>(fmRec, 'tags', `${ctx} frontmatter`)
   const backlinks = expectOptionalArrayField<string>(rec, 'backlinks', ctx)
   const outgoing_links = expectOptionalArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
   const lint_findings = expectOptionalArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
   return {
     ...(rec as unknown as WikiPageData),
+    slug,
+    sha256,
+    body_markdown,
     frontmatter: {
       ...(fmRec as unknown as WikiPageData['frontmatter']),
+      title,
+      revision,
       tags,
     },
     backlinks,
@@ -340,7 +353,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     setEditTitle(page.frontmatter.title)
     setEditSummary(page.frontmatter.summary)
     setEditSource(page.frontmatter.source)
-    setEditTags((page.frontmatter.tags ?? []).join(', '))
+    setEditTags(page.frontmatter.tags.join(', '))
     setEditBody(page.body_markdown)
     setEditNote('')
     setExpectedSha(page.sha256)

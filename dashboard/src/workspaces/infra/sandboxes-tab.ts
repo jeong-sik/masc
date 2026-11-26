@@ -19,7 +19,13 @@ import {
 } from '../../core'
 import { DataTable, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { expectOptionalArrayField, expectWireRecord, isJsonRecord } from '../../lib/wire-decode'
+import {
+  expectOptionalArrayField,
+  expectRecordElements,
+  expectRequiredRecordField,
+  expectWireRecord,
+  isJsonRecord,
+} from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   formatUnixTs,
@@ -242,24 +248,34 @@ export function summarizeJsonMetrics(raw: Record<string, unknown> | null): strin
 function decodeInfraSandboxesData(raw: unknown): InfraSandboxesData {
   const ctx = 'GET /api/v1/infra/sandboxes'
   const rec = expectWireRecord(raw, ctx)
-  if (!isJsonRecord(rec.probe_state)) {
-    throw new Error(`${ctx}: "probe_state" 필드는 객체여야 합니다.`)
-  }
-  if (!isJsonRecord(rec.summary)) {
-    throw new Error(`${ctx}: "summary" 필드는 객체여야 합니다.`)
-  }
-  if (!isJsonRecord(rec.shim_parity)) {
-    throw new Error(`${ctx}: "shim_parity" 필드는 객체여야 합니다.`)
-  }
-  const unobserved_reasons = expectOptionalArrayField<{ readonly scope: string; readonly reason: string }>(
-    rec,
+  expectRequiredRecordField(rec, 'probe_state', ctx)
+  expectRequiredRecordField(rec, 'summary', ctx)
+  expectRequiredRecordField(rec, 'shim_parity', ctx)
+  const unobserved_reasons = expectRecordElements<{ readonly scope: string; readonly reason: string }>(
+    expectOptionalArrayField<unknown>(rec, 'unobserved_reasons', ctx),
     'unobserved_reasons',
     ctx,
   )
-  const microvm_guests = expectOptionalArrayField<InfraMicroVmGuest>(rec, 'microvm_guests', ctx)
-  const ssh_pools = expectOptionalArrayField<InfraSshPool>(rec, 'ssh_pools', ctx)
-  const docker_keepers = expectOptionalArrayField<InfraDockerKeeper>(rec, 'docker_keepers', ctx)
-  const ssh_unbound_keepers = expectOptionalArrayField<InfraSshUnboundKeeper>(rec, 'ssh_unbound_keepers', ctx)
+  const microvm_guests = expectRecordElements<InfraMicroVmGuest>(
+    expectOptionalArrayField<unknown>(rec, 'microvm_guests', ctx),
+    'microvm_guests',
+    ctx,
+  )
+  const ssh_pools = expectRecordElements<InfraSshPool>(
+    expectOptionalArrayField<unknown>(rec, 'ssh_pools', ctx),
+    'ssh_pools',
+    ctx,
+  )
+  const docker_keepers = expectRecordElements<InfraDockerKeeper>(
+    expectOptionalArrayField<unknown>(rec, 'docker_keepers', ctx),
+    'docker_keepers',
+    ctx,
+  )
+  const ssh_unbound_keepers = expectRecordElements<InfraSshUnboundKeeper>(
+    expectOptionalArrayField<unknown>(rec, 'ssh_unbound_keepers', ctx),
+    'ssh_unbound_keepers',
+    ctx,
+  )
   return {
     ...(rec as unknown as InfraSandboxesData),
     unobserved_reasons,

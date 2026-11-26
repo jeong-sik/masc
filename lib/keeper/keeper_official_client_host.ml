@@ -1045,39 +1045,6 @@ let start_range_projection ~input_source ?argument_projection
   Ok selected.selected_messages
 ;;
 
-let carried_history_projection ~input_source
-    ?argument_projection
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
-  : Keeper_history_projection.t
-  =
-  fun history_messages ->
-  let window = ref None and front = ref None in
-  let* sent = start_range_projection
-      ~input_source
-    ?argument_projection
-    ~measure_message_bytes
-    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-    ?on_model_input_window_observation:(Option.map
-      (fun _ observation -> window := Some observation) on_model_input_window_observation)
-    ?carried_front_seed
-    ?librarian_front
-    ?on_carried_front:(Option.map
-      (fun _ observed ~transmitted_bytes ~sends_from ->
-        front := Some (observed,transmitted_bytes,sends_from))
-      on_carried_front)
-    ~turn_start ~keeper_name ~runtime_id history_messages in
-  let* sent = project_source source_projection sent in
-  (* A refused custom projection returned no range. Publish the buffered
-     raw-source observations only after the final transmitted copy exists. *)
-  Option.iter (fun (front,transmitted_bytes,sends_from) ->
-    Option.iter (fun observe -> observe front ~transmitted_bytes ~sends_from) on_carried_front)
-    !front;
-  Option.iter (fun observation ->
-    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
-  Ok sent
-;;
-
 let render_start_messages ~started_at messages =
   messages
   |> List.map (fun (message : Agent_core.Types.message) ->

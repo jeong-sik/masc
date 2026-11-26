@@ -693,14 +693,14 @@ val start_range_projection :
   runtime_id:string ->
   Agent_core.Types.message list ->
   (Agent_core.Types.message list, Agent_core.Error.t) result
-(** Capacity-first Start projection shared by Claude Code and Codex. The
+(** Capacity-first Start projection shared by Codex, Claude Code, Antigravity
+    and ACP. The
     zero-history floor stays empty and its front is {!Lane_cut}; otherwise
     the latest of the capacity, seed, Librarian, and turn-start fronts is
     composed. [on_carried_front] gets the front once, with the range's bytes
     and where the request starts in the history
     ({!Keeper_request_start.sends_from}).
-    Source-specific projection runs after this range. Antigravity
-    can use the same projection with unbounded capacity. Without
+    Source-specific projection runs after this range. Without
     [librarian_front] the turn has no read end.
 
     With [argument_projection], verified closed raw-seed arguments and
@@ -722,25 +722,6 @@ val start_range_projection :
     unmaterialized slot is restored, and the full range/summary decision is
     repeated without I/O. Custom source projection must run after this
     function returns. *)
-
-val carried_history_projection :
-  input_source:Keeper_request_source.t ->
-  ?argument_projection:argument_projection ->
-  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
-  ?carried_front_seed:Keeper_carried_front.seed_reader ->
-  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
-  ?on_carried_front:carried_front_observer ->
-  turn_start:Keeper_carried_front.turn_start ->
-  keeper_name:string ->
-  runtime_id:string ->
-  Keeper_history_projection.t option ->
-  Keeper_history_projection.t
-(** Unbounded carried-history composition for clients that compact their own
-    input. The range opens from the turn's read end ([librarian_front]; none
-    without it) before the source projection. Window/front observations are
-    published only after that
-    final projection succeeds, and retain durable-history coordinates: an
-    appended Gate replay reference cannot become a checkpoint front. *)
 
 type framed_delivery =
   | Framed_start of { started_at : float }

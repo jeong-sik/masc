@@ -111,6 +111,10 @@ module For_testing : sig
     -> Runtime_acp_client.usage
     -> int option
 
+  val held_context_of_usage
+    :  Runtime_acp_client.usage
+    -> Runtime_observation.request_context option
+
   val stop_reason_of_acp_stop_reason
     :  Runtime_acp_client.stop_reason
     -> Agent_core.Types.stop_reason

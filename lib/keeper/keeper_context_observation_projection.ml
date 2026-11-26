@@ -2,7 +2,9 @@
 
     Context occupancy is projected from the newest TurnRecord:
     [input_tokens] is the provider-reported prompt total for the last
-    completed turn with explicit [Measured_request] provenance. Estimates and
+    completed turn with explicit [Measured_request] provenance, or the
+    context an ACP agent counted its session holding after that turn
+    ([Agent_held_context]). Estimates and
     unknown provenance retain their raw count as diagnostics only.
     Prefer its [provider_context_window] when reported; otherwise
     use the configured [context_window] for that same request. The pair describes
@@ -272,7 +274,9 @@ let context_observation ~config ~keeper_name ~current_trace_id =
            in
            unmeasured ~provenance:Provenance_estimated ?estimated_ratio reason_input_estimate
          | None -> unmeasured reason_input_provenance_unavailable
-         | Some Turn_input_provenance.Measured_request ->
+         | Some
+             ( Turn_input_provenance.Measured_request
+             | Turn_input_provenance.Agent_held_context ) ->
            (match window with
             | Some maximum when maximum > 0 && tokens > maximum ->
               unmeasured reason_tokens_exceed_window

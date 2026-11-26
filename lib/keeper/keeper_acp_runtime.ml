@@ -414,6 +414,24 @@ let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
       (Muse_log.error_to_string err)
 ;;
 
+(* The context the agent counts its session holding after the turn
+   ([usage_update.used]), the number the rollover rule reads. The turn's
+   [inputTokens] is a sum over every model request (and, on Muse, reviews and
+   observers), so it never stands in for this count. The window stays the
+   configured one: [usage_update.size] is the agent's model window, which can
+   be larger than the limit the operator declared for this lane. *)
+let held_context_of_usage (u : Acp.usage) : Runtime_observation.request_context option =
+  match u.context_used with
+  | Some used when used > 0 ->
+    Some
+      { Runtime_observation.input_tokens = used
+      ; cache = None
+      ; output_tokens = None
+      ; provenance = Turn_input_provenance.Agent_held_context
+      }
+  | Some _ | None -> None
+;;
+
 let effective_context_used ~driver (u : Acp.usage) =
   match u.context_used with
   | Some n when n > 0 -> Some n
@@ -3387,6 +3405,8 @@ let run_without_lifecycle
             ~attempt_details_source:("acp_" ^ Acp.driver_to_string config.driver)
             ~agent_core_internal_runtime_allowed:false
             ~usage_scope:Runtime_usage_scope.Turn_total
+            ?request_context:
+              (held_context_of_usage prompt_res.usage)
             ()
         in
         Ok
@@ -3717,6 +3737,7 @@ module For_testing = struct
   let api_usage_of_acp_usage = api_usage_of_acp_usage
   let usage_is_nonzero = usage_is_nonzero
   let effective_context_used = effective_context_used
+  let held_context_of_usage = held_context_of_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
   let effective_context_limit_tokens = effective_context_limit_tokens

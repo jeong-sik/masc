@@ -37,7 +37,9 @@ val context_fields :
     occupancy is projected from the keeper's newest TurnRecord,
     the measurement SSOT: [context_tokens] is the
     provider-reported prompt total of the last completed turn with explicit
-    [Measured_request] provenance. Estimates and absent provenance keep their
+    [Measured_request] provenance, or the context an ACP agent counted its
+    session holding after that turn ([Agent_held_context]). Estimates and
+    absent provenance keep their
     raw count only in the typed unavailability diagnostic,
     [context_max] its provider-reported usable window (or the configured
     request window if the provider did not report one), and

@@ -4558,6 +4558,21 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     (Keeper_acp_runtime.For_testing.effective_context_used
        ~driver:Antigravity
        Runtime_acp_client.empty_usage);
+  (* The gauge reads only the agent's own count: the turn's summed
+     inputTokens never stands in for it. *)
+  let held usage =
+    Option.map
+      (fun (c : Runtime_observation.request_context) ->
+         c.input_tokens, c.output_tokens, c.provenance)
+      (Keeper_acp_runtime.For_testing.held_context_of_usage usage)
+  in
+  check bool "turn-summed input without usage_update holds no context" true
+    (held agy_usage_no_ctx = None);
+  check bool "usage_update.used is the held context, with no output" true
+    (held { agy_usage_no_ctx with context_used = Some 77777 }
+     = Some (77777, None, Turn_input_provenance.Agent_held_context));
+  check bool "a zero usage_update.used holds no context" true
+    (held { agy_usage_no_ctx with context_used = Some 0 } = None);
   (* 5. process_config_sha256 tracks spawn-time config but stays stable on model/effort/mode *)
   let base_cfg : Runtime_execution.acp_client =
     { driver = Runtime_acp_client.Antigravity

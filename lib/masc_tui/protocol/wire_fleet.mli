@@ -498,6 +498,7 @@ type turn_usage_scope =
 type turn_input_provenance =
   | Input_measured_request
   | Input_context_estimate
+  | Input_agent_held_context
 
 type turn_record_row = {
   absolute_turn : int;
@@ -523,7 +524,7 @@ val decode_keeper_turn_records :
 val turn_record_context_fill : turn_record_row -> float option
 (** The record's measured context fill (input / window), under the rule the
     server applies to a keeper's newest record: per-request usage, input
-    provenance [measured_request], the provider window else the configured
+    provenance [measured_request] or [agent_held_context], the provider window else the configured
     one, and input not above that window. [None] for every other record. *)
 
 val decode_keeper_turns : Yojson.Safe.t -> (keeper_turn_row list, string) result

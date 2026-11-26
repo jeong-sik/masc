@@ -24,8 +24,9 @@ type t =
   ; resolve_closed : unit Eio.Promise.u
   ; stall_bound : stall_bound
   ; now : unit -> float
-  ; frames_written : int Atomic.t
-  ; last_written_at : float Atomic.t
+  ; sends_marked : int Atomic.t
+  ; last_marked_at : float Atomic.t
+  ; sends_waiting : int Atomic.t
   }
 
 type outcome =
@@ -66,8 +67,9 @@ let open_response ~clock ~stalled_after_s ?flush_headers_immediately reqd respon
   ; resolve_closed
   ; stall_bound
   ; now
-  ; frames_written = Atomic.make 0
-  ; last_written_at = Atomic.make (now ())
+  ; sends_marked = Atomic.make 0
+  ; last_marked_at = Atomic.make (now ())
+  ; sends_waiting = Atomic.make 0
   }
 ;;
 
@@ -101,6 +103,14 @@ let close_after t f =
   result
 ;;
 
+(* A send's start and its end each count for the keepalive. The time goes
+   first: a keepalive that sees the new count reads this send's time or a
+   later one. *)
+let mark_send t =
+  Atomic.set t.last_marked_at (t.now ());
+  Atomic.incr t.sends_marked
+;;
+
 (* Nothing between the write and the flush registration suspends, so a frame
    from another fiber cannot land inside this one. [flush] answers once the
    bytes written so far were handed to the socket ([`Written]), or once the
@@ -112,11 +122,14 @@ let send t frame =
     close t;
     Closed)
   else (
-    (* The frame counts for the keepalive before its bytes can reach the
-       client. The time goes first: a keepalive that sees the new count
-       reads this frame's time or a later one. *)
-    Atomic.set t.last_written_at (t.now ());
-    Atomic.incr t.frames_written;
+    (* The send counts before its bytes can reach the client, and it ends
+       on every way out, a cancellation too. *)
+    mark_send t;
+    Atomic.incr t.sends_waiting;
+    Fun.protect ~finally:(fun () ->
+      Atomic.decr t.sends_waiting;
+      mark_send t)
+    @@ fun () ->
     Http_reqd.Body_writer.write_string t.writer frame;
     let flushed, resolve = Eio.Promise.create () in
     Http_reqd.Body_writer.flush t.writer (Eio.Promise.resolve resolve);
@@ -199,34 +212,38 @@ let keepalive_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
    client's producer as long. The keepalive is the write that a quiet
    stream lacks.
 
-   It is due once no frame was written for an interval, counted from the
-   last frame any fiber handed to [send]. A producer that wakes and writes
-   nothing does not put it off, and one that writes often never needs it.
-   The count of frames tells a frame written during the sleep from none: a
-   wall clock that was set back reads an earlier time after a later frame.
-   Each sleep is at most one interval, so a clock set back since the last
-   frame delays no keepalive. [Quiet] starts the next interval at the
-   answer. *)
+   It is due once no send started or ended for an interval, counted from
+   the last start or end of a send from any fiber. A producer that wakes and
+   writes nothing does not put it off, and one that writes often never needs
+   it. A send that still waits for the socket is not silence: its own stall
+   bound watches the client, so the keepalive waits one more interval. The
+   count of starts and ends tells one during the sleep from none: a wall
+   clock that was set back reads an earlier time after a later send. Each
+   sleep is at most one interval, so a clock set back holds the keepalive
+   at most one interval past the wake that saw the new count. [Quiet] starts
+   the next interval at the answer. *)
 let keep_alive t ~sleep ~idle =
-  let rec wait ~frames ~from =
+  let rec wait ~marked ~from =
     let due_in = from +. keepalive_interval_s -. t.now () in
     sleep (Float.min keepalive_interval_s (Float.max 0.0 due_in));
-    let written = Atomic.get t.frames_written in
-    if written <> frames
-    then wait ~frames:written ~from:(Atomic.get t.last_written_at)
+    let now_marked = Atomic.get t.sends_marked in
+    if now_marked <> marked
+    then wait ~marked:now_marked ~from:(Atomic.get t.last_marked_at)
+    else if Atomic.get t.sends_waiting > 0
+    then wait ~marked ~from:(t.now ())
     else (
       match idle () with
       | Keepalive ->
         (match send t keepalive_frame with
-         | Written -> after_last_frame ()
+         | Written -> after_last_send ()
          | Closed | Stalled -> ())
-      | Quiet -> wait ~frames ~from:(t.now ())
+      | Quiet -> wait ~marked ~from:(t.now ())
       | Finish -> close t)
-  and after_last_frame () =
-    let frames = Atomic.get t.frames_written in
-    wait ~frames ~from:(Atomic.get t.last_written_at)
+  and after_last_send () =
+    let marked = Atomic.get t.sends_marked in
+    wait ~marked ~from:(Atomic.get t.last_marked_at)
   in
-  after_last_frame ()
+  after_last_send ()
 ;;
 
 (* The keepalive ends with the response: the race ends it at the close, and

@@ -44,7 +44,7 @@ type idle =
   | Keepalive  (** {!keepalive_frame} is written. *)
   | Quiet
   (** Nothing is written. The response asks again one interval later, unless
-      a frame was written by then. *)
+      a frame was sent by then. *)
   | Finish  (** Nothing is written and the response is closed. *)
 (** What a response does when no frame was written for
     {!Server_mcp_transport_http_headers.sse_ping_interval_s}. *)
@@ -74,8 +74,9 @@ val respond :
     The response keeps itself alive until it is closed. Once no frame was
     written for {!Server_mcp_transport_http_headers.sse_ping_interval_s} by
     [clock], it asks [idle] and does what that answers; without [idle] it
-    writes {!keepalive_frame}. The time counts from the last frame any fiber
-    wrote, so a stream that carries frames is not asked. The keepalive is
+    writes {!keepalive_frame}. The time counts from the last start or end of
+    a {!send} from any fiber, and a {!send} that still waits for the socket
+    holds it off, so a stream that carries frames is not asked. The keepalive is
     what tells an HTTP/1.1 response that its quiet client left: a keepalive
     that is not taken closes the response like any [send].
 

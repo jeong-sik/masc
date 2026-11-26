@@ -1,7 +1,7 @@
 ---
 rfc: "open-tool-carries-cohort-and-reach"
 title: "열린 도구는 같이 도는 묶음과 닿는 곳을 싣는다"
-status: Draft
+status: Accepted
 created: 2026-11-26
 updated: 2026-11-26
 author: claude
@@ -12,7 +12,7 @@ related: ["turn-activity-is-open-work"]
 
 # RFC open-tool-carries-cohort-and-reach: 열린 도구는 같이 도는 묶음과 닿는 곳을 싣는다
 
-- 상태: **초안.** 운영자가 11-26에 범위를 골랐다(「서버 분류까지 (RFC부터)」).
+- 상태: **승인(2026-11-26).** 운영자가 범위를 「서버 분류까지 (RFC부터)」로 고르고 이 초안을 승인했다(「네네 시작!」). §5의 「Batch」는 agent core의 계획 묶음으로 읽은 대로 간다.
 - 계기: 운영자가 키퍼 채팅을 보며 한 말이다. 「Tools, Thinkings, Parallel, Batch 등등 그리고 외부 Call 등등도… 진행이라는 게 UI로 명확하게 표시」.
 - 코드 좌표는 `origin/main` `d764c5f6ac2f`에서 읽었다.
 - 앞선 RFC `turn-activity-is-open-work`가 미리보기에 「지금 열려 있는 일」 목록을 실었다. 이 RFC는 그 목록의 도구 항목에 두 가지를 더한다.

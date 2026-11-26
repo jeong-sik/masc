@@ -328,8 +328,8 @@ export function ReposTab(props: WorkspaceViewProps) {
   `
 
   return html`
-    <div class="ov" data-testid="infra-repos-tab">
-      <header class="ov-head">
+    <div class="ov ov--split" data-testid="infra-repos-tab">
+      <header class="ov-head" style=${{ flexShrink: 0 }}>
         <div>
           <span class="ov-eyebrow">6 INFRA · REPOS & 24H CHANGES</span>
           <h1>저장소 관리 · 24시간 Keeper 파일 Diff</h1>
@@ -337,17 +337,19 @@ export function ReposTab(props: WorkspaceViewProps) {
       </header>
 
       ${errorBanner && html`
-        <div role="alert" class="ap-error">
+        <div role="alert" class="ap-error" style=${{ flexShrink: 0 }}>
           ${errorBanner}
         </div>
       `}
 
-      <${MasterDetail}
-        masterLabel="저장소 목록"
-        detailLabel="24시간 변경 Diff"
-        master=${masterPane}
-        detail=${detailPane}
-      />
+      <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
+        <${MasterDetail}
+          masterLabel="저장소 목록"
+          detailLabel="24시간 변경 Diff"
+          master=${masterPane}
+          detail=${detailPane}
+        />
+      </div>
     </div>
   `
 }

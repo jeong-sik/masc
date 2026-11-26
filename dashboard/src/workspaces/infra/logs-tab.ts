@@ -31,7 +31,7 @@ import { isRecord } from '../../lib/type-guards'
 import { formatTimestampKo } from '../../lib/format-time'
 import { OBSERVER_IDLE_TIMEOUT_HEADER } from '../../lib/observer-protocol'
 import { readSse } from '../../lib/sse-reader'
-import { VirtualList } from '../../components/primitives'
+import { PopoverMenu, VirtualList } from '../../components/primitives'
 import type {
   TimelineEntry,
   TimelineLevel,
@@ -389,33 +389,38 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
 
       ${snapshotError && html`<div class="ap-error" role="alert">로그 조회 실패: ${snapshotError}</div>`}
 
-      <section class="v2-logs-panel">
-        <div class="v2-logs-toolbar">
-          <div class="ap-viewseg" role="group" aria-label="타임라인 종류">
-            ${(['ALL', 'LOGS', 'EVENTS'] as const).map((k) => html`
-              <button
-                key=${k}
-                type="button"
-                class=${`ap-viewbtn ${kindFilter === k ? 'on' : ''}`}
-                onClick=${() => setKindFilter(k)}
-              >
-                ${k}
-              </button>
-            `)}
-          </div>
+      <section class="v2-logs-panel" style=${{ overflow: 'visible' }}>
+        <div
+          class="v2-logs-toolbar"
+          style=${{ borderTopLeftRadius: 'var(--radius-md)', borderTopRightRadius: 'var(--radius-md)' }}
+        >
+          <${PopoverMenu}
+            triggerLabel=${html`<span>종류: <strong class="mono">${kindFilter}</strong> ▾</span>`}
+            triggerTestId="logs-kind-filter"
+            popoverTestId="logs-kind-menu"
+            ariaLabel=${`타임라인 종류 (${kindFilter})`}
+            items=${(['ALL', 'LOGS', 'EVENTS'] as const).map((k) => ({
+              id: k,
+              label: k,
+              active: kindFilter === k,
+              testId: `logs-kind-option-${k}`,
+              onSelect: () => setKindFilter(k),
+            }))}
+          />
 
-          <div class="ap-viewseg" role="group" aria-label="로그 레벨 필터">
-            ${(['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as const).map((lv) => html`
-              <button
-                key=${lv}
-                type="button"
-                class=${`ap-viewbtn ${levelFilter === lv ? 'on' : ''}`}
-                onClick=${() => setLevelFilter(lv)}
-              >
-                ${lv}
-              </button>
-            `)}
-          </div>
+          <${PopoverMenu}
+            triggerLabel=${html`<span>레벨: <strong class="mono">${levelFilter}</strong> ▾</span>`}
+            triggerTestId="logs-level-filter"
+            popoverTestId="logs-level-menu"
+            ariaLabel=${`로그 레벨 필터 (${levelFilter})`}
+            items=${(['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as const).map((lv) => ({
+              id: lv,
+              label: lv,
+              active: levelFilter === lv,
+              testId: `logs-level-option-${lv}`,
+              onSelect: () => setLevelFilter(lv),
+            }))}
+          />
 
           <input
             type="search"
@@ -423,7 +428,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
             placeholder="모듈 / Keeper / 메시지 검색…"
             value=${query}
             onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-            style=${{ flex: '1 1 180px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+            style=${{ flex: '1 1 180px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', fontSize: 'var(--fs-12)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
 
           <button
@@ -449,7 +454,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
           </button>
         </div>
 
-        <div style=${{ overflowX: 'auto', minWidth: 0 }}>
+        <div style=${{ overflowX: 'auto', minWidth: 0, borderBottomLeftRadius: 'var(--radius-md)', borderBottomRightRadius: 'var(--radius-md)' }}>
           <div class="v2-logs-table-header mono" aria-hidden="true" style=${{ minWidth: '520px' }}>
             <span>TIME</span>
             <span>KIND</span>

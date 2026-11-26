@@ -32,9 +32,9 @@ export function AppearancePanel() {
       class="wka-card"
       data-testid="settings-appearance-panel"
       aria-label="화면 테마 및 대비 설정"
-      style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}
+      style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}
     >
-      <div class="wka-h">
+      <div class="wka-h" style=${{ marginBottom: 0 }}>
         <h3>화면 테마 & 고대비 (OKLCH SSOT)</h3>
         <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
           theme=${theme} · contrast=${contrast ?? 'auto'}

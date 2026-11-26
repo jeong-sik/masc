@@ -60,6 +60,35 @@ export function runtimeIsAvailable(rt: RuntimeResolution, nowUnix: number): bool
   return rt.quota_rest === null && runtimeLivenessBlock(rt, nowUnix) === null
 }
 
+export interface RuntimeStandingBadge {
+  readonly kind: 'credential_refused' | 'quota_rest' | 'rate_limited'
+  readonly label: '인증 거부' | '일시 중지' | '속도 제한'
+  readonly tone: 'bad' | 'warn'
+}
+
+/** Compact standing liveness status badge following TUI precedence:
+ *  refused credential > quota rest > live rate limit. */
+export function runtimeStandingBadge(
+  rt: RuntimeResolution,
+  nowUnix: number,
+): RuntimeStandingBadge | null {
+  const block = runtimeLivenessBlock(rt, nowUnix)
+  if (block?.kind === 'credential_refused') {
+    return { kind: 'credential_refused', label: '인증 거부', tone: 'bad' }
+  }
+  if (rt.quota_rest !== null) {
+    return {
+      kind: 'quota_rest',
+      label: '일시 중지',
+      tone: rt.quota_rest.cause === 'payment_refused' ? 'bad' : 'warn',
+    }
+  }
+  if (block?.kind === 'rate_limited') {
+    return { kind: 'rate_limited', label: '속도 제한', tone: 'warn' }
+  }
+  return null
+}
+
 export function attemptFailureLabel(failure: RuntimeAttemptFailure): string {
   switch (failure) {
     case 'server_error':

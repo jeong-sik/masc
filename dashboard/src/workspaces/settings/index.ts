@@ -412,7 +412,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                     disabled=${!field.writable || busy === 'apply'}
                     value=${currentDisplay}
                     onChange=${(e: Event) => stageFieldChange(field, (e.target as HTMLSelectElement).value)}
-                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    style=${{ minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   >
                     ${field.enum_values!.map((opt) => html`<option key=${opt} value=${opt}>${opt}</option>`)}
                   </select>
@@ -440,7 +440,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                       value=${field.secret && !isModified ? '' : currentDisplay}
                       onInput=${(e: Event) => stageFieldChange(field, (e.target as HTMLInputElement).value)}
                       class="mono tnum"
-                      style=${{ flex: 1, minWidth: '200px', padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      style=${{ flex: 1, minWidth: '200px', minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                     />
                   `}
 
@@ -473,8 +473,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   return html`
-    <div class="ov" data-testid="settings-workspace">
-      <header class="ov-head">
+    <div class="set-shell" data-testid="settings-workspace">
+      <header class="ov-head" style=${{ gridColumn: '1 / -1' }}>
         <div>
           <span class="ov-eyebrow">SYSTEM · SCHEMA-DRIVEN SETTINGS</span>
           <h1>설정 트리 & CAS Dry-Run Diff 인스펙터</h1>
@@ -489,7 +489,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             placeholder="설정 키 / 설명 검색…"
             value=${searchQuery}
             onInput=${(e: Event) => setSearchQuery((e.target as HTMLInputElement).value)}
-            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', minWidth: '200px' }}
+            style=${{ minHeight: 'var(--btn-h, 32px)', fontSize: 'var(--fs-12)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', minWidth: '200px' }}
           />
           <button
             type="button"
@@ -510,11 +510,11 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
         </div>
       </header>
 
-      ${errorBanner && html`<div class="ap-error" role="alert">${errorBanner}</div>`}
+      ${errorBanner && html`<div class="ap-error" role="alert" style=${{ gridColumn: '1 / -1' }}>${errorBanner}</div>`}
 
       <!-- 409 CAS Conflict Alert -->
       ${casConflict && html`
-        <section class="ap-error" data-testid="settings-cas-conflict" role="alert" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+        <section class="ap-error" data-testid="settings-cas-conflict" role="alert" style=${{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <div>
             <strong>⚠ 409 CAS 충돌 (conflict_cas):</strong> ${casConflict}
           </div>
@@ -530,7 +530,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
           class="wka-card"
           data-testid="settings-apply-receipt"
           role="status"
-          style=${{ borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}
+          style=${{ gridColumn: '1 / -1', borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}
         >
           <div style=${{ fontWeight: 600, color: 'var(--ok-fg)' }}>
             ✓ 설정 패치 적용 완료 (${reloadScopeNotice(applyResult.reload_scope).label})
@@ -549,9 +549,9 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
         <section
           class="wka-card"
           data-testid="settings-dry-run-panel"
-          style=${{ borderColor: 'var(--brass-border)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}
+          style=${{ gridColumn: '1 / -1', borderColor: 'var(--brass-border)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}
         >
-          <div class="wka-h">
+          <div class="wka-h" style=${{ marginBottom: 0 }}>
             <h3>Dry-Run Unified Diff 미리보기 (${stagedCount}건 변경)</h3>
             <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
               <button type="button" class="btn-ghost" onClick=${() => setPreview(null)}>닫기</button>
@@ -593,91 +593,90 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
       `}
 
       <!-- 2-Pane Category Tree + Property Inspector -->
-      <div class="set-shell" style=${{ padding: 0 }}>
-        <nav class="set-card-b" aria-label="설정 카테고리 (7개)" style=${{ padding: 'var(--sp-2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', alignSelf: 'start' }}>
-          ${categories.map((cat) => {
-            const isSel = !searchQuery.trim() && activeCategory?.id === cat.id
-            const catStagedCount = cat.fields.filter((f) => f.full_key in staged).length
-            return html`
-              <button
-                key=${cat.id}
-                type="button"
-                aria-current=${isSel ? 'page' : undefined}
-                onClick=${() => {
-                  setSearchQuery('')
-                  setActiveCategoryId(cat.id)
-                }}
-                style=${{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 'var(--sp-2)',
-                  padding: 'var(--sp-2) var(--sp-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: 'none',
-                  background: isSel ? 'var(--bg-4)' : 'transparent',
-                  color: isSel ? 'var(--fg-1)' : 'var(--fg-2)',
-                  fontWeight: isSel ? 600 : 400,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  fontSize: 'var(--fs-12)',
-                }}
-              >
-                <span>${cat.title}</span>
-                <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: catStagedCount > 0 ? 'var(--brass-1)' : 'var(--fg-3)' }}>
-                  ${catStagedCount > 0 ? `*${catStagedCount} / ` : ''}${cat.field_count}
-                </span>
-              </button>
-            `
-          })}
-
-          ${stagedCount > 0 && html`
+      <nav class="set-card-b" aria-label="설정 카테고리 (7개)" style=${{ padding: 'var(--sp-2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', alignSelf: 'start' }}>
+        ${categories.map((cat) => {
+          const isSel = !searchQuery.trim() && activeCategory?.id === cat.id
+          const catStagedCount = cat.fields.filter((f) => f.full_key in staged).length
+          return html`
             <button
+              key=${cat.id}
               type="button"
-              class="btn-ghost"
-              style=${{ marginTop: 'var(--sp-2)', color: 'var(--err-fg)' }}
+              aria-current=${isSel ? 'page' : undefined}
               onClick=${() => {
-                setStaged({})
-                setPreview(null)
+                setSearchQuery('')
+                setActiveCategoryId(cat.id)
+              }}
+              style=${{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 'var(--sp-2)',
+                minHeight: 'var(--btn-h, 32px)',
+                padding: 'var(--sp-1) var(--sp-3)',
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                background: isSel ? 'var(--bg-4)' : 'transparent',
+                color: isSel ? 'var(--fg-1)' : 'var(--fg-2)',
+                fontWeight: isSel ? 600 : 400,
+                textAlign: 'left',
+                cursor: 'pointer',
+                fontSize: 'var(--fs-12)',
               }}
             >
-              스테이징 모두 취소 (${stagedCount})
+              <span>${cat.title}</span>
+              <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: catStagedCount > 0 ? 'var(--brass-1)' : 'var(--fg-3)' }}>
+                ${catStagedCount > 0 ? `*${catStagedCount} / ` : ''}${cat.field_count}
+              </span>
             </button>
-          `}
-        </nav>
+          `
+        })}
 
-        <section class="set-card-b" aria-label="속성 인스펙터" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-          ${(activeCategory?.id === 'general' && !searchQuery.trim()) && html`<${AppearancePanel} />`}
+        ${stagedCount > 0 && html`
+          <button
+            type="button"
+            class="btn-ghost"
+            style=${{ marginTop: 'var(--sp-1)', color: 'var(--err-fg)' }}
+            onClick=${() => {
+              setStaged({})
+              setPreview(null)
+            }}
+          >
+            스테이징 모두 취소 (${stagedCount})
+          </button>
+        `}
+      </nav>
 
-          <div class="wka-h">
-            <h3>
-              ${searchQuery.trim()
-                ? `검색 결과: "${searchQuery.trim()}" (${visibleFields.length})`
-                : `${activeCategory?.title ?? 'Settings'} (${visibleFields.length})`}
-            </h3>
-            <button type="button" class="btn-ghost" onClick=${() => loadSchema('manual')}>스키마 새로고침</button>
+      <section class="set-card-b" aria-label="속성 인스펙터" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
+        ${(activeCategory?.id === 'general' && !searchQuery.trim()) && html`<${AppearancePanel} />`}
+
+        <div class="wka-h" style=${{ marginBottom: 0 }}>
+          <h3>
+            ${searchQuery.trim()
+              ? `검색 결과: "${searchQuery.trim()}" (${visibleFields.length})`
+              : `${activeCategory?.title ?? 'Settings'} (${visibleFields.length})`}
+          </h3>
+          <button type="button" class="btn-ghost" onClick=${() => loadSchema('manual')}>스키마 새로고침</button>
+        </div>
+
+        ${schemaObs.kind === 'loading' && html`<div class="dtable-absent">설정 스키마 불러오는 중…</div>`}
+        ${schemaObs.kind === 'failed' && html`
+          <div class="ap-error" role="alert">
+            ${schemaObs.error.kind === 'forbidden'
+              ? '관리자(Admin) 권한이 필요한 설정 스키마입니다 (HTTP 403).'
+              : `설정 스키마 조회 실패: ${schemaObs.error.message}`}
           </div>
+        `}
 
-          ${schemaObs.kind === 'loading' && html`<div class="dtable-absent">설정 스키마 불러오는 중…</div>`}
-          ${schemaObs.kind === 'failed' && html`
-            <div class="ap-error" role="alert">
-              ${schemaObs.error.kind === 'forbidden'
-                ? '관리자(Admin) 권한이 필요한 설정 스키마입니다 (HTTP 403).'
-                : `설정 스키마 조회 실패: ${schemaObs.error.message}`}
-            </div>
-          `}
+        ${schemaObs.kind === 'value' && visibleFields.length === 0 && html`
+          <div class="dtable-absent">이 카테고리에 표시할 설정 필드가 없습니다.</div>
+        `}
 
-          ${schemaObs.kind === 'value' && visibleFields.length === 0 && html`
-            <div class="dtable-absent">이 카테고리에 표시할 설정 필드가 없습니다.</div>
-          `}
-
-          ${visibleFields.length > 0 && html`
-            <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-              ${visibleFields.map(renderFieldRow)}
-            </div>
-          `}
-        </section>
-      </div>
+        ${visibleFields.length > 0 && html`
+          <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            ${visibleFields.map(renderFieldRow)}
+          </div>
+        `}
+      </section>
     </div>
   `
 }

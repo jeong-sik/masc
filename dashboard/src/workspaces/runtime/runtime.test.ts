@@ -738,12 +738,14 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(40)
-
-    const card503 = container.querySelector('[data-testid="browser-lane-503"]')
-    expect(card503).not.toBeNull()
-    expect(card503!.textContent).toContain('HTTP 503')
-    expect(card503!.textContent).toContain('browser lane addon is not attached')
+    const card503 = await vi.waitFor(() => {
+      const el = container.querySelector('[data-testid="browser-lane-503"]')
+      expect(el).not.toBeNull()
+      return el!
+    }, { timeout: 3000 })
+    expect(card503.textContent).toContain('HTTP 503')
+    expect(card503.textContent).toContain('browser lane addon is not attached')
+    expect(container.querySelector('[data-testid="runtime-addons-tab"]')?.classList.contains('ov--split')).toBe(true)
   })
 
   it('loads multi_account provider_accounts, sends exact {integration_id,key} & {provider_account_id,model}, and rejects synthetic "latest" credential revision', async () => {
@@ -801,8 +803,19 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(40)
 
+    // Provider inventory section is default-collapsed via .ap-disclosure
+    const invToggle = await vi.waitFor(() => {
+      const el = container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')
+      expect(el?.textContent).toContain('1개 계정')
+      return el!
+    }, { timeout: 3000 })
+    expect(invToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-testid="provider-inventory-body"]')).toBeNull()
+
+    invToggle.click()
+    await flushUi(15)
+    expect(invToggle.getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('pa-codex-01')
     expect(container.textContent).toContain('openai_codex')
 
@@ -1216,8 +1229,12 @@ describe('workspaces/runtime', () => {
     expect(panel.querySelector('[data-testid="paused-group-claude_acct"]')?.textContent).not.toContain('예상')
     expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')?.textContent).toContain('예상')
 
+    // Group wrapper must not clip :focus-visible outlines with overflow: hidden
+    const geminiGroupEl = panel.querySelector('[data-testid="paused-group-gemini_acct"]') as HTMLElement
+    expect(geminiGroupEl.style.overflow).not.toBe('hidden')
+
     // Expanding gemini_acct reveals individual runtimes, local time, 예상 tag, and API 키 등록 action
-    const geminiBtn = panel.querySelector('[data-testid="paused-group-gemini_acct"] button[aria-expanded]') as HTMLButtonElement
+    const geminiBtn = geminiGroupEl.querySelector('button[aria-expanded]') as HTMLButtonElement
     geminiBtn.click()
     await flushUi(10)
     const geminiBody = panel.querySelector('[data-testid="paused-group-body-gemini_acct"]')
@@ -1226,8 +1243,14 @@ describe('workspaces/runtime', () => {
     expect(geminiBody!.textContent).toContain('예상')
     expect(geminiBody!.textContent).toContain('API 키 등록')
 
-    // Sort switch to count -> claude_acct (3) first
+    // Sort switch via PopoverMenu ('정렬·필터 ▾') -> count -> claude_acct (3) first
+    const controlsTrigger = panel.querySelector('[data-testid="paused-controls-trigger"]') as HTMLButtonElement
+    expect(controlsTrigger).not.toBeNull()
+    controlsTrigger.click()
+    await flushUi(10)
     const sortCountBtn = panel.querySelector('[data-testid="paused-sort-count"]') as HTMLButtonElement
+    expect(sortCountBtn.getAttribute('role')).toBe('menuitemradio')
+    expect(sortCountBtn.getAttribute('aria-checked')).toBe('false')
     sortCountBtn.click()
     await flushUi(10)
     const sortedGroupIds = Array.from(panel.querySelectorAll('[data-testid^="paused-group-"]'))
@@ -1239,8 +1262,11 @@ describe('workspaces/runtime', () => {
       'paused-group-codex_acct',
     ])
 
-    // Cause filter to payment_refused -> shows only gemini_acct
+    // Cause filter via PopoverMenu -> payment_refused -> shows only gemini_acct
+    controlsTrigger.click()
+    await flushUi(10)
     const paymentFilterBtn = panel.querySelector('[data-testid="paused-filter-payment_refused"]') as HTMLButtonElement
+    expect(paymentFilterBtn.getAttribute('role')).toBe('menuitemradio')
     paymentFilterBtn.click()
     await flushUi(10)
     expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')).not.toBeNull()
@@ -1253,5 +1279,222 @@ describe('workspaces/runtime', () => {
     expect(panelToggle.getAttribute('aria-expanded')).toBe('false')
     expect(panel.textContent).toContain('일시 중지 6/8 (3개 계정) · 가용 2')
     expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')).toBeNull()
+  })
+
+  it('shows honest blocked count/tone on KPI 4, default-collapses non-payment paused panel, and ticks shared 30s clock', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      const baseMs = new Date(2026, 10, 26, 12, 0, 0).getTime()
+      vi.setSystemTime(baseMs)
+      const nowSec = baseMs / 1000
+
+      const mkRt = (id: string, extra: Partial<RuntimeResolution> = {}): RuntimeResolution => ({
+        id,
+        provider: 'openai',
+        provider_id: 'openai',
+        model: `model-${id}`,
+        effective_max_context: 128_000,
+        max_context_source: 'capability',
+        max_output_tokens: 16_384,
+        is_local: false,
+        is_default: false,
+        quota_rest: null,
+        ...extra,
+      })
+
+      // Case 1: restingCount === 0, 1 active rate_limited expiring in 20s -> KPI 4 MUST be warn (1 / 2), then tick to ok (0 / 2) at +30s
+      const rateLimitedOnly: RuntimeResolution[] = [
+        mkRt('rt-ok'),
+        mkRt('rt-429', { rate_limited: true, rate_limit_resets_at: nowSec + 20 }),
+      ]
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.startsWith('/api/v1/runtime/resolved')) {
+          return jsonResponse({
+            config_path: 'runtime.toml',
+            default_route: 'default',
+            default_runtime: null,
+            runtimes: rateLimitedOnly,
+            lanes: [],
+            assignments: [],
+            provider_usage_windows: [],
+          })
+        }
+        if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+          return jsonResponse({ state: 'unavailable', reason: 'no history' })
+        }
+        if (url.startsWith('/api/v1/setup/inventory')) {
+          return jsonResponse({ integrations: [] })
+        }
+        return jsonResponse({})
+      }) as typeof fetch
+
+      render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="runtime-liveness-rt-429"]')).not.toBeNull()
+      }, { timeout: 3000 })
+
+      const kpi4 = container.querySelector('[data-testid="kpi-paused-runtimes"]')!
+      expect(kpi4.textContent).toContain('1 / 2')
+      expect(kpi4.textContent).toContain('가용 1')
+      expect(kpi4.querySelector('.ov-kpi-v.warn')).not.toBeNull()
+      expect(kpi4.querySelector('.ov-kpi-v.ok')).toBeNull()
+
+      // Advance 30s -> shared interval expires the 20s rate limit in BOTH KPI 4 and RuntimeLivenessPanel!
+      vi.advanceTimersByTime(30_000)
+      await vi.waitFor(() => {
+        expect(kpi4.textContent).toContain('0 / 2')
+        expect(container.querySelector('[data-testid="runtime-liveness-panel"]')).toBeNull()
+      })
+      expect(kpi4.textContent).toContain('가용 2')
+      expect(kpi4.querySelector('.ov-kpi-v.ok')).not.toBeNull()
+
+      // Case 2: credential_refused + non-payment quota_rest -> KPI 4 MUST be bad; non-payment paused panel starts collapsed
+      render(null, container)
+      resourceCache.clearAll()
+      const mixedRuntimes: RuntimeResolution[] = [
+        mkRt('rt-ok'),
+        mkRt('rt-refused', { credential_refused_at: nowSec - 60 }),
+        mkRt('rt-rest', { quota_rest: { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 600 } }),
+      ]
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.startsWith('/api/v1/runtime/resolved')) {
+          return jsonResponse({
+            config_path: 'runtime.toml',
+            default_route: 'default',
+            default_runtime: null,
+            runtimes: mixedRuntimes,
+            lanes: [],
+            assignments: [],
+            provider_usage_windows: [],
+          })
+        }
+        if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+          return jsonResponse({ state: 'unavailable', reason: 'no history' })
+        }
+        if (url.startsWith('/api/v1/setup/inventory')) {
+          return jsonResponse({ integrations: [{ id: 'openai', display_name: 'OpenAI', enabled: true, setup_support: 'full' }] })
+        }
+        return jsonResponse({})
+      }) as typeof fetch
+
+      render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      const pausedToggle = await vi.waitFor(() => {
+        const btn = container.querySelector<HTMLButtonElement>('[data-testid="paused-panel-toggle"]')
+        expect(btn).not.toBeNull()
+        return btn!
+      }, { timeout: 3000 })
+
+      const kpi4Mixed = container.querySelector('[data-testid="kpi-paused-runtimes"]')!
+      expect(kpi4Mixed.textContent).toContain('2 / 3')
+      expect(kpi4Mixed.textContent).toContain('가용 1')
+      expect(kpi4Mixed.querySelector('.ov-kpi-v.bad')).not.toBeNull()
+
+      // Non-payment paused panel starts default-collapsed with 1-line summary bar
+      expect(pausedToggle.getAttribute('aria-expanded')).toBe('false')
+      expect(pausedToggle.textContent).toContain('일시 중지 1/3 (1개 계정) · 가용 1')
+      expect(container.querySelector('[data-testid="paused-group-openai"]')).toBeNull()
+      pausedToggle.click()
+      await flushUi(15)
+      expect(pausedToggle.getAttribute('aria-expanded')).toBe('true')
+      expect(container.querySelector('[data-testid="paused-group-openai"]')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('default-collapses Lanes routing/CRUD config behind .ap-disclosure and renders compact liveness badges on probe & lane rows', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const runtimes: RuntimeResolution[] = [
+      {
+        id: 'rt-refused', provider: 'openai', provider_id: 'openai', model: 'gpt-5',
+        effective_max_context: 128_000, max_context_source: 'capability', max_output_tokens: null,
+        is_local: false, is_default: false, quota_rest: null, credential_refused_at: nowSec - 120,
+      },
+      {
+        id: 'rt-limited', provider: 'anthropic', provider_id: 'anthropic', model: 'claude-4',
+        effective_max_context: 200_000, max_context_source: 'capability', max_output_tokens: null,
+        is_local: false, is_default: false, quota_rest: null, rate_limited: true, rate_limit_resets_at: nowSec + 180,
+      },
+      {
+        id: 'rt-paused', provider: 'gemini', provider_id: 'gemini', model: 'gemini-2.5',
+        effective_max_context: 200_000, max_context_source: 'capability', max_output_tokens: null,
+        is_local: false, is_default: false, quota_rest: { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 600 },
+      },
+    ]
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'primary',
+          default_runtime: null,
+          runtimes,
+          lanes: [{ id: 'primary', declared: true, runtime_ids: ['rt-refused', 'rt-limited', 'rt-paused'] }],
+          assignments: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/runtime-probe')) {
+        return jsonResponse({
+          generated_at: '2026-11-26T00:00:00Z',
+          cache_ttl_sec: 60,
+          cache_age_sec: 1,
+          cache_hit: true,
+          refresh_state: 'fresh',
+          probe: {
+            status: 'ok',
+            probe_ok: true,
+            checked_at: '2026-11-26T00:00:00Z',
+            summary: { runtimes: 3, probed: 3, reachable: 3, failed: 0, skipped: 0, default_runtime_id: 'rt-refused' },
+            providers: [
+              { runtime_id: 'rt-refused', provider_id: 'openai', provider_display_name: 'OpenAI', model_id: 'gpt-5', protocol: 'openai', runtime_kind: 'http', transport: 'http', status: 'reachable', reachable: true, http_status: 200, latency_ms: 80, error: null, checked_at: '2026-11-26T00:00:00Z' },
+              { runtime_id: 'rt-limited', provider_id: 'anthropic', provider_display_name: 'Anthropic', model_id: 'claude-4', protocol: 'anthropic', runtime_kind: 'http', transport: 'http', status: 'reachable', reachable: true, http_status: 200, latency_ms: 90, error: null, checked_at: '2026-11-26T00:00:00Z' },
+              { runtime_id: 'rt-paused', provider_id: 'gemini', provider_display_name: 'Gemini', model_id: 'gemini-2.5', protocol: 'gemini', runtime_kind: 'http', transport: 'http', status: 'reachable', reachable: true, http_status: 200, latency_ms: 95, error: null, checked_at: '2026-11-26T00:00:00Z' },
+            ],
+            errors: [], observations: [], limitations: [],
+          },
+        })
+      }
+      if (url === '/api/v1/runtime/config/raw') {
+        return jsonResponse({
+          ok: true,
+          source_revision: 'a'.repeat(64),
+          path: '/ws/runtime.toml',
+          source_text: '[runtime]\ndefault = "primary"\n[runtime.lanes.primary]\ncandidates = ["rt-refused", "rt-limited", "rt-paused"]\n',
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="probe-liveness-rt-refused"]')).not.toBeNull()
+    }, { timeout: 3000 })
+
+    // Routing & Lane CRUD config starts collapsed behind .ap-disclosure
+    const configToggle = container.querySelector('[data-testid="lane-config-toggle"]') as HTMLButtonElement
+    expect(configToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(configToggle.textContent).toContain('라우팅 · 레인 설정')
+    expect(container.querySelector('[data-testid="lane-config-body"]')).toBeNull()
+
+    // Probes rows immediately show compact liveness badges + provider attention highlighting
+    expect(container.querySelector('[data-testid="probe-liveness-rt-refused"]')?.textContent).toBe('인증 거부')
+    expect(container.querySelector('[data-testid="probe-liveness-rt-limited"]')?.textContent).toBe('속도 제한')
+    expect(container.querySelector('[data-testid="probe-liveness-rt-paused"]')?.textContent).toBe('일시 중지')
+    expect(container.querySelector('[data-probe-runtime="rt-refused"]')?.getAttribute('data-provider-attention')).toBe('true')
+    expect(container.querySelector('[data-probe-runtime="rt-limited"]')?.getAttribute('data-provider-attention')).toBe('true')
+
+    // Expanding config reveals declared lane candidates with compact liveness badges too
+    configToggle.click()
+    await flushUi(15)
+    expect(configToggle.getAttribute('aria-expanded')).toBe('true')
+    const laneRow = container.querySelector('[data-lane-row="failover:primary"]')!
+    expect(laneRow.textContent).toContain('인증 거부')
+    expect(laneRow.textContent).toContain('속도 제한')
+    expect(laneRow.textContent).toContain('일시 중지')
   })
 })

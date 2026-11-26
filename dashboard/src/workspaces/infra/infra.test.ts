@@ -141,6 +141,28 @@ describe('workspaces/infra', () => {
     // ssh_active_sessions: null MUST display "미보고", never "0"
     expect(container.textContent).toContain('미보고 / 8')
 
+    // Shim Parity starts collapsed when matched; expands on click to show identities
+    const parityToggle = container.querySelector('[data-testid="sandbox-shim-parity-toggle"]') as HTMLButtonElement
+    expect(parityToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-testid="sandbox-shim-parity-body"]')).toBeNull()
+    parityToggle.click()
+    await flushUi(10)
+    expect(parityToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[data-testid="sandbox-shim-parity-body"]')?.textContent).toContain('sha-abc123')
+
+    // Volume GC & Host Storage start collapsed with 1-line metric summaries and expand raw JSON on click
+    const volToggle = container.querySelector('[data-testid="sandbox-volume-gc-toggle"]') as HTMLButtonElement
+    const hostToggle = container.querySelector('[data-testid="sandbox-host-storage-toggle"]') as HTMLButtonElement
+    expect(volToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(volToggle.textContent).toContain('reclaimed_bytes: 0')
+    expect(container.querySelector('[data-testid="sandbox-volume-gc-body"]')).toBeNull()
+    expect(hostToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(hostToggle.textContent).toContain('free_gb: 120')
+    expect(container.querySelector('[data-testid="sandbox-host-storage-body"]')).toBeNull()
+    volToggle.click()
+    await flushUi(10)
+    expect(container.querySelector('[data-testid="sandbox-volume-gc-body"] pre')?.textContent).toContain('"reclaimed_bytes": 0')
+
     const probeBtn = Array.from(container.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('지금 프로브 실행'),
     ) as HTMLButtonElement
@@ -264,6 +286,9 @@ describe('workspaces/infra', () => {
     // Docker OCaml wire fields rendered cleanly
     expect(text).toContain('dock-bot')
     expect(text).toContain('bridge')
+    // Shim Parity mismatch auto-expands to expose mismatching identities
+    expect(container.querySelector('[data-testid="sandbox-shim-parity-toggle"]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[data-testid="sandbox-shim-parity-body"]')?.textContent).toContain('sha-shim-1')
   })
 
   it('renders ssh_unbound_keepers and wires sandbox/keeper settings deep links', async () => {
@@ -525,6 +550,7 @@ describe('workspaces/infra', () => {
     await flushUi(50)
 
     expect(seenUrls).toContain('/api/v1/ide/repository-activity?repo_id=repo-masc&window_hours=24')
+    expect(container.querySelector('[data-testid="infra-repos-tab"]')?.classList.contains('ov--split')).toBe(true)
     expect(container.textContent).toContain('lib/example.ml')
     expect(container.textContent).toContain('+let x = 2')
 
@@ -648,6 +674,31 @@ describe('workspaces/infra', () => {
     pauseBtn.click()
     await flushUi(10)
     expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
+
+    // PopoverMenu dropdown filters (종류 & 레벨) render accessible menuitemradio options and filter rows
+    const levelTrigger = container.querySelector('[data-testid="logs-level-filter"]') as HTMLButtonElement
+    expect(levelTrigger).not.toBeNull()
+    expect(levelTrigger.textContent).toContain('레벨: ALL')
+    levelTrigger.click()
+    await flushUi(10)
+    const errOpt = container.querySelector('[data-testid="logs-level-option-ERROR"]') as HTMLButtonElement
+    expect(errOpt.getAttribute('role')).toBe('menuitemradio')
+    expect(errOpt.getAttribute('aria-checked')).toBe('false')
+    errOpt.click()
+    await flushUi(15)
+    expect(levelTrigger.textContent).toContain('레벨: ERROR')
+    expect(container.textContent).toContain('60 / 300')
+
+    const kindTrigger = container.querySelector('[data-testid="logs-kind-filter"]') as HTMLButtonElement
+    expect(kindTrigger.textContent).toContain('종류: ALL')
+    kindTrigger.click()
+    await flushUi(10)
+    const eventsOpt = container.querySelector('[data-testid="logs-kind-option-EVENTS"]') as HTMLButtonElement
+    expect(eventsOpt.getAttribute('role')).toBe('menuitemradio')
+    eventsOpt.click()
+    await flushUi(15)
+    expect(kindTrigger.textContent).toContain('종류: EVENTS')
+    expect(container.textContent).toContain('0 / 300')
   })
 
   describe('Activity & Logs read overlap', () => {

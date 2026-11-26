@@ -1376,8 +1376,7 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     let start = Int.max 0 (total - view_h - clamped_scroll) in
     let visible = Int.min view_h (total - start) in
     let content = Card.pad_inner ~pad_x rect in
-    (* Cap comfortable prose column at 96 cells for readability on ultra-wide screens *)
-    let col_w = Int.min content.w 96 in
+    let col_w = Chat_transcript.prose_width ~content_w:content.w in
     let col_x = content.x in
     for i = 0 to visible - 1 do
       let r = arr.(start + i) in
@@ -1480,7 +1479,7 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = Ops_common.pad_x_for ~model rect in
     let inner_c = Card.pad_inner ~pad_x rect in
-    let col_w = Int.min inner_c.w 96 in
+    let col_w = inner_c.w in
     let panel = Rect.make ~x:inner_c.x ~y:inner_c.y ~w:col_w ~h:inner_c.h in
     if Rect.is_empty panel then ()
     else
@@ -1717,7 +1716,7 @@ let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let pad_x = Ops_common.pad_x_for ~model body_rect in
     let prose_w =
-      Int.max 16 (Int.min (Int.max 16 (body_rect.w - (2 * pad_x))) 96)
+      Chat_transcript.prose_width ~content_w:(body_rect.w - (2 * pad_x))
     in
     (* The history is laid out again only when its layout or its messages
        changed since the rows were kept. *)

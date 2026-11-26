@@ -6489,7 +6489,27 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       ~width:gw.prose_w
   in
   Alcotest.(check bool) "Display_origin_inline uses fewer rows than Bare at wide width"
-    true (r_inline < r_bare)
+    true (r_inline < r_bare);
+
+  (* (f) The prose column follows the card width on a wide terminal *)
+  let m_ultra0 = Model.initial ~cols:240 ~rows:60 () in
+  let m_ultra =
+    {
+      m_ultra0 with
+      fleet = m_bare.fleet;
+      nav = { m_ultra0.nav with workspace = Nav.Keepers; zoomed = true };
+    }
+  in
+  let g_ultra = Chat_transcript.chat_viewport_geometry ~model:m_ultra in
+  let card_w, _ =
+    Chat_transcript.keeper_content_rect_size ~embedded:false ~model:m_ultra
+  in
+  Alcotest.(check bool) "prose column is wider than 96 cells at 240 cols" true
+    (g_ultra.prose_w > 96);
+  Alcotest.(check bool) "prose column grows with the terminal" true
+    (g_ultra.prose_w > gw.prose_w);
+  Alcotest.(check bool) "prose column stays inside the card" true
+    (g_ultra.prose_w <= card_w)
 
 let test_p1_work_inbox_ask_approval_sync () =
   let m0 = Model.initial ~cols:140 ~rows:40 () in

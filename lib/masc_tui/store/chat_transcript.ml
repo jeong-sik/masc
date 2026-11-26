@@ -2616,6 +2616,9 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
   in
   (card_inner_w, Int.max 0 (raw_content_h - banner_h))
 
+(* The prose column fills the card; text wraps at the card's inner edge. *)
+let prose_width ~content_w = Int.max 16 content_w
+
 let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
   let cols = Int.max 0 model.viewport.cols in
   let rows = Int.max 0 model.viewport.rows in
@@ -2629,9 +2632,7 @@ let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
     else if card_inner_w < 44 then 1
     else Layout.card_pad_x breakpoint
   in
-  let prose_w =
-    Int.max 16 (Int.min (Int.max 16 (card_inner_w - (2 * pad_x))) 96)
-  in
+  let prose_w = prose_width ~content_w:(card_inner_w - (2 * pad_x)) in
   { body_h; prose_w }
 
 let chat_viewport_geometry ~(model : Model.t) =

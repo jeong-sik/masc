@@ -244,6 +244,12 @@ val keeper_content_rect_size : embedded:bool -> model:Model.t -> int * int
     [Keeper_dive.render_tabs_body] for both Dive ([embedded = false]) and
     [4 Keepers] Split [pane 1] ([embedded = true]). *)
 
+val prose_width : content_w:int -> int
+(** Width the chat transcript wraps at inside a content rect [content_w]
+    cells wide: the whole rect, never below 16 cells. Row counting and
+    [Keeper_dive.render_chat_tab] both use it, so scroll bounds match what
+    is drawn. *)
+
 val chat_viewport_geometry : model:Model.t -> viewport_geometry
 (** Exact Keeper Dive chat transcript viewport height and prose column width
     matching [Chrome.compute_layout], [Layout.inset_body], [Card.draw], and

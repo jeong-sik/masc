@@ -137,7 +137,6 @@ type event =
   | Agent_core of agent_core_event
   | Keeper_heartbeat of {
       keeper : string;
-      phase : string option;
       in_turn : bool option;
       in_flight_ms : float option;
       at_unix : float;
@@ -356,10 +355,9 @@ let decode_typed_event type_name json =
     | "keeper_heartbeat" ->
         let* keeper = required_nonblank_string json "name" in
         let* at_unix = required_finite_float json "ts_unix" in
-        let* phase = optional_nonblank_string json "phase" in
         let* in_turn = optional_bool_field json "in_turn" in
         let* in_flight_ms = optional_finite_float json "in_flight_elapsed_ms" in
-        Ok (Keeper_heartbeat { keeper; phase; in_turn; in_flight_ms; at_unix })
+        Ok (Keeper_heartbeat { keeper; in_turn; in_flight_ms; at_unix })
     | "keeper_turn_complete" ->
         let* keeper = required_nonblank_string json "name" in
         let* at_unix = required_finite_float json "ts_unix" in

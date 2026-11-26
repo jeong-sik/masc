@@ -1265,20 +1265,16 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
     items
 
 let format_active_turn_elapsed ~(model : Model.t) (turn : Wire_fleet.active_turn) =
-  let secs_opt =
-    if
-      model.freshness.last_wall_unix > 0.0
-      && model.freshness.last_wall_unix >= turn.started_at_unix
-    then Some (model.freshness.last_wall_unix -. turn.started_at_unix)
-    else Option.map (fun ms -> ms /. 1000.0) turn.elapsed_ms
-  in
-  match secs_opt with
-  | None -> None
-  | Some raw_s ->
-      let s = Int.max 0 (Int.of_float raw_s) in
-      if s < 60 then Some (Printf.sprintf "%ds" s)
-      else if s < 3600 then Some (Printf.sprintf "%dm %02ds" (s / 60) (s mod 60))
-      else Some (Printf.sprintf "%dh %02dm" (s / 3600) (s mod 3600 / 60))
+  if
+    model.freshness.last_wall_unix > 0.0
+    && model.freshness.last_wall_unix >= turn.started_at_unix
+  then (
+    let raw_s = model.freshness.last_wall_unix -. turn.started_at_unix in
+    let s = Int.max 0 (Int.of_float raw_s) in
+    if s < 60 then Some (Printf.sprintf "%ds" s)
+    else if s < 3600 then Some (Printf.sprintf "%dm %02ds" (s / 60) (s mod 60))
+    else Some (Printf.sprintf "%dh %02dm" (s / 3600) (s mod 3600 / 60)))
+  else None
 
 let short_turn_ref_tag (turn : Wire_fleet.active_turn) =
   match turn.turn_ref with

@@ -33,9 +33,6 @@ export interface KeeperActiveTurn {
   readonly owner_key?: string | null
   readonly preview_observed_through?: number | null
   readonly started_at_unix: number
-  readonly phase?: string | null
-  readonly tool_in_flight: string | null
-  readonly elapsed_ms?: number | null
   readonly preview?: KeeperActiveTurnPreview | null
 }
 

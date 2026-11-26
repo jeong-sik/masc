@@ -585,13 +585,11 @@ let keeper_turn_summary ~lang (k : Wire_fleet.keeper_summary) =
   match k.active_turn with
   | Some turn -> (
       let lane = Say.resolve lang (turn_lane_label turn.lane) in
-      match turn.tool_in_flight, turn.preview, turn.phase with
-      | Some tool, _, _ -> Printf.sprintf "%s:%s" lane tool
-      | None, Some _, _ ->
+      match turn.preview with
+      | Some _ ->
           Printf.sprintf "%s · %s" lane
             (Say.resolve lang (Chat_transcript.active_turn_short_activity turn))
-      | None, None, Some p -> Printf.sprintf "%s:%s" lane p
-      | None, None, None -> lane)
+      | None -> lane)
   | None -> (
       match k.current_task_id with
       | Some tid -> tid

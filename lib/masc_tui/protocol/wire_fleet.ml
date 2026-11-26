@@ -262,9 +262,6 @@ type active_turn = {
   turn_ref : string option;
   started_at_unix : float;
   interrupt_token : string;
-  phase : string option;
-  tool_in_flight : string option;
-  elapsed_ms : float option;
   preview_observed_through : int option;
   preview : turn_preview option;
 }
@@ -672,9 +669,6 @@ let equal_active_turn (a : active_turn) (b : active_turn) =
   && Option.equal String.equal a.turn_ref b.turn_ref
   && Float.equal a.started_at_unix b.started_at_unix
   && String.equal a.interrupt_token b.interrupt_token
-  && Option.equal String.equal a.phase b.phase
-  && Option.equal String.equal a.tool_in_flight b.tool_in_flight
-  && Option.equal Float.equal a.elapsed_ms b.elapsed_ms
   && Option.equal Int.equal a.preview_observed_through b.preview_observed_through
   && Option.equal equal_turn_preview a.preview b.preview
 
@@ -1014,9 +1008,6 @@ let decode_active_turn json =
   let* turn_ref = optional_nonblank_string json "turn_ref" in
   let* started_at_unix = required_finite_float json "started_at_unix" in
   let* interrupt_token = required_string_field json "interrupt_token" in
-  let* phase = optional_nonblank_string json "phase" in
-  let* tool_in_flight = optional_nonblank_string json "tool_in_flight" in
-  let* elapsed_ms = optional_finite_float json "elapsed_ms" in
   let* preview_observed_through = optional_int_field json "preview_observed_through" in
   let* prev_obj = optional_object_field json "preview" in
   let* preview =
@@ -1041,9 +1032,6 @@ let decode_active_turn json =
       turn_ref;
       started_at_unix;
       interrupt_token;
-      phase;
-      tool_in_flight;
-      elapsed_ms;
       preview_observed_through;
       preview;
     }

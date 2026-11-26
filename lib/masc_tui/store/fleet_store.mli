@@ -283,7 +283,6 @@ val apply_fleet_stream_event :
   observed_at:Clock.Mono.t -> Wire_fleet.fleet_stream_event -> t -> t
 val apply_heartbeat :
   keeper:string ->
-  phase:string option ->
   in_turn:bool option ->
   at_unix:float ->
   t ->

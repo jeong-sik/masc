@@ -4679,9 +4679,6 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
                        turn_ref = None;
                        started_at_unix = 100.0;
                        interrupt_token = "int-tok-7";
-                       phase = Some "thinking";
-                       tool_in_flight = None;
-                       elapsed_ms = Some 500.0;
                        preview_observed_through = None;
                        preview = None;
                      };
@@ -9934,9 +9931,6 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
             turn_ref = None;
             started_at_unix = 100.0;
             interrupt_token;
-            phase = Some "thinking";
-            tool_in_flight = None;
-            elapsed_ms = Some 500.0;
             preview_observed_through = None;
             preview = None;
           };
@@ -17120,9 +17114,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       turn_ref = Some "trace-1#15206";
       started_at_unix = 1795503055.0;
       interrupt_token = "itok-auto-15206";
-      phase = None;
-      tool_in_flight = None;
-      elapsed_ms = None;
       preview_observed_through = None;
       preview = Some active_preview_waiting;
     }
@@ -17670,8 +17661,8 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
       state =
         Turn_active
           { lane = Lane_proactive; turn_ref = Some ref_id; started_at_unix = 90.0;
-            interrupt_token = token; phase = None; tool_in_flight = None;
-            elapsed_ms = None; preview_observed_through = Some revision;
+            interrupt_token = token;
+            preview_observed_through = Some revision;
             preview = Some (preview revision text) } }
   in
   let missing_preview (turn_row : Wire_fleet.keeper_turn_row) revision =
@@ -23499,8 +23490,8 @@ let preview_reporting ?(activity = Wire_fleet.Preview_streaming) open_activities
 let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last_tool
     : Wire_fleet.active_turn =
   { lane = Wire_fleet.Lane_proactive; turn_ref = None; started_at_unix = 90.0;
-    interrupt_token = "tok-open-work"; phase = None; tool_in_flight = None;
-    elapsed_ms = None; preview_observed_through = Some 1;
+    interrupt_token = "tok-open-work";
+    preview_observed_through = Some 1;
     preview = Some (preview_reporting ~activity activities last_tool) }
 ;;
 
@@ -23614,6 +23605,27 @@ let test_open_work_of_preview_names_what_is_open () =
     (of_activity Wire_fleet.Preview_failed);
   Alcotest.(check (option string)) "a turn still preparing is not open work" None
     (of_activity Wire_fleet.Preview_preparing);
+;;
+
+(* A call can stay open without running: one a gate refused in the agent
+   loop, or a native run whose end never came. It sits before the call that
+   runs in the server's list. The running one is named and the other counted. *)
+let test_open_work_of_preview_names_the_call_that_runs () =
+  let phrase activities =
+    match Fleet_store.open_work_of_preview (preview_reporting (Some activities) None) with
+    | Some work -> Some (ko work.phrase, en work.phrase)
+    | None -> None
+  in
+  Alcotest.(check (option (pair string string))) "a call that never ran does not hide the running one"
+    (Some ("도구 실행 중 · Execute 외 1건", "Running Execute +1 more"))
+    (phrase [ open_tool "Write" Wire_fleet.Tool_requested 3.0; open_tool "Execute" Wire_fleet.Tool_executing 4.0 ]);
+  Alcotest.(check (option (pair string string))) "with nothing running the first call is named"
+    (Some ("도구 실행 전 · Write 외 1건", "Calling Write +1 more"))
+    (phrase [ open_tool "Write" Wire_fleet.Tool_requested 3.0; open_tool "Skill" Wire_fleet.Tool_requested 4.0 ]);
+  let shared = open_tool "Read" Wire_fleet.Tool_executing 3.0 in
+  Alcotest.(check (option (pair string string))) "two open calls that are one value are still two"
+    (Some ("도구 실행 중 · Read 외 1건", "Running Read +1 more"))
+    (phrase [ shared; shared ])
 ;;
 
 let test_chat_status_uses_the_same_words_for_every_turn () =
@@ -24356,6 +24368,8 @@ let () =
             `Quick test_turn_preview_updates_keep_owner_and_skip_fleet_reads;
           Alcotest.test_case "the open work of a preview names what the turn is doing"
             `Quick test_open_work_of_preview_names_what_is_open;
+          Alcotest.test_case "open work names the call that runs"
+            `Quick test_open_work_of_preview_names_the_call_that_runs;
           Alcotest.test_case "compact chat phase preserves waiting and observation freshness"
             `Quick test_compact_chat_phase_preserves_wait_and_turn_freshness;
           Alcotest.test_case "chat status uses the same words for every turn and names a waiting message"
@@ -28636,9 +28650,6 @@ let () =
                                    turn_ref = None;
                                    started_at_unix = 100.0;
                                    interrupt_token = "tok-narrow-1";
-                                   phase = Some "thinking";
-                                   tool_in_flight = None;
-                                   elapsed_ms = Some 200.0;
                                    preview_observed_through = None;
                                    preview = None;
                                  };

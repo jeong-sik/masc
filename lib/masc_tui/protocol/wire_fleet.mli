@@ -142,9 +142,6 @@ type active_turn = {
   turn_ref : string option;
   started_at_unix : float;
   interrupt_token : string;
-  phase : string option;
-  tool_in_flight : string option;
-  elapsed_ms : float option;
   preview_observed_through : int option;
   (** The last revision observed for this Owner, including an absent preview. *)
   preview : turn_preview option;

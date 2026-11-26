@@ -99,7 +99,6 @@ type event =
   | Agent_core of agent_core_event
   | Keeper_heartbeat of {
       keeper : string;
-      phase : string option;
       in_turn : bool option;
       in_flight_ms : float option;
       at_unix : float;

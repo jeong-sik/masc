@@ -143,8 +143,6 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           .filter((p): p is string => Boolean(p))
           .join(' · ') || null
       : null)
-    ?? keeper.active_turn?.tool_in_flight
-    ?? null
   const laneFailures = keeper.runtime_lane_failures ?? []
   const turnBreakdown = keeper.turns_24h_breakdown
   const actionableDisposition =

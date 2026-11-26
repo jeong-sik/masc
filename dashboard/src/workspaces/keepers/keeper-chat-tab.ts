@@ -1676,12 +1676,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const turnObservedAt = snapshotAt === undefined
     ? undefined : Math.max(snapshotAt, matchedPreview?.receivedAt ?? snapshotAt)
   const turnStartedAt = activeTurn && snapshotAt !== undefined
-    ? (activeTurn.elapsed_ms != null && activeTurn.elapsed_ms >= 0
-        ? snapshotAt - activeTurn.elapsed_ms
-        : activeTurn.started_at_unix > 0 ? activeTurn.started_at_unix * 1000 : null)
+    ? (activeTurn.started_at_unix > 0 ? activeTurn.started_at_unix * 1000 : null)
     : null
-  const activeTool = activeTurn?.tool_in_flight
-    ?? (effectivePreview?.activity === 'tool' ? effectivePreview.last_tool : null)
+  const activeTool = effectivePreview?.activity === 'tool' ? effectivePreview.last_tool : null
   const liveToolName = activeTool ?? effectivePreview?.last_tool ?? null
   const isLiveToolInFlight = turnAnimating && activeTool !== null
     && (snapshotLive || matchedPreview?.preview.activity === 'tool')

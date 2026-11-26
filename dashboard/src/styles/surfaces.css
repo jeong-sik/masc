@@ -163,10 +163,14 @@
   background: var(--bg-1);
 }
 
+/* A card header: a title with its actions at the far end. Short of room, the
+   title is what gives way: it breaks over lines, inside a word if it has to.
+   The label of a button stays on one line. */
 .wka-h {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-2);
   margin-bottom: var(--sp-2);
 }
 
@@ -174,6 +178,11 @@
   margin: 0;
   font-size: var(--fs-13);
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wka-h button {
+  white-space: nowrap;
 }
 
 /* Logs surface */

@@ -98,6 +98,27 @@ describe('workspaces/infra repos-pulls-model', () => {
     expect(summarizePulls(pulls)).toEqual({ total: 3, conflicting: 1, checksFailing: 1, changesRequested: 1, ready: 1 })
   })
 
+  it('does not count an approval of an earlier commit as ready to merge', () => {
+    const approved = (number: number, headReview: RepoPull['headReview']): RepoPull => (
+      { number, draft: false, checks: 'passing', review: 'approved', mergeable: 'mergeable', headReview, author: 'a', keeper: null, title: 't' }
+    )
+    const pulls = [approved(1, 'reviewed_on_head'), approved(2, 'not_reviewed_on_head'), approved(3, 'review_history_incomplete'), approved(4, 'unknown')]
+    expect(summarizePulls(pulls).ready).toBe(1)
+    expect(filterPulls(pulls, 'ready').map((pull) => pull.number)).toEqual([1])
+  })
+
+  it('reads when a rate limit lifts as a number or as not said, and refuses anything else', () => {
+    const limited = (resetAt: unknown) => decodePullsSnapshot({
+      reader: { state: 'not_declared' },
+      repositories_error: null,
+      keepers: { state: 'listed' },
+      repositories: [{ repository_id: 'a', url: 'u', slug: 'a/b', pulls: { state: 'failed', observed_at: 90, failure: { kind: 'rate_limited', reset_at: resetAt } } }],
+    }).byRepo.get('a')?.pulls
+    expect(limited(200)).toMatchObject({ kind: 'failed', failure: { kind: 'rate_limited', resetAt: 200 } })
+    expect(limited(null)).toMatchObject({ kind: 'failed', failure: { kind: 'rate_limited', resetAt: null } })
+    expect(() => limited('soon')).toThrow('reset_at')
+  })
+
   it('narrows the table to the rows a chip counts', () => {
     const pulls: RepoPull[] = [
       { number: 1, draft: false, checks: 'passing', review: 'approved', mergeable: 'mergeable', headReview: 'reviewed_on_head', author: 'a', keeper: null, title: 't' },

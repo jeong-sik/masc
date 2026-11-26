@@ -114,7 +114,11 @@ function parseFailure(raw: unknown): PullFailure {
     case 'repository_not_visible': return { kind: 'repository_not_visible' }
     case 'token_rejected': return { kind: 'token_rejected' }
     case 'rate_limited':
-      return { kind: 'rate_limited', resetAt: typeof raw.reset_at === 'number' ? raw.reset_at : null }
+      // GitHub does not always say when the limit lifts: the server sends null then.
+      if (raw.reset_at !== null && typeof raw.reset_at !== 'number') {
+        throw new Error('pulls: failure.reset_at is neither a number nor null')
+      }
+      return { kind: 'rate_limited', resetAt: raw.reset_at }
     case 'forbidden': return { kind: 'forbidden', status: status() }
     case 'http_status': return { kind: 'http_status', status: status() }
     case 'graphql_errors':
@@ -258,10 +262,16 @@ export interface PullSummary {
   readonly ready: number
 }
 
-/** Nothing left on GitHub's side: not a draft, checks passing, approved, and
- *  mergeable. */
+/** Nothing left to do before a merge: not a draft, checks passing, mergeable,
+ *  and approved on the commit that would merge. An approval of an earlier
+ *  commit, or a review history that could not be read whole, is not that:
+ *  the row says "최신 커밋은 리뷰 전" and the count must not say otherwise. */
 function isReadyToMerge(pull: RepoPull): boolean {
-  return !pull.draft && pull.checks === 'passing' && pull.review === 'approved' && pull.mergeable === 'mergeable'
+  return !pull.draft
+    && pull.checks === 'passing'
+    && pull.review === 'approved'
+    && pull.headReview === 'reviewed_on_head'
+    && pull.mergeable === 'mergeable'
 }
 
 export function summarizePulls(pulls: readonly RepoPull[]): PullSummary {

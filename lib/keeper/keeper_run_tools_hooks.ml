@@ -32,6 +32,7 @@ type agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; identity_tool_index : Keeper_identity_tool_index.t
+  ; tool_reach : string -> Keeper_tool_reach.t option
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; project_for_runtime : Keeper_tools_agent_core.model_tool_projection
@@ -126,7 +127,6 @@ type ctx =
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; identity_tool_index : Keeper_identity_tool_index.t
-  ; tool_reach : string -> Keeper_tool_reach.t option
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   }

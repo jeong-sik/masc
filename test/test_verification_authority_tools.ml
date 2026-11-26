@@ -1322,13 +1322,13 @@ let test_stored_web_page_is_read_only_through_its_own_fetch () =
             | Tool_result.Completed _ -> Alcotest.failf "%s: the read answered" label
             | Tool_result.Deferred _ -> Alcotest.failf "%s: the read deferred" label
           in
-          let store = Masc.Tool_blob_store.create ~base_path:config.base_path in
+          let store = Tool_blob_store.create ~base_path:config.base_path in
           let unfetched =
-            Masc.Tool_blob_store.put_durable store
+            Tool_blob_store.put_durable store
               ~bytes:"another keeper's stored result" ~mime:"text/markdown"
           in
           refused
-            (`Assoc [ "sha256", `String unfetched.Masc.Tool_output.sha256 ])
+            (`Assoc [ "sha256", `String unfetched.Tool_output.sha256 ])
             "a stored text no fetch of this review returned";
           refused
             (`Assoc [ "sha256", `String sha256; "reference", `String "artifact:small.txt" ])

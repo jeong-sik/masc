@@ -10164,7 +10164,9 @@ let dive_max_scroll (m : Model.t) active =
           (* One header row above the numbered lines. *)
           max 0
             (List.length (String.split_on_char '\n' c.content) - max 1 (content.h - 1))
-      | None -> 0)
+      (* Nothing to measure until the body arrives. Bounding by the current
+         offset keeps the target line [o] chose. *)
+      | None -> m.nav.inspector_scroll_offset)
   | Nav.Verification_inspector req_id -> (
       match
         List.find_opt

@@ -391,6 +391,16 @@ val apply_file_peek :
   t ->
   t
 
+val reserve_file_peek :
+  since_ns:Clock.Mono.t -> keeper:string -> path:string -> t -> t
+(** The File inspector's read was sent: [Loading] until the reply. A body
+    already shown stays shown. *)
+
+val drop_file_peek_content : t -> t
+(** Forget the File inspector's body but keep which file it shows. After an
+    epoch change the same Keeper and path can name a file in another
+    workspace. *)
+
 val fail_file_peek :
   keeper:string ->
   path:string ->

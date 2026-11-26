@@ -1364,6 +1364,10 @@ let mark_stale_all t =
     runtime_trace = Observed.mark_stale t.runtime_trace;
     activity_seen_seqs = String_set.empty;
     activity_seen_entries = [];
+    file_peek =
+      Option.map
+        (fun r -> { r with peek_content = Observed.mark_stale r.peek_content })
+        t.file_peek;
     code =
       {
         t.code with
@@ -1761,6 +1765,21 @@ let apply_file_peek ~observed_at ~keeper ~path content t =
   update_file_peek ~keeper ~path (fun _ -> Observed.value ~observed_at content) t
 
 let fail_file_peek ~keeper ~path ~failure t = update_file_peek ~keeper ~path failure t
+
+let reserve_file_peek ~since_ns ~keeper ~path t =
+  update_file_peek ~keeper ~path
+    (function
+      | (Observed.Value _ | Observed.Loading _) as kept -> kept
+      | Observed.Absent | Observed.Unreported | Observed.Failed _ ->
+          Observed.loading ~since_ns)
+    t
+
+let drop_file_peek_content t =
+  {
+    t with
+    file_peek =
+      Option.map (fun r -> { r with peek_content = Observed.unreported }) t.file_peek;
+  }
 
 let apply_git_status ~observed_at ~scope snap t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t

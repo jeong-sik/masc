@@ -637,12 +637,11 @@ let fetches_for_inspector ~force (m : Model.t) =
       in
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
   | Some (Nav.File_inspector peek) ->
-      let needed =
-        needs_fetch ~force
-          (Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path m.infra)
+      let read =
+        Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path m.infra
       in
       []
-      |> add_if needed
+      |> add_if (needs_fetch ~force read && (force || not (Observed.is_loading read)))
            (Cmd.Get_workspace_file
               { scope = Wire_infra.Ws_keeper peek.keeper; path = peek.path })
 

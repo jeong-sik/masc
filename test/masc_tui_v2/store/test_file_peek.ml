@@ -196,6 +196,55 @@ let test_reopening_reads_again () =
   let _, cmds = press_o m in
   Alcotest.(check (list string)) "read again" [ "keeper:alpha lib/a.ml" ] (reads cmds)
 
+let shown_state (m : Model.t) =
+  Infra_store.file_peek_state ~keeper:"alpha" ~path:"lib/a.ml" m.infra
+
+let planned m = reads (View_fetches.fetches_for_current_view m)
+
+(* The first read shows as loading and is not planned a second time. *)
+let test_the_first_read_is_sent_once () =
+  let m, _ = opened () in
+  Alcotest.(check bool) "loading" true (Observed.is_loading (shown_state m));
+  Alcotest.(check (list string)) "not planned again" [] (planned m)
+
+let test_moving_before_the_body_keeps_the_target () =
+  let down m = fst (Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Down))) in
+  let m, _ = opened () in
+  let m = down m in
+  Alcotest.(check int) "target kept without a body" 8 m.nav.inspector_scroll_offset;
+  let m, _ = file_reply m ~path:"lib/a.ml" (Ok (content "lib/a.ml")) in
+  Alcotest.(check int) "moves once the body is here" 9 (down m).nav.inspector_scroll_offset
+
+let test_a_reconnect_reads_again () =
+  let m, _ = opened () in
+  let m, _ = file_reply m ~path:"lib/a.ml" (Ok (content "lib/a.ml")) in
+  let m = Model.mark_all_domains_stale m in
+  Alcotest.(check bool) "stale" true (Observed.is_stale (shown_state m));
+  Alcotest.(check (list string)) "read again" [ "keeper:alpha lib/a.ml" ] (planned m)
+
+(* The server comes back on another workspace, where the same Keeper and path
+   can name another file. *)
+let test_a_workspace_change_forgets_the_body () =
+  let m, _ = opened () in
+  let m, _ = file_reply m ~path:"lib/a.ml" (Ok (content "lib/a.ml")) in
+  let mismatch =
+    Msg.Workspace_mismatch
+      {
+        expected_instance = Some "inst-1";
+        observed_instance = Some "inst-2";
+        observed_workspace_sha256 = Some "sha-2";
+        message = "server restarted on another workspace";
+      }
+  in
+  let m, _ =
+    Update.step ~now:t0 m
+      (Msg.Http_reply { epoch = m.epoch; reply = Msg.Reply_dashboard_shell (Error mismatch) })
+  in
+  Alcotest.(check bool) "inspector still open" true (Option.is_some (peek_of m));
+  Alcotest.(check bool) "old body forgotten" true
+    (Option.is_none (Infra_store.file_peek_content ~keeper:"alpha" ~path:"lib/a.ml" m.infra));
+  Alcotest.(check (list string)) "read again" [ "keeper:alpha lib/a.ml" ] (planned m)
+
 let () =
   Alcotest.run "file_peek"
     [
@@ -213,5 +262,12 @@ let () =
           Alcotest.test_case "a failure after a shown file" `Quick
             test_a_failure_after_a_shown_file_is_a_failure;
           Alcotest.test_case "reopening reads again" `Quick test_reopening_reads_again;
+          Alcotest.test_case "the first read is sent once" `Quick
+            test_the_first_read_is_sent_once;
+          Alcotest.test_case "moving before the body keeps the target" `Quick
+            test_moving_before_the_body_keeps_the_target;
+          Alcotest.test_case "a reconnect reads again" `Quick test_a_reconnect_reads_again;
+          Alcotest.test_case "a workspace change forgets the body" `Quick
+            test_a_workspace_change_forgets_the_body;
         ] );
     ]

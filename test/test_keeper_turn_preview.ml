@@ -349,7 +349,10 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
       (Keeper_secret_redaction.redact_text redaction second);
     let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
-    Alcotest.(check string) "an unfinished line is held back" "" (tail keeper_name);
+    Alcotest.(check string) "only the safe prefix before the split secret streams"
+      "deploy with " (tail keeper_name);
+    Alcotest.(check bool) "no part of the secret prefix is served" false
+      (contains (tail keeper_name) "preview-split");
     Alcotest.(check bool) "while the activity already shows the response" true
       (contains
          (Keeper_turn_preview.status_text
@@ -361,8 +364,8 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
          tool_id=Some "background";tool_name=Some "Read"});
     Keeper_turn_preview.note_stream ~writer ~now:2.3
       (Agent_core.Types.ContentBlockStop {index=1});
-    Alcotest.(check string) "background tool start and end cannot release the prefix"
-      "" (tail keeper_name);
+    Alcotest.(check string) "background tool start and end cannot release the secret prefix"
+      "deploy with " (tail keeper_name);
     Keeper_turn_preview.note_stream ~writer ~now:3. (text_delta second);
     Alcotest.(check string) "the finished line arrives redacted"
       "deploy with [REDACTED] now\n" (tail keeper_name);
@@ -376,10 +379,14 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
 let test_held_text_is_released_at_the_message_stop () =
   let keeper_name = "held-tail-preview" in
   let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
-  Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta "no newline yet");
-  Alcotest.(check string) "held while the line is open" "" (tail keeper_name);
+  Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta "no newline yet ");
+  Alcotest.(check string) "safe text streams immediately without a newline"
+    "no newline yet " (tail keeper_name);
+  Keeper_turn_preview.note_stream ~writer ~now:2.5 (text_delta "ghp_");
+  Alcotest.(check string) "potential secret prefix stays held until stop"
+    "no newline yet " (tail keeper_name);
   Keeper_turn_preview.note_stream ~writer ~now:3. Agent_core.Types.MessageStop;
-  Alcotest.(check string) "released, not dropped, at the stop" "no newline yet"
+  Alcotest.(check string) "released, not dropped, at the stop" "no newline yet ghp_"
     (tail keeper_name)
 ;;
 
@@ -508,7 +515,9 @@ let test_released_source_position_through_turns_decoder () =
   with_secret_redaction ~keeper_name:name "exact-secret" (fun redaction ->
     let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name:name ~now:9. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:10. (text_delta "before exact-");
-    check_position 0 0;
+    check_position 0 (String.length "before ");
+    Alcotest.(check bool) "partial secret prefix is withheld from tail" false
+      (contains (current ()).text_tail "exact");
     Keeper_turn_preview.note_stream ~writer ~now:11. (text_delta "secret after\n");
     let expected = Keeper_secret_redaction.redact_text redaction "before exact-secret after\n" in
     check_position 0 (String.length expected);

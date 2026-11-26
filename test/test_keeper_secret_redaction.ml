@@ -779,8 +779,8 @@ let test_stream_text_redacts_an_escaped_secret_in_tool_arguments () =
     {|{"command":"echo [REDACTED]"}|} (forwarded_tool_arguments events)
 
 (* Provider chunks can cut a Hangul syllable in two. Text with no secret comes
-   out byte for byte, a line at a time, and the unfinished last line at the
-   stop reason. *)
+   out incrementally as soon as each UTF-8 codepoint completes, never emitting
+   a partial codepoint and never waiting for a newline or stop reason. *)
 let test_stream_text_passes_korean_through_whole () =
   with_exact_secret ~keeper_name:"stream-text-korean" "unrelated-secret-value-5550"
   @@ fun redaction ->
@@ -789,58 +789,67 @@ let test_stream_text_passes_korean_through_whole () =
   let cut_in_a_syllable = 7 in
   let second_cut = String.length korean - 5 in
   let stream = Stream_text.create redaction in
-  let before_stop =
+  let first_events =
+    Stream_text.on_event stream (text_delta 0 (String.sub korean 0 cut_in_a_syllable))
+  in
+  Alcotest.(check string) "complete syllables before the mid-syllable cut stream immediately"
+    "안녕" (forwarded_text first_events);
+  let rest_before_stop =
     feed stream
-      [ text_delta 0 (String.sub korean 0 cut_in_a_syllable)
-      ; text_delta 0 (String.sub korean cut_in_a_syllable (second_cut - cut_in_a_syllable))
+      [ text_delta 0 (String.sub korean cut_in_a_syllable (second_cut - cut_in_a_syllable))
       ; text_delta 0 (String.sub korean second_cut (String.length korean - second_cut))
       ]
   in
-  Alcotest.(check string) "the finished first line is released before the stop"
-    first_line (forwarded_text before_stop);
-  let events = before_stop @ Stream_text.on_event stream
-    (Agent_core.Types.MessageDelta {stop_reason=Some Agent_core.Types.EndTurn; usage=None}) in
-  Alcotest.(check string) "the text arrives unchanged and complete" korean
-    (forwarded_text events)
+  Alcotest.(check string) "all safe text including the trailing line without newline streams before stop"
+    korean (forwarded_text (first_events @ rest_before_stop));
+  let after_stop =
+    Stream_text.on_event stream
+      (Agent_core.Types.MessageDelta {stop_reason=Some Agent_core.Types.EndTurn; usage=None})
+  in
+  Alcotest.(check string) "nothing remains withheld at stop" "" (forwarded_text after_stop)
 
 let test_stream_text_releases_held_text_in_order () =
-  let stream = Stream_text.create R.empty in
-  Alcotest.(check int) "an unfinished line is held" 0
-    (List.length (without_headers (Stream_text.on_event stream (text_delta 0 "before the tool"))));
+  with_exact_secret ~keeper_name:"stream-text-order" "before-the-tool-secret"
+  @@ fun redaction ->
+  let stream = Stream_text.create redaction in
+  Alcotest.(check int) "a potential secret prefix is held" 0
+    (List.length (without_headers (Stream_text.on_event stream (text_delta 0 "before-the-tool"))));
   (match Stream_text.on_event stream Agent_core.Types.Ping with
    | [ Agent_core.Types.Ping ] -> ()
-   | _ -> Alcotest.fail "a ping passes without releasing the line");
+   | _ -> Alcotest.fail "a ping passes without releasing held text");
   (match
      Stream_text.on_event stream
        (Agent_core.Types.ContentBlockStop { index = 0 })
    with
    | [ Agent_core.Types.ContentBlockDelta
-         { index = 0; delta = Agent_core.Types.TextDelta "before the tool" }
+         { index = 0; delta = Agent_core.Types.TextDelta "before-the-tool" }
      ; Agent_core.Types.ContentBlockStop { index = 0 }
      ] -> ()
-   | _ -> Alcotest.fail "the model block's own stop releases its text before later tools");
+   | _ -> Alcotest.fail "the model block's own stop releases its held text before later tools");
   let (_ : Agent_core.Types.sse_event list) =
-    Stream_text.on_event stream (text_delta 0 "cut off")
+    Stream_text.on_event stream (text_delta 0 "before-the")
   in
   (match Stream_text.flush stream with
    | [ Agent_core.Types.ContentBlockDelta
-         { index = 0; delta = Agent_core.Types.TextDelta "cut off" }
+         { index = 0; delta = Agent_core.Types.TextDelta "before-the" }
      ] -> ()
    | _ -> Alcotest.fail "flush releases what a stream without a stop still held");
   Alcotest.(check int) "nothing is held after a flush" 0
     (List.length (Stream_text.flush stream))
 
 let test_stream_text_releases_under_the_scope_it_arrived_in () =
-  let stream = Stream_text.Scoped.create R.empty in
-  Alcotest.(check int) "an unfinished line is held" 0
+  with_exact_secret ~keeper_name:"stream-text-scope" "scope-one-secret"
+  @@ fun redaction ->
+  let stream = Stream_text.Scoped.create redaction in
+  Alcotest.(check int) "a potential secret prefix is held" 0
     (List.length (without_headers
-      (List.map snd (Stream_text.Scoped.on_event stream ~stream_scope:1 (text_delta 0 "scope one")))));
+      (List.map snd (Stream_text.Scoped.on_event stream ~stream_scope:1 (text_delta 0 "scope-one")))));
   match
     Stream_text.Scoped.on_event stream ~stream_scope:2
       (Agent_core.Types.MessageStart { id = "m2"; model = "model"; usage = None })
   with
   | [ (1, Agent_core.Types.ContentBlockDelta
-          { index = 0; delta = Agent_core.Types.TextDelta "scope one" })
+          { index = 0; delta = Agent_core.Types.TextDelta "scope-one" })
     ; (2, Agent_core.Types.MessageStart _)
     ] -> ()
   | _ -> Alcotest.fail "held text is released under its own scope before the next one"
@@ -851,27 +860,30 @@ let test_overlapping_content_keeps_its_own_redaction () =
   let stream = Stream_text.create redaction in
   let header = Agent_core.Types.MessageStart {id="same-response"; model="fixture"; usage=None} in
   let prefix = "overlapping-" and suffix = "private-value-4850" in
-  let events = feed stream
+  let events1 = feed stream
     [ header
     ; text_delta 0 prefix
     ; delta 1 (Agent_core.Types.ThinkingDelta prefix)
-    ; delta 2 (Agent_core.Types.InputJsonDelta ("{\"secret\":\"" ^ prefix))
+    ; delta 2 (Agent_core.Types.InputJsonDelta ({|{"secret":"|} ^ prefix))
     ; Agent_core.Types.ContentBlockStart
         {index=3;content_type="tool_use";tool_id=Some "other";tool_name=Some "Read"}
     ; delta 3 (Agent_core.Types.InputJsonSnapshot "{}")
     ; Agent_core.Types.ContentBlockStop {index=3}
     ; header
     ] in
-  Alcotest.(check string) "unrelated block events and header replay cannot release text" "" (forwarded_text events);
-  Alcotest.(check string) "nor reasoning" "" (forwarded_thinking events);
-  Alcotest.(check string) "nor another tool's argument prefix" "" (forwarded_tool_arguments events);
-  let events = feed stream
-    [ delta 2 (Agent_core.Types.InputJsonDelta (suffix ^ "\"}"))
+  Alcotest.(check string) "unrelated block events and header replay cannot release text" "" (forwarded_text events1);
+  Alcotest.(check string) "nor reasoning" "" (forwarded_thinking events1);
+  Alcotest.(check string) "only the safe JSON prefix before the held secret streams"
+    {|{"secret":"|} (forwarded_tool_arguments events1);
+  not_contains "held secret prefix never leaks in tool arguments"
+    (forwarded_tool_arguments events1) prefix;
+  let events2 = feed stream
+    [ delta 2 (Agent_core.Types.InputJsonDelta (suffix ^ {|"}|}))
     ; Agent_core.Types.ContentBlockStop {index=2}
     ] in
-  Alcotest.(check string) "only the completed tool arguments are released"
-    "{\"secret\":\"[REDACTED]\"}" (forwarded_tool_arguments events);
-  Alcotest.(check string) "tool stop does not release the model prefix" "" (forwarded_text events);
+  Alcotest.(check string) "completed tool arguments reconstruct with the secret masked"
+    {|{"secret":"[REDACTED]"}|} (forwarded_tool_arguments (events1 @ events2));
+  Alcotest.(check string) "tool stop does not release the model prefix" "" (forwarded_text events2);
   let events = feed stream [text_delta 0 suffix; Agent_core.Types.ContentBlockStop {index=0}] in
   Alcotest.(check string) "text's own stop sees its whole secret" "[REDACTED]" (forwarded_text events);
   Alcotest.(check string) "text stop leaves reasoning held" "" (forwarded_thinking events);
@@ -885,10 +897,10 @@ let test_argument_snapshot_replaces_only_its_pending_channel () =
   let stream = Stream_text.create redaction in
   let events = feed stream
     [text_delta 0 "snapshot-private-";
-     delta 1 (Agent_core.Types.InputJsonDelta "{\"secret\":\"superseded-prefix");
+     delta 1 (Agent_core.Types.InputJsonDelta "snapshot-private-");
      delta 1 (Agent_core.Types.InputJsonSnapshot ("{\"secret\":\"" ^ secret ^ "\"}"))] in
   Alcotest.(check string) "snapshot does not release unrelated text" "" (forwarded_text events);
-  Alcotest.(check string) "superseded argument prefix is never published" "" (forwarded_tool_arguments events);
+  Alcotest.(check string) "superseded held argument prefix is never published" "" (forwarded_tool_arguments events);
   (match without_headers events with
    | [Agent_core.Types.ContentBlockDelta {index=1;delta=InputJsonSnapshot snapshot}] ->
        Alcotest.(check string) "whole replacement is redacted" "{\"secret\":\"[REDACTED]\"}" snapshot
@@ -919,7 +931,7 @@ let test_authored_content_preserves_cross_channel_positions () =
     [text_delta 0 "left order-sensitive-";
      delta 1 (Agent_core.Types.ThinkingDelta "R\n");
      text_delta 0 "secret-8204 right\n"]
-    [0,"text","left [REDACTED]"; 1,"thinking","R\n"; 0,"text"," right\n"];
+    [0,"text","left "; 0,"text","[REDACTED]"; 1,"thinking","R\n"; 0,"text"," right\n"];
   let korean = "한" in
   check_order "a split UTF8 scalar belongs to its first source byte"
     [text_delta 0 (String.sub korean 0 1);
@@ -928,36 +940,42 @@ let test_authored_content_preserves_cross_channel_positions () =
     [0,"text",korean; 1,"thinking","R\n"; 0,"text","\n"]
 
 let test_snapshot_stop_follows_its_deferred_content () =
-  let stream = Stream_text.create R.empty in
+  with_exact_secret ~keeper_name:"snapshot-stop-order" "held-secret-prefix-01"
+  @@ fun redaction ->
+  let stream = Stream_text.create redaction in
   let before = feed stream
-    [text_delta 0 "held";
+    [text_delta 0 "held-secret-";
      delta 1 (Agent_core.Types.TextSnapshot "visible");
      Agent_core.Types.ContentBlockStop {index=1}] in
-  Alcotest.(check int) "neither snapshot nor its stop overtakes earlier content" 0
+  Alcotest.(check int) "neither snapshot nor its stop overtakes earlier held content" 0
     (List.length (without_headers before));
   match Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) with
-  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held"};
+  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held-secret-"};
      ContentBlockDelta {index=1;delta=TextSnapshot "visible"};
      ContentBlockStop {index=1}; ContentBlockStop {index=0}] -> ()
   | _ -> Alcotest.fail "snapshot-only block stop overtook its deferred content"
 
 let test_snapshot_discards_only_the_old_channel_owner () =
-  let stream = Stream_text.create R.empty in
+  with_exact_secret ~keeper_name:"snapshot-discard-owner" "held-secret-prefix-02"
+  @@ fun redaction ->
+  let stream = Stream_text.create redaction in
   ignore (feed stream
-    [text_delta 0 "held"; text_delta 1 "superseded";
+    [text_delta 0 "held-secret-"; text_delta 1 "held-secret-";
      delta 1 (Agent_core.Types.TextSnapshot "replacement");
      text_delta 1 " continuation\n";
      Agent_core.Types.ContentBlockStop {index=1}]);
   match Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) with
-  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held"};
+  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held-secret-"};
      ContentBlockDelta {index=1;delta=TextSnapshot "replacement"};
      ContentBlockDelta {index=1;delta=TextDelta " continuation\n"};
      ContentBlockStop {index=1}; ContentBlockStop {index=0}] -> ()
   | _ -> Alcotest.fail "discarded snapshot owner consumed or restored another owner's content"
 
 let test_long_later_content_waits_without_loss () =
-  let stream = Stream_text.create R.empty in
-  ignore (Stream_text.on_event stream (text_delta 0 "first"));
+  with_exact_secret ~keeper_name:"long-deferred-content" "first-secret-prefix-03"
+  @@ fun redaction ->
+  let stream = Stream_text.create redaction in
+  ignore (Stream_text.on_event stream (text_delta 0 "first-secret-"));
   (* A workload, not a product capacity or a timing threshold. Attribution
      must not revisit these completed chunks while the first channel waits. *)
   let lines = List.init 2_000 (fun i -> string_of_int i ^ "\n") in
@@ -966,7 +984,7 @@ let test_long_later_content_waits_without_loss () =
       (List.length (without_headers (Stream_text.on_event stream (text_delta 1 line))))) lines;
   let released = Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) in
   Alcotest.(check string) "all deferred lines follow the earlier text exactly once"
-    ("first" ^ String.concat "" lines) (forwarded_text released)
+    ("first-secret-" ^ String.concat "" lines) (forwarded_text released)
 
 let test_thinking_snapshot_keeps_split_secret_private () =
   with_exact_secret ~keeper_name:"thinking-snapshot" "snapshot-secret-7788" @@ fun redaction ->
@@ -985,6 +1003,241 @@ let test_thinking_snapshot_keeps_split_secret_private () =
     | Agent_core.Types.ContentBlockDelta{delta=ThinkingSnapshot text|ThinkingDelta text;_}->
       not_contains "no public event leaks secret" text "snapshot-secret-7788"
     | _->())events
+
+(* Token_incremental streaming tests: immediate release for safe prose,
+   exhaustive every-byte-offset security and exact equivalence with
+   [redact_text], false-positive guards, and UTF-8 completeness. *)
+let with_exact_secrets ~keeper_name secrets f =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name in
+  List.iteri
+    (fun idx secret ->
+       write_file
+         (Filename.concat (Filename.concat root "env") (Printf.sprintf "SECRET_%d" idx))
+         (secret ^ "\n"))
+    secrets;
+  f (R.snapshot ~base_path:base ~keeper_name)
+
+let check_incremental_exhaustive ~label ~redaction ~forbidden_substrings input =
+  let expected = R.redact_text redaction input in
+  let len = String.length input in
+  let run_chunks chunks =
+    let state = R.create_stream_state ~mode:R.Token_incremental redaction in
+    let emitted = List.map (R.redact_stream_chunk state) chunks in
+    let tail = R.redact_stream_finish state in
+    let all_pieces = emitted @ [ tail ] in
+    let joined = String.concat "" all_pieces in
+    Alcotest.(check string) (label ^ ": matches redact_text") expected joined;
+    List.iter
+      (fun forbidden ->
+         not_contains (label ^ ": joined never leaks " ^ forbidden) joined forbidden;
+         List.iter
+           (fun piece ->
+              not_contains (label ^ ": chunk never leaks " ^ forbidden) piece forbidden)
+           all_pieces)
+      forbidden_substrings
+  in
+  (* 1-byte-at-a-time split *)
+  let byte_chunks = List.init len (fun i -> String.make 1 input.[i]) in
+  run_chunks byte_chunks;
+  (* Every 2-chunk split at offset 1..len-1 *)
+  for cut = 1 to len - 1 do
+    run_chunks [ String.sub input 0 cut; String.sub input cut (len - cut) ]
+  done
+
+let test_token_incremental_releases_prose_immediately () =
+  let korean_chunks = [ "안녕하세요"; ", "; "실시간 "; "스트리밍"; "입니다." ] in
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  List.iter
+    (fun chunk ->
+       let out = R.redact_stream_chunk state chunk in
+       Alcotest.(check string) ("Korean chunk released immediately: " ^ chunk) chunk out)
+    korean_chunks;
+  Alcotest.(check string) "nothing left at finish" "" (R.redact_stream_finish state);
+  let english_chunks = [ "Hello"; ", "; "world"; "! "; "Streaming works." ] in
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  List.iter
+    (fun chunk ->
+       let out = R.redact_stream_chunk state chunk in
+       Alcotest.(check string) ("English chunk released immediately: " ^ chunk) chunk out)
+    english_chunks;
+  Alcotest.(check string) "nothing left at finish" "" (R.redact_stream_finish state);
+  (* Keeper_stream_text_redaction forwards TextDelta and ThinkingDelta immediately without newline. *)
+  let stream = Stream_text.create R.empty in
+  let text_ev = Stream_text.on_event stream (text_delta 0 "토큰 단위 응답") in
+  Alcotest.(check string) "TextDelta streams immediately without newline"
+    "토큰 단위 응답" (forwarded_text text_ev);
+  let think_ev = Stream_text.on_event stream (delta 1 (Agent_core.Types.ThinkingDelta "단계별 생각 중")) in
+  Alcotest.(check string) "ThinkingDelta streams immediately without newline"
+    "단계별 생각 중" (forwarded_thinking think_ev)
+
+let test_token_incremental_exhaustive_exact_secrets () =
+  let secret = "exact-stream-secret-4242" in
+  with_exact_secrets ~keeper_name:"inc-exact" [ secret ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"exact secret"
+    ~redaction
+    ~forbidden_substrings:[ secret; "stream-secret-4242" ]
+    ("prefix " ^ secret ^ " suffix");
+  with_exact_secrets ~keeper_name:"inc-json-escaped" [ quoted_secret ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"JSON-escaped exact secret"
+    ~redaction
+    ~forbidden_substrings:[ quoted_secret_in_json; "quoted-value" ]
+    ({|{"cmd":"echo |} ^ quoted_secret_in_json ^ {|"}|});
+  let short_secret = "overlap-secret" in
+  let long_secret = "overlap-secret-extended-99" in
+  with_exact_secrets ~keeper_name:"inc-overlap" [ short_secret; long_secret ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"overlapping short+long exact secrets"
+    ~redaction
+    ~forbidden_substrings:[ short_secret; long_secret; "extended-99" ]
+    ("a " ^ long_secret ^ " b " ^ short_secret ^ " c");
+  (* Cross-overlapping equal-length exact secrets *)
+  let s1 = "zbcdef12" and s2 = "ef12aaaa" in
+  with_exact_secrets ~keeper_name:"inc-cross-overlap" [ s1; s2 ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"cross-overlapping exact secrets"
+    ~redaction
+    ~forbidden_substrings:[ s1 ]
+    ("pre " ^ "zbcdef12aaaa" ^ " post");
+  (* Exact secret immediately followed by structural secret *)
+  let exact = "secret-val" in
+  with_exact_secrets ~keeper_name:"inc-exact-then-sk" [ exact ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"exact secret adjacent to sk- token"
+    ~redaction
+    ~forbidden_substrings:[ exact; "secret1234" ]
+    (exact ^ "sk-" ^ "secret1234 done");
+  (* Overlapping exact secrets inside sk- token *)
+  with_exact_secrets ~keeper_name:"inc-sk-overlap-exact" [ "12345678"; "23456789" ] @@ fun redaction ->
+  check_incremental_exhaustive
+    ~label:"overlapping exact secrets inside sk- token"
+    ~redaction
+    ~forbidden_substrings:[ "12345678"; "23456789" ]
+    ("sk-" ^ "123456789 done");
+  (* Multi-line exact secret with short middle line *)
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name:"inc-multiline" in
+  let multiline = "first-line-secret\nshort\nlast-line-secret" in
+  write_file (Filename.concat (Filename.concat root "files") "multi") multiline;
+  let redaction = R.snapshot ~base_path:base ~keeper_name:"inc-multiline" in
+  check_incremental_exhaustive
+    ~label:"multiline exact secret"
+    ~redaction
+    ~forbidden_substrings:[ "first-line-secret"; "short"; "last-line-secret" ]
+    ("before\n" ^ multiline ^ "\nafter")
+
+let test_token_incremental_exhaustive_structural_patterns () =
+  let cases =
+    [ "sk-proj token", "use " ^ "sk-" ^ "proj-secret1234 now", [ "proj-secret1234" ]
+    ; "stripe live", "key=" ^ "sk_" ^ "live_secret1234!", [ "live_secret1234" ]
+    ; "stripe test", "key=" ^ "sk_" ^ "test_secret1234!", [ "test_secret1234" ]
+    ; "stripe restricted", "key=" ^ "rk_" ^ "live_secret1234!", [ "live_secret1234" ]
+    ; "github ghp_", "tok=" ^ "ghp_" ^ "1234567890abcdef end", [ "1234567890abcdef" ]
+    ; "github fine-grained", "tok=" ^ "github_" ^ "pat_abc.def-123 end", [ "pat_abc.def-123" ]
+    ; "github stateless ghs_", "tok=" ^ "ghs_" ^ "1234.eyJ.sig end", [ "1234.eyJ.sig" ]
+    ; "slack xoxb-", "tok=" ^ "xoxb-" ^ "123-456 end", [ "123-456" ]
+    ; "slack xoxp-", "tok=" ^ "xoxp-" ^ "789-abc end", [ "789-abc" ]
+    ; "masc mpat_", "tok=" ^ "mpat_" ^ "id1.deadbeef1234 end", [ "deadbeef1234" ]
+    ; "masc msvc_", "tok=" ^ "msvc_" ^ "svc1.cafebabe5678 end", [ "cafebabe5678" ]
+    ; "aws AKIA", "id=" ^ "AKIA" ^ "1234567890123456 ok", [ "1234567890123456" ]
+    ; "aws ASIA", "id=" ^ "ASIA" ^ "1234567890123456 ok", [ "1234567890123456" ]
+    ; "url credential", "go https://user:pass" ^ "@example.com/path", [ "user:pass" ]
+    ; "url credential with @ and :", "go https://user:p@ss:word" ^ "@example.com/path", [ "p@ss:word" ]
+    ; "Authorization header", "Authorization: Bearer supersecret123\nnext", [ "supersecret123" ]
+    ; "Proxy-Authorization header", "Proxy-Authorization: Basic dXNlcjpwYXNz\nnext", [ "dXNlcjpwYXNz" ]
+    ; "X-Api-Key header", "X-Api-Key: secret999\nnext", [ "secret999" ]
+    ; "X-Goog-Api-Key header", "X-Goog-Api-Key: googsecret888\nnext", [ "googsecret888" ]
+    ; "X-Auth-Token header", "X-Auth-Token: authtok777\nnext", [ "authtok777" ]
+    ; "Cookie header", "Cookie: session=opaque666\nnext", [ "opaque666" ]
+    ; "Set-Cookie header", "Set-Cookie: session=opaque555; HttpOnly\nnext", [ "opaque555" ]
+    ; "PEM private key block"
+    , "before\n-----BEGIN " ^ "PRIVATE KEY-----\nMIIEsecretbody\n-----END " ^ "PRIVATE KEY-----\nafter"
+    , [ "MIIEsecretbody" ]
+    ; "PEM inside Authorization header"
+    , "Authorization: x -----BEGIN " ^ "PRIVATE KEY-----\nopaque body\n-----END " ^ "PRIVATE KEY----- tail\nnext"
+    , [ "opaque body"; "tail" ]
+    ]
+  in
+  List.iter
+    (fun (label, input, forbidden_substrings) ->
+       check_incremental_exhaustive ~label ~redaction:R.empty ~forbidden_substrings input)
+    cases
+
+let test_token_incremental_false_positive_guards () =
+  (* Word-boundary lookbehind: "ta" + "sk-1234" -> "task-1234", not redacted. *)
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  let p1 = R.redact_stream_chunk state "ta" in
+  let p2 = R.redact_stream_chunk state "sk-1234" in
+  let p3 = R.redact_stream_finish state in
+  Alcotest.(check string) "ta streams immediately" "ta" p1;
+  Alcotest.(check string) "task-1234 is not falsely redacted" "task-1234" (p1 ^ p2 ^ p3);
+  (* Synthetic lookbehind char must not falsely trigger 'authorization' on "ba"+"uthorization: ..." *)
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  let b1 = R.redact_stream_chunk state "ba" in
+  let b2 = R.redact_stream_chunk state "uthorization: keep-me\n" in
+  let b3 = R.redact_stream_finish state in
+  Alcotest.(check string) "bauthorization is not falsely redacted"
+    "bauthorization: keep-me\n" (b1 ^ b2 ^ b3);
+  (* AKIA/ASIA + 17th char must NOT be redacted. *)
+  let akia17 = "AKIA" ^ "12345678901234567" in
+  check_incremental_exhaustive ~label:"AKIA+17 not redacted"
+    ~redaction:R.empty ~forbidden_substrings:[] akia17;
+  let asia17 = "ASIA" ^ "12345678901234567" in
+  check_incremental_exhaustive ~label:"ASIA+17 not redacted"
+    ~redaction:R.empty ~forbidden_substrings:[] asia17;
+  (* AKIA followed by exact secret vs ordinary word starting with same letter. *)
+  with_exact_secrets ~keeper_name:"inc-akia-eow" [ "secret1234" ] @@ fun redaction ->
+  check_incremental_exhaustive ~label:"AKIA followed by exact secret"
+    ~redaction ~forbidden_substrings:[ "1234567890123456"; "secret1234" ]
+    ("AKIA" ^ "1234567890123456secret1234 ");
+  check_incremental_exhaustive ~label:"AKIA followed by ordinary word"
+    ~redaction ~forbidden_substrings:[]
+    ("AKIA" ^ "1234567890123456something ");
+  (* Non-private PEM certificate and user-only SSH URL are preserved. *)
+  check_incremental_exhaustive ~label:"PEM certificate preserved"
+    ~redaction:R.empty ~forbidden_substrings:[]
+    ("-----BEGIN CERTIFICATE-----\npublic-cert\n-----END CERTIFICATE-----\n");
+  check_incremental_exhaustive ~label:"SSH user-only URL preserved"
+    ~redaction:R.empty ~forbidden_substrings:[]
+    "ssh://git@github.com/owner/repo.git"
+
+let test_token_incremental_utf8_byte_by_byte () =
+  let samples = [ "가나다"; "안녕😀세상😁!"; "prefix-가나다-suffix" ] in
+  List.iter
+    (fun sample ->
+       let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+       let chunks =
+         List.init (String.length sample) (fun i ->
+           let out = R.redact_stream_chunk state (String.make 1 sample.[i]) in
+           Alcotest.(check bool)
+             (Printf.sprintf "valid utf8 at byte %d of %S" i sample)
+             true (String_util.is_valid_utf8 out);
+           out)
+       in
+       let tail = R.redact_stream_finish state in
+       Alcotest.(check bool) "valid utf8 at finish" true (String_util.is_valid_utf8 tail);
+       Alcotest.(check string) "exact UTF-8 roundtrip" sample (String.concat "" chunks ^ tail))
+    samples
+
+let test_token_incremental_bounded_unterminated_pem () =
+  let body = String.make 12_000 'M' in
+  let input =
+    "before\n-----BEGIN " ^ "PRIVATE KEY-----\n" ^ body ^ "\n-----END " ^ "PRIVATE KEY-----\nafter"
+  in
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  let out = R.redact_stream_chunk state input in
+  let tail = R.redact_stream_finish state in
+  let joined = out ^ tail in
+  not_contains "oversized PEM body never leaks" joined "MMMMMM";
+  contains "prefix before PEM survives" joined "before\n";
+  contains "suffix after PEM survives" joined "\nafter";
+  contains "PEM leaves redaction marker" joined "[REDACTED]"
 
 let () =
   Alcotest.run
@@ -1070,5 +1323,17 @@ let () =
             test_snapshot_discards_only_the_old_channel_owner;
           Alcotest.test_case "stream text: long deferred content retains its order" `Quick
             test_long_later_content_waits_without_loss;
+          Alcotest.test_case "token incremental: Korean and English prose release immediately" `Quick
+            test_token_incremental_releases_prose_immediately;
+          Alcotest.test_case "token incremental: exhaustive exact secret splits" `Quick
+            test_token_incremental_exhaustive_exact_secrets;
+          Alcotest.test_case "token incremental: exhaustive structural pattern splits" `Quick
+            test_token_incremental_exhaustive_structural_patterns;
+          Alcotest.test_case "token incremental: false-positive guards" `Quick
+            test_token_incremental_false_positive_guards;
+          Alcotest.test_case "token incremental: UTF-8 byte-by-byte completeness" `Quick
+            test_token_incremental_utf8_byte_by_byte;
+          Alcotest.test_case "token incremental: bounded unterminated PEM block" `Quick
+            test_token_incremental_bounded_unterminated_pem;
         ] )
     ]

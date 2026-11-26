@@ -61,9 +61,21 @@ val redact_text_mapped : t -> string -> Secret_patterns.source_piece list
 (** Same policy as {!redact_text}, with half-open original input byte spans.
     No output-text comparison is used to recover replacement positions. *)
 
+type stream_release_mode =
+  | Line_buffered
+  | Token_incremental
+(** Controls when {!redact_stream_chunk_mapped} / {!redact_stream_chunk}
+    releases already-safe bytes:
+    - [Line_buffered] (default): holds bytes until [\n], [\r], or the bounded
+      flush threshold, matching shell/execute log-row callers.
+    - [Token_incremental]: releases every prefix that cannot start or extend
+      any exact secret, structural secret pattern, or incomplete UTF-8
+      codepoint immediately on every chunk, while preserving word-boundary
+      lookbehind and atomic multi-line PEM / multi-line exact-secret masking. *)
+
 type stream_state
 
-val create_stream_state : t -> stream_state
+val create_stream_state : ?mode:stream_release_mode -> t -> stream_state
 
 type stream_release =
   { pieces : Secret_patterns.source_piece list

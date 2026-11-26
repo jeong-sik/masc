@@ -3,13 +3,21 @@ type t =
   ; any_exact_value : Re.re option
   ; exact_values : string list
   ; max_exact_value_len : int
+  ; has_multiline_exact_value : bool
   }
+
+type stream_release_mode =
+  | Line_buffered
+  | Token_incremental
 
 type stream_state =
   { redaction : t
+  ; mode : stream_release_mode
   ; pending_line : Buffer.t
   ; mutable next_bounded_flush_at : int
   ; mutable consumed : int
+  ; mutable prev_ended_word : bool
+  ; mutable in_unterminated_pem : bool
   }
 
 type stream_release =
@@ -18,7 +26,12 @@ type stream_release =
   }
 
 let empty =
-  { patterns = []; any_exact_value = None; exact_values = []; max_exact_value_len = 0 }
+  { patterns = []
+  ; any_exact_value = None
+  ; exact_values = []
+  ; max_exact_value_len = 0
+  ; has_multiline_exact_value = false
+  }
 
 let min_secret_len = 8
 let max_secret_file_bytes = 64 * 1024
@@ -271,7 +284,17 @@ let compile_exact_values values =
   let max_exact_value_len =
     List.fold_left (fun longest value -> max longest (String.length value)) 0 values
   in
-  { patterns; any_exact_value; exact_values = values; max_exact_value_len }
+  let has_multiline_exact_value =
+    List.exists
+      (fun value -> String.contains value '\n' || String.contains value '\r')
+      values
+  in
+  { patterns
+  ; any_exact_value
+  ; exact_values = values
+  ; max_exact_value_len
+  ; has_multiline_exact_value
+  }
 
 let build ~redact_identity_scalars sources =
   let values =
@@ -375,21 +398,28 @@ let snapshot ~base_path ~keeper_name =
    [any_exact_value] does not match leaves the passes with nothing to do. The
    passes keep their longest-value-first order when something matches: a value
    that contains another must be replaced before the shorter one splits it. *)
-let redact_text_mapped t text =
+let redact_exact_pieces t text =
   let pieces =
     if String.equal text "" then []
-    else [ Secret_patterns.Copied
-             { source = { first_byte = 0; past_byte = String.length text }; text } ] in
-  let pieces =
-    match t.any_exact_value with
-    | Some any_exact_value when Re.execp any_exact_value text ->
+    else
+      [ Secret_patterns.Copied
+          { source = { first_byte = 0; past_byte = String.length text }; text }
+      ]
+  in
+  match t.any_exact_value with
+  | Some any_exact_value when Re.execp any_exact_value text ->
       List.fold_left
         (fun pieces pattern -> Secret_patterns.mask_matches pattern pieces)
         pieces
         t.patterns
-    | Some _ | None -> pieces
-  in
-  Secret_patterns.redact_pieces pieces
+  | Some _ | None -> pieces
+
+let redact_text_mapped t text =
+  Secret_patterns.redact_pieces (redact_exact_pieces t text)
+
+let redact_text_mapped_with_lookbehind ~prev_ended_word t text =
+  Secret_patterns.redact_pieces_with_lookbehind ~prev_ended_word
+    (redact_exact_pieces t text)
 
 let redact_text t text = Secret_patterns.render_pieces (redact_text_mapped t text)
 
@@ -401,11 +431,14 @@ let stream_flush_threshold redaction =
   stream_overlap_bytes redaction + stream_emit_bytes
 ;;
 
-let create_stream_state redaction =
+let create_stream_state ?(mode = Line_buffered) redaction =
   { redaction
+  ; mode
   ; pending_line = Buffer.create 256
   ; next_bounded_flush_at = stream_flush_threshold redaction
   ; consumed = 0
+  ; prev_ended_word = false
+  ; in_unterminated_pem = false
   }
 ;;
 
@@ -432,10 +465,197 @@ let shift_piece offset = function
       Secret_patterns.Masked
         { source = { first_byte = source.first_byte + offset; past_byte = source.past_byte + offset }; replacement }
 
+let rec last_nonempty_piece_char = function
+  | [] -> None
+  | piece :: rest ->
+      match last_nonempty_piece_char rest with
+      | Some _ as found -> found
+      | None ->
+          let text =
+            match piece with
+            | Secret_patterns.Copied { text; _ } -> text
+            | Secret_patterns.Masked { replacement; _ } -> replacement
+          in
+          let len = String.length text in
+          if len = 0 then None else Some text.[len - 1]
+
+let update_prev_ended_word state pieces =
+  match last_nonempty_piece_char pieces with
+  | None -> ()
+  | Some ch -> state.prev_ended_word <- Secret_patterns.is_word_char ch
+
 let emit_mapped (state : stream_state) emitted ~source_length pieces =
   let pieces = List.map (shift_piece state.consumed) pieces in
   emitted := List.rev_append pieces !emitted;
   state.consumed <- state.consumed + source_length
+
+(* Largest [k <= max_len] such that [s[0..k-1]] does not end with an incomplete
+   UTF-8 codepoint (including at [max_len = String.length s], where
+   [String_util.utf8_char_boundary] returns [len] verbatim). Invalid lead bytes
+   or stray continuation runs that cannot be completed by future bytes are left
+   at [max_len] so streaming never stalls on binary input. *)
+let complete_utf8_prefix_len s max_len =
+  let max_len = min max_len (String.length s) in
+  if max_len <= 0 then 0
+  else
+    let last_b = Char.code s.[max_len - 1] in
+    if last_b < 0x80 then max_len
+    else
+      let rec find_lead k cont_count =
+        if k < 0 then -1
+        else
+          let b = Char.code s.[k] in
+          if (b land 0xC0) = 0x80 then
+            if cont_count >= 3 then -1 else find_lead (k - 1) (cont_count + 1)
+          else k
+      in
+      let lead = find_lead (max_len - 1) 0 in
+      if lead < 0 then max_len
+      else
+        let b = Char.code s.[lead] in
+        let expected_width =
+          if b < 0x80 then 1
+          else if b >= 0xC2 && b <= 0xDF then 2
+          else if b >= 0xE0 && b <= 0xEF then 3
+          else if b >= 0xF0 && b <= 0xF4 then 4
+          else 0
+        in
+        if expected_width <= 1 then max_len
+        else if lead + expected_width <= max_len then max_len
+        else lead
+
+let is_prefix_of_value text ~start ~len value =
+  let suffix_len = len - start in
+  suffix_len <= String.length value
+  &&
+  let rec loop offset =
+    offset = suffix_len
+    || (Char.equal text.[start + offset] value.[offset] && loop (offset + 1))
+  in
+  loop 0
+
+let exact_suffix_hold_from redaction text =
+  let len = String.length text in
+  if len = 0 || redaction.max_exact_value_len = 0 then len
+  else
+    let first = max 0 (len - redaction.max_exact_value_len) in
+    let rec scan i =
+      if i >= len then len
+      else if List.exists (is_prefix_of_value text ~start:i ~len) redaction.exact_values
+      then i
+      else scan (i + 1)
+    in
+    scan first
+
+let source_offset_of_rendered pieces rendered_offset =
+  let rec walk rendered_pos = function
+    | [] -> 0
+    | piece :: rest ->
+        let source, piece_len, is_masked =
+          match piece with
+          | Secret_patterns.Copied { source; text } -> source, String.length text, false
+          | Secret_patterns.Masked { source; replacement } ->
+              source, String.length replacement, true
+        in
+        if rendered_offset <= rendered_pos then source.first_byte
+        else if rendered_offset < rendered_pos + piece_len then
+          if is_masked then source.first_byte
+          else source.first_byte + (rendered_offset - rendered_pos)
+        else if rest = [] then source.past_byte
+        else walk (rendered_pos + piece_len) rest
+  in
+  walk 0 pieces
+
+let rendered_offset_of_source pieces source_offset =
+  let rec walk rendered_pos = function
+    | [] -> rendered_pos
+    | piece :: rest ->
+        let source, piece_len =
+          match piece with
+          | Secret_patterns.Copied { source; text } -> source, String.length text
+          | Secret_patterns.Masked { source; replacement } ->
+              source, String.length replacement
+        in
+        if source_offset <= source.first_byte then rendered_pos
+        else if source_offset < source.past_byte then
+          rendered_pos + (source_offset - source.first_byte)
+        else walk (rendered_pos + piece_len) rest
+  in
+  walk 0 pieces
+
+let pull_back_straddling_exact_masks exact_pieces cut =
+  List.fold_left
+    (fun cut piece ->
+       match piece with
+       | Secret_patterns.Copied _ -> cut
+       | Secret_patterns.Masked { source; _ } ->
+           if source.first_byte < cut && cut < source.past_byte
+           then min cut source.first_byte
+           else cut)
+    cut
+    exact_pieces
+
+let safe_incremental_cut state pending =
+  let len = String.length pending in
+  if len = 0 then 0
+  else
+    let h_exact = exact_suffix_hold_from state.redaction pending in
+    let exact_pieces = redact_exact_pieces state.redaction pending in
+    let exact_rendered =
+      match exact_pieces with
+      | [ Secret_patterns.Copied { text; _ } ] when text == pending -> pending
+      | [] | (Secret_patterns.Copied _ | Secret_patterns.Masked _) :: _ ->
+          Secret_patterns.render_pieces exact_pieces
+    in
+    let h_struct_raw =
+      Secret_patterns.safe_stream_prefix_len
+        ~prev_ended_word:state.prev_ended_word
+        pending
+    in
+    let h_struct =
+      if exact_rendered == pending then h_struct_raw
+      else
+        let h_struct_exact =
+          Secret_patterns.safe_stream_prefix_len
+            ~prev_ended_word:state.prev_ended_word
+            exact_rendered
+          |> source_offset_of_rendered exact_pieces
+        in
+        min h_struct_raw h_struct_exact
+    in
+    let initial_cut = min h_exact h_struct in
+    let rec tighten cut =
+      if cut <= 0 then 0
+      else
+        let cut1 = complete_utf8_prefix_len pending cut in
+        let cut2 = pull_back_straddling_exact_masks exact_pieces cut1 in
+        let cut3 =
+          if cut2 <= 0 || cut2 = len then cut2
+          else
+            let rendered_cut = rendered_offset_of_source exact_pieces cut2 in
+            let safe_rendered_cut =
+              Secret_patterns.cut_before_straddling_match
+                ~prev_ended_word:state.prev_ended_word
+                exact_rendered
+                rendered_cut
+            in
+            let cut_from_exact =
+              if safe_rendered_cut = rendered_cut then cut2
+              else min cut2 (source_offset_of_rendered exact_pieces safe_rendered_cut)
+            in
+            if exact_rendered == pending then cut_from_exact
+            else
+              let safe_raw_cut =
+                Secret_patterns.cut_before_straddling_match
+                  ~prev_ended_word:state.prev_ended_word
+                  pending
+                  cut_from_exact
+              in
+              min cut_from_exact safe_raw_cut
+        in
+        if cut3 < cut then tighten cut3 else cut3
+    in
+    tighten initial_cut
 
 let emit_bounded_prefix state emitted stop =
   let pending = Buffer.contents state.pending_line in
@@ -471,8 +691,22 @@ let emit_bounded_prefix state emitted stop =
     | None -> incr cursor
   done;
   copy_until !cursor;
-  emit_mapped state emitted ~source_length:!cursor
-    (Secret_patterns.redact_pieces (List.rev !pieces));
+  let redacted =
+    match state.mode with
+    | Line_buffered -> Secret_patterns.redact_pieces (List.rev !pieces)
+    | Token_incremental ->
+        if !cursor >= 27
+           && Secret_patterns.has_unclosed_pem_block (String.sub pending 0 !cursor)
+        then state.in_unterminated_pem <- true;
+        let redacted =
+          Secret_patterns.redact_pieces_with_lookbehind
+            ~prev_ended_word:state.prev_ended_word
+            (List.rev !pieces)
+        in
+        update_prev_ended_word state redacted;
+        redacted
+  in
+  emit_mapped state emitted ~source_length:!cursor redacted;
   Buffer.clear state.pending_line;
   Buffer.add_substring
     state.pending_line
@@ -483,8 +717,28 @@ let emit_bounded_prefix state emitted stop =
 
 let flush_complete_record state emitted =
   let pending = Buffer.contents state.pending_line in
-  emit_mapped state emitted ~source_length:(String.length pending)
-    (redact_text_mapped state.redaction pending);
+  let len = String.length pending in
+  if len > 0 then (
+    let redacted =
+      if state.in_unterminated_pem then
+        [ Secret_patterns.Masked
+            { source = { first_byte = 0; past_byte = len }
+            ; replacement = "[REDACTED]"
+            }
+        ]
+      else
+        match state.mode with
+        | Line_buffered -> redact_text_mapped state.redaction pending
+        | Token_incremental ->
+            redact_text_mapped_with_lookbehind
+              ~prev_ended_word:state.prev_ended_word
+              state.redaction
+              pending
+    in
+    emit_mapped state emitted ~source_length:len redacted;
+    match state.mode with
+    | Line_buffered -> ()
+    | Token_incremental -> update_prev_ended_word state redacted);
   Buffer.clear state.pending_line;
   state.next_bounded_flush_at <- stream_flush_threshold state.redaction
 ;;
@@ -499,21 +753,116 @@ let flush_bounded_prefix_if_needed state emitted =
     state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
 ;;
 
+let flush_unterminated_pem_bounded state emitted pending pending_len =
+  let overlap = stream_overlap_bytes state.redaction in
+  let stop = pending_len - overlap in
+  if stop > 0 then (
+    let pieces =
+      [ Secret_patterns.Masked
+          { source = { first_byte = 0; past_byte = stop }
+          ; replacement = "[REDACTED]"
+          }
+      ]
+    in
+    emit_mapped state emitted ~source_length:stop pieces;
+    state.prev_ended_word <- false;
+    Buffer.clear state.pending_line;
+    Buffer.add_substring state.pending_line pending stop (pending_len - stop);
+    state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
+
+let handle_unterminated_pem_byte state emitted char =
+  Buffer.add_char state.pending_line char;
+  let pending_len = Buffer.length state.pending_line in
+  if Char.equal char '-' && pending_len >= 25 then (
+    let pending = Buffer.contents state.pending_line in
+    match Secret_patterns.find_pem_footer_end pending with
+    | Some end_pos ->
+        let pieces =
+          [ Secret_patterns.Masked
+              { source = { first_byte = 0; past_byte = end_pos }
+              ; replacement = "[REDACTED]"
+              }
+          ]
+        in
+        emit_mapped state emitted ~source_length:end_pos pieces;
+        state.prev_ended_word <- false;
+        state.in_unterminated_pem <- false;
+        Buffer.clear state.pending_line;
+        Buffer.add_substring state.pending_line pending end_pos (pending_len - end_pos);
+        state.next_bounded_flush_at <- stream_flush_threshold state.redaction
+    | None ->
+        if pending_len >= state.next_bounded_flush_at
+        then flush_unterminated_pem_bounded state emitted pending pending_len)
+  else if pending_len >= state.next_bounded_flush_at then
+    let pending = Buffer.contents state.pending_line in
+    flush_unterminated_pem_bounded state emitted pending pending_len
+
+let should_hold_across_newline state =
+  let pending_len = Buffer.length state.pending_line in
+  let pem_holds =
+    pending_len >= 27
+    && Secret_patterns.has_unclosed_pem_block (Buffer.contents state.pending_line)
+  in
+  if pem_holds then true
+  else if state.redaction.has_multiline_exact_value then
+    let pending = Buffer.contents state.pending_line in
+    exact_suffix_hold_from state.redaction pending < pending_len
+  else false
+
+let flush_safe_incremental_prefix state emitted =
+  let pending_len = Buffer.length state.pending_line in
+  if pending_len > 0 && not state.in_unterminated_pem then (
+    let pending = Buffer.contents state.pending_line in
+    let cut = safe_incremental_cut state pending in
+    if cut > 0 then (
+      let prefix =
+        if cut = pending_len then pending else String.sub pending 0 cut
+      in
+      let redacted =
+        redact_text_mapped_with_lookbehind
+          ~prev_ended_word:state.prev_ended_word
+          state.redaction
+          prefix
+      in
+      emit_mapped state emitted ~source_length:cut redacted;
+      update_prev_ended_word state redacted;
+      Buffer.clear state.pending_line;
+      if cut < pending_len then
+        Buffer.add_substring state.pending_line pending cut (pending_len - cut);
+      state.next_bounded_flush_at <- stream_flush_threshold state.redaction))
+
 let redact_stream_chunk_mapped state chunk =
   let emitted = ref [] in
-  String.iter
-    (fun char ->
-       Buffer.add_char state.pending_line char;
-       if Char.equal char '\n' || Char.equal char '\r'
-       then flush_complete_record state emitted
-       else flush_bounded_prefix_if_needed state emitted)
-    chunk;
+  (match state.mode with
+   | Line_buffered ->
+       String.iter
+         (fun char ->
+            Buffer.add_char state.pending_line char;
+            if Char.equal char '\n' || Char.equal char '\r'
+            then flush_complete_record state emitted
+            else flush_bounded_prefix_if_needed state emitted)
+         chunk
+   | Token_incremental ->
+       String.iter
+         (fun char ->
+            if state.in_unterminated_pem then
+              handle_unterminated_pem_byte state emitted char
+            else (
+              Buffer.add_char state.pending_line char;
+              if (Char.equal char '\n' || Char.equal char '\r')
+                 && not (should_hold_across_newline state)
+              then flush_complete_record state emitted
+              else flush_bounded_prefix_if_needed state emitted))
+         chunk;
+       flush_safe_incremental_prefix state emitted);
   { pieces = List.rev !emitted; consumed = state.consumed }
 ;;
 
 let redact_stream_finish_mapped state =
   let emitted = ref [] in
   flush_complete_record state emitted;
+  state.prev_ended_word <- false;
+  state.in_unterminated_pem <- false;
   { pieces = List.rev !emitted; consumed = state.consumed }
 ;;
 

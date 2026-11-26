@@ -191,6 +191,69 @@ let test_utf8_chunk_and_bounded_release () =
   check_coverage ~input ~first:first.consumed ~past:tail.consumed tail.pieces;
   check string "all Unicode survives bounded releases" input (S.render_pieces (first.pieces @ tail.pieces))
 
+let test_token_incremental_source_spans_and_utf8 () =
+  (* Korean prose without newline emits incrementally with exact contiguous spans *)
+  let korean = "가나다" in
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  let pieces = ref [] in
+  let cursor = ref 0 in
+  for i = 0 to String.length korean - 1 do
+    let rel = R.redact_stream_chunk_mapped state (String.make 1 korean.[i]) in
+    check_coverage ~input:korean ~first:!cursor ~past:rel.consumed rel.pieces;
+    List.iter (fun piece ->
+      let text = match piece with S.Copied {text;_} -> text | S.Masked {replacement;_} -> replacement in
+      check bool "each incremental piece is valid UTF-8" true (String.is_valid_utf_8 text))
+      rel.pieces;
+    cursor := rel.consumed;
+    pieces := !pieces @ rel.pieces
+  done;
+  let tail = R.redact_stream_finish_mapped state in
+  check_coverage ~input:korean ~first:!cursor ~past:tail.consumed tail.pieces;
+  check int "all UTF-8 bytes consumed" (String.length korean) tail.consumed;
+  check string "UTF-8 roundtrips identically" korean (S.render_pieces (!pieces @ tail.pieces));
+  (* Split secret across chunks: safe prefix releases immediately, secret span stays atomic *)
+  let secret = "span-secret-alpha-private" in
+  with_secrets [secret] (fun redaction ->
+    let state = R.create_stream_state ~mode:R.Token_incremental redaction in
+    let first = "keep span-secret-" and second = "alpha-private tail" in
+    let input = first ^ second in
+    let r1 = R.redact_stream_chunk_mapped state first in
+    check int "safe prefix before potential secret is consumed immediately" 5 r1.consumed;
+    check string "safe prefix rendered immediately" "keep " (S.render_pieces r1.pieces);
+    check_coverage ~input ~first:0 ~past:r1.consumed r1.pieces;
+    let r2 = R.redact_stream_chunk_mapped state second in
+    check int "completed secret and safe tail consumed immediately without newline"
+      (String.length input) r2.consumed;
+    check_coverage ~input ~first:r1.consumed ~past:r2.consumed r2.pieces;
+    check mask_testable "split secret owns one contiguous source span"
+      [5, 5 + String.length secret, "[REDACTED]"] (masks (r1.pieces @ r2.pieces));
+    check string "rendered matches redact_text"
+      (R.redact_text redaction input) (S.render_pieces (r1.pieces @ r2.pieces));
+    let fin = R.redact_stream_finish_mapped state in
+    check int "finish emits nothing extra" 0 (List.length fin.pieces));
+  (* Exhaustive 1-byte split matches redact_text_mapped spans for PEM inside header *)
+  let prefix = "Authorization: " in
+  let value =
+    "x -----BEGIN " ^ "PRIVATE KEY-----\nopaque body\n-----END " ^ "PRIVATE KEY----- y"
+  in
+  let input = prefix ^ value ^ "\nnext" in
+  let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+  let all_pieces = ref [] in
+  let prev = ref 0 in
+  for i = 0 to String.length input - 1 do
+    let rel = R.redact_stream_chunk_mapped state (String.make 1 input.[i]) in
+    check_coverage ~input ~first:!prev ~past:rel.consumed rel.pieces;
+    prev := rel.consumed;
+    all_pieces := !all_pieces @ rel.pieces
+  done;
+  let fin = R.redact_stream_finish_mapped state in
+  check_coverage ~input ~first:!prev ~past:fin.consumed fin.pieces;
+  all_pieces := !all_pieces @ fin.pieces;
+  check mask_testable "1-byte incremental spans match whole-text PEM+header composition"
+    (masks (S.redact_text_mapped input)) (masks !all_pieces);
+  check string "1-byte incremental output matches redact_text"
+    (S.redact_text input) (S.render_pieces !all_pieces)
+
 let () = run "redaction source spans" ["source authority",[
   test_case "named prefix and Unicode byte offsets" `Quick test_named_prefix_and_unicode;
   test_case "ordered replacements and literal markers" `Quick test_ordered_composition_and_literal_marker;
@@ -198,4 +261,5 @@ let () = run "redaction source spans" ["source authority",[
   test_case "longest exact match and structural composition" `Quick test_exact_longest_first_and_structural_composition;
   test_case "stream watermark and split secret" `Quick test_stream_watermark_across_secret_chunks;
   test_case "bounded exact matches advance the actual cursor" `Quick test_bounded_release_consumes_the_entire_crossing_secret;
-  test_case "UTF-8 chunk ownership and bounded release" `Quick test_utf8_chunk_and_bounded_release]]
+  test_case "UTF-8 chunk ownership and bounded release" `Quick test_utf8_chunk_and_bounded_release;
+  test_case "token incremental spans, UTF-8, and PEM+header composition" `Quick test_token_incremental_source_spans_and_utf8]]

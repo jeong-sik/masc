@@ -46,6 +46,34 @@ val redact_pieces : source_piece list -> source_piece list
 (** Apply structural masking to already mapped text, composing match offsets
     with its original source intervals. Used after Keeper exact-value masking. *)
 
+val redact_pieces_with_lookbehind :
+  prev_ended_word:bool -> source_piece list -> source_piece list
+(** Like {!redact_pieces}, preserving whether the immediately preceding emitted
+    output byte was a word character so [Re.bow] at byte 0 does not fire inside
+    a word split across incremental stream releases (e.g. ["ta"] + ["sk-1234"]). *)
+
+val is_word_char : char -> bool
+(** Whether [Re.bow]/[Re.eow] classifies this byte as a word character. *)
+
+val has_unclosed_pem_block : string -> bool
+(** [true] when the string has a complete PEM private-key [BEGIN] header with no
+    following matching [END] footer. *)
+
+val find_pem_footer_end : string -> int option
+(** Exclusive end byte offset of the first complete PEM private-key [END] footer
+    in the string, or [None] when absent. *)
+
+val safe_stream_prefix_len : prev_ended_word:bool -> string -> int
+(** Largest byte offset [k] ([0 <= k <= String.length s]) such that no
+    structural secret pattern starting at any byte [< k] can be completed or
+    extended by future bytes appended after [s], given whether the immediately
+    preceding emitted output byte was a word character. *)
+
+val cut_before_straddling_match : prev_ended_word:bool -> string -> int -> int
+(** Tighten [cut] ([0 <= cut <= String.length s]) when [cut < String.length s]
+    so no structural match in [s] straddles [cut] and no [Re.eow]-anchored
+    pattern ([AKIA]/[ASIA]) ends ambiguously right at [cut]. *)
+
 val mask_matches : Re.re -> source_piece list -> source_piece list
 (** Replace nonempty matches with [[REDACTED]], preserving mapped provenance.
     This shares the replacement engine with structural masking; Keeper exact

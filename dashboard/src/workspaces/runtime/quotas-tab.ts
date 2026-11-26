@@ -70,6 +70,7 @@ import {
   loadRuntimeResolved,
   maxUtilizationPct,
   partitionQuotaScopes,
+  quotaRestOfScope,
   restingProviderIds,
   windowKindLabel,
   type MultiAccountIntegration,
@@ -902,6 +903,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
       .map((p) => accountLine(accountEmails.get(p.id)))
       .filter((line): line is string => line !== null)
     const badgeStyle = costBadgeStyle(cls.kind)
+    // A card of a resting scope says so, in the words the paused panel uses
+    // for the cause. It is why the card is in Tier 1 whatever its usage says.
+    // When the rest ends is in the panel: a window's reset on this card is
+    // another fact, and the two side by side read as one. A rest that is over
+    // on this page's clock is one the panel calls released until the next
+    // read drops it, so the card does not call it paused.
+    const rest = quotaRestOfScope(scope, resolvedData?.runtimes ?? [])
+    const restMeta = rest !== null && rest.until * 1000 > Date.now() ? quotaRestCauseMeta(rest.cause) : null
 
     return html`
       <article
@@ -914,6 +923,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
             <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${name}</div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${scope.scope}</div>
             ${accounts.map((line) => html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${line}</div>`)}
+            ${restMeta !== null && html`
+              <div data-testid="quota-card-rest" style=${{ fontSize: 'var(--fs-11)', color: causeBadgeStyle(restMeta.tone).color }}>
+                일시 중지 · ${restMeta.shortLabel}
+              </div>
+            `}
           </div>
           <span
             class="mono tnum"

@@ -735,6 +735,19 @@ export function restingProviderIds(
   return ids
 }
 
+/** The quota rest the card of a scope speaks of: that of a runtime whose
+ *  provider the scope lists, joined as `restingProviderIds` joins. `null`
+ *  when none of them rests. */
+export function quotaRestOfScope(
+  scope: ProviderUsageScope,
+  runtimes: readonly RuntimeResolution[],
+): RuntimeQuotaRest | null {
+  for (const rt of runtimes) {
+    if (rt.quota_rest !== null && scope.providers.some((p) => p.id === rt.provider_id)) return rt.quota_rest
+  }
+  return null
+}
+
 export function partitionQuotaScopes(
   scopes: readonly ProviderUsageScope[],
   restingProviders: ReadonlySet<string> = new Set(),

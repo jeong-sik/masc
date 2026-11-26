@@ -2380,6 +2380,92 @@ describe('workspaces/runtime', () => {
     expect(formatResetCountdown(null, now)).toBe('없음')
   })
 
+
+  it('says on the usage card of a resting account that it is paused and why, and on no other card', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    // A runtime names its provider in words; `provider_id` is what a scope lists.
+    const runtimeRow = (id: string, providerId: string, quotaRest: unknown) => ({
+      id,
+      provider: `Provider of ${id}`,
+      provider_id: providerId,
+      model: 'fixture-model',
+      effective_max_context: 200_000,
+      max_context_source: 'capability',
+      max_output_tokens: 16_384,
+      is_local: false,
+      is_default: false,
+      quota_rest: quotaRest,
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'default',
+          default_runtime: null,
+          runtimes: [
+            runtimeRow('quota.one', 'quota_plan', { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 600 }),
+            // A second runtime of the same provider carries the same rest.
+            runtimeRow('quota.two', 'quota_plan', { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 600 }),
+            runtimeRow('payment.one', 'payment_plan', { cause: 'payment_refused', reset_stated: false, until: nowSec + 3600 }),
+            runtimeRow('spent.one', 'spent_plan', null),
+            // Read before its end and over since: the panel calls it released.
+            runtimeRow('over.one', 'over_plan', { cause: 'usage_read', reset_stated: true, until: nowSec - 5 }),
+          ],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [
+            { scope: 'account:1', providers: [{ id: 'quota_plan', display_name: 'Quota Plan' }], state: 'not_reported_since_start', windows: [] },
+            { scope: 'account:2', providers: [{ id: 'payment_plan', display_name: 'Payment Plan' }], state: 'not_reported_since_start', windows: [] },
+            { scope: 'account:4', providers: [{ id: 'over_plan', display_name: 'Over Plan' }], state: 'not_reported_since_start', windows: [] },
+            // In Tier 1 by its usage, not by a rest.
+            {
+              scope: 'account:3',
+              providers: [{ id: 'spent_plan', display_name: 'Spent Plan' }],
+              state: 'reported',
+              windows: [{
+                limit_id: '7d',
+                window: { kind: 'seven_day' },
+                utilization: { unit: 'fraction', value: 1 },
+                resets_at: nowSec + 86_400,
+                observed_at: nowSec,
+                source: 'cli',
+                role: 'gates_model_calls',
+              }],
+            },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'no history' })
+      }
+      if (url.startsWith('/api/v1/setup/inventory')) return jsonResponse({ integrations: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    const cards = await vi.waitFor(() => {
+      const found = [...container.querySelectorAll('[data-testid="quota-tier-1"] article')]
+      expect(found).toHaveLength(4)
+      return found
+    })
+    const restLineOf = (name: string) => cards
+      .find((card) => card.textContent?.includes(name))
+      ?.querySelector('[data-testid="quota-card-rest"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null
+    // The words are the paused panel's words for the cause.
+    expect(restLineOf('Quota Plan')).toBe('일시 중지 · 한도 초과')
+    expect(restLineOf('Payment Plan')).toBe('일시 중지 · 결제 거절')
+    expect(restLineOf('Spent Plan')).toBeNull()
+    // The card of the rest that is over is still among them, and says nothing of a pause.
+    expect(cards.some((card) => card.textContent?.includes('Over Plan'))).toBe(true)
+    expect(restLineOf('Over Plan')).toBeNull()
+    expect(container.querySelector('[data-testid="paused-runtimes-panel"]')?.textContent).toContain('해제됨')
+  })
+
   it('looks at the clock again when a rest is over, and no later than the longest wait', () => {
     const nowMs = 1_800_000_000_000
     const nowUnix = nowMs / 1000

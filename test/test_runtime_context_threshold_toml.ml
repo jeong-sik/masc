@@ -10,7 +10,9 @@
     5. A rollover/keep value outside [0.0, 1.0] fails the parse (fail-closed).
     6. A non-number value fails the parse.
     7. A non-positive [tail-window-atoms] fails the parse (fail-closed).
-    8. A non-integer [tail-window-atoms] fails the parse. *)
+    8. A non-integer [tail-window-atoms] fails the parse.
+    9. [agent-compaction-threshold] parses inside (0, 1) and fails the parse
+       at 0, at 1 and outside. *)
 
 open Alcotest
 
@@ -84,6 +86,29 @@ let test_non_number_fails_closed () =
     (model_toml ~extra_lines:"compaction-keep-ratio = \"narrow\"\n")
 ;;
 
+let agent_compaction_threshold cfg id =
+  match List.find_opt (fun (m : Schema.model_spec) -> String.equal m.id id) cfg.Schema.models with
+  | Some m -> m.Schema.agent_compaction_threshold
+  | None -> failf "model %S absent from parsed config" id
+;;
+
+let test_agent_compaction_threshold_parses () =
+  let cfg = parse_string_or_fail (model_toml ~extra_lines:"agent-compaction-threshold = 0.95
+") in
+  check (option (float 0.0001)) "inside (0, 1)" (Some 0.95) (agent_compaction_threshold cfg "m");
+  let cfg = parse_string_or_fail (model_toml ~extra_lines:"") in
+  check (option (float 0.0001)) "absent" None (agent_compaction_threshold cfg "m")
+;;
+
+let test_agent_compaction_threshold_ends_fail_closed () =
+  List.iter
+    (fun value ->
+       parse_string_expect_error
+         ("agent-compaction-threshold = " ^ value)
+         (model_toml ~extra_lines:("agent-compaction-threshold = " ^ value ^ "\n")))
+    [ "0"; "0.0"; "1"; "1.0"; "1.5"; "-0.2"; "\"high\"" ]
+;;
+
 let test_tail_atoms_invalid_fails_closed () =
   parse_string_expect_error "tail-window-atoms = 0 (not positive)"
     (model_toml ~extra_lines:"tail-window-atoms = 0\n");
@@ -98,11 +123,19 @@ let () =
     [ ("valid values"
       , [ test_case "thresholds parse" `Quick test_thresholds_parse
         ; test_case "absent thresholds are None" `Quick test_absent_thresholds_are_none
+        ; test_case
+            "agent-compaction-threshold parses"
+            `Quick
+            test_agent_compaction_threshold_parses
         ])
     ; ("invalid values fail closed"
       , [ test_case "ratio out-of-range fails parse" `Quick test_ratio_out_of_range_fails_closed
         ; test_case "non-number fails parse" `Quick test_non_number_fails_closed
         ; test_case "tail atoms invalid fails parse" `Quick test_tail_atoms_invalid_fails_closed
+        ; test_case
+            "agent-compaction-threshold at or past an end fails parse"
+            `Quick
+            test_agent_compaction_threshold_ends_fail_closed
         ])
     ]
 ;;

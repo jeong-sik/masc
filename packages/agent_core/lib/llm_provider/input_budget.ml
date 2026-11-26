@@ -56,6 +56,10 @@ type receipt_fit_error =
   | Receipt_context_exceeded of context_fit
 [@@deriving show, eq]
 
+(* The [None] arm is load-bearing (SSOT F6): catalog-silent ids under
+   numeric providers (and the open operator set) reach their preset from
+   here. Deleting or None-ing the presets without closing every such id
+   first would turn these budgets into typed unknowns. *)
 let capabilities_of_config (config : Provider_config.t) =
   match config.kind with
   | Provider_config.Anthropic

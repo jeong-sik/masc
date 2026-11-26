@@ -355,6 +355,15 @@ let with_declared_image_input value capabilities =
   { capabilities with supports_image_input = value; declared_image_input = Some value }
 ;;
 
+(* The numeric preset values below are load-bearing, not decorative.
+   Setting them to [None] is intentionally deferred (SSOT F6): twelve
+   catalog rows inherit [max_output_tokens] from their preset (six
+   gemini rows at 65536, six kimi rows at 32768), five ids advertised by
+   the kimi provider have no row under that provider (k3, k3-256k,
+   k3.1-pro, k3.1-pro-highspeed, kimi-for-coding-highspeed), and any id
+   selected on a numeric provider without a catalog row falls back to
+   these numbers ([Input_budget.capabilities_of_config]). None-ing now
+   would change effective budgets and fail required envelopes. *)
 let anthropic_capabilities =
   { default_capabilities with
     max_context_tokens = Some 200_000

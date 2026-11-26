@@ -59,6 +59,8 @@ let build_request ?stream ~config ~messages ?tools () =
 [@@@coverage off]
 (* === Inline tests === *)
 
+(* Test-only copy of preset numerics (SSOT F6): replace with a catalog
+   lookup in the same step that sets the presets to [None]. *)
 let deepseek_v4_capabilities =
   { Capabilities.openai_compat_chat_capabilities with
     max_context_tokens = Some 1_000_000

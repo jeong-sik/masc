@@ -6302,6 +6302,46 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       ("preserve trailing api_key:+LF", "api_key:\n", "api_key:\n");
       ("preserve api_key:+brace delimiter", "api_key: }", "api_key: }");
       ("preserve api_key:+comma delimiter", "api_key: , next", "api_key: , next");
+      ("preserve ASIA/SEOUL timezone", "TZ=ASIA/SEOUL", "TZ=ASIA/SEOUL");
+      ("preserve ASIAN word", "ASIAN cuisine", "ASIAN cuisine");
+      ("preserve task-1234 id", "task-1234", "task-1234");
+      ("scrub arg=sk- token", "arg=sk-proj-secret123", "arg=[redacted]");
+      ("scrub header:ghp_ token", "header:ghp_secret123", "header:[redacted]");
+      ("scrub semicolon-separated secrets", "a=1;token=abc;secret=xyz", "a=1;token=[redacted];secret=[redacted]");
+      ("scrub single-quoted api_key", "api_key='plain_secret'", "api_key='[redacted]'");
+      ( "scrub multi-line PEM block"
+      , "before\n-----BEGIN PRIVATE KEY-----\nMIIEbody\n-----END PRIVATE KEY-----\nafter"
+      , "before\n[redacted]\nafter" );
+      ( "scrub Cookie header with multiple pairs"
+      , "Cookie: session=abc123; csrf=xyz987\nnext"
+      , "Cookie: [redacted]\nnext" );
+      ( "scrub Set-Cookie header with attributes"
+      , "Set-Cookie: session=abc123; HttpOnly; Secure"
+      , "Set-Cookie: [redacted]" );
+      ( "scrub Cookie header inside JSON string without eating quotes"
+      , {|"detail":"Cookie: session=abc123; HttpOnly"|}
+      , {|"detail":"Cookie: [redacted]"|} );
+      ( "scrub RFC quoted Cookie pairs completely"
+      , {|Cookie: session="abc123"; csrf="xyz987"|}
+      , "Cookie: [redacted]" );
+      ( "scrub spaced double/single-quoted Cookie pairs completely"
+      , {|Cookie: session= "abc123"; csrf = 'xyz987'|}
+      , "Cookie: [redacted]" );
+      ( "scrub RFC quoted Set-Cookie value with attributes"
+      , {|Set-Cookie: sid="secret999"; HttpOnly|}
+      , "Set-Cookie: [redacted]" );
+      ( "scrub JSON-escaped quoted Cookie pairs preserving outer quote"
+      , {|"detail":"Cookie: session=\"abc123\"; csrf = \"xyz987\""|}
+      , {|"detail":"Cookie: [redacted]"|} );
+      ( "preserve outer JSON delimiter after empty cookie value"
+      , {|{"detail":"Cookie: a=", "other":"ok"}|}
+      , {|{"detail":"Cookie: [redacted]", "other":"ok"}|} );
+      ( "preserve outer JSON delimiter after spaced empty cookie value"
+      , {|{"detail":"Cookie: a= ", "other":"ok"}|}
+      , {|{"detail":"Cookie: [redacted]", "other":"ok"}|} );
+      ( "preserve Cookie blank-line prose"
+      , "Cookie:\n\nparagraph text"
+      , "Cookie:\n\nparagraph text" );
     ];
   Alcotest.(check string) "tool histogram ko"
     "Read ×2 · 위임(@worker-alpha)"

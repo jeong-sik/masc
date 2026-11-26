@@ -8,6 +8,7 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 open Masc_tui_ui
 
+val scrub_secrets_in_text_with : replacement:string -> string -> string
 val scrub_secrets_in_text : string -> string
 val scrub_json_secrets : Yojson.Safe.t -> Yojson.Safe.t
 val rewrite_masc_links_for_markdown : string -> string

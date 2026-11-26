@@ -609,6 +609,44 @@ let test_redact_json_strings_redacts_keys () =
   Alcotest.(check string) "both members kept, keys redacted"
     {|{"https[REDACTED]x":1,"https[REDACTED]x":2}|} out
 
+let test_extended_secret_patterns_and_headers () =
+  (* AWS ASIA temporary keys redact when 20 uppercase alnum chars, while
+     ordinary words/timezones stay untouched. *)
+  let asia_key = "ASIA" ^ "IOSFODNN7EXAMPLE" in
+  Alcotest.(check string) "ASIA temp key redacted" "[REDACTED]"
+    (Observability_redact.redact_text asia_key);
+  Alcotest.(check string) "ASIA/SEOUL timezone preserved" "ASIA/SEOUL"
+    (Observability_redact.redact_text "ASIA/SEOUL");
+  Alcotest.(check string) "ASIAN word preserved" "ASIAN"
+    (Observability_redact.redact_text "ASIAN");
+  (* Stripe and Slack token families *)
+  List.iter
+    (fun (label, tok) ->
+      Alcotest.(check string) (label ^ " redacted") "[REDACTED]"
+        (Observability_redact.redact_text tok))
+    [ "stripe live", "sk_" ^ "live_51AbCdEfGhIjKlMnOp"
+    ; "stripe test", "sk_" ^ "test_51AbCdEfGhIjKlMnOp"
+    ; "stripe restricted", "rk_" ^ "live_51AbCdEfGhIjKlMnOp"
+    ; "slack bot", "xoxb-" ^ "1234567890-abcdef"
+    ; "slack user", "xoxp-" ^ "1234567890-abcdef"
+    ];
+  (* Case-insensitive PEM block *)
+  let lower_pem = "-----begin private key-----\nMIIEbody\n-----end private key-----" in
+  Alcotest.(check string) "lowercase PEM redacted" "[REDACTED]"
+    (Observability_redact.redact_text lower_pem);
+  (* Extended sensitive headers *)
+  List.iter
+    (fun (input, expected) ->
+      Alcotest.(check string) ("header masked: " ^ input) expected
+        (Observability_redact.redact_text input))
+    [ "Proxy-Authorization: Basic dXNlcjpwYXNz", "Proxy-Authorization: [REDACTED]"
+    ; "X-Api-Key: secret-val-123", "X-Api-Key: [REDACTED]"
+    ; "X-Goog-Api-Key: AIzaSyntheticVal", "X-Goog-Api-Key: [REDACTED]"
+    ; "X-Auth-Token: tok-val-456", "X-Auth-Token: [REDACTED]"
+    ; "Cookie: session=abc123", "Cookie: [REDACTED]"
+    ; "Set-Cookie: session=abc123; HttpOnly", "Set-Cookie: [REDACTED]"
+    ]
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -678,6 +716,8 @@ let () =
             test_truncate_json_document_list_fits;
           Alcotest.test_case "redact_json_strings redacts keys" `Quick
             test_redact_json_strings_redacts_keys;
+          Alcotest.test_case "extended secret patterns and headers" `Quick
+            test_extended_secret_patterns_and_headers;
         ] );
       ( "tool_observability",
         [

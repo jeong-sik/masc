@@ -174,6 +174,35 @@ let test_url_password_with_at_is_redacted_whole () =
   must_not_contain ~tag:"password tail" line "ss@host";
   must_contain ~tag:"redacted url" line "https://[REDACTED]@host.example/repo.git"
 
+(* Word-bounded sk- avoids corrupting ordinary identifiers (task-1234, disk-0,
+   mask-foo), while shared Secret_patterns catches GitHub/AWS/PEM and
+   case-insensitive Bearer tokens in argv. *)
+let test_word_boundaries_and_shared_secret_patterns () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:
+      [ "echo"
+      ; "task-1234"
+      ; "disk-0"
+      ; "mask-foo"
+      ; "bearer lower_tok_999"
+      ; "ghp_" ^ "16C7e42F292c6912E7710c838347Ae178B4a"
+      ; "AKIA" ^ "IOSFODNN7EXAMPLE"
+      ; "-----BEGIN PRIVATE KEY-----\nMIIEbody\n-----END PRIVATE KEY-----"
+      ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_contain ~tag:"task-1234 preserved" line "task-1234";
+  must_contain ~tag:"disk-0 preserved" line "disk-0";
+  must_contain ~tag:"mask-foo preserved" line "mask-foo";
+  must_not_contain ~tag:"lowercase bearer hidden" line "lower_tok_999";
+  must_not_contain ~tag:"github pat hidden" line "16C7e42F292c6912";
+  must_not_contain ~tag:"aws key hidden" line "IOSFODNN7EXAMPLE";
+  must_not_contain ~tag:"pem body hidden" line "MIIEbody"
+
 let () =
   test_off_is_noop ();
   test_on_emits_one_line ();
@@ -185,4 +214,5 @@ let () =
   test_header_values_are_redacted_by_position ();
   test_a_header_argument_without_a_name_falls_back_to_shapes ();
   test_url_password_with_at_is_redacted_whole ();
+  test_word_boundaries_and_shared_secret_patterns ();
   print_endline "[test_exec_tap] all tests passed"

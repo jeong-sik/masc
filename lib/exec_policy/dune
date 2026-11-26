@@ -17,5 +17,6 @@
   ; cycle-free.
   masc.prompt_registry
   masc.masc_log
+  masc.secret_patterns
   masc.config_dir_resolver
   unix))

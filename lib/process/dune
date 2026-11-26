@@ -29,6 +29,7 @@
   masc_core
   fs_compat
   masc_log
+  masc.secret_patterns
   time_compat
   masc.monotonic_deadline
   masc.time_codec

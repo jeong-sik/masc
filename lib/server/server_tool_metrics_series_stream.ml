@@ -44,7 +44,7 @@ let serve ~sw ~clock ~owner ~request reqd =
   let current () = Server_observer_scope.stream_is_current owner in
   let authority = Sse.runtime_authority_exn ~base_path:config.Workspace.base_path in
   let response = Httpun.Response.create ~headers:(response_headers owner) `OK in
-  let output = Server_sse_response.respond ~clock
+  let output = Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd response in
   Eio.Fiber.fork ~sw (fun () ->
@@ -77,13 +77,11 @@ let serve ~sw ~clock ~owner ~request reqd =
           | Ok snapshot -> if send (data_frame snapshot.json) then wait snapshot.next_change_at
       and wait deadline =
         let remaining = max 0.0 (deadline -. Time_compat.now ()) in
-        let delay = min remaining Server_mcp_transport_http_headers.sse_ping_interval_s in
         let action = Eio.Fiber.first
             (fun () -> Server_sse_response.await_closed output; `Closed)
             (fun () -> Eio.Fiber.first
               (fun () -> Eio.Stream.take wake; `Changed)
-              (fun () -> Eio.Time.sleep clock delay;
-                if Time_compat.now () >= deadline then `Deadline else `Keepalive)) in
+              (fun () -> Eio.Time.sleep clock remaining; `Deadline)) in
         if not (current ()) then () else match action with
         | `Closed -> ()
         | `Changed -> deliver ()
@@ -91,8 +89,6 @@ let serve ~sw ~clock ~owner ~request reqd =
             Dashboard_cache.invalidate
               (Server_dashboard_http_agent_api.tool_series_cache_key config request);
             deliver ()
-        | `Keepalive ->
-            if send ": keepalive\n\n" then wait deadline
       in
       Eio.Fiber.first
         (fun () -> Server_observer_scope.await_stream_replaced owner)

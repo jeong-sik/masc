@@ -156,9 +156,8 @@ module Client = struct
   ;;
 end
 
-(* Short enough for a test to wait through, long enough that a loaded machine
-   does not make a quiet stream look dead. *)
-let ping_interval_s = 0.15
+(* Long enough for a frame the server should not send to arrive. *)
+let unsent_frame_wait_s = 0.3
 let reconnect_s = 0.05
 let queue_bound = 64
 
@@ -241,11 +240,18 @@ type server =
   }
 
 (* The real accept loop and the route's [serve], on a loopback port: everything
-   the server does for this stream but the authorization. *)
-let start_server ~sw env ?port ?subscribe ?scope_is_current ?scope_replaced
+   the server does for this stream but the authorization. [route_clock] is the
+   clock the route's response keeps time with; the accept loop keeps the real
+   one. *)
+let start_server ~sw env ?port ?subscribe ?scope_is_current ?scope_replaced ?route_clock
     ?(stalled_after_s = kept_stalled_after_s) hub =
   let subscribe = Option.value subscribe ~default:(Hub.subscribe hub) in
   let clock = Eio.Stdenv.clock env in
+  let route_clock : float Eio.Time.clock_ty Eio.Resource.t =
+    match route_clock with
+    | Some route_clock -> route_clock
+    | None -> (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+  in
   let net = Eio.Stdenv.net env in
   let listening, resolve_listening = Eio.Promise.create () in
   let finished, resolve_finished = Eio.Promise.create () in
@@ -279,9 +285,8 @@ let start_server ~sw env ?port ?subscribe ?scope_is_current ?scope_replaced
                ?scope_is_current
                ?scope_replaced
                ~sw:server_sw
-               ~clock
+               ~clock:route_clock
                ~subscribe
-               ~ping_interval_s
                ~stalled_after_s
                ~max_queued_events:queue_bound
                (Masc.Http_reqd.of_gluten gluten_reqd)))
@@ -400,7 +405,7 @@ let test_a_client_that_connects_before_the_first_reading_waits_for_it () =
       let server = start_server ~sw env hub in
       let reader = Client.create () in
       follow ~sw env ~port:server.port reader;
-      Eio.Time.sleep (Eio.Stdenv.clock env) (ping_interval_s *. 2.0);
+      Eio.Time.sleep (Eio.Stdenv.clock env) unsent_frame_wait_s;
       check position_t "no reading yet" None (position reader);
       Hub.observe hub ~measured_at:10.0 (fleet ~running:4 ());
       wait_until env "the first reading" (fun () -> position reader = Some (1, 4, Fine));
@@ -442,12 +447,18 @@ let contains ~needle text =
   from 0
 ;;
 
+(* The route's response keeps mock time, so an interval passes when the test
+   sets it. Nobody but the response writes the keepalive: the hub publishes
+   nothing after the Snapshot. *)
 let test_a_keepalive_crosses_http_without_becoming_an_event () =
   with_env (fun env ->
     Eio.Switch.run (fun sw ->
       let hub = new_hub () in
       Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
-      let server = start_server ~sw env hub in
+      let route_clock = Eio_mock.Clock.make () in
+      let server =
+        start_server ~sw env ~route_clock:(route_clock :> float Eio.Time.clock_ty Eio.Resource.t) hub
+      in
       let reader = Client.create () in
       let keepalives = ref 0 in
       follow
@@ -455,10 +466,17 @@ let test_a_keepalive_crosses_http_without_becoming_an_event () =
         env
         ~port:server.port
         ~on_bytes:(fun chunk ->
-          if contains ~needle:Server_sse_pump.keepalive_frame chunk
+          if contains ~needle:Server_sse_response.keepalive_frame chunk
           then incr keepalives)
         reader;
-      wait_until env "two keepalives" (fun () -> !keepalives >= 2);
+      wait_until env "the Snapshot" (fun () -> position reader = Some (1, 1, Fine));
+      Eio.Time.sleep (Eio.Stdenv.clock env) unsent_frame_wait_s;
+      check int "no keepalive before an interval passed" 0 !keepalives;
+      Eio_mock.Clock.set_time route_clock Server_mcp_transport_http_headers.sse_ping_interval_s;
+      wait_until env "a keepalive after one interval" (fun () -> !keepalives >= 1);
+      Eio_mock.Clock.set_time route_clock
+        (2.0 *. Server_mcp_transport_http_headers.sse_ping_interval_s);
+      wait_until env "another after the next" (fun () -> !keepalives >= 2);
       check position_t "the reading is the Snapshot's" (Some (1, 1, Fine)) (position reader);
       server.stop ()))
 ;;

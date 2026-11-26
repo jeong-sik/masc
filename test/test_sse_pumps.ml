@@ -8,7 +8,7 @@ let short_stall_s = 0.05
 (* An SSE connection over an in-memory httpun connection. A write reaches the
    "socket" only when the test answers it on the connection, so a frame sent
    on a connection nobody answers never does. *)
-let open_info ?(client_id = 0) ~clock ~stalled_after_s session_id =
+let open_info ?(client_id = 0) ~sw ~clock ~stalled_after_s session_id =
   let reqd_ref = ref None in
   let connection = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
   let request = "GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n" in
@@ -20,12 +20,14 @@ let open_info ?(client_id = 0) ~clock ~stalled_after_s session_id =
   | None -> fail "the in-memory connection parsed no request"
   | Some reqd ->
     let response =
-      Server_sse_response.respond ~clock ~stalled_after_s (Masc.Http_reqd.of_httpun reqd) (Httpun.Response.create `OK)
+      Server_sse_response.respond ~sw ~clock ~stalled_after_s (Masc.Http_reqd.of_httpun reqd)
+        (Httpun.Response.create `OK)
     in
     connection, Conn.make_sse_conn ~session_id ~client_id ~response ()
 ;;
 
-let make_info ~clock ~stalled_after_s session_id = snd (open_info ~clock ~stalled_after_s session_id)
+let make_info ~sw ~clock ~stalled_after_s session_id =
+  snd (open_info ~sw ~clock ~stalled_after_s session_id)
 
 let outcome_t =
   testable
@@ -41,19 +43,22 @@ let outcome_t =
 
 let fresh_session prefix = prefix ^ "-" ^ string_of_int (Random.bits ())
 
-(* [run_sse_pumps] forks the drain and ping pumps under a per-connection switch
-   and cancels BOTH when the stop promise resolves — including a drain blocked
-   in [Eio.Stream.take], which the [info.stop] flag alone could not interrupt
-   (#21548). Each pump resolves a "cleaned" promise from its cancellation
-   finalizer, so the test waits deterministically. The switch around
-   [run_sse_pumps] returns only after the supervisor's release hook ran. *)
+(* [run_sse_pumps] forks the drain and the renewal under a per-connection
+   switch and cancels BOTH when the stop promise resolves — including a drain
+   blocked in [Eio.Stream.take], which the [info.stop] flag alone could not
+   interrupt (#21548). Each resolves a "cleaned" promise from its
+   cancellation finalizer, so the test waits deterministically. The switch
+   around [run_sse_pumps] returns only after the supervisor's release hook
+   ran. The response's keepalive runs on a switch of its own. *)
 let test_stop_cancels_pumps_and_closes_the_response () =
   Eio_main.run
   @@ fun env ->
-  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s (fresh_session "stop") in
+  Eio.Switch.run
+  @@ fun response_sw ->
+  let info = make_info ~sw:response_sw ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s (fresh_session "stop") in
   let blocker : int Eio.Stream.t = Eio.Stream.create 0 in
   let drain_cleaned, set_drain_cleaned = Eio.Promise.create () in
-  let ping_cleaned, set_ping_cleaned = Eio.Promise.create () in
+  let renew_cleaned, set_renew_cleaned = Eio.Promise.create () in
   Eio.Switch.run (fun sw ->
     Conn.run_sse_pumps
       ~sw
@@ -62,13 +67,13 @@ let test_stop_cancels_pumps_and_closes_the_response () =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve set_drain_cleaned ())
           (fun () -> ignore (Eio.Stream.take blocker : int)))
-      ~ping:(fun () ->
+      ~renew:(fun () ->
         Fun.protect
-          ~finally:(fun () -> Eio.Promise.resolve set_ping_cleaned ())
+          ~finally:(fun () -> Eio.Promise.resolve set_renew_cleaned ())
           (fun () -> Eio.Fiber.await_cancel ()));
     Conn.close_sse_conn info;
     Eio.Promise.await drain_cleaned;
-    Eio.Promise.await ping_cleaned);
+    Eio.Promise.await renew_cleaned);
   check bool "the supervisor closed the response" true (Server_sse_response.is_closed info.response)
 ;;
 
@@ -77,7 +82,9 @@ let test_stop_cancels_pumps_and_closes_the_response () =
 let test_close_leaves_the_response_to_the_supervisor () =
   Eio_main.run
   @@ fun env ->
-  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s (fresh_session "signal") in
+  Eio.Switch.run
+  @@ fun response_sw ->
+  let info = make_info ~sw:response_sw ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s (fresh_session "signal") in
   Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () -> Conn.close_sse_conn info);
   check bool "the stop promise resolved" true (Eio.Promise.is_resolved info.stop_promise);
   check bool "the response is still open" false (Server_sse_response.is_closed info.response)
@@ -90,12 +97,14 @@ exception Server_stopped
 let test_cancelled_supervisor_closes_the_response () =
   Eio_main.run
   @@ fun env ->
+  Eio.Switch.run
+  @@ fun response_sw ->
   let session_id = fresh_session "cancel" in
-  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s session_id in
+  let info = make_info ~sw:response_sw ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s session_id in
   Conn.register_sse_conn ~session_id ~info;
   (match
      Eio.Switch.run (fun sw ->
-       Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~ping:Eio.Fiber.await_cancel;
+       Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~renew:Eio.Fiber.await_cancel;
        Eio.Fiber.yield ();
        Eio.Switch.fail sw Server_stopped)
    with
@@ -112,13 +121,15 @@ let test_cancelled_supervisor_closes_the_response () =
 let test_switch_off_closes_the_response () =
   Eio_main.run
   @@ fun env ->
+  Eio.Switch.run
+  @@ fun response_sw ->
   let session_id = fresh_session "off" in
-  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s session_id in
+  let info = make_info ~sw:response_sw ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s session_id in
   Conn.register_sse_conn ~session_id ~info;
   (match
      Eio.Switch.run (fun sw ->
        Eio.Switch.fail sw Server_stopped;
-       Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~ping:Eio.Fiber.await_cancel)
+       Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~renew:Eio.Fiber.await_cancel)
    with
    | () -> fail "the failed switch returned normally"
    | exception Server_stopped -> ());
@@ -134,8 +145,10 @@ let stop_bound_s = 5.0
 let test_stop_cancels_a_waiting_send () =
   Eio_main.run
   @@ fun env ->
+  Eio.Switch.run
+  @@ fun response_sw ->
   let clock = Eio.Stdenv.clock env in
-  let info = make_info ~clock ~stalled_after_s:long_stall_s (fresh_session "waiting") in
+  let info = make_info ~sw:response_sw ~clock ~stalled_after_s:long_stall_s (fresh_session "waiting") in
   let sending, set_sending = Eio.Promise.create () in
   match
     Eio.Time.with_timeout clock stop_bound_s (fun () ->
@@ -145,8 +158,7 @@ let test_stop_cancels_a_waiting_send () =
           info
           ~drain:(fun () ->
             Eio.Promise.resolve set_sending ();
-            ignore (Conn.send_raw info "data: {}\n\n" : Server_sse_response.outcome))
-          ~ping:Eio.Fiber.await_cancel;
+            ignore (Conn.send_raw info "data: {}\n\n" : Server_sse_response.outcome));
         Eio.Promise.await sending;
         Conn.close_sse_conn info);
       Ok ())
@@ -160,11 +172,11 @@ exception Prime_failed
 
 type pump =
   | Drain
-  | Ping
+  | Renew
 
 let pump_name = function
   | Drain -> "drain"
-  | Ping -> "ping"
+  | Renew -> "renewal"
 ;;
 
 (* Runs [run_sse_pumps] with [returning] as one pump and a pump that waits
@@ -173,10 +185,12 @@ let pump_name = function
 let check_one_returning_pump_ends_the_connection pump returning =
   Eio_main.run
   @@ fun env ->
+  Eio.Switch.run
+  @@ fun response_sw ->
   let which = pump_name pump in
   let clock = Eio.Stdenv.clock env in
   let session_id = fresh_session ("pump-ended-" ^ which) in
-  let info = make_info ~clock ~stalled_after_s:long_stall_s session_id in
+  let info = make_info ~sw:response_sw ~clock ~stalled_after_s:long_stall_s session_id in
   Conn.register_sse_conn ~session_id ~info;
   let other_cancelled, set_other_cancelled = Eio.Promise.create () in
   let waiting () =
@@ -184,14 +198,14 @@ let check_one_returning_pump_ends_the_connection pump returning =
       ~finally:(fun () -> Eio.Promise.resolve set_other_cancelled ())
       Eio.Fiber.await_cancel
   in
-  let drain, ping =
+  let drain, renew =
     match pump with
     | Drain -> returning, waiting
-    | Ping -> waiting, returning
+    | Renew -> waiting, returning
   in
   match
     Eio.Time.with_timeout clock stop_bound_s (fun () ->
-      Eio.Switch.run (fun sw -> Conn.run_sse_pumps ~sw info ~drain ~ping);
+      Eio.Switch.run (fun sw -> Conn.run_sse_pumps ~sw ~renew info ~drain);
       Ok ())
   with
   | Ok () ->
@@ -205,14 +219,14 @@ let check_one_returning_pump_ends_the_connection pump returning =
 
 (* Each route's drain sends the prime and the replay inside a handler that
    logs an exception and returns. A drain that returned that way carries no
-   more events, and a ping that returned that way sends no more keepalives,
-   so the connection ends. *)
+   more events, and a renewal that returned that way renews no more, so the
+   connection ends. *)
 let test_a_pump_that_returns_ends_the_connection () =
   let raising_prime () = raise Prime_failed in
   check_one_returning_pump_ends_the_connection Drain (fun () ->
     try raising_prime () with
     | Prime_failed -> ());
-  check_one_returning_pump_ends_the_connection Ping (fun () -> ())
+  check_one_returning_pump_ends_the_connection Renew (fun () -> ())
 ;;
 
 (* A frame that never reaches a socket ends the send at the stall bound.
@@ -221,7 +235,9 @@ let test_a_pump_that_returns_ends_the_connection () =
 let test_send_raw_waits_for_the_socket () =
   Eio_main.run
   @@ fun env ->
-  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:short_stall_s (fresh_session "stall") in
+  Eio.Switch.run
+  @@ fun response_sw ->
+  let info = make_info ~sw:response_sw ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:short_stall_s (fresh_session "stall") in
   check outcome_t "an unread frame stalls" Stalled (Conn.send_raw info "data: {}\n\n");
   check bool "the connection is stopped" true (Atomic.get info.closed);
   check bool "the response is closed" true (Server_sse_response.is_closed info.response);
@@ -297,10 +313,12 @@ type drained =
 let drain_with_first_write_held ~prefix ~replay ~total_bytes ~while_first_waits =
   Eio_main.run
   @@ fun env ->
+  Eio.Switch.run
+  @@ fun response_sw ->
   with_registered_session prefix (fun ~session_id ~client_id ~event_stream ->
     let clock = Eio.Stdenv.clock env in
     let connection, info =
-      open_info ~client_id ~clock ~stalled_after_s:long_stall_s session_id
+      open_info ~client_id ~sw:response_sw ~clock ~stalled_after_s:long_stall_s session_id
     in
     Conn.register_sse_conn ~session_id ~info;
     let sends = ref [] and written = ref 0 and drain_ended = ref false in
@@ -316,10 +334,9 @@ let drain_with_first_write_held ~prefix ~replay ~total_bytes ~while_first_waits 
       Conn.run_sse_pumps ~sw info
         ~drain:(fun () ->
           ignore
-            (Conn.drain_sse info ~clock ~prime ~replay ~frame_of:sized_frame ~send event_stream
+            (Conn.drain_sse info ~prime ~replay ~frame_of:sized_frame ~send event_stream
              : Server_sse_pump.ending);
-          drain_ended := true)
-        ~ping:Eio.Fiber.await_cancel;
+          drain_ended := true);
       let rec first_write () =
         match !sends, Httpun.Server_connection.next_write_operation connection with
         | [ _ ], `Write iovecs -> offered_bytes iovecs

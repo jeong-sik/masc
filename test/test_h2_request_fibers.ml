@@ -1178,10 +1178,13 @@ let test_raising_answer_ends_its_stream_only () =
 (* RFC-0518 D2 for SSE. [long_body] goes out as one frame through
    [Server_sse_response.send], and [record] gets the answer when [send]
    returns. On HTTP/2 only the stream's flush bound times the frame, slice
-   by slice. [fork] says where the [send] runs. *)
+   by slice. [fork] says where the [send] runs. The response's keepalive
+   runs on a switch of the handler's own; a frame that still waits for the
+   socket is no silence, so it writes nothing while the frame goes out. *)
 let long_frame_handler ~clock ~record ~fork ~stream_end _ h2_reqd =
+  Eio.Switch.run @@ fun sw ->
   let sse =
-    Server_sse_response.respond ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
+    Server_sse_response.respond ~sw ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
       (Httpun.Response.create `OK) in
   fork (fun () ->
     record (Server_sse_response.send sse long_body);
@@ -1341,38 +1344,26 @@ let collect reader into =
       read ()) in
   read ()
 
-(* The clock a log stream's loop is given: the mock clock, counting the
-   sleeps the loop starts on it. The loop takes the time of its next
-   keepalive when a send returns, and a client can hold a frame before the
-   server's send has returned. A test that moved the time as soon as it held
-   the frame would move it under that reading. The loop starts a sleep each
-   time it goes back to wait, so a test moves the time once [sleeps] grew.
-
-   The mock clock is the time that passes. What the loop reads is that time
-   less [set_back_s], as a wall clock set back by that much reads, and a
-   sleep lasts the difference to the reading when it starts, as the server's
-   clock sleeps (eio_posix time.ml). [before_sleep] runs when the loop starts
-   a sleep, after it began to wait for the ring. *)
+(* The clock a log stream's response is given: the mock clock, counting the
+   sleeps started on it. The response's keepalive starts a sleep each time it
+   goes back to wait, so a test moves the time once [sleeps] grew. *)
 module Loop_clock = struct
   type t =
     { clock : Eio_mock.Clock.t
     ; mutable sleeps : int
-    ; mutable set_back_s : float
-    ; mutable before_sleep : unit -> unit
     }
 
   type time = float
 
-  let now t = Eio.Time.now t.clock -. t.set_back_s
+  let now t = Eio.Time.now t.clock
 
   let sleep_until t time =
     t.sleeps <- t.sleeps + 1;
-    t.before_sleep ();
-    Eio.Time.sleep_until t.clock (time +. t.set_back_s)
+    Eio.Time.sleep_until t.clock time
 end
 
 let loop_clock_of clock =
-  let loop = { Loop_clock.clock; sleeps = 0; set_back_s = 0.0; before_sleep = ignore } in
+  let loop = { Loop_clock.clock; sleeps = 0 } in
   let resource : float Eio.Time.clock_ty Eio.Resource.t =
     Eio.Resource.T (loop, Eio.Time.Pi.clock (module Loop_clock)) in
   loop, resource
@@ -1380,10 +1371,10 @@ let loop_clock_of clock =
 let left_out () = Log.emit Log.Warn ~module_name:"h2-request-fibers-left-out" "left out"
 
 (* A log stream on [loop_clock] whose client holds the first frame and whose
-   loop is at its wait. [run] gets the count of keepalives received. Once it
-   returns the client goes. The response ends the loop: the connection's end
-   ends the stream, and no keepalive has to come due for that, so [sw] can
-   end with the clock where it is. *)
+   keepalive is at its wait. [run] gets the count of keepalives received.
+   Once it returns the client goes. The response ends the loop and the
+   keepalive: the connection's end ends the stream, and no keepalive has to
+   come due for that, so [sw] can end with the clock where it is. *)
 let with_waiting_log_stream ~clock ~loop ~loop_clock run =
   let outside, set_outside = Eio.Promise.create () in
   with_log_capture @@ fun _ ->
@@ -1396,7 +1387,7 @@ let with_waiting_log_stream ~clock ~loop ~loop_clock run =
     check int "the response started" 200 (Eio.Promise.await status);
     let received = Buffer.create 256 in
     collect (Eio.Promise.await response_body) received;
-    let keepalives () = frames_in (Buffer.contents received) Server_sse_pump.keepalive_frame in
+    let keepalives () = frames_in (Buffer.contents received) Server_sse_response.keepalive_frame in
     ping_until client (fun () -> Buffer.length received > 0 && loop.Loop_clock.sleeps > 0);
     check int "the first frame is no keepalive" 0 (keepalives ());
     run ~client ~keepalives;
@@ -1405,9 +1396,10 @@ let with_waiting_log_stream ~clock ~loop ~loop_clock run =
 
 (* A log stream whose query leaves out what the ring gets: an entry every
    third of a ping interval, each of which wakes the stream's loop and sends
-   nothing. The keepalive goes out every ping interval all the same, so a
-   client that reads tells a quiet stream from a dead connection. A
-   keepalive time started again at each wake would never come. *)
+   nothing (RFC-0518 D2). The response's keepalive goes out every ping
+   interval all the same, so a client that reads tells a quiet stream from a
+   dead connection. A keepalive time started again at each wake would never
+   come. *)
 let test_log_stream_pings_past_entries_its_query_leaves_out () =
   let clock = Eio_mock.Clock.make () in
   let loop, loop_clock = loop_clock_of clock in
@@ -1415,56 +1407,22 @@ let test_log_stream_pings_past_entries_its_query_leaves_out () =
   let third = ping_interval_s /. 3.0 in
   let intervals = 3 in
   with_waiting_log_stream ~clock ~loop ~loop_clock (fun ~client ~keepalives ->
-    (* The ring gets an entry the query leaves out at [time]. The loop is
-       back at its wait when this returns. *)
+    (* The ring gets an entry the query leaves out at [time]. A PING's
+       answer comes after the server's fibers ran, the loop's wake too. *)
     let left_out_at time =
-      let slept = loop.Loop_clock.sleeps in
       Eio_mock.Clock.set_time clock time;
       left_out ();
-      ping_until client (fun () -> loop.Loop_clock.sleeps > slept) in
+      ping client in
     for interval = 1 to intervals do
       let start = float_of_int (interval - 1) *. ping_interval_s in
       left_out_at (start +. third);
       left_out_at (start +. (2.0 *. third));
       check int "no keepalive before a ping interval went by" (interval - 1) (keepalives ());
+      let slept = loop.Loop_clock.sleeps in
       left_out_at (start +. ping_interval_s);
-      ping_until client (fun () -> keepalives () >= interval);
+      ping_until client (fun () -> keepalives () >= interval && loop.Loop_clock.sleeps > slept);
       check int "one keepalive each ping interval" interval (keepalives ())
     done)
-
-(* The wall clock is set back an hour while a log stream waits for its
-   keepalive time. That time is a reading the loop took before the step, and
-   a sleep until it would last the hour longer. The loop wakes for an entry
-   its query leaves out and goes back to sleep: a ping interval at most. *)
-let test_log_stream_keepalive_after_the_clock_is_set_back () =
-  let clock = Eio_mock.Clock.make () in
-  let loop, loop_clock = loop_clock_of clock in
-  let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s in
-  with_waiting_log_stream ~clock ~loop ~loop_clock (fun ~client ~keepalives ->
-    let slept = loop.Loop_clock.sleeps in
-    loop.Loop_clock.set_back_s <- 3600.0;
-    left_out ();
-    ping_until client (fun () -> loop.Loop_clock.sleeps > slept);
-    Eio_mock.Clock.set_time clock ping_interval_s;
-    ping_until client (fun () -> keepalives () >= 1);
-    check int "one keepalive a ping interval after the stream last sent" 1 (keepalives ()))
-
-(* A ring that holds a newer entry each time a log stream's loop comes back
-   to wait: an entry the query leaves out is added as the loop starts each
-   sleep, as a writer on another domain could add one between the loop's read
-   and its wait. The wait for the ring then ends first every time and the
-   wait for the keepalive time never does. The loop looks at the time when it
-   wakes for the ring, so the keepalive goes out. *)
-let test_log_stream_pings_while_the_ring_always_holds_a_newer_entry () =
-  let clock = Eio_mock.Clock.make () in
-  let loop, loop_clock = loop_clock_of clock in
-  let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s in
-  with_waiting_log_stream ~clock ~loop ~loop_clock (fun ~client ~keepalives ->
-    loop.Loop_clock.before_sleep <- left_out;
-    left_out ();
-    Eio_mock.Clock.set_time clock ping_interval_s;
-    ping_until client (fun () -> keepalives () >= 1);
-    check int "one keepalive at the ping interval" 1 (keepalives ()))
 
 (* A log stream whose client reads nothing. The first frame is longer than
    the client's window, so its flush waits, and at the bound the stream is
@@ -1506,9 +1464,10 @@ let test_unread_log_stream_is_reset_at_the_bound () =
       (logged (sse_stall_line_of "/logs")))
 
 (* A log stream whose client resets the stream while the loop waits for the
-   ring and for its keepalive time. The loop ends with the stream: [sw],
-   which the loop runs in, ends. Nothing moves the clock, so a loop that
-   outlived the stream would hold [sw] until the harness gives up. *)
+   ring and the response for its keepalive time. The loop ends with the
+   stream: [sw], which the loop runs in, ends. Nothing moves the clock, so a
+   loop that outlived the stream would hold [sw] until the harness gives
+   up. *)
 let test_reset_log_stream_ends_its_loop () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -1532,10 +1491,11 @@ let test_reset_log_stream_ends_its_loop () =
    outlives the HTTP/2 stream, as the router's switch does. [produce] gets
    the response, and [released] counts the runs of the producer's cleanup. *)
 let served_handler ~clock ~outside ~released ~produce ~stream_end _ h2_reqd =
+  let outside = Eio.Promise.await outside in
   let sse =
-    Server_sse_response.respond ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
+    Server_sse_response.respond ~sw:outside ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
       (Httpun.Response.create `OK) in
-  Server_sse_response.serve ~sw:(Eio.Promise.await outside) sse
+  Server_sse_response.serve ~sw:outside sse
     ~release:(fun () -> incr released)
     (fun () -> produce sse)
 
@@ -1618,18 +1578,18 @@ let test_raising_producer_cuts_its_response () =
     check int "the cleanup ran once" 1 !released;
     check int "the failure is logged once" 1 (logged failure))
 
-(* A switch that is already ending runs no fiber. The response is closed and
-   the cleanup runs all the same; the producer does not run. *)
+(* A switch that is already ending runs no fiber: no keepalive and no
+   producer. The response is closed and the cleanup runs all the same. *)
 let test_ending_switch_runs_no_producer () =
   let clock = Eio_mock.Clock.make () in
   let released = ref 0 and produced = ref false in
   let handler ~stream_end _ h2_reqd =
-    let sse =
-      Server_sse_response.respond ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
-        (Httpun.Response.create `OK) in
     match
       Eio.Switch.run (fun ending ->
         Eio.Switch.fail ending Exit;
+        let sse =
+          Server_sse_response.respond ~sw:ending ~clock ~stalled_after_s
+            (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
         Server_sse_response.serve ~sw:ending sse
           ~release:(fun () -> incr released)
           (fun () -> produced := true))
@@ -1680,10 +1640,11 @@ let test_raising_cleanup_stays_off_the_switch () =
   let released = ref 0 in
   let outside, set_outside = Eio.Promise.create () in
   let handler ~stream_end _ h2_reqd =
+    let outside = Eio.Promise.await outside in
     let sse =
-      Server_sse_response.respond ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
-        (Httpun.Response.create `OK) in
-    Server_sse_response.serve ~sw:(Eio.Promise.await outside) sse
+      Server_sse_response.respond ~sw:outside ~clock ~stalled_after_s
+        (reqd_of_h2 ~stream_end h2_reqd) (Httpun.Response.create `OK) in
+    Server_sse_response.serve ~sw:outside sse
       ~release:(fun () ->
         incr released;
         failwith "fixture cleanup failure")
@@ -1757,10 +1718,6 @@ let () = run "H2 request fibers" ["connection progress", [
     test_log_stream_pings_past_entries_its_query_leaves_out;
   test_case "an unread log stream is reset at the bound" `Quick
     test_unread_log_stream_is_reset_at_the_bound;
-  test_case "a log stream pings a ping interval after the clock is set back" `Quick
-    test_log_stream_keepalive_after_the_clock_is_set_back;
-  test_case "a log stream pings while the ring always holds a newer entry" `Quick
-    test_log_stream_pings_while_the_ring_always_holds_a_newer_entry;
 ]; "producer scope", [
   test_case "a reset stream ends its producer" `Quick test_reset_stream_ends_its_producer;
   test_case "a producer that returns ends its response whole" `Quick

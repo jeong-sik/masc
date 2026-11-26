@@ -233,7 +233,7 @@ let serve ~sw ~clock ~owner ~request reqd =
   let current () = Server_observer_scope.stream_is_current owner in
   let authority = Sse.runtime_authority_exn ~base_path in
   let response = Httpun.Response.create ~headers:(response_headers owner) `OK in
-  let output = Server_sse_response.respond ~clock
+  let output = Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd response in
   Eio.Fiber.fork ~sw (fun () ->
@@ -290,22 +290,18 @@ let serve ~sw ~clock ~owner ~request reqd =
           | Ok snapshot ->
               if send (data_frame snapshot.json) && not snapshot.retry_read then wait snapshot.next_change_at)
       and wait deadline =
-        let delay = match deadline with
-          | None -> Server_mcp_transport_http_headers.sse_ping_interval_s
-          | Some at -> min (max 0.0 (at -. Time_compat.now ()))
-              Server_mcp_transport_http_headers.sse_ping_interval_s in
+        (* With no deadline only a change or the end wakes the stream. *)
+        let due () = match deadline with
+          | None -> Eio.Fiber.await_cancel ()
+          | Some at -> Eio.Time.sleep clock (max 0.0 (at -. Time_compat.now ())) in
         let action = Eio.Fiber.first
             (fun () -> Server_sse_response.await_closed output; `Closed)
             (fun () -> Eio.Fiber.first
               (fun () -> Eio.Stream.take wake; `Changed)
-              (fun () -> Eio.Time.sleep clock delay;
-                match deadline with
-                | Some at when Time_compat.now () >= at -> `Deadline
-                | Some _ | None -> `Keepalive)) in
+              (fun () -> due (); `Deadline)) in
         match action with
         | `Closed -> ()
         | `Changed | `Deadline -> deliver ()
-        | `Keepalive -> if send ": keepalive\n\n" then wait deadline
       in
       Eio.Fiber.first
         (fun () -> Server_observer_scope.await_stream_replaced owner)

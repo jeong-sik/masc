@@ -186,14 +186,14 @@ let ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id frame =
 
 exception Ask_followup_stream_closed
 
-let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper_name
+let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
   let response = ref None in
   let send frame =
     let output = match !response with
       | Some output -> output
       | None ->
-        let output = Server_sse_response.respond ~clock
+        let output = Server_sse_response.respond ~sw ~clock
             ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
             (Httpun.Response.create
                ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
@@ -233,7 +233,7 @@ let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper
     Log.Keeper.warn "ask followup stream failed ask_id=%s: %s" ask.ask_id (Printexc.to_string exn);
     Printexc.raise_with_backtrace exn backtrace
 
-let handle_keeper_asks_list ~clock state request reqd =
+let handle_keeper_asks_list ~sw ~clock state request reqd =
   let config = Mcp_server.workspace_config state in
   let expected = Uri.query (Uri.of_string request.Httpun.Request.target)
     |> List.filter (fun (name,_) -> name="expected_base_path" || name="expected_masc_root") in
@@ -334,7 +334,7 @@ let handle_keeper_asks_list ~clock state request reqd =
              match List.assoc_opt ask_id rows with
              | None -> respond_json_value_with_cors ~status:`Not_found request reqd
                  (Stream.keeper_chat_stream_error_json "canonical question is unavailable")
-             | Some (ask,resolution) -> stream_keeper_ask_followup ~clock
+             | Some (ask,resolution) -> stream_keeper_ask_followup ~sw ~clock
                  ~base_path ~workspace ~state_ready ~keeper_name ~ask ~resolution request reqd)
         else
         let progress_fields = match answer_progress_for with

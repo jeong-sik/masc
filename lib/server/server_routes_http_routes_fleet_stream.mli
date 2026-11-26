@@ -2,9 +2,9 @@
 
     - [GET] {!Fleet_stream.stream_path} — the first frame is the [Snapshot] the server
       holds, and every later frame is the next change or outage. A frame's [id]
-      is the event's revision. A comment line is written every
-      {!Server_mcp_transport_http_headers.sse_ping_interval_s} seconds without
-      an event, so a reader can tell a quiet fleet from a dead connection.
+      is the event's revision. The response writes its keepalive comment
+      after a quiet interval ({!Server_sse_response.respond}), so a reader
+      can tell a quiet fleet from a dead connection.
 
     The route takes the same read authorization as the other operator reads
     ([with_public_read]), so a client that sends [expected_base_path] and
@@ -23,7 +23,6 @@ val serve :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   subscribe:(on_event:(Fleet_stream.event -> unit) -> unit -> unit) ->
-  ping_interval_s:float ->
   stalled_after_s:float ->
   max_queued_events:int ->
   Http_reqd.t ->

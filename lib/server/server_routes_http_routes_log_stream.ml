@@ -1,5 +1,4 @@
 let stream_path = "/api/v1/dashboard/logs/stream"
-let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
 let response_headers ~instance =
   Httpun.Headers.of_list
@@ -69,20 +68,10 @@ let serve ~sw ~clock ~instance ~current ~replaced ~encode ~(query : Server_logs_
      growing, and a frame the client does not take ends the stream. The loop
      writes no log entry of its own: an entry would wake it again. *)
   let sse =
-    Server_sse_response.respond ~clock
+    Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd response
   in
-  (* A keepalive is due once nothing was sent for a ping interval. The ring
-     wakes the loop for every entry, also for the ones the query leaves out,
-     and such a wake sends nothing: the time of the next keepalive is kept
-     across it. A timer started again at each wake would never run out on a
-     ring that gets an entry more often than the interval, and the stream
-     would go silent for a client that still reads. [deliver] looks at the
-     time itself: when the ring already holds a newer entry each time the
-     loop comes back to wait, the wait for the ring returns at once and the
-     wait for the time never gets its turn. *)
-  let next_ping () = Eio.Time.now clock +. ping_interval_s in
   (* No byte goes out once the stream's workspace was replaced: the frame
      would carry the replaced workspace's answer. The loop ends there as it
      does for a client that is gone. [current] is read again at each send
@@ -90,47 +79,34 @@ let serve ~sw ~clock ~instance ~current ~replaced ~encode ~(query : Server_logs_
   let send data =
     if current () then Server_sse_response.send sse data else Server_sse_response.Closed
   in
-  let keepalive () = send Server_sse_pump.keepalive_frame in
-  let rec deliver ~ping_at after =
-    if current () then deliver_current ~ping_at after
-  and deliver_current ~ping_at after =
-    let frame = next_frame query ~after in
-    if worth_sending frame
-    then sent ~after:frame.after (send (encode frame))
-    else if Eio.Time.now clock >= ping_at
-    then sent ~after:frame.after (keepalive ())
-    else wait ~ping_at frame.after
-  and sent ~after = function
-    | Server_sse_response.Written -> wait ~ping_at:(next_ping ()) after
-    | Closed | Stalled -> ()
-  and wait ~ping_at after =
-    (* [ping_at] is a reading of the wall clock. Had the clock been set back
-       since, the keepalive would be that much later than a ping interval;
-       the time kept across a wake is at most one interval from now. *)
-    let ping_at = Float.min ping_at (next_ping ()) in
-    match
-      Eio.Fiber.first
-        (fun () ->
-          Log.Ring.await_newer_than after;
-          `Appended)
-        (fun () ->
-          Eio.Time.sleep_until clock ping_at;
-          `Quiet)
-    with
-    | `Appended -> deliver ~ping_at (Some after)
-    | `Quiet -> sent ~after (keepalive ())
+  (* The ring wakes the loop for every entry, also for the ones the query
+     leaves out, and such a wake sends nothing. The keepalive is the
+     response's own and counts from the last frame sent, so those wakes do
+     not put it off. *)
+  let rec deliver after =
+    if current ()
+    then (
+      let frame = next_frame query ~after in
+      if worth_sending frame
+      then (
+        match send (encode frame) with
+        | Server_sse_response.Written -> wait frame.after
+        | Closed | Stalled -> ())
+      else wait frame.after)
+  and wait after =
+    Log.Ring.await_newer_than after;
+    deliver (Some after)
   in
   (* A frame that stalled is logged once: by [Server_sse_response.send] on
      HTTP/1.1, by the stream's flush bound on HTTP/2. This loop is held at
      that frame's send then, so the line wakes only the other streams. The
-     response ends the loop when its client is gone: a wait for the ring or
-     for the keepalive time is cancelled with the HTTP/2 stream. *)
+     response ends the loop when its client is gone: a wait for the ring is
+     cancelled with the HTTP/2 stream. *)
   (* [replaced] returning ends the loop too, and the response with it: a
      loop that waits for the ring would otherwise hold a replaced workspace's
      stream open until the next entry. *)
   Server_sse_response.serve ~sw sse (fun () ->
-    Eio.Fiber.first replaced (fun () ->
-      deliver ~ping_at:(next_ping ()) query.since_seq))
+    Eio.Fiber.first replaced (fun () -> deliver query.since_seq))
 ;;
 
 let add_routes ~sw ~clock router =

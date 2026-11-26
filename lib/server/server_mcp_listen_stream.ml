@@ -1,8 +1,8 @@
-let serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~subscription_id
-    ~filter ~headers reqd =
+let serve ~clock ~stalled_after_s ~max_queued_events ~subscription_id ~filter ~headers
+    reqd =
   Eio.Switch.run (fun stream_sw ->
     let response =
-      Server_sse_response.respond ~clock ~stalled_after_s reqd
+      Server_sse_response.respond ~sw:stream_sw ~clock ~stalled_after_s reqd
         (Httpun.Response.create ~headers `OK)
     in
     Eio.Switch.on_release stream_sw (fun () -> Server_sse_response.close response);
@@ -36,8 +36,6 @@ let serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~subscript
          (match
             Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
               ~step:(fun frame -> Server_sse_pump.Send frame)
-              ~idle:(fun () -> Server_sse_pump.Keepalive)
-              ~clock ~ping_interval_s
               ~closed:(fun () -> Server_sse_response.await_closed response)
               ~send:(Server_sse_response.send response)
           with

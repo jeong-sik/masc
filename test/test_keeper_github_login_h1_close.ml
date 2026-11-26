@@ -5,7 +5,7 @@
    then waits, as the real one does.
 
    HTTP/1.1 tells the server about a client that left only through a write
-   that is not taken, and a waiting login writes nothing. The route's
+   that is not taken, and a waiting login writes nothing. The response's own
    keepalive is what turns the departure into a closed response. Its interval
    runs on a mock clock here, so the test moves time instead of waiting it
    out. *)
@@ -165,6 +165,7 @@ let test_a_client_gone_from_a_quiet_login_stops_its_gh () =
       ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
         let reqd = gluten_reqd.Gluten.Reqd.reqd in
         Server_dashboard_http_keeper_api_post.handle_keeper_github_login_post
+          ~sw
           ~clock:route_clock
           state
           (Httpun.Reqd.request reqd)

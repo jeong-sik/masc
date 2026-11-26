@@ -5,8 +5,9 @@
     {!source} in order and writes each frame through [send], which waits for
     the client. Only that fiber waits for the client; a producer never does.
     The stream ends when [send] reports that the client is gone or stalled,
-    when the source says to write no more, or when the stream says it is done
-    ([Send_last], [Stop], [Finish]).
+    when the response closes, when the source says to write no more, or when
+    the stream says it is done ([Send_last], [Stop]). A quiet stream's
+    keepalive is the response's own ({!Server_sse_response.respond}).
 
     Producers of the fleet, Keeper chat and MCP [subscriptions/listen] streams
     put events in a bounded {!Queue} and return at once. Its source stops once
@@ -31,9 +32,7 @@ type ending =
   (** The source said to write no more. A {!Queue} says so once an event came
       while it was full. *)
   | Stalled  (** [send] answered [Stalled]. *)
-  | Finished
-  (** A [Send_last] frame was written, or [step] said [Stop], or [idle] said
-      [Finish]. *)
+  | Finished  (** A [Send_last] frame was written, or [step] said [Stop]. *)
 
 type step =
   | Skip  (** Nothing is written for this event. *)
@@ -41,15 +40,10 @@ type step =
   | Send_last of string  (** The whole frame is written and the stream ends. *)
   | Stop  (** Nothing is written and the stream ends. *)
 
-type idle =
-  | Keepalive  (** {!keepalive_frame} is written. *)
-  | Quiet  (** Nothing is written; the next interval starts. *)
-  | Finish  (** Nothing is written and the stream ends. *)
-
 type 'event source =
   { take : unit -> 'event
   (** Waits for the next event. The pump cancels a take that is still waiting
-      when the ping interval ends, so a cancelled take must take nothing:
+      when the response closes, so a cancelled take must take nothing:
       nothing between removing an event and returning it may suspend. *)
   ; take_nonblocking : unit -> 'event option
   (** The next event if one is waiting, without waiting for one. *)
@@ -64,11 +58,6 @@ val max_batch_bytes : int
     64 KiB, so one [send] carries at most this plus one frame. A client that
     takes less than this within the response's stall bound has stopped
     reading, so the bound keeps its meaning for a batch. *)
-
-val keepalive_frame : string
-(** The SSE comment written for [Keepalive]. A reader that sees it knows a
-    quiet stream from a dead connection, and the SSE decoder yields no event
-    for it. *)
 
 module Queue : sig
   type 'event t
@@ -90,26 +79,17 @@ end
 val run :
   source:'event source ->
   step:('event -> step) ->
-  idle:(unit -> idle) ->
-  clock:_ Eio.Time.clock ->
-  ping_interval_s:float ->
   closed:(unit -> unit) ->
   send:(string -> Server_sse_response.outcome) ->
   ending
-(** [run ~source ~step ~idle ~clock ~ping_interval_s ~closed ~send] serves
-    one client until it ends.
+(** [run ~source ~step ~closed ~send] serves one client until it ends.
 
     - The caller subscribes the producer before [run], and removes the
       subscription when the stream's switch ends. Frames the caller sends
       itself before [run] go out before every event of [source].
-    - [idle ()] is asked when no event came for [ping_interval_s]. The
-      interval counts from the last frame or skip, so a stream that carries
-      events is not asked.
     - [closed ()] returns once the response takes no more frames
       ({!Server_sse_response.await_closed}). A pump waiting for an event then
       ends [Client_gone] at once instead of at its next write.
-    - An event taken as the interval runs out is that event: it has left the
-      source, and the idle answer is not used in its place.
     - The frames of the events already waiting when one is taken go out in
       the same [send], within {!max_batch_bytes}, so a burst waits for the
       client once per batch. A [Send_last] or [Stop] ends the batch and then

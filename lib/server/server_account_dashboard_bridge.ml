@@ -367,11 +367,32 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
                  , string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms )
                ]
            in
+           let active_auth () =
+             match Authz_zone.read login.Login_routes.zone with
+             | Error (_ : Authz_zone.uncertain) -> None
+             | Ok trusted ->
+               (match
+                  authorize
+                    trusted
+                    ~now_ms:(Server_login_http.now_ms login)
+                    Browser_observer_sse
+                    gate_req
+                with
+                | Ok auth -> Some auth
+                | Error (_ : Login_routes.answer) -> None)
+           in
+           (* A quiet stream asks again whether its reader may still read: a
+              keepalive while it may, the end once it may not. *)
            let response =
              Server_sse_response.respond
+               ~sw
                ~clock
                ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
                ~flush_headers_immediately:true
+               ~idle:(fun () ->
+                 match active_auth () with
+                 | Some (_ : authorized) -> Server_sse_response.Keepalive
+                 | None -> Server_sse_response.Finish)
                reqd
                (Httpun.Response.create ~headers `OK)
            in
@@ -407,20 +428,6 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
                    Hashtbl.replace seen_replay_ids delivery.Sse.event_id ())
                  replay.Sse.deliveries)
              replay_opt;
-           let active_auth () =
-             match Authz_zone.read login.Login_routes.zone with
-             | Error (_ : Authz_zone.uncertain) -> None
-             | Ok trusted ->
-               (match
-                  authorize
-                    trusted
-                    ~now_ms:(Server_login_http.now_ms login)
-                    Browser_observer_sse
-                    gate_req
-                with
-                | Ok auth -> Some auth
-                | Error (_ : Login_routes.answer) -> None)
-           in
            let send_frame frame =
              match Server_sse_response.send response frame with
              | Server_sse_response.Written -> true
@@ -484,12 +491,6 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
                           with
                           | Some projected_frame -> Server_sse_pump.Send projected_frame
                           | None -> Server_sse_pump.Skip)))
-                   ~idle:(fun () ->
-                     match active_auth () with
-                     | Some (_ : authorized) -> Server_sse_pump.Keepalive
-                     | None -> Server_sse_pump.Finish)
-                   ~clock
-                   ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
                    ~closed:(fun () -> Server_sse_response.await_closed response)
                    ~send:(Server_sse_response.send response)
                in

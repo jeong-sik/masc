@@ -112,8 +112,6 @@ let respond_official_client_probe_result request reqd = function
         ])
       reqd
 
-let execute_output_heartbeat_s = 15.0
-
 let execute_output_keeper ~prefix path =
   match Server_utils.extract_path_param ~prefix path with
   | None -> None
@@ -156,7 +154,7 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
               @ public_read_cors_headers req)
          in
          let response =
-           Server_sse_response.respond ~clock
+           Server_sse_response.respond ~sw ~clock
              ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
              inner_reqd (Httpun.Response.create ~headers `OK)
          in
@@ -188,21 +186,11 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
                   && write_json (Dashboard_execute_output.initial_event_json subscriber)
                 in
                 if wrote_initial then (
+                  (* The response writes the keepalive while no event comes. *)
                   let rec loop () =
-                    (* An event taken as the heartbeat came due is that
-                       event: it has left the subscriber, and a heartbeat
-                       written in its place would drop it from the stream. *)
-                    match
-                      Watched_work.run
-                        ~watcher:(fun () ->
-                          Eio.Time.sleep clock execute_output_heartbeat_s;
-                          Error `Timeout)
-                        (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
-                    with
-                    | Ok event ->
-                      if write_json (Dashboard_execute_output.stream_event_json event)
-                      then loop ()
-                    | Error `Timeout -> if write_string ": heartbeat\n\n" then loop ()
+                    let event = Dashboard_execute_output.take_event subscriber in
+                    if write_json (Dashboard_execute_output.stream_event_json event)
+                    then loop ()
                   in
                   loop ()))
 

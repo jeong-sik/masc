@@ -23,12 +23,23 @@ type t =
   ; closed : unit Eio.Promise.t
   ; resolve_closed : unit Eio.Promise.u
   ; stall_bound : stall_bound
+  ; now : unit -> float
+  ; sends_marked : int Atomic.t
+  ; last_marked_at : float Atomic.t
+  ; sends_waiting : int Atomic.t
   }
 
 type outcome =
   | Written
   | Closed
   | Stalled
+
+type idle =
+  | Keepalive
+  | Quiet
+  | Finish
+
+let keepalive_frame = ": keepalive\n\n"
 
 (* The request's path without its query, which can carry a token. *)
 let path t =
@@ -38,7 +49,7 @@ let path t =
   | None -> target
 ;;
 
-let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
+let open_response ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
   let writer = Http_reqd.respond_with_streaming ?flush_headers_immediately reqd response in
   (* A writer with a stream end is an HTTP/2 stream's, and every flush of
@@ -49,7 +60,17 @@ let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
     | None ->
       Own_timer { stall = (fun () -> Eio.Time.sleep clock stalled_after_s); stalled_after_s }
   in
-  { reqd; writer; closed; resolve_closed; stall_bound }
+  let now () = Eio.Time.now clock in
+  { reqd
+  ; writer
+  ; closed
+  ; resolve_closed
+  ; stall_bound
+  ; now
+  ; sends_marked = Atomic.make 0
+  ; last_marked_at = Atomic.make (now ())
+  ; sends_waiting = Atomic.make 0
+  }
 ;;
 
 let is_closed t = Http_reqd.Body_writer.is_closed t.writer
@@ -82,6 +103,14 @@ let close_after t f =
   result
 ;;
 
+(* A send's start and its end each count for the keepalive. The time goes
+   first: a keepalive that sees the new count reads this send's time or a
+   later one. *)
+let mark_send t =
+  Atomic.set t.last_marked_at (t.now ());
+  Atomic.incr t.sends_marked
+;;
+
 (* Nothing between the write and the flush registration suspends, so a frame
    from another fiber cannot land inside this one. [flush] answers once the
    bytes written so far were handed to the socket ([`Written]), or once the
@@ -93,6 +122,14 @@ let send t frame =
     close t;
     Closed)
   else (
+    (* The send counts before its bytes can reach the client, and it ends
+       on every way out, a cancellation too. *)
+    mark_send t;
+    Atomic.incr t.sends_waiting;
+    Fun.protect ~finally:(fun () ->
+      Atomic.decr t.sends_waiting;
+      mark_send t)
+    @@ fun () ->
     Http_reqd.Body_writer.write_string t.writer frame;
     let flushed, resolve = Eio.Promise.create () in
     Http_reqd.Body_writer.flush t.writer (Eio.Promise.resolve resolve);
@@ -167,6 +204,80 @@ let end_serving t ~release =
    HTTP/2 stream or stops the HTTP/1.1 body, and logs the exception. On a
    response that had already ended the report cuts nothing and still logs. *)
 let producer_failed t exn = Http_reqd.report_exn t.reqd exn
+
+let keepalive_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
+
+(* An HTTP/1.1 response hears that its client left only from a write that is
+   not taken (#32910), so a stream that is quiet for long would hold a gone
+   client's producer as long. The keepalive is the write that a quiet
+   stream lacks.
+
+   It is due once no send started or ended for an interval, counted from
+   the last start or end of a send from any fiber. A producer that wakes and
+   writes nothing does not put it off, and one that writes often never needs
+   it. A send that still waits for the socket is not silence: its own stall
+   bound watches the client, so the keepalive waits one more interval. The
+   count of starts and ends tells one during the sleep from none: a wall
+   clock that was set back reads an earlier time after a later send. Each
+   sleep is at most one interval, so a clock set back holds the keepalive
+   at most one interval past the wake that saw the new count. [Quiet] starts
+   the next interval at the answer.
+
+   The race in [respond] cancels this fiber at the close, but a fiber whose
+   sleep already ended runs on to its next suspension: a close and a due
+   keepalive in the same instant would still ask [idle]. So every wake reads
+   the close first. *)
+let keep_alive t ~sleep ~idle =
+  let rec wait ~marked ~from =
+    let due_in = from +. keepalive_interval_s -. t.now () in
+    sleep (Float.min keepalive_interval_s (Float.max 0.0 due_in));
+    let now_marked = Atomic.get t.sends_marked in
+    if Eio.Promise.is_resolved t.closed || is_closed t
+    then ()
+    else if now_marked <> marked
+    then wait ~marked:now_marked ~from:(Atomic.get t.last_marked_at)
+    else if Atomic.get t.sends_waiting > 0
+    then wait ~marked ~from:(t.now ())
+    else (
+      match idle () with
+      | Keepalive ->
+        (match send t keepalive_frame with
+         | Written -> after_last_send ()
+         | Closed | Stalled -> ())
+      | Quiet -> wait ~marked ~from:(t.now ())
+      | Finish -> close t)
+  and after_last_send () =
+    let marked = Atomic.get t.sends_marked in
+    wait ~marked ~from:(Atomic.get t.last_marked_at)
+  in
+  after_last_send ()
+;;
+
+(* The keepalive ends with the response: the race ends it at the close, and
+   on HTTP/2 also when the stream ends under the response. An [idle] that
+   raises leaves the response cut, as a producer that raises does; the close
+   promise wakes the fibers that wait for the end. [sw] is the caller's, so
+   nothing raised here may reach it. *)
+let respond ~sw ~clock ~stalled_after_s ?flush_headers_immediately ?(idle = fun () -> Keepalive)
+    reqd response =
+  let t = open_response ~clock ~stalled_after_s ?flush_headers_immediately reqd response in
+  (match Eio.Switch.get_error sw with
+   | Some (_ : exn) -> ()
+   | None ->
+     Eio.Fiber.fork_daemon ~sw (fun () ->
+       (match
+          Eio.Fiber.first
+            (fun () -> await_closed t)
+            (fun () -> keep_alive t ~sleep:(Eio.Time.sleep clock) ~idle)
+        with
+        | () -> ()
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn ->
+          producer_failed t exn;
+          ignore (Eio.Promise.try_resolve t.resolve_closed () : bool));
+       `Stop_daemon));
+  t
+;;
 
 (* [Eio.Fiber.fork] runs nothing on a switch that is already off, so the
    response is ended here then. On a live switch the fork runs the fiber at

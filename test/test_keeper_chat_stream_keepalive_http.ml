@@ -39,9 +39,10 @@ let failure_guard_s = 10.0
 
 (* The stream's clock: the mock clock, counting the sleeps started on it.
    A response's frame starts its stall wait before its bytes can reach the
-   socket, and the pump starts its keepalive wait only after the send
-   returned. So a sleep started after a frame's bytes were written is the
-   pump waiting again, and the test moves the time only then. *)
+   socket, and the response's keepalive starts its next wait only after its
+   own send returned. So a sleep started after a keepalive's bytes were
+   written is the keepalive waiting again, and the test moves the time only
+   then. *)
 module Counted_clock = struct
   type t =
     { mock : Eio_mock.Clock.t
@@ -212,7 +213,7 @@ let test_a_queued_stream_keeps_alive_and_ends_when_the_operation_settles () =
       | Error `Timeout -> failf "%s did not happen" what
     in
     let wire = { bytes = Buffer.create 1024; ended = false; sleeps_at_last_write = 0 } in
-    (* Waits until the pump, after the last frame went out, waits again. *)
+    (* Waits until the keepalive, after the last frame went out, waits again. *)
     let await_stream_waiting () =
       let written = wire.sleeps_at_last_write in
       await "the stream's next wait" (fun () -> clock.sleeps > written)
@@ -246,12 +247,13 @@ let test_a_queued_stream_keeps_alive_and_ends_when_the_operation_settles () =
     let accepted () = List.find_map accepted_state (frames wire) in
     await "the acceptance" (fun () -> Option.is_some (accepted ()));
     check (option string) "the operation is accepted queued" (Some "Queued") (accepted ());
-    await_stream_waiting ();
     let before_keepalive = List.length (frames wire) in
     (* A keeper chat stream that stays silent for [keeper_chat_idle_timeout_sec]
        (180 s, matching the client stream idle bound) must have written a
-       keepalive frame before that silence elapses. The time moves once, so
-       only the wait the pump started at the acceptance comes due. *)
+       keepalive frame before that silence elapses. Nothing but the response
+       writes it. The time moves once, so only the wait the response started
+       when it opened comes due, and it writes one keepalive however long the
+       silence was. *)
     let keeper_chat_idle_timeout_sec = 180.0 in
     Eio_mock.Clock.set_time clock.mock (Float.pred keeper_chat_idle_timeout_sec);
     await "a frame within the TUI's idle bound" (fun () ->

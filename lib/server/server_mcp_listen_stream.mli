@@ -6,12 +6,11 @@
     {!Mcp_subscriptions} delivers to it. A publisher only puts the frame in
     this stream's queue and returns, so a client that reads slowly holds up
     neither the publisher nor the other subscriptions. {!Server_sse_pump} on
-    the caller's fiber writes the frames and a keepalive comment after each
-    quiet interval. *)
+    the caller's fiber writes the frames, and the response writes a
+    keepalive comment after each quiet interval. *)
 
 val serve :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ping_interval_s:float ->
   stalled_after_s:float ->
   max_queued_events:int ->
   subscription_id:Yojson.Safe.t ->

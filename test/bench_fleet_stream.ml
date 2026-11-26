@@ -96,7 +96,6 @@ module Client = struct
 end
 
 let queue_bound = 64
-let ping_interval_s = 30.0
 
 (* No run of the bench stalls a reader for this long. *)
 let stalled_after_s = 600.0
@@ -228,7 +227,6 @@ let sse =
                  ~sw
                  ~clock
                  ~subscribe:(Hub.subscribe hub)
-                 ~ping_interval_s
                  ~stalled_after_s
                  ~max_queued_events:queue_bound
                  (Masc.Http_reqd.of_gluten gluten_reqd));

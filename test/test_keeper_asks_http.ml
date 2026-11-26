@@ -93,7 +93,7 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       let router = Http_server_eio.Router.create ()
         |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
              (Server_routes_http_keeper_asks.handle_keeper_asks_list
-               ~clock:(Eio.Stdenv.clock env) state)
+               ~sw ~clock:(Eio.Stdenv.clock env) state)
         |> Server_route.post Server_route.Always_public "/api/v1/keepers/ask-answer"
              (Server_routes_http_keeper_asks.handle_keeper_ask_answer ~actor:"operator" state) in
       let clock = Eio.Stdenv.clock env in

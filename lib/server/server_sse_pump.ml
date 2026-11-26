@@ -10,11 +10,6 @@ type step =
   | Send_last of string
   | Stop
 
-type idle =
-  | Keepalive
-  | Quiet
-  | Finish
-
 type 'event source =
   { take : unit -> 'event
   ; take_nonblocking : unit -> 'event option
@@ -23,10 +18,8 @@ type 'event source =
 
 type 'event wake =
   | Event of 'event
-  | Ping
   | Gone
 
-let keepalive_frame = ": keepalive\n\n"
 let max_batch_bytes = 65_536
 
 module Queue = struct
@@ -80,26 +73,19 @@ module Queue = struct
   ;;
 end
 
-let run ~source ~step ~idle ~clock ~ping_interval_s ~closed ~send =
+let run ~source ~step ~closed ~send =
   let rec serve () =
     if source.stopped ()
     then Source_stopped
     else (
-      (* An event taken as the interval ran out is that event: it has left
-         the source, and the idle answer used in its place would drop it.
-         [Watched_work.run] keeps the work's outcome. A response that closes
-         while no event comes (the peer reset its HTTP/2 stream, or the route
-         closed it) ends the wait too, so no take outlives the client. *)
+      (* A response that closes while no event comes (the peer reset its
+         HTTP/2 stream, the route closed it, or its keepalive was not taken)
+         ends the wait, so no take outlives the client. *)
       match
         Watched_work.run
           ~watcher:(fun () ->
-            Eio.Fiber.first
-              (fun () ->
-                Eio.Time.sleep clock ping_interval_s;
-                Ping)
-              (fun () ->
-                closed ();
-                Gone))
+            closed ();
+            Gone)
           (fun () -> Event (source.take ()))
       with
       | Event event ->
@@ -108,11 +94,6 @@ let run ~source ~step ~idle ~clock ~ping_interval_s ~closed ~send =
          | Send frame -> batch [ frame ] ~bytes:(String.length frame)
          | Send_last frame -> write ~last:true [ frame ]
          | Stop -> Finished)
-      | Ping ->
-        (match idle () with
-         | Keepalive -> write ~last:false [ keepalive_frame ]
-         | Quiet -> serve ()
-         | Finish -> Finished)
       | Gone -> Client_gone)
   (* The events already waiting go out in the same send, so a burst waits for
      the socket once per batch instead of once per frame. Each take first asks

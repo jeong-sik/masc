@@ -4436,7 +4436,7 @@ let test_new_skill_authoring_routes_are_read_only () =
       (Sys.file_exists (Filename.concat config.base_path "skills/new-draft")))
 
 let test_asks_list_publishes_written_alternative_capability () =
-  with_test_env @@ fun ~env ~sw:_ ~config ->
+  with_test_env @@ fun ~env ~sw ~config ->
   let module Ask = Masc.Keeper_ask in
   let name = "ask-capability" in
   let meta =
@@ -4476,7 +4476,7 @@ let test_asks_list_publishes_written_alternative_capability () =
       let router = Lib.Http_server_eio.Router.create ()
         |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
              (Server_routes_http_keeper_asks.handle_keeper_asks_list
-                ~clock:(Eio.Stdenv.clock env) state)
+                ~sw ~clock:(Eio.Stdenv.clock env) state)
       in
       let status, _, body = tools_h1_wire_response ~router ~headers:[]
         ("/api/v1/keepers/asks?name=" ^ name) in

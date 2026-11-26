@@ -52,9 +52,12 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_keeper_provider_input _
   | Cmd.Get_keeper_provider_input_part _
   | Cmd.Get_keeper_memory_journal _
+  | Cmd.Get_keeper_memory_activity _
   | Cmd.Get_keeper_memory_facts _
   | Cmd.Get_keeper_tool_calls _
   | Cmd.Get_keeper_tool_result _
+  | Cmd.Get_chat_operation_events _
+  | Cmd.Get_keeper_next_request _
   | Cmd.Get_oauth_attempt_status _
   | Cmd.Get_goal_confirmation _
   | Cmd.Get_verification_evidence _
@@ -69,7 +72,6 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_skill_editor_sources
   | Cmd.Get_skill_editor_tools
   | Cmd.Get_async_requests
-  | Cmd.Get_lane_addon_declaration _
   | Cmd.Get_repository_activity _ ->
       Rbac.Single_user_token_admin_only
   (* Single-user Public_read / CanReadState / Read_auth reads (404 in MA) *)
@@ -78,8 +80,6 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_chat_history _
   | Cmd.Get_chat_queue _
   | Cmd.Get_chat_status _
-  | Cmd.Get_chat_operation_events _
-  | Cmd.Get_keeper_next_request _
   | Cmd.Get_keeper_turn_transcript _
   | Cmd.Get_keeper_tool_stats _
   | Cmd.Get_keeper_runtime_trace _
@@ -90,7 +90,6 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_board_quarantines _
   | Cmd.Get_oauth_providers
   | Cmd.Get_oauth_attached_tools _
-  | Cmd.Get_keeper_memory_activity _
   | Cmd.Get_keeper_memory_health _
   | Cmd.Get_verifications _
   | Cmd.Get_asks _
@@ -127,6 +126,7 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
   | Cmd.Get_lane_addon_asks _
+  | Cmd.Get_lane_addon_declaration _
   | Cmd.Get_addon_package_catalog _
   | Cmd.Get_addon_package_preview _
   | Cmd.Get_lane_addon_action_status _
@@ -174,28 +174,43 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
   | Cmd.Post_board_comment _
   | Cmd.Post_board_vote _
   | Cmd.Post_board_comment_vote _
-  | Cmd.Post_mcp_tools_list _ ->
+  | Cmd.Post_mcp_tools_list _
+  | Cmd.Post_fusion_launch _
+  | Cmd.Post_keeper_turn_interrupt _
+  | Cmd.Post_connector_bind _
+  | Cmd.Post_connector_unbind _
+  | Cmd.Post_lane_addon_attach _
+  | Cmd.Post_lane_addon_detach _
+  | Cmd.Post_lane_addon_action _
+  | Cmd.Post_lane_addon_declaration_save _
+  | Cmd.Post_lane_addon_observe _
+  | Cmd.Post_lane_addon_evidence _
+  | Cmd.Post_lane_addon_act _ ->
       Rbac.Single_user_write
-  (* Single-user Token_permission CanAdmin mutations (404 in MA) *)
-  | Cmd.Post_tui_preference _
+  (* Single-user Tool/Tool_actor admin_tool mutations (allows loopback auth_enabled=false Admin; 404 in MA) *)
   | Cmd.Post_ask_answer _
   | Cmd.Post_tool_approval _
+  | Cmd.Post_keeper_tool_approval_mode _
+  | Cmd.Post_lane_addon_ask_answer _
+  | Cmd.Post_lane_addon_retain _
+  | Cmd.Post_prompt_override _
+  | Cmd.Post_runtime_param_set _
+  | Cmd.Post_runtime_param_clear _ ->
+      Rbac.Single_user_role_admin
+  (* Single-user Token_permission CanAdmin mutations (404 in MA) *)
+  | Cmd.Post_tui_preference _
   | Cmd.Post_gate_resolution _
   | Cmd.Post_goal_confirmation _
   | Cmd.Post_verification_verdict _
   | Cmd.Post_memory_act _
-  | Cmd.Post_fusion_launch _
   | Cmd.Post_runtime_assignment _
   | Cmd.Post_runtime_default_route _
   | Cmd.Post_runtime_lane_create _
   | Cmd.Post_runtime_lane_update _
   | Cmd.Post_runtime_lane_delete _
   | Cmd.Post_setup_account_key _
-  | Cmd.Post_keeper_turn_interrupt _
   | Cmd.Post_artifact_check _
   | Cmd.Post_artifact_share _
-  | Cmd.Post_connector_bind _
-  | Cmd.Post_connector_unbind _
   | Cmd.Post_repo_add _
   | Cmd.Post_task_cancel _
   | Cmd.Post_harness_overrule _
@@ -210,10 +225,6 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
   | Cmd.Post_board_delete _
   | Cmd.Post_keeper_lifecycle _
   | Cmd.Post_keeper_purge _
-  | Cmd.Post_lane_addon_attach _
-  | Cmd.Post_lane_addon_detach _
-  | Cmd.Post_lane_addon_action _
-  | Cmd.Post_lane_addon_ask_answer _
   | Cmd.Post_keeper_control_lifecycle _
   | Cmd.Post_keeper_clear _
   | Cmd.Post_keeper_directive _
@@ -225,7 +236,6 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
   | Cmd.Post_gate_mode _
   | Cmd.Post_gate_rule_delete _
   | Cmd.Post_gate_retry _
-  | Cmd.Post_keeper_tool_approval_mode _
   | Cmd.Post_hitl_ack_uncertain _
   | Cmd.Post_hitl_late_approval_restore
   | Cmd.Post_mcp_tools_call _
@@ -235,21 +245,13 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
   | Cmd.Post_skill_editor_preview _
   | Cmd.Post_skill_editor_save _
   | Cmd.Post_skills_refresh
-  | Cmd.Post_prompt_override _
   | Cmd.Post_preset_save _
   | Cmd.Post_preset_create _
   | Cmd.Post_preset_restore _
   | Cmd.Post_preset_delete _
-  | Cmd.Post_runtime_param_set _
-  | Cmd.Post_runtime_param_clear _
   | Cmd.Post_runtime_routing_action _
   | Cmd.Post_runtime_config_raw_preview _
   | Cmd.Post_board_attention_quarantine_recovery _
-  | Cmd.Post_lane_addon_declaration_save _
-  | Cmd.Post_lane_addon_observe _
-  | Cmd.Post_lane_addon_retain _
-  | Cmd.Post_lane_addon_evidence _
-  | Cmd.Post_lane_addon_act _
   | Cmd.Post_lane_addon_operator _
   | Cmd.Post_browser_command _
   | Cmd.Post_browser_interact _ ->
@@ -330,21 +332,28 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
   | Nav.Task_transition_form _
   | Nav.Goal_upsert_form _
   | Nav.Goal_drop _
-  | Nav.Schedule_form ->
+  | Nav.Schedule_form
+  | Nav.Connector_form
+  | Nav.Fusion_launch_form
+  | Nav.Addon_attach_form
+  | Nav.Addon_detach_confirm _
+  | Nav.Addon_invoke_action _
+  | Nav.Addon_decl_form _
+  | Nav.Addon_act_form _ ->
       Rbac.Single_user_write
   | Nav.Wiki_edit_form -> Rbac.Bridged_token_admin
   | Nav.Setup_login_start_form | Nav.Setup_login_input_form _ ->
       Rbac.Own_provider_manage
+  | Nav.Prompt_override_form _ | Nav.Runtime_param_set_form _ ->
+      Rbac.Single_user_role_admin
   | Nav.Gate_reject _
   | Nav.Verification_reject _
   | Nav.Harness_overrule _
   | Nav.Task_cancel _
   | Nav.Task_link_goal _
-  | Nav.Connector_form
   | Nav.Repo_add_form
   | Nav.Goal_confirmation_proof
   | Nav.Memory_act_form
-  | Nav.Fusion_launch_form
   | Nav.Runtime_assign_form
   | Nav.Setup_account_key_form
   | Nav.Github_token_form _
@@ -354,9 +363,6 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
   | Nav.Board_delete_post _
   | Nav.Keeper_lifecycle_form _
   | Nav.Keeper_purge_confirm _
-  | Nav.Addon_attach_form
-  | Nav.Addon_detach_confirm _
-  | Nav.Addon_invoke_action _
   | Nav.Keeper_control_confirm _
   | Nav.Keeper_clear_form _
   | Nav.Keeper_operator_note_form _
@@ -365,13 +371,9 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
   | Nav.Skill_create_form
   | Nav.Skill_edit_form _
   | Nav.Skill_delete_confirm _
-  | Nav.Prompt_override_form _
   | Nav.Preset_create_form
-  | Nav.Runtime_param_set_form _
   | Nav.Default_route_edit
   | Nav.Lane_rename_form _
-  | Nav.Addon_decl_form _
-  | Nav.Addon_act_form _
   | Nav.Browser_interact_form _ ->
       Rbac.Single_user_token_admin_only
 
@@ -380,7 +382,7 @@ let route_access_of_overlay : Nav.overlay -> Rbac.route_access = function
       Rbac.Always_public
   | Nav.Settings _ -> Rbac.Bridged_token_admin
   | Nav.Queue_context _ -> Rbac.Single_user_read
-  | Nav.Ask_answer -> Rbac.Single_user_token_admin_only
+  | Nav.Ask_answer -> Rbac.Single_user_role_admin
   | Nav.Inline_action kind -> route_access_of_inline_action kind
 
 let route_access_of_menu_target : Nav.menu_target -> Rbac.route_access =
@@ -405,11 +407,14 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_keeper
   | Slash.Cmd_jump
   | Slash.Cmd_queue
-  | Slash.Cmd_context ->
+  | Slash.Cmd_context
+  | Slash.Cmd_addon ->
       Rbac.Single_user_read
-  | Slash.Cmd_voice | Slash.Cmd_btw -> Rbac.Single_user_write
+  | Slash.Cmd_btw -> Rbac.Single_user_write
   | Slash.Cmd_infra -> Rbac.Su_read_ma_admin
   | Slash.Cmd_config -> Rbac.Bridged_token_admin
+  | Slash.Cmd_prompt -> Rbac.Single_user_role_admin
+  | Slash.Cmd_voice
   | Slash.Cmd_model
   | Slash.Cmd_discord_reply
   | Slash.Cmd_wake
@@ -421,10 +426,8 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_gate
   | Slash.Cmd_exec
   | Slash.Cmd_skill
-  | Slash.Cmd_prompt
   | Slash.Cmd_preset
   | Slash.Cmd_lane
-  | Slash.Cmd_addon
   | Slash.Cmd_browser ->
       Rbac.Single_user_token_admin_only
   | Slash.Cmd_incidents
@@ -461,11 +464,26 @@ let route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access = function
   | Slash.Queue -> route_access_of_slash_command_id Slash.Cmd_queue
   | Slash.Context -> route_access_of_slash_command_id Slash.Cmd_context
   | Slash.Ctl _ -> route_access_of_slash_command_id Slash.Cmd_ctl
-  | Slash.Gate _ -> route_access_of_slash_command_id Slash.Cmd_gate
+  | Slash.Gate (Slash.Gate_keeper_mode_set _) -> Rbac.Single_user_role_admin
+  | Slash.Gate
+      ( Slash.Gate_mode_set _
+      | Slash.Gate_external_mode_set _
+      | Slash.Gate_rule_delete _
+      | Slash.Gate_approve_always _
+      | Slash.Gate_retry _
+      | Slash.Gate_ack_uncertain _
+      | Slash.Gate_restore_late ) ->
+      Rbac.Single_user_token_admin_only
   | Slash.Exec _ -> route_access_of_slash_command_id Slash.Cmd_exec
   | Slash.Skill _ -> route_access_of_slash_command_id Slash.Cmd_skill
-  | Slash.Prompt _ -> route_access_of_slash_command_id Slash.Cmd_prompt
-  | Slash.Preset _ -> route_access_of_slash_command_id Slash.Cmd_preset
+  | Slash.Prompt _ -> Rbac.Single_user_role_admin
+  | Slash.Preset (Slash.Preset_list | Slash.Preset_show _) -> Rbac.Single_user_read
+  | Slash.Preset
+      ( Slash.Preset_save _
+      | Slash.Preset_create _
+      | Slash.Preset_restore _
+      | Slash.Preset_delete _ ) ->
+      Rbac.Single_user_token_admin_only
   | Slash.Lane (Slash.Lane_run_inspect _) -> Rbac.Bridged_token_admin
   | Slash.Lane
       ( Slash.Lane_create _
@@ -480,19 +498,20 @@ let route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access = function
       | Slash.Lane_quarantine_recover _
       | Slash.Lane_raw_preview ) ->
       Rbac.Single_user_token_admin_only
-  | Slash.Addon (Slash.Addon_asks _ | Slash.Addon_slice _) ->
+  | Slash.Addon
+      (Slash.Addon_asks _ | Slash.Addon_slice _ | Slash.Addon_decl_read _) ->
       Rbac.Single_user_read
   | Slash.Addon
       ( Slash.Addon_attach _
       | Slash.Addon_detach _
       | Slash.Addon_observe _
-      | Slash.Addon_retain _
       | Slash.Addon_act _
       | Slash.Addon_evidence _
-      | Slash.Addon_decl_read _
-      | Slash.Addon_decl_new _
-      | Slash.Addon_ask_answer _
-      | Slash.Addon_operator _ ) ->
+      | Slash.Addon_decl_new _ ) ->
+      Rbac.Single_user_write
+  | Slash.Addon (Slash.Addon_retain _ | Slash.Addon_ask_answer _) ->
+      Rbac.Single_user_role_admin
+  | Slash.Addon (Slash.Addon_operator _) ->
       Rbac.Single_user_token_admin_only
   | Slash.Browser _ -> route_access_of_slash_command_id Slash.Cmd_browser
   | Slash.Tools _ -> route_access_of_slash_command_id Slash.Cmd_tools
@@ -552,22 +571,24 @@ let route_access_of_keymap_action : Keymap.action -> Rbac.route_access =
   | Keymap.Refresh_browser_tabs ->
       Rbac.Single_user_read
   | Keymap.Focus_composer
-  | Keymap.Voice_ptt_toggle
   | Keymap.Submit_steer
   | Keymap.Submit_followup
   | Keymap.Create_new
   | Keymap.Context_primary_action
   | Keymap.Board_vote _
-  | Keymap.Cycle_hearth_or_overrule ->
+  | Keymap.Cycle_hearth_or_overrule
+  | Keymap.Launch_fusion
+  | Keymap.Interrupt_turn ->
       Rbac.Single_user_write
   | Keymap.Account_login | Keymap.Poll_account_login ->
       Rbac.Own_provider_manage
   | Keymap.Fast_approve_top
   | Keymap.Fast_deny_top
-  | Keymap.Ask_select_choice _
+  | Keymap.Ask_select_choice _ ->
+      Rbac.Single_user_role_admin
+  | Keymap.Voice_ptt_toggle
   | Keymap.Open_model_switcher
   | Keymap.Toggle_artifact_share
-  | Keymap.Launch_fusion
   | Keymap.Unbind_connector
   | Keymap.Entity_approve_or_assign
   | Keymap.Entity_reject_or_cancel
@@ -575,7 +596,6 @@ let route_access_of_keymap_action : Keymap.action -> Rbac.route_access =
   | Keymap.Configure_provider_key
   | Keymap.Dismiss_errors
   | Keymap.Open_memory_recovery
-  | Keymap.Interrupt_turn
   | Keymap.Delete_selected
   | Keymap.Link_task_goal
   | Keymap.Keeper_wake_or_online
@@ -618,10 +638,22 @@ let edit_or_export_access (m : Model.t) : Rbac.route_access =
               else Rbac.Bridged_token_admin
           | Nav.Runtime_connectors -> Rbac.Bridged_token_admin
           | Nav.Runtime_fusion -> Rbac.Single_user_read
-          | Nav.Runtime_failover_lanes
-          | Nav.Runtime_addons_browser
-          | Nav.Runtime_tools_usage
-          | Nav.Runtime_efficiency_spend ->
+          | Nav.Runtime_addons_browser -> Rbac.Single_user_write
+          | Nav.Runtime_tools_usage -> (
+              match m.runtime.tools_subview with
+              | Runtime_store.Tools_prompts_presets -> (
+                  match m.runtime.pp_section with
+                  | Runtime_store.Sec_prompts | Runtime_store.Sec_params ->
+                      Rbac.Single_user_role_admin
+                  | Runtime_store.Sec_presets
+                  | Runtime_store.Sec_async_requests ->
+                      Rbac.Single_user_token_admin_only)
+              | Runtime_store.Tools_usage_calls
+              | Runtime_store.Tools_catalog_tree
+              | Runtime_store.Tools_keeper_skills
+              | Runtime_store.Tools_quality_gate ->
+                  Rbac.Single_user_token_admin_only)
+          | Nav.Runtime_failover_lanes | Nav.Runtime_efficiency_spend ->
               Rbac.Single_user_token_admin_only)
       | Nav.Work -> (
           match m.work.active_tab with
@@ -651,7 +683,7 @@ let launch_fusion_access (m : Model.t) : Rbac.route_access =
       | Nav.Skill_inspector _
       | Nav.Exact_run_inspector _
       | Nav.File_inspector _ ) ->
-      Rbac.Single_user_token_admin_only
+      Rbac.Single_user_write
   | None -> (
       match m.nav.workspace with
       | Nav.Knowledge
@@ -666,7 +698,7 @@ let launch_fusion_access (m : Model.t) : Rbac.route_access =
           Rbac.Single_user_read
       | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
       | Nav.Infra ->
-          Rbac.Single_user_token_admin_only)
+          Rbac.Single_user_write)
 
 let probe_sandbox_access (m : Model.t) : Rbac.route_access =
   match Model.active_inspector m with
@@ -731,7 +763,17 @@ let create_new_access (m : Model.t) : Rbac.route_access =
               | Nav.Work_inbox
               | Nav.Work_candle_scorecard ->
                   Rbac.Single_user_write)
-          | Nav.Runtime | Nav.Infra -> Rbac.Single_user_token_admin_only
+          | Nav.Runtime -> (
+              match m.runtime.active_tab with
+              | Nav.Runtime_connectors | Nav.Runtime_addons_browser ->
+                  Rbac.Single_user_write
+              | Nav.Runtime_quotas_credits
+              | Nav.Runtime_failover_lanes
+              | Nav.Runtime_tools_usage
+              | Nav.Runtime_efficiency_spend
+              | Nav.Runtime_fusion ->
+                  Rbac.Single_user_token_admin_only)
+          | Nav.Infra -> Rbac.Single_user_token_admin_only
           | Nav.Keepers -> Rbac.Bridged_token_admin))
 
 let context_primary_action_access (m : Model.t) : Rbac.route_access =
@@ -772,7 +814,11 @@ let context_primary_action_access (m : Model.t) : Rbac.route_access =
               Rbac.Single_user_write)
       | Nav.Runtime -> (
           match m.runtime.active_tab with
-          | Nav.Runtime_addons_browser -> Rbac.Single_user_token_admin_only
+          | Nav.Runtime_addons_browser ->
+              if m.nav.pane_index = 1 then Rbac.Single_user_token_admin_only
+              else if Runtime_store.open_lane_addon_asks m.runtime <> [] then
+                Rbac.Single_user_role_admin
+              else Rbac.Single_user_write
           | Nav.Runtime_quotas_credits
           | Nav.Runtime_failover_lanes
           | Nav.Runtime_tools_usage
@@ -906,6 +952,14 @@ let account_login_access (m : Model.t) : Rbac.route_access =
   then Rbac.Single_user_token_admin_only
   else Rbac.Own_provider_manage
 
+let unbind_connector_access (m : Model.t) : Rbac.route_access =
+  if
+    Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Runtime
+    && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_connectors
+  then Rbac.Single_user_write
+  else Rbac.Single_user_token_admin_only
+
 let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
     Rbac.route_access =
   match act with
@@ -921,6 +975,7 @@ let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
   | Keymap.Dismiss_errors -> dismiss_errors_access m
   | Keymap.Toggle_unreported -> toggle_unreported_access m
   | Keymap.Account_login -> account_login_access m
+  | Keymap.Unbind_connector -> unbind_connector_access m
   | Keymap.Switch_workspace _
   | Keymap.Toggle_sidebar
   | Keymap.Sub_tab _
@@ -964,7 +1019,6 @@ let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
   | Keymap.Toggle_artifact_share
   | Keymap.Step_revision _
   | Keymap.Step_context_item _
-  | Keymap.Unbind_connector
   | Keymap.Configure_provider_key
   | Keymap.Poll_account_login
   | Keymap.Copy_hash
@@ -1321,7 +1375,7 @@ let rec is_cmd_allowed session = function
       Rbac.is_allowed session Rbac.Single_user_read
   | Cmd.Open_dos_screen _ -> Rbac.is_allowed session Rbac.Machine_play
   | Cmd.Voice_cmd (Cmd.Start_ptt _) ->
-      Rbac.is_allowed session Rbac.Single_user_write
+      Rbac.is_allowed session Rbac.Single_user_token_admin_only
   | Cmd.Voice_cmd (Cmd.Stop_ptt | Cmd.Cancel_ptt | Cmd.Probe_capabilities) ->
       true
   | Cmd.Sync_streams _

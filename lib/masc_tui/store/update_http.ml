@@ -242,7 +242,6 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           skill_editor_loaded = Observed.unreported;
           skill_editor_preview = Observed.unreported;
           async_requests = Observed.unreported;
-          addon_declaration_doc = Observed.unreported;
           addon_last_action_receipt = Observed.unreported;
           browser_last_receipt = Observed.unreported;
           runtime_raw_preview = Observed.unreported;
@@ -256,6 +255,7 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           presets_listing = Observed.unreported;
           preset_detail = Observed.unreported;
           runtime_params = Observed.unreported;
+          addon_declaration_doc = Observed.unreported;
           addon_slice = Observed.unreported;
           browser_scene = Observed.unreported;
           browser_screenshot = Observed.unreported;
@@ -281,6 +281,8 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           provider_input = Observed.unreported;
           part_content = Observed.unreported;
           call_evidence = Observed.unreported;
+          next_request = Observed.unreported;
+          next_request_absent = false;
           checkpoints = Observed.unreported;
           last_purge_preview = None;
           tool_calls = Observed.unreported;
@@ -315,6 +317,7 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
         {
           k0 with
           keeper_memory_facts = Knowledge_store.String_map.empty;
+          keeper_memory_activity = Knowledge_store.String_map.empty;
           keeper_memory_journal = Observed.unreported;
           artifacts = Observed.unreported;
           active_artifact_detail = Observed.unreported;

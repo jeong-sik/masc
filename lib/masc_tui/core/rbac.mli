@@ -126,6 +126,11 @@ type route_access =
           requires [Token_permission CanAdmin] in single-user
           ([auth_enabled && require_token && token_valid && effective_admin])
           and [Admin_only] browser session in multi-account (PAT returns 403). *)
+  | Single_user_role_admin
+      (** Single-user [Tool] / [Tool_actor] [admin_tool] route: allows
+          [Single_user_local] whenever [role = Admin && effective_admin]
+          (including local loopback with [auth_enabled = false]), denies Worker
+          and Player with [Requires_admin], and returns 404 in multi-account. *)
   | Single_user_token_admin_only
       (** Single-user [Token_permission CanAdmin] route requiring
           [auth_enabled && require_token && token_valid && effective_admin]

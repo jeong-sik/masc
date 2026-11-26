@@ -1214,10 +1214,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                                 ] )
                           | Some _, None | None, (Some _ | None) -> (m, []))
                     else if not m.runtime.addon_catalog_mode then
-                      match
-                        Rbac.decide m.auth_session
-                          Rbac.Single_user_token_admin_only
-                      with
+                      match Rbac.decide m.auth_session Rbac.Single_user_write with
                       | Rbac.Denied reason ->
                           ( Model.with_toast ~now ~level:Model.Toast_warning
                               (Rbac.deny_reason_say reason) m

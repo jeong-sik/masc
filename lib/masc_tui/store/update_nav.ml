@@ -2868,7 +2868,7 @@ let active_attention_query (m : Model.t) =
 
 let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t)
     =
-  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  match Rbac.decide m.auth_session Rbac.Single_user_role_admin with
   | Rbac.Denied reason ->
       (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
   | Rbac.Allowed ->
@@ -3073,7 +3073,7 @@ let actionable_approval_item (m : Model.t) =
   else Model.fast_approval_strip_item m
 
 let fast_approve_top ~now (m : Model.t) =
-  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  match Rbac.decide m.auth_session Rbac.Single_user_role_admin with
   | Rbac.Denied reason ->
       (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
   | Rbac.Allowed ->
@@ -3102,21 +3102,30 @@ let fast_approve_top ~now (m : Model.t) =
               }
           in
           ({ m with attention }, [ cmd ])
-      | Attention.Payload_gate g ->
-          let attention =
-            Attention.mark_in_flight ~id:entry.id m.attention
-            |> Attention.advance_past_in_flight ~query:(active_attention_query m)
-          in
-          let cmd =
-            Cmd.Http_post
-              {
-                epoch = m.epoch;
-                req =
-                  Cmd.Post_gate_resolution
-                    { id = g.id; approved = true; reason = None };
-              }
-          in
-          ({ m with attention }, [ cmd ])
+      | Attention.Payload_gate g -> (
+          match
+            Rbac.decide m.auth_session Rbac.Single_user_token_admin_only
+          with
+          | Rbac.Denied reason ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Rbac.deny_reason_say reason) m
+              , [] )
+          | Rbac.Allowed ->
+              let attention =
+                Attention.mark_in_flight ~id:entry.id m.attention
+                |> Attention.advance_past_in_flight
+                     ~query:(active_attention_query m)
+              in
+              let cmd =
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Post_gate_resolution
+                        { id = g.id; approved = true; reason = None };
+                  }
+              in
+              ({ m with attention }, [ cmd ]))
       | Attention.Payload_ask ask ->
           (* NEVER blindly submit choice #1 on Y / Alt+Y — open the dedicated
              Ask Answer Modal while preserving any composer draft. *)
@@ -3132,7 +3141,7 @@ let fast_approve_top ~now (m : Model.t) =
           , cmds ))
 
 let fast_deny_top ~now (m : Model.t) =
-  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  match Rbac.decide m.auth_session Rbac.Single_user_role_admin with
   | Rbac.Denied reason ->
       (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
   | Rbac.Allowed ->
@@ -3257,7 +3266,7 @@ let teleport_blocked ~now (m : Model.t) =
 let toggle_voice ~now (m : Model.t) =
   match m.drafts.voice with
   | Drafts.Voice_off | Drafts.Voice_error _ -> (
-      match Rbac.decide m.auth_session Rbac.Single_user_write with
+      match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
       | Rbac.Denied reason ->
           (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
       | Rbac.Allowed ->

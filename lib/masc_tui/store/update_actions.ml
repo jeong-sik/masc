@@ -1858,7 +1858,7 @@ let set_board_recovery (m : Model.t) board_recovery =
 
 let request_keeper_interrupt ?(from_escape = false) ~now ~keeper ~target
     (m : Model.t) =
-  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  match Rbac.decide m.auth_session Rbac.Single_user_write with
   | Rbac.Denied reason -> rbac_denied_toast ~now reason m
   | Rbac.Allowed ->
   let fleet0, drafts =
@@ -7810,7 +7810,7 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Runtime
           when Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_connectors
           -> (
-            match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+            match Rbac.decide m.auth_session Rbac.Single_user_write with
             | Rbac.Denied reason -> rbac_denied_toast ~now reason m
             | Rbac.Allowed ->
             match Runtime_store.selected_connector m.runtime with

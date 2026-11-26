@@ -1118,15 +1118,24 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | None -> e.title)
           in
           let action_hint =
-            if not (Rbac.is_allowed model.auth_session Rbac.Single_user_token_admin_only)
-            then ""
-            else
-              match e.kind with
-              | Health.Held_tool_approval _ -> "[Y/N]"
-              | Health.Pending_ask _ ->
-                  Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
-              | Health.Goal_confirmation _ ->
+            match e.kind with
+            | Health.Held_tool_approval _ ->
+                if
+                  Rbac.is_allowed model.auth_session Rbac.Single_user_role_admin
+                then "[Y/N]"
+                else ""
+            | Health.Pending_ask _ ->
+                if
+                  Rbac.is_allowed model.auth_session Rbac.Single_user_role_admin
+                then Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
+                else ""
+            | Health.Goal_confirmation _ ->
+                if
+                  Rbac.is_allowed model.auth_session
+                    Rbac.Single_user_token_admin_only
+                then
                   Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter] Confirm")
+                else ""
           in
           let ah_w = Grapheme.display_width action_hint in
           let right_edge = Rect.right inner - pad_x in

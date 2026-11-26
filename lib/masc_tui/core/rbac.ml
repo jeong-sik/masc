@@ -87,6 +87,7 @@ type route_access =
   | Single_user_write
   | Su_read_ma_admin
   | Bridged_token_admin
+  | Single_user_role_admin
   | Single_user_token_admin_only
   | Own_provider_manage
   | Own_keeper_sandbox_read
@@ -380,6 +381,10 @@ let decide_single_user ~auth_enabled ~require_token ~token_valid ~role
       else if not has_worker_or_admin then Denied Requires_worker_or_admin
       else Denied (Auth_required Token_required)
   | Machine_play -> Allowed
+  | Single_user_role_admin -> (
+      match role with
+      | Admin -> if effective_admin then Allowed else Denied Requires_admin
+      | Worker | Player -> Denied Requires_admin)
   | Bridged_token_admin | Single_user_token_admin_only | Own_provider_manage ->
       if has_token_admin then Allowed
       else if (not auth_enabled) || not require_token then
@@ -418,6 +423,7 @@ let decide_multi_account ~(principal : principal) ~role
   | Single_user_read
   | Single_user_token_read
   | Single_user_write
+  | Single_user_role_admin
   | Single_user_token_admin_only
   | Machine_play ->
       Denied Single_user_only_in_multi_account
@@ -434,6 +440,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -450,6 +457,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -465,6 +473,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -482,6 +491,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -497,6 +507,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -512,6 +523,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -528,6 +540,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -544,6 +557,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -567,6 +581,7 @@ let tracked_capabilities =
     Single_user_write;
     Su_read_ma_admin;
     Bridged_token_admin;
+    Single_user_role_admin;
     Single_user_token_admin_only;
     Own_provider_manage;
     Own_keeper_sandbox_read;
@@ -750,6 +765,7 @@ let equal_route_access a b =
   | Single_user_write, Single_user_write
   | Su_read_ma_admin, Su_read_ma_admin
   | Bridged_token_admin, Bridged_token_admin
+  | Single_user_role_admin, Single_user_role_admin
   | Single_user_token_admin_only, Single_user_token_admin_only
   | Own_provider_manage, Own_provider_manage
   | Own_keeper_sandbox_read, Own_keeper_sandbox_read
@@ -766,6 +782,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -780,6 +797,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -794,6 +812,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -808,6 +827,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -822,6 +842,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -836,6 +857,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -850,6 +872,7 @@ let equal_route_access a b =
       | Single_user_token_read
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -864,6 +887,7 @@ let equal_route_access a b =
       | Single_user_token_read
       | Single_user_write
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -878,6 +902,22 @@ let equal_route_access a b =
       | Single_user_token_read
       | Single_user_write
       | Su_read_ma_admin
+      | Single_user_role_admin
+      | Single_user_token_admin_only
+      | Own_provider_manage
+      | Own_keeper_sandbox_read
+      | Memory_diff_read _
+      | Machine_play ) )
+  | ( Single_user_role_admin
+    , ( Always_public
+      | Single_user_shell_probe
+      | Multi_account_whoami_probe
+      | Workspace_read
+      | Single_user_read
+      | Single_user_token_read
+      | Single_user_write
+      | Su_read_ma_admin
+      | Bridged_token_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -893,6 +933,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Own_provider_manage
       | Own_keeper_sandbox_read
       | Memory_diff_read _
@@ -907,6 +948,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_keeper_sandbox_read
       | Memory_diff_read _
@@ -921,6 +963,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Memory_diff_read _
@@ -935,6 +978,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read
@@ -949,6 +993,7 @@ let equal_route_access a b =
       | Single_user_write
       | Su_read_ma_admin
       | Bridged_token_admin
+      | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
       | Own_keeper_sandbox_read

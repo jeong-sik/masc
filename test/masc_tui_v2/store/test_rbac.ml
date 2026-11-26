@@ -276,6 +276,7 @@ let all_route_accesses : (string * Rbac.route_access) list =
     ("Single_user_write", Rbac.Single_user_write);
     ("Su_read_ma_admin", Rbac.Su_read_ma_admin);
     ("Bridged_token_admin", Rbac.Bridged_token_admin);
+    ("Single_user_role_admin", Rbac.Single_user_role_admin);
     ("Single_user_token_admin_only", Rbac.Single_user_token_admin_only);
     ("Own_provider_manage", Rbac.Own_provider_manage);
     ("Own_keeper_sandbox_read", Rbac.Own_keeper_sandbox_read);
@@ -353,6 +354,8 @@ let test_core_parsers_and_projection () =
   in
   Alcotest.(check bool) "auth off allows Su_read_ma_admin (SU Public_read/CanReadState)"
     true (Rbac.is_allowed auth_off Rbac.Su_read_ma_admin);
+  Alcotest.(check bool) "auth off allows Single_user_role_admin (Tool/Tool_actor admin_tool)"
+    true (Rbac.is_allowed auth_off Rbac.Single_user_role_admin);
   Alcotest.(check bool) "auth off denies Bridged_token_admin with Token_auth_not_enabled"
     true
     (Rbac.equal_access_verdict
@@ -443,6 +446,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_write
         | Rbac.Su_read_ma_admin
         | Rbac.Bridged_token_admin
+        | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -469,6 +473,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_write
         | Rbac.Su_read_ma_admin
         | Rbac.Bridged_token_admin
+        | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -495,6 +500,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_write
         | Rbac.Su_read_ma_admin
         | Rbac.Bridged_token_admin
+        | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -521,6 +527,7 @@ let test_exhaustive_decision_matrix () =
             | Rbac.Single_user_write
             | Rbac.Su_read_ma_admin
             | Rbac.Bridged_token_admin
+            | Rbac.Single_user_role_admin
             | Rbac.Single_user_token_admin_only
             | Rbac.Own_provider_manage
             | Rbac.Own_keeper_sandbox_read
@@ -565,6 +572,9 @@ let test_exhaustive_decision_matrix () =
   Alcotest.(check bool) "MA Admin Session denied Single_user_token_admin_only"
     false
     (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_token_admin_only);
+  Alcotest.(check bool) "MA Admin Session denied Single_user_role_admin"
+    false
+    (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_role_admin);
   Alcotest.(check bool) "MA Admin Session denied Single_user_token_read" false
     (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_token_read);
 
@@ -608,6 +618,11 @@ let test_exhaustive_decision_matrix () =
     (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Machine_play);
   Alcotest.(check bool) "SU Worker denied Bridged_token_admin" false
     (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Bridged_token_admin);
+  Alcotest.(check bool) "SU Worker denied Single_user_role_admin (Requires_admin)"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac.decide Rbac.single_user_local_worker Rbac.Single_user_role_admin)
+       (Rbac.Denied Rbac.Requires_admin));
   Alcotest.(check bool) "SU Worker denied Single_user_token_admin_only" false
     (Rbac.is_allowed Rbac.single_user_local_worker
        Rbac.Single_user_token_admin_only);
@@ -1030,6 +1045,160 @@ let test_poller_loader_and_sse_suppression () =
         Cmd.Get_keeper_memory_os_internals { keeper = "alpha" } );
     ];
 
+  (* #28 P1-1: Token_permission CanAdmin keeper GET routes *)
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("SU Auth-off denied Token_auth_not_enabled " ^ lbl)
+        true
+        (Rbac.equal_access_verdict
+           (Rbac_policy.decide_get su_auth_off_sess req)
+           (Rbac.Denied Rbac.Token_auth_not_enabled));
+      Alcotest.(check bool) ("SU Token Admin allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get su_token_admin req))
+    [
+      ("Get_keeper_memory_activity", Cmd.Get_keeper_memory_activity { keeper = "alpha"; limit = 20 });
+      ( "Get_chat_operation_events",
+        Cmd.Get_chat_operation_events
+          { keeper = "alpha"; operation_id = "op-1"; from = Wire_chat_journal.From_start } );
+      ("Get_keeper_next_request", Cmd.Get_keeper_next_request { keeper = "alpha" });
+    ];
+
+  (* #28 P1-2: Worker-allowed Tool/Tool_actor routes (CanReadState / CanBroadcast / mutating_tool) *)
+  Alcotest.(check bool) "SU Worker allowed Get_lane_addon_declaration" true
+    (Rbac_policy.can_fetch_get Rbac.single_user_local_worker
+       (Cmd.Get_lane_addon_declaration { source_path = "a.toml" }));
+  Alcotest.(check bool) "MA Admin Session denied Get_lane_addon_declaration" false
+    (Rbac_policy.can_fetch_get ma_human_admin_session
+       (Cmd.Get_lane_addon_declaration { source_path = "a.toml" }));
+  Alcotest.(check bool) "SU Worker allowed /addon decl-read & write subcommands"
+    true
+    (List.for_all
+       (fun p ->
+         match Rbac_policy.decide_slash_parsed Rbac.single_user_local_worker p with
+         | Rbac.Allowed -> true
+         | Rbac.Denied _ -> false)
+       [
+         Slash.Addon (Slash.Addon_decl_read "a.toml");
+         Slash.Addon (Slash.Addon_decl_new "b.toml");
+         Slash.Addon (Slash.Addon_attach { manifest_path = "m"; run_id = "r"; binding_json = None });
+         Slash.Addon (Slash.Addon_detach "inst-1");
+         Slash.Addon (Slash.Addon_observe "inst-1");
+         Slash.Addon (Slash.Addon_act { instance_id = "inst-1"; action_json = None });
+         Slash.Addon (Slash.Addon_evidence { instance_id = "inst-1"; row_ids = []; keeper_name = None });
+       ]);
+  let sample_fusion : Wire_runtime.fusion_launch_request =
+    { prompt = "check"; preset = None; topology = None; web_tools = false }
+  in
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker allowed " ^ lbl) true
+        (Rbac_policy.can_post Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("MA Admin Session denied SU-only " ^ lbl) false
+        (Rbac_policy.can_post ma_human_admin_session req))
+    [
+      ("Post_fusion_launch", Cmd.Post_fusion_launch { keeper = "alpha"; request = sample_fusion });
+      ( "Post_keeper_turn_interrupt",
+        Cmd.Post_keeper_turn_interrupt { keeper = "alpha"; target = `Operation_id "op-1" } );
+      ( "Post_connector_bind",
+        Cmd.Post_connector_bind { connector = "discord"; channel_id = "c1"; keeper_name = "alpha" } );
+      ( "Post_connector_unbind",
+        Cmd.Post_connector_unbind { connector = "discord"; channel_id = "c1"; keeper_name = Some "alpha" } );
+      ( "Post_lane_addon_attach",
+        Cmd.Post_lane_addon_attach
+          { manifest_path = "m"; run_id = "r"; binding = `Assoc []; from_modal = false } );
+      ("Post_lane_addon_detach", Cmd.Post_lane_addon_detach { instance_id = "inst-1" });
+      ( "Post_lane_addon_action",
+        Cmd.Post_lane_addon_action
+          { instance_id = "inst-1"; expected_incarnation = "i"; request_id = "r"; action = `Assoc [] } );
+      ( "Post_lane_addon_declaration_save",
+        Cmd.Post_lane_addon_declaration_save
+          { mode = `Create; file_name = "a.toml"; source_text = ""; expected_source_revision = None } );
+      ("Post_lane_addon_observe", Cmd.Post_lane_addon_observe { instance_id = "inst-1" });
+      ( "Post_lane_addon_evidence",
+        Cmd.Post_lane_addon_evidence
+          { instance_id = "inst-1"; row_ids = []; keeper_name = None; broadcast = false; request_id = None } );
+      ( "Post_lane_addon_act",
+        Cmd.Post_lane_addon_act
+          { instance_id = "inst-1"; expected_incarnation = "i"; request_id = "r"; action = `Assoc [] } );
+    ];
+  Alcotest.(check bool) "SU Worker allowed Fusion_launch_form, Connector_form, Addon_* modals"
+    true
+    (List.for_all
+       (Rbac_policy.can_access_inline_action Rbac.single_user_local_worker)
+       [
+         Nav.Fusion_launch_form;
+         Nav.Connector_form;
+         Nav.Addon_attach_form;
+         Nav.Addon_detach_confirm { instance_id = "i"; title = "t" };
+         Nav.Addon_invoke_action { instance_id = "i"; action_names = [] };
+         Nav.Addon_decl_form { file_name = "a.toml"; mode = `Create; expected_source_revision = None };
+         Nav.Addon_act_form { instance_id = "i"; expected_incarnation = "e" };
+       ]);
+
+  (* #28 P2-3: Single_user_role_admin allows SU auth_enabled=false Admin while denying SU Worker & MA *)
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Auth-off Admin allowed " ^ lbl) true
+        (Rbac_policy.can_post su_auth_off_sess req);
+      Alcotest.(check bool) ("SU Token Admin allowed " ^ lbl) true
+        (Rbac_policy.can_post su_token_admin req);
+      Alcotest.(check bool) ("SU Worker denied " ^ lbl) false
+        (Rbac_policy.can_post Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("MA Admin Session denied " ^ lbl) false
+        (Rbac_policy.can_post ma_human_admin_session req))
+    [
+      ("Post_ask_answer", Cmd.Post_ask_answer { keeper = "alpha"; ask_id = "a1"; answers = [] });
+      ( "Post_tool_approval",
+        Cmd.Post_tool_approval
+          {
+            keeper = "alpha";
+            tool_call_id = "tc1";
+            approval_id = "ap1";
+            decision = Wire_work.Tool_approve;
+            expected_workspace = None;
+          } );
+      ( "Post_keeper_tool_approval_mode",
+        Cmd.Post_keeper_tool_approval_mode
+          { keeper = "alpha"; mode = Wire_work.Approval_auto } );
+      ( "Post_lane_addon_ask_answer",
+        Cmd.Post_lane_addon_ask_answer
+          { declaration_id = "d1"; ask_id = "a1"; answers = [] } );
+      ("Post_lane_addon_retain", Cmd.Post_lane_addon_retain { instance_id = "inst-1" });
+      ("Post_prompt_override", Cmd.Post_prompt_override { key = "k"; value = Some "v" });
+      ("Post_runtime_param_set", Cmd.Post_runtime_param_set { param_key = "k"; value = `String "v" });
+      ("Post_runtime_param_clear", Cmd.Post_runtime_param_clear { param_key = "k" });
+    ];
+  Alcotest.(check bool) "SU Auth-off Admin STILL denied Post_lane_addon_operator (Token_auth_not_enabled)"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac_policy.decide_post su_auth_off_sess
+          (Cmd.Post_lane_addon_operator
+             {
+               instance_id = "inst-1";
+               expected_incarnation = "e";
+               mode = Wire_runtime.Operator_describe;
+             }))
+       (Rbac.Denied Rbac.Token_auth_not_enabled));
+  Alcotest.(check bool) "SU Auth-off Admin allowed Ask_answer overlay & prompt/param forms"
+    true
+    (Rbac_policy.can_access_overlay su_auth_off_sess Nav.Ask_answer
+     && Rbac_policy.can_access_inline_action su_auth_off_sess
+          (Nav.Prompt_override_form { key = "k" })
+     && Rbac_policy.can_access_inline_action su_auth_off_sess
+          (Nav.Runtime_param_set_form { param_key = "k" }));
+  Alcotest.(check bool) "POST /api/v1/voice/transcribe (Start_ptt) requires Single_user_token_admin_only"
+    true
+    (Rbac_policy.is_cmd_allowed su_token_admin
+       (Cmd.Voice_cmd (Cmd.Start_ptt { device = None }))
+     && not
+          (Rbac_policy.is_cmd_allowed Rbac.single_user_local_worker
+             (Cmd.Voice_cmd (Cmd.Start_ptt { device = None })))
+     && not
+          (Rbac_policy.is_cmd_allowed su_auth_off_sess
+             (Cmd.Voice_cmd (Cmd.Start_ptt { device = None }))));
+
   (* Check #5: Suppressed reads on Work_inbox for MA Worker PAT do NOT stick in Loading *)
   let m_ma = Model.initial ~auth_session:ma_human_worker_pat () in
   let m_work, cmds_work =
@@ -1086,9 +1255,10 @@ let test_action_hotkey_modal_palette_and_slash_gating () =
       "/gate";
       "/lane";
       "/skill";
-      "/preset";
-      "/addon";
+      "/preset restore prod";
+      "/addon operator inst-1";
       "/browser";
+      "/voice";
       "/exec";
     ];
 
@@ -1578,9 +1748,43 @@ let test_action_hotkey_modal_palette_and_slash_gating () =
          | Cmd.Http_get { req = Cmd.Get_lane_addon_slice _; _ } -> true
          | _ -> false)
        (Cmd.flatten cmds_slice));
+  let _, cmds_observe =
+    Update.step ~now:t0 m_worker_addons_p0 (Msg.Key_event (char_key "O"))
+  in
+  Alcotest.(check bool) "SU Worker pane 0 [O] emits Post_lane_addon_observe (CanBroadcast)"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_lane_addon_observe _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_observe));
+  let m_ma_addons_p0 =
+    { m_worker_addons_p0 with auth_session = ma_human_admin_session }
+  in
   ignore
-    (check_warning_no_cmds "SU Worker pane 0 [O] Post_lane_addon_observe blocked"
-       (Update.step ~now:t0 m_worker_addons_p0 (Msg.Key_event (char_key "O"))));
+    (check_warning_no_cmds "MA Admin Session pane 0 [O] Post_lane_addon_observe blocked"
+       (Update.step ~now:t0 m_ma_addons_p0 (Msg.Key_event (char_key "O"))));
+
+  (* #28 P1-2: Unbind_connector allowed on Runtime_connectors for SU Worker, denied on Keeper_identity *)
+  let m_worker_connectors =
+    let base =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime = { base.runtime with active_tab = Nav.Runtime_connectors };
+    }
+  in
+  Alcotest.(check bool) "SU Worker allowed Unbind_connector on Runtime_connectors"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_worker_connectors
+       Keymap.Unbind_connector);
+  Alcotest.(check bool) "SU Worker denied Unbind_connector on Keeper_identity"
+    false
+    (Rbac_policy.can_run_keymap_action_in_model m_worker_oauth
+       Keymap.Unbind_connector);
 
   (* P2-6: Context-aware keymap action access (Edit_or_export / Launch_fusion / Probe_sandbox) *)
   let m_ma_quotas_login =
@@ -1839,6 +2043,27 @@ let test_chrome_footer_help_and_locked_screens () =
     (Option.is_some (Model.fast_approval_strip_item m_admin_attn));
   Alcotest.(check bool) "Worker does NOT see fast approval strip" true
     (Option.is_none (Model.fast_approval_strip_item m_worker_attn));
+  (* #28 P2-3: SU auth_enabled=false Admin sees Tool_approval on fast strip (Single_user_role_admin),
+     but NOT Gate pending (Single_user_token_admin_only) *)
+  let su_auth_off_local =
+    Rbac.session_of_single_user_shell_auth
+      ~auth_methods:Rbac.default_auth_methods ~enabled:false
+      ~require_token:false ~token_present:false ~token_valid:false
+      ~effective_agent:(Some "local") ~effective_role:(Some Rbac.Admin)
+      ~effective_admin:(Some true) ~can_keeper_msg:true ~auth_error_code:None
+      ~auth_error_detail:None
+  in
+  let m_auth_off_attn =
+    {
+      (Model.initial ~auth_session:su_auth_off_local ~lang:Say.Lang_en ~cols:140
+         ~rows:40 ())
+      with
+      attention = attn;
+    }
+  in
+  Alcotest.(check bool) "SU auth_off Admin sees Payload_tool_approval in fast approval strip"
+    true
+    (Option.is_some (Model.fast_approval_strip_item m_auth_off_attn));
 
   (* Help overlay omits Settings hotkey for Worker *)
   let m_worker_help =
@@ -2080,6 +2305,18 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
     let runtime =
       {
         base.runtime with
+        addon_declaration_doc =
+          Observed.value ~observed_at:t0
+            ( "a.toml"
+            , {
+                Wire_runtime.file_name = "a.toml";
+                source_path = "a.toml";
+                source_text = "id = \"a\"";
+                source_revision = "r1";
+                desired_revision = None;
+                valid = true;
+                messages = [];
+              } );
         addon_last_action_receipt =
           Observed.value ~observed_at:t0
             {
@@ -2099,9 +2336,46 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
             };
       }
     in
+    let keeper_context =
+      let ks0 = Keeper_context_store.get_keeper ~keeper:"alpha" base.keeper_context in
+      let ks1 =
+        {
+          ks0 with
+          next_request =
+            Observed.value ~observed_at:t0
+              {
+                Wire_keeper_context.keeper = "alpha";
+                trace_id = "tr-1";
+                checkpoint_messages = 1;
+                wake_line_bytes = 64;
+                walk = Wire_keeper_context.Walk_order { lane_id = "l1"; declared = [] };
+                candidates = [];
+              };
+          next_request_absent = true;
+        }
+      in
+      {
+        base.keeper_context with
+        by_keeper =
+          Keeper_context_store.String_map.add "alpha" ks1
+            base.keeper_context.by_keeper;
+      }
+    in
     let knowledge =
       {
         base.knowledge with
+        keeper_memory_activity =
+          Knowledge_store.String_map.add "alpha"
+            (Observed.value ~observed_at:t0
+               {
+                 Wire_knowledge.keeper = "alpha";
+                 limit = 20;
+                 journal_lines = 1;
+                 undecodable_lines = 0;
+                 events = [];
+                 notes = [];
+               })
+            base.knowledge.keeper_memory_activity;
         artifacts =
           Observed.value ~observed_at:t0
             [
@@ -2143,6 +2417,7 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
       infra;
       work;
       runtime;
+      keeper_context;
       knowledge;
       keeper_stop_armed = Some ("alpha", t0);
     }
@@ -2231,6 +2506,19 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
   Alcotest.(check bool) "Demotion purges Runtime addon & browser receipts" true
     (Option.is_none (Observed.to_option m_demoted.runtime.addon_last_action_receipt)
      && Option.is_none (Observed.to_option m_demoted.runtime.browser_last_receipt));
+  Alcotest.(check bool) "Demotion keeps addon_declaration_doc for SU Worker (Single_user_read)"
+    true
+    (Option.is_some (Observed.to_option m_demoted.runtime.addon_declaration_doc));
+  let ks_demoted =
+    Keeper_context_store.get_keeper ~keeper:"alpha" m_demoted.keeper_context
+  in
+  Alcotest.(check bool) "Demotion purges Keeper next_request & next_request_absent (#28 P1-1)"
+    true
+    (Option.is_none (Observed.to_option ks_demoted.next_request)
+     && not ks_demoted.next_request_absent);
+  Alcotest.(check bool) "Demotion purges Knowledge keeper_memory_activity (#28 P1-1)"
+    true
+    (Knowledge_store.String_map.is_empty m_demoted.knowledge.keeper_memory_activity);
   Alcotest.(check bool) "Demotion purges Knowledge artifacts & artifact_checks" true
     (Option.is_none (Observed.to_option m_demoted.knowledge.artifacts)
      && Option.is_none (Observed.to_option m_demoted.knowledge.artifact_checks));
@@ -2282,8 +2570,10 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
   Alcotest.(check bool) "SSE 401 opens Auth_gate" true
     (Option.equal Nav.equal_overlay m_sse_401.nav.overlay
        (Some (Nav.System_gate Nav.Auth_gate)));
-  Alcotest.(check bool) "SSE 401 purges Infra sandboxes cache" true
-    (Option.is_none (Observed.to_option m_sse_401.infra.sandboxes));
+  Alcotest.(check bool) "SSE 401 purges Infra sandboxes & Runtime addon_declaration_doc"
+    true
+    (Option.is_none (Observed.to_option m_sse_401.infra.sandboxes)
+     && Option.is_none (Observed.to_option m_sse_401.runtime.addon_declaration_doc));
   Alcotest.(check bool) "SSE 401 bumps epoch" true
     (not (Epoch.equal m_demoted.epoch m_sse_401.epoch));
   Alcotest.(check bool) "SSE 401 syncs empty stream list" true

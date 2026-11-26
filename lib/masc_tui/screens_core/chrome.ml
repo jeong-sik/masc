@@ -1750,6 +1750,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Rbac.Single_user_write
               | Rbac.Su_read_ma_admin
               | Rbac.Bridged_token_admin
+              | Rbac.Single_user_role_admin
               | Rbac.Single_user_token_admin_only
               | Rbac.Own_provider_manage
               | Rbac.Own_keeper_sandbox_read

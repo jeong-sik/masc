@@ -2431,10 +2431,7 @@ let decode_retained_images json =
                 let mime_type =
                   match member "mimeType" block with
                   | `String m when not (String.equal (String.trim m) "") -> Some (String.trim m)
-                  | _ -> (
-                      match member "mime_type" block with
-                      | `String m when not (String.equal (String.trim m) "") -> Some (String.trim m)
-                      | _ -> None)
+                  | _ -> None
                 in
                 Some { media_path; caption; mime_type }
               else None

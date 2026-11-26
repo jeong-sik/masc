@@ -119,7 +119,7 @@ let test_commonmark_fences_and_diagram_tags () =
   (* Tilde fences, 4-backtick fences, info options, and pele diagram tags *)
   let blocks =
     B.parse_text_to_blocks
-      "~~~alphatex rhythm\n:4 C4 D4\n~~~\n\n````md\n```inner```\n````\n\n```pele\ngraph LR\nA-->B\n```"
+      "~~~alphatex rhythm\n:4 C4 D4\n~~~\n\n````md\n```inner```\n````\n\n```math\n![a](https://example.com/a.png)\n```\n\n```pele\ngraph LR\nA-->B\n```"
   in
   Alcotest.(check (list yojson_testable))
     "commonmark fences + pele"
@@ -137,6 +137,13 @@ let test_commonmark_fences_and_diagram_tags () =
           ("html", `String "```inner```");
           ("cap", `String "md");
           ("source", `String "```inner```");
+        ];
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "![a](https://example.com/a.png)");
+          ("cap", `String "math");
+          ("source", `String "![a](https://example.com/a.png)");
         ];
       `Assoc
         [

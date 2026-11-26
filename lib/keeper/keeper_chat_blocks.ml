@@ -470,7 +470,8 @@ let collect_top_level_fenced_blocks text =
   let doc = Cmarkit.Doc.of_string ~strict:false ~locs:true text in
   let rec walk acc = function
     | Cmarkit.Block.Blocks (blocks, _) -> List.fold_left walk acc blocks
-    | Cmarkit.Block.Code_block (code, meta) ->
+    | Cmarkit.Block.Code_block (code, meta)
+    | Cmarkit.Block.Ext_math_block (code, meta) ->
       let closed =
         match Cmarkit.Block.Code_block.layout code with
         | `Fenced { closing_fence; _ } -> Option.is_some closing_fence

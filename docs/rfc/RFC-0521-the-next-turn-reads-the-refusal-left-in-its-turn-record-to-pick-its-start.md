@@ -289,7 +289,7 @@ C 의 걸음 가운데 같은 시작점에서 바꿔 보내는 것은 후보 0 �
   - HTTP 레인은 401·402·403·404·429 를 다른 생성자로 나눈다(`retry.ml:357-390`). 400 의 원인을 사용 창으로 가를 typed 근거가 없다.
   - 거절 뒤에 읽은 사용 창은 그 거절의 원인을 말하지 않는다.
   - 읽는 시각에 `~now` 로 묻는 값을 쓰면 같은 기록이 시각에 따라 다른 시작점을 낸다. 규칙 2 가 기대는 「턴 기록은 파일이므로 다시 띄워도 같은 값을 읽는다」(RFC-librarian-lifecycle.md:612)가 깨진다.
-  - Muse 는 이와 다르다. Muse 의 `Model_error` 는 한도와 모델 부재를 한데 담는다. 그래서 Muse 는 쓰는 쪽에서, 거절 뒤에 읽은 사용량과 카탈로그로 기록 여부를 정한다(`keeper_muse_runtime.ml:127-140`, :1846-1850). 이 RFC 는 그 규칙을 바꾸지 않는다.
+  - 공식 클라이언트 레인도 사용 창 조건을 두지 않는다. 그 레인은 `ContextOverflow` 와 `Request_body_refused_by_provider` 거절만 적는다(`keeper_turn_driver.ml` 의 `record_refused_model_input`, `Keeper_turn_driver_try_provider.is_size_refusal`). ACP 레인은 한도 거절을 RPC 경계에서 `HardQuota`·`RateLimit` 으로 받는다(`keeper_acp_runtime.ml` 의 `acp_error_to_core_error`). 그래서 한도 거절은 기록에 남지 않는다. 이 RFC 는 그 규칙을 바꾸지 않는다.
 - 모듈: `lib/types/turn_record.ml(i)`, `keeper_turn_driver_try_provider.ml(i)`, `keeper_turn_driver.ml`.
 
 #### D3. 다음 조립은 기록된 거절을 읽고 시작점을 고른다

@@ -110,9 +110,9 @@ slots = [
 
 | id 가 가리키는 것 | 처리 |
 |---|---|
-| 출력 스키마를 받는 공식 클라이언트 runtime(Claude Code, Codex, Antigravity, Muse, Vibe) | CLI slot |
+| 출력 스키마를 받는 공식 클라이언트 runtime(Claude Code, Codex, Antigravity CLI) | CLI slot |
 | Agent Core runtime(Messages, Chat Completions, Ollama, Gemini, Vertex) | HTTP slot. 기한 설정이 빠졌으면 지금처럼 degraded 로 보인다 |
-| 출력 스키마 경로가 없는 runtime | 로드 오류 |
+| 출력 스키마 경로가 없는 runtime(ACP driver: Muse Code, Mistral Vibe, Kimi Code, Antigravity) | 로드 오류 |
 | 선언은 됐지만 꺼진 binding·provider | 받지 않고 `dropped` 로 보인다. 사유는 "disabled" (Q5) |
 | 아무것도 가리키지 않음, 기본 catalog | 로드 오류 (Q4) |
 | 아무것도 가리키지 않음, `AGENT_CORE_MODEL_CATALOG` 교체 catalog | HTTP target 으로 본다. publish 때 registry 가 받거나 `dropped` 로 뺀다 |

@@ -60,7 +60,7 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 ### D3. 나이는 새 세션 씨앗에만 싣고 digest 에는 넣지 않는다
 
 - 코덱이 렌더링을 타입으로 가른다. `type rendering = Canonical_source | Session_start of { started_at : float }` 이다.
-- `canonical_source_sha256`(`keeper_official_client_context_codec.ml:104`)은 `Canonical_source` 로 인코딩한다. 나이가 없으므로 같은 히스토리는 언제 Start 해도 같은 digest 다. Muse(`keeper_muse_runtime.ml:1083`)와 Antigravity(`keeper_antigravity_runtime.ml:600`)가 저장한 세션을 이 digest 로 견준다. 나이가 digest 에 들어가면 모든 세션이 매번 바뀐 것으로 읽혀 이어 쓰지 못한다.
+- `canonical_source_sha256`(`keeper_official_client_context_codec.ml:104`)은 `Canonical_source` 로 인코딩한다. 나이가 없으므로 같은 히스토리는 언제 Start 해도 같은 digest 다. ACP(`keeper_acp_runtime.ml`)와 Antigravity(`keeper_antigravity_runtime.ml`)가 저장한 세션을 이 digest 로 견준다(`Keeper_official_client_session_store.reconcile_context`). 나이가 digest 에 들어가면 모든 세션이 매번 바뀐 것으로 읽혀 이어 쓰지 못한다.
 - `Session_start` 는 `result_time` 에 `"age_at_session_start": "3h59m"` 과 `"age_seconds": 14399` 를 더한다. `started_at` 은 Start 프롬프트를 만드는 시각이다. 사람이 읽는 꼴은 대기열 행의 나이와 같은 `Keeper_age_text.of_seconds` 다(1분 아래는 초, 1시간 아래는 분, 그 위는 시·분). 시작이 붙인 시각보다 앞서면(시계가 뒤로 간 경우) 나이는 0 이다.
 - 코덱의 `message_to_json`·`to_json`·`encode` 는 렌더링을 반드시 받는다. Start 프롬프트를 만드는 함수 셋도 시작 시각을 반드시 받는다. Claude Code `project_messages ~started_at`, Codex `project_messages ~started_at`, `Host.framed_prompt_for_turn ~delivery:(Framed_start {started_at} | Framed_resume)`(Muse·Antigravity) 이다. 그래서 Start 경로 넷은 컴파일러가 찾는다.
   - `Host.encode_history_message` 는 `Canonical_source` 로 남긴다. digest, 보유 맥락 해시, Resume, 창 크기 재기가 이것을 쓴다. 시험 50여 곳이 이 함수로 기대 글을 만든다. 키가 없는 메시지는 두 렌더링의 글이 같으므로 그 시험들은 그대로 맞다.

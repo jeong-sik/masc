@@ -72,6 +72,24 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
         event.preventDefault()
         event.stopPropagation()
         onCloseRef.current()
+        return
+      }
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        const target = event.target
+        if (
+          target instanceof HTMLElement
+          && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+        ) {
+          return
+        }
+        if (typeof document !== 'undefined') {
+          const otherModalOpen = Array.from(
+            document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+          ).some((el) => el !== drawerRef.current)
+          if (otherModalOpen) return
+        }
+        event.preventDefault()
+        setWide((w) => !w)
       }
     }
     window.addEventListener('keydown', onKeyDown)

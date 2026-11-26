@@ -153,6 +153,7 @@ export function MobileNav(): VNode {
             class=${`ap-mobile-tab ap-touch-target${active ? ' is-active' : ''}`}
             aria-current=${active ? 'page' : undefined}
             onClick=${(event: MouseEvent) => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
               event.preventDefault()
               mobileMoreOpen.value = false
               navigate(def.defaultPath)

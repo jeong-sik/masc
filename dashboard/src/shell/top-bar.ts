@@ -506,7 +506,7 @@ export function TopBar(): VNode {
               data-subtab=${tab.id}
               data-rbac-locked=${tab.locked ? 'true' : undefined}
               onClick=${(event: MouseEvent) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
                 event.preventDefault()
                 navigate(tab.path)
               }}

@@ -20,11 +20,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preac
 import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
+import { isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { randomUuid } from '../../lib/uuid'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
 import {
   cancelQueuedChatOperation,
+  enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperControlToken,
   fetchKeeperToolResultApi,
@@ -35,6 +37,7 @@ import {
   observeRosterContextPct,
   parseKeeperLiveObserverEvent,
   recoverCutReplyFromJournal,
+  runQueuedChatOperationNext,
   streamKeeperChat,
   transcribeVoiceAudio,
   type KeeperObserverChatSignal,
@@ -237,7 +240,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     ? queueRead
     : null
   const queuedOps = queue?.operations ?? []
-  const [draft, setDraft] = useState('')
+  const [draft, setDraftState] = useState('')
+  const draftRef = useRef('')
+  const setDraft = useCallback((next: string | ((cur: string) => string)) => {
+    setDraftState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      draftRef.current = resolved
+      return resolved
+    })
+  }, [])
   const [discordReplyId, setDiscordReplyId] = useState<string | null>(null)
   const discordReplyTrigger = useRef<HTMLButtonElement | null>(null)
   const discordSession = authSession.value
@@ -258,6 +269,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }, [discordEpoch, hasBearer, hasDiscordReplySource])
   const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
   const [sending, setSending] = useState(false)
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [controlToken, setControlToken] = useState<string | null>(keeper.chat_control_token)
   const [companionOpen, setCompanionOpen] = useState(false)
@@ -309,6 +321,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const streamAbortRef = useRef<AbortController | null>(null)
   const btwAbortRef = useRef<AbortController | null>(null)
   const sendingRef = useRef(false)
+  const followUpSubmittingRef = useRef(false)
+  const streamRunIdRef = useRef(0)
   const sendingOperationRef = useRef<{ operationId: string; executionId: string } | null>(null)
   const refreshChatRef = useRef<(...reads: ChatRead[]) => void>(() => {})
   const retryQueueRef = useRef<() => void>(() => {})
@@ -814,6 +828,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       unsubscribeEpoch()
       refreshChatRef.current = () => {}
       retryQueueRef.current = () => {}
+      streamRunIdRef.current += 1
+      sendingRef.current = false
+      sendingOperationRef.current = null
+      followUpSubmittingRef.current = false
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
@@ -989,14 +1007,19 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }
 
   const submitMessage = async (intent: 'queue' | 'steer') => {
-    if (sendingRef.current || sending) return
-    const trimmed = draft.trim()
+    if (followUpSubmittingRef.current) return
+    const trimmed = draftRef.current.trim()
     if (!trimmed && attachments.length === 0) return
 
-    // `/btw <question>` shortcut inside main composer
-    if (trimmed.startsWith('/btw ')) {
-      const sidePrompt = trimmed.slice(5).trim()
+    // `/btw <question>` shortcut inside main composer (bare `/btw` opens the side-query box)
+    if (/^\/btw(?:\s|$)/.test(trimmed)) {
+      const sidePrompt = trimmed.slice(4).trim()
+      draftRef.current = ''
       setDraft('')
+      if (!sidePrompt) {
+        setBtwOpen(true)
+        return
+      }
       await runBtwQuery(sidePrompt)
       return
     }
@@ -1015,6 +1038,58 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       operationId,
       deliveryState: 'Sending',
     }
+    const currentAttachments = [...attachments]
+
+    // While a turn is already streaming on the Layer 3 view-stream slot:
+    // - Queue submits via a short-lived acceptance request so the active stream is NOT aborted.
+    // - Steer preempts the active stream cleanly (after fetching controlToken) and hands off
+    //   the live slot to the steering turn.
+    if (sendingRef.current && intent === 'queue') {
+      followUpSubmittingRef.current = true
+      setFollowUpSubmitting(true)
+      forceScrollBottomRef.current = true
+      setMessagesState((prev) => ({
+        keeperName: targetKeeper,
+        entries: prev.keeperName === targetKeeper ? [...prev.entries, userEntry] : [userEntry],
+      }))
+      draftRef.current = ''
+      setDraft('')
+      setAttachments([])
+      queueMicrotask(() => composerRef.current?.focus())
+      try {
+        const res = await enqueueKeeperChat({
+          keeper: targetKeeper,
+          message: trimmed,
+          operationId,
+          mode: { kind: 'queue' },
+          attachments: currentAttachments,
+        })
+        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+          return
+        }
+        if (res.controlToken) setControlToken(res.controlToken)
+        if (!res.accepted) {
+          updateEntryById(userId, (m) => ({
+            ...m,
+            deliveryState: 'Failed',
+            errorDetail: res.error ?? '대기열 등록 실패',
+          }))
+          return
+        }
+        updateEntryById(userId, (m) => ({
+          ...m,
+          deliveryState: res.state === 'Queued' ? 'Queued' : 'Delivered',
+        }))
+        refreshChatRef.current('queue', 'waiting')
+        props.onMutated()
+      } finally {
+        followUpSubmittingRef.current = false
+        if (mountedRef.current) setFollowUpSubmitting(false)
+      }
+      return
+    }
+
+    const runId = ++streamRunIdRef.current
     const assistantId = `asst-${operationId}`
     const assistantEntry: ChatTranscriptEntry = {
       id: assistantId,
@@ -1025,7 +1100,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       deliveryState: 'Sending',
     }
 
-    const currentAttachments = [...attachments]
     let acceptedByServer = false
     sendingRef.current = true
     sendingOperationRef.current = { operationId, executionId: operationId }
@@ -1036,6 +1110,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         ? [...prev.entries, userEntry, assistantEntry]
         : [userEntry, assistantEntry],
     }))
+    draftRef.current = ''
     setDraft('')
     setAttachments([])
     setSending(true)
@@ -1052,7 +1127,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       }
       if (intent === 'steer') {
         const token = controlToken ?? (await fetchKeeperControlToken(targetKeeper))
-        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || streamRunIdRef.current !== runId) {
           return
         }
         if (token) {
@@ -1061,11 +1136,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         }
       }
 
-      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || streamRunIdRef.current !== runId) {
         return
       }
 
-      streamAbortRef.current?.abort()
+      streamAbortRef.current?.abort('steered')
       abortController = new AbortController()
       streamAbortRef.current = abortController
 
@@ -1479,10 +1554,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         },
       })
     } finally {
-      sendingRef.current = false
-      sendingOperationRef.current = null
-      if (mountedRef.current) {
-        setSending(false)
+      if (streamRunIdRef.current === runId) {
+        sendingRef.current = false
+        sendingOperationRef.current = null
+        if (mountedRef.current) {
+          setSending(false)
+        }
       }
     }
 
@@ -1490,6 +1567,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       !mountedRef.current
       || activeKeeperRef.current !== targetKeeper
       || !isEpochCurrent(startEpoch)
+      || streamRunIdRef.current !== runId
       || outcome.error === 'session_epoch_changed'
       || outcome.error === 'aborted'
     ) {
@@ -1516,12 +1594,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }
 
   const handleComposerKeyDown = (e: KeyboardEvent) => {
-    // Guard Korean/CJK IME composition & prevent double-submit while streaming
+    // Guard Korean/CJK IME composition & brief follow-up enqueue handshake
     if (e.isComposing || e.keyCode === 229) return
     if (e.key !== 'Enter') return
     if (e.shiftKey) return
     e.preventDefault()
-    if (sendingRef.current || sending) return
+    if (followUpSubmittingRef.current) return
     if (e.metaKey || e.ctrlKey) {
       void submitMessage('steer')
     } else {
@@ -1542,7 +1620,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       const base64 = typeof btoa === 'function' ? btoa(bin) : ''
       next.push({
         id: randomUuid(),
-        type: file.type.startsWith('image/') ? 'image' : 'file',
+        type: isWorkspaceRasterMime(file.type) ? 'image' : 'file',
         name: file.name,
         size: file.size,
         mimeType: file.type || 'application/octet-stream',
@@ -2533,6 +2611,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <span class="kp-roster-name">${op.message || op.operationId}</span>
                   <div class="kp-pill-row">
                     <button type="button" class="btn-ghost" disabled=${queue?.kind !== 'ready'}
+                      onClick=${() => void updateQueueOperation(op.operationId, runQueuedChatOperationNext)}>
+                      지금 실행
+                    </button>
+                    <button type="button" class="btn-ghost" disabled=${queue?.kind !== 'ready'}
                       onClick=${() => void updateQueueOperation(op.operationId, moveQueuedChatOperationToEndApi)}>
                       뒤로
                     </button>
@@ -2718,7 +2800,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-ghost"
-                disabled=${sending}
+                disabled=${followUpSubmitting}
                 onClick=${() => void submitMessage('queue')}
               >
                 Queue ↵
@@ -2726,7 +2808,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-primary"
-                disabled=${sending}
+                disabled=${followUpSubmitting}
                 onClick=${() => void submitMessage('steer')}
               >
                 Steer ⌘↵

@@ -681,7 +681,7 @@ export async function refreshPendingHitl(
         const hasValidList =
           isRecord(raw)
           && raw.ok !== false
-          && (Array.isArray(raw.pending) || Array.isArray(raw.approvals) || Array.isArray(raw.items))
+          && Array.isArray(raw.pending)
         if (!hasValidList) {
           const message =
             isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()

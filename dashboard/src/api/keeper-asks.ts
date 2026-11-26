@@ -45,6 +45,23 @@ export async function fetchKeeperAsks(
   return parsed.value
 }
 
+/**
+ * Shared SSOT for the server's `ask-answer` HTTP 500 partial-delivery contract:
+ * when the durable store recorded the answer (`recorded === true`) and only
+ * immediate wakeup awaits outbox recovery (`state !== 'recording_unconfirmed'`),
+ * callers must treat the answer as recorded rather than leaving the draft open.
+ */
+export function isAskAnswerRecordedOn500(
+  status: number | null | undefined,
+  body: unknown,
+): body is Record<string, unknown> {
+  if (status !== 500 || typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return false
+  }
+  const payload = body as Record<string, unknown>
+  return payload['recorded'] === true && payload['state'] !== 'recording_unconfirmed'
+}
+
 export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAccepted> {
   try {
     const raw = await post<Record<string, unknown>>('/api/v1/keepers/ask-answer', body)
@@ -61,25 +78,13 @@ export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAc
     if (error instanceof ApiRequestError && error.status === 409) {
       throw new AskAnswerConflict(body.ask_id, error.detail ?? 'already answered')
     }
-    // 500 with recorded === true (and not recording_unconfirmed) means the
-    // answer was durably saved in Keeper_ask_store and only immediate wakeup
-    // awaits automatic outbox recovery; treat it as recorded so the UI does
-    // not leave the answered modal open to hit 409 on retry.
-    if (
-      error instanceof ApiRequestError &&
-      error.status === 500 &&
-      typeof error.responseData === 'object' &&
-      error.responseData !== null &&
-      !Array.isArray(error.responseData)
-    ) {
-      const payload = error.responseData as Record<string, unknown>
-      if (payload['recorded'] === true && payload['state'] !== 'recording_unconfirmed') {
-        return {
-          askId: typeof payload['ask_id'] === 'string' ? payload['ask_id'] : body.ask_id,
-          answerCount: typeof payload['answer_count'] === 'number' ? payload['answer_count'] : 0,
-          openRemaining: typeof payload['open_remaining'] === 'number' ? payload['open_remaining'] : 0,
-          delivered: false,
-        }
+    if (error instanceof ApiRequestError && isAskAnswerRecordedOn500(error.status, error.responseData)) {
+      const payload = error.responseData
+      return {
+        askId: typeof payload['ask_id'] === 'string' ? payload['ask_id'] : body.ask_id,
+        answerCount: typeof payload['answer_count'] === 'number' ? payload['answer_count'] : 0,
+        openRemaining: typeof payload['open_remaining'] === 'number' ? payload['open_remaining'] : 0,
+        delivered: false,
       }
     }
     throw error

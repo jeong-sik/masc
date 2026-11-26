@@ -1880,4 +1880,28 @@ describe('ApprovalsSurface', () => {
     }
   })
 
+  it('keeps Gate Mode aside visible with em-dash counts when resolved history or rules are unavailable', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [queueItem({ id: 'appr-open-1' })],
+      null,
+      [],
+      undefined,
+      { state: 'ready' },
+      undefined,
+      [],
+      { state: 'unavailable', error: 'rules store down' },
+      { state: 'unavailable', stage: 'list_recent_resolved', error: 'history store down' },
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approvals-aside"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="gate-mode-selector"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="approvals-aside-recent-count"]')?.textContent).toBe('—')
+    expect(container.querySelectorAll('[role="tablist"] [role="tab"]').length).toBeGreaterThanOrEqual(2)
+    const kpiValues = Array.from(container.querySelectorAll('.ov-kpi')).map(el => el.textContent?.trim() ?? '')
+    expect(kpiValues.some(t => t.includes('Always 규칙') && t.includes('—'))).toBe(true)
+  })
+
 })

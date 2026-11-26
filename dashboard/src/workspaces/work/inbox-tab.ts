@@ -25,6 +25,7 @@ import {
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { refreshPendingHitl } from '../../shell/shell-state'
+import { isAskAnswerRecordedOn500 } from '../../api/keeper-asks'
 import {
   decodeGateQueueStrict,
   decodeKeeperAsksWire,
@@ -745,12 +746,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     if (!isEpochCurrent(epoch)) return
     setBusy(false)
     if (!res.ok) {
-      const errBody = isRecord(res.error.body) ? res.error.body : null
-      if (
-        res.error.status === 500
-        && errBody?.recorded === true
-        && errBody.state !== 'recording_unconfirmed'
-      ) {
+      if (isAskAnswerRecordedOn500(res.error.status, res.error.body)) {
         clearAskDraft(ask.askId)
         setFeedback({
           kind: 'ok',

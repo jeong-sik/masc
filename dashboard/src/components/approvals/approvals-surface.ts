@@ -799,11 +799,13 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
 function ApAside({
   openCount,
   resolvedItems,
+  resolvedUnavailable,
   rules,
   rulesState,
 }: {
   openCount: number
   resolvedItems: KeeperResolvedApprovalItem[]
+  resolvedUnavailable: boolean
   rules: KeeperApprovalRule[]
   rulesState: KeeperApprovalRulesState
 }) {
@@ -912,9 +914,11 @@ function ApAside({
       <section class="wka-card">
         <div class="wka-h">
           <h3>최근 처리</h3>
-          <span class="mono">${resolvedItems.length}</span>
+          <span class="mono" data-testid="approvals-aside-recent-count">${resolvedUnavailable ? '—' : resolvedItems.length}</span>
         </div>
-        ${recent.length > 0
+        ${resolvedUnavailable
+          ? html`<div class="ap-side-empty">처리 이력 조회 불가</div>`
+          : recent.length > 0
           ? html`
               <ul class="ap-recent-list">
                 ${recent.map(item => html`
@@ -1155,6 +1159,7 @@ export function ApprovalsSurface() {
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}
+          resolvedUnavailable=${resolvedUnavailable}
           rules=${rules}
           rulesState=${rulesState}
         />

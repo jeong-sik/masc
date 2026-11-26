@@ -613,33 +613,80 @@ let word_pattern_start_table =
     sensitive_header_names;
   tbl
 
-let non_pem_holds_at ~prev_ended_word s ~start ~len =
+type stream_owner =
+  | Sk_token_body
+  | Stripe_token_body
+  | Dotted_token_body
+  | Url_userinfo
+  | Header_value
+
+let stream_owner_continues owner c =
+  match owner with
+  | Sk_token_body -> is_sk_body c
+  | Stripe_token_body -> is_stripe_body c
+  | Dotted_token_body -> is_token_dot_body c
+  | Url_userinfo -> is_url_userinfo_base c || Char.equal c ':' || Char.equal c '@'
+  | Header_value -> not (Char.equal c '\r' || Char.equal c '\n')
+
+(* The owner of each entry of [word_bounded_token_groups], in the same order,
+   with the same body predicate: [stream_owner_continues] of the owner is the
+   group's [is_body]. *)
+let word_bounded_token_owners =
+  [ sk_prefixes, Sk_token_body
+  ; stripe_key_prefixes, Stripe_token_body
+  ; slack_token_prefixes, Sk_token_body
+  ; github_token_prefixes, Dotted_token_body
+  ; masc_credential_prefixes, Dotted_token_body
+  ]
+
+type stream_hold = { start : int; owner : stream_owner option }
+
+(* [Some owner] when a non-PEM structural pattern starting at [start] can still
+   be completed or extended by bytes appended after [s]. [owner] names the
+   unbounded body that continues it; the fixed-length AWS keys have none. *)
+let non_pem_hold_owner_at ~prev_ended_word s ~start ~len =
   let c = s.[start] in
-  if Char.equal c ':' && url_credential_holds_at s ~start ~len then true
-  else if not word_pattern_start_table.(Char.code c) then false
+  if Char.equal c ':' && url_credential_holds_at s ~start ~len then Some (Some Url_userinfo)
+  else if not word_pattern_start_table.(Char.code c) then None
   else
     let at_bow =
       if start = 0 then not prev_ended_word
       else not (is_word_char s.[start - 1])
     in
-    if not at_bow then false
+    if not at_bow then None
     else
-      List.exists
-        (fun (prefixes, is_body) ->
-           List.exists (unbounded_prefix_holds_at ~is_body s ~start ~len) prefixes)
-        word_bounded_token_groups
-      || fixed_aws_holds_at ~is_body:is_re_alnum ~prefix:"AKIA" s ~start ~len
-      || fixed_aws_holds_at ~is_body:is_upper_ascii_alnum ~prefix:"ASIA" s ~start ~len
-      || List.exists (sensitive_header_holds_at s ~start ~len) sensitive_header_names
+      match
+        List.find_opt
+          (fun (prefixes, owner) ->
+             List.exists
+               (unbounded_prefix_holds_at ~is_body:(stream_owner_continues owner) s ~start ~len)
+               prefixes)
+          word_bounded_token_owners
+      with
+      | Some (_, owner) -> Some (Some owner)
+      | None ->
+          if fixed_aws_holds_at ~is_body:is_re_alnum ~prefix:"AKIA" s ~start ~len
+          || fixed_aws_holds_at ~is_body:is_upper_ascii_alnum ~prefix:"ASIA" s ~start ~len
+          then Some None
+          else if List.exists (sensitive_header_holds_at s ~start ~len) sensitive_header_names
+          then Some (Some Header_value)
+          else None
 
-let scan_non_pem_hold ~prev_ended_word s =
+let first_stream_hold ~prev_ended_word s =
   let len = String.length s in
   let rec loop i =
-    if i >= len then len
-    else if non_pem_holds_at ~prev_ended_word s ~start:i ~len then i
-    else loop (i + 1)
+    if i >= len then None
+    else
+      match non_pem_hold_owner_at ~prev_ended_word s ~start:i ~len with
+      | Some owner -> Some { start = i; owner }
+      | None -> loop (i + 1)
   in
   loop 0
+
+let scan_non_pem_hold ~prev_ended_word s =
+  match first_stream_hold ~prev_ended_word s with
+  | Some { start; _ } -> start
+  | None -> String.length s
 
 let source_offset_of_rendered_pieces pieces rendered_offset =
   let rec walk rendered_pos = function

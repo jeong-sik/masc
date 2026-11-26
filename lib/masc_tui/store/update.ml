@@ -413,11 +413,11 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Sse_freshness { epoch; stream; freshness } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else Update_sse.apply_sse_freshness ~now ~stream ~freshness m
-  | Msg.Chat_stream_chunk { epoch; keeper; request_id; is_btw; chunk } ->
+  | Msg.Chat_stream_chunk { epoch; keeper; request_id; is_btw; seq; chunk } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else
         Update_sse.apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw
-          ~chunk m
+          ?seq ~chunk m
   | Msg.Chat_stream_decode_warning { epoch; keeper; request_id; reason } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else

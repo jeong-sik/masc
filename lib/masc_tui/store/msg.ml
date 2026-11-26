@@ -860,6 +860,7 @@ type t =
       keeper : string;
       request_id : string;
       is_btw : bool;
+      seq : int option;
       chunk : Wire_fleet.chat_stream_chunk;
     }
   | Chat_stream_decode_warning of {

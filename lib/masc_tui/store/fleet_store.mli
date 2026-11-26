@@ -13,6 +13,7 @@ open Masc_tui_protocol
 
 module String_map : Map.S with type key = string
 module String_set : Set.S with type elt = string
+module Int_set : Set.S with type elt = int
 
 module Operation_map : Map.S with type key = string * string
 (** Keyed by [(keeper, operation_id)]. *)
@@ -73,8 +74,26 @@ type chat_stream_buffer = {
   protocol_warning : string option;
   active : bool;
   ended : bool;
+  terminal_seen : bool;
+      (** [true] once a real terminal outcome was observed for this operation
+          ([Chunk_turn_done], [Chunk_error], settled [Chunk_accepted], or
+          persisted history retirement). Remains [false] after transport EOF
+          ({!finish_chat_stream}) or epoch detach ({!detach_chat_streams}) so
+          observer SSE frames for a still-running operation can take over. *)
   last_error : string option;
+  from_observer : bool;
+      (** [true] when this buffer is driven by observer SSE
+          [keeper_chat_operation_event] frames rather than a direct local
+          [POST /api/v1/keepers/chat/stream] socket. *)
+  seen_seqs : Int_set.t;
+      (** Bounded set (at most {!max_seen_seqs}) of event sequence numbers
+          already applied to this buffer across direct [POST /chat/stream] and
+          observer SSE delivery, used to ignore duplicate or replayed frames. *)
 }
+
+val max_seen_seqs : int
+(** Maximum number of event sequence numbers retained in [seen_seqs] per
+    {!chat_stream_buffer}. Older entries are pruned when this bound is exceeded. *)
 
 val empty_model_activity : model_activity
 
@@ -305,6 +324,7 @@ val start_chat_stream : keeper:string -> request_id:string -> t -> t
 
 val apply_chat_stream_chunk :
   ?allow_takeover:bool ->
+  ?seq:int ->
   keeper:string ->
   request_id:string ->
   Wire_fleet.chat_stream_chunk ->
@@ -314,7 +334,25 @@ val apply_chat_stream_chunk :
     late chunks/errors from a different [request_id] are dropped unless
     [allow_takeover = true] and either the prior buffer is inactive or the chunk
     signals explicit execution start ([Chunk_run_started] /
-    [Chunk_accepted { state = Running }]). *)
+    [Chunk_accepted { state = Running }]). When [seq] is present, records it in
+    [seen_seqs] (and drops already-seen duplicates) so an observer takeover
+    after transport disconnect will not replay earlier deltas. *)
+
+val apply_observer_chat_stream_chunk :
+  keeper:string ->
+  operation_id:string ->
+  seq:int option ->
+  Wire_fleet.chat_stream_chunk ->
+  t ->
+  t
+(** Apply an AG-UI chunk received over observer SSE
+    ([keeper_chat_operation_event]) into [chat_streams[keeper]]. Never
+    overwrites or double-appends into an active direct [POST /chat/stream]
+    buffer or a buffer whose [terminal_seen = true]. When a direct stream ended
+    on transport EOF/error or epoch detach ([not active && not terminal_seen])
+    for the same operation, hands off ownership to the observer while preserving
+    accumulated content and [seen_seqs] deduplication. Avoids spawning ghost
+    buffers on lone terminal or ignored frames. *)
 
 val set_operation_interrupting :
   keeper:string -> operation_id:string -> interrupting:bool -> t -> t
@@ -337,10 +375,16 @@ val clear_inactive_chat_stream_error : keeper:string -> t -> t
 
 val finish_chat_stream :
   keeper:string -> request_id:string -> error:string option -> t -> t
+(** Close a direct [POST /chat/stream] buffer on transport EOF/error without
+    setting [terminal_seen = true], so observer SSE frames for a still-running
+    operation can take over cleanly. No-op when the keeper's current buffer is
+    already owned by the observer ([from_observer = true]). *)
 
 val detach_chat_streams : t -> t
-(** End every active stream buffer and keep what it received. For a new epoch,
-    whose guard drops the frames those streams still send. *)
+(** End every active stream buffer and keep what it received without setting
+    [terminal_seen = true]. For a new epoch, whose guard drops the frames prior
+    direct streams still send while allowing new-epoch observer SSE frames to
+    resume an in-flight operation. *)
 
 val set_fleet_mode : Nav.keepers_fleet_mode -> t -> t
 val cycle_fleet_mode : Keymap.cycle_dir -> t -> t

@@ -1368,6 +1368,94 @@ let test_wire_observer () =
   | Ok res -> Alcotest.(check bool) "gap triggers cold resync" true res.needs_cold_resync
   | Error _ -> Alcotest.fail "expected valid gap handshake"
 
+let test_wire_observer_keeper_chat_operation_event () =
+  let decode_op ?(cursor = "10") ~seq ag_ui_json =
+    let data =
+      Printf.sprintf
+        {|{"type":"keeper_chat_operation_event","name":"alpha","operation_id":"op-1","seq":%d,"ts_unix":1795252090.0,"ag_ui_event":%s}|}
+        seq ag_ui_json
+    in
+    Wire_observer.decode_frame { Sse_wire.id = Some cursor; data }
+  in
+  (match
+     (decode_op ~seq:1
+        {|{"type":"TEXT_MESSAGE_CONTENT","delta":"Hello","textStreamScope":0}|})
+       .decoded
+   with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         {
+           keeper = "alpha";
+           operation_id = "op-1";
+           seq = Some 1;
+           frame = Some "TEXT_MESSAGE_CONTENT";
+           chunk = Some (Wire_fleet.Chunk_text_delta { delta = "Hello"; _ });
+           _;
+         }) ->
+      ()
+  | _ -> Alcotest.fail "expected TEXT_MESSAGE_CONTENT to decode into Chunk_text_delta");
+  (match
+     (decode_op ~seq:2
+        {|{"type":"CUSTOM","name":"KEEPER_THINKING_DELTA","value":{"delta":"plan"}}|})
+       .decoded
+   with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         {
+           seq = Some 2;
+           frame = Some "CUSTOM KEEPER_THINKING_DELTA";
+           chunk = Some (Wire_fleet.Chunk_thinking_delta { delta = "plan"; _ });
+           _;
+         }) ->
+      ()
+  | _ -> Alcotest.fail "expected KEEPER_THINKING_DELTA to decode into Chunk_thinking_delta");
+  (match
+     (decode_op ~seq:3
+        {|{"type":"TOOL_CALL_START","toolCallId":"tc-1","toolCallName":"masc_status"}|})
+       .decoded
+   with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         {
+           seq = Some 3;
+           frame = Some "TOOL_CALL_START";
+           chunk =
+             Some
+               (Wire_fleet.Chunk_tool_start
+                  { tool_use_id = "tc-1"; tool_name = "masc_status"; _ });
+           _;
+         }) ->
+      ()
+  | _ -> Alcotest.fail "expected TOOL_CALL_START to decode into Chunk_tool_start");
+  (match
+     (decode_op ~seq:4 {|{"type":"RUN_FINISHED","runId":"keeper-operation-run-op-1"}|})
+       .decoded
+   with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         {
+           seq = Some 4;
+           frame = Some "RUN_FINISHED";
+           chunk = Some (Wire_fleet.Chunk_turn_done { operation_id = Some "op-1"; _ });
+           _;
+         }) ->
+      ()
+  | _ -> Alcotest.fail "expected RUN_FINISHED to decode into Chunk_turn_done");
+  (match (decode_op ~seq:5 {|{"type":"TEXT_MESSAGE_START","messageId":"m1"}|}).decoded with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         { frame = Some "TEXT_MESSAGE_START"; chunk = None; _ }) ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_ignored inner event to decode as chunk = None");
+  match (decode_op ~seq:6 {|{"type":"FUTURE_UNKNOWN_EVENT","foo":1}|}).decoded with
+  | Wire_observer.Event
+      (Wire_observer.Keeper_chat_stream_frame
+         { frame = Some "FUTURE_UNKNOWN_EVENT"; chunk = None; _ }) ->
+      ()
+  | _ ->
+      Alcotest.fail
+        "unknown inner ag_ui_event must never break outer observer SSE decoding"
+
 (* 9. Ui_bus: keyed latest-wins coalescing + 512-cap exact Stream_gap overflow *)
 let test_ui_bus () =
   let wakes = Atomic.make 0 in
@@ -7912,6 +8000,8 @@ let () =
           Alcotest.test_case "wire_infra" `Quick test_wire_infra;
           Alcotest.test_case "wire_config" `Quick test_wire_config;
           Alcotest.test_case "wire_observer" `Quick test_wire_observer;
+          Alcotest.test_case "wire_observer keeper_chat_operation_event" `Quick
+            test_wire_observer_keeper_chat_operation_event;
           Alcotest.test_case "wire_observer agent_core payload shapes" `Quick
             test_wire_observer_agent_core_payload_shapes;
           Alcotest.test_case "live_round1_board_and_planning" `Quick

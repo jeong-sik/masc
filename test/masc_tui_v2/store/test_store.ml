@@ -786,6 +786,7 @@ let test_compact_composer_and_drafts () =
            keeper = "alpha";
            request_id = tx_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -812,6 +813,7 @@ let test_compact_composer_and_drafts () =
            keeper = "alpha";
            request_id = tx_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_turn_done
                {
@@ -1650,6 +1652,7 @@ let test_verifier_regressions () =
            keeper = "alpha";
            request_id = dup_tx_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -1692,6 +1695,7 @@ let test_verifier_regressions () =
            keeper = "alpha";
            request_id = dup_tx_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_error
                { operation_id = Some "op-dup"; code = Some "503"; message = "busy" };
@@ -1738,6 +1742,7 @@ let test_verifier_regressions () =
            keeper = "alpha";
            request_id = btw_id;
            is_btw = true;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_text_delta
                {
@@ -7489,6 +7494,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -7513,6 +7519,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_thinking_delta
                { operation_id = None; delta = "reasoning..."; owner = None };
@@ -7530,6 +7537,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_tool_start
                {
@@ -7553,6 +7561,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_tool_end
                {
@@ -7573,6 +7582,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_text_delta
                {
@@ -7615,6 +7625,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_b.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -7681,6 +7692,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_turn_done
                { operation_id = Some tx_a.request_id; turn_ref = None; reply = None };
@@ -7737,6 +7749,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_b.request_id;
            is_btw = false;
+           seq = None;
            chunk = Wire_fleet.Chunk_run_started { operation_id = Some tx_b.request_id };
          })
   in
@@ -7748,6 +7761,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_b.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_text_delta
                {
@@ -7765,6 +7779,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_error
                {
@@ -7934,6 +7949,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_q.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -7975,6 +7991,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_q.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -10067,7 +10084,7 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
   let feed (m : Model.t) ~request_id chunk =
     Update.step ~now:t0 m
       (Msg.Chat_stream_chunk
-         { epoch = m.epoch; keeper; request_id; is_btw = false; chunk })
+         { epoch = m.epoch; keeper; request_id; is_btw = false; seq = None; chunk })
   in
   (* Idle: Enter sends request A, and A streams a partial reply. *)
   let m1, cmds1 = press "first" m0 in
@@ -11986,7 +12003,7 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
     fst
       (Update.step ~now:t0 m
          (Msg.Chat_stream_chunk
-            { epoch = m.epoch; keeper; request_id = btw_id; is_btw = true; chunk }))
+            { epoch = m.epoch; keeper; request_id = btw_id; is_btw = true; seq = None; chunk }))
   in
   let m_btw =
     m0
@@ -16924,7 +16941,7 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let apply ?(request_id = request_id) m chunk =
     fst (Update.step ~now:t1 m
            (Msg.Chat_stream_chunk
-              { epoch = m.epoch; keeper; request_id; is_btw = false; chunk }))
+              { epoch = m.epoch; keeper; request_id; is_btw = false; seq = None; chunk }))
   in
   let apply_json m json =
     match Wire_fleet.decode_chat_stream_chunk (Yojson.Safe.from_string json) with
@@ -17281,6 +17298,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
            keeper;
            request_id = tx_q.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -17347,7 +17365,10 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         protocol_warning = None;
         active = false;
         ended = true;
+        terminal_seen = true;
         last_error = None;
+        from_observer = false;
+        seen_seqs = Fleet_store.Int_set.empty;
       }
     in
     {
@@ -17600,7 +17621,10 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       protocol_warning = None;
       active = false;
       ended = true;
+      terminal_seen = true;
       last_error = None;
+      from_observer = false;
+      seen_seqs = Fleet_store.Int_set.empty;
     }
   in
   let m0_with_prior =
@@ -17627,7 +17651,13 @@ let test_active_turn_preview_visibility_and_queued_followup () =
     1 (List.length kept_buf.tools);
   (* Completed tools leave the active stream waiting for the response. *)
   let tool_done_active : Fleet_store.chat_stream_buffer =
-    { prior_tool_buf with text = ""; active = true; ended = false }
+    {
+      prior_tool_buf with
+      text = "";
+      active = true;
+      ended = false;
+      terminal_seen = false;
+    }
   in
   let m_stream_wait =
     {
@@ -17656,6 +17686,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
            keeper;
            request_id = tx_q.request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -17888,6 +17919,7 @@ let test_interrupt_reply_and_stream_completion_are_request_scoped () =
              keeper;
              request_id = tx_s.request_id;
              is_btw = false;
+             seq = None;
              chunk =
                Wire_fleet.Chunk_accepted
                  {
@@ -17984,6 +18016,7 @@ let test_interrupt_reply_and_stream_completion_are_request_scoped () =
            keeper;
            request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_text_delta
                {
@@ -18046,6 +18079,7 @@ let test_interrupt_reply_and_stream_completion_are_request_scoped () =
            keeper;
            request_id = new_request_id;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -20527,6 +20561,7 @@ let test_layer1_input_esc_focus_traps () =
              keeper;
              request_id = tx_s.request_id;
              is_btw = false;
+             seq = None;
              chunk =
                Wire_fleet.Chunk_accepted
                  {
@@ -27977,6 +28012,7 @@ let () =
                        keeper;
                        request_id = "req-live-9";
                        is_btw = false;
+                       seq = None;
                        chunk =
                          Wire_fleet.Chunk_tool_end
                            {
@@ -30448,6 +30484,7 @@ let () =
                        keeper = "alpha";
                        request_id = "req-apr";
                        is_btw = false;
+                       seq = None;
                        chunk;
                      })
               in
@@ -30573,5 +30610,837 @@ let () =
               Alcotest.(check int)
                 "warming tools_dashboard preserves existing snapshot data" 7
                 kept_count);
+          Alcotest.test_case
+            "observer keeper_chat_operation_event live streaming, dedup, and history retirement"
+            `Quick
+            (fun () ->
+              let t0 = Clock.Mono.of_ns 1_000_000L in
+              let keeper = "alpha" in
+              let m0 =
+                let m = Model.initial ~cols:140 ~rows:40 () in
+                let fleet =
+                  m.fleet
+                  |> Fleet_store.apply_keepers ~observed_at:t0
+                       [ sample_keeper keeper ]
+                  |> Fleet_store.select_keeper keeper
+                  |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
+                  |> Fleet_store.update_chat_control_token ~keeper ~token:"ctrl-1"
+                in
+                {
+                  m with
+                  nav = { m.nav with workspace = Nav.Keepers; inspector = None };
+                  fleet;
+                }
+              in
+              let step_observer m ~operation_id ~seq chunk =
+                Update.step ~now:t0 m
+                  (Msg.Sse_event
+                     {
+                       epoch = m.epoch;
+                       event =
+                         Msg.Sse_observer_delivery
+                           {
+                             cursor = seq;
+                             decoded =
+                               Wire_observer.Event
+                                 (Wire_observer.Keeper_chat_stream_frame
+                                    {
+                                      keeper;
+                                      operation_id;
+                                      seq;
+                                      frame = None;
+                                      chunk;
+                                      at_unix = 1795252090.0;
+                                    });
+                           };
+                     })
+              in
+              (* 1. Lone terminal / ignored observer frames do not spawn a ghost buffer. *)
+              let m_ghost1, cmds_ghost1 =
+                step_observer m0 ~operation_id:"op-ghost" ~seq:(Some 1)
+                  (Some
+                     (Wire_fleet.Chunk_turn_done
+                        { operation_id = Some "op-ghost"; turn_ref = None; reply = None }))
+              in
+              Alcotest.(check bool) "lone observer RUN_FINISHED spawns no ghost buffer"
+                true (Fleet_store.String_map.is_empty m_ghost1.fleet.chat_streams);
+              Alcotest.(check int) "lone observer RUN_FINISHED emits no cmds" 0
+                (List.length (Cmd.flatten cmds_ghost1));
+              let m_ghost2, _ =
+                step_observer m0 ~operation_id:"op-ghost" ~seq:(Some 2)
+                  (Some
+                     (Wire_fleet.Chunk_reply_details
+                        {
+                          operation_id = Some "op-ghost";
+                          reply = "final";
+                          turn_outcome = None;
+                          turn_ref = None;
+                        }))
+              in
+              Alcotest.(check bool) "lone observer reply_details spawns no ghost buffer"
+                true (Fleet_store.String_map.is_empty m_ghost2.fleet.chat_streams);
+              (* 2. Observer frames stream live text/thinking/tools without direct POST. *)
+              let m1, _ =
+                step_observer m0 ~operation_id:"op-obs-1" ~seq:(Some 1)
+                  (Some (Wire_fleet.Chunk_run_started { operation_id = Some "op-obs-1" }))
+              in
+              let m2, _ =
+                step_observer m1 ~operation_id:"op-obs-1" ~seq:(Some 2)
+                  (Some
+                     (Wire_fleet.Chunk_thinking_delta
+                        { operation_id = None; delta = "reasoning"; owner = None }))
+              in
+              let m3, _ =
+                step_observer m2 ~operation_id:"op-obs-1" ~seq:(Some 3)
+                  (Some
+                     (Wire_fleet.Chunk_tool_start
+                        {
+                          operation_id = None;
+                          tool_use_id = "tu-obs-1";
+                          stream_scope = Some 0;
+                          tool_name = "masc_status";
+                          args_preview = None;
+                        }))
+              in
+              let m4, _ =
+                step_observer m3 ~operation_id:"op-obs-1" ~seq:(Some 4)
+                  (Some
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = None;
+                          delta = "Hel";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        }))
+              in
+              (* Duplicate seq = 4 MUST NOT double-append text. *)
+              let m4_dup, _ =
+                step_observer m4 ~operation_id:"op-obs-1" ~seq:(Some 4)
+                  (Some
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = None;
+                          delta = "Hel";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        }))
+              in
+              let m5, _ =
+                step_observer m4_dup ~operation_id:"op-obs-1" ~seq:(Some 5)
+                  (Some
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = None;
+                          delta = "lo";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        }))
+              in
+              let obs_buf = Fleet_store.String_map.find keeper m5.fleet.chat_streams in
+              Alcotest.(check bool) "observer buffer marked from_observer" true
+                obs_buf.from_observer;
+              Alcotest.(check bool) "observer buffer active while streaming" true
+                obs_buf.active;
+              Alcotest.(check bool) "observer buffer not ended while streaming" false
+                obs_buf.ended;
+              Alcotest.(check string) "observer text deduped on duplicate seq" "Hello"
+                obs_buf.text;
+              Alcotest.(check string) "observer thinking streamed" "reasoning"
+                obs_buf.thinking;
+              Alcotest.(check int) "observer tool call streamed" 1
+                (List.length obs_buf.tools);
+              Alcotest.(check int) "observer stream never creates Drafts pending_txs" 0
+                (List.length m5.drafts.pending_txs);
+              Alcotest.(check bool) "observer stream is not steerable as own turn" true
+                (match Update_nav.resolve_steer ~keeper m5 with
+                | Update_nav.Steer_refused Update_nav.Steer_turn_not_own -> true
+                | Update_nav.Steer_own _
+                | Update_nav.Steer_refused Update_nav.Steer_no_control_token ->
+                    false);
+              (* 3. Observer RUN_FINISHED ends buffer, fetches history, and retires on persistence. *)
+              let m6, cmds6 =
+                step_observer m5 ~operation_id:"op-obs-1" ~seq:(Some 6)
+                  (Some
+                     (Wire_fleet.Chunk_turn_done
+                        { operation_id = Some "op-obs-1"; turn_ref = None; reply = None }))
+              in
+              let obs_done = Fleet_store.String_map.find keeper m6.fleet.chat_streams in
+              Alcotest.(check bool) "observer RUN_FINISHED sets active = false" false
+                obs_done.active;
+              Alcotest.(check bool) "observer RUN_FINISHED sets ended = true" true
+                obs_done.ended;
+              Alcotest.(check bool)
+                "observer RUN_FINISHED triggers Get_chat_history when viewing chat" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = k; _ }; _ } ->
+                         String.equal k keeper
+                     | _ -> false)
+                   (Cmd.flatten cmds6));
+              let persisted_row : Wire_fleet.chat_message =
+                {
+                  id = "m-asst-obs-1";
+                  role = Wire_fleet.Role_assistant;
+                  content = "Hello";
+                  ts_unix = 1795252095.0;
+                  turn_ref = None;
+                  model_used = None;
+                  tool_call_id = None;
+                  tool_call_name = None;
+                  execution_id = None;
+                  provenance = operation_provenance "op-obs-1" Terminal_result;
+                  failure_kind = None;
+                  thinking = None;
+                  retained_images = [];
+                  tool_meta = None;
+                  trace_tools = [];
+                }
+              in
+              Alcotest.(check bool)
+                "stream_reply_already_persisted recognizes persisted observer op" true
+                (Chat_transcript.stream_reply_already_persisted [ persisted_row ]
+                   obs_done);
+              let m_persisted =
+                {
+                  m6 with
+                  fleet =
+                    Fleet_store.apply_chat_history ~observed_at:t0 ~keeper
+                      { messages = [ persisted_row ]; has_more = false; next_cursor = None }
+                      m6.fleet;
+                }
+              in
+              Alcotest.(check bool)
+                "project_transcript omits retired observer buffer once persisted" false
+                (List.exists
+                   (function
+                     | Chat_transcript.Section_stream _ -> true
+                     | Chat_transcript.Section_history _
+                     | Chat_transcript.Section_active_turn _
+                     | Chat_transcript.Section_pending _ ->
+                         false)
+                   (Chat_transcript.project_transcript ~model:m_persisted ~keeper));
+              (* 4. Active direct POST stream + simultaneous observer events do NOT double-append. *)
+              let m_dir0 =
+                {
+                  m0 with
+                  fleet =
+                    Fleet_store.start_chat_stream ~keeper ~request_id:"op-dir-1"
+                      m0.fleet;
+                }
+              in
+              let m_dir1, _ =
+                Update.step ~now:t0 m_dir0
+                  (Msg.Chat_stream_chunk
+                     {
+                       epoch = m_dir0.epoch;
+                       keeper;
+                       request_id = "op-dir-1";
+                       is_btw = false;
+                       seq = None;
+                       chunk =
+                         Wire_fleet.Chunk_text_delta
+                           {
+                             operation_id = Some "op-dir-1";
+                             delta = "Direct";
+                             owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                           };
+                     })
+              in
+              let m_dir2, cmds_dir_obs =
+                step_observer m_dir1 ~operation_id:"op-dir-1" ~seq:(Some 1)
+                  (Some
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-dir-1";
+                          delta = "Direct";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        }))
+              in
+              let m_dir3, cmds_dir_done =
+                step_observer m_dir2 ~operation_id:"op-dir-1" ~seq:(Some 2)
+                  (Some
+                     (Wire_fleet.Chunk_turn_done
+                        { operation_id = Some "op-dir-1"; turn_ref = None; reply = None }))
+              in
+              let dir_buf = Fleet_store.String_map.find keeper m_dir3.fleet.chat_streams in
+              Alcotest.(check string)
+                "simultaneous observer frame does not double-append active direct stream"
+                "Direct" dir_buf.text;
+              Alcotest.(check bool) "active direct stream remains from_observer = false"
+                false dir_buf.from_observer;
+              Alcotest.(check bool) "observer RUN_FINISHED does not close active direct stream"
+                true dir_buf.active;
+              Alcotest.(check int) "suppressed observer frames emit 0 cmds" 0
+                (List.length (Cmd.flatten cmds_dir_obs)
+                 + List.length (Cmd.flatten cmds_dir_done));
+              (* 5. History arriving before observer RUN_FINISHED retires active observer buffer. *)
+              let m_race1, _ =
+                step_observer m0 ~operation_id:"op-race-1" ~seq:(Some 1)
+                  (Some
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = None;
+                          delta = "Raced";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        }))
+              in
+              let race_row =
+                {
+                  persisted_row with
+                  id = "m-asst-race-1";
+                  content = "Raced";
+                  provenance = operation_provenance "op-race-1" Terminal_result;
+                }
+              in
+              let m_race2 =
+                {
+                  m_race1 with
+                  fleet =
+                    Fleet_store.apply_chat_history ~observed_at:t0 ~keeper
+                      { messages = [ race_row ]; has_more = false; next_cursor = None }
+                      m_race1.fleet;
+                }
+              in
+              let race_buf = Fleet_store.String_map.find keeper m_race2.fleet.chat_streams in
+              Alcotest.(check bool)
+                "persisted history racing ahead retires active observer buffer" false
+                race_buf.active;
+              Alcotest.(check bool)
+                "persisted history racing ahead marks observer buffer ended" true
+                race_buf.ended;
+              Alcotest.(check bool)
+                "raced history produces zero duplicate Section_stream" false
+                (List.exists
+                   (function
+                     | Chat_transcript.Section_stream _ -> true
+                     | Chat_transcript.Section_history _
+                     | Chat_transcript.Section_active_turn _
+                     | Chat_transcript.Section_pending _ ->
+                         false)
+                   (Chat_transcript.project_transcript ~model:m_race2 ~keeper)));
+          Alcotest.test_case
+            "observer handoff after direct transport EOF/detach vs terminal completion and bounded seen_seqs"
+            `Quick
+            (fun () ->
+              let t0 = Clock.Mono.of_ns 2_000_000L in
+              let keeper = "alpha" in
+              let m0 =
+                let m = Model.initial ~cols:140 ~rows:40 () in
+                let fleet =
+                  m.fleet
+                  |> Fleet_store.apply_keepers ~observed_at:t0
+                       [ sample_keeper keeper ]
+                  |> Fleet_store.select_keeper keeper
+                  |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
+                  |> Fleet_store.update_chat_control_token ~keeper ~token:"ctrl-1"
+                in
+                {
+                  m with
+                  nav = { m.nav with workspace = Nav.Keepers; inspector = None };
+                  fleet;
+                }
+              in
+              let step_direct m ~request_id ~seq chunk =
+                Update.step ~now:t0 m
+                  (Msg.Chat_stream_chunk
+                     {
+                       epoch = m.epoch;
+                       keeper;
+                       request_id;
+                       is_btw = false;
+                       seq;
+                       chunk;
+                     })
+              in
+              let step_observer m ~operation_id ~seq chunk =
+                Update.step ~now:t0 m
+                  (Msg.Sse_event
+                     {
+                       epoch = m.epoch;
+                       event =
+                         Msg.Sse_observer_delivery
+                           {
+                             cursor = seq;
+                             decoded =
+                               Wire_observer.Event
+                                 (Wire_observer.Keeper_chat_stream_frame
+                                    {
+                                      keeper;
+                                      operation_id;
+                                      seq;
+                                      frame = None;
+                                      chunk = Some chunk;
+                                      at_unix = 1795252100.0;
+                                    });
+                           };
+                     })
+              in
+              (* (a) Direct POST stream -> Chunk_accepted + Chunk_text_delta (seq=1)
+                 -> transport EOF (Chat_stream_done Error Stream_eof without terminal)
+                 -> observer dup seq=1 skipped + seq=2 applied + tool_start + turn_done. *)
+              let m_sent, _ =
+                let m_draft = { m0 with drafts = Drafts.insert_text "hello" m0.drafts } in
+                Update.execute_action ~now:t0 m_draft Keymap.Submit_followup
+              in
+              let req_id =
+                match Drafts.pending_txs_for_keeper ~keeper m_sent.drafts with
+                | tx :: _ -> tx.request_id
+                | [] -> Alcotest.fail "expected pending tx from Submit_chat"
+              in
+              let op_eof = "op-eof-1" in
+              let m_acc, _ =
+                step_direct m_sent ~request_id:req_id ~seq:None
+                  (Wire_fleet.Chunk_accepted
+                     {
+                       operation_id = op_eof;
+                       queued_count = 0;
+                       state = Keeper_chat_operation.State_name.Running;
+                       interactive_outcome = None;
+                       control_token = None;
+                     })
+              in
+              let m_d1, _ =
+                step_direct m_acc ~request_id:req_id ~seq:(Some 1)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some op_eof;
+                       delta = "Hel";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_d1 = Fleet_store.String_map.find keeper m_d1.fleet.chat_streams in
+              Alcotest.(check bool) "direct seq=1 recorded in seen_seqs" true
+                (Fleet_store.Int_set.mem 1 buf_d1.seen_seqs);
+              Alcotest.(check bool) "direct stream terminal_seen=false before terminal"
+                false buf_d1.terminal_seen;
+              let m_eof, _ =
+                Update.step ~now:t0 m_d1
+                  (Msg.Chat_stream_done
+                     {
+                       epoch = m_d1.epoch;
+                       keeper;
+                       request_id = req_id;
+                       is_btw = false;
+                       result = Error (Msg.Transport Health.Stream_eof);
+                     })
+              in
+              let buf_eof = Fleet_store.String_map.find keeper m_eof.fleet.chat_streams in
+              Alcotest.(check bool) "transport EOF sets active=false" false buf_eof.active;
+              Alcotest.(check bool) "transport EOF sets ended=true" true buf_eof.ended;
+              Alcotest.(check bool) "transport EOF keeps terminal_seen=false" false
+                buf_eof.terminal_seen;
+              Alcotest.(check bool) "transport EOF keeps from_observer=false" false
+                buf_eof.from_observer;
+              (* Observer replay of seq=1 is deduplicated with 0 cmds and no double-append. *)
+              let m_obs_dup, cmds_obs_dup =
+                step_observer m_eof ~operation_id:op_eof ~seq:(Some 1)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some op_eof;
+                       delta = "Hel";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_obs_dup =
+                Fleet_store.String_map.find keeper m_obs_dup.fleet.chat_streams
+              in
+              Alcotest.(check string) "observer dup seq=1 after EOF does not double-append"
+                "Hel" buf_obs_dup.text;
+              Alcotest.(check int) "observer dup seq=1 emits 0 cmds" 0
+                (List.length (Cmd.flatten cmds_obs_dup));
+              (* Observer seq=2 takes over cleanly, preserving accumulated text and ownership. *)
+              let m_obs2, _ =
+                step_observer m_obs_dup ~operation_id:op_eof ~seq:(Some 2)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some op_eof;
+                       delta = "lo";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_obs2 = Fleet_store.String_map.find keeper m_obs2.fleet.chat_streams in
+              Alcotest.(check bool) "handoff flips from_observer=true" true
+                buf_obs2.from_observer;
+              Alcotest.(check bool) "handoff restores active=true" true buf_obs2.active;
+              Alcotest.(check bool) "handoff clears ended=false" false buf_obs2.ended;
+              Alcotest.(check bool) "handoff keeps terminal_seen=false" false
+                buf_obs2.terminal_seen;
+              Alcotest.(check (option string)) "handoff clears last_error" None
+                buf_obs2.last_error;
+              Alcotest.(check string) "handoff produces exact combined text without dup"
+                "Hello" buf_obs2.text;
+              (* Post-handoff guards remain consistent for from_observer=true. *)
+              Alcotest.(check bool)
+                "handed-off observer buffer is not a local interrupt target" true
+                (Option.is_none
+                   (Chat_transcript.explicit_interrupt_target ~model:m_obs2
+                      ~keeper None));
+              Alcotest.(check bool)
+                "handed-off observer buffer is not an Esc interrupt target" true
+                (Option.is_none
+                   (Chat_transcript.escape_interrupt_target ~model:m_obs2 ~keeper));
+              Alcotest.(check bool)
+                "handed-off observer buffer is not steerable as own direct stream" true
+                (match Update_nav.resolve_steer ~keeper m_obs2 with
+                | Update_nav.Steer_refused Update_nav.Steer_turn_not_own -> true
+                | Update_nav.Steer_own _
+                | Update_nav.Steer_refused Update_nav.Steer_no_control_token ->
+                    false);
+              Alcotest.(check bool)
+                "chat_status_fetches still polls Confirming_delivery tx after observer handoff"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get
+                         {
+                           req = Cmd.Get_chat_status { keeper = k; operation_id };
+                           _;
+                         } ->
+                         String.equal k keeper && String.equal operation_id op_eof
+                     | _ -> false)
+                   (Cmd.flatten
+                      (View_fetches.chat_status_fetches ~keeper m_obs2)));
+              (* Observer tool_start + turn_done finish the handed-off stream cleanly. *)
+              let m_obs3, _ =
+                step_observer m_obs2 ~operation_id:op_eof ~seq:(Some 3)
+                  (Wire_fleet.Chunk_tool_start
+                     {
+                       operation_id = Some op_eof;
+                       tool_use_id = "tu-handoff-1";
+                       stream_scope = Some 0;
+                       tool_name = "masc_status";
+                       args_preview = None;
+                     })
+              in
+              let m_obs4, cmds_obs4 =
+                step_observer m_obs3 ~operation_id:op_eof ~seq:(Some 4)
+                  (Wire_fleet.Chunk_turn_done
+                     { operation_id = Some op_eof; turn_ref = None; reply = None })
+              in
+              let buf_obs4 = Fleet_store.String_map.find keeper m_obs4.fleet.chat_streams in
+              Alcotest.(check int) "observer tool_start applied after handoff" 1
+                (List.length buf_obs4.tools);
+              Alcotest.(check bool) "observer turn_done sets active=false" false
+                buf_obs4.active;
+              Alcotest.(check bool) "observer turn_done sets ended=true" true
+                buf_obs4.ended;
+              Alcotest.(check bool) "observer turn_done sets terminal_seen=true" true
+                buf_obs4.terminal_seen;
+              Alcotest.(check string) "observer turn_done preserves combined text"
+                "Hello" buf_obs4.text;
+              Alcotest.(check bool)
+                "observer turn_done after handoff emits Get_chat_history" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = k; _ }; _ } ->
+                         String.equal k keeper
+                     | _ -> false)
+                   (Cmd.flatten cmds_obs4));
+              let m_obs_late, cmds_obs_late =
+                step_observer m_obs4 ~operation_id:op_eof ~seq:(Some 5)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some op_eof;
+                       delta = "LATE";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_obs_late =
+                Fleet_store.String_map.find keeper m_obs_late.fleet.chat_streams
+              in
+              Alcotest.(check string) "late observer delta after terminal_seen ignored"
+                "Hello" buf_obs_late.text;
+              Alcotest.(check int) "late observer delta after terminal_seen emits 0 cmds" 0
+                (List.length (Cmd.flatten cmds_obs_late));
+              (* Direct finish_chat_stream with error clears last_error on observer takeover. *)
+              let fleet_err_takeover =
+                m0.fleet
+                |> Fleet_store.start_chat_stream ~keeper ~request_id:"req-err-eof"
+                |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-err-eof"
+                     (Wire_fleet.Chunk_accepted
+                        {
+                          operation_id = "op-err-eof";
+                          queued_count = 0;
+                          state = Keeper_chat_operation.State_name.Running;
+                          interactive_outcome = None;
+                          control_token = None;
+                        })
+                |> Fleet_store.finish_chat_stream ~keeper ~request_id:"req-err-eof"
+                     ~error:(Some "socket reset")
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-err-eof" ~seq:(Some 10)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-err-eof";
+                          delta = "Recovered";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+              in
+              let buf_err_takeover =
+                Fleet_store.String_map.find keeper fleet_err_takeover.chat_streams
+              in
+              Alcotest.(check (option string))
+                "observer takeover clears transport last_error" None
+                buf_err_takeover.last_error;
+              Alcotest.(check string) "observer takeover appends text after error EOF"
+                "Recovered" buf_err_takeover.text;
+              (* (b) Direct start_chat_stream -> Chunk_accepted + delta -> detach_chat_streams
+                 -> observer takeover cleanly resumes without duplicate seq. *)
+              let fleet_detached =
+                m0.fleet
+                |> Fleet_store.start_chat_stream ~keeper ~request_id:"req-det-1"
+                |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-det-1"
+                     (Wire_fleet.Chunk_accepted
+                        {
+                          operation_id = "op-det-1";
+                          queued_count = 0;
+                          state = Keeper_chat_operation.State_name.Running;
+                          interactive_outcome = None;
+                          control_token = None;
+                        })
+                |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-det-1"
+                     ~seq:1
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-det-1";
+                          delta = "Before ";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+                |> Fleet_store.detach_chat_streams
+              in
+              let buf_det0 =
+                Fleet_store.String_map.find keeper fleet_detached.chat_streams
+              in
+              Alcotest.(check bool) "detach_chat_streams sets active=false" false
+                buf_det0.active;
+              Alcotest.(check bool) "detach_chat_streams sets ended=true" true
+                buf_det0.ended;
+              Alcotest.(check bool) "detach_chat_streams keeps terminal_seen=false" false
+                buf_det0.terminal_seen;
+              let fleet_det_resumed =
+                fleet_detached
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-det-1" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-det-1";
+                          delta = "Before ";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-det-1" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-det-1";
+                          delta = "After";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+              in
+              let buf_det1 =
+                Fleet_store.String_map.find keeper fleet_det_resumed.chat_streams
+              in
+              Alcotest.(check bool) "observer takes over detached direct stream" true
+                buf_det1.from_observer;
+              Alcotest.(check bool) "resumed detached stream is active" true
+                buf_det1.active;
+              Alcotest.(check string)
+                "resumed detached stream dedups seq=1 and appends seq=2"
+                "Before After" buf_det1.text;
+              (* (c) Direct start_chat_stream -> Chunk_accepted -> Chunk_turn_done
+                 (terminal_seen = true) -> subsequent observer delta for same op ignored. *)
+              let m_term0 =
+                {
+                  m0 with
+                  fleet =
+                    Fleet_store.start_chat_stream ~keeper ~request_id:"req-term-1"
+                      m0.fleet;
+                }
+              in
+              let m_term1, _ =
+                step_direct m_term0 ~request_id:"req-term-1" ~seq:None
+                  (Wire_fleet.Chunk_accepted
+                     {
+                       operation_id = "op-term-1";
+                       queued_count = 0;
+                       state = Keeper_chat_operation.State_name.Running;
+                       interactive_outcome = None;
+                       control_token = None;
+                     })
+              in
+              let m_term2, _ =
+                step_direct m_term1 ~request_id:"req-term-1" ~seq:(Some 1)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some "op-term-1";
+                       delta = "Direct done";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let m_term3, _ =
+                step_direct m_term2 ~request_id:"req-term-1" ~seq:(Some 2)
+                  (Wire_fleet.Chunk_turn_done
+                     {
+                       operation_id = Some "op-term-1";
+                       turn_ref = None;
+                       reply = None;
+                     })
+              in
+              let buf_term3 =
+                Fleet_store.String_map.find keeper m_term3.fleet.chat_streams
+              in
+              Alcotest.(check bool) "direct turn_done sets terminal_seen=true" true
+                buf_term3.terminal_seen;
+              let m_term_obs, cmds_term_obs =
+                step_observer m_term3 ~operation_id:"op-term-1" ~seq:(Some 3)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some "op-term-1";
+                       delta = "SHOULD_IGNORE";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_term_obs =
+                Fleet_store.String_map.find keeper m_term_obs.fleet.chat_streams
+              in
+              Alcotest.(check string)
+                "observer delta after direct Chunk_turn_done is ignored"
+                "Direct done" buf_term_obs.text;
+              Alcotest.(check bool)
+                "observer delta after direct Chunk_turn_done leaves from_observer=false"
+                false buf_term_obs.from_observer;
+              Alcotest.(check bool)
+                "observer delta after direct Chunk_turn_done leaves active=false"
+                false buf_term_obs.active;
+              Alcotest.(check int)
+                "observer delta after direct Chunk_turn_done emits 0 cmds" 0
+                (List.length (Cmd.flatten cmds_term_obs));
+              (* Direct Chunk_error also sets terminal_seen=true and blocks observer replay. *)
+              let fleet_err_term =
+                m0.fleet
+                |> Fleet_store.start_chat_stream ~keeper ~request_id:"req-err-term"
+                |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-err-term"
+                     (Wire_fleet.Chunk_accepted
+                        {
+                          operation_id = "op-err-term";
+                          queued_count = 0;
+                          state = Keeper_chat_operation.State_name.Running;
+                          interactive_outcome = None;
+                          control_token = None;
+                        })
+                |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-err-term"
+                     (Wire_fleet.Chunk_error
+                        {
+                          operation_id = Some "op-err-term";
+                          code = Some "failed";
+                          message = "boom";
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-err-term" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-err-term";
+                          delta = "NOPE";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+              in
+              let buf_err_term =
+                Fleet_store.String_map.find keeper fleet_err_term.chat_streams
+              in
+              Alcotest.(check bool) "direct Chunk_error sets terminal_seen=true" true
+                buf_err_term.terminal_seen;
+              Alcotest.(check string) "observer delta after direct Chunk_error ignored"
+                "" buf_err_term.text;
+              (* Inactive direct buffer on op-term-1 allows observer takeover for a NEW op-other. *)
+              let m_new_op, _ =
+                step_observer m_term3 ~operation_id:"op-new-2" ~seq:(Some 1)
+                  (Wire_fleet.Chunk_text_delta
+                     {
+                       operation_id = Some "op-new-2";
+                       delta = "New op";
+                       owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                     })
+              in
+              let buf_new_op =
+                Fleet_store.String_map.find keeper m_new_op.fleet.chat_streams
+              in
+              Alcotest.(check bool) "observer takes over for different op when direct inactive"
+                true buf_new_op.from_observer;
+              Alcotest.(check string) "new op text streamed" "New op" buf_new_op.text;
+              (* (d) Persisted history terminal after transport EOF seals terminal_seen=true
+                 so delayed observer frames do not revive an already-persisted op. *)
+              let persisted_eof_row : Wire_fleet.chat_message =
+                {
+                  id = "m-asst-eof-hist";
+                  role = Wire_fleet.Role_assistant;
+                  content = "Final persisted";
+                  ts_unix = 1795252110.0;
+                  turn_ref = None;
+                  model_used = None;
+                  tool_call_id = None;
+                  tool_call_name = None;
+                  execution_id = None;
+                  provenance = operation_provenance op_eof Terminal_result;
+                  failure_kind = None;
+                  thinking = None;
+                  retained_images = [];
+                  tool_meta = None;
+                  trace_tools = [];
+                }
+              in
+              let fleet_eof_hist =
+                m_eof.fleet
+                |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper
+                     {
+                       messages = [ persisted_eof_row ];
+                       has_more = false;
+                       next_cursor = None;
+                     }
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:op_eof ~seq:(Some 2)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some op_eof;
+                          delta = "STALE";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+              in
+              let buf_eof_hist =
+                Fleet_store.String_map.find keeper fleet_eof_hist.chat_streams
+              in
+              Alcotest.(check bool)
+                "persisted history terminal sets terminal_seen=true on EOF buffer" true
+                buf_eof_hist.terminal_seen;
+              Alcotest.(check string)
+                "delayed observer delta after persisted history is ignored"
+                "Hel" buf_eof_hist.text;
+              (* (e) seen_seqs stays bounded at Fleet_store.max_seen_seqs by pruning oldest. *)
+              let overflow = 10 in
+              let total_seqs = Fleet_store.max_seen_seqs + overflow in
+              let fleet_bounded =
+                let rec loop i fl =
+                  if i > total_seqs then fl
+                  else
+                    let fl' =
+                      Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                        ~operation_id:"op-bounded" ~seq:(Some i)
+                        (Wire_fleet.Chunk_text_delta
+                           {
+                             operation_id = Some "op-bounded";
+                             delta = "";
+                             owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                           })
+                        fl
+                    in
+                    loop (i + 1) fl'
+                in
+                loop 1 m0.fleet
+              in
+              let buf_bounded =
+                Fleet_store.String_map.find keeper fleet_bounded.chat_streams
+              in
+              Alcotest.(check int) "seen_seqs cardinal capped at max_seen_seqs"
+                Fleet_store.max_seen_seqs
+                (Fleet_store.Int_set.cardinal buf_bounded.seen_seqs);
+              Alcotest.(check bool) "oldest seq pruned when exceeding max_seen_seqs"
+                false (Fleet_store.Int_set.mem 1 buf_bounded.seen_seqs);
+              Alcotest.(check bool) "newest seq retained when exceeding max_seen_seqs"
+                true (Fleet_store.Int_set.mem total_seqs buf_bounded.seen_seqs));
         ] );
     ]

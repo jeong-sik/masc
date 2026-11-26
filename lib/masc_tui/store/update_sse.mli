@@ -22,6 +22,7 @@ val apply_chat_stream_chunk :
   keeper:string ->
   request_id:string ->
   is_btw:bool ->
+  ?seq:int ->
   chunk:Wire_fleet.chat_stream_chunk ->
   Model.t ->
   Model.t * Cmd.t list

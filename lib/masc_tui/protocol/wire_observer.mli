@@ -140,6 +140,10 @@ type event =
       operation_id : string;
       seq : int option;
       frame : string option;
+      chunk : Wire_fleet.chat_stream_chunk option;
+      (** Decoded AG-UI chat stream chunk from [ag_ui_event], or [None] when
+          [ag_ui_event] is absent, non-visual ([Chunk_ignored]), or carries an
+          unrecognized inner event. *)
       at_unix : float;
     }
   | Keeper_roster_changed of string option

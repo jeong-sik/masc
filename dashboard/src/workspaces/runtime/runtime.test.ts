@@ -20,7 +20,14 @@ import {
   startObserverStream,
 } from '../../core'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
-import { classifyQuotaScope, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope } from './types'
+import {
+  formatLocalReleaseTime,
+  formatReleaseSummary,
+  groupRestingRuntimes,
+  quotaRestCauseMeta,
+  stripProviderPrefix,
+} from './quota-rest-groups'
+import { classifyQuotaScope, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope, type RuntimeResolution } from './types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -941,5 +948,272 @@ describe('workspaces/runtime', () => {
     await flushUi(20)
     expect(received).toHaveLength(0)
     ac.abort()
+  })
+
+  it('humanizes quota_rest causes, formats local release times, and groups/sorts/filters paused runtimes', () => {
+    expect(quotaRestCauseMeta('provider_quota_refused')).toEqual({
+      label: '한도 초과',
+      shortLabel: '한도 초과',
+      tone: 'warn',
+    })
+    expect(quotaRestCauseMeta('payment_refused')).toEqual({
+      label: '결제·크레딧 거절',
+      shortLabel: '결제 거절',
+      tone: 'bad',
+    })
+    expect(quotaRestCauseMeta('usage_read')).toEqual({
+      label: '사용량 100% 도달',
+      shortLabel: '사용량 100%',
+      tone: 'warn',
+    })
+    expect(quotaRestCauseMeta('custom_cap')).toEqual({
+      label: '일시 중지 (custom_cap)',
+      shortLabel: '일시 중지 (custom_cap)',
+      tone: 'warn',
+    })
+
+    const baseLocal = new Date(2026, 10, 26, 10, 0, 0).getTime() / 1000
+    const sameDayTarget = new Date(2026, 10, 26, 10, 33, 0).getTime() / 1000
+    const nextDayTarget = new Date(2026, 10, 27, 9, 5, 0).getTime() / 1000
+    const multiDayTarget = new Date(2026, 10, 28, 14, 28, 0).getTime() / 1000
+
+    expect(formatLocalReleaseTime(sameDayTarget, baseLocal)).toBe('오늘 10:33')
+    expect(formatLocalReleaseTime(nextDayTarget, baseLocal)).toBe('내일 09:05')
+    expect(formatLocalReleaseTime(multiDayTarget, baseLocal)).toBe('11/28 14:28')
+    expect(formatLocalReleaseTime(0, baseLocal)).toBeNull()
+    expect(formatLocalReleaseTime(Number.NaN, baseLocal)).toBeNull()
+
+    const soonSummary = formatReleaseSummary(baseLocal + 300, false, baseLocal)
+    expect(soonSummary.countdown).toBe('5분 후')
+    expect(soonSummary.isSoon).toBe(true)
+    expect(soonSummary.isEstimated).toBe(true)
+
+    expect(stripProviderPrefix('claude_code_acct:claude-opus', 'claude_code_acct')).toBe('claude-opus')
+    expect(stripProviderPrefix('openai_codex.gpt-5', 'openai_codex')).toBe('gpt-5')
+    expect(stripProviderPrefix('plain-id', 'other')).toBe('plain-id')
+
+    const mkRt = (
+      id: string,
+      provider: string,
+      model: string,
+      quotaRest: RuntimeResolution['quota_rest'],
+      isDefault = false,
+    ): RuntimeResolution => ({
+      id,
+      provider,
+      model,
+      effective_max_context: 200_000,
+      max_context_source: 'capability',
+      max_output_tokens: 16_384,
+      is_local: false,
+      is_default: isDefault,
+      quota_rest: quotaRest,
+    })
+
+    const runtimes: RuntimeResolution[] = [
+      mkRt('claude_a:opus', 'claude_a', 'claude-opus', { cause: 'provider_quota_refused', reset_stated: true, until: baseLocal + 172_800 }),
+      mkRt('claude_a:sonnet', 'claude_a', 'claude-sonnet', { cause: 'provider_quota_refused', reset_stated: true, until: baseLocal + 172_800 }),
+      mkRt('claude_a:haiku', 'claude_a', 'claude-haiku', { cause: 'usage_read', reset_stated: true, until: baseLocal + 180_000 }),
+      mkRt('codex:gpt5', 'codex', 'gpt-5-codex', { cause: 'provider_quota_refused', reset_stated: true, until: baseLocal + 300 }, true),
+      mkRt('codex:mini', 'codex', 'gpt-5-mini', null),
+      mkRt('gemini:pro', 'gemini', 'gemini-pro', { cause: 'payment_refused', reset_stated: false, until: baseLocal + 420 }),
+      mkRt('gemini:flash', 'gemini', 'gemini-flash', { cause: 'provider_quota_refused', reset_stated: true, until: baseLocal + 900 }),
+      mkRt('ollama:local', 'ollama', 'qwen', null),
+    ]
+
+    const displayNames = new Map([
+      ['claude_a', 'Claude Code A'],
+      ['codex', 'OpenAI Codex'],
+      ['gemini', 'Gemini API'],
+    ])
+    const emails = new Map([
+      ['codex', { integration_id: 'codex', state: 'read' as const, email: 'ops@example.com', plan: ['Pro'] }],
+    ])
+
+    // Default sort ('release'): soonest until first -> codex (300s), gemini (420s), claude_a (172800s)
+    const byRelease = groupRestingRuntimes(runtimes, {
+      providerDisplayNames: displayNames,
+      accountEmails: emails,
+      sortBy: 'release',
+      causeFilter: 'all',
+      nowUnix: baseLocal,
+    })
+    expect(byRelease.summary.totalRegistered).toBe(8)
+    expect(byRelease.summary.restingCount).toBe(6)
+    expect(byRelease.summary.availableCount).toBe(2)
+    expect(byRelease.summary.groupCount).toBe(3)
+    expect(byRelease.summary.hasPaymentRefused).toBe(true)
+    expect(byRelease.summary.soonestUntil).toBe(baseLocal + 300)
+    expect(byRelease.groups.map((g) => g.provider)).toEqual(['codex', 'gemini', 'claude_a'])
+    expect(byRelease.groups[0]!.restingCount).toBe(1)
+    expect(byRelease.groups[0]!.totalInProvider).toBe(2)
+    expect(byRelease.groups[0]!.accountLineText).toBe('ops@example.com · Pro')
+    // payment_refused wins primaryCause precedence on mixed gemini group
+    expect(byRelease.groups[1]!.primaryCause).toBe('payment_refused')
+    expect(byRelease.groups[1]!.hasEstimatedReset).toBe(true)
+
+    // Sort by count desc -> claude_a (3), gemini (2), codex (1)
+    const byCount = groupRestingRuntimes(runtimes, {
+      providerDisplayNames: displayNames,
+      sortBy: 'count',
+      causeFilter: 'all',
+      nowUnix: baseLocal,
+    })
+    expect(byCount.groups.map((g) => g.provider)).toEqual(['claude_a', 'gemini', 'codex'])
+
+    // Sort by name -> Claude Code A, Gemini API, OpenAI Codex
+    const byName = groupRestingRuntimes(runtimes, {
+      providerDisplayNames: displayNames,
+      sortBy: 'name',
+      causeFilter: 'all',
+      nowUnix: baseLocal,
+    })
+    expect(byName.groups.map((g) => g.provider)).toEqual(['claude_a', 'gemini', 'codex'])
+
+    // Cause filter ('payment_refused') keeps only gemini and only its payment_refused runtime
+    const onlyPayment = groupRestingRuntimes(runtimes, {
+      providerDisplayNames: displayNames,
+      sortBy: 'release',
+      causeFilter: 'payment_refused',
+      nowUnix: baseLocal,
+    })
+    expect(onlyPayment.groups).toHaveLength(1)
+    expect(onlyPayment.groups[0]!.provider).toBe('gemini')
+    expect(onlyPayment.groups[0]!.runtimes).toHaveLength(1)
+    expect(onlyPayment.summary.restingCount).toBe(6)
+  })
+
+  it('renders collapsible grouped Paused Runtimes panel on Quotas tab with expand, filter, sort, and KPI counts', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const mkRt = (
+      id: string,
+      provider: string,
+      model: string,
+      quotaRest: RuntimeResolution['quota_rest'],
+      isDefault = false,
+    ): RuntimeResolution => ({
+      id,
+      provider,
+      model,
+      effective_max_context: 200_000,
+      max_context_source: 'capability',
+      max_output_tokens: 16_384,
+      is_local: false,
+      is_default: isDefault,
+      quota_rest: quotaRest,
+    })
+
+    const runtimes: RuntimeResolution[] = [
+      mkRt('claude_acct:opus', 'claude_acct', 'claude-opus-4', { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 172_800 }),
+      mkRt('claude_acct:sonnet', 'claude_acct', 'claude-sonnet-4', { cause: 'provider_quota_refused', reset_stated: false, until: nowSec + 180_000 }),
+      mkRt('claude_acct:haiku', 'claude_acct', 'claude-haiku-4', { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 172_800 }),
+      mkRt('codex_acct:gpt5', 'codex_acct', 'gpt-5-codex', { cause: 'provider_quota_refused', reset_stated: true, until: nowSec + 300 }, true),
+      mkRt('codex_acct:mini', 'codex_acct', 'gpt-5-mini', null),
+      mkRt('gemini_acct:pro', 'gemini_acct', 'gemini-2.5-pro', { cause: 'payment_refused', reset_stated: false, until: nowSec + 420 }),
+      mkRt('gemini_acct:flash', 'gemini_acct', 'gemini-2.5-flash', { cause: 'payment_refused', reset_stated: false, until: nowSec + 480 }),
+      mkRt('local_acct:qwen', 'local_acct', 'qwen-local', null),
+    ]
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'default',
+          default_runtime: runtimes[3],
+          runtimes,
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'no history' })
+      }
+      if (url.startsWith('/api/v1/setup/inventory')) {
+        return jsonResponse({
+          integrations: [
+            { id: 'claude_acct', display_name: 'Claude Code Alpha', setup_support: 'full' },
+            { id: 'codex_acct', display_name: 'Codex CLI Alpha', setup_support: 'full' },
+            { id: 'gemini_acct', display_name: 'Gemini API Alpha', setup_support: 'full' },
+          ],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    const onNavigate = vi.fn()
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${onNavigate} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    const panel = await vi.waitFor(() => {
+      const p = container.querySelector('[data-testid="paused-runtimes-panel"]')
+      expect(p).not.toBeNull()
+      return p!
+    })
+
+    // KPI 4 shows resting/registered and available counts, red tone due to payment_refused
+    const kpi4 = container.querySelector('[data-testid="kpi-paused-runtimes"]')!
+    expect(kpi4.textContent).toContain('일시 중지 런타임')
+    expect(kpi4.textContent).toContain('6 / 8')
+    expect(kpi4.textContent).toContain('가용 2')
+    expect(kpi4.querySelector('.ov-kpi-v.bad')).not.toBeNull()
+
+    // Provider groups rendered in soonest-release order and collapsed by default
+    const groupEls = Array.from(panel.querySelectorAll('[data-testid^="paused-group-"]')).filter(
+      (el) => !el.getAttribute('data-testid')?.startsWith('paused-group-body-'),
+    )
+    expect(groupEls.map((el) => el.getAttribute('data-testid'))).toEqual([
+      'paused-group-codex_acct',
+      'paused-group-gemini_acct',
+      'paused-group-claude_acct',
+    ])
+    expect(panel.querySelector('[data-testid="paused-group-body-gemini_acct"]')).toBeNull()
+    expect(panel.textContent).toContain('결제·크레딧 거절')
+    expect(panel.textContent).toContain('한도 초과')
+    expect(panel.textContent).toContain('1/2 중지')
+    // Group header with provider-stated soonestUntil does NOT falsely tag 예상 even if a later runtime is unstated
+    expect(panel.querySelector('[data-testid="paused-group-claude_acct"]')?.textContent).not.toContain('예상')
+    expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')?.textContent).toContain('예상')
+
+    // Expanding gemini_acct reveals individual runtimes, local time, 예상 tag, and API 키 등록 action
+    const geminiBtn = panel.querySelector('[data-testid="paused-group-gemini_acct"] button[aria-expanded]') as HTMLButtonElement
+    geminiBtn.click()
+    await flushUi(10)
+    const geminiBody = panel.querySelector('[data-testid="paused-group-body-gemini_acct"]')
+    expect(geminiBody).not.toBeNull()
+    expect(geminiBody!.textContent).toContain('gemini-2.5-pro')
+    expect(geminiBody!.textContent).toContain('예상')
+    expect(geminiBody!.textContent).toContain('API 키 등록')
+
+    // Sort switch to count -> claude_acct (3) first
+    const sortCountBtn = panel.querySelector('[data-testid="paused-sort-count"]') as HTMLButtonElement
+    sortCountBtn.click()
+    await flushUi(10)
+    const sortedGroupIds = Array.from(panel.querySelectorAll('[data-testid^="paused-group-"]'))
+      .map((el) => el.getAttribute('data-testid'))
+      .filter((id) => id && !id.startsWith('paused-group-body-'))
+    expect(sortedGroupIds).toEqual([
+      'paused-group-claude_acct',
+      'paused-group-gemini_acct',
+      'paused-group-codex_acct',
+    ])
+
+    // Cause filter to payment_refused -> shows only gemini_acct
+    const paymentFilterBtn = panel.querySelector('[data-testid="paused-filter-payment_refused"]') as HTMLButtonElement
+    paymentFilterBtn.click()
+    await flushUi(10)
+    expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')).not.toBeNull()
+    expect(panel.querySelector('[data-testid="paused-group-claude_acct"]')).toBeNull()
+
+    // Collapse entire panel -> renders compact 1-line summary and hides group list
+    const panelToggle = panel.querySelector('[data-testid="paused-panel-toggle"]') as HTMLButtonElement
+    panelToggle.click()
+    await flushUi(10)
+    expect(panelToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(panel.textContent).toContain('일시 중지 6/8 (3개 계정) · 가용 2')
+    expect(panel.querySelector('[data-testid="paused-group-gemini_acct"]')).toBeNull()
   })
 })

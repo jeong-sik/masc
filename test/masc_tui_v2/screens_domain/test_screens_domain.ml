@@ -2545,7 +2545,7 @@ let test_v25_runtime_quotas_aliases_and_collapsed_unreported () =
   Alcotest.(check bool) "renders collapsed ▸ 미보고 API 키 (3개) footer" true
     (contains_sub ~needle:"▸ 미보고 API 키 (3개)" ~haystack:txt_c);
   Alcotest.(check bool) "fills left bottom with cooldown/health card" true
-    (contains_sub ~needle:"쿨다운 · 프로바이더 헬스" ~haystack:txt_c);
+    (contains_sub ~needle:"일시 중지 · 프로바이더 헬스" ~haystack:txt_c);
   (* Expanding via toggle_unreported_accounts reveals clean human aliases *)
   let rt_exp = Runtime_store.toggle_unreported_accounts rt in
   let g_exp =
@@ -4421,6 +4421,146 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
   in
   Alcotest.(check bool) "Board preview surfaces active_thread fetch failure" true
     (contains_sub ~needle:"Failed to load comments" ~haystack:(grid_all_text g_fail))
+let test_runtime_quotas_grouped_paused_runtimes_parity () =
+  let tz_offset_sec = 9 * 3600 in
+  let m0 =
+    Model.initial ~lang:Say.Lang_ko ~cols:140 ~rows:40 ~tz_offset_sec ()
+  in
+  let now_unix = 1795658400.0 in
+  let now_mono = Clock.Mono.of_ns 1_000_000_000L in
+  let freshness = { m0.freshness with last_wall_unix = now_unix } in
+  let mk_rt ~id ~provider ~model : Wire_runtime.runtime_option =
+    {
+      id;
+      provider_id = provider;
+      provider;
+      model = Some model;
+      declared_reasoning_effort = None;
+      transport = Some "cli";
+      is_default = false;
+    }
+  in
+  let mk_standing ~cause ~until ~reset_stated : Wire_runtime.runtime_standing =
+    {
+      quota_rest_cause = Some cause;
+      quota_rest_until_unix = Some until;
+      quota_rest_reset_stated = reset_stated;
+      credential_refused_at_unix = None;
+      rate_limited = false;
+      rate_limit_resets_at_unix = None;
+      failed_attempt_failure = None;
+      failed_attempt_noted_at_unix = None;
+      failed_attempt_by = None;
+    }
+  in
+  let resolved : Wire_runtime.runtime_resolved_snapshot =
+    {
+      generated_at_iso = "2026-11-26T02:00:00Z";
+      config_path = Some ".masc/runtime.toml";
+      default_route = Some "default";
+      lanes = [];
+      runtimes =
+        [
+          mk_rt ~id:"claude_code_8ad4ff55:opus" ~provider:"claude_code_8ad4ff55" ~model:"opus";
+          mk_rt ~id:"claude_code_8ad4ff55:sonnet" ~provider:"claude_code_8ad4ff55" ~model:"sonnet";
+          mk_rt ~id:"codex_e641909e:gpt5" ~provider:"codex_e641909e" ~model:"gpt-5";
+          mk_rt ~id:"codex_e641909e:mini" ~provider:"codex_e641909e" ~model:"gpt-5-mini";
+          mk_rt ~id:"codex_5675bb80:gpt5" ~provider:"codex_5675bb80" ~model:"gpt-5";
+          mk_rt ~id:"gemini:pro" ~provider:"gemini" ~model:"gemini-pro";
+        ];
+      usage_windows = Some { since_unix = now_unix -. 3600.0; accounts = [] };
+    }
+  in
+  let standings =
+    [
+      ( "claude_code_8ad4ff55:opus"
+      , mk_standing ~cause:"provider_quota_refused" ~until:(now_unix +. 172_800.0)
+          ~reset_stated:true );
+      ( "claude_code_8ad4ff55:sonnet"
+      , mk_standing ~cause:"provider_quota_refused" ~until:(now_unix +. 172_800.0)
+          ~reset_stated:true );
+      ( "codex_e641909e:gpt5"
+      , mk_standing ~cause:"provider_quota_refused" ~until:(now_unix +. 300.0)
+          ~reset_stated:true );
+      ( "codex_5675bb80:gpt5"
+      , mk_standing ~cause:"provider_quota_refused" ~until:(now_unix +. 360.0)
+          ~reset_stated:true );
+      ( "gemini:pro"
+      , mk_standing ~cause:"payment_refused" ~until:(now_unix +. 420.0)
+          ~reset_stated:false );
+    ]
+  in
+  let rt =
+    m0.runtime
+    |> Runtime_store.set_tab Nav.Runtime_quotas_credits
+    |> Runtime_store.apply_runtime_resolved ~observed_at:now_mono resolved
+    |> Runtime_store.apply_runtime_standings standings
+  in
+  let g =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render ~model:{ m0 with freshness; runtime = rt } ~cache
+          ~rect gr)
+  in
+  assert_grid_invariants ~label:"Quotas/GroupedPausedRuntimes" g;
+  let txt = grid_all_text g in
+  Alcotest.(check bool) "renders paused ratio divider (5/6 · 가용 1)" true
+    (contains_sub ~needle:"일시 중지 · 한도 경고 (5/6 · 가용 1)" ~haystack:txt);
+  Alcotest.(check bool) "humanizes payment_refused as 결제 거절" true
+    (contains_sub ~needle:"결제 거절" ~haystack:txt);
+  Alcotest.(check bool) "humanizes provider_quota_refused as 한도 초과" true
+    (contains_sub ~needle:"한도 초과" ~haystack:txt);
+  Alcotest.(check bool) "renders grouped provider ratios (1/2), (1/1), (2/2)" true
+    (contains_sub ~needle:"(1/2)" ~haystack:txt
+     && contains_sub ~needle:"(1/1)" ~haystack:txt
+     && contains_sub ~needle:"(2/2)" ~haystack:txt);
+  Alcotest.(check bool) "disambiguates colliding same-display-name accounts by trailing suffix" true
+    (contains_sub ~needle:"#e641909e" ~haystack:txt
+     && contains_sub ~needle:"#5675bb80" ~haystack:txt);
+  Alcotest.(check bool) "marks unstated reset time with ~ prefix" true
+    (contains_sub ~needle:"~7m" ~haystack:txt);
+  let row_of needle =
+    let rec scan y =
+      if y >= 40 then None
+      else
+        let r = grid_row_text g ~y ~x0:0 ~x1:70 in
+        if contains_sub ~needle ~haystack:r then Some y else scan (y + 1)
+    in
+    scan 0
+  in
+  let y_codex_a = row_of "#e641909e (1/2)" in
+  let y_codex_b = row_of "#5675bb80 (1/1)" in
+  let y_gemini = row_of "Gemini (1/1)" in
+  let y_claude = row_of "(2/2)" in
+  (match (y_codex_a, y_codex_b, y_gemini, y_claude) with
+   | Some yca, Some ycb, Some yg, Some ycl ->
+       Alcotest.(check bool) "sorts grouped quota_rest soonest-first (5m < 6m < 7m < 2d)" true
+         (yca < ycb && ycb < yg && yg < ycl)
+   | _ ->
+       Alcotest.fail
+         (Printf.sprintf
+            "expected grouped rows #e641909e (1/2), #5675bb80 (1/1), Gemini (1/1), Claude Code (2/2) in grid:\n%s"
+            txt));
+  let ts_codex_s =
+    Wire_common.format_unix_rfc3339
+      (now_unix +. 300.0 +. Float.of_int tz_offset_sec)
+  in
+  let expected_clock = Printf.sprintf "(%s)" (String.sub ts_codex_s 11 5) in
+  Alcotest.(check bool) ("renders local release clock " ^ expected_clock) true
+    (contains_sub ~needle:expected_clock ~haystack:txt);
+  let ts_claude_s =
+    Wire_common.format_unix_rfc3339
+      (now_unix +. 172_800.0 +. Float.of_int tz_offset_sec)
+  in
+  let expected_multiday_clock =
+    Printf.sprintf "(%s/%s %s)"
+      (String.sub ts_claude_s 5 2)
+      (String.sub ts_claude_s 8 2)
+      (String.sub ts_claude_s 11 5)
+  in
+  Alcotest.(check bool)
+    ("renders multi-day local release clock " ^ expected_multiday_clock) true
+    (contains_sub ~needle:expected_multiday_clock ~haystack:txt)
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -4436,6 +4576,9 @@ let () =
           Alcotest.test_case
             "7 sub-tabs, Observed cost states, full-width charts & SSOT isolation"
             `Quick test_runtime_all_tabs_and_invariants;
+          Alcotest.test_case
+            "Quotas grouped paused runtimes parity (causes, soonest-first, ratios & local clock)"
+            `Quick test_runtime_quotas_grouped_paused_runtimes_parity;
         ] );
       ( "infra"
       , [

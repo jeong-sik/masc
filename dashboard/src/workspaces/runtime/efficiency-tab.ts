@@ -572,7 +572,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           syncCrosshair=${true}
           emptyLabel=${historyObs.kind === 'value' && historyObs.data.state === 'unavailable'
             ? `사용량 이력 불가: ${historyObs.data.reason}`
-            : '429 / 쿨다운 이력 없음'}
+            : '일시 중지 이력 없음'}
         />
 
         <!-- Panel 4: Tool Error Rate & Exact-Output Pass % -->

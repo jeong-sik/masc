@@ -31,13 +31,17 @@
   gap: var(--sp-4);
 }
 
+/* The list takes the room its header leaves, and never less than a few rows.
+   A header that leaves less, as with a form open in it, scrolls the pane
+   instead of being cut by it. */
 .wk-pane-col {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   transition: box-shadow var(--t-fast) var(--ease);
 }
 
@@ -46,8 +50,7 @@
 }
 
 .wk-pane-col > .vlist {
-  flex: 1 1 0%;
-  min-height: 0;
+  flex: 1 0 var(--md-list-floor);
 }
 
 .wk-pane-grow {

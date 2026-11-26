@@ -258,6 +258,8 @@
 
 /* ── MasterDetail (Selective 42% / 58% @container split) ── */
 .md-container {
+  /* The least height a list in the master pane keeps: two of its taller rows. */
+  --md-list-floor: 12rem;
   container-type: inline-size;
   container-name: master-detail;
   min-width: 0;

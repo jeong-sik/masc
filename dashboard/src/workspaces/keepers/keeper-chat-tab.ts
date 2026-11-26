@@ -14,6 +14,7 @@ import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { ErrorBoundary } from '../../components/common/error-boundary'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { KeeperWaitingStrip } from './keeper-waiting-strip'
 import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
@@ -51,7 +52,6 @@ import {
   formatElapsedCompact,
   formatTurnActivityLabel,
   formatTurnLaneLabel,
-  formatWaitingSourceLabel,
   groupTranscriptEntries,
   internalModeLabel,
   loadChatBlockPrefs,
@@ -2740,47 +2740,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `}
         </div>
 
-        ${waitingInventory && waitingInventory.rows.length > 0 && (() => {
-          const shownRows = waitingInventory.rows.slice(0, 12)
-          const hiddenWaitingCount = Math.max(
-            waitingInventory.rows.length - shownRows.length,
-            waitingInventory.total_row_count - shownRows.length,
-          )
-          return html`
-            <details class="kp-waiting-strip" data-testid="chat-waiting-strip">
-              <summary class="kp-activity-group-summary">
-                <span class="kp-pill" data-tone="warn">대기 · 위임 현황 (${waitingInventory.total_row_count || waitingInventory.rows.length}건)</span>
-                ${waitingInventory.oldest_age_seconds !== null && html`
-                  <span class="kp-pill">최장 ${formatElapsedCompact(waitingInventory.oldest_age_seconds)}</span>
-                `}
-                <span class="kp-block-preview">
-                  ${summarizeCompact(
-                    `${waitingInventory.rows[0]!.waiting_on} — ${waitingInventory.rows[0]!.what}`,
-                    90,
-                  )}
-                </span>
-              </summary>
-              <div class="kp-hierarchy-rail">
-                ${shownRows.map((row, idx) => html`
-                  <div key=${`${row.source}-${row.waiting_on}-${idx}`} class="kp-waiting-row">
-                    <div class="kp-pill-row">
-                      <span class="kp-pill" data-tone="brass">${formatWaitingSourceLabel(row.source)}</span>
-                      <span class="kp-roster-name">${row.waiting_on}</span>
-                    </div>
-                    ${row.what && html`<div class="kp-waiting-what">${row.what}</div>`}
-                    ${row.detail_lines.map((line, lineIndex) => html`
-                      <div class="kp-block-status" key=${`detail:${lineIndex}`}>${line}</div>
-                    `)}
-                    ${row.next_action && html`<div class="kp-block-status">다음 동작: ${row.next_action}</div>`}
-                  </div>
-                `)}
-                ${hiddenWaitingCount > 0 && html`
-                  <div class="kp-block-status">+ ${hiddenWaitingCount}건 더 있음</div>
-                `}
-              </div>
-            </details>
-          `
-        })()}
+        ${waitingInventory && waitingInventory.rows.length > 0 && html`
+          <${KeeperWaitingStrip} inventory=${waitingInventory} nowUnix=${Date.now() / 1000} />
+        `}
 
         ${(queuedOps.length > 0 || !queue || queue.kind !== 'ready') && html`
           <div class="kp-queue-strip" aria-label="대기 중인 큐 작업">

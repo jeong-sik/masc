@@ -993,7 +993,7 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       // Waiting inventory strip rendered with canonical OCaml source label
       const waitStrip = container.querySelector('[data-testid="chat-waiting-strip"]')
       expect(waitStrip).not.toBeNull()
-      expect(waitStrip!.textContent).toContain('대기 · 위임 현황 (1건)')
+      expect(waitStrip!.textContent).toContain('대기 1건')
       expect(waitStrip!.textContent).toContain('이벤트 큐')
     })
 

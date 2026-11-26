@@ -324,8 +324,10 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
         (match Keeper_chat_response_ownership.admit ownership response with
          | Keeper_chat_response_ownership.Stale -> continue ~ownership ()
          | Admitted ownership | Preserved_unobserved ownership ->
-        let acc_text = acc_text ^ text in
-        let patch_content = streaming_patch_content acc_text in
+        let acc_text = Keeper_chat_reply_text.append acc_text ~response text in
+        let patch_content =
+          streaming_patch_content (Keeper_chat_reply_text.to_string acc_text)
+        in
         let post_failed err ~next =
           (* A failed POST may still have landed server-side (network error
              after send, or a 2xx whose body we could not read an id from).
@@ -396,7 +398,7 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
                        plain interval is the honest bound. *)
                     continue ~ownership ~acc_text ~last_edit_time:(now ()) ())))
     | Text_message_end ->
-        let final_content = truncate acc_text in
+        let final_content = truncate (Keeper_chat_reply_text.to_string acc_text) in
         (match message with
          | Created mid when final_content <> last_edited_text ->
              (match edit_message ~message_id:mid ~content:final_content with
@@ -413,7 +415,8 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
          | Not_requested
          | Unanswered (Retry_available | Retry_spent) -> continue ())
     | Run_finished { run_id = _ } ->
-        let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
+        let reply_text = Keeper_chat_reply_text.to_string acc_text in
+        let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:reply_text in
         let send_overflow = function
           | None -> Ok ()
           | Some overflow -> send_reply ~content:overflow
@@ -461,7 +464,7 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
         in
         on_send_result final_result;
         if Option.is_none reply_to_message_id || Result.is_ok final_result then
-          List.iter send_rich_embed (rich_embeds_of_text acc_text);
+          List.iter send_rich_embed (rich_embeds_of_text reply_text);
         Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
         external_effect_completed := true;
@@ -476,12 +479,12 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
         (* A new run's work is its own; the previous run's trail was delivered
            with the previous run's reply. *)
         tool_trail := Keeper_chat_tool_trail.create ();
-        loop ~acc_text:"" ~message:Not_requested ~nonce:(fresh_nonce ())
-          ~last_edit_time:0.0 ~last_edited_text:""
+        loop ~acc_text:Keeper_chat_reply_text.empty ~message:Not_requested
+          ~nonce:(fresh_nonce ()) ~last_edit_time:0.0 ~last_edited_text:""
           ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
         let ownership = Keeper_chat_response_ownership.retire_attempt ownership in
-        continue ~ownership ~acc_text:"" ()
+        continue ~ownership ~acc_text:Keeper_chat_reply_text.empty ()
     | Provider_retry_observed _ -> continue ()
     | Text_message_start _ -> continue ()
     | Reply_details _
@@ -538,7 +541,9 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
                 pending-approval status; the external-effect flow then owns
                 the message. *)
              continue
-               ~acc_text:(Keeper_chat_blocks.status_kind_connector_text kind)
+               ~acc_text:
+                 (Keeper_chat_reply_text.of_string
+                    (Keeper_chat_blocks.status_kind_connector_text kind))
                ()
          | Keeper_chat_blocks.Continuation_checkpoint ->
              (* A mid-turn checkpoint must not shrink the posted message:
@@ -551,8 +556,8 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
         continue ()
   in
   let run () =
-    loop ~acc_text:"" ~message:Not_requested ~nonce:(fresh_nonce ())
-      ~last_edit_time:0.0 ~last_edited_text:""
+    loop ~acc_text:Keeper_chat_reply_text.empty ~message:Not_requested
+      ~nonce:(fresh_nonce ()) ~last_edit_time:0.0 ~last_edited_text:""
       ~ownership:(Keeper_chat_response_ownership.create ())
   in
   match clock, show_activity with

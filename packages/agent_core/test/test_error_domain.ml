@@ -145,10 +145,13 @@ let test_to_string_each_variant () =
   let variants : Error_domain.core_error_poly list =
     [ `Rate_limited (Some 2.0, "slow down")
     ; `Rate_limited (None, "no retry hint")
+    ; `Hard_quota ("openai", Some 60.0, "billing limit")
     ; `Auth_error "forbidden"
     ; `Authorization_error "permission refused"
     ; `Server_error (503, "unavailable")
-    ; `Network_error "connection refused"
+    ; `Provider_server_error ("openai", 500, false, "fatal server error")
+    ; `Provider_unavailable ("gemini", "backend down")
+    ; `Network_error (None, Http_client.Unknown, "connection refused")
     ; `Provider_timeout (None, "3s elapsed")
     ; `Streaming_timeout (Http_client.Stream_body, "stream body elapsed", None)
     ; `Overloaded
@@ -182,10 +185,13 @@ let test_to_string_each_variant () =
 let test_all_variants_convert () =
   let all_polys : Error_domain.core_error_poly list =
     [ `Rate_limited (None, "x")
+    ; `Hard_quota ("p", None, "x")
     ; `Auth_error "x"
     ; `Authorization_error "x"
     ; `Server_error (500, "x")
-    ; `Network_error "x"
+    ; `Provider_server_error ("p", 500, true, "x")
+    ; `Provider_unavailable ("p", "x")
+    ; `Network_error (None, Http_client.Unknown, "x")
     ; `Provider_timeout (None, "x")
     ; `Streaming_timeout
         (Http_client.Stream_idle Http_client.Streaming_thinking, "idle", None)
@@ -256,16 +262,67 @@ let test_roundtrip_api_server_error () =
 
 let test_roundtrip_api_network_error () =
   let orig =
-    Error.Api (Retry.NetworkError { message = "conn refused"; kind = Unknown })
+    Error.Api (Retry.NetworkError { message = "conn refused"; kind = Http_client.Dns_failure })
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
-   | `Network_error "conn refused" -> ()
-   | _ -> Alcotest.fail "expected Network_error");
+   | `Network_error (None, Http_client.Dns_failure, "conn refused") -> ()
+   | _ -> Alcotest.fail "expected Network_error preserving kind");
   let back = Error_domain.to_core_error poly in
-  match back with
-  | Error.Api (Retry.NetworkError _) -> ()
-  | _ -> Alcotest.fail "roundtrip mismatch for NetworkError"
+  Alcotest.(check bool) "roundtrip is exact" true (orig = back);
+  let tls =
+    Error.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "openai"
+         ; kind = Http_client.Tls_error
+         ; timeout_phase = None
+         ; detail = "cert mismatch"
+         })
+  in
+  let tls_poly = Error_domain.of_core_error tls in
+  Alcotest.(check bool) "Tls_error Network_error is not retryable" false
+    (Error_domain.is_retryable tls_poly);
+  Alcotest.(check bool) "provider Network_error roundtrip is exact" true
+    (Error_domain.to_core_error tls_poly = tls)
+;;
+
+let test_roundtrip_provider_retryability_fidelity () =
+  let hard_quota =
+    Error.Provider
+      (Llm_provider.Error.HardQuota
+         { provider = "openai"; retry_after = Some 300.0; detail = "budget spent" })
+  in
+  let hq_poly = Error_domain.of_core_error hard_quota in
+  Alcotest.(check bool) "HardQuota stays non-retryable" false
+    (Error_domain.is_retryable hq_poly);
+  Alcotest.(check bool) "HardQuota roundtrip is exact" true
+    (Error_domain.to_core_error hq_poly = hard_quota);
+  let unavailable =
+    Error.Provider
+      (Llm_provider.Error.ProviderUnavailable { provider = "gemini"; detail = "offline" })
+  in
+  let unavail_poly = Error_domain.of_core_error unavailable in
+  Alcotest.(check bool) "ProviderUnavailable stays non-retryable" false
+    (Error_domain.is_retryable unavail_poly);
+  Alcotest.(check bool) "ProviderUnavailable roundtrip is exact" true
+    (Error_domain.to_core_error unavail_poly = unavailable);
+  let non_transient_server =
+    Error.Provider
+      (Llm_provider.Error.ServerError
+         { provider = "anthropic"; code = 500; transient = false; detail = "fatal" })
+  in
+  let nts_poly = Error_domain.of_core_error non_transient_server in
+  Alcotest.(check bool) "non-transient ServerError stays non-retryable" false
+    (Error_domain.is_retryable nts_poly);
+  Alcotest.(check bool) "non-transient ServerError roundtrip is exact" true
+    (Error_domain.to_core_error nts_poly = non_transient_server);
+  let transient_server =
+    Error.Provider
+      (Llm_provider.Error.ServerError
+         { provider = "anthropic"; code = 503; transient = true; detail = "retry me" })
+  in
+  Alcotest.(check bool) "transient ServerError stays retryable" true
+    (Error_domain.is_retryable (Error_domain.of_core_error transient_server))
 ;;
 
 (* RFC #52028 §2.3: a connection that did not open keeps its family, kind and
@@ -710,9 +767,13 @@ let test_retryable_streaming_timeout () =
 
 let test_retryable_network_error () =
   Alcotest.(check bool)
-    "network_error retryable"
+    "network_error Unknown retryable"
     true
-    (Error_domain.is_retryable (`Network_error "conn refused"))
+    (Error_domain.is_retryable (`Network_error (None, Http_client.Unknown, "conn refused")));
+  Alcotest.(check bool)
+    "network_error Tls_error not retryable"
+    false
+    (Error_domain.is_retryable (`Network_error (None, Http_client.Tls_error, "bad cert")))
 ;;
 
 let test_retryable_mcp_init_failed () =
@@ -738,10 +799,20 @@ let test_retryable_mcp_http () =
 
 let test_retryable_invalid_request () =
   Alcotest.(check bool)
-    "invalid_request not retryable"
+    "invalid_request Unknown not retryable"
     false
     (Error_domain.is_retryable
-       (`Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad")))
+       (`Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad")));
+  Alcotest.(check bool)
+    "invalid_request Json_parse_error retryable"
+    true
+    (Error_domain.is_retryable
+       (`Invalid_request (Llm_provider.Retry.Json_parse_error, "truncated")));
+  Alcotest.(check bool)
+    "invalid_request Refusal_body_not_received retryable"
+    true
+    (Error_domain.is_retryable
+       (`Invalid_request (Llm_provider.Retry.Refusal_body_not_received, "window closed")))
 ;;
 
 let test_retryable_tool_exec_failed () =
@@ -864,10 +935,14 @@ let test_provider_roundtrip_all_via_to_sdk () =
   let variants : Error_domain.provider_error list =
     [ `Rate_limited (Some 1.0, "slow down")
     ; `Rate_limited (None, "no retry hint")
+    ; `Hard_quota ("openai", Some 60.0, "budget spent")
     ; `Auth_error "x"
     ; `Authorization_error "x"
     ; `Server_error (500, "x")
-    ; `Network_error "x"
+    ; `Provider_server_error ("openai", 500, false, "fatal")
+    ; `Provider_unavailable ("gemini", "offline")
+    ; `Network_error (None, Http_client.Unknown, "x")
+    ; `Network_error (Some "openai", Http_client.Dns_failure, "x")
     ; `Provider_timeout (None, "x")
     ; `Streaming_timeout (Http_client.Stream_body, "x", Some "openai")
     ; `Streaming_timeout (Http_client.Stream_body, "x", None)
@@ -881,11 +956,21 @@ let test_provider_roundtrip_all_via_to_sdk () =
        let s = Error.to_string core_error in
        Alcotest.(check bool) "nonempty to_string" true (String.length s > 0);
        match v, core_error with
-       | `Streaming_timeout (_, _, Some _), Error.Provider _ -> ()
-       | `Streaming_timeout (_, _, None), Error.Api _ -> ()
-       | `Streaming_timeout _, _ ->
+       | ( (`Hard_quota _
+           | `Provider_server_error _
+           | `Provider_unavailable _
+           | `Network_error (Some _, _, _)
+           | `Streaming_timeout (_, _, Some _))
+         , Error.Provider _ ) -> ()
+       | (`Network_error (None, _, _) | `Streaming_timeout (_, _, None)), Error.Api _ -> ()
+       | ( (`Hard_quota _
+           | `Provider_server_error _
+           | `Provider_unavailable _
+           | `Network_error _
+           | `Streaming_timeout _)
+         , _ ) ->
          Alcotest.fail
-           "a streaming timeout keeps its provider or stays the API error it was"
+           "provider-scoped errors must keep their family across roundtrip"
        | _, Error.Api _ -> ()
        | _ -> Alcotest.fail "expected Api for provider_error")
     variants
@@ -909,6 +994,10 @@ let () =
             test_roundtrip_api_authorization_error
         ; Alcotest.test_case "api server_error" `Quick test_roundtrip_api_server_error
         ; Alcotest.test_case "api network_error" `Quick test_roundtrip_api_network_error
+        ; Alcotest.test_case
+            "provider retryability fidelity"
+            `Quick
+            test_roundtrip_provider_retryability_fidelity
         ; Alcotest.test_case "connect_failed both families" `Quick test_roundtrip_connect_failed
         ; Alcotest.test_case "api timeout" `Quick test_roundtrip_api_timeout
         ; Alcotest.test_case

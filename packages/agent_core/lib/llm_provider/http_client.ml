@@ -782,22 +782,6 @@ let normalize_response_headers headers =
     | order -> order)
 ;;
 
-let response_header_name_is_sensitive = function
-  | "authorization"
-  | "proxy-authorization"
-  | "cookie"
-  | "set-cookie"
-  | "www-authenticate"
-  | "proxy-authenticate"
-  | "authentication-info"
-  | "proxy-authentication-info"
-  | "api-key"
-  | "x-api-key"
-  | "x-goog-api-key"
-  | "x-auth-token" -> true
-  | _ -> false
-;;
-
 let capture_response_header_evidence headers =
   let raw_headers = Http.Header.to_list headers in
   let retry_after_header =
@@ -816,7 +800,7 @@ let capture_response_header_evidence headers =
     raw_headers
     |> normalize_response_headers
     |> List.map (fun (name, value) ->
-      if response_header_name_is_sensitive name then name, "[REDACTED]" else name, value)
+      if Secret_redactor.is_sensitive_header_name name then name, "[REDACTED]" else name, value)
   in
   let fingerprint =
     `Assoc

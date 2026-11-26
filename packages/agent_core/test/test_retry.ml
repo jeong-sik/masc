@@ -1021,7 +1021,49 @@ let test_structured_json_signals_and_status_optional_ssot () =
        (parse {|{"error":{"code":"prompt_too_long","message":"too long"}}|})
    with
    | Some (Retry.Signal_context_overflow _) -> ()
-   | _ -> fail "non-HTTP classify_structured_json must still classify code=prompt_too_long")
+   | _ -> fail "non-HTTP classify_structured_json must still classify code=prompt_too_long");
+  (* 12. Regression checks: CONTEXT_OVERFLOW wire/JSON parity, structured
+     details[].reason = QUOTA_EXHAUSTED, split-array embedded JSON merging,
+     and resolve_retry_after delegating to retry_after_of_json. *)
+  (match Retry.classify_machine_tokens "CONTEXT_OVERFLOW" with
+   | Some (Retry.Signal_context_overflow _) -> ()
+   | _ -> fail "CONTEXT_OVERFLOW machine token must classify as Signal_context_overflow");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"code":"context_overflow","message":"too large"}}|})
+   with
+   | Some (Retry.Signal_context_overflow _) -> ()
+   | _ -> fail "structured code=context_overflow must classify as Signal_context_overflow");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"details":[{"reason":"QUOTA_EXHAUSTED"}]}}|} )
+   with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "structured details[].reason=QUOTA_EXHAUSTED must classify as Signal_hard_quota");
+  (match
+     Retry.classify_embedded_json
+       {|[{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]|}
+   with
+   | Some (Retry.Signal_rate_limited { retry_after = Some 39.0; _ }) -> ()
+   | _ -> fail "classify_embedded_json must merge sibling array objects with RetryInfo");
+  check (option (float 0.001)) "resolve_retry_after parses google.rpc.RetryInfo" (Some 39.0)
+    (Retry.resolve_retry_after
+       ~body:{|{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}|}
+       ~header:(Some 5.0));
+  check (option (float 0.001)) "resolve_retry_after parses camelCase retryAfter" (Some 14.5)
+    (Retry.resolve_retry_after
+       ~body:{|{"error":{"retryAfter":14.5}}|}
+       ~header:None);
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:403
+       ~body:{|{"error":{"code":"context_length_exceeded","message":"forbidden"}}|}
+   with
+   | Retry.AuthorizationError _ -> ()
+   | other ->
+     failf "HTTP 403 must never be promoted to ContextOverflow, got %s"
+       (Retry.error_message other))
 ;;
 
 let () =

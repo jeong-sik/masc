@@ -18,6 +18,12 @@ val redact_string : string -> string
     bounded form provider text takes in an operator-facing message. *)
 val redacted_excerpt : string -> string
 
+(** [is_sensitive_header_name name] is [true] for HTTP header names that carry
+    credentials, cookies, or authentication challenges (ASCII case-insensitive,
+    trimmed). Shared SSOT for header scrubbing and fingerprint exclusion across
+    [llm_provider]. *)
+val is_sensitive_header_name : string -> bool
+
 (** [redact_json j] recursively redacts string values inside a JSON tree.
     The tree structure and key names are preserved. *)
 val redact_json : Yojson.Safe.t -> Yojson.Safe.t

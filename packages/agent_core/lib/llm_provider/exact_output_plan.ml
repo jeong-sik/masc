@@ -359,17 +359,7 @@ let option_float = function
   | Some value -> Printf.sprintf "some:%.17g" value
 ;;
 
-let credential_header name =
-  List.mem
-    (String.lowercase_ascii name)
-    [ "authorization"
-    ; "proxy-authorization"
-    ; "x-api-key"
-    ; "x-goog-api-key"
-    ; "cookie"
-    ; "set-cookie"
-    ]
-;;
+let credential_header name = Secret_redactor.is_sensitive_header_name name
 
 let plan_fingerprint
       ~(config : Provider_config.t)

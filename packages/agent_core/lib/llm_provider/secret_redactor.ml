@@ -458,6 +458,23 @@ let redact_private_key_block s =
     Buffer.contents buf
 ;;
 
+let is_sensitive_header_name name =
+  match String.lowercase_ascii (String.trim name) with
+  | "authorization"
+  | "proxy-authorization"
+  | "cookie"
+  | "set-cookie"
+  | "www-authenticate"
+  | "proxy-authenticate"
+  | "authentication-info"
+  | "proxy-authentication-info"
+  | "api-key"
+  | "x-api-key"
+  | "x-goog-api-key"
+  | "x-auth-token" -> true
+  | _ -> false
+;;
+
 let builtin_prefixes =
   [ "Bearer "
   ; "Bearer\t"

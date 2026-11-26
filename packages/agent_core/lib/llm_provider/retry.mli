@@ -132,9 +132,10 @@ val verdict_of_empty_completion
   -> message:string
   -> empty_completion_verdict
 
-(** Merge a provider's structured [retry_after] evidence: the JSON body's
-    [error.retry_after] field wins when present (provider-specific, more
-    precise); the transport's parsed [Retry-After] response header
+(** Merge a provider's structured [retry_after] evidence: the JSON body wins
+    when {!retry_after_of_json} extracts a finite, non-negative delay
+    ([retry_after], [retryAfter], Google [google.rpc.RetryInfo], or nested
+    [metadata.raw]); the transport's parsed [Retry-After] response header
     ([Http_retry_after.parse_seconds]) is the fallback. [None] when
     neither is present or parseable. *)
 val resolve_retry_after : body:string -> header:float option -> float option

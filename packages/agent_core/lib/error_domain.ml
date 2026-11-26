@@ -5,10 +5,13 @@ module Http_client = Llm_provider.Http_client
 
 type provider_error =
   [ `Rate_limited of float option * string (** retry_after seconds, message *)
+  | `Hard_quota of string * float option * string
   | `Auth_error of string
   | `Authorization_error of string
   | `Server_error of int * string
-  | `Network_error of string
+  | `Provider_server_error of string * int * bool * string
+  | `Provider_unavailable of string * string
+  | `Network_error of string option * Http_client.network_error_kind * string
   | `Connect_failed of string option * Http_client.network_error_kind * string
     (** provider (when a provider error carried it), kind, detail *)
   | `Empty_completion of string * Llm_provider.Types.stop_reason * string
@@ -96,7 +99,7 @@ let of_api_error (err : Retry.api_error) : provider_error =
   | Retry.AuthError r -> `Auth_error r.message
   | Retry.AuthorizationError r -> `Authorization_error r.message
   | Retry.ServerError r -> `Server_error (r.status, r.message)
-  | Retry.NetworkError r -> `Network_error r.message
+  | Retry.NetworkError r -> `Network_error (None, r.kind, r.message)
   | Retry.Connect_failed r -> `Connect_failed (None, r.kind, r.message)
   | Retry.Timeout r ->
     (match r.phase with
@@ -114,11 +117,12 @@ let of_api_error (err : Retry.api_error) : provider_error =
 let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error =
   match err with
   | Llm_provider.Error.RateLimit r -> `Rate_limited (r.retry_after, r.detail)
-  | Llm_provider.Error.HardQuota r -> `Rate_limited (r.retry_after, r.detail)
+  | Llm_provider.Error.HardQuota r -> `Hard_quota (r.provider, r.retry_after, r.detail)
   | Llm_provider.Error.AuthError r -> `Auth_error r.detail
   | Llm_provider.Error.AuthorizationError r -> `Authorization_error r.detail
-  | Llm_provider.Error.ServerError r -> `Server_error (r.code, r.detail)
-  | Llm_provider.Error.NetworkError r -> `Network_error r.detail
+  | Llm_provider.Error.ServerError r ->
+    `Provider_server_error (r.provider, r.code, r.transient, r.detail)
+  | Llm_provider.Error.NetworkError r -> `Network_error (Some r.provider, r.kind, r.detail)
   | Llm_provider.Error.Connect_failed r -> `Connect_failed (Some r.provider, r.kind, r.detail)
   | Llm_provider.Error.Timeout r ->
     (match r.timeout_phase with
@@ -141,7 +145,8 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
     `Invalid_request
       ( Retry.Unknown_invalid_request
       , Printf.sprintf "unknown %s variant: %s" r.type_name r.value )
-  | Llm_provider.Error.ProviderUnavailable r -> `Network_error r.detail
+  | Llm_provider.Error.ProviderUnavailable r ->
+    `Provider_unavailable (r.provider, r.detail)
   | Llm_provider.Error.EmptyCompletion r ->
     `Empty_completion (r.provider, r.stop_reason, r.detail)
   | Llm_provider.Error.ProviderTerminal r ->
@@ -191,12 +196,22 @@ let of_core_error (err : Error.t) : core_error_poly =
 let provider_to_error : provider_error -> Error.t = function
   | `Rate_limited (after, message) ->
     Error.Api (Retry.RateLimited { retry_after = after; message })
+  | `Hard_quota (provider, retry_after, detail) ->
+    Error.Provider (Llm_provider.Error.HardQuota { provider; retry_after; detail })
   | `Auth_error msg -> Error.Api (Retry.AuthError { message = msg })
   | `Authorization_error msg -> Error.Api (Retry.AuthorizationError { message = msg })
   | `Server_error (status, msg) -> Error.Api (Retry.ServerError { status; message = msg })
-  | `Network_error msg -> Error.Api (Retry.NetworkError { message = msg; kind = Unknown })
-  (* Kind and family ride along, so a connect failure comes back as the value it
-     left as (RFC #52028 §2.3); [`Network_error] above loses both. *)
+  | `Provider_server_error (provider, code, transient, detail) ->
+    Error.Provider (Llm_provider.Error.ServerError { provider; code; transient; detail })
+  | `Provider_unavailable (provider, detail) ->
+    Error.Provider (Llm_provider.Error.ProviderUnavailable { provider; detail })
+  | `Network_error (Some provider, kind, detail) ->
+    Error.Provider
+      (Llm_provider.Error.NetworkError { provider; kind; timeout_phase = None; detail })
+  | `Network_error (None, kind, message) ->
+    Error.Api (Retry.NetworkError { message; kind })
+  (* Kind and family ride along, so both network and connect failures come back
+     as the values they left as (RFC #52028 §2.3). *)
   | `Connect_failed (Some provider, kind, detail) ->
     Error.Provider (Llm_provider.Error.Connect_failed { provider; kind; detail })
   | `Connect_failed (None, kind, message) ->
@@ -306,9 +321,17 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Server_error _
   | `Overloaded
   | `Provider_timeout _
-  | `Streaming_timeout _
-  | `Network_error _ -> true
-  | `Connect_failed (_, kind, _) -> not (Http_client.network_error_kind_is_non_retryable kind)
+  | `Streaming_timeout _ -> true
+  | `Provider_server_error (_, _, transient, _) -> transient
+  | `Network_error (_, kind, _) | `Connect_failed (_, kind, _) ->
+    not (Http_client.network_error_kind_is_non_retryable kind)
+  | `Invalid_request (reason, _) ->
+    (match reason with
+     | Retry.Json_parse_error | Retry.Refusal_body_not_received -> true
+     | Retry.Attempt_rejected
+     | Retry.Request_body_refused_by_provider _
+     | Retry.Unknown_invalid_request
+     | Retry.Unclassified_status _ -> false)
   | `Mcp_init_failed _
   | `Mcp_tool_list_failed _
   | `Mcp_tool_call_failed _
@@ -318,9 +341,10 @@ let is_retryable (err : [< core_error_poly ]) : bool =
      being silently treated as non-retryable. error_domain.mli's purpose is to
      eliminate defensive catch-alls; this matches the exhaustive sibling
      Error.is_retryable. *)
+  | `Hard_quota _
+  | `Provider_unavailable _
   | `Auth_error _
   | `Authorization_error _
-  | `Invalid_request _
   | `Empty_completion _
   | `Not_found _
   | `Context_overflow _

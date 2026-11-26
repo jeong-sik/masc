@@ -37,7 +37,7 @@ import type { KeeperActiveTurn, KeeperRosterItem } from './types'
 describe('owner-scoped turn progress', () => {
   const sample = (ownerKey: string, revision: number, receivedAt: number): ReceivedTurnPreview => ({
     ownerKey, receivedAt, live: true,
-    preview: { status_text: ownerKey, activity: 'streaming', open_activities: null, text_tail: '', last_tool: null,
+    preview: { status_text: ownerKey, activity: 'streaming', open_activities: null, preparation: null, work_context: null, text_tail: '', last_tool: null,
       revision, updated_at_unix: receivedAt / 1000 },
   })
   const turn = (ownerKey: string, through: number): KeeperActiveTurn => ({
@@ -954,6 +954,8 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
           status_text: 'Checking build output',
           activity: 'tool',
           open_activities: null,
+          preparation: null,
+          work_context: null,
           text_tail: 'Evaluating diff hunks',
           last_tool: 'Execute',
           updated_at_unix: Math.floor(Date.now() / 1000),

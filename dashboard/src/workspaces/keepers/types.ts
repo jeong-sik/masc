@@ -78,6 +78,11 @@ export interface KeeperActiveTurnPreview {
   /** The turn's open work, one entry each. `null` when the server did not
    *  send the list or sent one this dashboard cannot read. */
   readonly open_activities: readonly TurnOpenActivity[] | null
+  /** The turn's preparation phase and how it ended, when it is preparing or
+   *  just finished preparing. */
+  readonly preparation: KeeperTurnPreparation | null
+  /** Why the turn started and the task it had at the start. */
+  readonly work_context: KeeperTurnWorkContext | null
   readonly text_tail: string
   readonly last_tool: string | null
   readonly updated_at_unix: number
@@ -102,6 +107,10 @@ export interface KeeperWaitingRow {
   readonly since: number | null
   readonly due_at: number | null
   readonly next_action: string
+  /** Why the row is blocked, read from the server's `detail`: a rejection
+   *  or cancellation reason, a blocked shutdown stage, spent-quota
+   *  candidates and when they come back. */
+  readonly detail_lines: readonly string[]
 }
 
 export interface KeeperWaitingInventoryData {
@@ -139,10 +148,41 @@ export interface KeeperTurnBreakdown {
   readonly failed: number
 }
 
-export interface KeeperWaitingSummary {
-  readonly count: number
-  readonly primary_reason: string | null
+export interface KeeperTurnPreparation {
+  readonly phase: string
+  readonly state: 'active' | 'prepared' | 'rejected' | 'raised' | 'cancelled'
+}
+
+export interface KeeperTurnWorkContext {
+  readonly task_id: string | null
+  readonly start_reasons: readonly string[]
+}
+
+/** One kind of waiting (server `waiting_head_json`): its first row. */
+export interface KeeperWaitingHead {
+  readonly source: string
+  /** The operator sentence for what the Keeper waits on. */
+  readonly what: string
+  readonly next_action: string
   readonly due_at: string | null
+}
+
+/** A Keeper's waiting (server `keeper_turns_json`). */
+export interface KeeperWaitingSummary {
+  readonly state: 'idle' | 'busy' | 'waiting' | 'deferred'
+  readonly count: number
+  /** The first head's `what`. */
+  readonly primary_reason: string | null
+  /** The earliest due time over all rows, never an action name. */
+  readonly due_at: string | null
+  readonly heads: readonly KeeperWaitingHead[]
+}
+
+/** The turns read could not read the waiting inventory: an unknown, not
+ *  "nothing waiting". */
+export interface KeeperWaitingUnavailable {
+  readonly unavailable: true
+  readonly reason: string | null
 }
 export interface KeeperRosterItem {
   readonly name: string
@@ -177,7 +217,7 @@ export interface KeeperRosterItem {
   readonly candle_balance_milli: string | number | null
   readonly portrait_equipment: KeeperEquipment | null
   readonly chat_control_token: string | null
-  readonly waiting_summary?: KeeperWaitingSummary | null
+  readonly waiting_summary?: KeeperWaitingSummary | KeeperWaitingUnavailable | null
   readonly active_turn: KeeperActiveTurn | null
 }
 

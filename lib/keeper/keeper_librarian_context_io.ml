@@ -53,7 +53,9 @@ let capture ~base_path ~keepers_dir ~keeper_name =
             (* The queue and chat stores that say what is pending were read.
                This is one stored record the decoder rejects, so it stays
                hidden and must not stop the commit from dropping settled
-               sources, itself included. *)
+               sources, itself included; that commit logs it. Until the
+               pending inputs change there is no commit, and the record stays
+               in the file, unshown. *)
             | Readership.Event_source_undecodable ->
               withheld_reasons := undecodable_source_withheld :: !withheld_reasons)
           withheld;

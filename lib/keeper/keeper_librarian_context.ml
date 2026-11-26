@@ -208,6 +208,19 @@ let retain_untouched_pockets ~excluded_ids ~same_progress ~retain_reference pock
         ; completeness = Needs_reconsideration
         }) pockets
 
+(* A record the decoder rejects is never shown, so the commit that removes it
+   is where its failure is reported. *)
+let report_removed_undecodable ~keeper_id ~previous ~(kept : source list) =
+  let kept = Set_util.StringSet.of_list (List.map (fun (s : source) -> s.reference) kept) in
+  List.iter (fun (s : source) ->
+    if not (Set_util.StringSet.mem s.reference kept) then
+      match stimulus_of_source s with
+      | Some (Error detail) ->
+        Log.Keeper.warn ~keeper_name:keeper_id
+          "working context removed an event record that no longer decodes: reference=%s error=%s"
+          s.reference detail
+      | Some (Ok _) | None -> ()) previous
+
 let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_version ~sources pockets =
   let file = path ~keepers_dir ~keeper_id in
   File_lock_eio.with_lock file (fun () ->
@@ -252,7 +265,10 @@ let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_
         | None -> Random_id.uuid_v7 (), 1
         | Some old -> old.generation, old.revision + 1 in
       let snapshot = {generation; revision; execution_basis; sources; pockets} in
-      let* () = Fs_compat.save_file_atomic file (snapshot_bytes snapshot) in Ok snapshot)
+      let* () = Fs_compat.save_file_atomic file (snapshot_bytes snapshot) in
+      Option.iter (fun (old : snapshot) ->
+        report_removed_undecodable ~keeper_id ~previous:old.sources ~kept:snapshot.sources) current;
+      Ok snapshot)
 
 let retract_sources
       ~keepers_dir

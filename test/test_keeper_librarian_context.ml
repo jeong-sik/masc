@@ -604,8 +604,8 @@ let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@
     [author; reader; outsider]
 
 (* A Board signal stored before its payload required [audience] no longer
-   decodes. It stays hidden, and it must not stop settled history from leaving
-   the snapshot. *)
+   decodes. It stays hidden, it must not stop settled history from leaving the
+   snapshot, and removing it is reported. *)
 let test_undecodable_retained_record_does_not_stop_settlement () = with_store @@ fun base_path ->
   let config = Workspace.default_config base_path in
   ignore (Workspace.init config ~agent_name:None : string);
@@ -635,39 +635,52 @@ let test_undecodable_retained_record_does_not_stop_settlement () = with_store @@
   let board_signal : Keeper_event_queue.board_stimulus =
     {kind = Post_created; author = "author"; title = "title"; content = "body";
      hearth = None; updated_at = Some 0.; audience = Audience_targets [keeper_name]} in
-  let unreadable =
-    let record = stored_event "event:unreadable:1" (event "unreadable" (Board_signal board_signal)) in
+  let unreadable reference =
+    let record = stored_event reference (event "unreadable" (Board_signal board_signal)) in
     let without_audience = function
       | "payload", `Assoc payload -> "payload", `Assoc (List.remove_assoc "audience" payload)
       | field -> field in
     match record.content with
     | `Assoc fields -> {record with content = `Assoc (List.map without_audience fields)}
     | _ -> fail "a stored event is a JSON object" in
+  let alone = unreadable "event:unreadable:1" in
+  let mixed = unreadable "event:unreadable:2" in
   check bool "the fixture record is one the decoder rejects" true
-    (match Context.stimulus_of_source unreadable with Some (Error _) -> true | Some (Ok _) | None -> false);
+    (match Context.stimulus_of_source alone with Some (Error _) -> true | Some (Ok _) | None -> false);
   let keepers_dir = Filename.concat base_path "contexts" in
   ignore (ok (Context.commit ~keepers_dir ~keeper_id:keeper_name ~expected_version:None
-      ~sources:[unreadable; settled; pending]
-      [pocket [unreadable.reference] "UNREADABLE" [];
-       pocket [settled.reference] "SETTLED" [];
-       pocket [pending.reference] "PENDING" []]));
+      ~sources:[alone; mixed; settled; pending]
+      [pocket [alone.reference] "ALONE" [];
+       pocket [mixed.reference; pending.reference] "MIXED" [];
+       pocket [settled.reference] "SETTLED" []]));
   let captured = Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name in
   let references sources = List.map (fun (s : Context.source) -> s.reference) sources in
   let contexts (snapshot : Context.snapshot) =
     List.map (fun (p : Context.pocket) -> p.context) snapshot.pockets in
   check (list string) "a stored record that does not decode is not an unread store" []
     captured.unavailable;
+  check (list string) "each record that does not decode is withheld"
+    ["Retained event source no longer decodes"; "Retained event source no longer decodes"]
+    captured.withheld;
   check (list string) "only the pending event is offered" [pending.reference] (references captured.sources);
   let previous = Option.get captured.previous in
-  check (list string) "the record that does not decode is not shown" ["SETTLED"; "PENDING"]
-    (contexts previous);
+  check (list string) "a context naming such a record is not shown" ["SETTLED"] (contexts previous);
+  check bool "the capture asks for a pass" true
+    (Keeper_working_context_pass.needed ~keepers_dir ~keeper_name captured);
   (* The runtime passes [observed_sources] only because [unavailable] is empty. *)
   let committed = ok (Context.commit ~observed_sources:captured.sources ~keepers_dir
       ~keeper_id:keeper_name ~expected_version:(Some (Context.version previous))
       ~sources:captured.sources [pocket [pending.reference] "ORGANIZED" []]) in
   check (list string) "settled and unreadable history leaves" [pending.reference]
     (references committed.sources);
-  check (list string) "one context remains" ["ORGANIZED"] (contexts committed)
+  check (list string) "one context remains" ["ORGANIZED"] (contexts committed);
+  let warnings = Log.Ring.recent ~module_filter:"Keeper" () in
+  let reported (removed : Context.source) =
+    List.exists (fun (entry : Log.Ring.entry) ->
+      entry.keeper_name = Some keeper_name
+      && String_util.contains_substring entry.message removed.reference) warnings in
+  check (list bool) "removing a record that does not decode is reported, a settled one is not"
+    [true; true; false] (List.map reported [alone; mixed; settled])
 
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");

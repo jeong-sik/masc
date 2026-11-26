@@ -2098,17 +2098,21 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                 let start_in_doc = body_total - Int.max 0 scroll in
                 let rev_skip = Int.max 0 (-start_in_doc) in
                 let dy = ref (doc_r.y + Int.max 0 start_in_doc) in
+                let bg = Color.of_rgb theme.surface_1 in
                 List.iter
                   (fun ln ->
                     if !dy < Rect.bottom doc_r then begin
-                      let st =
-                        if String.starts_with ~prefix:"──" ln then
-                          H.accent_style ~theme ()
-                        else H.secondary_style ~theme ()
-                      in
-                      ignore
-                        (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
-                           ~max_w:doc_r.w ~style:st ln);
+                      if String.starts_with ~prefix:"──" ln then
+                        let lbl =
+                          String.sub ln 6 (String.length ln - 6) |> String.trim
+                        in
+                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                          ~rect:doc_r ~y:!dy ~theme
+                      else
+                        ignore
+                          (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                             ~max_w:doc_r.w ~style:(H.secondary_style ~theme ())
+                             ln);
                       incr dy
                     end)
                   (Store_scroll.drop rev_skip rev_lines)

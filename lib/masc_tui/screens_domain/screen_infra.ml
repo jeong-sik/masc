@@ -494,11 +494,11 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
           if rem_rows >= 2 then
             let empty_hint =
               if model.nav.zoomed && Model.can_zoom_current_view model then
-                Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
-                  ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe"
+                Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [o] 키퍼 · [p] 프로브"
+                  ~en:"[e] Keeper Cfg · [S] SSH Pools · [o] Keeper · [p] Probe"
               else
-                Say.make ~ko:"[Enter/z] 확대 보기 · [e] 설정"
-                  ~en:"[Enter/z] Zoom · [e] Config"
+                Say.make ~ko:"[Enter/z] 확대 보기 · [e] 설정 · [o] 키퍼"
+                  ~en:"[Enter/z] Zoom · [e] Config · [o] Keeper"
             in
             ignore
               (H.put_clipped ~grid ~clip:empty_box ~x:(empty_box.x + 2)
@@ -747,12 +747,12 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
   let hotkey =
     if zoomed then
       Say.resolve lang
-        (Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
-           ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe")
+        (Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [o] 키퍼 · [p] 프로브"
+           ~en:"[e] Keeper Cfg · [S] SSH Pools · [o] Keeper · [p] Probe")
     else
       Say.resolve lang
-        (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [p] 프로브"
-           ~en:"[Enter/z] Zoom · [e] Config · [p] Probe")
+        (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [o] 키퍼 · [p] 프로브"
+           ~en:"[Enter/z] Zoom · [e] Config · [o] Keeper · [p] Probe")
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -1290,8 +1290,8 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [S] SSH 풀"
-                 ~en:"[Enter/z] Zoom · [e] Config · [S] SSH Pools"))
+              (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [S] SSH 풀 · [o] 키퍼"
+                 ~en:"[Enter/z] Zoom · [e] Config · [S] SSH Pools · [o] Keeper"))
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 샌드박스 플릿 (%d)" (List.length entries))
@@ -2725,7 +2725,8 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
                 end)
               vis_msg
           end;
-          if eff_scroll <= msg_n && !y < bot then begin
+          if eff_scroll <= msg_n && !y < bot then incr y;
+          if eff_scroll <= msg_n + 1 && !y < bot then begin
             H.draw_divider ~grid ~rect:content ~y:!y ~theme
               ~label:(Say.resolve lang (Say.make ~ko:"속성 트리" ~en:"Attributes"))
               ();
@@ -2736,7 +2737,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             let tree_rect =
               Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
             in
-            let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 1)) in
+            let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 2)) in
             let lines =
               Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
             in
@@ -2798,6 +2799,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             @ [
                 `Kv (Say.resolve lang (Say.make ~ko:"소스" ~en:"Origin"), "MASC Observer SSE");
                 `Kv (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keeper"), kp);
+                `Blank;
                 `Divider (Say.resolve lang (Say.make ~ko:"이벤트 상세" ~en:"Event Detail"));
               ]
             @ List.map (fun l -> `Detail l) detail_lines
@@ -2806,8 +2808,12 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           let max_skip = Int.max 0 (List.length all_rows - vis_h) in
           let skip = Int.min max_skip (Int.max 0 inf.detail_scroll_offset) in
           let y = ref content.y and bot = Rect.bottom content in
+          let kv_x = if content.w >= 24 then content.x + 2 else content.x in
+          let kv_w = Int.max 0 (Rect.right content - kv_x) in
           List.iter
             (function
+              | `Blank ->
+                  if !y < bot then incr y
               | `Summary line ->
                   if !y < bot then begin
                     Card.draw_left_rail ~tone:kind_tone grid ~x:content.x ~y:!y
@@ -2820,8 +2826,8 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
                   end
               | `Kv (k, v) ->
                   if !y < bot then begin
-                    H.put_kv ~grid ~clip:content ~x:content.x ~y:!y
-                      ~max_w:content.w ~theme ~key_w:9 ~key:k v;
+                    H.put_kv ~grid ~clip:content ~x:kv_x ~y:!y
+                      ~max_w:kv_w ~theme ~key_w:9 ~key:k v;
                     incr y
                   end
               | `Divider lbl ->

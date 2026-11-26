@@ -58,6 +58,8 @@ import {
   formatNativeProgressLabel,
 } from './chat-blocks'
 import { decodeOpenActivities } from './turn-open-work'
+import { KeeperChatStreamEventSchema } from '../../schemas/sse'
+import type { KeeperProviderRetry } from '../../lib/keeper-chat-stream-contract'
 import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
@@ -1386,9 +1388,24 @@ export interface StreamKeeperChatCallbacks {
     readonly state: string
     readonly queuedCount: number
     readonly controlToken: string | null
+    /** Set when an interrupt-and-send could not interrupt the running turn. */
+    readonly interruptProblem: string | null
   }) => void
   readonly onRunStarted?: () => void
-  readonly onAttemptStarted?: () => void
+  /** A new runtime attempt replaces what the previous one streamed. `null`
+   *  when the event's payload did not pass the stream contract. */
+  readonly onAttemptStarted?: (attempt: KeeperStreamAttempt | null) => void
+  /** The provider answered with a retryable failure and the runtime waits
+   *  before trying again. */
+  readonly onProviderRetry?: (retry: KeeperProviderRetry) => void
+  /** The stream broke its contract. `quarantinedStreamKey` names the tool
+   *  occurrence the server set aside, when there is one. */
+  readonly onStreamProtocolError?: (info: {
+    readonly message: string
+    readonly quarantinedStreamKey?: string
+  }) => void
+  /** The turn stopped at a continuation checkpoint and will go on later. */
+  readonly onContinuationCheckpoint?: (message: string | null) => void
   readonly onModelActivity?: (channel: 'thinking' | 'text') => void
   readonly onTextDelta?: (delta: string) => void
   readonly onRetainedImages?: (images: readonly RetainedChatImage[]) => void
@@ -1433,6 +1450,94 @@ export interface StreamKeeperChatCallbacks {
   readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
   readonly onFinished?: () => void
   readonly onError?: (message: string) => void
+}
+
+export type KeeperStreamAttempt = {
+  readonly runtimeId: string | null
+  readonly attemptIndex: number | null
+}
+
+/** CUSTOM events whose payload the chat reads through the shared stream
+ *  contract (`KeeperChatStreamEventSchema`) instead of field by field. */
+const CONTRACT_NOTICE_EVENTS: ReadonlySet<string> = new Set([
+  'KEEPER_RUNTIME_ATTEMPT_STARTED',
+  'KEEPER_PROVIDER_RETRY',
+  'KEEPER_STREAM_PROTOCOL_ERROR',
+  'KEEPER_CONTINUATION_CHECKPOINT',
+])
+
+function protocolErrorMessage(value: {
+  readonly kind?: string
+  readonly reason?: string
+  readonly event_type?: string
+}): string {
+  return [value.kind ?? 'stream protocol error', value.event_type ? `event=${value.event_type}` : '', value.reason ?? '']
+    .filter((part) => part.trim() !== '')
+    .join(' · ')
+}
+
+/** Reads one of `CONTRACT_NOTICE_EVENTS` through the shared contract. A
+ *  payload that fails it is itself a protocol problem and is shown as one;
+ *  an attempt start still resets the reply, since the server did start one. */
+export function dispatchContractNotice(
+  name: string,
+  event: unknown,
+  callbacks: StreamKeeperChatCallbacks,
+): void {
+  const result = KeeperChatStreamEventSchema.safeParse(event)
+  if (!result.success) {
+    if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') callbacks.onAttemptStarted?.(null)
+    callbacks.onStreamProtocolError?.({ message: `${name}: payload outside the stream contract` })
+    return
+  }
+  const decoded = result.data
+  if (decoded.type !== 'CUSTOM') return
+  switch (decoded.name) {
+    case 'KEEPER_RUNTIME_ATTEMPT_STARTED':
+      callbacks.onAttemptStarted?.({
+        runtimeId: decoded.value?.runtime_id ?? null,
+        attemptIndex: decoded.value?.attempt_index ?? null,
+      })
+      return
+    case 'KEEPER_PROVIDER_RETRY':
+      callbacks.onProviderRetry?.(decoded.value)
+      return
+    case 'KEEPER_STREAM_PROTOCOL_ERROR': {
+      const occurrence = decoded.value.quarantined_occurrence
+      callbacks.onStreamProtocolError?.({
+        message: protocolErrorMessage(decoded.value),
+        quarantinedStreamKey: occurrence
+          ? `occ:${occurrence.toolStreamScope}:${occurrence.toolCallBlockIndex}`
+          : undefined,
+      })
+      return
+    }
+    case 'KEEPER_CONTINUATION_CHECKPOINT':
+      callbacks.onContinuationCheckpoint?.(decoded.value.message ?? null)
+      return
+    default:
+      return
+  }
+}
+
+/** The operator-facing problem of an interrupt-and-send, or `null` when the
+ *  interrupt went through or none was asked for. */
+function interruptProblemOf(interactive: Record<string, unknown>): string | null {
+  const error = asStr(interactive.interrupt_error)
+  if (error) {
+    const code = asStr(interactive.interrupt_error_code)
+    return code ? `${error} (${code})` : error
+  }
+  // The operation is admitted in every outcome; only the interrupt differs
+  // (Keeper_owner.Submit_interactive_operation).
+  switch (asStr(interactive.outcome)) {
+    case 'stale_control':
+      return '실행 중인 턴이 이미 바뀌어서 끼어들지 않았어요. 메시지는 접수돼 차례를 기다려요.'
+    case 'paused':
+      return '지금은 턴을 새로 받지 않는 상태라 끼어들지 않았어요. 메시지는 접수됐어요.'
+    default:
+      return null
+  }
 }
 
 function extractToolOccurrenceKey(rec: Record<string, unknown>): string | undefined {
@@ -1760,9 +1865,9 @@ export async function streamKeeperChat(params: {
           } else if (type === 'CUSTOM') {
             const name = asStr(parsed.name)
             const val = isRecord(parsed.value) ? parsed.value : null
-            if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
-              mediaOwnership = retireAttempt(mediaOwnership)
-              params.callbacks.onAttemptStarted?.()
+            if (name !== null && CONTRACT_NOTICE_EVENTS.has(name)) {
+              if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') mediaOwnership = retireAttempt(mediaOwnership)
+              dispatchContractNotice(name, parsed, params.callbacks)
             } else if (name === 'KEEPER_STREAM_MESSAGE_START' && val) {
               admitMediaOwner(decodeTextOwner({ ...val, response: val }))
             } else if (name === 'KEEPER_MODEL_CONTENT_ACTIVITY' && val) {
@@ -1863,6 +1968,7 @@ export async function streamKeeperChat(params: {
                 state,
                 queuedCount: asNum(val.queued_count) ?? 0,
                 controlToken: inter ? asStr(inter.chat_control_token) : null,
+                interruptProblem: inter ? interruptProblemOf(inter) : null,
               })
               if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
                 terminal = true

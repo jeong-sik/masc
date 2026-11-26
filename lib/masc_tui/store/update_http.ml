@@ -167,30 +167,54 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
     else None
   in
   let config =
-    if Rbac.can_admin session then m.config
+    let preferences =
+      if Rbac.is_allowed session Rbac.Single_user_token_read then
+        m.config.preferences
+      else Observed.unreported
+    in
+    if Rbac.can_admin session then { m.config with preferences }
     else
       {
         Config_store.empty with
         active_tab = m.config.active_tab;
-        preferences = m.config.preferences;
+        preferences;
         live_theme_fallback = m.config.live_theme_fallback;
         live_lang_fallback = m.config.live_lang_fallback;
       }
   in
   let infra =
-    if not (Rbac.can_admin session) then
+    let allow_su_ma_admin = Rbac.is_allowed session Rbac.Su_read_ma_admin in
+    let allow_su_read = Rbac.is_allowed session Rbac.Single_user_read in
+    if (not allow_su_ma_admin) && not allow_su_read then
       { Infra_store.empty with active_tab = m.infra.active_tab }
-    else if not (Rbac.can_single_user_token_admin session) then
-      {
-        m.infra with
-        repositories = Observed.unreported;
-        repository_pulls = Observed.unreported;
-        repository_details = Infra_store.String_map.empty;
-        repo_activity = None;
-        code = Infra_store.empty.code;
-        file_peek = None;
-      }
-    else m.infra
+    else
+      let i0 =
+        if allow_su_ma_admin then m.infra
+        else
+          {
+            m.infra with
+            sandboxes = Observed.unreported;
+            logs = [];
+            logs_loaded = false;
+            last_log_seq = None;
+          }
+      in
+      let i1 =
+        if allow_su_read then i0
+        else
+          {
+            i0 with
+            repositories = Observed.unreported;
+            repository_pulls = Observed.unreported;
+            repository_details = Infra_store.String_map.empty;
+            code = Infra_store.empty.code;
+            file_peek = None;
+            activity_events = [];
+            activity_events_loaded = false;
+          }
+      in
+      if Rbac.can_single_user_token_admin session then i1
+      else { i1 with repo_activity = None }
   in
   let runtime =
     let r0 =
@@ -218,18 +242,29 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           skill_editor_loaded = Observed.unreported;
           skill_editor_preview = Observed.unreported;
           async_requests = Observed.unreported;
-          presets_listing = Observed.unreported;
-          preset_detail = Observed.unreported;
-          runtime_params = Observed.unreported;
           addon_declaration_doc = Observed.unreported;
-          addon_slice = Observed.unreported;
+          addon_last_action_receipt = Observed.unreported;
+          browser_last_receipt = Observed.unreported;
           runtime_raw_preview = Observed.unreported;
         }
     in
-    if Rbac.is_allowed session Rbac.Own_provider_manage then r1
+    let r2 =
+      if Rbac.is_allowed session Rbac.Single_user_read then r1
+      else
+        {
+          r1 with
+          presets_listing = Observed.unreported;
+          preset_detail = Observed.unreported;
+          runtime_params = Observed.unreported;
+          addon_slice = Observed.unreported;
+          browser_scene = Observed.unreported;
+          browser_screenshot = Observed.unreported;
+        }
+    in
+    if Rbac.is_allowed session Rbac.Own_provider_manage then r2
     else
       {
-        r1 with
+        r2 with
         setup_login_receipt = None;
         setup_login_auth_url = None;
         setup_login_device_code = None;
@@ -269,18 +304,42 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
     let k0 =
       if Rbac.can_admin session then m.knowledge
       else
-        { (Knowledge_store.clear_pending_wiki_edit m.knowledge) with
+        {
+          (Knowledge_store.clear_pending_wiki_edit m.knowledge) with
           wiki_edit_base = None;
         }
     in
-    if Rbac.can_single_user_token_admin session then k0
+    let k1 =
+      if Rbac.can_single_user_token_admin session then k0
+      else
+        {
+          k0 with
+          keeper_memory_facts = Knowledge_store.String_map.empty;
+          keeper_memory_journal = Observed.unreported;
+          artifacts = Observed.unreported;
+          active_artifact_detail = Observed.unreported;
+          active_artifact_detail_target = None;
+          pending_artifact_revision = None;
+          artifact_checks = Observed.unreported;
+        }
+    in
+    if Rbac.is_allowed session Rbac.Single_user_read then k1
     else
       {
-        k0 with
+        k1 with
         workspace_memory_ledger = Observed.unreported;
         workspace_memory_context = Observed.unreported;
-        keeper_memory_facts = Knowledge_store.String_map.empty;
-        keeper_memory_journal = Observed.unreported;
+      }
+  in
+  let work =
+    if Rbac.can_single_user_token_admin session then m.work
+    else
+      {
+        m.work with
+        verification_evidence = Observed.unreported;
+        verification_evidence_auth_denied = false;
+        late_approval_attempts = Observed.unreported;
+        late_approval_auth_denied = false;
       }
   in
   let next =
@@ -294,6 +353,7 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
       runtime;
       keeper_context;
       knowledge;
+      work;
     }
   in
   if Rbac.can_single_user_token_admin session then next

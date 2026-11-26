@@ -2266,7 +2266,7 @@ let palette_filtered_commands (m : Model.t) =
   let all =
     Keymap.palette_commands ~lang:m.lang
     |> List.filter (fun (c : Keymap.palette_command) ->
-           Rbac_policy.can_run_keymap_action m.auth_session c.action)
+           Rbac_policy.can_run_keymap_action_in_model m c.action)
   in
   if String.equal q "" then all
   else
@@ -2584,7 +2584,7 @@ let palette_entries_with_overflow (m : Model.t) :
       (board_entries @ wiki_entries)
   in
   let sandbox_entries =
-    if not (Rbac.can_admin m.auth_session) then []
+    if not (Rbac.is_allowed m.auth_session Rbac.Su_read_ma_admin) then []
     else
     let items =
       match Observed.to_option m.infra.sandboxes with
@@ -2796,6 +2796,12 @@ let build_chat_submit_cmd (m : Model.t) (tx : Drafts.pending_message) ~mode
     { epoch = m.epoch; req = Cmd.Stream_keeper_chat { request = req; is_btw } }
 
 let start_btw_query ~now ~prompt (m : Model.t) =
+  match Rbac_policy.can_chat_with_keeper m.auth_session with
+  | Rbac.Denied reason ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Rbac.deny_reason_say reason) m
+      , [] )
+  | Rbac.Allowed ->
   let trimmed = String.trim prompt in
   if String.equal trimmed "" then open_inline_modal m Nav.Btw_query
   else
@@ -4763,6 +4769,11 @@ let enter_hint (m : Model.t) =
 let check_verification_verdict_precondition (m : Model.t)
     (v : Wire_work.verification_request) : (unit, Say.t) result =
   let ( let* ) = Result.bind in
+  let* () =
+    match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+    | Rbac.Allowed -> Ok ()
+    | Rbac.Denied reason -> Error (Rbac.deny_reason_say reason)
+  in
   let* () = Work_store.verification_read_allows_verdict m.work in
   let* v =
     List.find_opt
@@ -11542,34 +11553,46 @@ let open_schedule_form_populated (m : Model.t) =
 
 let approve_verification_request ~now (m : Model.t)
     (v : Wire_work.verification_request) =
-  match check_verification_verdict_precondition m v with
-  | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
-  | Ok () ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:("검증 승인 전송: " ^ v.task_title)
-             ~en:("Approving verification: " ^ v.task_title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_verification_verdict
-                  {
-                    task_id = v.task_id;
-                    verification_id = v.request_id;
-                    verdict = Wire_work.Verdict_approve;
-                    notes = None;
-                  };
-            };
-        ] )
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Rbac.deny_reason_say reason) m
+      , [] )
+  | Rbac.Allowed -> (
+      match check_verification_verdict_precondition m v with
+      | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
+      | Ok () ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:("검증 승인 전송: " ^ v.task_title)
+                 ~en:("Approving verification: " ^ v.task_title))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_verification_verdict
+                      {
+                        task_id = v.task_id;
+                        verification_id = v.request_id;
+                        verdict = Wire_work.Verdict_approve;
+                        notes = None;
+                      };
+                };
+            ] ))
 
 let reject_verification_request ~now (m : Model.t)
     (v : Wire_work.verification_request) =
-  match check_verification_verdict_precondition m v with
-  | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
-  | Ok () -> open_inline_modal m (Nav.Verification_reject v.request_id)
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Rbac.deny_reason_say reason) m
+      , [] )
+  | Rbac.Allowed -> (
+      match check_verification_verdict_precondition m v with
+      | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
+      | Ok () -> open_inline_modal m (Nav.Verification_reject v.request_id))
 
 let request_goal_complete_guarded ~now (m : Model.t) (g : Wire_work.goal) =
   match Rbac.decide m.auth_session Rbac.Single_user_write with

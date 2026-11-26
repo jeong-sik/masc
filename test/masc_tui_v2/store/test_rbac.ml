@@ -272,9 +272,10 @@ let all_route_accesses : (string * Rbac.route_access) list =
     ("Multi_account_whoami_probe", Rbac.Multi_account_whoami_probe);
     ("Workspace_read", Rbac.Workspace_read);
     ("Single_user_read", Rbac.Single_user_read);
+    ("Single_user_token_read", Rbac.Single_user_token_read);
     ("Single_user_write", Rbac.Single_user_write);
-    ("Admin_only", Rbac.Admin_only);
-    ("Single_user_admin_only", Rbac.Single_user_admin_only);
+    ("Su_read_ma_admin", Rbac.Su_read_ma_admin);
+    ("Bridged_token_admin", Rbac.Bridged_token_admin);
     ("Single_user_token_admin_only", Rbac.Single_user_token_admin_only);
     ("Own_provider_manage", Rbac.Own_provider_manage);
     ("Own_keeper_sandbox_read", Rbac.Own_keeper_sandbox_read);
@@ -339,8 +340,9 @@ let test_core_parsers_and_projection () =
   Alcotest.(check bool) "missing role with require_token fails closed" true
     (Rbac.requires_auth_gate missing_role_session);
 
-  (* Auth disabled local dev mode: server resolves effective_role = Some Admin,
-     grants can_admin, but Token_permission CanAdmin still requires token auth *)
+  (* Auth disabled local dev mode: server allows SU Public_read/CanReadState
+     (including Su_read_ma_admin), while Token_permission routes (Bridged_token_admin,
+     Single_user_token_admin_only, Single_user_token_read) return Token_auth_not_enabled. *)
   let auth_off =
     Rbac.session_of_single_user_shell_auth
       ~auth_methods:Rbac.default_auth_methods
@@ -349,12 +351,24 @@ let test_core_parsers_and_projection () =
       ~effective_role:(Some Rbac.Admin) ~effective_admin:(Some true)
       ~can_keeper_msg:true ~auth_error_code:None ~auth_error_detail:None
   in
-  Alcotest.(check bool) "auth off grants local admin" true
-    (Rbac.can_admin auth_off);
+  Alcotest.(check bool) "auth off allows Su_read_ma_admin (SU Public_read/CanReadState)"
+    true (Rbac.is_allowed auth_off Rbac.Su_read_ma_admin);
+  Alcotest.(check bool) "auth off denies Bridged_token_admin with Token_auth_not_enabled"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac.decide auth_off Rbac.Bridged_token_admin)
+       (Rbac.Denied Rbac.Token_auth_not_enabled));
+  Alcotest.(check bool) "auth off denies Single_user_token_read with Token_auth_not_enabled"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac.decide auth_off Rbac.Single_user_token_read)
+       (Rbac.Denied Rbac.Token_auth_not_enabled));
+  Alcotest.(check bool) "auth off does not satisfy can_admin (Token_permission CanAdmin)"
+    false (Rbac.can_admin auth_off);
   Alcotest.(check bool) "auth off does not satisfy Token_permission CanAdmin"
     false (Rbac.can_single_user_token_admin auth_off);
 
-  (* Token-enabled admin satisfies both can_admin and can_single_user_token_admin *)
+  (* Token-enabled admin satisfies Bridged_token_admin, Single_user_token_admin_only, and Single_user_token_read *)
   let tok_admin =
     Rbac.session_of_single_user_shell_auth
       ~auth_methods:Rbac.default_auth_methods
@@ -363,11 +377,13 @@ let test_core_parsers_and_projection () =
       ~effective_role:(Some Rbac.Admin) ~effective_admin:(Some true)
       ~can_keeper_msg:true ~auth_error_code:None ~auth_error_detail:None
   in
-  Alcotest.(check bool) "token admin grants can_admin and can_single_user_token_admin"
-    true (Rbac.can_admin tok_admin && Rbac.can_single_user_token_admin tok_admin);
+  Alcotest.(check bool) "token admin grants can_admin, token_admin, and token_read"
+    true
+    (Rbac.can_admin tok_admin
+     && Rbac.can_single_user_token_admin tok_admin
+     && Rbac.is_allowed tok_admin Rbac.Single_user_token_read);
 
-  (* Optional token without valid token: effective_role=Some Admin locally,
-     but Token_permission CanAdmin requires require_token && token_valid *)
+  (* Optional token without valid token: Token_permission routes require require_token && token_valid *)
   let optional_no_token =
     Rbac.session_of_single_user_shell_auth
       ~auth_methods:Rbac.default_auth_methods
@@ -378,8 +394,14 @@ let test_core_parsers_and_projection () =
   in
   Alcotest.(check bool) "optional-token without token cannot run Token_permission CanAdmin"
     false (Rbac.can_single_user_token_admin optional_no_token);
+  Alcotest.(check bool) "optional-token without token cannot run Bridged_token_admin"
+    false (Rbac.can_admin optional_no_token);
+  Alcotest.(check bool) "optional-token without token cannot run Single_user_token_read"
+    false (Rbac.is_allowed optional_no_token Rbac.Single_user_token_read);
+  Alcotest.(check bool) "optional-token without token allows Su_read_ma_admin"
+    true (Rbac.is_allowed optional_no_token Rbac.Su_read_ma_admin);
 
-  (* Token worker stays Worker, never Admin *)
+  (* Token worker stays Worker, gets Su_read_ma_admin & Single_user_token_read, never Admin *)
   let worker_sess =
     Rbac.session_of_single_user_shell_auth
       ~auth_methods:Rbac.default_auth_methods
@@ -391,6 +413,10 @@ let test_core_parsers_and_projection () =
   Alcotest.(check bool) "worker is authenticated" true
     (Rbac.is_authenticated worker_sess);
   Alcotest.(check bool) "worker is not admin" false (Rbac.can_admin worker_sess);
+  Alcotest.(check bool) "worker gets Su_read_ma_admin" true
+    (Rbac.is_allowed worker_sess Rbac.Su_read_ma_admin);
+  Alcotest.(check bool) "worker gets Single_user_token_read" true
+    (Rbac.is_allowed worker_sess Rbac.Single_user_token_read);
   Alcotest.(check bool) "worker role = Worker" true
     (Option.equal Rbac.equal_role (Rbac.role_of_session worker_sess)
        (Some Rbac.Worker))
@@ -413,9 +439,10 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Multi_account_whoami_probe
         | Rbac.Workspace_read
         | Rbac.Single_user_read
+        | Rbac.Single_user_token_read
         | Rbac.Single_user_write
-        | Rbac.Admin_only
-        | Rbac.Single_user_admin_only
+        | Rbac.Su_read_ma_admin
+        | Rbac.Bridged_token_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -438,9 +465,10 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Multi_account_whoami_probe
         | Rbac.Workspace_read
         | Rbac.Single_user_read
+        | Rbac.Single_user_token_read
         | Rbac.Single_user_write
-        | Rbac.Admin_only
-        | Rbac.Single_user_admin_only
+        | Rbac.Su_read_ma_admin
+        | Rbac.Bridged_token_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -463,9 +491,10 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_shell_probe
         | Rbac.Workspace_read
         | Rbac.Single_user_read
+        | Rbac.Single_user_token_read
         | Rbac.Single_user_write
-        | Rbac.Admin_only
-        | Rbac.Single_user_admin_only
+        | Rbac.Su_read_ma_admin
+        | Rbac.Bridged_token_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
         | Rbac.Own_keeper_sandbox_read
@@ -488,9 +517,10 @@ let test_exhaustive_decision_matrix () =
             | Rbac.Multi_account_whoami_probe
             | Rbac.Workspace_read
             | Rbac.Single_user_read
+            | Rbac.Single_user_token_read
             | Rbac.Single_user_write
-            | Rbac.Admin_only
-            | Rbac.Single_user_admin_only
+            | Rbac.Su_read_ma_admin
+            | Rbac.Bridged_token_admin
             | Rbac.Single_user_token_admin_only
             | Rbac.Own_provider_manage
             | Rbac.Own_keeper_sandbox_read
@@ -507,11 +537,16 @@ let test_exhaustive_decision_matrix () =
         Rbac.Auth_unavailable { mode = None; reason = "probe failed" } );
     ];
 
-  (* Multi-account Admin PAT: NEVER gets Admin_only (Pat_cannot_admin), NEVER gets SU-only *)
-  Alcotest.(check bool) "MA Admin PAT denied Admin_only with Pat_cannot_admin"
+  (* Multi-account Admin PAT: NEVER gets Bridged_token_admin or Su_read_ma_admin (Pat_cannot_admin), NEVER gets SU-only *)
+  Alcotest.(check bool) "MA Admin PAT denied Bridged_token_admin with Pat_cannot_admin"
     true
     (Rbac.equal_access_verdict
-       (Rbac.decide ma_human_admin_pat Rbac.Admin_only)
+       (Rbac.decide ma_human_admin_pat Rbac.Bridged_token_admin)
+       (Rbac.Denied Rbac.Pat_cannot_admin));
+  Alcotest.(check bool) "MA Admin PAT denied Su_read_ma_admin with Pat_cannot_admin"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac.decide ma_human_admin_pat Rbac.Su_read_ma_admin)
        (Rbac.Denied Rbac.Pat_cannot_admin));
   Alcotest.(check bool) "MA Admin PAT allowed Workspace_read" true
     (Rbac.is_allowed ma_human_admin_pat Rbac.Workspace_read);
@@ -519,19 +554,21 @@ let test_exhaustive_decision_matrix () =
     (Rbac.is_allowed ma_human_admin_pat Rbac.Own_provider_manage);
   Alcotest.(check bool) "MA Admin PAT denied Single_user_read" false
     (Rbac.is_allowed ma_human_admin_pat Rbac.Single_user_read);
-  Alcotest.(check bool) "MA Admin PAT denied Single_user_admin_only" false
-    (Rbac.is_allowed ma_human_admin_pat Rbac.Single_user_admin_only);
+  Alcotest.(check bool) "MA Admin PAT denied Single_user_token_read" false
+    (Rbac.is_allowed ma_human_admin_pat Rbac.Single_user_token_read);
 
-  (* Multi-account Admin Session: gets Admin_only + Workspace_read + Own_provider_manage, NO SU-only *)
-  Alcotest.(check bool) "MA Admin Session allowed Admin_only" true
-    (Rbac.is_allowed ma_human_admin_session Rbac.Admin_only);
+  (* Multi-account Admin Session: gets Bridged_token_admin + Su_read_ma_admin + Workspace_read + Own_provider_manage, NO SU-only *)
+  Alcotest.(check bool) "MA Admin Session allowed Bridged_token_admin" true
+    (Rbac.is_allowed ma_human_admin_session Rbac.Bridged_token_admin);
+  Alcotest.(check bool) "MA Admin Session allowed Su_read_ma_admin" true
+    (Rbac.is_allowed ma_human_admin_session Rbac.Su_read_ma_admin);
   Alcotest.(check bool) "MA Admin Session denied Single_user_token_admin_only"
     false
     (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_token_admin_only);
-  Alcotest.(check bool) "MA Admin Session denied Single_user_admin_only" false
-    (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_admin_only);
+  Alcotest.(check bool) "MA Admin Session denied Single_user_token_read" false
+    (Rbac.is_allowed ma_human_admin_session Rbac.Single_user_token_read);
 
-  (* Multi-account Worker PAT: Workspace_read + Own_provider_manage + world/keeper memory diff, denied Admin_only & SU *)
+  (* Multi-account Worker PAT: Workspace_read + Own_provider_manage + world/keeper memory diff, denied MA admin & SU *)
   Alcotest.(check bool) "MA Worker PAT allowed Workspace_read" true
     (Rbac.is_allowed ma_human_worker_pat Rbac.Workspace_read);
   Alcotest.(check bool) "MA Worker PAT allowed Own_provider_manage" true
@@ -543,8 +580,10 @@ let test_exhaustive_decision_matrix () =
     true
     (Rbac.is_allowed ma_human_worker_pat
        (Rbac.Memory_diff_read { keeper_scoped = false }));
-  Alcotest.(check bool) "MA Worker PAT denied Admin_only" false
-    (Rbac.is_allowed ma_human_worker_pat Rbac.Admin_only);
+  Alcotest.(check bool) "MA Worker PAT denied Bridged_token_admin" false
+    (Rbac.is_allowed ma_human_worker_pat Rbac.Bridged_token_admin);
+  Alcotest.(check bool) "MA Worker PAT denied Su_read_ma_admin" false
+    (Rbac.is_allowed ma_human_worker_pat Rbac.Su_read_ma_admin);
 
   (* Multi-account Service Worker: denied Own_provider_manage with Service_cannot_manage_own_provider *)
   Alcotest.(check bool) "MA Service Worker denied Own_provider_manage" true
@@ -556,17 +595,19 @@ let test_exhaustive_decision_matrix () =
     (Rbac.is_allowed ma_service_worker
        (Rbac.Memory_diff_read { keeper_scoped = true }));
 
-  (* Single-user Worker: allowed SU read/write, denied Admin_only / SU_admin / Token_admin / Own_provider_manage *)
+  (* Single-user Worker: allowed SU read/token_read/write/Su_read_ma_admin, denied Bridged_token_admin / Token_admin / Own_provider_manage *)
   Alcotest.(check bool) "SU Worker allowed Single_user_read" true
     (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Single_user_read);
+  Alcotest.(check bool) "SU Worker allowed Single_user_token_read" true
+    (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Single_user_token_read);
+  Alcotest.(check bool) "SU Worker allowed Su_read_ma_admin" true
+    (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Su_read_ma_admin);
   Alcotest.(check bool) "SU Worker allowed Single_user_write" true
     (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Single_user_write);
   Alcotest.(check bool) "SU Worker allowed Machine_play" true
     (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Machine_play);
-  Alcotest.(check bool) "SU Worker denied Admin_only" false
-    (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Admin_only);
-  Alcotest.(check bool) "SU Worker denied Single_user_admin_only" false
-    (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Single_user_admin_only);
+  Alcotest.(check bool) "SU Worker denied Bridged_token_admin" false
+    (Rbac.is_allowed Rbac.single_user_local_worker Rbac.Bridged_token_admin);
   Alcotest.(check bool) "SU Worker denied Single_user_token_admin_only" false
     (Rbac.is_allowed Rbac.single_user_local_worker
        Rbac.Single_user_token_admin_only);
@@ -577,18 +618,33 @@ let test_exhaustive_decision_matrix () =
   Alcotest.(check bool) "SU Optional-token Admin denied Token_permission CanAdmin"
     false
     (Rbac.is_allowed su_optional_token_admin Rbac.Single_user_token_admin_only);
+  Alcotest.(check bool) "SU Optional-token Admin denied Bridged_token_admin"
+    false
+    (Rbac.is_allowed su_optional_token_admin Rbac.Bridged_token_admin);
+  Alcotest.(check bool) "SU Optional-token Admin denied Single_user_token_read"
+    false
+    (Rbac.is_allowed su_optional_token_admin Rbac.Single_user_token_read);
+  Alcotest.(check bool) "SU Optional-token Admin allowed Su_read_ma_admin"
+    true
+    (Rbac.is_allowed su_optional_token_admin Rbac.Su_read_ma_admin);
   Alcotest.(check bool) "SU Token Admin allowed Token_permission CanAdmin" true
     (Rbac.is_allowed su_token_admin Rbac.Single_user_token_admin_only);
+  Alcotest.(check bool) "SU Token Admin allowed Bridged_token_admin" true
+    (Rbac.is_allowed su_token_admin Rbac.Bridged_token_admin);
 
-  (* Single-user Player: allowed Machine_play ONLY, denied Workspace_read, Single_user_read, Admin_only *)
+  (* Single-user Player: allowed Machine_play ONLY, denied Workspace_read, Single_user_read, Su_read_ma_admin, Bridged_token_admin *)
   Alcotest.(check bool) "SU Player allowed Machine_play" true
     (Rbac.is_allowed Rbac.single_user_local_player Rbac.Machine_play);
   Alcotest.(check bool) "SU Player denied Workspace_read" false
     (Rbac.is_allowed Rbac.single_user_local_player Rbac.Workspace_read);
   Alcotest.(check bool) "SU Player denied Single_user_read" false
     (Rbac.is_allowed Rbac.single_user_local_player Rbac.Single_user_read);
-  Alcotest.(check bool) "SU Player denied Admin_only" false
-    (Rbac.is_allowed Rbac.single_user_local_player Rbac.Admin_only)
+  Alcotest.(check bool) "SU Player denied Single_user_token_read" false
+    (Rbac.is_allowed Rbac.single_user_local_player Rbac.Single_user_token_read);
+  Alcotest.(check bool) "SU Player denied Su_read_ma_admin" false
+    (Rbac.is_allowed Rbac.single_user_local_player Rbac.Su_read_ma_admin);
+  Alcotest.(check bool) "SU Player denied Bridged_token_admin" false
+    (Rbac.is_allowed Rbac.single_user_local_player Rbac.Bridged_token_admin)
 
 let stream_name = function
   | Subscriptions.Stream_observer -> "observer"
@@ -755,7 +811,8 @@ let test_poller_loader_and_sse_suppression () =
     (Rbac_policy.can_fetch_get ma_service_worker
        (Cmd.Get_setup_login_status { login_id = "l-1" }));
 
-  (* Server Truth Check #3: SU Worker on Infra_logs does NOT get Stream_logs *)
+  (* Server Truth Check #3: GET /api/v1/dashboard/logs/stream is Public_read in SU
+     (allowed for SU Worker), and 404 in MA (0 SSE streams even for MA Admin Session). *)
   let m_worker_logs =
     let m = Model.initial ~auth_session:Rbac.single_user_local_worker () in
     {
@@ -765,19 +822,215 @@ let test_poller_loader_and_sse_suppression () =
     }
   in
   let worker_plan = Subscriptions.plan m_worker_logs in
-  Alcotest.(check bool) "SU Worker plan excludes Stream_logs" false
+  Alcotest.(check bool) "SU Worker plan includes Stream_logs (Public_read in SU)"
+    true
     (List.exists
        (fun s ->
          Subscriptions.equal_stream_kind s
            (Subscriptions.Stream_logs { since_seq = None }))
        worker_plan);
-  Alcotest.(check bool) "SU Worker plan still keeps persistent Stream_observer"
+  Alcotest.(check bool) "SU Worker plan keeps persistent Stream_observer"
     true
     (List.exists
        (fun s -> Subscriptions.equal_stream_id s Subscriptions.Stream_observer)
        worker_plan);
+  let m_ma_admin_logs =
+    let m = Model.initial ~auth_session:ma_human_admin_session () in
+    {
+      m with
+      nav = { m.nav with workspace = Nav.Infra };
+      infra = { m.infra with active_tab = Nav.Infra_activity_logs };
+    }
+  in
+  Alcotest.(check int) "MA Admin Session plan has 0 SSE streams (no Stream_logs)"
+    0 (List.length (Subscriptions.plan m_ma_admin_logs));
 
-  (* Check #4: Suppressed reads on Work_inbox for MA Worker PAT do NOT stick in Loading *)
+  (* Server Truth Check #4: Exact SU Worker / SU Auth-off / MA route classifications *)
+  let su_auth_off_sess =
+    Rbac.session_of_single_user_shell_auth
+      ~auth_methods:Rbac.default_auth_methods ~enabled:false
+      ~require_token:false ~token_present:false ~token_valid:false
+      ~effective_agent:(Some "local") ~effective_role:(Some Rbac.Admin)
+      ~effective_admin:(Some true) ~can_keeper_msg:true ~auth_error_code:None
+      ~auth_error_detail:None
+  in
+  (* Su_read_ma_admin routes: SU Worker & SU Auth-off allowed; MA Admin Session allowed; MA Admin PAT denied *)
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("SU Auth-off allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get su_auth_off_sess req);
+      Alcotest.(check bool) ("MA Admin Session allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get ma_human_admin_session req);
+      Alcotest.(check bool) ("MA Admin PAT denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get ma_human_admin_pat req))
+    [
+      ("Get_sandboxes", Cmd.Get_sandboxes);
+      ("Get_system_logs", Cmd.Get_system_logs { limit = Some 50; level = None });
+    ];
+  (* Bridged_token_admin routes: SU Worker denied; SU Auth-off denied Token_auth_not_enabled; MA Admin Session allowed *)
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("SU Auth-off denied Token_auth_not_enabled " ^ lbl)
+        true
+        (Rbac.equal_access_verdict
+           (Rbac_policy.decide_get su_auth_off_sess req)
+           (Rbac.Denied Rbac.Token_auth_not_enabled));
+      Alcotest.(check bool) ("MA Admin Session allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get ma_human_admin_session req);
+      Alcotest.(check bool) ("MA Admin PAT denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get ma_human_admin_pat req))
+    [
+      ("Get_config_schema", Cmd.Get_config_schema Wire_config.Target_runtime);
+      ("Get_standalone_lanes", Cmd.Get_standalone_lanes);
+      ("Get_exact_lane_runs", Cmd.Get_exact_lane_runs { lane = None; limit = Some 20 });
+      ("Get_exact_lane_run_detail", Cmd.Get_exact_lane_run_detail { run_id = "r1" });
+    ];
+  let sample_wiki_put =
+    Cmd.Put_wiki_page
+      {
+        page = "index";
+        request =
+          {
+            Wire_knowledge.expected_revision = Some 1;
+            expected_sha256 = Some "abc";
+            title = "Index";
+            summary = "Summary";
+            source = Wire_knowledge.Source_direct_experience;
+            tags = [];
+            body = "hi";
+            note = "";
+          };
+      }
+  in
+  Alcotest.(check bool) "SU Auth-off denied Put_wiki_page (Token_auth_not_enabled)"
+    true
+    (Rbac.equal_access_verdict
+       (Rbac_policy.decide_put su_auth_off_sess sample_wiki_put)
+       (Rbac.Denied Rbac.Token_auth_not_enabled));
+  Alcotest.(check bool) "MA Admin Session allowed Put_wiki_page" true
+    (Rbac_policy.can_put ma_human_admin_session sample_wiki_put);
+
+  (* 24 SU Worker-allowed read routes + Workspace/Git/Browser/Addon/Presets/Memory *)
+  let ws_scope = Wire_infra.Ws_project in
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("MA Admin Session denied SU-only " ^ lbl) false
+        (Rbac_policy.can_fetch_get ma_human_admin_session req))
+    [
+      ("Get_repositories", Cmd.Get_repositories);
+      ("Get_repository_pulls", Cmd.Get_repository_pulls);
+      ("Get_repository_detail", Cmd.Get_repository_detail { repo_id = "r1" });
+      ("Get_workspace_children", Cmd.Get_workspace_children { scope = ws_scope; dir = "" });
+      ("Get_workspace_files", Cmd.Get_workspace_files { scope = ws_scope });
+      ("Get_workspace_search", Cmd.Get_workspace_search { scope = ws_scope; query = "x" });
+      ("Get_workspace_file", Cmd.Get_workspace_file { scope = ws_scope; path = "README.md" });
+      ("Get_git_branches", Cmd.Get_git_branches { scope = ws_scope });
+      ("Get_git_worktrees", Cmd.Get_git_worktrees { scope = ws_scope });
+      ("Get_git_status", Cmd.Get_git_status { scope = ws_scope });
+      ("Get_git_blame", Cmd.Get_git_blame { scope = ws_scope; path = "README.md" });
+      ("Get_git_log", Cmd.Get_git_log { scope = ws_scope; path = "README.md" });
+      ("Get_git_diff", Cmd.Get_git_diff { scope = ws_scope; path = "README.md" });
+      ("Get_addon_package_catalog", Cmd.Get_addon_package_catalog { directory = None });
+      ("Get_addon_package_preview", Cmd.Get_addon_package_preview { manifest_path = "p1" });
+      ("Get_lane_addon_slice", Cmd.Get_lane_addon_slice { run_id = None; lane_id = None });
+      ( "Get_lane_addon_action_status",
+        Cmd.Get_lane_addon_action_status { instance_id = "inst-1"; request_id = "req-1" } );
+      ("Get_presets", Cmd.Get_presets);
+      ("Get_preset_show", Cmd.Get_preset_show { name = "default" });
+      ("Get_runtime_params", Cmd.Get_runtime_params);
+      ("Get_workspace_memory_ledger", Cmd.Get_workspace_memory_ledger);
+      ("Get_workspace_memory_context", Cmd.Get_workspace_memory_context);
+    ];
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker allowed " ^ lbl) true
+        (Rbac_policy.can_post Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("MA Admin Session denied SU-only " ^ lbl) false
+        (Rbac_policy.can_post ma_human_admin_session req))
+    [
+      ("Post_browser_tabs", Cmd.Post_browser_tabs { client_id = "c1" });
+      ("Post_browser_scene", Cmd.Post_browser_scene { client_id = "c1"; tab_id = 1; view = `Content });
+      ("Post_browser_screenshot", Cmd.Post_browser_screenshot { client_id = "c1"; tab_id = 1 });
+    ];
+  Alcotest.(check bool) "SU Worker still denied Get_repository_activity" false
+    (Rbac_policy.can_fetch_get Rbac.single_user_local_worker
+       (Cmd.Get_repository_activity { repo_id = "r1" }));
+  Alcotest.(check bool) "SU Worker allowed Nav.Infra_repos_changes & Infra_code & File_inspector"
+    true
+    (Rbac.is_allowed Rbac.single_user_local_worker
+       (Rbac_policy.route_access_of_infra_tab Nav.Infra_repos_changes)
+     && Rbac.is_allowed Rbac.single_user_local_worker
+          (Rbac_policy.route_access_of_infra_tab Nav.Infra_code)
+     && Rbac.is_allowed Rbac.single_user_local_worker
+          (Rbac_policy.route_access_of_inspector
+             (Nav.File_inspector { keeper = "alpha"; path = "a.ml"; line = 1 })));
+  Alcotest.(check bool) "SU Worker allowed /addon slice" true
+    (match
+       Rbac_policy.decide_slash_parsed Rbac.single_user_local_worker
+         (Slash.Addon (Slash.Addon_slice { run_id = None; lane_id = None }))
+     with
+    | Rbac.Allowed -> true
+    | Rbac.Denied _ -> false);
+
+  (* P1-3: Reclassified Token_permission SU routes *)
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("SU Auth-off denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get su_auth_off_sess req);
+      Alcotest.(check bool) ("SU Token Admin allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get su_token_admin req))
+    [
+      ("Get_artifacts", Cmd.Get_artifacts { generation = 0 });
+      ("Get_artifact_checks", Cmd.Get_artifact_checks);
+    ];
+  Alcotest.(check bool) "SU Worker denied Post_tui_preference" false
+    (Rbac_policy.can_post Rbac.single_user_local_worker
+       (Cmd.Post_tui_preference (Wire_config.Pref_theme (Some "dark"))));
+  Alcotest.(check bool) "SU Token Admin allowed Post_tui_preference" true
+    (Rbac_policy.can_post su_token_admin
+       (Cmd.Post_tui_preference (Wire_config.Pref_theme (Some "dark"))));
+  Alcotest.(check bool) "SU Worker denied Nav.Knowledge_artifacts" false
+    (match
+       Rbac_policy.decide_knowledge_tab Rbac.single_user_local_worker
+         Nav.Knowledge_artifacts
+     with
+    | Rbac.Allowed -> true
+    | Rbac.Denied _ -> false);
+  List.iter
+    (fun (lbl, req) ->
+      Alcotest.(check bool) ("SU Worker (token valid) allowed " ^ lbl) true
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_worker req);
+      Alcotest.(check bool) ("SU Auth-off denied Token_auth_not_enabled " ^ lbl)
+        true
+        (Rbac.equal_access_verdict
+           (Rbac_policy.decide_get su_auth_off_sess req)
+           (Rbac.Denied Rbac.Token_auth_not_enabled));
+      Alcotest.(check bool) ("SU Player denied " ^ lbl) false
+        (Rbac_policy.can_fetch_get Rbac.single_user_local_player req))
+    [
+      ("Get_tui_preferences", Cmd.Get_tui_preferences);
+      ("Get_keeper_sandbox_logs", Cmd.Get_keeper_sandbox_logs { keeper = "alpha"; tail = Some 50 });
+      ("Get_efficiency", Cmd.Get_efficiency { month = None });
+      ("Get_keeper_turn_records", Cmd.Get_keeper_turn_records { keeper = "alpha"; limit = 20 });
+      ( "Get_keeper_context_turn_records",
+        Cmd.Get_keeper_context_turn_records
+          { keeper = "alpha"; limit = Some 20; turn_ref = None } );
+      ("Get_keeper_metrics", Cmd.Get_keeper_metrics { keeper = "alpha" });
+      ( "Get_keeper_cache_outcome",
+        Cmd.Get_keeper_cache_outcome { keeper = "alpha"; turn_ref = "t-1" } );
+      ( "Get_keeper_memory_os_internals",
+        Cmd.Get_keeper_memory_os_internals { keeper = "alpha" } );
+    ];
+
+  (* Check #5: Suppressed reads on Work_inbox for MA Worker PAT do NOT stick in Loading *)
   let m_ma = Model.initial ~auth_session:ma_human_worker_pat () in
   let m_work, cmds_work =
     Update.step ~now:t0 m_ma (Msg.Key_event (char_key "2"))
@@ -858,18 +1111,32 @@ let test_action_hotkey_modal_palette_and_slash_gating () =
        (Rbac_policy.is_cmd_allowed Rbac.single_user_local_worker)
        (Cmd.flatten cmds_nav_infra));
 
-  (* Command palette hides Settings & Sandboxes & /config for SU Worker *)
+  (* Command palette hides Settings & /config for SU Worker; MA Worker PAT hides Sandbox entries *)
   let worker_pal, _ = Update_nav.palette_entries_with_overflow m_worker in
   Alcotest.(check bool) "SU Worker palette hides Settings entries" false
     (List.exists
        (fun (e : Update_nav.palette_entry) ->
          match e.section with Update_nav.Pal_sec_settings -> true | _ -> false)
        worker_pal);
-  Alcotest.(check bool) "SU Worker palette hides Sandbox entries" false
+  let m_ma_worker_sb =
+    let base =
+      Model.initial ~auth_session:ma_human_worker_pat ~cols:140 ~rows:40 ()
+    in
+    {
+      base with
+      infra =
+        {
+          base.infra with
+          sandboxes = Observed.value ~observed_at:t0 (empty_sandboxes_snapshot ~running:1 ());
+        };
+    }
+  in
+  let ma_worker_pal, _ = Update_nav.palette_entries_with_overflow m_ma_worker_sb in
+  Alcotest.(check bool) "MA Worker PAT palette hides Sandbox entries" false
     (List.exists
        (fun (e : Update_nav.palette_entry) ->
          match e.section with Update_nav.Pal_sec_sandboxes -> true | _ -> false)
-       worker_pal);
+       ma_worker_pal);
   let m_worker_cfg_pal =
     {
       m_worker with
@@ -914,7 +1181,501 @@ let test_action_hotkey_modal_palette_and_slash_gating () =
     check_blocked "MA Admin PAT Ctrl+," m_ma_pat (Msg.Key_event (ctrl_key ","))
   in
   Alcotest.(check bool) "MA Admin PAT Settings stays closed" true
-    (Option.is_none m_pat_after.nav.overlay)
+    (Option.is_none m_pat_after.nav.overlay);
+
+  (* P1-4: Single_user_local with can_keeper_msg = false blocks Stream_keeper_chat and /btw *)
+  let su_no_keeper_msg =
+    Rbac.session_of_single_user_shell_auth
+      ~auth_methods:Rbac.default_auth_methods ~enabled:true ~require_token:true
+      ~token_present:true ~token_valid:true ~effective_agent:(Some "w-nomsg")
+      ~effective_role:(Some Rbac.Worker) ~effective_admin:(Some false)
+      ~can_keeper_msg:false ~auth_error_code:None
+      ~auth_error_detail:(Some "keeper msg disabled")
+  in
+  let sample_chat_req : Wire_fleet.chat_submit_request =
+    {
+      request_id = "req-1";
+      keeper_name = "alpha";
+      message = "hello";
+      origin = Wire_fleet.Origin_bare;
+      mode = Wire_fleet.Follow_up;
+      turn_instructions = None;
+      since_seq = None;
+      attachments = [];
+    }
+  in
+  let stream_chat_cmd =
+    Cmd.Http_post_stream
+      {
+        epoch = Epoch.initial;
+        req = Cmd.Stream_keeper_chat { request = sample_chat_req; is_btw = false };
+      }
+  in
+  Alcotest.(check bool) "can_keeper_msg=false blocks Stream_keeper_chat in is_cmd_allowed"
+    false (Rbac_policy.is_cmd_allowed su_no_keeper_msg stream_chat_cmd);
+  Alcotest.(check int) "can_keeper_msg=false filters out Stream_keeper_chat" 0
+    (List.length (Rbac_policy.filter_cmds su_no_keeper_msg [ stream_chat_cmd ]));
+  let m_nomsg =
+    Model.initial ~auth_session:su_no_keeper_msg ~cols:140 ~rows:40 ()
+  in
+  let m_btw_blocked, cmds_btw_blocked =
+    Update_nav.start_btw_query ~now:t0 ~prompt:"ping" m_nomsg
+  in
+  Alcotest.(check int) "can_keeper_msg=false start_btw_query emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_btw_blocked));
+  Alcotest.(check bool) "can_keeper_msg=false start_btw_query sets warning toast"
+    true
+    (match m_btw_blocked.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | Some _ | None -> false);
+  Alcotest.(check bool) "can_keeper_msg=false start_btw_query keeps modal closed"
+    true (Option.is_none m_btw_blocked.inline_modal);
+
+  (* P2-5: 5 direct-POST handlers warn & emit 0 cmds & mutate 0 state for SU Worker *)
+  let check_warning_no_cmds label (next, cmds) =
+    Alcotest.(check int) (label ^ " emits 0 cmds") 0
+      (List.length (Cmd.flatten cmds));
+    Alcotest.(check bool) (label ^ " sets warning toast") true
+      (match next.Model.toast with
+      | Some { level = Model.Toast_warning; _ } -> true
+      | Some _ | None -> false);
+    next
+  in
+  (* 5a. Verification approve/reject + precondition *)
+  let sample_verif : Wire_work.verification_request =
+    {
+      request_id = "verif-1";
+      task_id = "task-1";
+      task_title = "Check RBAC";
+      submitted_by = "alpha";
+      created_at_unix = Some 1_700_000_000.0;
+      completion_contract = [];
+      required_artifacts = [];
+      submitted_evidence = [];
+      evidence_projection_error = None;
+      review_observation = None;
+    }
+  in
+  let m_worker_verif =
+    let work =
+      Work_store.apply_verifications ~observed_at:t0 [ sample_verif ]
+        m_worker.work
+    in
+    { m_worker with work }
+  in
+  Alcotest.(check bool) "SU Worker check_verification_verdict_precondition returns Error"
+    true
+    (Result.is_error
+       (Update_nav.check_verification_verdict_precondition m_worker_verif
+          sample_verif));
+  ignore
+    (check_warning_no_cmds "SU Worker approve_verification_request"
+       (Update_nav.approve_verification_request ~now:t0 m_worker_verif
+          sample_verif));
+  ignore
+    (check_warning_no_cmds "SU Worker reject_verification_request"
+       (Update_nav.reject_verification_request ~now:t0 m_worker_verif
+          sample_verif));
+  (* 5b. OAuth identity switch on Keeper_identity *)
+  let sample_oauth_attached : Wire_keeper_context.oauth_attached_tools_snapshot =
+    {
+      keeper = "alpha";
+      providers =
+        [
+          {
+            provider = "github";
+            provider_label = "GitHub";
+            attached = true;
+            app_state_kind = "ready";
+            enabled = Some true;
+            switch_problem = None;
+            also_on = [];
+            discovered_at = None;
+            tools = [];
+            problem = None;
+          };
+        ];
+    }
+  in
+  let m_worker_oauth =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    let ks0 = Keeper_context_store.get_keeper ~keeper:"alpha" m0.keeper_context in
+    let ks1 =
+      {
+        ks0 with
+        oauth_attached = Observed.value ~observed_at:t0 sample_oauth_attached;
+        identity_selected_idx = 0;
+      }
+    in
+    let kc =
+      {
+        m0.keeper_context with
+        by_keeper =
+          Keeper_context_store.String_map.add "alpha" ks1
+            m0.keeper_context.by_keeper;
+      }
+    in
+    let fleet =
+      {
+        (Fleet_store.set_keeper_dive_tab Nav.Keeper_identity m0.fleet) with
+        selected_keeper = Some "alpha";
+      }
+    in
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; pane_index = 1 };
+      drafts = Drafts.set_active_keeper "alpha" m0.drafts;
+      fleet;
+      keeper_context = kc;
+    }
+  in
+  ignore
+    (check_warning_no_cmds "SU Worker Post_oauth_identity_switch"
+       (Update_actions.execute_action ~now:t0 m_worker_oauth
+          Keymap.Entity_approve_or_assign));
+  (* 5c. Memory act resume on Knowledge_memory and Keeper_memory *)
+  let m_worker_kmem =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    let fleet =
+      {
+        (Fleet_store.set_keeper_dive_tab Nav.Keeper_memory m0.fleet) with
+        selected_keeper = Some "alpha";
+      }
+    in
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; pane_index = 1 };
+      drafts = Drafts.set_active_keeper "alpha" m0.drafts;
+      fleet;
+    }
+  in
+  ignore
+    (check_warning_no_cmds "SU Worker Keeper_memory Post_memory_act"
+       (Update_actions.execute_action ~now:t0 m_worker_kmem
+          Keymap.Entity_approve_or_assign));
+  (* 5d. Preset restore on Runtime_tools_usage / Sec_presets *)
+  let sample_preset : Wire_runtime.preset_manifest =
+    {
+      name = "prod";
+      description = "Prod preset";
+      created_at = "2026-11-26T00:00:00Z";
+      override_count = 1;
+      override_keys = [ "k" ];
+      keepers = [];
+      assignment_count = 0;
+      lane_count = 1;
+    }
+  in
+  let m_worker_preset =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    let runtime =
+      {
+        m0.runtime with
+        active_tab = Nav.Runtime_tools_usage;
+        tools_subview = Runtime_store.Tools_prompts_presets;
+        pp_section = Runtime_store.Sec_presets;
+        pp_selected_index = 0;
+        presets_listing =
+          Observed.value ~observed_at:t0
+            { Wire_runtime.presets = [ sample_preset ]; unreadable = [] };
+      }
+    in
+    { m0 with nav = { m0.nav with workspace = Nav.Runtime }; runtime }
+  in
+  ignore
+    (check_warning_no_cmds "SU Worker Post_preset_restore"
+       (Update_actions.execute_action ~now:t0 m_worker_preset
+          Keymap.Entity_approve_or_assign));
+  (* 5e. Gate rule delete on Work_inbox / Inbox_rules must NOT mark gate_snapshot stale *)
+  let sample_gate_rule : Wire_work.gate_rule =
+    {
+      id = "rule-1";
+      keeper_name = "alpha";
+      tool_name = "shell";
+      request_fingerprint = "fp-1";
+      created_at = 1_700_000_000.0;
+      created_by = Some "admin";
+      source_approval_id = None;
+      expires_at = None;
+    }
+  in
+  let sample_gate_snap : Wire_work.gate_snapshot =
+    {
+      generated_at = None;
+      pending = [];
+      pending_error = None;
+      retry_meta = [];
+      rules = [ sample_gate_rule ];
+      rules_error = None;
+      recent_resolved = [];
+      recent_resolved_error = None;
+      recent_resolved_partial = false;
+      hitl = None;
+    }
+  in
+  let m_worker_gate_rule =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    let work =
+      {
+        m0.work with
+        active_tab = Nav.Work_inbox;
+        inbox_subview = Work_store.Inbox_rules;
+        rule_selected_index = 0;
+        gate_snapshot = Observed.value ~observed_at:t0 sample_gate_snap;
+      }
+    in
+    { m0 with nav = { m0.nav with workspace = Nav.Work }; work }
+  in
+  let m_after_rule_del =
+    check_warning_no_cmds "SU Worker Post_gate_rule_delete"
+      (Update_actions.execute_action ~now:t0 m_worker_gate_rule
+         Keymap.Entity_reject_or_cancel)
+  in
+  Alcotest.(check bool) "SU Worker denied gate rule delete leaves gate_snapshot fresh"
+    false (Observed.is_stale m_after_rule_del.work.gate_snapshot);
+
+  (* P1-2: Runtime_addons_browser O / D / W split for SU Worker *)
+  let sample_client : Wire_runtime.browser_client_row =
+    {
+      client_id = "chrome-1";
+      browser = "chrome";
+      version = "130";
+      engine_version = "130";
+      transport = "ws";
+      space = None;
+      ownership = None;
+      presence_state = None;
+      presence_reason = None;
+      interactions = [];
+      last_activities = [];
+    }
+  in
+  let sample_tab : Wire_runtime.browser_tab_row =
+    {
+      id = 7;
+      title = "Home";
+      url = "https://example.com";
+      active = true;
+      window_id = None;
+      opened_by = None;
+      label = None;
+      dialog_present = false;
+      dialog_kind = None;
+    }
+  in
+  let sample_inst : Wire_runtime.addon_instance =
+    {
+      runtime_presence = Wire_runtime.Addon_live;
+      instance_id = "inst-1";
+      addon_id = "addon-1";
+      title = "Addon";
+      revision = "1";
+      phase = Wire_runtime.Addon_attached;
+      execution_kind = None;
+      resolved_image = None;
+      observation_seq = 1;
+      rows_count = 0;
+      observation_pending = false;
+      visibility_kind = None;
+      visibility_keeper = None;
+      host_cycles = None;
+      host_waiting_count = 0;
+      host_issue_kind = None;
+      action_names = [];
+      config_declaration_id = None;
+    }
+  in
+  let m_worker_addons_p1 =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    let tabs_resp : Wire_runtime.browser_tabs_response =
+      {
+        client_id = Some "chrome-1";
+        tabs = [ sample_tab ];
+        complete = true;
+        unavailable_count = 0;
+        error = None;
+      }
+    in
+    let runtime =
+      {
+        m0.runtime with
+        active_tab = Nav.Runtime_addons_browser;
+        addon_catalog_mode = false;
+        browser_lane =
+          Observed.value ~observed_at:t0
+            {
+              Wire_runtime.ok = true;
+              available = true;
+              inventory_complete = true;
+              client_count = 1;
+              issue_count = 0;
+              automatic_browse_ok = true;
+              detail = None;
+              clients = [ sample_client ];
+              issues = [];
+            };
+        browser_tabs =
+          Runtime_store.String_map.add "chrome-1"
+            (Observed.value ~observed_at:t0 tabs_resp)
+            m0.runtime.browser_tabs;
+        lane_addons =
+          Observed.value ~observed_at:t0
+            {
+              Wire_runtime.configuration_complete = true;
+              declarations = [];
+              instances = [ sample_inst ];
+              issues = [];
+            };
+      }
+    in
+    { m0 with nav = { m0.nav with workspace = Nav.Runtime; pane_index = 1 }; runtime }
+  in
+  let _, cmds_scene =
+    Update.step ~now:t0 m_worker_addons_p1 (Msg.Key_event (char_key "O"))
+  in
+  Alcotest.(check bool) "SU Worker pane 1 [O] emits Post_browser_scene" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_browser_scene _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_scene));
+  let _, cmds_shot =
+    Update.step ~now:t0 m_worker_addons_p1 (Msg.Key_event (char_key "W"))
+  in
+  Alcotest.(check bool) "SU Worker pane 1 [W] emits Post_browser_screenshot" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_browser_screenshot _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_shot));
+  let m_worker_addons_p0 =
+    {
+      m_worker_addons_p1 with
+      nav = { m_worker_addons_p1.nav with pane_index = 0 };
+    }
+  in
+  let _, cmds_slice =
+    Update.step ~now:t0 m_worker_addons_p0 (Msg.Key_event (char_key "D"))
+  in
+  Alcotest.(check bool) "SU Worker pane 0 [D] emits Get_lane_addon_slice" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_lane_addon_slice _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_slice));
+  ignore
+    (check_warning_no_cmds "SU Worker pane 0 [O] Post_lane_addon_observe blocked"
+       (Update.step ~now:t0 m_worker_addons_p0 (Msg.Key_event (char_key "O"))));
+
+  (* P2-6: Context-aware keymap action access (Edit_or_export / Launch_fusion / Probe_sandbox) *)
+  let m_ma_quotas_login =
+    let base =
+      Model.initial ~auth_session:ma_human_worker_pat ~cols:140 ~rows:40 ()
+    in
+    let receipt : Wire_runtime.setup_login_receipt =
+      {
+        login_id = "login-1";
+        integration_id = "openai";
+        status = "pending";
+        account = None;
+        account_ref = None;
+        authentication = None;
+      }
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime =
+        {
+          base.runtime with
+          active_tab = Nav.Runtime_quotas_credits;
+          setup_login_receipt = Some receipt;
+        };
+    }
+  in
+  Alcotest.(check bool)
+    "MA Human Worker PAT can run [e] on Quotas when login_id is active" true
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_quotas_login
+       Keymap.Edit_or_export);
+  let m_svc_quotas_login =
+    { m_ma_quotas_login with auth_session = ma_service_worker }
+  in
+  Alcotest.(check bool)
+    "MA Service Worker denied [e] on Quotas even when login_id is active" false
+    (Rbac_policy.can_run_keymap_action_in_model m_svc_quotas_login
+       Keymap.Edit_or_export);
+  let m_ma_admin_wiki =
+    let base =
+      Model.initial ~auth_session:ma_human_admin_session ~cols:140 ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge = { base.knowledge with active_tab = Nav.Knowledge_wiki };
+    }
+  in
+  Alcotest.(check bool) "MA Admin Session can run [e] on Wiki" true
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_admin_wiki
+       Keymap.Edit_or_export);
+  let m_ma_pat_wiki =
+    { m_ma_admin_wiki with auth_session = ma_human_admin_pat }
+  in
+  Alcotest.(check bool) "MA Admin PAT denied [e] on Wiki" false
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_pat_wiki
+       Keymap.Edit_or_export);
+  let m_ma_mem_diff =
+    let base =
+      Model.initial ~auth_session:ma_human_worker_pat ~cols:140 ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge =
+        {
+          base.knowledge with
+          active_tab = Nav.Knowledge_memory;
+          memory_subview = Knowledge_store.Mem_diff_flow;
+        };
+    }
+  in
+  Alcotest.(check bool) "MA Worker PAT can run [e] (Evolution) & [f] (Facts) on Memory"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_mem_diff
+       Keymap.Edit_or_export
+     && Rbac_policy.can_run_keymap_action_in_model m_ma_mem_diff
+          Keymap.Launch_fusion);
+  let m_worker_code =
+    let base =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra };
+      infra = { base.infra with active_tab = Nav.Infra_code };
+    }
+  in
+  Alcotest.(check bool) "SU Worker can run [f] (Code search) & [p] (Code finder) on Infra_code"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_worker_code
+       Keymap.Launch_fusion
+     && Rbac_policy.can_run_keymap_action_in_model m_worker_code
+          Keymap.Probe_sandbox)
 
 (* 5. Truthful chrome, badges, lock markers, footer/help filtering & locked screens *)
 let test_chrome_footer_help_and_locked_screens () =
@@ -931,8 +1692,8 @@ let test_chrome_footer_help_and_locked_screens () =
   Alcotest.(check bool) "Admin top rail has no lock glyph" false
     (contains_ci ~needle:lock_glyph txt_admin);
 
-  (* Worker SU on Infra: badge LOCAL WORKER, lock glyph on Infra, locked panel rendered,
-     and footer omits dead Admin hotkeys *)
+  (* Worker SU on Infra: badge LOCAL WORKER, Infra is readable (Su_read_ma_admin),
+     and footer omits dead Admin hotkeys (Settings). *)
   let m_worker_infra =
     let m =
       Model.initial ~auth_session:Rbac.single_user_local_worker
@@ -943,12 +1704,74 @@ let test_chrome_footer_help_and_locked_screens () =
   let txt_worker_infra = render_full_frame m_worker_infra in
   Alcotest.(check bool) "Worker top rail shows LOCAL WORKER" true
     (contains_ci ~needle:"LOCAL WORKER" txt_worker_infra);
-  Alcotest.(check bool) "Worker top rail marks locked workspaces" true
+  Alcotest.(check bool) "Worker top rail marks non-admin session with lock glyph" true
     (contains_ci ~needle:lock_glyph txt_worker_infra);
-  Alcotest.(check bool) "Worker Infra renders LOCKED panel" true
+  Alcotest.(check bool) "Worker Infra Sandboxes is NOT locked (SU CanReadState)" false
     (contains_ci ~needle:"LOCKED" txt_worker_infra);
   Alcotest.(check bool) "Worker Infra footer hides Settings hotkey" false
     (contains_ci ~needle:"Settings" txt_worker_infra);
+
+  (* Worker SU on Knowledge > Artifacts (Token_permission CanAdmin): renders LOCKED panel *)
+  let m_worker_artifacts =
+    let m =
+      Model.initial ~auth_session:Rbac.single_user_local_worker
+        ~lang:Say.Lang_en ~cols:140 ~rows:40 ()
+    in
+    {
+      m with
+      nav = { m.nav with workspace = Nav.Knowledge };
+      knowledge = { m.knowledge with active_tab = Nav.Knowledge_artifacts };
+    }
+  in
+  let txt_worker_artifacts = render_full_frame m_worker_artifacts in
+  Alcotest.(check bool) "Worker Knowledge Artifacts renders LOCKED panel" true
+    (contains_ci ~needle:"LOCKED" txt_worker_artifacts);
+
+  (* P2-6: Work_views card hotkeys gated for SU Worker *)
+  let m_worker_inbox_rules =
+    let m =
+      Model.initial ~auth_session:Rbac.single_user_local_worker
+        ~lang:Say.Lang_en ~cols:140 ~rows:40 ()
+    in
+    {
+      m with
+      nav = { m.nav with workspace = Nav.Work };
+      work =
+        {
+          m.work with
+          active_tab = Nav.Work_inbox;
+          inbox_subview = Work_store.Inbox_rules;
+        };
+    }
+  in
+  let txt_worker_rules = render_full_frame m_worker_inbox_rules in
+  Alcotest.(check bool) "Worker Work_inbox Rules omits [Ctrl+,] Settings card hotkey"
+    false (contains_ci ~needle:"[Ctrl+,] Settings" txt_worker_rules);
+  let m_worker_inbox_hist =
+    {
+      m_worker_inbox_rules with
+      work =
+        { m_worker_inbox_rules.work with inbox_subview = Work_store.Inbox_history };
+    }
+  in
+  let txt_worker_hist = render_full_frame m_worker_inbox_hist in
+  Alcotest.(check bool) "Worker Work_inbox History omits /gate ack-uncertain hotkey"
+    false (contains_ci ~needle:"/gate ack-uncertain" txt_worker_hist);
+
+  (* P2-7: Work_dive Verification_inspector renders LOCKED panel in Multi-account *)
+  let m_ma_verif_dive =
+    let m =
+      Model.initial ~auth_session:ma_human_worker_pat ~lang:Say.Lang_en
+        ~cols:140 ~rows:40 ()
+    in
+    {
+      m with
+      nav = { m.nav with inspector = Some (Nav.Verification_inspector "req-99") };
+    }
+  in
+  let txt_ma_verif_dive = render_full_frame m_ma_verif_dive in
+  Alcotest.(check bool) "MA Worker Verification_inspector renders LOCKED panel" true
+    (contains_ci ~needle:"LOCKED" txt_ma_verif_dive);
 
   (* Multi-account Admin PAT on Keepers: badge MA ADMIN·PAT, locked screen *)
   let m_ma_pat_keepers =
@@ -1207,6 +2030,104 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
       {
         base.infra with
         sandboxes = Observed.value ~observed_at:t0 (empty_sandboxes_snapshot ());
+        repo_activity =
+          Some
+            {
+              Infra_store.repo_id = "r1";
+              activity =
+                Observed.value ~observed_at:t0
+                  {
+                    Wire_infra.window_hours = 24.0;
+                    changes = [];
+                    incomplete = 0;
+                    unattributed = 0;
+                  };
+            };
+      }
+    in
+    let work =
+      {
+        base.work with
+        verification_evidence =
+          Observed.value ~observed_at:t0
+            ( "verif-1"
+            , {
+                Wire_work.task_id = "t1";
+                verification_id = "verif-1";
+                producer = None;
+                authority_kind = "admin";
+                authority_actor = "root";
+                available = true;
+                unavailable_reason = None;
+                items = [];
+              } );
+        verification_evidence_auth_denied = true;
+        late_approval_attempts =
+          Observed.value ~observed_at:t0
+            [
+              {
+                Wire_work.consume_id = "c1";
+                keeper_name = "alpha";
+                tool_name = "shell";
+                args_fingerprint = "fp";
+                consumed_at = 1_700_000_000.0;
+                outcome = "uncertain";
+              };
+            ];
+        late_approval_auth_denied = true;
+      }
+    in
+    let runtime =
+      {
+        base.runtime with
+        addon_last_action_receipt =
+          Observed.value ~observed_at:t0
+            {
+              Wire_runtime.instance_id = "inst-1";
+              request_id = "req-1";
+              state = "ok";
+              detail = None;
+              result_json = None;
+            };
+        browser_last_receipt =
+          Observed.value ~observed_at:t0
+            {
+              Wire_runtime.ok = true;
+              summary = "clicked";
+              data_json = None;
+              error = None;
+            };
+      }
+    in
+    let knowledge =
+      {
+        base.knowledge with
+        artifacts =
+          Observed.value ~observed_at:t0
+            [
+              {
+                Wire_knowledge.id = "art-1";
+                revision = 1;
+                title = "Secret";
+                summary = "Admin only";
+                author = "admin";
+                created_at_unix = 1_700_000_000.0;
+                body = { sha256 = "sha"; bytes = 10; mime = "text/markdown" };
+              };
+            ];
+        artifact_checks =
+          Observed.value ~observed_at:t0
+            [
+              {
+                Wire_knowledge.id = "art-1";
+                revision = 1;
+                body_sha256 = "sha";
+                checked = true;
+                change_id = "ch-1";
+                changed_by = "admin";
+                changed_at = "2026-11-26T00:00:00Z";
+              };
+            ];
       }
     in
     {
@@ -1220,6 +2141,9 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
         };
       config;
       infra;
+      work;
+      runtime;
+      knowledge;
       keeper_stop_armed = Some ("alpha", t0);
     }
   in
@@ -1294,8 +2218,22 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
     (Config_store.dirty_count m_demoted.config);
   Alcotest.(check bool) "Demotion purges Config_store schema" true
     (Option.is_none (Observed.to_option m_demoted.config.schema));
-  Alcotest.(check bool) "Demotion purges Infra sandboxes cache" true
-    (Option.is_none (Observed.to_option m_demoted.infra.sandboxes));
+  Alcotest.(check bool) "Demotion purges Infra repo_activity cache" true
+    (Option.is_none m_demoted.infra.repo_activity);
+  Alcotest.(check bool) "Demotion purges Work verification_evidence & auth_denied"
+    true
+    (Option.is_none (Observed.to_option m_demoted.work.verification_evidence)
+     && not m_demoted.work.verification_evidence_auth_denied);
+  Alcotest.(check bool) "Demotion purges Work late_approval_attempts & auth_denied"
+    true
+    (Option.is_none (Observed.to_option m_demoted.work.late_approval_attempts)
+     && not m_demoted.work.late_approval_auth_denied);
+  Alcotest.(check bool) "Demotion purges Runtime addon & browser receipts" true
+    (Option.is_none (Observed.to_option m_demoted.runtime.addon_last_action_receipt)
+     && Option.is_none (Observed.to_option m_demoted.runtime.browser_last_receipt));
+  Alcotest.(check bool) "Demotion purges Knowledge artifacts & artifact_checks" true
+    (Option.is_none (Observed.to_option m_demoted.knowledge.artifacts)
+     && Option.is_none (Observed.to_option m_demoted.knowledge.artifact_checks));
   Alcotest.(check bool) "Demotion disarms keeper_stop_armed" true
     (Option.is_none m_demoted.keeper_stop_armed);
 
@@ -1305,14 +2243,31 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
       (Msg.Http_reply
          {
            epoch = pre_demote_epoch;
-           reply = Msg.Reply_sandboxes (Ok (empty_sandboxes_snapshot ~running:3 ()));
+           reply =
+             Msg.Reply_artifacts
+               {
+                 generation = 0;
+                 result =
+                   Ok
+                     [
+                       {
+                         Wire_knowledge.id = "art-late";
+                         revision = 1;
+                         title = "Late";
+                         summary = "Should drop";
+                         author = "admin";
+                         created_at_unix = 1_700_000_000.0;
+                         body = { sha256 = "sha"; bytes = 5; mime = "text/markdown" };
+                       };
+                     ];
+               };
          })
   in
-  Alcotest.(check bool) "Late pre-demotion reply dropped (sandboxes stay purged)"
+  Alcotest.(check bool) "Late pre-demotion reply dropped (artifacts stay purged)"
     true
-    (Option.is_none (Observed.to_option m_after_late.infra.sandboxes));
+    (Option.is_none (Observed.to_option m_after_late.knowledge.artifacts));
 
-  (* E. Runtime SSE 401 enters Auth_gate, bumps epoch, and tears down streams *)
+  (* E. Runtime SSE 401 enters Auth_gate, bumps epoch, purges sandboxes, and tears down streams *)
   let m_sse_401, cmds_sse_401 =
     Update.step ~now:t1 m_demoted
       (Msg.Sse_freshness
@@ -1327,6 +2282,8 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
   Alcotest.(check bool) "SSE 401 opens Auth_gate" true
     (Option.equal Nav.equal_overlay m_sse_401.nav.overlay
        (Some (Nav.System_gate Nav.Auth_gate)));
+  Alcotest.(check bool) "SSE 401 purges Infra sandboxes cache" true
+    (Option.is_none (Observed.to_option m_sse_401.infra.sandboxes));
   Alcotest.(check bool) "SSE 401 bumps epoch" true
     (not (Epoch.equal m_demoted.epoch m_sse_401.epoch));
   Alcotest.(check bool) "SSE 401 syncs empty stream list" true
@@ -1334,7 +2291,7 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
        (function Cmd.Sync_streams { streams = []; _ } -> true | _ -> false)
        (Cmd.flatten cmds_sse_401));
 
-  (* Verify SU auth_off bootstrap resolves to local admin *)
+  (* Verify SU auth_off bootstrap resolves to authenticated SU local (Su_read_ma_admin=true, Bridged_token_admin=false) *)
   let m_off, _ =
     Update.step ~now:t0 m_su_probe
       (Msg.Http_reply
@@ -1344,8 +2301,11 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
              Msg.Reply_dashboard_shell (Ok (sample_shell ~auth:su_auth_admin_off ()));
          })
   in
-  Alcotest.(check bool) "SU auth_off bootstrap resolves to local admin" true
-    (Rbac.can_admin m_off.auth_session)
+  Alcotest.(check bool) "SU auth_off bootstrap resolves authenticated with Su_read_ma_admin=true, can_admin=false"
+    true
+    (Rbac.is_authenticated m_off.auth_session
+     && Rbac.is_allowed m_off.auth_session Rbac.Su_read_ma_admin
+     && not (Rbac.can_admin m_off.auth_session))
 
 let () =
   Alcotest.run "masc_tui_rbac"

@@ -19,9 +19,9 @@ let route_access_of_stream_id = function
   | Stream_observer
   | Stream_fleet
   | Stream_model_metrics
-  | Stream_tool_metrics_series ->
+  | Stream_tool_metrics_series
+  | Stream_logs _ ->
       Rbac.Single_user_read
-  | Stream_logs _ -> Rbac.Single_user_admin_only
 
 let equal_stream_id a b =
   match a, b with

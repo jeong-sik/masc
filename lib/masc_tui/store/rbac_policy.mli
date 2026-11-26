@@ -27,10 +27,20 @@ val route_access_of_menu_target : Nav.menu_target -> Rbac.route_access
 val route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access
 val route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access
 val route_access_of_keymap_action : Keymap.action -> Rbac.route_access
+val route_access_of_keymap_action_in_model :
+  Model.t -> Keymap.action -> Rbac.route_access
+(** Context-aware capability requirement for overloaded keymap actions such as
+    [Edit_or_export], [Launch_fusion], [Probe_sandbox], [Create_new],
+    [Context_primary_action], [Entity_approve_or_assign],
+    [Entity_reject_or_cancel], [Cycle_hearth_or_overrule], [Dismiss_errors],
+    [Toggle_unreported], [Account_login], and [Open_external_editor]. *)
 
 val decide_keymap_action :
   Rbac.auth_session -> Keymap.action -> Rbac.access_verdict
 val can_run_keymap_action : Rbac.auth_session -> Keymap.action -> bool
+val decide_keymap_action_in_model :
+  Model.t -> Keymap.action -> Rbac.access_verdict
+val can_run_keymap_action_in_model : Model.t -> Keymap.action -> bool
 
 val decide_get : Rbac.auth_session -> Cmd.get_request -> Rbac.access_verdict
 val decide_post : Rbac.auth_session -> Cmd.post_request -> Rbac.access_verdict

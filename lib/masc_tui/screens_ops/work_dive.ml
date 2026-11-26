@@ -33,6 +33,17 @@ let json_of_verification (v : Wire_work.verification_request) : Yojson.Safe.t =
 
 let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) grid =
+  match
+    Rbac_policy.decide_inspector model.auth_session
+      (Nav.Verification_inspector req_id)
+  with
+  | Rbac.Denied reason ->
+      Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache ~rect
+        ~theme ~model
+        ~title:
+          (Say.make ~ko:("검증: " ^ req_id) ~en:("Verification: " ^ req_id))
+        ~reason
+  | Rbac.Allowed ->
   let v_opt =
     List.find_opt
       (fun (v : Wire_work.verification_request) ->

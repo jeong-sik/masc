@@ -1734,18 +1734,22 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       in
       List.filter
         (fun (h : Keymap.footer_hint) ->
-          Rbac_policy.can_run_keymap_action model.auth_session h.action
+          Rbac_policy.can_run_keymap_action_in_model model h.action
           && (not view_locked
               ||
-              match Rbac_policy.route_access_of_keymap_action h.action with
+              match
+                Rbac_policy.route_access_of_keymap_action_in_model model
+                  h.action
+              with
               | Rbac.Always_public -> true
               | Rbac.Single_user_shell_probe
               | Rbac.Multi_account_whoami_probe
               | Rbac.Workspace_read
               | Rbac.Single_user_read
+              | Rbac.Single_user_token_read
               | Rbac.Single_user_write
-              | Rbac.Admin_only
-              | Rbac.Single_user_admin_only
+              | Rbac.Su_read_ma_admin
+              | Rbac.Bridged_token_admin
               | Rbac.Single_user_token_admin_only
               | Rbac.Own_provider_manage
               | Rbac.Own_keeper_sandbox_read

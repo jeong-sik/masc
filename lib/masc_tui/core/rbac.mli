@@ -106,17 +106,26 @@ type route_access =
   | Single_user_read
       (** Single-user [Public_read] / [CanReadState] route returning 404 in
           multi-account. *)
+  | Single_user_token_read
+      (** Single-user [Token_permission CanReadState] route requiring
+          [auth_enabled && require_token && token_valid] with Worker or Admin
+          role, and returning 404 in multi-account. *)
   | Single_user_write
       (** Single-user worker mutation ([CanBroadcast], [CanVote],
           [CanAddTask], [CanClaimTask], [CanCompleteTask]); 404 in
           multi-account. *)
-  | Admin_only
-      (** Admin operation bridged in BOTH single-user ([Permission CanAdmin])
-          and multi-account ([Admin_only] browser session only; PAT always
-          returns 403). *)
-  | Single_user_admin_only
-      (** Single-user [Permission CanAdmin] route returning 404 in
-          multi-account even for multi-account admins. *)
+  | Su_read_ma_admin
+      (** Dual-mode read ([GET /api/v1/infra/sandboxes],
+          [GET /api/v1/dashboard/logs]): [Public_read] / [CanReadState] in
+          single-user (Admin or Worker), and bridged [Admin_only] browser
+          session in multi-account (PAT returns 403). *)
+  | Bridged_token_admin
+      (** Bridged admin operation ([/api/v1/config/*],
+          [POST /api/v1/infra/sandboxes/probe], [PUT /api/v1/wiki/:slug],
+          [/api/v1/dashboard/standalone-lanes], [/api/v1/dashboard/exact-lane-runs]):
+          requires [Token_permission CanAdmin] in single-user
+          ([auth_enabled && require_token && token_valid && effective_admin])
+          and [Admin_only] browser session in multi-account (PAT returns 403). *)
   | Single_user_token_admin_only
       (** Single-user [Token_permission CanAdmin] route requiring
           [auth_enabled && require_token && token_valid && effective_admin]

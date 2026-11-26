@@ -4986,8 +4986,7 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                let entries =
                  List.filter
                    (fun (e : Keymap.help_entry) ->
-                     Rbac_policy.can_run_keymap_action model.auth_session
-                       e.action)
+                     Rbac_policy.can_run_keymap_action_in_model model e.action)
                    g.entries
                in
                if entries = [] then None else Some { g with entries })

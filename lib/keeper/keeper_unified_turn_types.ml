@@ -408,16 +408,16 @@ let registry_failure_reason_of_terminal_reason
 
 (** Tracker for matching ToolCalled/ToolCompleted event pairs within a
     single keeper turn. Pure immutable accumulator: a map from tool name to
-    the FIFO list of pending inputs and the first integrity error observed
-    while matching events. *)
+    its in-flight call count and the first integrity error observed while
+    matching events. *)
 type turn_tool_event_tracker =
-  { pending_tool_inputs : Yojson.Safe.t list StringMap.t
+  { pending_tool_counts : int StringMap.t
   ; tool_completed_count : int
   ; integrity_error : Agent_core.Error.t option
   }
 
 let create_turn_tool_event_tracker () =
-  { pending_tool_inputs = StringMap.empty
+  { pending_tool_counts = StringMap.empty
   ; tool_completed_count = 0
   ; integrity_error = None
   }
@@ -426,27 +426,27 @@ let create_turn_tool_event_tracker () =
 let turn_tool_event_integrity_error tracker = tracker.integrity_error
 let turn_tool_completed_count tracker = tracker.tool_completed_count
 
-let push_turn_tool_input tracker tool_name input =
-  let inputs =
-    match StringMap.find_opt tool_name tracker.pending_tool_inputs with
-    | Some inputs -> inputs @ [ input ]
-    | None -> [ input ]
+let push_turn_tool_call tracker tool_name =
+  let count =
+    match StringMap.find_opt tool_name tracker.pending_tool_counts with
+    | Some count -> count + 1
+    | None -> 1
   in
-  { tracker with pending_tool_inputs = StringMap.add tool_name inputs tracker.pending_tool_inputs }
+  { tracker with
+    pending_tool_counts = StringMap.add tool_name count tracker.pending_tool_counts
+  }
 ;;
 
-let pop_turn_tool_input tracker tool_name =
-  match StringMap.find_opt tool_name tracker.pending_tool_inputs with
-  | Some (input :: rest) ->
-    let pending =
-      match rest with
-      | [] -> StringMap.remove tool_name tracker.pending_tool_inputs
-      | head :: tail ->
-        StringMap.add tool_name (head :: tail) tracker.pending_tool_inputs
-    in
-    Some input, { tracker with pending_tool_inputs = pending }
-  | Some [] -> None, tracker
-  | None -> None, tracker
+let pop_turn_tool_call tracker tool_name =
+  match StringMap.find_opt tool_name tracker.pending_tool_counts with
+  | Some count when count > 1 ->
+    ( true
+    , { tracker with
+        pending_tool_counts = StringMap.add tool_name (count - 1) tracker.pending_tool_counts
+      } )
+  | Some count when count = 1 ->
+    true, { tracker with pending_tool_counts = StringMap.remove tool_name tracker.pending_tool_counts }
+  | Some _ | None -> false, tracker
 ;;
 
 let record_unmatched_tool_completed
@@ -479,15 +479,15 @@ let record_turn_tool_events
   List.fold_left
     (fun tracker (evt : Agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_core.Event_bus.ToolCalled { tool_name; input; _ } ->
-         push_turn_tool_input tracker tool_name input
+       | Agent_core.Event_bus.ToolCalled { tool_name; _ } ->
+         push_turn_tool_call tracker tool_name
        | Agent_core.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
-         (match pop_turn_tool_input tracker tool_name with
-          | Some _, tracker -> tracker
-          | None, tracker ->
+         (match pop_turn_tool_call tracker tool_name with
+          | true, tracker -> tracker
+          | false, tracker ->
             record_unmatched_tool_completed
               tracker
               ~keeper_name
@@ -497,9 +497,9 @@ let record_turn_tool_events
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
-         (match pop_turn_tool_input tracker tool_name with
-          | Some _, tracker -> tracker
-          | None, tracker ->
+         (match pop_turn_tool_call tracker tool_name with
+          | true, tracker -> tracker
+          | false, tracker ->
             record_unmatched_tool_completed
               tracker
               ~keeper_name

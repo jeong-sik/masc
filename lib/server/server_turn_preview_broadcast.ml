@@ -10,7 +10,7 @@ let observation ~base_path ~keeper_name =
   let* turn = Keeper_owner.turn_in_flight owner in
   let* preview =
     Keeper_turn_preview.current_for_turn
-      ~keeper_name ~interrupt_token:turn.interrupt_token
+      ~base_path ~keeper_name ~interrupt_token:turn.interrupt_token
   in
   let owner_key =
     Sse_wire.keeper_turn_observation_key

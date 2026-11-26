@@ -1687,7 +1687,7 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
   let selection = match R.with_turn_result ~preview ~config ~keeper_name ~turn_ref ~phase:R.Direct_task_resolution
       (fun () ->
         check bool "actual resolution publishes its active owned Skill scope" true
-          (match Masc.Keeper_turn_preview.current_for_turn ~keeper_name ~interrupt_token:owner with
+          (match Masc.Keeper_turn_preview.current_for_turn ~base_path:root ~keeper_name ~interrupt_token:owner with
            | Some {preparation=Some {phase=Skill_preparation;state=Preparation_active;turn_ref=Some observed;_};_} ->
              Ids.Turn_ref.equal observed turn_ref
            | Some _ | None -> false);

@@ -68,6 +68,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
       else (
         let settled =
           Keeper_tool_approval_registry.settle
+            ~base_path
             (Keeper_tool_approval_registry.shared ())
             ~keeper_name ~tool_call_id ~approval_id decision
         in
@@ -106,9 +107,11 @@ let handle_keeper_tool_approval ~actor state request reqd =
    this, such a call could only time out (masc#30034). [asked_at] is the
    registry clock's epoch reading; the consumer derives display age against
    its own clock rather than trusting one computed here. *)
-let handle_keeper_tool_approvals_list _state request reqd =
+let handle_keeper_tool_approvals_list state request reqd =
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let held =
     Keeper_tool_approval_registry.pending
+      ~base_path
       (Keeper_tool_approval_registry.shared ())
   in
   respond_json_value_with_cors ~status:`OK request reqd
@@ -282,6 +285,7 @@ let handle_keeper_turns_list state request reqd =
                it here is what keeps a stale tail unreachable. *)
             let preview_observed_through, preview =
               Keeper_turn_preview.current_for_turn_with_revision
+                ~base_path:config.base_path
                 ~keeper_name ~interrupt_token:turn.interrupt_token
             in
             let preview_json =

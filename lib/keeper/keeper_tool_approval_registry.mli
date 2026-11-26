@@ -48,6 +48,8 @@ type outcome =
           approve a call the operator never saw. *)
 
 val await :
+  ?base_path:string ->
+  ?on_timed_out:(unit -> unit) ->
   t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   on_registered:(unit -> unit) ->
@@ -62,11 +64,20 @@ val await :
   outcome
 (** Register a wait and block until it settles.
 
+    [base_path], when supplied, scopes displacement, listing, and settlement to
+    the workspace that owns this keeper so two workspaces running a keeper with
+    the same name never see or settle each other's waits.
+
     [on_registered] runs once after insertion, outside the registry mutex and
     inside this wait's cleanup scope. A publisher can expose the question and
     receive an immediate answer there. Raising or cancellation removes this
     wait. The timeout starts after the callback returns. When the callback
     returns, an answer already settled during publication remains the outcome.
+
+    [on_timed_out], when supplied, runs once only if this wait actually timed
+    out (never if a racing {!settle} or displacement won the wait). Any racing
+    {!settle} for the same wait observes [false] only after [on_timed_out]
+    finishes, so late-approval recording cannot race ahead of a late answer.
 
     [timeout_sec] is required. A wait with no bound would park the keeper's
     turn for the life of the process if nobody is watching, and how long an
@@ -90,9 +101,16 @@ val await :
     turn broadcast it after the entry is removed. *)
 
 val settle :
-  t -> keeper_name:string -> tool_call_id:string -> approval_id:string -> decision -> bool
-(** Answer the exact wait the operator saw. The Keeper, provider call ID and
-    immutable approval ID are compared under the registry lock before removal.
+  ?base_path:string ->
+  t ->
+  keeper_name:string ->
+  tool_call_id:string ->
+  approval_id:string ->
+  decision ->
+  bool
+(** Answer the exact wait the operator saw. The optional workspace [base_path],
+    Keeper, provider call ID and immutable approval ID are compared under the
+    registry lock before removal.
     Returns [false] for a replacement, timed-out, answered or unknown wait. Callers report that
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. A settled wait broadcasts
@@ -115,8 +133,8 @@ type pending =
   ; timeout_sec : float
   }
 
-val pending : t -> pending list
-(** Every wait currently open, oldest first. *)
+val pending : ?base_path:string -> t -> pending list
+(** Every wait currently open (optionally scoped to [base_path]), oldest first. *)
 
 type outcome_totals =
   { answered_total : int

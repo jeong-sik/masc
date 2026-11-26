@@ -393,7 +393,7 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
     check bool "pool-backed input preparation preserves the original source products" true
       (read ~preview () = reference);
     let module P = Keeper_turn_preview in
-    let current () = match P.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
+    let current () = match P.current_for_turn ~base_path:config.base_path ~keeper_name:"researcher" ~interrupt_token:owner with
       | Some current -> current | None -> fail "original preparation writer missing" in
     let check_sources expected =
       let spans = P.preparation_spans (current ()).preparation_timeline in
@@ -416,7 +416,7 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
     check_sources [P.Lane_inputs_preparation,P.Prepared;
       P.Workspace_memory_preparation,P.Rejected;P.Wiki_preparation,P.Prepared];
     check bool "actual world preparation retains its original Owner and turn reference" true
-      (match Keeper_turn_preview.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
+      (match Keeper_turn_preview.current_for_turn ~base_path:config.base_path ~keeper_name:"researcher" ~interrupt_token:owner with
        | Some {preparation=Some {phase=World_preparation;turn_ref=Some actual;
            state=Preparation_finished {outcome=Prepared;_};_};_} -> Ids.Turn_ref.equal actual original
        | Some _ | None -> false);

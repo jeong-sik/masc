@@ -129,63 +129,113 @@ let elapsed_seconds started =
     unbounded and never see it. *)
 exception Lane_admission_timeout of string
 
-let with_lane_gate ~on_wait ~wait_budget ~lane_label sem f =
+let try_acquire_gate (gate : lane_gate) =
+  Stdlib.Mutex.protect gate.gate_mu (fun () ->
+    if not gate.held then (
+      gate.held <- true;
+      true)
+    else false)
+;;
+
+let release_gate (gate : lane_gate) =
+  let rec next_live_waiter () =
+    match Queue.take_opt gate.waiters with
+    | None -> None
+    | Some waiter ->
+      if waiter.cancelled then next_live_waiter ()
+      else (
+        waiter.granted <- true;
+        Some waiter.wake)
+  in
+  let wake =
+    Stdlib.Mutex.protect gate.gate_mu (fun () ->
+      match next_live_waiter () with
+      | Some wake -> Some wake
+      | None ->
+        gate.held <- false;
+        None)
+  in
+  Option.iter (fun wake -> Eio.Promise.resolve wake ()) wake
+;;
+
+let acquire_gate ~on_wait (gate : lane_gate) =
+  let action =
+    Stdlib.Mutex.protect gate.gate_mu (fun () ->
+      if not gate.held then (
+        gate.held <- true;
+        `Acquired)
+      else (
+        let promise, wake = Eio.Promise.create () in
+        let waiter = { granted = false; cancelled = false; wake } in
+        Queue.add waiter gate.waiters;
+        `Wait (waiter, promise)))
+  in
+  match action with
+  | `Acquired -> ()
+  | `Wait (waiter, promise) ->
+    let abort_wait () =
+      let must_release =
+        Stdlib.Mutex.protect gate.gate_mu (fun () ->
+          if waiter.granted then true
+          else (
+            waiter.cancelled <- true;
+            false))
+      in
+      if must_release then release_gate gate
+    in
+    (try
+       on_wait ();
+       Eio.Promise.await promise
+     with
+     | Eio.Cancel.Cancelled _ as exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       abort_wait ();
+       Printexc.raise_with_backtrace exn backtrace
+     | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       abort_wait ();
+       Printexc.raise_with_backtrace exn backtrace)
+;;
+
+let with_lane_gate ~on_wait ~wait_budget ~lane_label (gate : lane_gate) f =
   let acquired =
     match wait_budget with
     | None ->
       (* Unbounded (settlement path): a committed write must always be able
-         to settle, so [acquire] waits as long as it takes. *)
-      if Eio.Semaphore.get_value sem <= 0 then on_wait ();
-      Eio.Semaphore.acquire sem;
+         to settle, so [acquire_gate] waits FIFO as long as it takes. *)
+      acquire_gate ~on_wait gate;
       true
     | Some budget_sec ->
-      (match Eio_context.get_mono_clock_opt () with
-       | None ->
-         (* No ambient monotonic clock (pre-boot): a contended wait cannot
-            be bounded honestly, so refuse instead of hanging. A free token
-            is still taken directly. *)
-         if Eio.Semaphore.get_value sem > 0
-         then (
-           Eio.Semaphore.acquire sem;
-           true)
-         else (
-           on_wait ();
-           false)
-       | Some clock ->
-         if budget_sec <= 0.0
-         then (
-           if Eio.Semaphore.get_value sem > 0
-           then (
-             Eio.Semaphore.acquire sem;
-             true)
-           else (
-             on_wait ();
-             false))
-         else (
-           (* Bounded acquisition runs under the timeout even on the fast
-              path: [get_value] and [acquire] are not atomic, and a
-              cross-domain steal between them must not fall back into an
-              unbounded wait. *)
-           if Eio.Semaphore.get_value sem <= 0 then on_wait ();
-           match
-             Eio.Time.Timeout.run
-               (Eio.Time.Timeout.seconds clock budget_sec)
-               (fun () ->
-                  Eio.Semaphore.acquire sem;
-                  Ok ())
-           with
-           | Ok () -> true
-           | Error `Timeout -> false))
+      if try_acquire_gate gate then true
+      else (
+        match Eio_context.get_mono_clock_opt () with
+        | None ->
+          (* No ambient monotonic clock (pre-boot): a contended wait cannot
+             be bounded honestly, so refuse immediately without inflating wait
+             counters. *)
+          false
+        | Some clock ->
+          if budget_sec <= 0.0 then false
+          else (
+            match
+              Eio.Time.Timeout.run
+                (Eio.Time.Timeout.seconds clock budget_sec)
+                (fun () ->
+                   acquire_gate ~on_wait gate;
+                   Ok ())
+            with
+            | Ok () -> true
+            | Error `Timeout -> false))
   in
   if not acquired then raise (Lane_admission_timeout lane_label);
   (* A started durable systhread cannot be cancelled. Keep the lane held until
      its transaction and gate release finish. Deliberately do not re-check the
      parent cancellation here: the caller must first settle the committed
      receipt/status, matching [Keeper_event_queue_owner_lock.with_durable_lock]. *)
-  (* fun-protect-finally-ok: [Eio.Semaphore.release] is non-suspending and
-     releases only the lane gate acquired immediately above. *)
+  (* fun-protect-finally-ok: [release_gate] uses only a non-suspending
+     [Stdlib.Mutex] and [Eio.Promise.resolve] for the gate acquired above. *)
   Fun.protect
-    ~finally:(fun () -> Eio.Semaphore.release sem)
+    ~finally:(fun () -> release_gate gate)
     (fun () -> Eio.Cancel.protect f)
 ;;
 
@@ -198,7 +248,13 @@ let with_keeper_lane_lock observation table ~lane_label ?wait_budget ~base_path 
         lock.users <- lock.users + 1;
         lock
       | None ->
-        let lock = { sem = Eio.Semaphore.make 1; users = 1 } in
+        let lock =
+          { gate_mu = Stdlib.Mutex.create ()
+          ; held = false
+          ; waiters = Queue.create ()
+          ; users = 1
+          }
+        in
         Keeper_lane_table.add table key lock;
         lock)
   in
@@ -221,7 +277,7 @@ let with_keeper_lane_lock observation table ~lane_label ?wait_budget ~base_path 
   in
   let run () =
     match
-      with_lane_gate ~on_wait ~wait_budget ~lane_label lock.sem (fun () ->
+      with_lane_gate ~on_wait ~wait_budget ~lane_label lock (fun () ->
         leave_pending ();
         match observation with
         | Unobserved_lane -> `Unobserved (f ())

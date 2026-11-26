@@ -112,8 +112,16 @@ type store_transition_lock =
     waiters FIFO. [Eio.Mutex.lock] offers no bounded wait at all, which is how
     a hung durable write used to leak the lane permanently and hang every
     later submit for that keeper (#25398). *)
+type lane_waiter =
+  { mutable granted : bool
+  ; mutable cancelled : bool
+  ; wake : unit Eio.Promise.u
+  }
+
 type lane_gate =
-  { sem : Eio.Semaphore.t
+  { gate_mu : Stdlib.Mutex.t
+  ; mutable held : bool
+  ; waiters : lane_waiter Queue.t
   ; mutable users : int
   }
 

@@ -262,8 +262,15 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; response } ->
-    let provider = inference_provider_bucket ~provider:"" ~model:response.model in
-    let model_bucket = inference_model_bucket ~provider:"" ~model:response.model in
+    let raw_provider =
+      match response.telemetry with
+      | Some { upstream_provider = Some p; _ } when String.trim p <> "" -> p
+      | Some { provider_kind = Some kind; _ } ->
+        Agent_core.Llm_provider.Provider_kind.to_string kind
+      | Some _ | None -> ""
+    in
+    let provider = inference_provider_bucket ~provider:raw_provider ~model:response.model in
+    let model_bucket = inference_model_bucket ~provider:raw_provider ~model:response.model in
     let cost_usd =
       match response.usage with
       | Some usage -> usage.cost_usd

@@ -421,6 +421,81 @@ let test_an_answer_during_delayed_publication_stays_answered () =
       check int "the answer is counted once" 1 totals.answered_total;
       check int "publication time never turns the answer into a timeout" 0 totals.timed_out_total))
 
+let test_waits_are_scoped_to_their_workspace () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    let approval_a = Random_id.uuid_v7 () in
+    let approval_b = Random_id.uuid_v7 () in
+    Eio.Switch.run (fun sw ->
+      let wait_a = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await ~base_path:"/ws/a" registry ~clock ~on_registered:Fun.id
+          ~approval_id:approval_a ~tool_name:"Execute" ~args:"{}"
+          ~question:"run a?" ~because:"policy: ask" ~keeper_name:keeper
+          ~tool_call_id:"shared-call" ~timeout_sec:5.0) in
+      let wait_b = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await ~base_path:"/ws/b" registry ~clock ~on_registered:Fun.id
+          ~approval_id:approval_b ~tool_name:"Execute" ~args:"{}"
+          ~question:"run b?" ~because:"policy: ask" ~keeper_name:keeper
+          ~tool_call_id:"shared-call" ~timeout_sec:5.0) in
+      check (list string) "workspace a lists only its own wait" [ approval_a ]
+        (Registry.pending ~base_path:"/ws/a" registry
+         |> List.map (fun (p : Registry.pending) -> p.approval_id));
+      check (list string) "workspace b lists only its own wait" [ approval_b ]
+        (Registry.pending ~base_path:"/ws/b" registry
+         |> List.map (fun (p : Registry.pending) -> p.approval_id));
+      check bool "workspace b cannot settle workspace a's wait" false
+        (Registry.settle ~base_path:"/ws/b" registry ~keeper_name:keeper
+           ~tool_call_id:"shared-call" ~approval_id:approval_a Registry.Approve);
+      check bool "workspace a settles its own wait" true
+        (Registry.settle ~base_path:"/ws/a" registry ~keeper_name:keeper
+           ~tool_call_id:"shared-call" ~approval_id:approval_a Registry.Approve);
+      check bool "workspace b settles its own wait" true
+        (Registry.settle ~base_path:"/ws/b" registry ~keeper_name:keeper
+           ~tool_call_id:"shared-call" ~approval_id:approval_b Registry.Deny);
+      check outcome "workspace a receives approve without displacement"
+        (Registry.Answered Registry.Approve) (Eio.Promise.await_exn wait_a);
+      check outcome "workspace b receives deny without displacement"
+        (Registry.Answered Registry.Deny) (Eio.Promise.await_exn wait_b)))
+
+let test_on_timed_out_orders_racing_settle () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    let approval_id = Random_id.uuid_v7 () in
+    let started_p, started_r = Eio.Promise.create () in
+    let finish_p, finish_r = Eio.Promise.create () in
+    let noted = ref false in
+    Eio.Switch.run (fun sw ->
+      let waited = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await ~base_path:"/ws/a"
+          ~on_timed_out:(fun () ->
+            Eio.Promise.resolve started_r ();
+            Eio.Promise.await finish_p;
+            noted := true)
+          registry ~clock ~on_registered:Fun.id ~approval_id
+          ~tool_name:"Execute" ~args:"{}" ~question:"run?" ~because:"policy: ask"
+          ~keeper_name:keeper ~tool_call_id:"call-timeout-order" ~timeout_sec:1.0) in
+      Eio_mock.Clock.set_time clock 1.0;
+      Eio.Promise.await started_p;
+      let saw_noted_after_settle = ref false in
+      let settler = Eio.Fiber.fork_promise ~sw (fun () ->
+        let res =
+          Registry.settle ~base_path:"/ws/a" registry ~keeper_name:keeper
+            ~tool_call_id:"call-timeout-order" ~approval_id Registry.Approve
+        in
+        saw_noted_after_settle := !noted;
+        res) in
+      Eio.Promise.resolve finish_r ();
+      check bool "racing settle reports false after timeout claims wait" false
+        (Eio.Promise.await_exn settler);
+      check bool "racing settle observes on_timed_out completion before returning" true
+        !saw_noted_after_settle;
+      check outcome "waiter resolves to Timed_out" Registry.Timed_out
+        (Eio.Promise.await_exn waited)))
+
 let () =
   run "keeper_tool_approval_registry"
     [ ( "answering"
@@ -446,6 +521,8 @@ let () =
             test_answering_a_wait_that_already_timed_out_reports_it
         ; test_case "answering an unknown call reports it" `Quick
             test_answering_an_unknown_call_reports_it
+        ; test_case "on_timed_out orders racing settle" `Quick
+            test_on_timed_out_orders_racing_settle
         ] )
     ; ( "identity and cleanup"
       , [ test_case "a second wait on the same id displaces the first" `Quick
@@ -454,6 +531,8 @@ let () =
             test_stale_approval_cannot_answer_a_replacement
         ; test_case "waits are scoped to their keeper" `Quick
             test_waits_are_scoped_to_their_keeper
+        ; test_case "waits are scoped to their workspace" `Quick
+            test_waits_are_scoped_to_their_workspace
         ; test_case "pending lists open waits oldest first" `Quick
             test_pending_lists_open_waits_oldest_first
         ; test_case "a cancelled wait leaves nothing behind" `Quick

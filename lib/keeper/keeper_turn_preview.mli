@@ -130,15 +130,26 @@ val snapshot : writer -> t
     timeline traversal occurs while the lock is held. *)
 
 val current : keeper_name:string -> t option
-(** Last installed snapshot for diagnostics; not proof of a running owner. *)
-val current_for_turn : keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> t option
-(** Only the exact Owner slot can read its preview. Before its writer is
-    installed, an older writer remains unreadable regardless of update time. *)
+(** Last installed snapshot for diagnostics across workspaces; not proof of a
+    running owner. *)
+
+val current_for_workspace : base_path:string -> keeper_name:string -> t option
+(** Last installed snapshot for diagnostics scoped to [base_path]. *)
+
+val current_for_turn :
+  base_path:string -> keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> t option
+(** Only the exact Owner slot in [base_path] can read its preview. Before its
+    writer is installed, an older writer remains unreadable regardless of update
+    time. *)
 
 val current_for_turn_with_revision :
-  keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> int * t option
-(** Read under one lock. For an installed preview, return its revision. A
-    missing preview is observed through the latest process preview revision. *)
+  base_path:string ->
+  keeper_name:string ->
+  interrupt_token:Keeper_interrupt_token.t ->
+  int * t option
+(** Read under one lock for [base_path]. For an installed preview, return its
+    revision. A missing preview is observed through the latest process preview
+    revision. *)
 
 val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot

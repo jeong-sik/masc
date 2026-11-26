@@ -48,15 +48,16 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
     with
     | Error rejection -> Error (Submit_rejected rejection)
     | Ok (request_id, entry, key, transition_lock) ->
-    (* Any exceptional exit before the request is durably accepted must not
-       leak the fresh reservation: the finally below drops it exactly like
-       the [Not_published] rollback path. Once the worker daemon is forked
-       and the caller gets [Durably_accepted], ownership has moved to the
-       active request and the finally must stand down. *)
-    let durably_accepted = ref false in
+    (* Any exceptional exit before the initial record is durably persisted must
+       not leak the fresh reservation: the finally below drops it exactly like
+       the [Not_published] rollback path. Once initial persistence commits,
+       ownership moves to the durable request lifecycle (including
+       [Persistence_failed] / [Lost] transitions) and the finally must not wipe
+       the live reservation or runtime overlay. *)
+    let persisted_durably = ref false in
     Fun.protect
       ~finally:(fun () ->
-        if not !durably_accepted then remove_runtime_if_owned key transition_lock)
+        if not !persisted_durably then remove_runtime_if_owned key transition_lock)
       (fun () ->
     let reconciliation_outcome reason =
       Ok
@@ -126,6 +127,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
     (match initial_persistence with
      | `Settled result -> result
      | `Persisted ->
+       persisted_durably := true;
        let acceptance_result =
          match on_accepted with
          | None -> Ok ()
@@ -328,6 +330,9 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                  })
             |> Option.iter notify_settled);
         raise e
+      | (Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+        clear_active_switch key;
+        raise exn
       | exn ->
         Done
           { ok = false
@@ -344,16 +349,13 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
         with
         | () ->
           if Atomic.get worker_started
-          then (
-            durably_accepted := true;
-            Ok { request_id; acceptance = Durably_accepted })
+          then Ok { request_id; acceptance = Durably_accepted }
           else (
             match Eio.Switch.get_error background_sw with
             | None ->
               (* Eio accepted the daemon. A child can remain unscheduled here,
                  but Eio only drops it when the target switch is already
                  cancelling. *)
-              durably_accepted := true;
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->

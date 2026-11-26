@@ -33,6 +33,7 @@ import { NavRail } from './nav-rail'
 import { QueueContextOverlayBody } from './queue-context-overlay'
 import {
   activeOverlay,
+  hitlSourceStatus,
   commandPaletteOpen,
   currentShellOverlay,
   effectiveHitlSourceStatus,
@@ -1320,5 +1321,32 @@ describe('Proposal A+ Shell components', () => {
     expect(container.querySelector('.ap-switcher-bearer [role="alert"]')).not.toBeNull()
     expect(shellToasts.value.some((t) => t.tone === 'success')).toBe(false)
     expect(shellToasts.value.some((t) => t.tone === 'error')).toBe(true)
+  })
+
+  it.each([
+    ['alternate approvals key', { ok: true, approvals: [{ approval_id: 'a1' }] }],
+    ['alternate items key', { ok: true, items: [{ approval_id: 'a1' }] }],
+    ['explicit ok:false', { ok: false, pending: [], error: 'queue unavailable' }],
+    ['non-object payload', null],
+  ])('refreshPendingHitl fails closed on malformed tool-approvals payload (%s)', async (_label, payload) => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const fetchMalformed: typeof fetch = async (input) => {
+      const path = new URL(String(input), location.href).pathname
+      if (path === '/api/v1/keepers/tool-approvals') {
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return hitlJson(EMPTY_HITL[path] ?? {})
+    }
+    await refreshPendingHitl(fetchMalformed)
+    expect(hitlSourceStatus.value.approvals.kind).toBe('failed')
   })
 })

@@ -132,6 +132,36 @@ describe('appendLiveToolCall', () => {
     expect(events[0]!.error).toBe('command not found')
   })
 
+  it('synthesizes fallback error and preserves disposition when success is false without error text', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    appendLiveToolCall('keeper-a', {
+      toolName: 'Execute',
+      durationMs: 120,
+      success: false,
+      error: null,
+      disposition: 'failed',
+      wireOutcome: 'error',
+      tsUnix: 1712400005,
+    })
+
+    const events = getTraceEvents('keeper-a')
+    expect(events).toHaveLength(1)
+    expect(events[0]!.error).toBe('tool_call_failed')
+    expect(events[0]!.detail.disposition).toBe('failed')
+    expect(events[0]!.detail.wire_outcome).toBe('error')
+  })
+
   it('appends multiple events in order', () => {
     traceSlots.value = {
       'keeper-a': {

@@ -127,6 +127,7 @@ function handleRefreshToolQualityClick() {
 }
 
 const successColor = computed(() => {
+  if ((data.value?.total ?? 0) === 0) return 'text-[var(--color-fg-muted)]'
   const rate = data.value?.success_rate ?? 0
   if (rate >= 95) return 'text-[var(--color-status-ok)]'
   if (rate >= 90) return 'text-[var(--color-status-warn)]'
@@ -466,7 +467,10 @@ export function ToolQualityPanel() {
 
       <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
         <div class="text-center">
-          <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
+          <div
+            class="text-lg font-mono ${successColor.value}"
+            title=${d.total === 0 ? '정산된 호출이 없어 성공률을 산출할 수 없습니다' : undefined}
+          >${d.total === 0 ? '—' : `${d.success_rate.toFixed(1)}%`}</div>
           <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">성공률</div>
         </div>
         <div class="text-center">
@@ -489,7 +493,9 @@ export function ToolQualityPanel() {
         </div>
       </div>
 
-      <${RateGauge} rate=${d.success_rate} label="전체" />
+      ${d.total > 0
+        ? html`<${RateGauge} rate=${d.success_rate} label="전체" />`
+        : html`<div class="text-2xs text-[var(--color-fg-muted)]">정산된 호출 없음 (대기/미정산 호출만 기록됨)</div>`}
 
       ${d.hourly_trend && d.hourly_trend.length >= 2 ? html`
         <${TrendSparkline} points=${d.hourly_trend} />

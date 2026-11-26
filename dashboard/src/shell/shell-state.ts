@@ -22,6 +22,7 @@ import {
   sessionEpoch,
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
+import { resourceCache } from '../core/resource-cache'
 import {
   decodeGateQueueStrict,
   decodeKeeperAsksWire,
@@ -634,6 +635,15 @@ export async function refreshPendingHitl(
       const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', reqOpts)
       if (!isCurrent()) return
       if (planRes.ok) {
+        if (!isRecord(planRes.value) || planRes.value.ok === false || !Array.isArray(planRes.value.goals)) {
+          const message =
+            isRecord(planRes.value) && typeof planRes.value.error === 'string' && planRes.value.error.trim()
+              ? planRes.value.error.trim()
+              : '목표 확인 큐 응답 형식이 올바르지 않습니다'
+          setHitlSourceState('planning', { kind: 'failed', message })
+          recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
+          return
+        }
         clearHitlIncident('planning')
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
         setHitlSourceState('planning', { kind: 'ok' })
@@ -667,8 +677,22 @@ export async function refreshPendingHitl(
     const approvalsJob = apiGet<unknown>('/api/v1/keepers/tool-approvals', reqOpts).then((approvalsRes) => {
       if (!isCurrent()) return
       if (approvalsRes.ok) {
+        const raw = approvalsRes.value
+        const hasValidList =
+          isRecord(raw)
+          && raw.ok !== false
+          && Array.isArray(raw.pending)
+        if (!hasValidList) {
+          const message =
+            isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
+              ? raw.error.trim()
+              : '도구 승인 큐 응답 형식이 올바르지 않습니다'
+          setHitlSourceState('approvals', { kind: 'failed', message })
+          recordHitlIncidentOnce('approvals', 'Tool approval queue response invalid', message)
+          return
+        }
         clearHitlIncident('approvals')
-        pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
+        pendingApprovals.value = parseToolApprovalsPayload(raw, workspaceId)
         setHitlSourceState('approvals', { kind: 'ok' })
       } else if (
         approvalsRes.error.kind !== 'epoch_stale'
@@ -756,8 +780,18 @@ export async function refreshPendingHitl(
     const planningJob = apiGet<unknown>('/api/v1/dashboard/planning', reqOpts).then((planRes) => {
       if (!isCurrent()) return
       if (planRes.ok) {
+        const raw = planRes.value
+        if (!isRecord(raw) || raw.ok === false || !Array.isArray(raw.goals)) {
+          const message =
+            isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
+              ? raw.error.trim()
+              : '목표 확인 큐 응답 형식이 올바르지 않습니다'
+          setHitlSourceState('planning', { kind: 'failed', message })
+          recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
+          return
+        }
         clearHitlIncident('planning')
-        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(raw, workspaceId)
         setHitlSourceState('planning', { kind: 'ok' })
       } else if (
         planRes.error.kind !== 'epoch_stale'
@@ -876,6 +910,7 @@ export async function submitFastToolApproval(
   pendingApprovals.value = pendingApprovals.peek().filter(
     (row) => row.approvalId !== item.approvalId,
   )
+  resourceCache.invalidateTopic('tool_approval')
   pushShellToast(
     settled
       ? `${item.keeper} · ${item.tool || item.approvalId} ${decision === 'approve' ? '승인 완료' : '거절 완료'}`

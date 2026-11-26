@@ -190,6 +190,7 @@ export interface SSEEvent {
   tool_name?: string
   duration_ms?: number
   disposition?: 'completed' | 'deferred' | 'failed'
+  wire_outcome?: 'ok' | 'error' | 'unknown'
   success?: boolean
   error_text?: string
   tool_args?: unknown

@@ -215,10 +215,9 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     windowHours: 24,
   }
 
-  // Loading stays quiet; an empty result still renders source freshness so
-  // operators can distinguish no calls from a broken trajectory lane.
-  if (asyncState.loading) return null
-  if (asyncState.error) {
+  // Loading stays quiet only on initial load; keep retained data mounted during SSE refreshes.
+  if (asyncState.loading && !asyncState.data) return null
+  if (asyncState.error && !asyncState.data) {
     return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3 v2-monitoring-panel" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
@@ -231,7 +230,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     `
   }
 
-  const maxCount = s.tools[0]?.call_count ?? 1
+  const maxCount = Math.max(1, ...s.tools.map((t) => t.call_count))
 
   // Find tools with highest p95
   const slowest = [...s.tools].sort((a, b) => b.p95_duration_ms - a.p95_duration_ms).slice(0, 3)

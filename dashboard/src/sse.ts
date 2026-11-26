@@ -483,7 +483,9 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_tool_call': {
       const toolName = event.tool_name ?? '?'
       const durationMs = event.duration_ms ?? 0
-      const isError = event.disposition === 'failed'
+      const isError =
+        event.disposition === 'failed'
+        || (!event.disposition && event.wire_outcome === 'error')
       const isDeferred = event.disposition === 'deferred'
       let dispositionSuffix = ''
       if (isError) dispositionSuffix = ' ERR'
@@ -510,6 +512,8 @@ function handleEvent(event: SSEEvent): void {
           durationMs,
           success: !isError,
           error: event.error_text ?? null,
+          disposition: event.disposition,
+          wireOutcome: event.wire_outcome,
           tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
           toolArgs,
           toolResult,

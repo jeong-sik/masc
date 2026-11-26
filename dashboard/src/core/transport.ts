@@ -44,6 +44,7 @@ export interface ApiError {
   readonly message: string
   readonly retryable: boolean
   readonly field?: string
+  readonly body?: unknown
   readonly cause?: unknown
 }
 
@@ -97,23 +98,25 @@ function classifyHttpError(status: number, body: unknown): ApiError {
     }
   }
 
+  const bodyField = body !== null && body !== undefined ? { body } : {}
+
   if (status === 401) {
-    return { kind: 'unauthorized', status, code, message, retryable: false, field }
+    return { kind: 'unauthorized', status, code, message, retryable: false, field, ...bodyField }
   }
   if (status === 403) {
     const isCsrf = code === 'csrf_invalid' || code === 'csrf_missing' || /\bcsrf\b/i.test(message)
-    return { kind: isCsrf ? 'csrf_rejected' : 'forbidden', status, code, message, retryable: false, field }
+    return { kind: isCsrf ? 'csrf_rejected' : 'forbidden', status, code, message, retryable: false, field, ...bodyField }
   }
   if (status === 404) {
-    return { kind: 'not_found', status, code, message, retryable: false, field }
+    return { kind: 'not_found', status, code, message, retryable: false, field, ...bodyField }
   }
   if (status === 409) {
-    return { kind: 'conflict_cas', status, code, message, retryable: false, field }
+    return { kind: 'conflict_cas', status, code, message, retryable: false, field, ...bodyField }
   }
   if (status >= 400 && status < 500) {
-    return { kind: 'validation', status, code, message, retryable: false, field }
+    return { kind: 'validation', status, code, message, retryable: false, field, ...bodyField }
   }
-  return { kind: 'server', status, code, message, retryable: status >= 500, field }
+  return { kind: 'server', status, code, message, retryable: status >= 500, field, ...bodyField }
 }
 
 export function unwrapV2Envelope<T>(raw: unknown): Result<T, ApiError> {

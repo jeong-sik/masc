@@ -67,18 +67,24 @@ export async function loadToolSchemas(force = false): Promise<void> {
   }
 }
 
+let executionGeneration = 0
+
 export function selectTool(tool: McpToolSchema): void {
+  executionGeneration += 1
   selectedTool.value = tool
   formValues.value = buildDefaults(tool.inputSchema)
   validationErrors.value = []
   lastResult.value = null
+  executing.value = false
 }
 
 export function clearSelection(): void {
+  executionGeneration += 1
   selectedTool.value = null
   formValues.value = {}
   validationErrors.value = []
   lastResult.value = null
+  executing.value = false
 }
 
 export function updateFormValues(values: Record<string, unknown>): void {
@@ -104,18 +110,21 @@ export async function executeTool(): Promise<void> {
     showToast(`필수 필드 누락: ${missing.join(', ')}`, 'error')
     return
   }
+  const gen = ++executionGeneration
   executing.value = true
   lastResult.value = null
   try {
     const args = stripEmptyOptionals(formValues.value, tool.inputSchema)
     const text = await callMcpTool(tool.name, args)
+    if (gen !== executionGeneration) return
     lastResult.value = { success: true, text, toolName: tool.name, timestamp: Date.now() }
     showToast(`${tool.name} 실행 완료`, 'success')
   } catch (err) {
+    if (gen !== executionGeneration) return
     const message = errorToString(err)
     lastResult.value = { success: false, text: message, toolName: tool.name, timestamp: Date.now() }
     showToast(`${tool.name} 실행 실패`, 'error')
   } finally {
-    executing.value = false
+    if (gen === executionGeneration) executing.value = false
   }
 }

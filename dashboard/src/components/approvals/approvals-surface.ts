@@ -329,8 +329,9 @@ function ApHistory({
           <button
             key=${option.id}
             type="button"
+            role="tab"
             class=${`ap-hist-f ${filter === option.id ? 'on' : ''}`}
-            aria-pressed=${filter === option.id}
+            aria-selected=${filter === option.id}
             onClick=${() => setFilter(option.id)}
           >${option.label}</button>
         `)}
@@ -798,11 +799,13 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
 function ApAside({
   openCount,
   resolvedItems,
+  resolvedUnavailable,
   rules,
   rulesState,
 }: {
   openCount: number
   resolvedItems: KeeperResolvedApprovalItem[]
+  resolvedUnavailable: boolean
   rules: KeeperApprovalRule[]
   rulesState: KeeperApprovalRulesState
 }) {
@@ -911,9 +914,11 @@ function ApAside({
       <section class="wka-card">
         <div class="wka-h">
           <h3>최근 처리</h3>
-          <span class="mono">${resolvedItems.length}</span>
+          <span class="mono" data-testid="approvals-aside-recent-count">${resolvedUnavailable ? '—' : resolvedItems.length}</span>
         </div>
-        ${recent.length > 0
+        ${resolvedUnavailable
+          ? html`<div class="ap-side-empty">처리 이력 조회 불가</div>`
+          : recent.length > 0
           ? html`
               <ul class="ap-recent-list">
                 ${recent.map(item => html`
@@ -1000,6 +1005,7 @@ export function ApprovalsSurface() {
             <div class="ap-viewseg" role="tablist" aria-label="승인 큐 보기">
               <button
                 type="button"
+                role="tab"
                 class=${`ap-viewbtn ${view === 'queue' ? 'on' : ''}`}
                 aria-selected=${view === 'queue'}
                 onClick=${() => navigate('approvals', targetId === undefined ? {} : { approval: targetId })}
@@ -1008,6 +1014,7 @@ export function ApprovalsSurface() {
               </button>
               <button
                 type="button"
+                role="tab"
                 class=${`ap-viewbtn ${view === 'history' ? 'on' : ''}`}
                 aria-selected=${view === 'history'}
                 onClick=${() => navigate('approvals', { view: 'history' })}
@@ -1101,7 +1108,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Always 규칙</div>
-            <div class="ov-kpi-v">${rules.length}</div>
+            <div class="ov-kpi-v">${rulesState?.state === 'ready' ? rules.length : '—'}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">처리 완료</div>
@@ -1148,10 +1155,11 @@ export function ApprovalsSurface() {
           : null}
       `}
       </div>
-      ${!firstLoad && !queueUnavailable && !resolvedUnavailable && items !== null && rulesState !== null ? html`
+      ${!firstLoad && !queueUnavailable && items !== null && rulesState !== null ? html`
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}
+          resolvedUnavailable=${resolvedUnavailable}
           rules=${rules}
           rulesState=${rulesState}
         />

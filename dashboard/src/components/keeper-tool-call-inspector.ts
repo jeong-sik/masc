@@ -336,34 +336,41 @@ function toolCallFailed(entry: ToolCallEntry): boolean {
 }
 
 function toolCallStatusLabel(entry: ToolCallEntry): string {
-  return entry.disposition ?? (toolCallSucceeded(entry) ? 'completed' : 'failed')
+  if (entry.disposition) return entry.disposition
+  if (toolCallSucceeded(entry)) return 'completed'
+  if (toolCallFailed(entry)) return 'failed'
+  return entry.wire_outcome ?? 'unsettled'
 }
 
-/** succeeded / deferred / neither, resolved once so the three places that
-    branch on it (tone, colour, glyph) cannot drift apart. */
-type ToolCallOutcome = 'ok' | 'deferred' | 'failed'
+/** succeeded / deferred / unsettled / failed, resolved once so the three places
+    that branch on it (tone, colour, glyph) cannot drift apart. */
+type ToolCallOutcome = 'ok' | 'deferred' | 'unsettled' | 'failed'
 
 function toolCallOutcome(entry: ToolCallEntry): ToolCallOutcome {
   if (toolCallSucceeded(entry)) return 'ok'
   if (toolCallDeferred(entry)) return 'deferred'
-  return 'failed'
+  if (toolCallFailed(entry)) return 'failed'
+  return 'unsettled'
 }
 
 const TOOL_CALL_OUTCOME_TONE: Record<ToolCallOutcome, StatusChipTone> = {
   ok: 'ok',
   deferred: 'warn',
+  unsettled: 'neutral',
   failed: 'bad',
 }
 
 const TOOL_CALL_OUTCOME_COLOR: Record<ToolCallOutcome, string> = {
   ok: 'text-[var(--color-status-ok)]',
   deferred: 'text-[var(--color-status-warn)]',
+  unsettled: 'text-[var(--color-fg-muted)]',
   failed: 'text-[var(--color-status-err)]',
 }
 
 const TOOL_CALL_OUTCOME_GLYPH: Record<ToolCallOutcome, string> = {
   ok: 'O',
   deferred: 'D',
+  unsettled: '?',
   failed: 'X',
 }
 
@@ -375,6 +382,7 @@ export function deriveKeeperToolCallDossier(
   const slowest = slowestToolCall(entries)
   const failed = entries.filter(toolCallFailed)
   const deferred = entries.filter(toolCallDeferred)
+  const unsettled = entries.filter(entry => toolCallOutcome(entry) === 'unsettled')
   const toolCounts = countByTool(entries)
   const hotTool = toolCounts[0] ?? null
   const evidenceLinks = countEvidenceLinks(entries)
@@ -384,6 +392,7 @@ export function deriveKeeperToolCallDossier(
   const totalCalls = entries.length
   const failedCount = failed.length
   const deferredCount = deferred.length
+  const unsettledCount = unsettled.length
   const latestTone: StatusChipTone =
     latest === null ? 'neutral' : TOOL_CALL_OUTCOME_TONE[toolCallOutcome(latest)]
 
@@ -392,6 +401,8 @@ export function deriveKeeperToolCallDossier(
     headline = `${failedCount} failed / ${totalCalls}`
   } else if (totalCalls > 0 && deferredCount > 0) {
     headline = `${deferredCount} deferred / ${totalCalls}`
+  } else if (totalCalls > 0 && unsettledCount > 0) {
+    headline = `${unsettledCount} unsettled / ${totalCalls}`
   } else if (totalCalls > 0) {
     headline = `${totalCalls} calls clean`
   }
@@ -401,6 +412,8 @@ export function deriveKeeperToolCallDossier(
     tone = 'bad'
   } else if (deferredCount > 0) {
     tone = 'warn'
+  } else if (unsettledCount > 0) {
+    tone = 'neutral'
   } else if (totalCalls > 0) {
     tone = 'ok'
   }
@@ -912,11 +925,11 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   // Reverse to show newest first
   const sorted = [...filtered].reverse()
 
-  if (resource.state.value.loading) {
+  if (resource.state.value.loading && !response) {
     return html`<${LoadingState}>도구 호출 불러오는 중...<//>`
   }
 
-  if (resource.state.value.error) {
+  if (resource.state.value.error && !response) {
     return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
@@ -944,7 +957,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const settledCalls = entries.filter(entry => toolCallCompletion(entry) !== undefined)
   const successRate = settledCalls.length > 0
     ? Math.round((settledCalls.filter(entry => toolCallCompletion(entry) === true).length / settledCalls.length) * 100)
-    : 0
+    : null
   const uniqueTools = new Set(entries.map(e => e.tool)).size
 
   return html`
@@ -955,7 +968,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         <div class="flex gap-4 text-xs text-[var(--color-fg-muted)]">
           <span>${totalCalls} calls</span>
           <span>${uniqueTools} tools</span>
-          <span class=${successRate < 80 ? 'text-[var(--color-status-warn)]' : ''}>${successRate}% ok</span>
+          <span class=${successRate !== null && successRate < 80 ? 'text-[var(--color-status-warn)]' : ''}>${successRate === null ? '—' : `${successRate}% ok`}</span>
         </div>
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
         <${TextInput}
@@ -996,16 +1009,16 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>
-        ${groupToolCallTree(sorted).map((node: ToolCallTreeNode) => html`
-          <div key=${`${node.entry.ts}-${node.entry.keeper}-${node.entry.tool}`}>
+        ${groupToolCallTree(sorted).map((node: ToolCallTreeNode, nodeIdx: number) => html`
+          <div key=${node.entry.execution_id ?? `${node.entry.ts}-${node.entry.keeper}-${node.entry.tool}-${node.entry.tool_use_id ?? nodeIdx}`}>
             <${ToolCallRow} entry=${node.entry} />
             ${node.children.length > 0 ? html`
               <div
                 class="ml-4 border-l border-[var(--color-accent-border)] v2-monitoring-panel"
                 data-composition-children=${node.entry.tool_use_id}
               >
-                ${node.children.map((child: ToolCallEntry) => html`
-                  <${ToolCallRow} key=${`${child.ts}-${child.keeper}-${child.tool}-${child.composition_node_id ?? ''}`} entry=${child} />
+                ${node.children.map((child: ToolCallEntry, childIdx: number) => html`
+                  <${ToolCallRow} key=${child.execution_id ?? `${child.ts}-${child.keeper}-${child.tool}-${child.composition_node_id ?? child.tool_use_id ?? childIdx}`} entry=${child} />
                 `)}
               </div>
             ` : null}

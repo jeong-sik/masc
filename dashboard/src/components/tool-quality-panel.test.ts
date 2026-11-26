@@ -208,6 +208,8 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(container.textContent).not.toContain('도구 호출 데이터 없음')
+    expect(container.textContent).not.toContain('0.0%')
+    expect(container.textContent).toContain('—')
     expect(container.textContent).toContain('대기')
     expect(container.textContent).toContain('1')
   })

@@ -1479,6 +1479,7 @@ export function LanesTab(props: WorkspaceViewProps) {
               data-testid="failover-probes-list"
               style=${{ padding: 0, overflowX: 'auto', minWidth: 0 }}
             >
+              <div class="v2-failover-probes-track">
               <div
                 class="mono"
                 aria-hidden="true"
@@ -1589,6 +1590,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   `
                 }}
               />
+              </div>
             </div>
           </section>
         </div>

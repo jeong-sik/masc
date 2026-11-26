@@ -558,7 +558,7 @@
 }
 
 @media (min-width: 768px) {
-  .kp-tabs {
+  .kp-tabs[data-mobile-only="true"] {
     display: none;
   }
 }
@@ -788,9 +788,12 @@
   color: var(--fg-3);
 }
 
-.kp-toggle-btn {
+.kp-toggle-btn,
+.btn-ghost.kp-toggle-btn {
+  min-height: 24px;
   font-size: var(--fs-11);
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-0) var(--sp-2);
+  line-height: 1.25;
 }
 
 .kp-toggle-btn[data-active="true"] {

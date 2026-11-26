@@ -325,6 +325,10 @@
   gap: var(--sp-2);
 }
 
+.v2-failover-probes-track {
+  min-width: 640px;
+}
+
 /* Settings surface */
 .set-shell {
   display: grid;

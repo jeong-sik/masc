@@ -135,13 +135,23 @@
   margin-top: var(--sp-2);
 }
 
-.kn-btn-compact {
-  padding: var(--sp-1) var(--sp-2);
+.kn-btn-compact,
+.btn-ghost.kn-btn-compact,
+.kn-btn-warn.kn-btn-compact,
+.kn-btn-danger.kn-btn-compact {
+  min-height: 24px;
+  padding: var(--sp-0) var(--sp-2);
+  font-size: var(--fs-11);
+  line-height: 1.25;
 }
 
-.kn-btn-ml {
+.kn-btn-ml,
+.btn-ghost.kn-btn-ml {
   margin-left: var(--sp-2);
-  padding: var(--sp-1) var(--sp-2);
+  min-height: 24px;
+  padding: var(--sp-0) var(--sp-2);
+  font-size: var(--fs-11);
+  line-height: 1.25;
 }
 
 .kn-search-row {

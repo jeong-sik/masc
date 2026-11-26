@@ -171,8 +171,15 @@
   flex: 1 1 200px;
 }
 
-.wk-btn-compact {
-  padding: var(--sp-1) var(--sp-2);
+.wk-btn-compact,
+.btn-ghost.wk-btn-compact,
+.wk-btn-ok.wk-btn-compact,
+.wk-btn-danger.wk-btn-compact,
+.wk-btn-warn.wk-btn-compact {
+  min-height: 24px;
+  padding: var(--sp-0) var(--sp-2);
+  font-size: var(--fs-11);
+  line-height: 1.25;
 }
 
 .wk-check-label {

@@ -1149,4 +1149,41 @@ describe('Proposal A+ Shell components', () => {
     expect(moreBadge?.getAttribute('aria-hidden')).toBe('true')
     expect(moreBadge?.textContent?.trim()).toBe('1')
   })
+
+  it('hides TopBar Account subtabs outside multi_account_signed_in and deduplicates signed-out /account button', async () => {
+    viewportWidth.value = 1280
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      workspaceId: 'default',
+      authMethods: AUTH_METHODS,
+    }
+    navigate('/account/profile')
+    await act(async () => {
+      render(h(TopBar, {}), container)
+    })
+    expect(container.querySelectorAll('[data-subtab]').length).toBe(0)
+
+    authSession.value = {
+      kind: 'multi_account_signed_out',
+      mode: 'multi_account',
+      authMethods: AUTH_METHODS,
+    }
+    await act(async () => {
+      render(h(TopBar, {}), container)
+    })
+    expect(container.querySelectorAll('[data-subtab]').length).toBe(0)
+
+    const switcherTrigger = container.querySelector('[data-testid="account-workspace-switcher"]') as HTMLButtonElement
+    expect(switcherTrigger).not.toBeNull()
+    await act(async () => {
+      switcherTrigger.click()
+    })
+    const accountButtons = Array.from(container.querySelectorAll('.ap-popover button')).filter(
+      (btn) => btn.textContent?.includes('Sign-In Gate') || btn.textContent?.includes('Manage Account'),
+    )
+    expect(accountButtons).toHaveLength(1)
+    expect(accountButtons[0]?.textContent?.trim()).toBe('Open Sign-In Gate →')
+  })
 })

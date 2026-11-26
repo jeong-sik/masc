@@ -396,7 +396,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       cell: (r) => {
         const description = r.description
         return description ? html`
-          <button type="button" class="btn-ghost" aria-label=${`${r.name} 설명 읽기`} onClick=${() => onInspect({
+          <button type="button" class="btn-ghost btn-compact" aria-label=${`${r.name} 설명 읽기`} onClick=${() => onInspect({
             title: r.name,
             kind: 'tool-description',
             render: () => html`<${MarkdownContent} text=${description} />`,

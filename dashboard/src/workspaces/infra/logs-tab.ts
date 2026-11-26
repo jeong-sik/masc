@@ -319,7 +319,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
       kind: 'infra_log_entry',
       data: entry,
       render: () => html`
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
+        <div data-testid="logs-kv-inspector" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="wka-card" style=${{ fontSize: 'var(--fs-12)' }}>
             <div style=${{ fontWeight: 600, marginBottom: 'var(--sp-1)' }}>${entry.message}</div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
@@ -448,6 +448,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
               pendingLiveRef.current = { entries: [], resetLogs: false }
               setBufferedCount(0)
               setEntries([])
+              setSelectedEntry(null)
             }}
           >
             버퍼 비우기
@@ -511,21 +512,6 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
           />
         </div>
       </section>
-
-      ${selectedEntry && html`
-        <section class="wka-card" data-testid="logs-kv-inspector" aria-label="선택된 로그 K/V 상세">
-          <div class="wka-h">
-            <h3>K/V 상세 · ${selectedEntry.kind} ${selectedEntry.module}</h3>
-            <button type="button" class="btn-ghost" onClick=${() => setSelectedEntry(null)}>닫기</button>
-          </div>
-          <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)', marginBottom: 'var(--sp-2)' }}>
-            ts=${selectedEntry.tsDisplay} · level=${selectedEntry.level} · source=${selectedEntry.source} · keeper=${selectedEntry.keeper ?? '없음'}
-          </div>
-          <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', background: 'var(--bg-0)', padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)' }}>
-            ${JSON.stringify(selectedEntry.details, null, 2)}
-          </pre>
-        </section>
-      `}
     </div>
   `
 }

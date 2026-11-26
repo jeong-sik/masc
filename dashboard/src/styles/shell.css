@@ -679,21 +679,32 @@
   flex: none;
 }
 
-.ap-fast-btn {
+.ap-fast-btn,
+.btn-primary.ap-fast-btn,
+.btn-ghost.ap-fast-btn {
+  min-height: 28px;
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-12);
 }
 
-.ap-fast-deny {
+.ap-fast-deny,
+.btn-ghost.ap-fast-deny {
   border-color: var(--err-border);
   color: var(--err-fg);
+}
+
+.btn-ghost.ap-fast-deny:hover:not(:disabled) {
+  background: var(--button-danger-bg-hover);
+  border-color: var(--err-border);
 }
 
 .ap-fast-strip.is-mobile {
   padding: var(--sp-1) var(--sp-2);
 }
 
-.ap-fast-strip.is-mobile .ap-fast-btn {
+.ap-fast-strip.is-mobile .ap-fast-btn,
+.ap-fast-strip.is-mobile .btn-primary.ap-fast-btn,
+.ap-fast-strip.is-mobile .btn-ghost.ap-fast-btn {
   min-height: var(--mobile-touch-target-min);
 }
 
@@ -939,7 +950,9 @@
   padding: var(--sp-1) var(--sp-1) env(safe-area-inset-bottom, var(--sp-1));
 }
 
-.ap-touch-target {
+.ap-touch-target,
+.btn-ghost.ap-touch-target,
+.btn-primary.ap-touch-target {
   min-width: var(--mobile-touch-target-min);
   min-height: var(--mobile-touch-target-min);
 }
@@ -1393,46 +1406,16 @@
   flex-direction: column;
 }
 
-.ap-workspace-head,
-.ap-placeholder-head {
+.ap-workspace-head {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
 }
 
-.ap-workspace-title,
-.ap-placeholder-title {
+.ap-workspace-title {
   margin: 0;
   font-size: var(--fs-20);
   font-weight: 600;
-  color: var(--fg-1);
-}
-
-.ap-placeholder-desc {
-  margin: 0;
-  color: var(--fg-2);
-  font-size: var(--fs-13);
-}
-
-.ap-placeholder-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  margin: 0;
-  padding: var(--sp-3);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line-1);
-  background: var(--bg-1);
-  font-size: var(--fs-12);
-}
-
-.ap-placeholder-meta dt {
-  color: var(--fg-3);
-  font-size: var(--fs-10);
-}
-
-.ap-placeholder-meta dd {
-  margin: 0;
   color: var(--fg-1);
 }
 
@@ -1745,14 +1728,25 @@
   background: var(--err-soft);
 }
 
-.ap-danger-btn {
+.ap-danger-btn,
+.btn-ghost.ap-danger-btn {
   border-color: var(--err-border);
   color: var(--err-fg);
 }
 
-.ap-danger-solid {
+.btn-ghost.ap-danger-btn:hover:not(:disabled) {
+  background: var(--button-danger-bg-hover);
+  border-color: var(--err-border);
+}
+
+.ap-danger-solid,
+.btn-primary.ap-danger-solid {
   background: var(--err);
   color: var(--bg-0);
+}
+
+.btn-primary.ap-danger-solid:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--err) 86%, var(--fg-1));
 }
 
 .ap-signin-gate {
@@ -1765,7 +1759,8 @@
   gap: var(--sp-2);
 }
 
-.ap-signin-btn {
+.ap-signin-btn,
+.btn-primary.ap-signin-btn {
   width: 100%;
   min-height: 40px;
 }

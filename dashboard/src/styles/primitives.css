@@ -483,6 +483,15 @@
 .btn-ghost:hover:not(:disabled) { background: var(--bg-3); border-color: var(--line-2); }
 .btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.btn-compact,
+.btn-primary.btn-compact,
+.btn-ghost.btn-compact {
+  min-height: 24px;
+  padding: var(--sp-0) var(--sp-2);
+  font-size: var(--fs-11);
+  line-height: 1.25;
+}
+
 .img-out {
   margin: var(--sp-2) 0;
   display: flex;

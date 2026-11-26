@@ -679,7 +679,18 @@ candidates = ["safe.model"]
       if (url === '/api/v1/dashboard/provider-usage') return jsonResponse({ scopes: [] })
       if (url.startsWith('/api/v1/dashboard/provider-usage-history')) return jsonResponse({ state: 'unavailable', reason: 'none' })
       if (url === '/api/v1/runtime/resolved') {
-        return jsonResponse({ default_route: 'default', runtimes: [{ id: 'codex.gpt-5', provider: 'codex_subscription', model: 'gpt-5-codex' }], lanes: [], assignments: [] })
+        return jsonResponse({
+          config_path: null,
+          default_route: 'default',
+          default_runtime: null,
+          runtimes: [{
+            id: 'codex.gpt-5', provider: 'codex_subscription', model: 'gpt-5-codex',
+            effective_max_context: 200_000, max_context_source: 'capability', max_output_tokens: null,
+            is_local: false, is_default: false, quota_rest: null,
+          }],
+          lanes: [],
+          assignments: [],
+        })
       }
       if (url === '/api/v1/setup/inventory') {
         return jsonResponse({

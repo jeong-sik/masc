@@ -1482,6 +1482,16 @@ let test_v25_typography_layout_and_card () =
     (Color.equal
        (Cell_grid.get grid ~x:(inner.x + inner.w - 3) ~y:(inner.y + 3)).style.fg
        (Color.of_rgb theme.border_inactive));
+  Card.draw_hairline ~pad_x:2 ~label:"Secondary" ~focused:false grid ~rect:inner
+    ~y:(inner.y + 4) ~theme;
+  let unfoc_marker = Cell_grid.get grid ~x:(inner.x + 2) ~y:(inner.y + 4) in
+  Alcotest.(check bool) "unfocused hairline paints muted dot marker" true
+    (Cell_grid.glyph_equal unfoc_marker.glyph (Cell_grid.Utf8 "·")
+     && Color.equal unfoc_marker.style.fg (Color.of_rgb theme.text_muted));
+  Alcotest.(check bool) "unfocused hairline paints border_subtle rule" true
+    (Color.equal
+       (Cell_grid.get grid ~x:(inner.x + inner.w - 3) ~y:(inner.y + 4)).style.fg
+       (Color.of_rgb theme.border_subtle));
   Card.draw_left_rail ~tone:Theme.Status_ai grid ~x:(inner.x + 2) ~y:(inner.y + 5) ~h:2 ~theme;
   let rail_cell = Cell_grid.get grid ~x:(inner.x + 2) ~y:(inner.y + 5) in
   Alcotest.(check bool) "left_rail uses Glyph.Left_rail in Violet" true
@@ -2490,6 +2500,61 @@ let test_markdown_inline_mermaid_blocks () =
   Alcotest.(check bool) "CJK inline mermaid preserves Korean labels" true
     (has_sub joined_cjk "기억 스냅샷" && has_sub joined_cjk "최종 반영")
 
+let test_ratio_gauge_unreported_and_narrow_width () =
+  let theme = Theme.default in
+  let spec : Chart.Spec.t =
+    {
+      title = Say.literal "Sessions";
+      kind =
+        Chart.Spec.Ratio_gauge
+          {
+            used = Observed.Unreported;
+            limit = Observed.Unreported;
+            unit = Format_val.Count;
+            gradient = Chart.Gradient.Efficiency;
+            reset_hint = None;
+          };
+      hotkey_hint = None;
+    }
+  in
+  let grid = Cell_grid.create ~cols:24 ~rows:2 in
+  ignore
+    (Chart.draw grid ~rect:(Rect.make ~x:0 ~y:0 ~w:24 ~h:2) ~theme
+       ~caps:Presenter.default_capabilities ~lang:Say.Lang_ko
+       ~show_title:false spec);
+  let row0 = grid_row_text grid ~y:0 in
+  let row1 = grid_row_text grid ~y:1 in
+  Alcotest.(check bool) "narrow ratio gauge keeps full unreported label" true
+    (contains_sub ~needle:"? 미보고" ~haystack:row0);
+  Alcotest.(check bool) "unreported ratio gauge renders non-empty detail" true
+    (contains_sub ~needle:"? 미보고" ~haystack:row1);
+  Alcotest.(check bool)
+    "unreported ratio gauge avoids duplicated slash detail" false
+    (contains_sub ~needle:"/" ~haystack:row1);
+  let mixed_spec : Chart.Spec.t =
+    {
+      spec with
+      kind =
+        Chart.Spec.Ratio_gauge
+          {
+            used = Observed.Absent;
+            limit = Observed.Unreported;
+            unit = Format_val.Count;
+            gradient = Chart.Gradient.Efficiency;
+            reset_hint = None;
+          };
+    }
+  in
+  let mgrid = Cell_grid.create ~cols:28 ~rows:2 in
+  ignore
+    (Chart.draw mgrid ~rect:(Rect.make ~x:0 ~y:0 ~w:28 ~h:2) ~theme
+       ~caps:Presenter.default_capabilities ~lang:Say.Lang_ko
+       ~show_title:false mixed_spec);
+  let mrow1 = grid_row_text mgrid ~y:1 in
+  Alcotest.(check bool) "mixed non-value ratio gauge preserves both states" true
+    (contains_sub ~needle:"/" ~haystack:mrow1
+     && contains_sub ~needle:"? 미보고" ~haystack:mrow1)
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2528,6 +2593,8 @@ let () =
             `Quick test_p0_2_dual_independent_usd_axis;
           Alcotest.test_case "Memory_flow pure bucketing, Flow_io/Net_total & honest empty/n=1"
             `Quick test_memory_flow_braille_chart;
+          Alcotest.test_case "Ratio_gauge unreported detail dedup & narrow label budget"
+            `Quick test_ratio_gauge_unreported_and_narrow_width;
         ] );
       ( "table",
         [

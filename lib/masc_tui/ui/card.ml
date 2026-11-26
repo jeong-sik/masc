@@ -464,8 +464,8 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
     ignore geom.width;
     inner_rect rect
 
-let draw_hairline ?(pad_x = 0) ?label ?(unicode = true) ?bg grid ~(rect : Rect.t)
-    ~y ~(theme : Theme.t) =
+let draw_hairline ?(pad_x = 0) ?label ?(focused = true) ?(unicode = true) ?bg
+    grid ~(rect : Rect.t) ~y ~(theme : Theme.t) =
   if Rect.is_empty rect || y < rect.y || y >= Rect.bottom rect then ()
   else
     let px = Int.max 0 (Int.min pad_x ((rect.w - 1) / 2)) in
@@ -476,7 +476,13 @@ let draw_hairline ?(pad_x = 0) ?label ?(unicode = true) ?bg grid ~(rect : Rect.t
       let bg = match bg with Some c -> c | None -> Color.of_rgb theme.surface_1 in
       let subtle_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
       let labeled_line_style =
-        Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg ()
+        if focused then
+          Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg ()
+        else subtle_style
+      in
+      let lbl_style =
+        if focused then Typography.anchor ~bg theme
+        else Typography.structure ~bg theme
       in
       let clip = Rect.make ~x:x0 ~y ~w ~h:1 in
       let ellipsis = if unicode then "…" else "." in
@@ -494,7 +500,6 @@ let draw_hairline ?(pad_x = 0) ?label ?(unicode = true) ?bg grid ~(rect : Rect.t
                 Glyph.Box_h
             done
           else if w < 6 then
-            let lbl_style = Typography.anchor ~bg theme in
             let adv =
               Cell_grid.put_text ~clip grid ~x:x0 ~y ~style:lbl_style
                 (Grapheme.truncate_to_width ~max_width:w ~ellipsis lbl)
@@ -504,10 +509,15 @@ let draw_hairline ?(pad_x = 0) ?label ?(unicode = true) ?bg grid ~(rect : Rect.t
             done
           else
             let marker =
-              if unicode then Glyph.to_utf8 Glyph.Focus_caret else ">"
+              if focused then
+                if unicode then Glyph.to_utf8 Glyph.Focus_caret else ">"
+              else if unicode then Glyph.to_utf8 Glyph.Separator_dot
+              else "-"
             in
-            let marker_style = Typography.accent ~bg ~bold:true theme in
-            let lbl_style = Typography.anchor ~bg theme in
+            let marker_style =
+              if focused then Typography.accent ~bg ~bold:true theme
+              else Typography.whisper ~bg ~italic:false theme
+            in
             let m_adv =
               Cell_grid.put_text ~clip grid ~x:x0 ~y ~style:marker_style marker
             in

@@ -1206,7 +1206,6 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
           if not (Rect.is_empty rest_rect) then begin
             let tasks_focused = Model.pane_focused model 0 in
             let verifs_focused = Model.pane_focused model 1 in
-            let focus_prefix f = if f then "▸ " else "" in
             let tasks_r, verif_r =
               match
                 Layout.split_v ~gap:0 rest_rect [ Layout.Ratio 0.42; Layout.Flex 1 ]
@@ -1236,7 +1235,7 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Printf.sprintf " · %d/%d" (t_sel + 1) t_total
               else ""
             in
-            Card.draw_hairline ~pad_x:0 ~bg
+            Card.draw_hairline ~pad_x:0 ~bg ~focused:tasks_focused
               ~label:
                 (let status =
                    match task_notice with
@@ -1249,8 +1248,7 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
                      Ops_common.say model ~ko:" · [Enter] 작업 열기"
                        ~en:" · [Enter] Open Task"
                  in
-                 Printf.sprintf "%s%s · %s%s"
-                   (focus_prefix tasks_focused)
+                 Printf.sprintf "%s · %s%s"
                    (Ops_common.say model ~ko:"표시된 연결 작업" ~en:"Linked Tasks Shown")
                    status open_hint)
               grid ~rect:tasks_r ~y:tasks_r.y ~theme;
@@ -1333,7 +1331,7 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
                 if v_total > 1 then Printf.sprintf " · %d/%d" (v_sel + 1) v_total
                 else ""
               in
-              Card.draw_hairline ~pad_x:0 ~bg
+              Card.draw_hairline ~pad_x:0 ~bg ~focused:verifs_focused
                 ~label:
                   (let status =
                      match verification_notice, task_notice with
@@ -1346,8 +1344,7 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
                        Ops_common.say model ~ko:" · [Enter] 검증 상세"
                          ~en:" · [Enter] Inspect"
                    in
-                   Printf.sprintf "%s%s · %s%s"
-                     (focus_prefix verifs_focused)
+                   Printf.sprintf "%s · %s%s"
                      (Ops_common.say model ~ko:"검증 실행 · 증거"
                         ~en:"Verifier Runs & Evidence")
                      status open_hint)
@@ -2272,7 +2269,7 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
           let has_two_panes =
             Option.is_some tk.description && Option.is_some v_opt
           in
-          let desc_focused = has_two_panes && Model.pane_focused model 0 in
+          let desc_focused = Option.is_some tk.description && Model.pane_focused model 0 in
           let verif_focused =
             (has_two_panes && Model.pane_focused model 1)
             || ((not has_two_panes) && Option.is_some v_opt && Model.pane_focused model 0)
@@ -2309,7 +2306,6 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Int.min max_d_scroll (Int.max 0 model.work.task_dive_desc_scroll)
               in
               if hdr_rows = 1 then begin
-                let prefix = if desc_focused then "▸ " else "" in
                 let base_lbl =
                   Ops_common.say model ~ko:"작업 설명" ~en:"Description"
                 in
@@ -2326,8 +2322,8 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
                       Printf.sprintf " · L%d-%d/%d" vis_start vis_end total_lines
                   else ""
                 in
-                Card.draw_hairline ~pad_x:0 ~bg
-                  ~label:(prefix ^ base_lbl ^ pos_lbl)
+                Card.draw_hairline ~pad_x:0 ~bg ~focused:desc_focused
+                  ~label:(base_lbl ^ pos_lbl)
                   grid ~rect:content ~y:!y ~theme;
                 incr y
               end;
@@ -2358,7 +2354,6 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
                 | [ a; b ] -> (a, b)
                 | _ -> (vr, Rect.empty)
               in
-              let v_prefix = if verif_focused then "▸ " else "" in
               let v_overflow =
                 let total_d = List.length diff_rows in
                 if not (Rect.is_empty diff_r) && total_d > diff_r.h && diff_r.h > 0
@@ -2371,9 +2366,9 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
                   else Printf.sprintf " · L%d-%d/%d" (cs + 1) vis_end total_d
                 else ""
               in
-              Card.draw_hairline ~pad_x:0 ~bg
+              Card.draw_hairline ~pad_x:0 ~bg ~focused:verif_focused
                 ~label:
-                  (Printf.sprintf "%s%s%s · [Enter] %s" v_prefix
+                  (Printf.sprintf "%s%s · [Enter] %s"
                      (Ops_common.say model ~ko:"검증 증거 · 반려 Diff"
                         ~en:"Verification Evidence & Rejection Diff")
                      v_overflow
@@ -5538,6 +5533,18 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     (Ops_common.say model ~ko:"목표" ~en:"Goals")
                     (fmt_i sc.goals_completed_24h)
             in
+            let verify_val =
+              let p_s = fmt_i sc.verifications_passed_24h in
+              let r_s = fmt_i sc.verifications_rejected_24h in
+              match
+                ( Observed.is_value sc.verifications_passed_24h
+                , Observed.is_value sc.verifications_rejected_24h )
+              with
+              | true, true -> Printf.sprintf "%s/%s" p_s r_s
+              | false, false when String.equal p_s r_s -> p_s
+              | false, false | true, false | false, true ->
+                  Printf.sprintf "%s / %s" p_s r_s
+            in
             let kpis =
               [
                 ( Ops_common.say model ~ko:"완료(24h)" ~en:"Done 24h"
@@ -5547,9 +5554,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 , done_sub );
                 ( Ops_common.say model ~ko:"검증 통과" ~en:"Verify"
                 , Ops_common.say model ~ko:"검증" ~en:"Ver"
-                , Printf.sprintf "%s/%s"
-                    (fmt_i sc.verifications_passed_24h)
-                    (fmt_i sc.verifications_rejected_24h)
+                , verify_val
                 , Typography.accent ~bg:r_bg ~bold:true theme
                 , Ops_common.say model ~ko:"통과 / 반려" ~en:"pass / rej" );
                 ( Ops_common.say model ~ko:"24h 턴" ~en:"24h Turns"
@@ -5639,24 +5644,28 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             (fun idx (grp : Wire_fleet.company_group) ->
               if !y < bot then begin
                 let done_n = company_done_count grp in
-                let bar_w = if content.w >= 48 then 8 else 0 in
                 let rank_name = Printf.sprintf "%d. %s" (idx + 1) grp.company in
                 let meta =
                   Printf.sprintf "%dt · %d/%d" done_n grp.running_count
                     (List.length grp.keepers)
                 in
                 let meta_w = Grapheme.display_width meta in
+                let bar_w =
+                  if content.w >= 48 && content.w - meta_w - 11 >= 10 then 8
+                  else 0
+                in
                 let name_w =
-                  Int.max 10
+                  Int.max 0
                     (content.w - meta_w - (if bar_w > 0 then bar_w + 3 else 2))
                 in
                 let name_st =
                   if idx = 0 then Typography.anchor ~bg:r_bg theme
                   else Typography.primary ~bg:r_bg theme
                 in
-                ignore
-                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                     ~max_w:name_w ~style:name_st rank_name);
+                if name_w > 0 then
+                  ignore
+                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                       ~max_w:name_w ~style:name_st rank_name);
                 if bar_w > 0 then begin
                   let score = Int.max done_n grp.running_count in
                   let ratio =
@@ -5665,18 +5674,24 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                          (Float.of_int score /. Float.of_int max_g_score))
                   in
                   let bx = Rect.right content - meta_w - bar_w - 2 in
-                  if bx > content.x + 8 then
+                  if bx >= content.x + name_w + 1 then
                     ignore
                       (Chart.draw_ratio_bar_run ~clip:content grid ~x:bx ~y:!y
                          ~width:bar_w ~theme ~bg:r_bg ~unicode:true
                          ~gradient:Chart.Gradient.Efficiency ~ratio)
                 end;
-                ignore
-                  (Ops_common.put_line ~clip:content grid
-                     ~x:(Rect.right content - meta_w)
-                     ~y:!y ~max_w:meta_w
-                     ~style:(Typography.whisper ~bg:r_bg theme)
-                     meta);
+                let meta_x =
+                  Int.max
+                    (if name_w > 0 then content.x + name_w + 1 else content.x)
+                    (Rect.right content - meta_w)
+                in
+                let avail_meta_w = Int.max 0 (Rect.right content - meta_x) in
+                if avail_meta_w > 0 then
+                  ignore
+                    (Ops_common.put_line ~clip:content grid ~x:meta_x ~y:!y
+                       ~max_w:(Int.min meta_w avail_meta_w)
+                       ~style:(Typography.whisper ~bg:r_bg theme)
+                       meta);
                 incr y
               end)
             (List.take 5 sorted_groups);
@@ -5935,8 +5950,13 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         badge = (if Rect.is_empty left_rect then status_badge else None);
         hotkey =
           Some
-            (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"
-               ~en:"[→/Tab] Scroll Detail · [y] Approve · [n] Reject");
+            (if Model.is_zoomed_active model then
+               Ops_common.say model ~ko:"[↑↓] 스크롤 · [y] 승인 · [n] 반려"
+                 ~en:"[↑↓] Scroll · [y] Approve · [n] Reject"
+             else
+               Ops_common.say model
+                 ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"
+                 ~en:"[→/Tab] Scroll Detail · [y] Approve · [n] Reject");
         focused = Model.detail_pane_focused ~detail_index:1 model;
       }
     in

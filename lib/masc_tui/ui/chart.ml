@@ -1168,15 +1168,21 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
              | Some h -> Typography.sep_dot ^ Say.resolve lang h
              | None -> ""
            in
-           Printf.sprintf "%s / %s%s" u_s l_s hint_s
+           if
+             (not (Observed.is_value used))
+             && (not (Observed.is_value limit))
+             && String.equal u_s l_s
+           then u_s ^ hint_s
+           else Printf.sprintf "%s / %s%s" u_s l_s hint_s
          in
          let lbl_style = Typography.primary ~bg theme in
          let pct_style = Typography.anchor ~bg theme in
          let sub_style = Typography.whisper ~bg theme in
          let lbl_text = if show_title then title_str else "" in
+         let pct_w = Grapheme.display_width pct_str in
          let lbl_w =
            if String.length (String.trim lbl_text) = 0 then 0
-           else Int.max 0 (rect.w - bar_cols - Grapheme.display_width pct_str - 2)
+           else Int.max 0 (rect.w - bar_cols - pct_w - 2)
          in
          let cx = ref rect.x in
          if lbl_w > 0 then begin
@@ -1184,16 +1190,20 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
            let adv = Cell_grid.put_text ~clip:rect grid ~x:!cx ~y:rect.y ~style:lbl_style fit in
            cx := !cx + adv + 1
          end;
+         let rem_for_bar = rect.w - (!cx - rect.x) - pct_w - 1 in
          let actual_bar_w =
-           if lbl_w = 0 then
-             Int.max bar_cols (Int.max 8 (rect.w - Grapheme.display_width pct_str - 2))
-           else bar_cols
+           if rem_for_bar <= 0 then 0
+           else if lbl_w = 0 then
+             Int.min rem_for_bar (Int.max 4 (rem_for_bar - 1))
+           else Int.min bar_cols rem_for_bar
          in
-         let drawn =
-           draw_ratio_bar_run ~clip:rect grid ~x:!cx ~y:rect.y ~width:actual_bar_w
-             ~theme ~bg ~unicode ~gradient ~ratio
-         in
-         cx := !cx + drawn + 1;
+         if actual_bar_w > 0 then begin
+           let drawn =
+             draw_ratio_bar_run ~clip:rect grid ~x:!cx ~y:rect.y ~width:actual_bar_w
+               ~theme ~bg ~unicode ~gradient ~ratio
+           in
+           cx := !cx + drawn + 1
+         end;
          ignore (Cell_grid.put_text ~clip:rect grid ~x:!cx ~y:rect.y ~style:pct_style pct_str);
          if multiline_detail && rect.h >= 2 then
            ignore

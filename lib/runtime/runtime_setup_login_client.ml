@@ -153,7 +153,8 @@ let client_environment = function
       (Runtime_acp_client.For_testing.build_environment
          ~base_env:(Unix.environment ())
          ~driver
-         ~extra_strip_env:[])
+         ~extra_strip_env:[]
+         ~agent_compaction:None)
 
 (* The variable that names the command an official client runs to open a
    link. Claude Code 2.1.326 runs the file it names, with the link as its one

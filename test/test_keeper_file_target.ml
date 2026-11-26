@@ -214,13 +214,17 @@ let test_line_ranges_follow_the_producer_evidence () =
              ~occurrence_count:
                (Keeper_file_change_evidence.max_recorded_edit_occurrences + 1))));
   Alcotest.check range "append" None (changed None);
+  let window offset =
+    match Keeper_tool_read_window.of_args (`Assoc [ "offset", `Int offset ]) with
+    | Ok w -> w
+    | Error _ -> Alcotest.fail "read window"
+  in
   Alcotest.check range "read window" (Some (12, 40))
-    (lines_of (Keeper_file_target.read confined ~start_line:12 ~returned_lines:29));
+    (lines_of (Keeper_file_target.read confined ~window:(window 12) ~returned_lines:29));
   Alcotest.check range "read returned nothing" None
-    (lines_of (Keeper_file_target.read confined ~start_line:12 ~returned_lines:0));
-  Alcotest.check_raises "read start below one"
-    (Invalid_argument "read file target: start_line must be at least 1")
-    (fun () -> ignore (Keeper_file_target.read confined ~start_line:0 ~returned_lines:1))
+    (lines_of (Keeper_file_target.read confined ~window:(window 12) ~returned_lines:0));
+  Alcotest.(check bool) "a window cannot start below one" true
+    (Result.is_error (Keeper_tool_read_window.of_args (`Assoc [ "offset", `Int 0 ])))
 ;;
 
 (* ── Durable row through the production handler and hook ──────────── *)

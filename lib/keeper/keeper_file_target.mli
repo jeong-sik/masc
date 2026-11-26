@@ -22,10 +22,13 @@ val changed : Keeper_alerting_path.confined_path -> Keeper_file_change_evidence.
     ranges were omitted, carry none. No evidence (an append, an edit that
     changed nothing) carries none. *)
 
-val read : Keeper_alerting_path.confined_path -> start_line:int -> returned_lines:int -> t
-(** A completed read of [returned_lines] lines starting at [start_line].
-    Zero lines carry no range. Raises [Invalid_argument] for a start below one
-    or a negative count, which a parsed read window cannot produce. *)
+val read :
+  Keeper_alerting_path.confined_path ->
+  window:Keeper_tool_read_window.read_line_window ->
+  returned_lines:int ->
+  t
+(** A completed read of [returned_lines] lines from the window's first line.
+    A read that returned no lines carries no range. *)
 
 val to_yojson : t -> Yojson.Safe.t
 (** [{"path": relative_path, "lines": {"start_line", "end_line"}}]; [lines]

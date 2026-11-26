@@ -482,7 +482,7 @@ let handle_read_file_with_preparation
        (match read_target with
         | Keeper_tree_file confined ->
           Keeper_tool_execution.with_file_target
-            (Keeper_file_target.read confined ~start_line:window.start_line ~returned_lines)
+            (Keeper_file_target.read confined ~window ~returned_lines)
             execution
         (* A declared endpoint root lies outside the Keeper's tree, so the
            read names no file in the Keeper workspace. *)

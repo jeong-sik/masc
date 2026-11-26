@@ -17,21 +17,20 @@ let changed confined (evidence : Keeper_file_change_evidence.t option) =
   { relative_path = relative_path_of confined; lines }
 ;;
 
-let read confined ~start_line ~returned_lines =
-  if returned_lines < 0 then invalid_arg "read file target needs a non-negative line count";
+let read confined ~(window : Keeper_tool_read_window.read_line_window) ~returned_lines =
   let lines =
-    match returned_lines with
-    | 0 ->
-      if start_line < 1 then invalid_arg "read file target start must be 1-based";
-      None
-    | count ->
-      (match
-         Keeper_file_change_evidence.line_range
-           ~start_line
-           ~end_line:(start_line + count - 1)
-       with
-       | Ok range -> Some range
-       | Error detail -> invalid_arg ("read file target: " ^ detail))
+    if returned_lines <= 0
+    then None
+    else (
+      match
+        Keeper_file_change_evidence.line_range
+          ~start_line:window.start_line
+          ~end_line:(window.start_line + returned_lines - 1)
+      with
+      | Ok range -> Some range
+      (* [of_args] makes [start_line >= 1] and [returned_lines > 0] here, so
+         the range is 1-based and ordered. *)
+      | Error _ -> assert false)
   in
   { relative_path = relative_path_of confined; lines }
 ;;

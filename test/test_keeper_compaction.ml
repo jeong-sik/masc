@@ -1103,6 +1103,52 @@ let test_secrets_are_redacted_at_the_storage_boundary () =
     (C.decode_live_blob_references_json (C.db_path ~keepers_dir ~keeper_id:"secret") = Ok None)
 ;;
 
+(* A tool result that points at an externalized blob is archived with its
+   atom. The blob sweep reads the compaction store through this decoder, so
+   the reference must come back live, or the sweep could delete the blob. *)
+let test_an_archived_blob_reference_stays_live () =
+  with_temp_dir
+  @@ fun base_path ->
+  let store = Tool_blob_store.create ~base_path in
+  let marker =
+    Tool_output.encode_for_agent_core
+      (Tool_blob_store.put store ~bytes:(String.make 9000 'b') ~mime:"text/plain")
+  in
+  let keepers_dir = Filename.concat base_path ".masc/keepers" in
+  Fs_compat.mkdir_p keepers_dir;
+  let id = "call-blob#1-read" in
+  let history =
+    let open Agent_core.Types in
+    [ message ~metadata:(stamped "blob#1") User [ Text "read the log" ]
+    ; message Assistant [ ToolUse { id; name = "read"; input = `Assoc [] } ]
+    ; { (message
+           Tool
+           [ ToolResult
+               { tool_use_id = id
+               ; content = marker
+               ; outcome = Tool_succeeded
+               ; json = None
+               ; content_blocks = None
+               }
+           ])
+        with
+        tool_call_id = Some id
+      }
+    ; message Assistant [ Text "read it" ]
+    ]
+    @ agent_core_turn ~turn:"blob#2" ~prompt:"next" ~answer:"done" ()
+  in
+  let anchor = committed (compact ~keepers_dir ~keeper_id:"blob" ~prefix:3 history) in
+  check bool "the epoch archives the whole first turn" true
+    (anchor.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "blob#1"; extent = A.Whole_turn }));
+  match C.decode_live_blob_references_json (C.db_path ~keepers_dir ~keeper_id:"blob") with
+  | Ok (Some (`List references)) ->
+    check bool "the archived tool result's blob stays live" true
+      (List.mem (`String marker) references)
+  | Ok (Some _) | Ok None | Error _ -> fail "the archived blob reference was not reported"
+;;
+
 let test_per_keeper_token_is_redacted_under_config_keepers () =
   with_temp_dir
   @@ fun base_path ->
@@ -2022,6 +2068,8 @@ let () =
             test_epoch_listener_receives_the_workspace
         ; test_case "secrets are redacted at the storage boundary" `Quick
             test_secrets_are_redacted_at_the_storage_boundary
+        ; test_case "an archived blob reference stays live" `Quick
+            test_an_archived_blob_reference_stays_live
         ; test_case "per-keeper token is redacted under config/keepers" `Quick
             test_per_keeper_token_is_redacted_under_config_keepers
         ; test_case "zero-byte database reads as empty" `Quick test_zero_byte_database_reads_as_empty

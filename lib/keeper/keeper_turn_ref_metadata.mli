@@ -6,6 +6,10 @@
     official-client turn bridged into the checkpoint afterwards carries
     {!bridged_key} on each of its messages ({!Keeper_turn_bridge}).
 
+    A {!bridged_key} value is the bridge's turn reference ([<trace>#<turn>],
+    {!Ids.Turn_ref.to_string}), not a Keeper turn id; read as one, it names
+    the turn for equality only.
+
     Readers compare the value for equality only. The canonical turn store keeps
     an ACP turn under a provisional [acp:<session>:<turn>] id until finalize
     rebinds it to the Keeper turn, and a list rebuilt in between carries that

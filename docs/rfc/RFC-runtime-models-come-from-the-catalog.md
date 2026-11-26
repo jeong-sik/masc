@@ -121,6 +121,7 @@ related: []
 
 - 옛 `[models]` 모양을 읽는 reader·converter·migration 은 만들지 않는다(헌법 `legacy_residue`).
 - 운영 `runtime.toml` 은 새로 쓴다. 운영 workspace 에서는 배정 28건과 레인 9개(후보 57개)가 옛 id 를 부른다. 같이 바꾼다.
+- 런타임 id 를 부르는 곳은 이 밖에도 있다. exact-output 레인 6개의 `slots`·`cli_slots` 22개, `media_failover` 3개, `default` 1개다(`[runtime]` 아래, 11-26 운영 파일 기준). 같이 바꾼다.
 - 장부·턴 기록에 남은 옛 런타임 id 는 과거 사실이다. 바꾸지 않는다.
 - 이 변경의 changelog 는 `Fresh state required` 로 적는다.
 
@@ -190,6 +191,8 @@ related: []
    - 지금 공식 client 행의 `tools-support` 는 모델 표가 답한다(`docs/RUNTIME-TOML-REFERENCE.md` §3, `lib/runtime/runtime_tool_support.ml`). 사람 연동 검증도 이 값을 읽는다(`lib/server/server_person_integrations.ml:47`). 모델 표가 없어지면 이 값의 출처도 정해야 한다.
 5. **보이는 모델이 늘어날 때.** D2 로 카탈로그 계정마다 받는 행이 모두 런타임이 된다. 부팅 점검이나 상태 검사가 런타임마다 도는지 확인해야 한다. 돈다면 레인·배정·기본값이 부르는 런타임만 검사한다.
 6. **계정에서 모델을 숨기기.** 운영자가 어떤 카탈로그 행을 그 계정 목록에서 빼고 싶을 때 계정 묶음 `enabled = false` 를 쓸지 정한다. 이 키는 지금 「손으로 쓰지 않는 내부 값」이다(`docs/RUNTIME-TOML-REFERENCE.md` §4).
+7. **exact-output 레인 슬롯의 변형.** exact-output 레인의 `slots`·`cli_slots` 는 지금 런타임 id 문자열만 받고, 출력 상한은 레인 표의 `max_output_tokens` 가 정한다. 슬롯도 D4 의 레인 후보처럼 표를 받아 effort 같은 값을 실을지 정한다.
+8. **사람 계정 만들기와의 관계.** `RFC-a-persons-api-key-is-their-own-provider-account` 는 사람의 계정을 운영자 provider 항목(template)에서 id 와 홈만 바꿔 만든다. 그때 모델 묶음을 어떻게 옮기는지 읽고, 계정 꼬리표 복사본(§1)이 그 길에서 생기는지 확인한다. 이 RFC 가 그 RFC 의 결정을 바꾸지 않는지도 같이 적는다.
 
 ## 7. 바뀌는 문서
 

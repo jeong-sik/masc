@@ -97,7 +97,7 @@ describe('Inbox › tool approval timeout', () => {
 })
 
 describe('Inbox › gate payload', () => {
-  const queueRow = (extra: Record<string, unknown>) => ({ id: 'ap1', keeper_name: 'k', tool_name: 'bash', ...extra })
+  const queueRow = (extra: Record<string, unknown>) => ({ id: 'ap1', keeper_name: 'k', tool_name: 'bash', sequence: 3, ...extra })
   const payload = (extra: Record<string, unknown>) => ({
     approval_queue_state: { state: 'ready' },
     approval_queue: [],
@@ -132,11 +132,29 @@ describe('Inbox › gate payload', () => {
   it('missing decision_source is not a human decision', () => {
     const gate = decodeGatePayload(payload({
       recent_resolved: [
-        { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve' },
-        { id: 'r2', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', decision_source: 'auto_judge' },
+        { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', resolved_at: 1_795_700_000 },
+        { id: 'r2', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', resolved_at: 1_795_700_000, decision_source: 'auto_judge' },
       ],
     }))
     expect(gate.resolved.map((row) => row.decisionSource)).toEqual([null, 'auto_judge'])
+  })
+
+  it('reads a queue row without a sequence as an unreadable queue, not revision 1', () => {
+    expect(decodeGatePayload(payload({ approval_queue: [queueRow({})] })).pending[0]?.sequence).toBe(3)
+    const gate = decodeGatePayload(payload({ approval_queue: [queueRow({}), queueRow({ id: 'ap2', sequence: undefined })] }))
+    expect(gate.pending).toEqual([])
+    expect(gate.queueError).toContain('sequence')
+  })
+
+  it('reads an audit row without its tool, decision or time as an unreadable history', () => {
+    const good = { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'reject', resolved_at: 1_795_700_000 }
+    const ok = decodeGatePayload(payload({ recent_resolved: [good] }))
+    expect(ok.resolved[0]).toMatchObject({ toolName: 'bash', decision: 'reject', resolvedAt: new Date(1_795_700_000_000).toISOString() })
+    for (const broken of [{ tool_name: undefined }, { decision_kind: 'maybe' }, { resolved_at: 'yesterday' }]) {
+      const gate = decodeGatePayload(payload({ recent_resolved: [good, { ...good, id: 'r2', ...broken }] }))
+      expect(gate.resolved).toEqual([])
+      expect(gate.auditError).not.toBeNull()
+    }
   })
 
   it('reads an unavailable judge lane and its reason', () => {

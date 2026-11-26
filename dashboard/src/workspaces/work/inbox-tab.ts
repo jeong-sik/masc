@@ -171,6 +171,38 @@ function readGateUnavailableReason(stateObj: unknown): string | null {
   )
 }
 
+function decodeDecisionKind(v: unknown): GateResolvedAuditRow['decision'] | null {
+  switch (v) {
+    case 'approve':
+    case 'reject':
+      return v
+    default:
+      return null
+  }
+}
+
+/** One `recent_resolved` row (audit.ml resolved_approval_json_of_audit_event). */
+function decodeResolvedAuditRow(row: unknown): GateResolvedAuditRow | null {
+  if (!isRecord(row)) return null
+  const id = asNonEmptyString(row.id)
+  const keeper = asNonEmptyString(row.keeper_name)
+  const toolName = asNonEmptyString(row.tool_name)
+  const decision = decodeDecisionKind(row.decision_kind)
+  const seconds = asFiniteNumber(row.resolved_at)
+  const date = seconds === null ? null : new Date(seconds * 1000)
+  if (!id || !keeper || !toolName || decision === null || date === null || Number.isNaN(date.getTime())) return null
+  return {
+    id,
+    keeper,
+    toolName,
+    decision,
+    decisionSource: normalizeGateDecisionSource(row.decision_source),
+    reason: asNonEmptyString(row.decision_reason),
+    actor: asNonEmptyString(row.actor),
+    resolvedAt: date.toISOString(),
+  }
+}
+
 export function decodeGatePayload(raw: unknown): {
   pending: GatePendingItem[]
   resolved: GateResolvedAuditRow[]
@@ -181,18 +213,26 @@ export function decodeGatePayload(raw: unknown): {
   judgeLane: GateJudgeLane | null
 } {
   if (!isRecord(raw)) throw new Error('Channel Gate 응답 형식이 잘못되었습니다.')
-  const queueError = readGateUnavailableReason(raw.approval_queue_state)
+  let queueError = readGateUnavailableReason(raw.approval_queue_state)
     ?? (Array.isArray(raw.approval_queue) ? null : '응답에서 대기 목록을 확인할 수 없습니다.')
-  const auditError = readGateUnavailableReason(raw.recent_resolved_state)
+  let auditError = readGateUnavailableReason(raw.recent_resolved_state)
     ?? (Array.isArray(raw.recent_resolved) ? null : '응답에서 결정 이력을 확인할 수 없습니다.')
-  const pending: GatePendingItem[] = []
-  if (Array.isArray(raw.approval_queue)) {
+  // The server writes id, keeper_name, tool_name and sequence on every queue
+  // row (keeper_approval_queue_projection.ml) and fails the whole history when
+  // one audit row breaks its contract (audit.ml project_resolved_rows). A row
+  // without them is the same failure here, not a row to skip or fill in.
+  let pending: GatePendingItem[] = []
+  if (queueError === null && Array.isArray(raw.approval_queue)) {
     for (const row of raw.approval_queue) {
-      if (!isRecord(row)) continue
-      const id = asNonEmptyString(row.id)
-      const keeper = asNonEmptyString(row.keeper_name)
-      const toolName = asNonEmptyString(row.tool_name)
-      if (!id || !keeper || !toolName) continue
+      const id = isRecord(row) ? asNonEmptyString(row.id) : null
+      const keeper = isRecord(row) ? asNonEmptyString(row.keeper_name) : null
+      const toolName = isRecord(row) ? asNonEmptyString(row.tool_name) : null
+      const sequence = isRecord(row) ? asSafeInt(row.sequence) : null
+      if (!isRecord(row) || !id || !keeper || !toolName || sequence === null) {
+        queueError = '대기 목록에 서버 계약과 다른 줄이 있어요(id·keeper_name·tool_name·sequence).'
+        pending = []
+        break
+      }
       const sumStatus = isRecord(row.summary_status) ? row.summary_status : null
       const sumObj = sumStatus && isRecord(sumStatus.summary) ? sumStatus.summary : null
       pending.push({
@@ -203,7 +243,7 @@ export function decodeGatePayload(raw: unknown): {
         waitingSec: asFiniteNumber(row.waiting_s),
         phase: decodeApprovalQueuePhase(row.phase),
         disposition: normalizeKeeperSummaryAttemptDisposition(row.summary_attempt_disposition),
-        sequence: asSafeInt(row.sequence) ?? 1,
+        sequence,
         taskId: asNonEmptyString(row.task_id),
         goalId: asNonEmptyString(row.goal_id),
         summaryText: sumObj ? asNonEmptyString(sumObj.context_summary) : null,
@@ -214,27 +254,16 @@ export function decodeGatePayload(raw: unknown): {
       })
     }
   }
-  const resolved: GateResolvedAuditRow[] = []
-  if (Array.isArray(raw.recent_resolved)) {
+  let resolved: GateResolvedAuditRow[] = []
+  if (auditError === null && Array.isArray(raw.recent_resolved)) {
     for (const row of raw.recent_resolved) {
-      if (!isRecord(row)) continue
-      const id = asNonEmptyString(row.id)
-      const keeper = asNonEmptyString(row.keeper_name)
-      if (!id || !keeper) continue
-      const seconds = asFiniteNumber(row.resolved_at)
-      const date = seconds === null ? null : new Date(seconds * 1000)
-      resolved.push({
-        id,
-        keeper,
-        toolName: asString(row.tool_name, ''),
-        decision: asString(row.decision_kind ?? row.decision, ''),
-        decisionSource: normalizeGateDecisionSource(row.decision_source),
-        reason: asNonEmptyString(row.decision_reason),
-        actor: asNonEmptyString(row.actor),
-        resolvedAt: date !== null && Number.isFinite(date.getTime())
-          ? date.toISOString()
-          : asString(row.resolved_at, ''),
-      })
+      const decoded = decodeResolvedAuditRow(row)
+      if (decoded === null) {
+        auditError = '결정 이력에 서버 계약과 다른 줄이 있어요(id·keeper_name·tool_name·decision_kind·resolved_at).'
+        resolved = []
+        break
+      }
+      resolved.push(decoded)
     }
   }
   const page = isRecord(raw.recent_resolved_page) ? raw.recent_resolved_page : null

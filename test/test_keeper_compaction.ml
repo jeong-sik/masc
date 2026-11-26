@@ -1655,9 +1655,11 @@ let test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request () =
    row. When no row's turn is in the history, as with no row or rows that
    still carry ACP turn ids, the summary takes all of the history and the
    start holds it and every row: those rows may repeat the summarized turns,
-   and summarizing them again could make an older request the last one. An
-   overflow retry marks its run compacted once an epoch commits. With the
-   canonical turn store
+   and summarizing them again could make an older request the last one.
+   When the handoff list cannot be read or compacted after the history
+   summary, every row stays and the start does not count as compacted, so an
+   overflow retry compacts again on its next shrink. With the canonical turn
+   store
    unreadable they compact the history, leaving its most recent atoms for
    the start, which sends it. An unreadable compaction store skips the
    compaction, which would fail on the same store. *)
@@ -1704,7 +1706,9 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
             ~refused_sent_bytes:None
             ~capacity:200_000
             ~initial_messages:history;
-          check bool "overflow: a committed epoch marks the run compacted"
+          check bool
+            (Printf.sprintf "%s after %d epochs: the run counts as compacted when an epoch commits"
+               keeper_id epochs_before)
             (epoch_count keeper_id > epochs_before) !already_compacted )
     ]
   in
@@ -1741,85 +1745,90 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        let fresh_state = producer ^ "-after-fresh-state" in
        commit_rows ~keepers_dir ~keeper_id:fresh_state [ "k#2"; "k#3" ];
        compact_for fresh_state;
-       check (list string) (producer ^ ": the history before the rows, then the handoff list")
+       check (list string) (fresh_state ^ ": the history before the rows, then the handoff list")
          [ "message_history"; "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:fresh_state);
-       check (list string) (producer ^ ": the history summary stops before the first row's turn")
+       check (list string) (fresh_state ^ ": the history summary stops before the first row's turn")
          [ "k#1"; "k#1"; "k#1" ] (turns_archived_by ~epoch:1 fresh_state);
-       check bool (producer ^ ": k#1, which no row holds, with its tool round") true
+       check bool (fresh_state ^ ": k#1, which no row holds, with its tool round") true
          (archives_a_tool_round fresh_state);
-       check bool (producer ^ ": then the oldest row") true (archives_the_answer_to "k#2" fresh_state);
-       check bool (producer ^ ": leaving the newest") false (archives_the_answer_to "k#3" fresh_state);
-       check string (producer ^ ": whose last request is k#2's") "ask k#2"
+       check bool (fresh_state ^ ": then the oldest row") true (archives_the_answer_to "k#2" fresh_state);
+       check bool (fresh_state ^ ": leaving the newest") false (archives_the_answer_to "k#3" fresh_state);
+       check string (fresh_state ^ ": whose last request is k#2's") "ask k#2"
          (latest_intent fresh_state);
-       check int (producer ^ ": for the start, after the anchor") 3 (start_length fresh_state);
+       check int (fresh_state ^ ": the start holds the anchor and k#3's row") 3
+         (start_length fresh_state);
        commit_rows ~keepers_dir ~keeper_id:fresh_state [ "k#4" ];
        compact_for fresh_state;
-       check (list string) (producer ^ ": once a summary applies, the handoff list alone")
+       check (list string) (fresh_state ^ ": once a summary applies, the handoff list alone")
          [ "message_history"; "canonical_turns"; "canonical_turns" ]
          (epoch_frames ~keepers_dir ~keeper_id:fresh_state);
-       check bool (producer ^ ": through k#3") true (archives_the_answer_to "k#3" fresh_state);
-       check bool (producer ^ ": leaving k#4's row") false (archives_the_answer_to "k#4" fresh_state);
-       check string (producer ^ ": whose last request is k#3's") "ask k#3" (latest_intent fresh_state);
-       check int (producer ^ ": for the start, after the anchor") 3 (start_length fresh_state);
+       check bool (fresh_state ^ ": through k#3") true (archives_the_answer_to "k#3" fresh_state);
+       check bool (fresh_state ^ ": leaving k#4's row") false (archives_the_answer_to "k#4" fresh_state);
+       check string (fresh_state ^ ": whose last request is k#3's") "ask k#3" (latest_intent fresh_state);
+       check int (fresh_state ^ ": the start holds the anchor and k#4's row") 3
+         (start_length fresh_state);
        let one_row = producer ^ "-one-row" in
        commit_rows ~keepers_dir ~keeper_id:one_row [ "k#3" ];
        compact_for one_row;
-       check (list string) (producer ^ ": a handoff list of one row is left whole")
+       check (list string) (one_row ^ ": a handoff list of one row is left whole")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:one_row);
-       check (list string) (producer ^ ": after the history before it is summarized")
+       check (list string) (one_row ^ ": after the history before it is summarized")
          [ "k#1"; "k#1"; "k#1"; "k#2"; "k#2"; "k#2" ] (turns_archived_by ~epoch:1 one_row);
-       check int (producer ^ ": so the start holds the summary and the row") 3
+       check int (one_row ^ ": so the start holds the summary and the row") 3
          (start_length one_row);
        let current_turn = producer ^ "-with-the-current-turn-row" in
        commit_rows ~keepers_dir ~keeper_id:current_turn [ "k#2"; "k#3"; "acp:sess-1:4" ];
        compact_for current_turn;
-       check (list string) (producer ^ ": rows after the history are compacted after it")
+       check (list string) (current_turn ^ ": rows after the history are compacted after it")
          [ "message_history"; "canonical_turns" ]
          (epoch_frames ~keepers_dir ~keeper_id:current_turn);
-       check bool (producer ^ ": through k#3") true (archives_the_answer_to "k#3" current_turn);
-       check (list string) (producer ^ ": leaving the current turn's row")
+       check bool (current_turn ^ ": through k#3") true (archives_the_answer_to "k#3" current_turn);
+       check (list string) (current_turn ^ ": leaving the current turn's row")
          [ "acp:sess-1:4" ]
          (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:current_turn)));
-       check int (producer ^ ": for the start, after the anchor") 3 (start_length current_turn);
+       check int (current_turn ^ ": for the start, after the anchor") 3 (start_length current_turn);
        let provisional = producer ^ "-acp-turn-id-row" in
        commit_rows ~keepers_dir ~keeper_id:provisional [ "acp:sess-1:4" ];
        compact_for provisional;
-       check (list string) (producer ^ ": a row under an id the history lacks leaves the history")
+       check (list string) (provisional ^ ": a row under an id the history lacks leaves the history")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:provisional);
-       check bool (producer ^ ": all of it") true (archives_the_answer_to "k#3" provisional);
-       check (list string) (producer ^ ": and the row")
+       check bool (provisional ^ ": all of it") true (archives_the_answer_to "k#3" provisional);
+       check (list string) (provisional ^ ": and the row")
          [ "acp:sess-1:4" ] (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:provisional)));
-       check int (producer ^ ": which the start holds after the anchor") 3 (start_length provisional);
+       check int (provisional ^ ": which the start holds after the anchor") 3 (start_length provisional);
        let stale = producer ^ "-acp-turn-id-rows" in
        commit_rows ~keepers_dir ~keeper_id:stale [ "acp:sess-1:1"; "acp:sess-1:2"; "acp:sess-1:3" ];
        compact_for stale;
-       check (list string) (producer ^ ": rows that may repeat the summarized turns stay whole")
+       check (list string) (stale ^ ": rows that may repeat the summarized turns stay whole")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:stale);
-       check (list string) (producer ^ ": all of them")
+       check (list string) (stale ^ ": all of them")
          [ "acp:sess-1:1"; "acp:sess-1:2"; "acp:sess-1:3" ]
          (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:stale)));
-       check string (producer ^ ": so no older request becomes the last one") "ask k#3"
+       check string (stale ^ ": so no older request becomes the last one") "ask k#3"
          (latest_intent stale);
-       check int (producer ^ ": and the start holds the summary and every row") 7
+       check int (stale ^ ": and the start holds the summary and every row") 7
          (start_length stale);
        let from_the_start = producer ^ "-rows-from-the-first-turn" in
        commit_rows ~keepers_dir ~keeper_id:from_the_start turns;
        compact_for from_the_start;
-       check (list string) (producer ^ ": rows from the first turn on are the canonical turn list")
+       check (list string) (from_the_start ^ ": rows from the first turn on are the canonical turn list")
          [ "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:from_the_start);
-       check bool (producer ^ ": which holds no tool round") false
+       check bool (from_the_start ^ ": which holds no tool round") false
          (archives_a_tool_round from_the_start);
-       check bool (producer ^ ": through k#2") true (archives_the_answer_to "k#2" from_the_start);
-       check bool (producer ^ ": leaving k#3's row") false (archives_the_answer_to "k#3" from_the_start);
-       check int (producer ^ ": for the start, after the anchor") 3 (start_length from_the_start);
+       check bool (from_the_start ^ ": through k#2") true (archives_the_answer_to "k#2" from_the_start);
+       check bool (from_the_start ^ ": leaving k#3's row") false (archives_the_answer_to "k#3" from_the_start);
+       check int (from_the_start ^ ": for the start, after the anchor") 3 (start_length from_the_start);
+       compact_for from_the_start;
+       check (list string) (from_the_start ^ ": a list of two atoms left commits nothing")
+         [ "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:from_the_start);
        let without_rows = producer ^ "-without-rows" in
        compact_for without_rows;
-       check (list string) (producer ^ ": without rows it compacts the message history")
+       check (list string) (without_rows ^ ": without rows it compacts the message history")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:without_rows);
-       check bool (producer ^ ": the history it was given") true (archives_a_tool_round without_rows);
-       check bool (producer ^ ": all of it, since the start holds only the anchor") true
+       check bool (without_rows ^ ": the history it was given") true (archives_a_tool_round without_rows);
+       check bool (without_rows ^ ": all of it, since the start holds only the anchor") true
          (archives_the_answer_to "k#3" without_rows);
-       check int (producer ^ ": which is then the whole start") 1 (start_length without_rows);
+       check int (without_rows ^ ": which is then the whole start") 1 (start_length without_rows);
        let unreadable = producer ^ "-unreadable-rows" in
        exec_all
          (Store.db_path ~keepers_dir ~keeper_id:unreadable)
@@ -1830,13 +1839,13 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
             compaction_epoch_id INTEGER, created_at REAL NOT NULL)"
          ];
        compact_for unreadable;
-       check (list string) (producer ^ ": an unreadable store leaves the message history too")
+       check (list string) (unreadable ^ ": an unreadable store leaves the message history too")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:unreadable);
-       check bool (producer ^ ": compacted from the history it was given") true
+       check bool (unreadable ^ ": compacted from the history it was given") true
          (archives_a_tool_round unreadable);
-       check bool (producer ^ ": up to its most recent atoms") false
+       check bool (unreadable ^ ": up to its most recent atoms") false
          (archives_the_answer_to "k#3" unreadable);
-       check int (producer ^ ": since the start sends that history")
+       check int (unreadable ^ ": since the start sends that history")
          (List.length history) (start_length unreadable))
     producers;
   let broken = "unreadable-compaction-store" in
@@ -1850,7 +1859,34 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
   check bool "an unreadable compaction store skips the compaction" true
     (match Keeper_acp_runtime.For_testing.next_start_list ~keepers_dir ~keeper_id:broken ~history with
      | Error (C.Schema_not_current { found = 0L; _ }) -> true
-     | Ok _ | Error _ -> false)
+     | Ok _ | Error _ -> false);
+  let module R = Keeper_acp_runtime.For_testing in
+  let trigger =
+    R.overflow_trigger
+      ~input_limit
+      ~previous_capacity:400_000
+      ~refused_sent_bytes:None
+      ~capacity:200_000
+  in
+  let after_summary keeper_id handoff =
+    match R.compact_rows_after_summary ~keepers_dir ~keeper_id ~trigger handoff with
+    | R.Start_compacted -> "start compacted"
+    | R.Nothing_new -> "nothing new"
+    | R.Rows_kept_whole -> "rows kept whole"
+  in
+  let rows_of_stale_ids = Store.load_handoff_context ~keepers_dir ~keeper_id:"rollover-acp-turn-id-rows" in
+  check string "after the summary, a handoff list that compacts shrinks the start" "start compacted"
+    (after_summary "after-summary-compacts" rows_of_stale_ids);
+  check string "after the summary, a compaction that fails keeps every row" "rows kept whole"
+    (after_summary broken rows_of_stale_ids);
+  check string "after the summary, an unreadable handoff list keeps every row" "rows kept whole"
+    (after_summary
+       "after-summary-unreadable"
+       (Error (Store.Sqlite_error { operation = "load_handoff_context"; detail = "busy" })));
+  check string "after the summary, a summary that does not apply keeps every row" "rows kept whole"
+    (after_summary
+       "after-summary-not-applied"
+       (Ok { Store.anchor = None; turns_after_anchor = []; messages = [] }))
 ;;
 
 let test_canonical_turn_store_compaction_watermark_and_failover () =

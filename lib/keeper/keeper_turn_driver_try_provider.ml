@@ -952,15 +952,12 @@ type in_turn_overflow_demotion =
 
 (* Conservative bytes-per-token factor translating a provider's declared token
    input budget into {!Keeper_compaction.Explicit_hard_limit}'s byte contract
-   so anchor budgets are never undersized by mixing token and byte units. *)
-let compaction_bytes_per_token = 4
-
-let compaction_bytes_of_tokens tokens =
-  if tokens <= 0
-  then 0
-  else if tokens > max_int / compaction_bytes_per_token
-  then max_int
-  else tokens * compaction_bytes_per_token
+   so anchor budgets are never undersized by mixing token and byte units.
+   Owner lives in [Keeper_compaction]; this module aliases the conversion
+   so the two token→byte conversions cannot drift. The raw factor alias
+   is intentionally not kept here: it was unused and broke the build under
+   warnings-as-errors; the factor is owned in [Keeper_compaction] only. *)
+let compaction_bytes_of_tokens = Keeper_compaction.compaction_bytes_of_tokens
 ;;
 
 type attempt_state =

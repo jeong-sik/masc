@@ -12,10 +12,7 @@ let count_tokens_url (config : Provider_config.t) =
     config.base_url ^ path ^ "/count_tokens" ^ query
 ;;
 
-type measurement_transport_stage =
-  | Measurement_before_dispatch
-  | Measurement_dispatch_started
-  | Measurement_response_received of int
+include Measurement_types
 
 type count_dispatch_error =
   | Count_failed of Input_token_count.error * measurement_transport_stage
@@ -211,23 +208,11 @@ let count_gemini_staged
       ()
 ;;
 
-type completion_request_measurement =
-  { input_count : Input_token_count.count
-  ; output_token_receipt : Types.output_token_receipt
-  }
-
-type completion_request_error =
-  | Input_count_failed of Input_token_count.error
-  | Output_token_resolution_failed of Types.required_output_token_error
-  | Invalid_completion_request of string
-
 type completion_request_dispatch_error =
   | Completion_request_failed of completion_request_error * measurement_transport_stage
 
 let supports_completion_request_measurement (config : Provider_config.t) =
-  match config.kind with
-  | Provider_config.Anthropic | Provider_config.Kimi | Provider_config.Gemini -> true
-  | Provider_config.OpenAI_compat | Provider_config.Ollama | Provider_config.Glm -> false
+  Measurement_types.supports_admission_measurement config
 ;;
 
 let measure_completion_request_staged

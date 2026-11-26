@@ -50,7 +50,8 @@ type config =
   ; autocompact_window : autocompact_window option
   }
 
-let default_timeout_s = 300.0
+let default_timeout_s = Runtime_timeout_budget.claude_default_turn_timeout_s
+let default_admission_timeout_s = Runtime_timeout_budget.claude_default_admission_timeout_s
 
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
@@ -66,7 +67,7 @@ let default_config ~cwd =
   ; model = None
   ; system_prompt = None
   ; native = Runtime_native_tools.claude_code_default
-  ; admission_timeout_s = default_timeout_s
+  ; admission_timeout_s = default_admission_timeout_s
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
   ; autocompact_window = None

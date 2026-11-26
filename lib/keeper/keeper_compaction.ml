@@ -397,6 +397,8 @@ let deterministic_fold ~previous ~evicted =
 
 let default_anchor_max_bytes = 32_768
 
+let compaction_bytes_per_token = 4
+
 let saturating_mul a b =
   if a <= 0 || b <= 0
   then 0
@@ -405,6 +407,15 @@ let saturating_mul a b =
   else a * b
 ;;
 
+let compaction_bytes_of_tokens tokens =
+  saturating_mul (max 0 tokens) compaction_bytes_per_token
+;;
+
+(* Structural 1/4 anchor-window ratio. This is intentionally NOT
+   [compaction_bytes_per_token]: that factor translates provider tokens
+   into bytes, while this quarters a byte window into an anchor budget.
+   Both happen to be 4 today but they are different concepts; retuning
+   one must not silently re-size the other. *)
 let anchor_budget_for_window ~capacity_bytes ~reserved_bytes =
   max 0 ((capacity_bytes - reserved_bytes) / 4)
 ;;
@@ -1969,8 +1980,9 @@ let compact_evicted_messages
   | [] -> Ok None
   | _ :: _ ->
     (* Always bound the committed anchor even when the provider omits a token
-       limit; convert provider token limits to bytes (tok * 4) before applying
-       the structural 1/4 anchor window ratio. *)
+       limit; convert provider token limits to bytes via
+       [compaction_bytes_of_tokens] before applying the structural
+       window ratio. *)
     let effective_budget =
       match max_anchor_bytes with
       | Some n -> max 0 n
@@ -1980,7 +1992,7 @@ let compact_evicted_messages
            anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
          | Provider_context_overflow { provider_limit_tokens = Some tok }
          | Provider_counted_window { limit_tokens = tok; used_tokens = _ } ->
-           let capacity_bytes = saturating_mul (max 0 tok) 4 in
+           let capacity_bytes = compaction_bytes_of_tokens tok in
            anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
          | Provider_context_overflow { provider_limit_tokens = None } ->
            default_anchor_max_bytes)

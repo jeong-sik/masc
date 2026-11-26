@@ -6935,9 +6935,12 @@ let acp_runtime_toml ?(options = "") () =
     options
 ;;
 
-(* [admission-timeout-s] is the ACP initialize admission budget. Absent it
-   keeps the hardcoded initialize value [Runtime_acp_client.init_timeout_s]
-   (30.0), so an existing config behaves exactly as before. *)
+(* [admission-timeout-s] is the ACP admission budget: the wait for
+   [initialize], [session/new], [session/load], [session/resume],
+   [session/set_mode], [session/set_model], [session/set_config_option] and the
+   default wait of [session/close]. Absent it keeps
+   [Runtime_acp_client.default_admission_timeout_s] (30.0), so an existing
+   config behaves exactly as before. *)
 let test_acp_admission_timeout_defaults_to_init_timeout () =
   with_temp_runtime_toml (acp_runtime_toml ()) (fun path ->
     without_an_installed_client @@ fun () ->
@@ -6948,7 +6951,7 @@ let test_acp_admission_timeout_defaults_to_init_timeout () =
        | Runtime_execution.Acp config ->
          check (float 0.0) "prompt budget keeps its default" 180.0 config.timeout_s;
          check (float 0.0) "admission budget keeps the init default"
-           Runtime_acp_client.init_timeout_s config.admission_timeout_s
+           Runtime_acp_client.default_admission_timeout_s config.admission_timeout_s
        | Runtime_execution.Agent_core _
        | Runtime_execution.Claude_code _
        | Runtime_execution.Codex_app_server _

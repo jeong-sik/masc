@@ -22,6 +22,7 @@
   responses_reasoning_stream
   output_token_wire_internal
   request_artifact_internal
+  measurement_types
   exact_output_count_tokens
   exact_output_measurement_receipt
   exact_output_measurement_transport

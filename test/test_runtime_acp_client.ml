@@ -2400,6 +2400,75 @@ for line in sys.stdin:
         check bool "PID-tagged --gemini-dir cleaned up on close" false (Sys.file_exists gdir))))
 ;;
 
+(* Behavioral F1 proof: a non-default [admission_timeout_s] must reach the
+   [session/new] RPC deadline. The mock answers [initialize] immediately (so
+   [start] succeeds) but delays [session/new] past the configured 0.5s budget;
+   the client must fail with [Timeout { timeout_s = 0.5 }] — the configured
+   value, not the module default. Without the SSOT fix the client would hang
+   until the hardcoded 30s literal (this test would never finish). *)
+let test_nondefault_admission_timeout_reaches_session_new () =
+  let tmp = Filename.temp_dir "acp-admission-" "" in
+  let mock_script = Filename.concat tmp "mock_acp.py" in
+  let script_body =
+    {|#!/usr/bin/env python3
+import json, sys, time
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    if "method" in msg:
+        m = msg["method"]
+        req_id = msg.get("id")
+        if m == "initialize":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "protocolVersion": 1,
+                "agentCapabilities": {"loadSession": True}
+            }})
+        elif m == "session/new":
+            time.sleep(2)
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "sessionId": "sess-1",
+                "configOptions": []
+            }})
+|}
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        ; admission_timeout_s = 0.5
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "mock ACP start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        (match Runtime_acp_client.new_session client ~cwd:tmp () with
+         | Error (Runtime_acp_client.Timeout { stage; timeout_s }) ->
+           check string "timeout stage is session/new" "session/new" stage;
+           check bool "timeout_s is the configured non-default value" true
+             (Float.abs (timeout_s -. 0.5) < 0.0001)
+         | Ok _ -> fail "session/new must time out after 0.5s"
+         | Error err ->
+           failf "expected Timeout, got %s" (Runtime_acp_client.error_to_string err));
+        Runtime_acp_client.close client)))
+;;
+
 let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
   (* 1. Shrink retry with force_fresh_retry=true (previous_settlement=None) loads
         compacted handoff anchor and compacts at most ONCE across shrink retries. *)
@@ -5782,6 +5851,8 @@ let () =
             test_pool_key_switch_evicts_superseded_keeper_entry
         ; test_case "mock ACP child PGID reap, sessionId perm check & PID-tagged gemini dir" `Quick
             test_mock_acp_child_pgid_reap_session_perm_and_pid_tagged_dir
+        ; test_case "non-default admission_timeout_s reaches session/new deadline" `Quick
+            test_nondefault_admission_timeout_reaches_session_new
         ] )
     ; ( "rollover_and_vibe310"
       , [ test_case "80% hysteresis rollover, durable marker & ContextOverflow classification" `Quick

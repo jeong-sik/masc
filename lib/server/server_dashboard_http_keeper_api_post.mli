@@ -117,6 +117,7 @@ val handle_keeper_secrets_post :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_github_login_post :
+  sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 

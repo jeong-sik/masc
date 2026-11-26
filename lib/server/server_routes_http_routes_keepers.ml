@@ -192,7 +192,7 @@ let add_routes ~sw ~clock router =
 
   (* What one Keeper is waiting on a human for. *)
   |> Server_route.get (Server_route.Tool { tool_name = "masc_ask_status" }) "/api/v1/keepers/asks" (fun state request reqd ->
-         Server_routes_http_keeper_asks.handle_keeper_asks_list ~clock state request reqd)
+         Server_routes_http_keeper_asks.handle_keeper_asks_list ~sw ~clock state request reqd)
 
   (* Answers a Keeper's question. The operator may be at any surface; the
      log settles concurrent submissions on first write. *)
@@ -357,7 +357,7 @@ let add_routes ~sw ~clock router =
        | Keeper_api.Keeper_post_github_login ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
-               Keeper_api.handle_keeper_github_login_post ~clock state req reqd)
+               Keeper_api.handle_keeper_github_login_post ~sw ~clock state req reqd)
              request reqd
        | Keeper_api.Keeper_post_github_token ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -69,30 +69,6 @@ let github_login_stream_send response event json =
   | Server_sse_response.Written | Closed | Stalled -> ()
 ;;
 
-(* An HTTP/1.1 response hears that its client left only from a write that is
-   not taken (Server_sse_response.await_closed). A login is quiet for most of
-   its life -- while its lane is shaped, and while gh waits for the operator to
-   approve the one-time code -- so with no write of its own a closed window
-   went unnoticed until the login timed out, and a Remote_ssh endpoint kept its
-   gh and its session that long (#32910). Once a keepalive is not taken the
-   response is closed, [stream_login] sees it and stops its stage, and the
-   keepalive stops too.
-
-   An HTTP/2 stream that ends under the response cancels this fiber with the
-   stream's own end. A response that is over ends the login quietly, as
-   [stream_login] ends it, so that end stops the keepalive instead of failing
-   the login's switch. *)
-let github_login_keepalive ~clock response =
-  let rec keep_alive () =
-    Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-    match Server_sse_response.send response Server_sse_pump.keepalive_frame with
-    | Server_sse_response.Written -> keep_alive ()
-    | Closed | Stalled -> `Stop_daemon
-  in
-  try keep_alive () with
-  | Eio.Cancel.Cancelled _ when Server_sse_response.is_closed response -> `Stop_daemon
-;;
-
 (* Run [run] for the Keeper the request path names, once its meta has been
    read with [read_meta]. [extract_keeper_name_for_suffix] answers "" both for
    a path with no name and for a name [Keeper_config.validate_name] refuses, so
@@ -109,7 +85,7 @@ let with_existing_keeper ~read_meta ~suffix state req reqd run =
     | Ok (Some meta) -> run ~config ~name ~meta
 ;;
 
-let handle_keeper_github_login_post ~clock state req reqd =
+let handle_keeper_github_login_post ~sw ~clock state req reqd =
   (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned and
      a persisted read answers with the default, which would send every
      Keeper's login to this host. *)
@@ -128,17 +104,17 @@ let handle_keeper_github_login_post ~clock state req reqd =
       | Error message -> respond_error ~status:`Bad_request reqd message
       | Ok scopes ->
       let headers = github_login_stream_request_headers req in
+      (* A login is quiet for most of its life: while its lane is shaped, and
+         while gh waits for the operator to approve the one-time code. The
+         response's keepalive is the write that tells an HTTP/1.1 response
+         its window was closed (#32910): once one is not taken the response
+         is closed, and [stream_login] sees it and stops its stage. *)
       let response =
-        Server_sse_response.respond ~clock
+        Server_sse_response.respond ~sw ~clock
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
           reqd (Httpun.Response.create ~headers `OK)
       in
       Server_sse_response.close_after response (fun () ->
-        (* The keepalive lives exactly as long as the login: the switch
-           cancels it once the login has ended. *)
-        Eio.Switch.run (fun login_sw ->
-          Eio.Fiber.fork_daemon ~sw:login_sw (fun () ->
-            github_login_keepalive ~clock response);
           match
             Keeper_github_identity.stream_login
               ~config
@@ -158,7 +134,7 @@ let handle_keeper_github_login_post ~clock state req reqd =
               response
               "error"
               (`Assoc [ "message", `String message ])
-          | Error _ -> ())))
+          | Error _ -> ()))
 ;;
 
 let handle_keeper_github_token_post state req reqd body_str =

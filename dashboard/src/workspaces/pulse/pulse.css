@@ -161,7 +161,12 @@
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  min-height: 28px;
   flex: 1 1 auto;
+}
+
+.pulse-card-title-group .pulse-pill {
+  flex: none;
 }
 
 .pulse-card-head h2 {
@@ -172,6 +177,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .pulse-pill {
@@ -217,6 +224,16 @@
   background: var(--info-soft);
   border-color: var(--info-border);
   color: var(--info-fg);
+}
+
+.pulse-pill[data-stale="false"] {
+  visibility: hidden;
+}
+
+.pulse-pill[data-ctx="true"] {
+  min-width: 80px;
+  justify-content: center;
+  text-align: center;
 }
 
 /* Attention queue */

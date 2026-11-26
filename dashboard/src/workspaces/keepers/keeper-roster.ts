@@ -59,7 +59,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
       <div class="kp-roster-head">
         <div class="kp-roster-top">
           <h2 class="kp-roster-title">
-            Keepers (${items.length})
+            <span class="kp-roster-title-text" title=${`Keepers (${items.length})`}>Keepers (${items.length})</span>
             ${props.roster.kind === 'value' && props.roster.stale && html`
               <span class="kp-pill" data-tone="warn">지연됨</span>
             `}
@@ -185,7 +185,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
                         </span>
                       </span>
                       <span class="kp-roster-right">
-                        <span class="kp-pill" data-tone=${ctxTone} title=${ctxDetail.tooltip}>
+                        <span class="kp-pill" data-ctx="true" data-tone=${ctxTone} title=${ctxDetail.tooltip}>
                           Ctx ${ctxLabel}
                         </span>
                         <span class="kp-roster-sub" title=${rightSub}>

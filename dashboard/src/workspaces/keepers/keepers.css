@@ -40,11 +40,12 @@
 
 .kp-roster-top {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   min-width: 0;
+  min-height: 32px;
 }
 
 .kp-roster-title {
@@ -52,6 +53,36 @@
   font-size: var(--fs-13);
   font-weight: 600;
   color: var(--fg-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.kp-roster-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kp-roster-title .kp-pill {
+  flex: none;
+}
+
+.kp-roster-top .btn-primary {
+  flex: none;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-12);
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .kp-input {
@@ -112,6 +143,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.25;
 }
 
 .kp-mode-btn[aria-pressed="true"] {
@@ -335,6 +371,15 @@
 .kp-pill[data-tone="info"] { background: var(--info-soft); border-color: var(--info-border); color: var(--info-fg); }
 .kp-pill[data-tone="stalled"] { background: var(--stalled-soft); border-color: var(--stalled-border); color: var(--stalled-fg); }
 
+.kp-pill[data-ctx="true"] {
+  min-width: 80px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+
 .kp-notice {
   display: block;
   padding: var(--sp-3) var(--sp-4);
@@ -362,12 +407,23 @@
   gap: var(--sp-1);
 }
 
+.kp-lifecycle-bar > .btn-primary,
+.kp-lifecycle-bar > .btn-ghost,
+.kp-lifecycle-bar > .kp-btn-danger {
+  min-height: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.25;
+}
+
 .kp-btn-danger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--button-danger-border);
   background: var(--button-danger-bg);

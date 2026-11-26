@@ -229,6 +229,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               <span class="kp-pill">${keeper.runtime_id}</span>
               <span
                 class="kp-pill"
+                data-ctx="true"
                 data-tone=${ctxObs.kind === 'value' && ctxObs.data >= 80 ? 'warn' : 'brass'}
                 title=${ctxDetail.tooltip}
               >

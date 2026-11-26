@@ -116,16 +116,6 @@ val host_root_abs_of_meta :
     hardened Docker backend. *)
 val container_root : string -> string
 
-(** [host_path_of_visible_path ~config ~agent_name raw_path] maps a
-    sandbox-visible absolute path for [agent_name] back to the
-    backend-scoped host path used for validation. Non-matching absolute
-    paths and relative paths are returned unchanged. *)
-val host_path_of_visible_path :
-  config:Workspace.config ->
-  agent_name:string ->
-  string ->
-  string
-
 (** {1 Construction} *)
 
 (** [of_meta ~config ~meta] derives the full sandbox record from a

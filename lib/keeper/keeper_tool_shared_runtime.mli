@@ -33,26 +33,6 @@ val keeper_default_write_root
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
-(** [keeper_observation_sandbox_root ~config ~meta] is the keeper's
-    playground sandbox root anchored at the normalised project root.
-    Pure path computation for the observation write path — unlike
-    [keeper_playground_root] it never creates the sandbox bundle. *)
-val keeper_observation_sandbox_root
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-
-(** [keeper_observation_host_path_of_visible_path ~config ~meta path] maps a
-    Docker keeper's sandbox-visible absolute path to the corresponding host
-    playground path without creating the sandbox bundle. Keepers whose profile
-    is not Docker, relative paths, and unrelated absolute paths are returned
-    unchanged. *)
-val keeper_observation_host_path_of_visible_path
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-  -> string
-
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 
@@ -75,14 +55,17 @@ val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_exist
 
     [host_path_of_keeper_visible_path ~config ~meta ?host_cwd path] is the
     single owner of turning a path a Keeper names into a host path (#29964).
-    Every Keeper tool that takes a path or a cwd resolves it here, so one
-    spelling names one host location whichever tool receives it.
+    Every Keeper tool that takes a path or a cwd resolves it here, and so
+    does the observation attribution of a tool call, so one spelling names
+    one host location whichever reader receives it (#52082).
 
     - A Docker Keeper's container-visible absolute path maps to its host
       mount; any other absolute path keeps its identity.
     - A relative path joins [host_cwd] (a host directory this function
       already returned) when given, and the Keeper's playground root
       otherwise.
+    - The host mount and the playground root are both
+      {!Keeper_sandbox.host_root_abs_of_meta}.
     - [None] when [path] is blank: the caller named nothing.
 
     The result is not confined. Pass it to a resolver below, or to

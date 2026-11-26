@@ -92,11 +92,6 @@ let host_root_rel_of_config_agent ~config ~agent_name =
     ~base_path:config.Workspace.base_path
     ~agent_name
 
-let host_root_abs_of_config_agent ~config ~agent_name =
-  Keeper_sandbox_config.host_root_abs_of_agent
-    ~base_path:config.Workspace.base_path
-    ~agent_name
-
 let host_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
 
@@ -106,36 +101,6 @@ let host_root_abs_of_meta ~(config : Workspace.config)
 
 let container_root name =
   Keeper_sandbox_config.container_root_of_agent ~agent_name:name
-
-let host_path_of_visible_path ~config ~agent_name raw_path =
-  if Filename.is_relative raw_path
-  then raw_path
-  else
-    match tree_location_of_backend (backend_of_config_agent ~config ~agent_name) with
-    (* The only host-side namespace such a keeper has is its bookkeeping
-       bundle, so identity is the truthful mapping; the endpoint spelling is
-       [Keeper_remote_path]'s, applied by the remote lane on the way out and
-       back. *)
-    | Endpoint_owned -> raw_path
-    (* The sandbox mounts the keeper's host root at a guest path, so a visible
-       path maps back the same way whatever runs the guest. *)
-    | Shared_mount ->
-        let container_prefix = container_root agent_name in
-        if String.equal raw_path container_prefix
-        then host_root_abs_of_config_agent ~config ~agent_name
-        else if String.starts_with ~prefix:(container_prefix ^ "/") raw_path
-        then (
-          let suffix =
-            String.sub
-              raw_path
-              (String.length container_prefix + 1)
-              (String.length raw_path - String.length container_prefix - 1)
-          in
-          Filename.concat
-            (host_root_abs_of_config_agent ~config ~agent_name)
-            suffix)
-        else
-          raw_path
 
 let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = meta.sandbox_profile in

@@ -14,9 +14,11 @@ import { navigate, resetRouterForTests } from '../../routes/router'
 import {
   buildChatStreamRequestBody,
   buildPortraitPreviewUrl,
+  createChatStreamFrameDispatcher,
   decodeChatJournalPage,
   decodeKeeperMemoryFacts,
   decodeKeeperRoster,
+  enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
@@ -28,6 +30,7 @@ import {
   observeRosterContextPct,
   parseOrdinaryMemoryBranch,
   parseSourceBoundMemoryBranch,
+  recordedToolOutcomeTone,
   reconstructJournalReply,
   streamKeeperChat,
   transcribeVoiceAudio,
@@ -2835,5 +2838,344 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       try { observer.close() } catch { /* already closed on epoch abort */ }
       await obsPromise
     }
+  })
+
+  it('drains replayed frames after terminal ACCEPTED, drops stale-attempt deltas, rejects truncated enqueue, avoids /btw slot preemption, and classifies tool outcomes', async () => {
+    const enc = new TextEncoder()
+    const sse = (frames: unknown[]) =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            for (const f of frames) c.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`))
+            c.close()
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      )
+
+    // 1. Terminal ACCEPTED(Succeeded) must still drain replayed text/reply/RUN_FINISHED frames
+    const deltas: string[] = []
+    let finishedCount = 0
+    const replayOutcome = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'hi',
+      operationId: 'op-replay-ok',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () =>
+        sse([
+          { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED', value: { operation_id: 'op-replay-ok', state: 'Succeeded' } },
+          { type: 'TEXT_MESSAGE_CONTENT', delta: 'replayed reply' },
+          { type: 'RUN_FINISHED' },
+        ]),
+      ),
+      callbacks: {
+        onTextDelta: (d) => deltas.push(d),
+        onFinished: () => { finishedCount += 1 },
+      },
+    })
+    expect(replayOutcome).toEqual({ terminal: true, error: null })
+    expect(deltas).toEqual(['replayed reply'])
+    expect(finishedCount).toBe(1)
+
+    // 2. Terminal ACCEPTED(Failed) with EOF (no RUN_ERROR) invokes onError rather than onFinished
+    const errors: string[] = []
+    let failedFinished = 0
+    const failedOutcome = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'hi',
+      operationId: 'op-replay-fail',
+      mode: { kind: 'btw' },
+      fetchImpl: vi.fn(async () =>
+        sse([
+          { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED', value: { operation_id: 'op-replay-fail', state: 'Failed' } },
+        ]),
+      ),
+      callbacks: {
+        onError: (m) => errors.push(m),
+        onFinished: () => { failedFinished += 1 },
+      },
+    })
+    expect(failedOutcome.terminal).toBe(true)
+    expect(errors.length).toBe(1)
+    expect(failedFinished).toBe(0)
+
+    // 3. Dispatcher rejects stale-attempt text/thinking deltas after attempt reset
+    const seenText: string[] = []
+    const seenThinking: string[] = []
+    const dispatcher = createChatStreamFrameDispatcher({
+      operationId: 'op-attempt',
+      startEpoch: currentSessionEpoch(),
+      callbacks: {
+        onTextDelta: (d) => seenText.push(d),
+        onThinkingDelta: (d) => seenThinking.push(d),
+      },
+    })
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'attempt1',
+      response: { content_generation: 0, stream_scope: 1 },
+    })
+    dispatcher.dispatch({ type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { attempt: 2 } })
+    // Late frames from retired generation 0 must be dropped
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'stale-text',
+      response: { content_generation: 0, stream_scope: 1 },
+    })
+    dispatcher.dispatch({
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'stale-think', response: { content_generation: 0, stream_scope: 1 } },
+    })
+    // New attempt generation 1 succeeds
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'attempt2',
+      response: { content_generation: 1, stream_scope: 0 },
+    })
+    expect(seenText).toEqual(['attempt1', 'attempt2'])
+    expect(seenThinking).toEqual([])
+
+    // 4. Truncated enqueue stream without ACCEPTED is unconfirmed (rejected: false),
+    //    whereas explicit HTTP 500 rejection is confirmed (rejected: true).
+    const trunc = await enqueueKeeperChat({
+      keeper: 'alpha',
+      message: 'queued',
+      operationId: 'op-trunc',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => sse([])),
+    })
+    expect(trunc.accepted).toBe(false)
+    expect(trunc.rejected).toBe(false)
+    expect(trunc.error).toBe('acceptance_unconfirmed')
+
+    const httpRej = await enqueueKeeperChat({
+      keeper: 'alpha',
+      message: 'queued-rej',
+      operationId: 'op-rej',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => new Response('queue full', { status: 503 })),
+    })
+    expect(httpRej.accepted).toBe(false)
+    expect(httpRej.rejected).toBe(true)
+    expect(httpRej.error).toBe('queue full')
+
+    // 5. /btw must NOT preempt an active main chat stream
+    let releaseMain!: () => void
+    let mainAborted = false
+    const mainPromise = streamKeeperChat({
+      keeper: 'alpha',
+      message: 'main',
+      operationId: 'op-main-live',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async (_input, init) => {
+        init?.signal?.addEventListener('abort', () => { mainAborted = true })
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'live' })}\n\n`))
+              releaseMain = () => {
+                c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'RUN_FINISHED' })}\n\n`))
+                c.close()
+              }
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+      callbacks: {},
+    })
+    await waitFor(() => expect(getActiveViewStreamKey()).toContain('op-main-live'))
+    const btwRes = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'side question',
+      operationId: 'op-btw-live',
+      mode: { kind: 'btw' },
+      fetchImpl: vi.fn(async () => sse([{ type: 'TEXT_MESSAGE_CONTENT', delta: 'side' }, { type: 'RUN_FINISHED' }])),
+      callbacks: {},
+    })
+    expect(btwRes.terminal).toBe(true)
+    expect(mainAborted).toBe(false)
+    releaseMain()
+    await mainPromise
+
+    // 6. Tool outcome tone classification matches recordedToolOutcome SSOT
+    expect(recordedToolOutcomeTone({ wire_outcome: 'error' })).toBe('bad')
+    expect(recordedToolOutcomeTone({ wire_outcome: 'unknown' })).toBe('warn')
+    expect(recordedToolOutcomeTone({ disposition: 'deferred', wire_outcome: 'ok' })).toBe('warn')
+    expect(recordedToolOutcomeTone({ disposition: 'completed', wire_outcome: 'ok' })).toBe('ok')
+  })
+
+  it('reconciles pre-acceptance main-turn transport drop against /chat/events and converges to Cut_recovered when server persisted it', async () => {
+    let submittedOpId: string | null = null
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        submittedOpId = typeof body.request_id === 'string' ? body.request_id : null
+        throw new TypeError('network reset before first frame')
+      }
+      if (url.includes('/chat/events')) {
+        expect(submittedOpId).toBeTruthy()
+        expect(url).toContain(`operation_id=${encodeURIComponent(submittedOpId!)}`)
+        return json({
+          schema: 'masc.keeper_chat_events.v2',
+          has_more: false,
+          events: [
+            { event: { type: 'RUN_STARTED' } },
+            { event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'Persisted before drop', response: { content_generation: 0, stream_scope: 0 } } },
+            { event: { type: 'RUN_FINISHED' } },
+          ],
+        })
+      }
+      return json({ rows: [] })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    const input = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'Check persistence' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Persisted before drop')
+      expect(chat.container.textContent).toContain('Cut_recovered')
+    })
+    expect(chat.container.textContent).not.toContain('Failed')
+    chat.unmount()
+  })
+
+  it('marks main turn Failed only after journal and queue confirm an unaccepted operation is absent', async () => {
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
+      if (url.includes('/chat/operations')) return json(queuedOperations())
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        throw new TypeError('offline transport error')
+      }
+      if (url.includes('/chat/events')) {
+        return json({ schema: 'masc.keeper_chat_events.v2', has_more: false, events: [] })
+      }
+      return json({ rows: [] })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    const input = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'Never arrived' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Failed')
+      expect(chat.container.textContent).toContain('offline transport error')
+    })
+    chat.unmount()
+  })
+
+  it('reconciles truncated follow-up enqueue via /chat/operations and distinguishes confirmed HTTP rejection', async () => {
+    const enc = new TextEncoder()
+    let releaseMain!: () => void
+    let streamCount = 0
+    let followUpOpId: string | null = null
+    const onMutated = vi.fn()
+
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
+      if (url.includes('/chat/operations')) {
+        if (followUpOpId && !url.includes('after_sequence=')) {
+          return json({
+            schema: 'masc.keeper_chat_operations.list.v1',
+            state: 'Queued',
+            operations: [{
+              schema: 'masc.keeper_chat_operation.v1',
+              operation_id: followUpOpId,
+              sequence: '1',
+              created_at: 100,
+              state: 'Queued',
+              input: {
+                schema: 'masc.keeper_chat_operation.input.v1',
+                message: 'Follow-up persisted',
+                user_blocks: [{ type: 'text', text: 'Follow-up persisted' }],
+                turn_instructions: null,
+                surface_context: null,
+                attachments: [],
+              },
+            }],
+          })
+        }
+        return json(queuedOperations())
+      }
+      if (url.includes('/chat/events')) {
+        return json({ schema: 'masc.keeper_chat_events.v2', has_more: false, events: [] })
+      }
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        streamCount += 1
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        if (streamCount === 1) {
+          return new Response(
+            new ReadableStream({
+              start(c) {
+                c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Working...' })}\n\n`))
+                releaseMain = () => {
+                  c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'RUN_FINISHED' })}\n\n`))
+                  c.close()
+                }
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (streamCount === 2) {
+          // Server persisted followUpOpId into the queue, but proxy dropped SSE before ACCEPTED
+          followUpOpId = typeof body.request_id === 'string' ? body.request_id : null
+          return new Response(new ReadableStream({ start(c) { c.close() } }), {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+        // Confirmed HTTP 503 rejection on third submit
+        return new Response('queue limit reached', { status: 503 })
+      }
+      return json({ rows: [] })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${onMutated} />`)
+    const input = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+
+    // 1. Start main streaming turn
+    fireEvent.input(input, { target: { value: 'Long running turn' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(chat.container.textContent).toContain('Working...'))
+
+    // 2. Submit queued follow-up whose SSE drops before ACCEPTED, but server queued it
+    fireEvent.input(input, { target: { value: 'Follow-up persisted' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(onMutated).toHaveBeenCalled()
+      expect(chat.container.textContent).toContain('Follow-up persisted')
+      expect(chat.container.textContent).toContain('Queued')
+    })
+    expect(chat.container.textContent).not.toContain('Failed')
+
+    // 3. Submit another queued follow-up explicitly rejected with HTTP 503 -> Failed
+    fireEvent.input(input, { target: { value: 'Follow-up rejected' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(chat.container.textContent).toContain('Follow-up rejected')
+      expect(chat.container.textContent).toContain('Failed')
+    })
+
+    releaseMain()
+    chat.unmount()
   })
 })

@@ -873,6 +873,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
     ) => void
     readonly onBatchBound?: (memberId: string, executionId: string) => void
+    readonly onServerAccepted?: () => void
   }): StreamKeeperChatCallbacks => {
     const { assistantId, userId, updateAssistant, updateExistingAssistant } = opts
     let acceptedByServer = opts.initialAcceptedByServer
@@ -882,6 +883,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
     const markUserDelivered = () => {
       acceptedByServer = true
+      opts.onServerAccepted?.()
       updateEntryById(userId, (m) =>
         m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' },
       )
@@ -891,6 +893,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       onBatchBound: opts.onBatchBound,
       onAccepted: (info) => {
         acceptedByServer = true
+        opts.onServerAccepted?.()
         if (info.controlToken) setControlToken(info.controlToken)
         const accepted = acceptedReplyState(info.state)
         const interruptProblem = info.interruptProblem
@@ -1136,7 +1139,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         liveTools = upsertStreamToolCall(
           liveTools,
           { toolCallId, streamKey },
-          (cur) => ({ ...cur, result: content, status: 'completed' }),
+          (cur) => ({ ...cur, result: content, status: cur.status === 'error' ? 'error' : 'completed' }),
           () => ({
             id: toolCallId || undefined,
             streamKey,
@@ -1834,15 +1837,111 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setNextCursor(res.value.nextCursor)
   }
 
-  const handleRecoverCut = async (assistantId: string, operationId: string) => {
+  const handleRecoverCut = async (
+    assistantId: string,
+    operationId: string,
+    opts?: {
+      readonly userId?: string
+      readonly unconfirmedAcceptance?: boolean
+      readonly streamError?: string | null
+    },
+  ) => {
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
+    const stillActive = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && isEpochCurrent(startEpoch)
+    if (opts?.unconfirmedAcceptance && opts.userId) {
+      updateEntryById(opts.userId, (m) => ({
+        ...m,
+        deliveryState: 'Confirming_delivery',
+      }))
+    }
     updateAssistantEntry(assistantId, (m) => ({
       ...m,
       deliveryState: 'Confirming_delivery',
     }))
     const recovered = await recoverCutReplyFromJournal(targetKeeper, operationId)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    if (!stillActive()) return
+    if (opts?.unconfirmedAcceptance) {
+      if (recovered.ok && recovered.value.eventCount > 0) {
+        if (opts.userId) {
+          updateEntryById(opts.userId, (m) => ({
+            ...m,
+            deliveryState: 'Delivered',
+            errorDetail: undefined,
+          }))
+        }
+        updateAssistantEntry(assistantId, (m) => ({
+          ...m,
+          content: recovered.value.text || m.content,
+          replyOperationId: recovered.value.executionId ?? m.replyOperationId,
+          deliveryState: recovered.value.error ? 'Failed' : 'Cut_recovered',
+          cutStream: false,
+          errorDetail: recovered.value.error ?? undefined,
+        }))
+        refreshChatRef.current('history')
+        return
+      }
+      if (!recovered.ok && (recovered.error.kind === 'epoch_stale' || recovered.error.kind === 'aborted')) {
+        return
+      }
+      const queueRes = await fetchQueuedChatOperations(targetKeeper)
+      if (!stillActive()) return
+      if (queueRes.ok) {
+        const queuedOp = queueRes.value.find((op) => op.operationId === operationId)
+        if (queuedOp) {
+          const accepted = acceptedReplyState(queuedOp.state)
+          if (opts.userId) {
+            updateEntryById(opts.userId, (m) => ({
+              ...m,
+              deliveryState: queuedOp.state === 'Queued' ? 'Queued' : 'Delivered',
+              errorDetail: undefined,
+            }))
+          }
+          updateAssistantEntry(assistantId, (m) => ({
+            ...m,
+            deliveryState: accepted.delivery,
+            cutStream: false,
+            errorDetail: accepted.detail ?? m.errorDetail,
+          }))
+          refreshChatRef.current('queue', 'waiting')
+          return
+        }
+        if (recovered.ok) {
+          const errText = opts.streamError ?? '전송 실패'
+          if (opts.userId) {
+            updateEntryById(opts.userId, (m) => ({
+              ...m,
+              deliveryState: 'Failed',
+              errorDetail: errText,
+            }))
+          }
+          updateAssistantEntry(assistantId, (m) => ({
+            ...m,
+            deliveryState: 'Failed',
+            cutStream: false,
+            errorDetail: errText,
+          }))
+          return
+        }
+      } else if (queueRes.error.kind === 'epoch_stale' || queueRes.error.kind === 'aborted') {
+        return
+      }
+      const uncertainDetail = '수락 여부 확인 실패 — 중복 전송 방지를 위해 새로고침 후 확인하세요'
+      if (opts.userId) {
+        updateEntryById(opts.userId, (m) => ({
+          ...m,
+          deliveryState: 'Confirming_delivery',
+          errorDetail: uncertainDetail,
+        }))
+      }
+      updateAssistantEntry(assistantId, (m) => ({
+        ...m,
+        deliveryState: 'Confirming_delivery',
+        errorDetail: uncertainDetail,
+      }))
+      return
+    }
     if (!recovered.ok) {
       if (recovered.error.kind === 'epoch_stale' || recovered.error.kind === 'aborted') return
       updateAssistantEntry(assistantId, (m) => ({
@@ -1905,15 +2004,28 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         },
       },
     })
-    if (!outcome.terminal && !outcome.error && isStillActive()) {
-      const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
-      if (rec.ok && isStillActive()) {
-        setBtw((cur) => ({
-          ...cur,
-          status: rec.value.error ? 'error' : 'done',
-          reply: rec.value.text || cur.reply,
-          error: rec.value.error,
-        }))
+    if (!outcome.terminal && isStillActive()) {
+      if (outcome.error) {
+        if (outcome.error !== 'aborted' && outcome.error !== 'session_epoch_changed') {
+          setBtw((cur) => (cur.status === 'error' ? cur : { ...cur, status: 'error', error: outcome.error }))
+        }
+      } else {
+        const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
+        if (!isStillActive()) return
+        if (rec.ok) {
+          setBtw((cur) => ({
+            ...cur,
+            status: rec.value.error ? 'error' : 'done',
+            reply: rec.value.text || cur.reply,
+            error: rec.value.error,
+          }))
+        } else if (rec.error.kind !== 'aborted' && rec.error.kind !== 'epoch_stale') {
+          setBtw((cur) => ({
+            ...cur,
+            status: 'error',
+            error: rec.error.message,
+          }))
+        }
       }
     }
   }
@@ -1982,11 +2094,66 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         }
         if (res.controlToken) setControlToken(res.controlToken)
         if (!res.accepted) {
+          if (res.error === 'session_epoch_changed' || res.error === 'aborted') {
+            return
+          }
+          if (res.rejected) {
+            updateEntryById(userId, (m) => ({
+              ...m,
+              deliveryState: 'Failed',
+              errorDetail: res.error ?? '대기열 등록 실패',
+            }))
+            return
+          }
+          // Unconfirmed transport drop / EOF without ACCEPTED: reconcile by
+          // operationId against queue and journal before marking Failed so
+          // retrying does not duplicate an already-persisted follow-up.
           updateEntryById(userId, (m) => ({
             ...m,
-            deliveryState: 'Failed',
-            errorDetail: res.error ?? '대기열 등록 실패',
+            deliveryState: 'Confirming_delivery',
+            errorDetail: undefined,
           }))
+          const queueRes = await fetchQueuedChatOperations(targetKeeper)
+          if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+            return
+          }
+          const queuedOp = queueRes.ok
+            ? queueRes.value.find((op) => op.operationId === operationId)
+            : undefined
+          if (queuedOp) {
+            const accepted = acceptedReplyState(queuedOp.state)
+            updateEntryById(userId, (m) => ({
+              ...m,
+              deliveryState: queuedOp.state === 'Queued' ? 'Queued' : accepted.delivery,
+              errorDetail: accepted.detail ?? undefined,
+            }))
+          } else {
+            const journalRes = await recoverCutReplyFromJournal(targetKeeper, operationId)
+            if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
+              return
+            }
+            if (journalRes.ok && journalRes.value.eventCount > 0) {
+              updateEntryById(userId, (m) => ({
+                ...m,
+                deliveryState: journalRes.value.error ? 'Failed' : 'Delivered',
+                errorDetail: journalRes.value.error ?? undefined,
+              }))
+            } else if (queueRes.ok && journalRes.ok) {
+              updateEntryById(userId, (m) => ({
+                ...m,
+                deliveryState: 'Failed',
+                errorDetail: res.error ?? '대기열 등록 실패',
+              }))
+            } else {
+              updateEntryById(userId, (m) => ({
+                ...m,
+                deliveryState: 'Confirming_delivery',
+                errorDetail: '수락 여부 확인 실패 — 중복 전송 방지를 위해 새로고침 후 확인하세요',
+              }))
+            }
+          }
+          refreshChatRef.current('queue', 'waiting')
+          props.onMutated()
           return
         }
         const accepted = acceptedReplyState(res.state ?? '')
@@ -2034,6 +2201,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     queueMicrotask(() => composerRef.current?.focus())
 
     let abortController: AbortController | null = null
+    let acceptedByServer = false
     let outcome: { readonly terminal: boolean; readonly error: string | null } = {
       terminal: false,
       error: null,
@@ -2072,6 +2240,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           assistantId,
           userId,
           initialAcceptedByServer: false,
+          onServerAccepted: () => { acceptedByServer = true },
           updateAssistant: (updater) => updateAssistantEntry(assistantId, updater),
           updateExistingAssistant: (updater) => updateAssistantEntry(assistantId, updater),
           onBatchBound: (memberId, executionId) => {
@@ -2104,15 +2273,32 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       return
     }
 
-    // Mid-stream cut without RUN_FINISHED -> Confirming_delivery & journal recovery
+    // Mid-stream cut without RUN_FINISHED -> explicit HTTP rejection already
+    // returned terminal=true via onError. Any non-terminal cut here either had
+    // acceptance confirmed or dropped mid-transport with uncertain server receipt;
+    // reconcile against journal + queue by operationId before concluding Failed.
     if (!outcome.terminal && !abortController?.signal.aborted) {
-      updateEntryById(userId, (m) => (m.deliveryState === 'Sending' ? { ...m, deliveryState: 'Delivered' } : m))
-      updateAssistantEntry(assistantId, (m) => ({
-        ...m,
-        cutStream: true,
-        deliveryState: 'Confirming_delivery',
-      }))
-      await handleRecoverCut(assistantId, operationId)
+      if (acceptedByServer) {
+        updateEntryById(userId, (m) => (m.deliveryState === 'Sending' ? { ...m, deliveryState: 'Delivered' } : m))
+        updateAssistantEntry(assistantId, (m) => ({
+          ...m,
+          cutStream: true,
+          deliveryState: 'Confirming_delivery',
+        }))
+        await handleRecoverCut(assistantId, operationId)
+      } else {
+        updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Confirming_delivery' }))
+        updateAssistantEntry(assistantId, (m) => ({
+          ...m,
+          cutStream: true,
+          deliveryState: 'Confirming_delivery',
+        }))
+        await handleRecoverCut(assistantId, operationId, {
+          userId,
+          unconfirmedAcceptance: true,
+          streamError: outcome.error,
+        })
+      }
     }
 
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
@@ -3049,12 +3235,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                           </div>
                         `}
 
-                        ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
+                        ${(blocks.bodyText || msg.deliveryState === 'Streaming' || msg.deliveryState === 'Pending_processing') && html`
                           ${blocks.bodyText
                             ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
-                            : openWork !== null && openWork.length > 0
-                              ? html`<${OpenWorkRows} activities=${openWork} live=${turnAnimating} />`
-                              : html`<div class="kp-msg-body">응답 생성 중…</div>`}
+                            : (!showLiveTurnCard && openWork !== null && openWork.length > 0)
+                              ? null
+                              : html`<div class="kp-msg-body">${msg.deliveryState === 'Pending_processing' ? '요청 처리 준비 중…' : '응답 생성 중…'}</div>`}
+                          ${!showLiveTurnCard && (msg.deliveryState === 'Streaming' || msg.deliveryState === 'Pending_processing') && openWork !== null && openWork.length > 0 && html`
+                            <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
+                          `}
                         `}
                         ${msg.retainedImages?.map((image, index) => html`
                           <${WorkspaceChatImage} key=${`${index}:${image.path}`}

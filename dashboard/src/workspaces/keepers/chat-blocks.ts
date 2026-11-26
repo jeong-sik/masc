@@ -518,12 +518,33 @@ export function findToolCallIndex(
     if (byKey >= 0) return byKey
   }
   if (id) {
-    // Only match by provider toolCallId when stream scopes don't conflict —
-    // prevents sequential IDs (`call_0`) from colliding across tool rounds.
-    const byId = list.findIndex(
-      (t) => t.id === id && (!sk || !t.streamKey || t.streamKey === sk),
-    )
-    if (byId >= 0) return byId
+    if (sk) {
+      // Only match by provider toolCallId when stream scopes don't conflict —
+      // prevents sequential IDs (`call_0`) from colliding across tool rounds.
+      const byId = list.findIndex(
+        (t) => t.id === id && (!t.streamKey || t.streamKey === sk),
+      )
+      if (byId >= 0) return byId
+    } else {
+      // Without a streamKey (e.g. approval events), scan backwards preferring
+      // an in-flight card over an earlier already-settled round with the same
+      // sequential provider ID (`call_0`).
+      let latestMatch = -1
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        const cur = list[i]!
+        if (cur.id !== id) continue
+        if (
+          cur.status === 'running'
+          || cur.status === 'awaiting_result'
+          || cur.status === 'awaiting_approval'
+          || cur.status === 'result_ready'
+        ) {
+          return i
+        }
+        if (latestMatch < 0) latestMatch = i
+      }
+      if (latestMatch >= 0) return latestMatch
+    }
   }
   if (!sk && !id && list.length > 0) {
     return list.length - 1

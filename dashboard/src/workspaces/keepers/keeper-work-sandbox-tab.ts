@@ -23,6 +23,7 @@ import {
   fetchKeeperSandboxApi,
   fetchKeeperToolCallsApi,
   fetchKeeperToolStatsApi,
+  recordedToolOutcomeTone,
   saveKeeperOperatorNoteApi,
 } from './keepers-api'
 import type { KeeperRetainedProjection, KeeperToolCallEntry, KeeperToolSource } from './types'
@@ -225,7 +226,7 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
       id: 'outcome',
       header: 'Outcome',
       cell: (r) => html`
-        <span class="kp-pill" data-tone=${r.disposition === 'failed' ? 'bad' : r.disposition === 'deferred' ? 'warn' : 'ok'}>
+        <span class="kp-pill" data-tone=${recordedToolOutcomeTone(r)}>
           ${r.disposition ?? r.wire_outcome}
         </span>
       `,

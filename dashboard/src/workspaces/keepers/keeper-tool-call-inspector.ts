@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { prettyFormatPayload, toolResultMarkdownPreview } from './chat-blocks'
-import { fetchKeeperToolResultApi } from './keepers-api'
+import { fetchKeeperToolResultApi, recordedToolOutcomeTone } from './keepers-api'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
@@ -207,12 +207,7 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   const effectiveOutput = hydratedLoaded
     ? (resultState.displayContent ?? '')
     : previewOutput
-  const outcomeTone =
-    entry.disposition === 'failed' || (hydratedLoaded && resultState.isError)
-      ? 'bad'
-      : entry.disposition === 'deferred'
-        ? 'warn'
-        : 'ok'
+  const outcomeTone = recordedToolOutcomeTone(entry, hydratedLoaded && resultState.isError)
   const progressText = formatToolResultProgress(resultState ?? undefined)
   const previewTruncated = isPreviewTruncated(entry)
   const completeOutput = hydratedLoaded ? resultState.eof && !resultState.isBinary : !previewTruncated

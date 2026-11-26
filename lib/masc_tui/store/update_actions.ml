@@ -1992,6 +1992,19 @@ let dispatch_keeper_shutdown ~now ~name (m : Model.t) =
          ~en:(Printf.sprintf "Shutting down %s..." name))
     ~include_expected_workspace:true m_cleared name
 
+(* [U] cuts a connection. One press only asks; the request goes out on a second
+   press on the same target while the window is open. *)
+let unbind_on_second_press ~now ~target ~ask ~sent ~req (m : Model.t) =
+  if Model.unbind_is_armed ~now target m then
+    ( Model.with_toast ~now ~level:Model.Toast_info sent
+        { m with unbind_armed = None }
+    , [ Cmd.Http_post { epoch = m.epoch; req } ] )
+  else
+    ( Model.with_toast ~now ~duration_s:Model.unbind_arm_window_s
+        ~level:Model.Toast_warning ask
+        { m with unbind_armed = Some (target, now) }
+    , [] )
+
 let dispatch_keeper_smart_wake ~now ~name (m : Model.t) =
   match Fleet_store.find_keeper ~name m.fleet with
   | Some k when k.paused -> dispatch_keeper_resume ~now ~name m
@@ -7906,18 +7919,23 @@ and execute_action ~now (m : Model.t) action =
                  ks.identity_selected_idx)
           with
           | Some (Update_nav.Identity_oauth { provider; _ }) ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
+              unbind_on_second_press ~now
+                ~target:(Model.Unbind_oauth_provider { keeper; provider })
+                ~ask:
+                  (Say.make
+                     ~ko:
+                       (Printf.sprintf
+                          "한 번 더 [U]를 누르면 %s OAuth 연결을 끊습니다" provider)
+                     ~en:
+                       (Printf.sprintf
+                          "Press [U] again to disconnect OAuth provider %s"
+                          provider))
+                ~sent:
                   (Say.make
                      ~ko:("OAuth 연결 해제 요청: " ^ provider)
                      ~en:("Disconnecting OAuth provider: " ^ provider))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_oauth_disconnect { keeper; provider };
-                    };
-                ] )
+                ~req:(Cmd.Post_oauth_disconnect { keeper; provider })
+                m
           | Some Update_nav.Identity_github | None -> (m, []))
       | None ->
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_inspector m)
@@ -7938,7 +7956,24 @@ and execute_action ~now (m : Model.t) action =
                       if String.equal (String.trim b.keeper_name) "" then None
                       else Some b.keeper_name
                     in
-                    ( Model.with_toast ~now ~level:Model.Toast_info
+                    unbind_on_second_press ~now
+                      ~target:
+                        (Model.Unbind_connector_channel
+                           {
+                             connector = conn.connector_id;
+                             channel_id = b.channel_id;
+                           })
+                      ~ask:
+                        (Say.make
+                           ~ko:
+                             (Printf.sprintf
+                                "한 번 더 [U]를 누르면 커넥터 바인딩을 해제합니다: %s (%s)"
+                                conn.connector_id b.channel_id)
+                           ~en:
+                             (Printf.sprintf
+                                "Press [U] again to unbind connector: %s (%s)"
+                                conn.connector_id b.channel_id))
+                      ~sent:
                         (Say.make
                            ~ko:
                              (Printf.sprintf "커넥터 바인딩 해제 요청: %s (%s)"
@@ -7946,20 +7981,14 @@ and execute_action ~now (m : Model.t) action =
                            ~en:
                              (Printf.sprintf "Unbinding connector: %s (%s)"
                                 conn.connector_id b.channel_id))
-                        m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_connector_unbind
-                                {
-                                  connector = conn.connector_id;
-                                  channel_id = b.channel_id;
-                                  keeper_name;
-                                };
-                          };
-                      ] )
+                      ~req:
+                        (Cmd.Post_connector_unbind
+                           {
+                             connector = conn.connector_id;
+                             channel_id = b.channel_id;
+                             keeper_name;
+                           })
+                      m
                 | [] ->
                     ( Model.with_toast ~now ~level:Model.Toast_warning
                         (Say.make

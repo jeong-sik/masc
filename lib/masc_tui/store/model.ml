@@ -206,6 +206,11 @@ type toast_tag =
   | Toast_quit_arm
   | Toast_keeper_stop_arm
 
+(* What a second [U] would cut. *)
+type unbind_target =
+  | Unbind_oauth_provider of { keeper : string; provider : string }
+  | Unbind_connector_channel of { connector : string; channel_id : string }
+
 type toast = {
   message : Say.t;
   level : toast_level;
@@ -254,6 +259,7 @@ type t = {
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;
   keeper_stop_armed : (string * Clock.Mono.t) option;
+  unbind_armed : (unbind_target * Clock.Mono.t) option;
   keeper_resume_op_ids : (string * string * int) list;
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
@@ -369,6 +375,25 @@ let disarm_quit m =
       { m with quit_armed_at = None; toast }
 
 let keeper_stop_arm_window_s = 2.5
+let unbind_arm_window_s = keeper_stop_arm_window_s
+
+let equal_unbind_target a b =
+  match (a, b) with
+  | Unbind_oauth_provider x, Unbind_oauth_provider y ->
+      String.equal x.keeper y.keeper && String.equal x.provider y.provider
+  | Unbind_connector_channel x, Unbind_connector_channel y ->
+      String.equal x.connector y.connector
+      && String.equal x.channel_id y.channel_id
+  | Unbind_oauth_provider _, Unbind_connector_channel _
+  | Unbind_connector_channel _, Unbind_oauth_provider _ ->
+      false
+
+let unbind_is_armed ~now target m =
+  match m.unbind_armed with
+  | Some (armed, armed_at) when equal_unbind_target armed target ->
+      let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+      elapsed >= 0.0 && elapsed < unbind_arm_window_s
+  | Some _ | None -> false
 
 let keeper_stop_arm_toast_message ~name =
   Say.make
@@ -610,6 +635,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     toast = None;
     quit_armed_at = None;
     keeper_stop_armed = None;
+    unbind_armed = None;
     keeper_resume_op_ids = [];
     keeper_lifecycle_seq = 1;
     modal_submission_seq = 1;

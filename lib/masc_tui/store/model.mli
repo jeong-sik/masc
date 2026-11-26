@@ -231,6 +231,12 @@ type toast_tag =
   | Toast_quit_arm
   | Toast_keeper_stop_arm
 
+(** What a second [U] would cut: the OAuth provider of a Keeper, or the channel
+    binding of a connector. *)
+type unbind_target =
+  | Unbind_oauth_provider of { keeper : string; provider : string }
+  | Unbind_connector_channel of { connector : string; channel_id : string }
+
 type toast = {
   message : Say.t;
   level : toast_level;
@@ -284,6 +290,7 @@ type t = {
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;
   keeper_stop_armed : (string * Clock.Mono.t) option;
+  unbind_armed : (unbind_target * Clock.Mono.t) option;
   keeper_resume_op_ids : (string * string * int) list;
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
@@ -320,6 +327,13 @@ val keeper_stop_arm_toast_message : name:string -> Say.t
 val disarm_keeper_stop : t -> t
 (** Clear [keeper_stop_armed] and any {!Toast_keeper_stop_arm} warning toast
     without disturbing unrelated toasts. *)
+
+val unbind_arm_window_s : float
+(** Seconds during which a second [U] on the same target sends the request. The
+    same window as {!keeper_stop_arm_window_s}. *)
+
+val unbind_is_armed : now:Clock.Mono.t -> unbind_target -> t -> bool
+(** Whether [unbind_armed] holds this target and its window is still open. *)
 
 val next_keeper_lifecycle_seq : t -> int * t
 (** Mint a strictly monotonic sequence number for a Keeper lifecycle POST or

@@ -6495,7 +6495,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
   Alcotest.(check bool) "404 marks turn_transcript absent for turn_ref" true
     (Option.equal String.equal ks_a.absent_transcript_ref (Some "trace#1"));
 
-  (* 5e. Unbind_connector sends real channel_id from configured_bindings *)
+  (* 5e. Unbind_connector asks on the first U and sends the real channel_id from
+     configured_bindings on the second *)
   let m_conn =
     {
       base with
@@ -6503,7 +6504,14 @@ let test_wave2_100pct_menu_reachability_matrix () =
       runtime = Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
     }
   in
-  let _, unbind_cmds = step m_conn (char_key ~shift:true "U") in
+  let m_conn_asked, unbind_ask_cmds = step m_conn (char_key ~shift:true "U") in
+  Alcotest.(check bool) "first U on a connector sends no unbind" false
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_connector_unbind _; _ } -> true
+         | _ -> false)
+       unbind_ask_cmds);
+  let _, unbind_cmds = step m_conn_asked (char_key ~shift:true "U") in
   Alcotest.(check bool) "Unbind_connector sends real configured_bindings channel_id"
     true
     (List.exists
@@ -9012,6 +9020,23 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
          | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
          | _ -> false)
        cmds_id_ent);
+  (* U disconnects the provider on the second press, not the first *)
+  let is_oauth_disconnect = function
+    | Cmd.Http_post
+        {
+          req = Cmd.Post_oauth_disconnect { keeper = "alpha"; provider = "openai" };
+          _;
+        } ->
+        true
+    | _ -> false
+  in
+  let m_id_asked, cmds_id_u1 = step m_id_dive (char_key ~shift:true "U") in
+  Alcotest.(check bool) "Keeper_identity first U sends no OAuth disconnect" false
+    (has_cmd is_oauth_disconnect cmds_id_u1);
+  let _, cmds_id_u2 = step m_id_asked (char_key ~shift:true "U") in
+  Alcotest.(check bool) "Keeper_identity second U sends Post_oauth_disconnect"
+    true
+    (has_cmd is_oauth_disconnect cmds_id_u2);
 
   (* Embedded Split Keepers pane_index=1 Keeper_identity: Space=0 POSTs, a/Enter=switch *)
   let selected_name =

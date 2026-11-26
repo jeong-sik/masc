@@ -464,7 +464,8 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
    `/api/v1/gate/keeper-sandbox-logs`; zero local filesystem reads).
 9. **Identity**: per-Keeper OAuth & GitHub identity manager (`l` OAuth login or
    GitHub SSE device flow login, `L` poll OAuth attempt status, `r` refresh
-   identity, `a` / `Enter` switch OAuth enabled/disabled, `U` disconnect OAuth, `K`
+   identity, `a` / `Enter` switch OAuth enabled/disabled, `U` twice within 2.5 seconds
+   disconnect OAuth, `K`
    masked GitHub PAT modal — secrets are never echoed or logged, `y` copy OAuth
    authorize URL or GitHub device code; graceful `CanAdmin` notice on 401/403).
 
@@ -519,7 +520,8 @@ Seven 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 6. **Connectors**: dedicated 2-pane screen for Channel Gate Connectors (`n`
    opens the Connector bind form: connector name such as `discord`, channel ID
    with live `/api/v1/gate/connector/names` picker via `←`/`→`, and the Keeper
-   to bind via `?name=<connector>`, `U` unbind) on the left and Connected MCP
+   to bind via `?name=<connector>`, `U` twice within 2.5 seconds unbind) on the
+   left and Connected MCP
    Clients + Browser/Addons summary on the right (`Tab` switches panes).
 7. **Addons & Browser (Operator)**: dedicated 2-pane operator cockpit (`Tab`
    switches panes; press **`p`** to toggle the **Package Catalog** browser backed

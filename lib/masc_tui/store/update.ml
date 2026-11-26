@@ -699,6 +699,8 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       keeper_context =
         Keeper_context_store.clear_epoch_logins after.keeper_context;
       keeper_resume_op_ids = [];
+      (* A first [U] asked about a target of the epoch that just ended. *)
+      unbind_armed = None;
     }
     |> Model.disarm_keeper_stop
 

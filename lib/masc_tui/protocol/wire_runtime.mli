@@ -1059,6 +1059,16 @@ val setup_account_line : setup_account_state -> string
 
 val decode_setup_inventory : Yojson.Safe.t -> (setup_inventory, string) result
 
+type setup_login_status =
+  | Setup_login_complete
+  | Setup_login_failed
+  | Setup_login_cancelled
+  | Setup_login_pending
+  | Setup_login_other of string
+
+val classify_setup_login_status : string -> setup_login_status
+val is_terminal_setup_login_status : setup_login_status -> bool
+
 type setup_login_receipt = {
   login_id : string;
   integration_id : string;
@@ -1411,6 +1421,18 @@ type skill_editor_preview = {
   diagnostics : string list;
 }
 
+type skill_write_status =
+  | Skill_saved_published
+  | Skill_saved_unpublished
+  | Skill_created_published
+  | Skill_created_shadowed
+  | Skill_created_unpublished
+  | Skill_deleted_published
+  | Skill_deleted_unpublished
+  | Skill_write_other of string
+
+val classify_skill_write_status : string -> skill_write_status
+
 type skill_editor_outcome = {
   status : string;
   snapshot_revision : string option;
@@ -1614,6 +1636,13 @@ type runtime_routing_action =
       replacement_runtime_id : string;
     }
 
+type routing_lane_kind =
+  | Route_default
+  | Route_media_failover
+  | Route_exact of string
+  | Route_named of string
+
+val classify_routing_lane : string -> routing_lane_kind
 val is_named_routing_lane : string -> bool
 
 val set_routing_action :

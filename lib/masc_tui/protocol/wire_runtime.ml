@@ -4034,6 +4034,25 @@ type setup_login_receipt = {
   authentication : string option;
 }
 
+type setup_login_status =
+  | Setup_login_complete
+  | Setup_login_failed
+  | Setup_login_cancelled
+  | Setup_login_pending
+  | Setup_login_other of string
+
+let classify_setup_login_status status =
+  match String.lowercase_ascii (String.trim status) with
+  | "complete" | "completed" -> Setup_login_complete
+  | "failed" -> Setup_login_failed
+  | "cancelled" | "canceled" | "interrupted" -> Setup_login_cancelled
+  | "pending" | "running" | "started" | "awaiting_input" -> Setup_login_pending
+  | other -> Setup_login_other other
+
+let is_terminal_setup_login_status = function
+  | Setup_login_complete | Setup_login_failed | Setup_login_cancelled -> true
+  | Setup_login_pending | Setup_login_other _ -> false
+
 let decode_setup_login_receipt json =
   let* _, body = unwrap_v2_or_raw json in
   let* login_id = required_nonblank_string body "login_id" in
@@ -5523,6 +5542,27 @@ let decode_skill_editor_preview json =
   in
   decode_skill_preview_obj prev_obj
 
+type skill_write_status =
+  | Skill_saved_published
+  | Skill_saved_unpublished
+  | Skill_created_published
+  | Skill_created_shadowed
+  | Skill_created_unpublished
+  | Skill_deleted_published
+  | Skill_deleted_unpublished
+  | Skill_write_other of string
+
+let classify_skill_write_status status =
+  match String.lowercase_ascii (String.trim status) with
+  | "saved_and_published" -> Skill_saved_published
+  | "saved_but_unpublished" -> Skill_saved_unpublished
+  | "created_and_published" -> Skill_created_published
+  | "created_but_shadowed" -> Skill_created_shadowed
+  | "created_but_unpublished" -> Skill_created_unpublished
+  | "deleted_and_published" -> Skill_deleted_published
+  | "deleted_but_unpublished" -> Skill_deleted_unpublished
+  | other -> Skill_write_other other
+
 let decode_skill_editor_outcome json =
   let* _, body = unwrap_v2_or_raw json in
   let* status = required_nonblank_string body "status" in
@@ -6175,26 +6215,36 @@ type runtime_routing_action =
       replacement_runtime_id : string;
     }
 
-let routing_lane_kind lane =
-  match String.trim lane with
-  | "default" -> `Default
-  | "media_failover" -> `Media_failover
-  | name when String.starts_with ~prefix:"exact/" name -> `Exact
-  | _ -> `Named
+type routing_lane_kind =
+  | Route_default
+  | Route_media_failover
+  | Route_exact of string
+  | Route_named of string
+
+let classify_routing_lane lane =
+  let trimmed = String.trim lane in
+  match trimmed with
+  | "default" -> Route_default
+  | "media_failover" -> Route_media_failover
+  | name when String.starts_with ~prefix:"exact/" name ->
+      Route_exact (String.sub name 6 (String.length name - 6))
+  | name -> Route_named name
 
 let is_named_routing_lane lane =
-  match routing_lane_kind lane with
-  | `Named -> not (String.equal (String.trim lane) "")
-  | `Default | `Media_failover | `Exact -> false
+  match classify_routing_lane lane with
+  | Route_named name -> not (String.equal name "")
+  | Route_default | Route_media_failover | Route_exact _ -> false
 
 let set_routing_action ~lane ~runtime_ids ~expected_source_revision =
-  match routing_lane_kind lane, runtime_ids with
-  | `Default, [ runtime_id ] when not (String.equal (String.trim runtime_id) "") ->
+  match classify_routing_lane lane, runtime_ids with
+  | Route_default, [ runtime_id ] when not (String.equal (String.trim runtime_id) "") ->
       Ok (Route_set_default { runtime_id = String.trim runtime_id })
-  | `Default, _ -> Error "The default route requires exactly one runtime ID"
-  | (`Media_failover | `Exact | `Named), [] -> Error "At least one runtime ID is required"
-  | `Media_failover, _ -> Ok (Route_set_media_failover { runtime_ids })
-  | (`Named | `Exact), _ -> Ok (Route_set_named { lane; runtime_ids; expected_source_revision })
+  | Route_default, _ -> Error "The default route requires exactly one runtime ID"
+  | (Route_media_failover | Route_exact _ | Route_named _), [] ->
+      Error "At least one runtime ID is required"
+  | Route_media_failover, _ -> Ok (Route_set_media_failover { runtime_ids })
+  | (Route_named _ | Route_exact _), _ ->
+      Ok (Route_set_named { lane; runtime_ids; expected_source_revision })
 
 let encode_runtime_routing_action = function
   | Route_create { lane; runtime_ids } ->

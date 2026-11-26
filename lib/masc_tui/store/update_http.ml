@@ -3749,17 +3749,20 @@ let apply_http_reply ~now (m : Model.t) reply =
       let runtime =
         Runtime_store.apply_setup_login_receipt receipt m.runtime
       in
-      let status_lc = String.lowercase_ascii receipt.status in
-      let is_done =
-        String.equal status_lc "complete" || String.equal status_lc "completed"
+      let login_status =
+        Wire_runtime.classify_setup_login_status receipt.status
       in
-      let is_failed_or_cancelled =
-        String.equal status_lc "failed"
-        || String.equal status_lc "cancelled"
-        || String.equal status_lc "canceled"
-        || String.equal status_lc "interrupted"
+      let is_done, is_failed_or_cancelled =
+        match login_status with
+        | Wire_runtime.Setup_login_complete -> (true, false)
+        | Wire_runtime.Setup_login_failed | Wire_runtime.Setup_login_cancelled ->
+            (false, true)
+        | Wire_runtime.Setup_login_pending | Wire_runtime.Setup_login_other _ ->
+            (false, false)
       in
-      let is_terminal = is_done || is_failed_or_cancelled in
+      let is_terminal =
+        Wire_runtime.is_terminal_setup_login_status login_status
+      in
       let level =
         if is_done then Model.Toast_success
         else if is_failed_or_cancelled then Model.Toast_error
@@ -6438,10 +6441,15 @@ let apply_http_reply ~now (m : Model.t) reply =
                   (Say.make ~ko:("OAuth 상태: " ^ status.kind) ~en:("OAuth status: " ^ status.kind)) next
               in
               let cmds =
-                match String.lowercase_ascii (String.trim status.kind) with
-                | "completed" | "complete" ->
+                match
+                  Wire_keeper_context.classify_oauth_attempt_kind status.kind
+                with
+                | Wire_keeper_context.Oauth_completed ->
                     [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } } ]
-                | _ -> []
+                | Wire_keeper_context.Oauth_active
+                | Wire_keeper_context.Oauth_settled_other
+                | Wire_keeper_context.Oauth_other _ ->
+                    []
               in
               (next, cmds)
           | Error (Msg.Http_error { status = 401 | 403; _ } as err) ->
@@ -7266,17 +7274,19 @@ let apply_http_reply ~now (m : Model.t) reply =
             | `Create | `Save -> Observed.mark_stale m.runtime.skill_editor_loaded);
         }
       in
-      let status_lower = String.lowercase_ascii outcome.status in
-      let has_sub sub =
-        let n = String.length status_lower and m = String.length sub in
-        let rec scan i =
-          if i + m > n then false
-          else if String.equal (String.sub status_lower i m) sub then true
-          else scan (i + 1)
-        in
-        m > 0 && scan 0
+      let is_warning =
+        match Wire_runtime.classify_skill_write_status outcome.status with
+        | Wire_runtime.Skill_saved_unpublished
+        | Wire_runtime.Skill_created_shadowed
+        | Wire_runtime.Skill_created_unpublished
+        | Wire_runtime.Skill_deleted_unpublished ->
+            true
+        | Wire_runtime.Skill_saved_published
+        | Wire_runtime.Skill_created_published
+        | Wire_runtime.Skill_deleted_published
+        | Wire_runtime.Skill_write_other _ ->
+            false
       in
-      let is_warning = has_sub "unpublished" || has_sub "shadowed" in
       let reason_suffix =
         match outcome.reason with
         | Some r when not (String.equal (String.trim r) "") ->

@@ -655,11 +655,8 @@ let apply_setup_inventory ~observed_at inv t =
   { t with setup_inventory = Observed.value ~observed_at inv }
 
 let is_terminal_setup_login_status status =
-  match String.lowercase_ascii (String.trim status) with
-  | "complete" | "completed" | "failed" | "canceled" | "cancelled"
-  | "interrupted" ->
-      true
-  | _ -> false
+  Wire_runtime.is_terminal_setup_login_status
+    (Wire_runtime.classify_setup_login_status status)
 
 let apply_setup_login_receipt (receipt : Wire_runtime.setup_login_receipt) t =
   let same_session =

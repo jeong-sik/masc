@@ -1009,17 +1009,20 @@ let path_rest_for ~(keeper : Wire_fleet.keeper_summary) t =
   else
     match String_map.find_opt keeper.name t.keeper_diagnostics with
     | Some { runtime_path_rest = Some r; phase; _ }
-      when String.equal (String.lowercase_ascii r.status) "resting"
+      when (match Wire_fleet.classify_path_rest_status r.status with
+            | Wire_fleet.Path_rest_resting -> true
+            | Wire_fleet.Path_rest_other _ -> false)
            && (match r.release_at_unix with
                | Some ts when t.wall_unix > 0.0 && ts <= t.wall_unix -> false
                | Some _ | None -> true)
            && not
-                (match phase with
-                | Some p ->
-                    let lp = String.lowercase_ascii p in
-                    String.equal lp "paused" || String.equal lp "stopped"
-                    || String.equal lp "offline"
-                | None -> false) ->
+                (match Option.map Wire_fleet.classify_keeper_phase phase with
+                | Some
+                    ( Wire_fleet.Phase_paused
+                    | Wire_fleet.Phase_stopped
+                    | Wire_fleet.Phase_offline ) ->
+                    true
+                | Some (Wire_fleet.Phase_other _) | None -> false) ->
         Some r
     | Some _ | None -> None
 

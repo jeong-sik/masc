@@ -294,6 +294,20 @@ val turn_outcome_breakdown_24h : now_unix:float -> turn_pulse -> int * int * int
 (** [(ok, rested, failed)] sums across the 48 half-hour slots ending at
     [now_unix]. *)
 
+type path_rest_status =
+  | Path_rest_resting
+  | Path_rest_other of string
+
+val classify_path_rest_status : string -> path_rest_status
+
+type keeper_phase_kind =
+  | Phase_paused
+  | Phase_stopped
+  | Phase_offline
+  | Phase_other of string
+
+val classify_keeper_phase : string -> keeper_phase_kind
+
 type runtime_path_rest = {
   status : string;
   runtime_id : string;

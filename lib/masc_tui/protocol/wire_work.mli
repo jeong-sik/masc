@@ -657,6 +657,13 @@ val decode_candle_ledger : Yojson.Safe.t -> (candle_ledger, string) result
 
 (** {1 Wave 3: Harness Health & Verification Evidence / Summary / Specs / TLC} *)
 
+type harness_verdict_kind =
+  | Verdict_approve
+  | Verdict_reject
+  | Verdict_other of string
+
+val classify_harness_verdict : string -> harness_verdict_kind
+
 type harness_verdict_row = {
   timestamp : float;
   task_id : string;
@@ -840,6 +847,10 @@ type gate_rule = {
   expires_at : float option;
 }
 
+type gate_decision_kind =
+  | Gate_approved
+  | Gate_rejected_or_other of string
+
 type gate_resolved_row = {
   id : string;
   event : string;
@@ -853,6 +864,8 @@ type gate_resolved_row = {
   actor : string option;
   ts : float;
 }
+
+val classify_gate_decision : gate_resolved_row -> gate_decision_kind
 
 type gate_snapshot = {
   generated_at : string option;

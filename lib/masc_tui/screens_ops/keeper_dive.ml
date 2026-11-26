@@ -1884,9 +1884,19 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
         in
         let y = ref content.y and bot = Rect.bottom content in
         List.iter
-          (fun ln ->
+          (fun (ln : Update_nav.styled_line) ->
             if !y < bot then begin
-              let is_sel = String.starts_with ~prefix:">" ln in
+              let is_sel =
+                match ln.tone with
+                | Update_nav.Line_selected -> true
+                | Update_nav.Line_plain
+                | Update_nav.Line_section
+                | Update_nav.Line_ok
+                | Update_nav.Line_warn
+                | Update_nav.Line_error
+                | Update_nav.Line_accent ->
+                    false
+              in
               let row_rect =
                 Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
               in
@@ -1898,18 +1908,21 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                   ~style:(Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
                   ();
               let st =
-                if is_sel then Typography.anchor ~bg:row_bg theme
-                else if String.starts_with ~prefix:"──" ln then
-                  Typography.status ~bg ~bold:true theme Theme.Status_active
-                else if String.starts_with ~prefix:"  [error" ln then
-                  Typography.status ~bg theme Theme.Status_critical
-                else if String.starts_with ~prefix:"  [warn" ln then
-                  Typography.status ~bg theme Theme.Status_attention
-                else Typography.structure ~bg theme
+                match ln.tone with
+                | Update_nav.Line_selected -> Typography.anchor ~bg:row_bg theme
+                | Update_nav.Line_section | Update_nav.Line_accent ->
+                    Typography.status ~bg ~bold:true theme Theme.Status_active
+                | Update_nav.Line_error ->
+                    Typography.status ~bg theme Theme.Status_critical
+                | Update_nav.Line_warn ->
+                    Typography.status ~bg theme Theme.Status_attention
+                | Update_nav.Line_ok ->
+                    Typography.status ~bg theme Theme.Status_ok
+                | Update_nav.Line_plain -> Typography.structure ~bg theme
               in
               ignore
                 (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                   ~max_w:content.w ~style:st ln);
+                   ~max_w:content.w ~style:st ln.text);
               incr y
             end)
           (Store_scroll.drop skip lines)

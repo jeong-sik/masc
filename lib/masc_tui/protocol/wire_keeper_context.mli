@@ -421,6 +421,22 @@ type oauth_attached_tools_snapshot = {
   providers : oauth_attached_provider list;
 }
 
+type tool_call_disposition =
+  | Disposition_deferred
+  | Disposition_completed
+  | Disposition_failed
+  | Disposition_other of string
+
+val classify_tool_call_disposition : string -> tool_call_disposition
+
+type oauth_attempt_state =
+  | Oauth_completed
+  | Oauth_active
+  | Oauth_settled_other
+  | Oauth_other of string
+
+val classify_oauth_attempt_kind : string -> oauth_attempt_state
+
 type oauth_attempt_status = {
   kind : string;
   expires_at : float option;

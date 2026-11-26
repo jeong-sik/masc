@@ -2269,10 +2269,10 @@ let memory_flow_input_of_diff (diff : Wire_knowledge.memory_diff)
             | Error _ -> None
             | Ok at_unix ->
                 let added, removed =
-                  match String.lowercase_ascii (String.trim r.op) with
-                  | "added" -> (1, 0)
-                  | "retracted" -> (0, 1)
-                  | _ -> (0, 0)
+                  match Wire_knowledge.classify_world_revision_op r.op with
+                  | Wire_knowledge.World_op_added -> (1, 0)
+                  | Wire_knowledge.World_op_retracted -> (0, 1)
+                  | Wire_knowledge.World_op_other _ -> (0, 0)
                 in
                 Some
                   {

@@ -976,23 +976,43 @@ let selected_log t =
   | Some (Entry_log e) -> Some e
   | Some (Entry_event _) | None -> None
 
-let sandbox_inspector_event_count ~keeper t =
+let has_module_token ~tokens raw =
+  let s = String.lowercase_ascii (String.trim raw) in
+  let len = String.length s in
+  let is_sep = function
+    | '_' | '-' | '/' | '.' | ':' | ' ' | '\t' -> true
+    | _ -> false
+  in
+  let rec scan i =
+    if i >= len then false
+    else if is_sep s.[i] then scan (i + 1)
+    else
+      let rec find_end j =
+        if j >= len || is_sep s.[j] then j else find_end (j + 1)
+      in
+      let j = find_end i in
+      let tok = String.sub s i (j - i) in
+      if List.exists (String.equal tok) tokens then true else scan j
+  in
+  scan 0
+
+let is_sandbox_related_log (e : Wire_infra.system_log_entry) =
+  has_module_token ~tokens:[ "sandbox" ] e.source
+  || has_module_token ~tokens:[ "sandbox"; "vm"; "microvm"; "ssh"; "docker"; "container" ]
+       e.module_name
+
+let sandbox_inspector_logs ~keeper t =
   let keeper_logs =
     List.filter
       (fun (e : Wire_infra.system_log_entry) ->
         match e.keeper with Some k -> String.equal k keeper | None -> false)
       t.logs
   in
-  let display_logs =
-    if keeper_logs <> [] then keeper_logs
-    else
-      List.filter
-        (fun (e : Wire_infra.system_log_entry) ->
-          contains_ci ~needle:"sandbox" e.source
-          || contains_ci ~needle:"vm" e.module_name
-          || contains_ci ~needle:"ssh" e.module_name)
-        t.logs
-  in
+  if keeper_logs <> [] then keeper_logs
+  else List.filter is_sandbox_related_log t.logs
+
+let sandbox_inspector_event_count ~keeper t =
+  let display_logs = sandbox_inspector_logs ~keeper t in
   let keeper_acts =
     List.filter
       (fun (ev : activity_row) ->

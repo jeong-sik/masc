@@ -1963,6 +1963,17 @@ let float_or_0 json key =
   | Ok (Some f) -> f
   | Ok None | Error _ -> 0.0
 
+type harness_verdict_kind =
+  | Verdict_approve
+  | Verdict_reject
+  | Verdict_other of string
+
+let classify_harness_verdict v =
+  match String.lowercase_ascii (String.trim v) with
+  | "approve" | "approved" -> Verdict_approve
+  | "reject" | "rejected" -> Verdict_reject
+  | other -> Verdict_other other
+
 let decode_harness_verdict_row json =
   let timestamp = float_or_0 json "timestamp" in
   let* task_id = required_nonblank_string json "task_id" in
@@ -2599,6 +2610,16 @@ let decode_gate_rule json =
       source_approval_id;
       expires_at;
     }
+
+type gate_decision_kind =
+  | Gate_approved
+  | Gate_rejected_or_other of string
+
+let classify_gate_decision (r : gate_resolved_row) =
+  let raw = Option.value r.decision_kind ~default:r.decision in
+  match String.lowercase_ascii (String.trim raw) with
+  | "approve" | "approved" | "allow" -> Gate_approved
+  | other -> Gate_rejected_or_other other
 
 let decode_gate_resolved_row json =
   let* id = required_nonblank_string json "id" in

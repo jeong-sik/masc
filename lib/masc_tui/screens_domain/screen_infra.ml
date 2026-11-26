@@ -455,21 +455,8 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
       end;
       let rem_rows = Int.max 0 (bottom - !y) in
       if rem_rows > 0 then begin
-        let keeper_logs =
-          List.filter
-            (fun (e : Wire_infra.system_log_entry) ->
-              match e.keeper with Some k -> String.equal k keeper | None -> false)
-            model.infra.logs
-        in
         let display_logs =
-          if keeper_logs <> [] then keeper_logs
-          else
-            List.filter
-              (fun (e : Wire_infra.system_log_entry) ->
-                H.contains_ci ~needle:"sandbox" e.source
-                || H.contains_ci ~needle:"vm" e.module_name
-                || H.contains_ci ~needle:"ssh" e.module_name)
-              model.infra.logs
+          Infra_store.sandbox_inspector_logs ~keeper model.infra
         in
         let keeper_acts =
           List.filter

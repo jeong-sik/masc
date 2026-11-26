@@ -3078,6 +3078,7 @@ let test_memory_health_os_read_errors () =
         (Msg.Http_reply { epoch = model.epoch; reply })
     in
     Update_nav.keeper_memory_subview_lines ~width:120 ~name:keeper model.knowledge
+    |> List.map (fun (l : Update_nav.styled_line) -> l.text)
     |> String.concat "\n"
   in
   let wire = Yojson.Safe.from_string {|{

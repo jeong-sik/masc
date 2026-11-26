@@ -378,6 +378,28 @@ type turn_pulse = { known_since : float; slots : turn_slot list }
 
 let turn_slot_seconds = 1800
 
+type path_rest_status =
+  | Path_rest_resting
+  | Path_rest_other of string
+
+let classify_path_rest_status s =
+  match String.lowercase_ascii (String.trim s) with
+  | "resting" -> Path_rest_resting
+  | other -> Path_rest_other other
+
+type keeper_phase_kind =
+  | Phase_paused
+  | Phase_stopped
+  | Phase_offline
+  | Phase_other of string
+
+let classify_keeper_phase s =
+  match String.lowercase_ascii (String.trim s) with
+  | "paused" -> Phase_paused
+  | "stopped" -> Phase_stopped
+  | "offline" -> Phase_offline
+  | other -> Phase_other other
+
 type runtime_path_rest = {
   status : string;
   runtime_id : string;

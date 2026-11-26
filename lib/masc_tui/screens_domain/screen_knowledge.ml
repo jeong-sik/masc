@@ -3054,22 +3054,21 @@ let draw_memory_subview_card ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let skip = Int.min max_skip (Int.max 0 k.memory_subview_scroll) in
     let y = ref content.y and bot = Rect.bottom content in
     List.iter
-      (fun ln ->
+      (fun (ln : Update_nav.styled_line) ->
         if !y < bot then begin
           let st =
-            if String.starts_with ~prefix:"──" ln then
-              H.accent_style ~theme ~attrs:Attr.bold ()
-            else if
-              String.starts_with ~prefix:"    [error" ln
-              || String.starts_with ~prefix:"  [conflict" ln
-            then H.status_style ~theme Theme.Status_critical
-            else if String.starts_with ~prefix:"    [warn" ln then
-              H.status_style ~theme Theme.Status_attention
-            else H.text_style ~theme ()
+            match ln.tone with
+            | Update_nav.Line_section | Update_nav.Line_accent ->
+                H.accent_style ~theme ~attrs:Attr.bold ()
+            | Update_nav.Line_error -> H.status_style ~theme Theme.Status_critical
+            | Update_nav.Line_warn -> H.status_style ~theme Theme.Status_attention
+            | Update_nav.Line_ok -> H.status_style ~theme Theme.Status_ok
+            | Update_nav.Line_plain | Update_nav.Line_selected ->
+                H.text_style ~theme ()
           in
           ignore
             (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-               ~max_w:content.w ~style:st ln);
+               ~max_w:content.w ~style:st ln.text);
           incr y
         end)
       (Store_scroll.drop skip lines)

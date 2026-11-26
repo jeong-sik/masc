@@ -755,16 +755,6 @@ let flush_complete_record state emitted =
   state.next_bounded_flush_at <- stream_flush_threshold state.redaction
 ;;
 
-let flush_bounded_prefix_if_needed state emitted =
-  let pending_len = Buffer.length state.pending_line in
-  if pending_len >= state.next_bounded_flush_at
-  then (
-    let overlap = stream_overlap_bytes state.redaction in
-    let stop = pending_len - overlap in
-    emit_bounded_prefix state emitted stop;
-    state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
-;;
-
 let flush_unterminated_pem_bounded state emitted pending pending_len =
   let overlap = stream_overlap_bytes state.redaction in
   let stop = pending_len - overlap in
@@ -862,30 +852,42 @@ let absorb_into_owned_mask (state : stream_state) emitted ~source_length =
            :: !emitted);
     state.consumed <- past_byte)
 
-(* Token_incremental bounded flush (#55006 follow-up). The plain flush released
-   [0, stop) and kept the rest pending, so a structural token running across
-   [stop] was masked only up to [stop] and its body after [stop] left as
-   copied text. Here the release ends before any structural match that
-   crosses [stop] and before any pattern still in progress. When such a token
-   starts at byte 0 and fills the whole release window, holding it back would
-   leave the pending line unbounded, so the window is released masked and the
-   stream owns the token until its body ends. *)
-let rec token_incremental_char state emitted char =
+(* Bounded flush of both stream modes (#55006 follow-up; the line-buffered
+   mode in task-4126). The plain flush released [0, stop) and kept the rest
+   pending, so a structural token running across [stop] was masked only up to
+   [stop] and its body after [stop] left as copied text. Here the release ends
+   before any structural match that crosses [stop] and before any pattern
+   still in progress. When such a token starts at byte 0 and fills the whole
+   release window, holding it back would leave the pending line unbounded, so
+   the window is released masked and the stream owns the token until its body
+   ends. The line-buffered mode never sets [prev_ended_word], so its lookbehind
+   passes are its plain ones. *)
+let rec stream_char state emitted char =
   match state.owned with
   | Some owned -> owned_token_char state emitted owned char
-  | None -> token_incremental_plain_char state emitted char
+  | None -> plain_stream_char state emitted char
 
-and token_incremental_plain_char state emitted char =
-  if state.in_unterminated_pem then handle_unterminated_pem_byte state emitted char
-  else (
-    Buffer.add_char state.pending_line char;
-    if (Char.equal char '\n' || Char.equal char '\r')
-       && not (should_hold_across_newline state)
-    then flush_complete_record state emitted
-    else if Buffer.length state.pending_line >= state.next_bounded_flush_at
-    then (
-      emit_token_incremental_bounded state emitted;
-      state.next_bounded_flush_at <- stream_flush_threshold state.redaction))
+and plain_stream_char state emitted char =
+  match state.mode with
+  | Line_buffered ->
+      Buffer.add_char state.pending_line char;
+      if Char.equal char '\n' || Char.equal char '\r'
+      then flush_complete_record state emitted
+      else flush_bounded_window_if_needed state emitted
+  | Token_incremental ->
+      if state.in_unterminated_pem then handle_unterminated_pem_byte state emitted char
+      else (
+        Buffer.add_char state.pending_line char;
+        if (Char.equal char '\n' || Char.equal char '\r')
+           && not (should_hold_across_newline state)
+        then flush_complete_record state emitted
+        else flush_bounded_window_if_needed state emitted)
+
+and flush_bounded_window_if_needed state emitted =
+  if Buffer.length state.pending_line >= state.next_bounded_flush_at
+  then (
+    emit_bounded_window state emitted;
+    state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
 
 and owned_token_char state emitted owned char =
   let continues = Secret_patterns.stream_owner_continues owned.owner char in
@@ -908,7 +910,7 @@ and owned_token_char state emitted owned char =
       else (
         (* The authority ended: bytes after its last [@] are the host. *)
         state.owned <- None;
-        token_incremental_plain_char state emitted char)
+        plain_stream_char state emitted char)
   | Secret_patterns.Sk_token_body
   | Secret_patterns.Stripe_token_body
   | Secret_patterns.Dotted_token_body
@@ -916,9 +918,9 @@ and owned_token_char state emitted owned char =
       if continues then absorb_into_owned_mask state emitted ~source_length:1
       else (
         state.owned <- None;
-        token_incremental_plain_char state emitted char)
+        plain_stream_char state emitted char)
 
-and emit_token_incremental_bounded state emitted =
+and emit_bounded_window state emitted =
   let pending = Buffer.contents state.pending_line in
   let pending_len = String.length pending in
   let stop = pending_len - stream_overlap_bytes state.redaction in
@@ -980,7 +982,7 @@ and own_token_at_window_start state emitted pending stop =
       Buffer.clear state.pending_line;
       state.next_bounded_flush_at <- stream_flush_threshold state.redaction;
       String.iter
-        (token_incremental_char state emitted)
+        (stream_char state emitted)
         (String.sub pending stop (String.length pending - stop))
   | Some { start = _; owner = Some _ | None } | None ->
       (* No unbounded body at byte 0: a PEM block or a complete match. The
@@ -990,16 +992,9 @@ and own_token_at_window_start state emitted pending stop =
 let redact_stream_chunk_mapped state chunk =
   let emitted = ref [] in
   (match state.mode with
-   | Line_buffered ->
-       String.iter
-         (fun char ->
-            Buffer.add_char state.pending_line char;
-            if Char.equal char '\n' || Char.equal char '\r'
-            then flush_complete_record state emitted
-            else flush_bounded_prefix_if_needed state emitted)
-         chunk
+   | Line_buffered -> String.iter (stream_char state emitted) chunk
    | Token_incremental ->
-       String.iter (token_incremental_char state emitted) chunk;
+       String.iter (stream_char state emitted) chunk;
        flush_safe_incremental_prefix state emitted);
   { pieces = List.rev !emitted; consumed = state.consumed }
 ;;

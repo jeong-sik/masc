@@ -1245,11 +1245,11 @@ let test_token_incremental_bounded_unterminated_pem () =
    ("[REDACTED]" + 4,907 bytes of an [sk-] key 9,000 bytes long). Streaming
    must equal [redact_text] at every split, and the stream must never hold
    more than its flush threshold. *)
-let check_long_token_streaming ~label ~forbidden input =
+let check_long_token_streaming ?(mode = R.Token_incremental) ~label ~forbidden input =
   let expected = R.redact_text R.empty input in
   let len = String.length input in
   let run chunks =
-    let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+    let state = R.create_stream_state ~mode R.empty in
     let fed = ref 0 in
     let outputs =
       List.map
@@ -1306,6 +1306,27 @@ let test_token_incremental_long_token_crossing_bounded_flush () =
     ("go https://user:" ^ body ^ "@example.com/path rest");
   check_long_token_streaming ~label:"url credential with long user" ~forbidden
     ("go https://" ^ body ^ ":pw" ^ "@example.com/path rest")
+
+(* task-4126: the line-buffered stream (shell and Execute output rows) has the
+   same bounded flush. A record longer than its flush window without a newline
+   must not release a structural token's body after the cut either. *)
+let test_line_buffered_long_token_crossing_bounded_flush () =
+  let mode = R.Line_buffered in
+  let body = String.make 9_000 'A' in
+  let forbidden = String.make 32 'A' in
+  check_long_token_streaming ~mode ~label:"line: sk- body 9000 alone" ~forbidden ("sk-" ^ body);
+  check_long_token_streaming ~mode ~label:"line: sk- body 9000 in prose" ~forbidden
+    ("lead text " ^ "sk-" ^ body ^ " tail text");
+  check_long_token_streaming ~mode ~label:"line: sk- body after 5000 bytes of prose" ~forbidden
+    (String.make 5_000 'x' ^ " sk-" ^ body ^ " done");
+  check_long_token_streaming ~mode ~label:"line: stripe live" ~forbidden
+    ("key=" ^ "sk_" ^ "live_" ^ body ^ "!");
+  check_long_token_streaming ~mode ~label:"line: github ghp_" ~forbidden
+    ("tok=" ^ "ghp_" ^ body ^ " end");
+  check_long_token_streaming ~mode ~label:"line: Authorization header" ~forbidden
+    ("Authorization: Bearer " ^ body ^ "\nnext line");
+  check_long_token_streaming ~mode ~label:"line: url credential with long password" ~forbidden
+    ("go https://user:" ^ body ^ "@example.com/path rest")
 
 let () =
   Alcotest.run
@@ -1405,5 +1426,7 @@ let () =
             test_token_incremental_bounded_unterminated_pem;
           Alcotest.test_case "token incremental: long token crossing a bounded flush" `Quick
             test_token_incremental_long_token_crossing_bounded_flush;
+          Alcotest.test_case "line buffered: long token crossing a bounded flush" `Quick
+            test_line_buffered_long_token_crossing_bounded_flush;
         ] )
     ]

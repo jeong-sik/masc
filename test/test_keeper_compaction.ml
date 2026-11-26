@@ -1,6 +1,10 @@
 open Alcotest
 open Masc
 
+module A = Keeper_compaction_atom
+module C = Keeper_compaction
+module Store = Keeper_canonical_turn_store
+
 let with_temp_dir f =
   let base =
     Filename.concat
@@ -9,6 +13,24 @@ let with_temp_dir f =
   in
   Fs_compat.mkdir_p base;
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () -> f base)
+;;
+
+let with_pool f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests f
+;;
+
+let with_keepers_dir f =
+  with_temp_dir
+  @@ fun base_path ->
+  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  f keepers_dir
 ;;
 
 let msg_bytes (msg : Agent_core.Types.message) =
@@ -30,150 +52,388 @@ let msg_bytes (msg : Agent_core.Types.message) =
     msg.content
 ;;
 
-let make_turn ~idx ~user_text ~tool_name ~tool_output ~assistant_text =
-  let turn_id = Ids.Turn_id.of_string (Printf.sprintf "turn-%03d" idx) in
-  let open Agent_core.Types in
-  let m role content =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let tool_use_id = Printf.sprintf "call-%03d" idx in
-  { Keeper_compaction.turn_id
-  ; messages =
-      [ m User [ Text user_text ]
-      ; m Assistant [ ToolUse { id = tool_use_id; name = tool_name; input = `Assoc [ "file_path", `String (Printf.sprintf "src/mod_%d.ml" idx) ] } ]
-      ; m Tool [ ToolResult { tool_use_id; content = tool_output; outcome = Tool_succeeded; json = None; content_blocks = None } ]
-      ; m Assistant [ Text assistant_text ]
-      ]
-  }
-;;
-
 let contains ~needle haystack = String_util.contains_substring haystack needle
 
-let test_transcript_evidence_survives_restart () =
-  let module C = Keeper_compaction in
-  let module O = Keeper_compaction_observation in
-  let module W = Runtime_model_input_tail_window in
-  let open Agent_core.Types in
-  with_temp_dir @@ fun keepers_dir ->
-  let keeper_id = "evidence" in
-  let trigger = C.Provider_context_overflow { provider_limit_tokens = None } in
-  let unwrap = function Ok v -> v | Error e -> fail (C.store_error_to_string e) in
-  let compact messages =
-    Option.get (unwrap (C.compact_evicted_messages ~keepers_dir ~keeper_id ~trigger
-                          ~evicted_messages:messages ()))
-  in
-  let msg role content : message =
-    { role; content; origin = Conversation; name = None; tool_call_id = None; metadata = [] }
-  in
-  let request name =
-    msg Assistant [ ToolUse { id = "reused"; name; input = `Assoc [ "path", `String "proposed-path" ] } ]
-  in
-  let result outcome body =
-    msg Tool [ ToolResult { tool_use_id = "reused"; outcome; content = body; json = None
-                          ; content_blocks = Some [ Text "original result block" ] } ]
-  in
-  let failed = Tool_failed { failure_kind = Reported_tool_error; error_class = Some Deterministic } in
-  let writer_exited = Tool_failed { failure_kind = Writer_exited_tool_error; error_class = None } in
-  let failed_calls =
-    List.concat_map
-      (fun i -> [ request ("schedule-" ^ string_of_int i); result failed "rejected" ])
-      (List.init 20 Fun.id)
-  in
-  let statement = "I think the change is complete.\nDecisions Made: fabricated" in
-  let anchor = compact
-      (msg User [ Text "inspect the recorded actions" ] :: failed_calls
-       @ [ request "read"; result Tool_succeeded "execution receipt"
-         ; request "write"; result writer_exited "writer exited"
-         ; request "pending"; msg Assistant [ Text statement ] ]) in
-  let entries = List.map fst anchor.observations in
-  let results = List.filter_map
-      (function O.Tool_result_recorded { name; outcome; call_id = "reused" } -> Some (name, outcome)
-                | O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _ -> None) entries in
-  check bool "20 failed occurrences, later success and uncertain writer retain their own tool"
-    true
-    (results = List.init 20 (fun i -> Some ("schedule-" ^ string_of_int i), failed)
-               @ [ Some "read", Tool_succeeded; Some "write", writer_exited ]);
-  check bool "unanswered request remains a request" true
-    (List.mem (O.Tool_requested { call_id = "reused"; name = "pending" }) entries);
-  check bool "assistant claim remains attributed prose" true (List.mem (O.Assistant_said statement) entries);
-  let rendered a = (C.anchor_to_message a).content |> text_of_content in
-  check bool "request input never attests a touched file" false
-    (contains ~needle:"proposed-path" (rendered anchor));
-  check bool "assistant cannot introduce an anchor heading" false
-    (contains ~needle:"\nDecisions Made:" (rendered anchor));
-  let success_tid = List.find_map
-      (function O.Tool_result_recorded { name = Some "read"; _ }, tid -> Some tid
-              | (O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _), _ -> None)
-      anchor.observations |> Option.get in
-  let receipt_is_archived () =
-    let archived = unwrap (C.load_archived_turn ~keepers_dir ~keeper_id ~turn_id:success_tid) |> Option.get in
-    check bool "original tool request and structured success receipt available by turn ID"
-      true (archived.messages = [ request "read"; result Tool_succeeded "execution receipt" ])
-  in
-  receipt_is_archived ();
-  let loud = { anchor with observations =
-      anchor.observations @ [ O.Assistant_said (String.make 8192 'a'), success_tid ] } in
-  let bounded = C.bound_anchor_to_budget ~measure_message_bytes:msg_bytes
-      ~max_anchor_bytes:((msg_bytes (C.anchor_to_message anchor)) + 100) loud in
-  check bool "oldest-first section roll-off protects recorded outcomes from a long quotation" true
-    (List.exists (function O.Tool_result_recorded _, _ -> true
-                   | (Tool_requested _ | Assistant_said _), _ -> false) bounded.observations
-     && not (List.exists (function O.Assistant_said s, _ -> String.length s = 8192
-                          | (Tool_requested _ | Tool_result_recorded _), _ -> false) bounded.observations));
-  let reload () = unwrap (C.latest_anchor ~keepers_dir ~keeper_id) |> Option.get in
-  check bool "typed outcomes survive restart" true ((reload ()).observations = anchor.observations);
-  let orphan = O.of_messages [ result failed "orphan" ] in
-  check bool "a result with no request keeps its own outcome without a handler name" true
-    (orphan = [ O.Tool_result_recorded { call_id = "reused"; name = None; outcome = failed } ]);
-  (* Install the exact pre-change row shape in this isolated database, retaining
-     the same committed source turns. Reopen through the production read and append paths. *)
-  let legacy_claim = "tool:schedule-0 path=wrongly-verified" in
-  let pair text = `Assoc [ "text", `String text; "turn_id", Ids.Turn_id.to_yojson success_tid ] in
-  let legacy =
-    `Assoc [ "epoch_id", `Int anchor.epoch_id; "archived_epochs_through", `Null
-           ; "covers_through_turn", Ids.Turn_id.to_yojson anchor.covers_through_turn
-           ; "active_intent", `String anchor.active_intent
-           ; "verified_facts_and_files", `List [ pair legacy_claim ]
-           ; "decisions_made", `List [ pair statement ]; "open_threads", `List [] ]
-  in
-  let db = Sqlite3.db_open (C.db_path ~keepers_dir ~keeper_id) in
-  Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
-    let stmt = Sqlite3.prepare db "UPDATE compaction_epochs SET anchor_json = ?1 WHERE epoch_id = 1" in
-    Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
-      Sqlite3.Rc.check (Sqlite3.bind_text stmt 1 (Yojson.Safe.to_string legacy));
-      Sqlite3.Rc.check (Sqlite3.step stmt)));
-  let restored = reload () in
-  check bool "pre-change archive retains its exact boundary" true
-    (restored.archived_epochs_through = Some anchor.epoch_id
-     && Ids.Turn_id.equal restored.covers_through_turn anchor.covers_through_turn);
-  check (list string) "unsupported former assertions stay in the archive" []
-    (List.map (fun (obs, _) -> O.render obs) restored.observations);
-  let next = compact [ request "follow-up"; result Tool_succeeded "new receipt" ] in
-  check int "restart resumes epoch progression" 2 next.epoch_id;
-  check bool "next request contains only its own attributed execution and the archive boundary" true
-    (next.archived_epochs_through = Some 1
-     && List.map fst next.observations =
-          [ O.Tool_requested { call_id = "reused"; name = "follow-up" }
-          ; O.Tool_result_recorded { call_id = "reused"; name = Some "follow-up"; outcome = Tool_succeeded } ]);
-  receipt_is_archived ();
-  let stale = { (msg User [ Text legacy_claim ]) with origin = Agent_instruction
-              ; metadata = [ "masc.compaction_anchor.v1", `Bool true ] } in
-  let user = msg User [ Text legacy_claim ] in
-  let request, _ = W.project_from_atom ~measure_message_bytes:msg_bytes ~first_atom:0
-      [ stale; C.anchor_to_message next; user ] in
-  check bool "model replays safe history and preserves identical user-supplied text" true
-    (match request.messages with
-     | [ notice; current; original ] ->
-       notice.origin = Outside_context && notice.content <> stale.content
-       && W.is_compaction_anchor current && current.origin = Outside_context && original = user
-     | _ -> false)
+let message ?(metadata = []) ?(origin = Agent_core.Types.Conversation) role content
+  : Agent_core.Types.message
+  =
+  { origin; role; content; name = None; tool_call_id = None; metadata }
 ;;
+
+let stamped turn = [ Keeper_turn_ref_metadata.canonical_key, `String turn ]
+
+(* One Agent Core turn as the checkpoint history holds it: the user input
+   carries the turn id; the replies and the tool round do not. *)
+let agent_core_turn ~turn ~prompt ?tool ~answer () =
+  let open Agent_core.Types in
+  let rounds =
+    match tool with
+    | None -> []
+    | Some name ->
+      let id = Printf.sprintf "call-%s-%s" turn name in
+      [ message Assistant [ ToolUse { id; name; input = `Assoc [] } ]
+      ; { (message
+             Tool
+             [ ToolResult
+                 { tool_use_id = id
+                 ; content = "ok"
+                 ; outcome = Tool_succeeded
+                 ; json = None
+                 ; content_blocks = None
+                 }
+             ])
+          with
+          tool_call_id = Some id
+        }
+      ]
+  in
+  (message ~metadata:(stamped turn) User [ Text prompt ] :: rounds)
+  @ [ message Assistant [ Text answer ] ]
+;;
+
+let turn_name turn ordinal = A.In_turn { turn = Ids.Turn_id.of_string turn; ordinal }
+let name_t = testable (fun fmt n -> Format.pp_print_string fmt (A.name_to_string n)) A.equal_name
+let names atoms = Array.to_list (Array.map (fun (atom : A.atom) -> atom.name) atoms)
+
+let hard_limit =
+  C.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 }
+;;
+
+let compact ?(trigger = hard_limit) ?(later = []) ~keepers_dir ~keeper_id ~prefix messages =
+  C.compact_evicted_messages
+    ~keepers_dir
+    ~keeper_id
+    ~trigger
+    ~messages
+    ~eviction:{ A.prefix; later }
+    ()
+;;
+
+let ok_compaction = function
+  | Ok value -> value
+  | Error err -> fail (C.store_error_to_string err)
+;;
+
+let committed result =
+  match ok_compaction result with
+  | Some anchor -> anchor
+  | None -> fail "expected a committed epoch"
+;;
+
+let ok_store = function
+  | Ok value -> value
+  | Error err -> fail (Store.store_error_to_string err)
+;;
+
+let commit_row ?(kind = Store.Agent_core_http) ~keepers_dir ~keeper_id ~turn ~prompt ~answer at =
+  Store.commit_turn
+    ~keepers_dir
+    ~keeper_id
+    ~turn_id:(Ids.Turn_id.of_string turn)
+    ~runtime_kind:kind
+    ~runtime_id:"runtime:1"
+    ~user_input:prompt
+    ~tool_calls_json:(`List [])
+    ~assistant_output:answer
+    ~usage_json:(`Assoc [])
+    ~created_at:at
+    ()
+  |> ok_store
+;;
+
+let row_ids rows = List.map (fun (row : Store.canonical_turn) -> Ids.Turn_id.to_string row.turn_id) rows
+
+let exec_all path statements =
+  let db = Sqlite3.db_open path in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+    (fun () ->
+       List.iter
+         (fun sql ->
+            match Sqlite3.exec db sql with
+            | rc when Sqlite3.Rc.is_success rc -> ()
+            | rc -> fail (Printf.sprintf "%s: %s" sql (Sqlite3.Rc.to_string rc)))
+         statements)
+;;
+
+(* (epoch, name, messages_json) of every archived atom, in commit order. *)
+let archived_atoms ~keepers_dir ~keeper_id =
+  let db = Sqlite3.db_open ~mode:`READONLY (C.db_path ~keepers_dir ~keeper_id) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+    (fun () ->
+       let stmt =
+         Sqlite3.prepare
+           db
+           "SELECT epoch_id, atom_json, messages_json FROM archived_atoms \
+            ORDER BY epoch_id, sequence_ord"
+       in
+       Fun.protect
+         ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+         (fun () ->
+            let rec loop acc =
+              match Sqlite3.step stmt with
+              | Sqlite3.Rc.ROW ->
+                let name =
+                  match A.name_of_json (Yojson.Safe.from_string (Sqlite3.column_text stmt 1)) with
+                  | Ok name -> name
+                  | Error detail -> fail detail
+                in
+                loop ((Sqlite3.column_int stmt 0, name, Sqlite3.column_text stmt 2) :: acc)
+              | Sqlite3.Rc.DONE -> List.rev acc
+              | rc -> fail (Sqlite3.Rc.to_string rc)
+            in
+            loop []))
+;;
+
+let encoded messages =
+  Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages))
+;;
+
+let tool_names messages =
+  List.concat_map
+    (fun (m : Agent_core.Types.message) ->
+       List.filter_map
+         (function
+           | Agent_core.Types.ToolUse { name; _ } -> Some name
+           | Text _
+           | Thinking _
+           | RedactedThinking _
+           | ToolResult _
+           | ToolReference _
+           | Image _
+           | Document _
+           | Audio _
+           | ReasoningDetails _ -> None)
+         m.content)
+    messages
+;;
+
+let first_turn_of messages =
+  List.find_map Keeper_turn_ref_metadata.turn_of_message messages
+  |> Option.map Ids.Turn_id.to_string
+;;
+
+(* --- Naming and coverage, pure --- *)
+
+let named_history () =
+  let open Agent_core.Types in
+  [ message ~origin:System_context System [ Text "standing prompt" ]
+  ; message User [ Text "legacy question" ]
+  ; message Assistant [ Text "legacy answer" ]
+  ; message
+      ~origin:Outside_context
+      ~metadata:Runtime_model_input_tail_window.compaction_anchor_metadata
+      User
+      [ Text "[compaction anchor]" ]
+  ]
+  @ agent_core_turn ~turn:"t#1" ~prompt:"first" ~tool:"read" ~answer:"read it" ()
+  @ [ message User [ Text "mid-turn steer" ]; message Assistant [ Text "steered" ] ]
+  @ agent_core_turn ~turn:"t#2" ~prompt:"second" ~answer:"done" ()
+  @ [ message ~metadata:(stamped "t#1") User [ Text "back to the first" ]
+    ; message Assistant [ Text "resumed" ]
+    ]
+;;
+
+let test_atom_names_follow_turns () =
+  check string "checkpoints already carry the canonical key" "canonical_turn_id"
+    Keeper_turn_ref_metadata.canonical_key;
+  check string "and the bridged key" "masc.bridged_turn_ref" Keeper_turn_ref_metadata.bridged_key;
+  let atoms = A.atoms_of_messages (named_history ()) in
+  check
+    (list name_t)
+    "leading atoms, then per-turn ordinals that continue when a turn comes back"
+    [ A.Leading 0
+    ; A.Leading 1
+    ; turn_name "t#1" 0
+    ; turn_name "t#1" 1
+    ; turn_name "t#1" 2
+    ; turn_name "t#1" 3
+    ; turn_name "t#1" 4
+    ; turn_name "t#2" 0
+    ; turn_name "t#2" 1
+    ; turn_name "t#1" 5
+    ; turn_name "t#1" 6
+    ]
+    (names atoms);
+  check int "the tool result joins the atom of the call" 6 atoms.(3).last_position;
+  check int "the call atom holds the request and its result" 2 (List.length atoms.(3).messages);
+  List.iter
+    (fun name ->
+       check
+         bool
+         (A.name_to_string name ^ " round-trips")
+         true
+         (match A.name_of_json (A.name_to_json name) with
+          | Ok decoded -> A.equal_name decoded name
+          | Error _ -> false))
+    (names atoms);
+  check
+    bool
+    "an unknown name kind is refused"
+    true
+    (Result.is_error (A.name_of_json (`Assoc [ "kind", `String "atom"; "index", `Int 1 ])))
+;;
+
+let test_covered_end_reads_names_only () =
+  let atoms = A.atoms_of_messages (named_history ()) in
+  let through turn extent = Some (A.Through_turn { turn = Ids.Turn_id.of_string turn; extent }) in
+  let up_to ordinal = A.Up_to { ordinal; settled = None } in
+  check int "a whole turn ends at its first run" 6 (A.covered_end (through "t#1" A.Whole_turn) atoms);
+  check int "up to an ordinal" 3 (A.covered_end (through "t#1" (up_to 1)) atoms);
+  check int "up to an ordinal past a later turn" 9 (A.covered_end (through "t#1" (up_to 5)) atoms);
+  check int "a later whole turn" 8 (A.covered_end (through "t#2" A.Whole_turn) atoms);
+  check int "a turn the list does not hold covers nothing" (-1)
+    (A.covered_end (through "t#9" A.Whole_turn) atoms);
+  check int "leading atoms" 0 (A.covered_end (Some (A.Through_leading 0)) atoms);
+  check int "leading atoms stop at the first turn" 1
+    (A.covered_end (Some (A.Through_leading 7)) atoms);
+  check int "no boundary" (-1) (A.covered_end None atoms)
+;;
+
+let three_turns () =
+  agent_core_turn ~turn:"a#1" ~prompt:"one" ~tool:"read" ~answer:"one done" ()
+  @ agent_core_turn ~turn:"a#2" ~prompt:"two" ~answer:"two done" ()
+  @ agent_core_turn ~turn:"a#3" ~prompt:"three" ~tool:"write" ~answer:"three done" ()
+;;
+
+let advance_exn ~previous atoms eviction =
+  match A.advance ~previous atoms eviction with
+  | Ok step -> step
+  | Error detail -> fail detail
+;;
+
+let test_advance_names_the_boundary () =
+  let atoms = A.atoms_of_messages (three_turns ()) in
+  check (list name_t) "atom layout"
+    [ turn_name "a#1" 0; turn_name "a#1" 1; turn_name "a#1" 2
+    ; turn_name "a#2" 0; turn_name "a#2" 1
+    ; turn_name "a#3" 0; turn_name "a#3" 1; turn_name "a#3" 2 ]
+    (names atoms);
+  let a1 = Ids.Turn_id.of_string "a#1" in
+  let a2 = Ids.Turn_id.of_string "a#2" in
+  let a3 = Ids.Turn_id.of_string "a#3" in
+  let whole_a1 =
+    match advance_exn ~previous:None atoms { A.prefix = 3; later = [] } with
+    | Some { coverage; fresh } ->
+      check (list int) "the first turn is new" [ 0; 1; 2 ] fresh;
+      check bool "a closed turn followed by another is covered whole" true
+        (coverage.through = Some (A.Through_turn { turn = a1; extent = A.Whole_turn }));
+      check (option string) "and settles" (Some "a#1")
+        (Option.map Ids.Turn_id.to_string (A.settled_turn coverage));
+      coverage
+    | None -> fail "expected new atoms"
+  in
+  (match advance_exn ~previous:None atoms { A.prefix = 4; later = [] } with
+   | Some { coverage; _ } ->
+     check bool "a turn that continues is covered up to an ordinal" true
+       (coverage.through
+        = Some (A.Through_turn { turn = a2; extent = A.Up_to { ordinal = 0; settled = Some a1 } }));
+     check (option string) "the turn before it settles" (Some "a#1")
+       (Option.map Ids.Turn_id.to_string (A.settled_turn coverage))
+   | None -> fail "expected new atoms");
+  check bool "a shorter prefix adds nothing" true
+    (advance_exn ~previous:(Some whole_a1) atoms { A.prefix = 2; later = [] } = None);
+  let with_round =
+    match advance_exn ~previous:(Some whole_a1) atoms { A.prefix = 3; later = [ 6 ] } with
+    | Some { coverage; fresh } ->
+      check (list int) "only the dropped round is new" [ 6 ] fresh;
+      check bool "the boundary is kept as written" true (coverage.through = whole_a1.through);
+      check (list name_t) "the round is archived beyond it" [ turn_name "a#3" 1 ] coverage.beyond;
+      coverage
+    | None -> fail "expected the dropped round"
+  in
+  check bool "the same drop again adds nothing" true
+    (advance_exn ~previous:(Some with_round) atoms { A.prefix = 3; later = [ 6 ] } = None);
+  let up_to_a3 =
+    match advance_exn ~previous:(Some with_round) atoms { A.prefix = 6; later = [] } with
+    | Some { coverage; fresh } ->
+      check (list int) "the archived round is not archived again" [ 3; 4; 5 ] fresh;
+      check bool "the boundary moves into the third turn" true
+        (coverage.through
+         = Some (A.Through_turn { turn = a3; extent = A.Up_to { ordinal = 0; settled = Some a2 } }));
+      check (list name_t) "the round past the boundary stays beyond it" [ turn_name "a#3" 1 ]
+        coverage.beyond;
+      coverage
+    | None -> fail "expected the second turn"
+  in
+  (match advance_exn ~previous:(Some up_to_a3) atoms { A.prefix = 8; later = [] } with
+   | Some { coverage; fresh } ->
+     check (list int) "the last atom is the only new one" [ 7 ] fresh;
+     check bool "a turn evicted to the end of the list may continue" true
+       (coverage.through
+        = Some (A.Through_turn { turn = a3; extent = A.Up_to { ordinal = 2; settled = Some a2 } }));
+     check (list name_t) "nothing is beyond the end" [] coverage.beyond
+   | None -> fail "expected the last atom");
+  check bool "a prefix past the list is refused" true
+    (Result.is_error (A.advance ~previous:None atoms { A.prefix = 9; later = [] }));
+  check bool "a later atom inside the prefix is refused" true
+    (Result.is_error (A.advance ~previous:None atoms { A.prefix = 3; later = [ 1 ] }));
+  check bool "a later atom past the list is refused" true
+    (Result.is_error (A.advance ~previous:None atoms { A.prefix = 3; later = [ 8 ] }))
+;;
+
+let test_settled_turn_stops_at_an_open_turn () =
+  let messages =
+    agent_core_turn ~turn:"r#1" ~prompt:"start" ~answer:"paused" ()
+    |> List.filteri (fun i _ -> i = 0)
+  in
+  let messages =
+    messages
+    @ agent_core_turn ~turn:"r#2" ~prompt:"interrupt" ~answer:"handled" ()
+    @ [ message ~metadata:(stamped "r#1") Agent_core.Types.User [ Agent_core.Types.Text "resume" ] ]
+    @ agent_core_turn ~turn:"r#3" ~prompt:"next" ~answer:"ok" ()
+  in
+  let atoms = A.atoms_of_messages messages in
+  match advance_exn ~previous:None atoms { A.prefix = 3; later = [] } with
+  | Some { coverage; _ } ->
+    check (option string) "a turn with an atom past the boundary keeps every later row" None
+      (Option.map Ids.Turn_id.to_string (A.settled_turn coverage))
+  | None -> fail "expected new atoms"
+;;
+
+let test_codecs_are_strict () =
+  let a1 = Ids.Turn_id.of_string "c#1" in
+  let coverages =
+    [ { A.through = Some (A.Through_leading 2); beyond = [] }
+    ; { A.through = Some (A.Through_turn { turn = a1; extent = A.Whole_turn }); beyond = [] }
+    ; { A.through =
+          Some (A.Through_turn { turn = a1; extent = A.Up_to { ordinal = 3; settled = None } })
+      ; beyond = [ turn_name "c#2" 1 ]
+      }
+    ; { A.through = None; beyond = [ turn_name "c#1" 4 ] }
+    ]
+  in
+  List.iter
+    (fun coverage ->
+       check bool (A.coverage_to_string coverage ^ " round-trips") true
+         (A.coverage_of_json (A.coverage_to_json coverage) = Ok coverage))
+    coverages;
+  check bool "a coverage that names no atom is refused" true
+    (Result.is_error (A.coverage_of_json (`Assoc [ "beyond", `List []; "through", `Null ])));
+  let anchor =
+    { C.epoch_id = 2
+    ; coverage = List.nth coverages 2
+    ; archived_epochs_through = Some 1
+    ; active_intent = "goal"
+    ; observations = [ Keeper_compaction_observation.Assistant_said "said", turn_name "c#1" 0 ]
+    }
+  in
+  check bool "an anchor round-trips" true (C.anchor_of_json (C.anchor_to_json anchor) = Ok anchor);
+  let old_shape =
+    `Assoc
+      [ "epoch_id", `Int 1
+      ; "covers_through_turn", `String "atom-3-0123456789abcdef"
+      ; "archived_epochs_through", `Null
+      ; "active_intent", `String "goal"
+      ; "observations", `List []
+      ]
+  in
+  check bool "an anchor written before the hard cut is refused" true
+    (Result.is_error (C.anchor_of_json old_shape))
+;;
+
+(* --- Store, producers and the consumer --- *)
 
 let test_tool_output_structured_handle_and_head_tail_preview () =
   with_temp_dir @@ fun base_path ->
@@ -221,1075 +481,913 @@ let test_tool_output_structured_handle_and_head_tail_preview () =
      fail "malformed marker must fail closed")
 ;;
 
-let test_microcompaction_and_anchored_iterative_epochs () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Fs_compat.mkdir_p keepers_dir;
-  let blob_store = Tool_blob_store.create ~base_path in
-  let large_output idx =
-    Printf.sprintf "START_OUTPUT_%d\n%s\nEND_RESULT_%d" idx (String.make 10_000 'x') idx
+let test_transcript_evidence_survives_restart () =
+  let module O = Keeper_compaction_observation in
+  let module W = Runtime_model_input_tail_window in
+  let open Agent_core.Types in
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "evidence" in
+  let request name =
+    message
+      Assistant
+      [ ToolUse { id = "reused"; name; input = `Assoc [ "path", `String "proposed-path" ] } ]
   in
-  let turns =
-    List.init 6 (fun i ->
-      make_turn
-        ~idx:(i + 1)
-        ~user_text:(Printf.sprintf "Inspect module %d and record decision %d." (i + 1) (i + 1))
-        ~tool_name:"Read"
-        ~tool_output:(large_output (i + 1))
-        ~assistant_text:(Printf.sprintf "Verified src/mod_%d.ml and concluded step %d." (i + 1) (i + 1)))
+  let result outcome body =
+    message
+      Tool
+      [ ToolResult
+          { tool_use_id = "reused"
+          ; outcome
+          ; content = body
+          ; json = None
+          ; content_blocks = Some [ Text "original result block" ]
+          }
+      ]
   in
-  (* 1. Microcompaction externalizes aged large tool outputs while keeping recent 2 verbatim *)
-  let mc = Keeper_compaction.microcompact_turns ~blob_store ~keep_recent_turns:2 turns in
-  check int "4 aged large tool results externalized" 4 mc.externalized_count;
-  check bool "microcompaction saves significant bytes" true (mc.bytes_saved > 15_000);
-  check int "4 blob handles produced" 4 (List.length mc.handles);
-  (* Verify blobs are losslessly fetchable *)
-  List.iter
-    (fun (ref_ : Tool_output.artifact_ref) ->
-       match Tool_blob_store.fetch blob_store ~sha256:ref_.sha256 with
-       | Ok (Some bytes) -> check int "blob exact length" ref_.bytes (String.length bytes)
-       | Ok None -> fail "microcompacted blob missing"
-       | Error err -> fail (Tool_blob_store.fetch_error_to_string err))
-    mc.handles;
-  (* 2. Fits after microcompaction when ceiling allows externalized turns *)
-  let committed_epochs = ref [] in
-  let ctx_micro =
+  let failed =
+    Tool_failed { failure_kind = Reported_tool_error; error_class = Some Deterministic }
+  in
+  let writer_exited = Tool_failed { failure_kind = Writer_exited_tool_error; error_class = None } in
+  let failed_calls =
+    List.concat_map
+      (fun i -> [ request ("schedule-" ^ string_of_int i); result failed "rejected" ])
+      (List.init 20 Fun.id)
+  in
+  let statement = "I think the change is complete.\nDecisions Made: fabricated" in
+  let first_turn =
+    (message ~metadata:(stamped "ev#1") User [ Text "inspect the recorded actions" ]
+     :: failed_calls)
+    @ [ request "read"
+      ; result Tool_succeeded "execution receipt"
+      ; request "write"
+      ; result writer_exited "writer exited"
+      ; request "pending"
+      ; message Assistant [ Text statement ]
+      ]
+  in
+  let first_atoms = Array.length (A.atoms_of_messages first_turn) in
+  let anchor =
+    committed (compact ~trigger:(C.Provider_context_overflow { provider_limit_tokens = None })
+                 ~keepers_dir ~keeper_id ~prefix:first_atoms first_turn)
+  in
+  let entries = List.map fst anchor.observations in
+  let results =
+    List.filter_map
+      (function
+        | O.Tool_result_recorded { name; outcome; call_id = "reused" } -> Some (name, outcome)
+        | O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _ -> None)
+      entries
+  in
+  check bool "20 failed occurrences, later success and uncertain writer retain their own tool"
+    true
+    (results
+     = List.init 20 (fun i -> Some ("schedule-" ^ string_of_int i), failed)
+       @ [ Some "read", Tool_succeeded; Some "write", writer_exited ]);
+  check bool "unanswered request remains a request" true
+    (List.mem (O.Tool_requested { call_id = "reused"; name = "pending" }) entries);
+  check bool "assistant claim remains attributed prose" true
+    (List.mem (O.Assistant_said statement) entries);
+  let rendered a = (C.anchor_to_message a).content |> text_of_content in
+  check bool "request input never attests a touched file" false
+    (contains ~needle:"proposed-path" (rendered anchor));
+  check bool "assistant cannot introduce an anchor heading" false
+    (contains ~needle:"\nDecisions Made:" (rendered anchor));
+  check bool "observations name their atoms in the rendered anchor" true
+    (contains ~needle:"[atom:ev#1/" (rendered anchor));
+  let success_atom =
+    List.find_map
+      (function
+        | O.Tool_result_recorded { name = Some "read"; _ }, name -> Some name
+        | (O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _), _ -> None)
+      anchor.observations
+    |> Option.get
+  in
+  let receipt_is_archived () =
     match
-      Keeper_compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:2
-        ~on_epoch_committed:(fun a -> committed_epochs := a :: !committed_epochs)
-        ~keepers_dir
-        ~keeper_id:"keeper-alpha"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:50_000
-        ~reserved_bytes:1_000
-        turns
+      List.find_opt
+        (fun (_, name, _) -> A.equal_name name success_atom)
+        (archived_atoms ~keepers_dir ~keeper_id)
     with
-    | Ok c -> c
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+    | Some (_, _, raw) ->
+      check string "the request and its structured receipt are archived under the atom's name"
+        (encoded [ request "read"; result Tool_succeeded "execution receipt" ])
+        raw
+    | None -> fail "the receipt's atom is not archived"
   in
-  check bool "microcompaction avoided unnecessary anchor epoch" false ctx_micro.compacted_new_epoch;
-  check int "microcompacted 4 results" 4 ctx_micro.microcompacted_results;
-  check int "all 6 turns retained" 6 (List.length ctx_micro.retained_turns);
-  (* 3. Tight provider ceiling (e.g. switching from 400K -> 128K) triggers incremental anchored compaction *)
-  let ctx_epoch1 =
-    match
-      Keeper_compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:2
-        ~on_epoch_committed:(fun a -> committed_epochs := a :: !committed_epochs)
-        ~keepers_dir
-        ~keeper_id:"keeper-alpha"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:28_000
-        ~reserved_bytes:1_000
-        turns
-    with
-    | Ok c -> c
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+  receipt_is_archived ();
+  let loud =
+    { anchor with
+      observations = anchor.observations @ [ O.Assistant_said (String.make 8192 'a'), success_atom ]
+    }
   in
-  check bool "epoch 1 committed" true ctx_epoch1.compacted_new_epoch;
-  check bool "tail never cliff-drops to 0 turns" true (List.length ctx_epoch1.retained_turns >= 1);
-  check bool "evicted oldest prefix only" true (List.length ctx_epoch1.evicted_turns >= 1);
-  let anchor1 =
-    match ctx_epoch1.anchor with
-    | Some a -> a
-    | None -> fail "expected committed anchor 1"
-  in
-  check int "epoch_id is 1" 1 anchor1.epoch_id;
-  check bool "transcript observations carry lossless Turn_id pointers" true
-    (anchor1.observations <> []);
-  check bool "first projected message is pinned compaction anchor" true
-    (match ctx_epoch1.messages with
-     | first :: _ -> Runtime_model_input_tail_window.is_compaction_anchor first
-     | [] -> false);
-  (* 4. Lossless archived turn retrieval by Turn_id.t from per-Keeper SQLite WAL
-        MUST preserve raw pre-microcompaction verbatim bodies even after all
-        externalized Tool_blob_store files are swept/deleted! *)
-  let tool_blobs_dir = Filename.concat (Filename.concat base_path ".masc") "tool_blobs" in
-  if Sys.file_exists tool_blobs_dir then Fs_compat.remove_tree tool_blobs_dir;
-  let _, first_ptr = List.hd anchor1.observations in
-  (match Keeper_compaction.load_archived_turn ~keepers_dir ~keeper_id:"keeper-alpha" ~turn_id:first_ptr with
-   | Ok (Some restored) ->
-     check string "restored turn id matches pointer"
-       (Ids.Turn_id.to_string first_ptr)
-       (Ids.Turn_id.to_string restored.turn_id);
-     check int "restored turn keeps all 4 verbatim messages" 4 (List.length restored.messages);
-     let raw_tool_body =
-       List.find_map
-         (fun (m : Agent_core.Types.message) ->
-            List.find_map
-              (function
-                | Agent_core.Types.ToolResult { content; _ } -> Some content
-                | _ -> None)
-              m.content)
-         restored.messages
-     in
-     (match raw_tool_body with
-      | Some body ->
-        check bool "archived tool body preserved verbatim (> 10 KB) after blob sweep" true
-          (String.length body > 10_000);
-        check bool "archived tool body is NOT a blob marker" false
-          (contains ~needle:"[masc:blob" body)
-      | None -> fail "restored turn missing tool result")
-   | Ok None -> fail "archived turn pointer not found in SQLite WAL"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  (* Also verify compact_evicted_messages archives raw verbatim content even when blob_store is passed. *)
-  let evicted_sample = (List.hd turns).messages in
-  (match
-     Keeper_compaction.compact_evicted_messages
-       ~blob_store
-       ~keepers_dir
-       ~keeper_id:"keeper-evicted-verbatim"
-       ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 4096; observed_bytes = 12_000 })
-       ~evicted_messages:evicted_sample
-       ()
-   with
-   | Ok (Some ev_anchor) ->
-     if Sys.file_exists tool_blobs_dir then Fs_compat.remove_tree tool_blobs_dir;
-     (match
-        Keeper_compaction.load_archived_turns_for_epoch
-          ~keepers_dir
-          ~keeper_id:"keeper-evicted-verbatim"
-          ~epoch_id:ev_anchor.epoch_id
-      with
-      | Ok restored_turns ->
-        let has_full_raw =
-          List.exists
-            (fun (t : Keeper_compaction.canonical_turn) ->
-               List.exists
-                 (fun (m : Agent_core.Types.message) ->
-                    List.exists
-                      (function
-                        | Agent_core.Types.ToolResult { content; _ } ->
-                          String.length content > 10_000
-                          && contains ~needle:"END_RESULT_1" content
-                          && not (contains ~needle:"[masc:blob" content)
-                        | _ -> false)
-                      m.content)
-                 t.messages)
-            restored_turns
-        in
-        check bool "compact_evicted_messages preserves raw verbatim turn after blob sweep" true has_full_raw
-      | Error err -> fail (Keeper_compaction.store_error_to_string err))
-   | Ok None -> fail "expected compact_evicted_messages to commit epoch"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  (* 5. Provider_context_overflow on remaining turns advances incrementally to epoch 2 *)
-  let more_turns =
-    ctx_epoch1.retained_turns
-    @ [ make_turn ~idx:7 ~user_text:"Finalize deployment" ~tool_name:"Read"
-          ~tool_output:(large_output 7) ~assistant_text:"Deployment ready." ]
-  in
-  let ctx_epoch2 =
-    match
-      Keeper_compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:1
-        ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 32_000 })
-        ~on_epoch_committed:(fun a -> committed_epochs := a :: !committed_epochs)
-        ~keepers_dir
-        ~keeper_id:"keeper-alpha"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:18_000
-        ~reserved_bytes:1_000
-        more_turns
-    with
-    | Ok c -> c
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
-  in
-  check bool "epoch 2 committed" true ctx_epoch2.compacted_new_epoch;
-  let anchor2 = Option.get ctx_epoch2.anchor in
-  check int "epoch_id incremented monotonically to 2" 2 anchor2.epoch_id;
-  check bool "epoch 2 preserved prior epoch 1 turn pointers" true
-    (List.for_all (fun entry -> List.mem entry anchor2.observations) anchor1.observations);
-  (* 6. Runtime_model_input_tail_window pins anchor without static omission preamble *)
-  let window_res =
-    Runtime_model_input_tail_window.project_with_drop
-      ~capacity_bytes:100_000
-      ~reserved_bytes:0
+  let bounded =
+    C.bound_anchor_to_budget
       ~measure_message_bytes:msg_bytes
-      ctx_epoch2.messages
+      ~max_anchor_bytes:(msg_bytes (C.anchor_to_message anchor) + 100)
+      loud
   in
-  (match window_res with
-   | Ok proj ->
-     check bool "tail window preserved pinned compaction anchor" true
-       (match proj.messages with
-        | first :: _ -> Runtime_model_input_tail_window.is_compaction_anchor first
-        | [] -> false);
-     check bool "no static omission preamble injected when anchor is present" false
-       (List.exists Runtime_model_input_tail_window.is_synthetic_preamble proj.messages)
-   | Error _ -> fail "tail window rejected valid anchored projection");
-  (* 7. Concurrent WAL readers + sibling Keeper isolation *)
-  Eio.Fiber.all
-    [ (fun () ->
-         match Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"keeper-alpha" with
-         | Ok epochs -> check int "concurrent reader 1 sees 2 epochs" 2 (List.length epochs)
-         | Error err -> fail (Keeper_compaction.store_error_to_string err))
-    ; (fun () ->
-         match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"keeper-alpha" with
-         | Ok (Some a) -> check int "concurrent reader 2 sees epoch 2" 2 a.epoch_id
-         | Ok None -> fail "concurrent reader 2 missed epoch"
-         | Error err -> fail (Keeper_compaction.store_error_to_string err))
-    ; (fun () ->
-         let sibling_turns =
-           [ make_turn ~idx:1 ~user_text:"Sibling work" ~tool_name:"Read"
-               ~tool_output:"small" ~assistant_text:"Sibling done." ]
-         in
-         match
-           Keeper_compaction.compact_and_project
-             ~keepers_dir ~keeper_id:"keeper-beta"
-             ~measure_message_bytes:msg_bytes
-             ~capacity_bytes:10_000 ~reserved_bytes:100 sibling_turns
-         with
-         | Ok c -> check int "sibling keeper isolated" 1 (List.length c.retained_turns)
-         | Error err -> fail (Keeper_compaction.store_error_to_string err))
-    ]
-;;
-
-let test_capacity_exceeded_and_live_try_provider_wiring () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Fs_compat.mkdir_p keepers_dir;
-  (* 1. Oversized newest turn must return Capacity_exceeded without committing a broken epoch *)
-  let huge_turns =
-    [ make_turn ~idx:1 ~user_text:"older" ~tool_name:"Read" ~tool_output:"small" ~assistant_text:"done"
-    ; make_turn ~idx:2 ~user_text:"newest" ~tool_name:"Read" ~tool_output:(String.make 5000 'z') ~assistant_text:"big"
+  check bool "oldest-first section roll-off protects recorded outcomes from a long quotation" true
+    (List.exists
+       (function
+         | O.Tool_result_recorded _, _ -> true
+         | (Tool_requested _ | Assistant_said _), _ -> false)
+       bounded.observations
+     && not
+          (List.exists
+             (function
+               | O.Assistant_said s, _ -> String.length s = 8192
+               | (Tool_requested _ | Tool_result_recorded _), _ -> false)
+             bounded.observations));
+  let reload () = ok_compaction (C.latest_anchor ~keepers_dir ~keeper_id) |> Option.get in
+  check bool "typed outcomes survive restart" true ((reload ()).observations = anchor.observations);
+  let orphan = O.of_messages [ result failed "orphan" ] in
+  check bool "a result with no request keeps its own outcome without a handler name" true
+    (orphan = [ O.Tool_result_recorded { call_id = "reused"; name = None; outcome = failed } ]);
+  let follow_up =
+    [ message ~metadata:(stamped "ev#2") User [ Text "follow up" ]
+    ; request "follow-up"
+    ; result Tool_succeeded "new receipt"
     ]
   in
-  (match
-     Keeper_compaction.compact_and_project
-       ~keepers_dir
-       ~keeper_id:"keeper-overflow"
-       ~measure_message_bytes:msg_bytes
-       ~capacity_bytes:300
-       ~reserved_bytes:50
-       huge_turns
-   with
-   | Error (Keeper_compaction.Capacity_exceeded _) -> ()
-   | Error other ->
-     fail ("expected Capacity_exceeded, got: " ^ Keeper_compaction.store_error_to_string other)
-   | Ok _ -> fail "expected Capacity_exceeded when newest turn exceeds capacity");
-  (match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"keeper-overflow" with
-   | Ok None -> ()
-   | Ok (Some _) -> fail "Capacity_exceeded must not commit a broken epoch"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  (* 2. compact_evicted_messages commits idempotently + fires global on_epoch_committed hook *)
-  let hook_epochs = ref [] in
-  Keeper_compaction.set_on_epoch_committed
-    (Some (fun ~keepers_dir:_ ~keeper_id anchor -> hook_epochs := (keeper_id, anchor.epoch_id) :: !hook_epochs));
-  Fun.protect
-    ~finally:(fun () -> Keeper_compaction.set_on_epoch_committed None)
-    (fun () ->
-       let t1 = make_turn ~idx:1 ~user_text:"Step one" ~tool_name:"Read" ~tool_output:"ok1" ~assistant_text:"Done 1" in
-       let t2 = make_turn ~idx:2 ~user_text:"Step two" ~tool_name:"Read" ~tool_output:"ok2" ~assistant_text:"Done 2" in
-       let evicted = t1.messages @ t2.messages in
-       let anchor =
-         match
-           Keeper_compaction.compact_evicted_messages
-             ~keepers_dir
-             ~keeper_id:"keeper-live"
-             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             ~evicted_messages:evicted
-             ()
-         with
-         | Ok (Some a) -> a
-         | Ok None -> fail "expected committed anchor from evicted messages"
-         | Error err -> fail (Keeper_compaction.store_error_to_string err)
-       in
-       check int "global hook received epoch 1" 1 (List.length !hook_epochs);
-       (* Re-running on exact same evicted prefix is idempotent (Ok None) *)
-       (match
-          Keeper_compaction.compact_evicted_messages
-            ~keepers_dir
-            ~keeper_id:"keeper-live"
-            ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-            ~evicted_messages:evicted
-            ()
-        with
-        | Ok None -> ()
-        | Ok (Some _) -> fail "duplicate eviction should be idempotent"
-        | Error err -> fail (Keeper_compaction.store_error_to_string err));
-       (* 3. Live Keeper_turn_driver_try_provider projection pins anchor_to_message *)
-       let t3 = make_turn ~idx:3 ~user_text:"Current turn" ~tool_name:"Read" ~tool_output:"ok3" ~assistant_text:"Done 3" in
-       let full_history = evicted @ t3.messages in
-       let digest_at = Runtime_model_input_tail_window.atom_opening_digest full_history in
-       let composed =
-         Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
-           ~compaction_anchor:anchor
-           ~measure_message_bytes:msg_bytes
-           ~measure_wire_bytes:(fun m -> Some (msg_bytes m))
-           ~front:None
-           ~accepted:None
-           ~history_digest_at:digest_at
-           ~current_turn_results:Current_turn_verbatim
-           ~base_path:""
-           ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = 2 })
-           full_history
-       in
-       check bool "try_provider pins compaction anchor message ahead of retained tail" true
-         (List.exists Runtime_model_input_tail_window.is_compaction_anchor
-            composed.projection.Runtime_model_input_tail_window.messages))
+  let history = first_turn @ follow_up in
+  let next = committed (compact ~keepers_dir ~keeper_id ~prefix:(first_atoms + 2) history) in
+  check int "restart resumes epoch progression" 2 next.epoch_id;
+  check bool "the next epoch adds only the new atoms' evidence" true
+    (List.map fst next.observations
+     = entries
+       @ [ O.Tool_requested { call_id = "reused"; name = "follow-up" }
+         ; O.Tool_result_recorded
+             { call_id = "reused"; name = Some "follow-up"; outcome = Tool_succeeded }
+         ]);
+  check int "every archived atom is archived once" (first_atoms + 2)
+    (List.length (archived_atoms ~keepers_dir ~keeper_id));
+  receipt_is_archived ();
+  let stale =
+    { (message User [ Text "stale claim" ]) with
+      origin = Agent_instruction
+    ; metadata = [ "masc.compaction_anchor.v1", `Bool true ]
+    }
+  in
+  let user = message User [ Text "stale claim" ] in
+  let request, _ =
+    W.project_from_atom
+      ~measure_message_bytes:msg_bytes
+      ~first_atom:0
+      [ stale; C.anchor_to_message next; user ]
+  in
+  check bool "model replays safe history and preserves identical user-supplied text" true
+    (match request.messages with
+     | [ notice; current; original ] ->
+       notice.origin = Outside_context
+       && notice.content <> stale.content
+       && W.is_compaction_anchor current
+       && current.origin = Outside_context
+       && original = user
+     | _ -> false)
 ;;
 
-let test_multi_epoch_bounded_anchor_rolloff_and_lossless_recall () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let capacity_bytes = 6_000 in
-  let reserved_bytes = 500 in
-  let expected_anchor_ceiling =
-    Keeper_compaction.anchor_budget_for_window ~capacity_bytes ~reserved_bytes
+let test_leading_atoms_are_archived_once () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "leading" in
+  let messages =
+    [ message Agent_core.Types.User [ Agent_core.Types.Text "before turn ids" ]
+    ; message Agent_core.Types.Assistant [ Agent_core.Types.Text "old reply" ]
+    ]
+    @ agent_core_turn ~turn:"l#1" ~prompt:"first stamped" ~answer:"ok" ()
+    @ agent_core_turn ~turn:"l#2" ~prompt:"second stamped" ~answer:"ok" ()
   in
-  let total_epochs = 60 in
-  let retained = ref [] in
-  let last_anchor = ref None in
-  for epoch = 1 to total_epochs do
-    let new_turn =
-      make_turn
-        ~idx:epoch
-        ~user_text:(Printf.sprintf "Long-horizon milestone %03d: inspect and verify module_%d." epoch epoch)
-        ~tool_name:"Read"
-        ~tool_output:(Printf.sprintf "OUTPUT_EPOCH_%03d_%s" epoch (String.make 1_400 'r'))
-        ~assistant_text:
-          (Printf.sprintf
-             "Decision %03d: verified invariants for src/mod_%d.ml and recorded rollout note."
-             epoch
-             epoch)
-    in
-    let turns =
-      match !retained with
-      | [] ->
-        [ make_turn ~idx:0 ~user_text:"Bootstrap workspace" ~tool_name:"Read"
-            ~tool_output:(Printf.sprintf "OUTPUT_EPOCH_000_%s" (String.make 1_400 'b'))
-            ~assistant_text:"Decision 000: workspace initialized."
-        ; new_turn
-        ]
-      | prev -> prev @ [ new_turn ]
-    in
-    let ctx =
-      match
-        Keeper_compaction.compact_and_project
-          ~keep_recent_turns:1
-          ~force_trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes; observed_bytes = capacity_bytes + 500 })
-          ~keepers_dir
-          ~keeper_id:"keeper-long-horizon"
-          ~measure_message_bytes:msg_bytes
-          ~capacity_bytes
-          ~reserved_bytes
-          turns
-      with
-      | Ok c -> c
-      | Error err ->
-        fail
-          (Printf.sprintf "epoch %d failed unexpectedly: %s" epoch
-             (Keeper_compaction.store_error_to_string err))
-    in
-    check bool (Printf.sprintf "epoch %d committed" epoch) true ctx.compacted_new_epoch;
-    let anchor =
-      match ctx.anchor with
-      | Some a -> a
-      | None -> fail (Printf.sprintf "epoch %d missing anchor" epoch)
-    in
-    check int (Printf.sprintf "epoch_id=%d" epoch) epoch anchor.epoch_id;
-    let anchor_bytes = msg_bytes (Keeper_compaction.anchor_to_message anchor) in
-    check bool
-      (Printf.sprintf "epoch %d anchor bytes (%d) <= structural budget (%d)" epoch anchor_bytes expected_anchor_ceiling)
-      true
-      (anchor_bytes <= expected_anchor_ceiling);
-    retained := ctx.retained_turns;
-    last_anchor := Some anchor
-  done;
-  let final_anchor = Option.get !last_anchor in
-  check bool "roll-off recorded archived_epochs_through" true
-    (Option.is_some final_anchor.archived_epochs_through);
-  (* All 60 immutable epochs are persisted in SQLite, and epoch 1's earliest rolled-off
-     turn remains 100% losslessly retrievable verbatim! *)
-  (match Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"keeper-long-horizon" with
-   | Ok epochs -> check int "all 60 epochs persisted immutably" total_epochs (List.length epochs)
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  (match
-     Keeper_compaction.load_archived_turn
-       ~keepers_dir
-       ~keeper_id:"keeper-long-horizon"
-       ~turn_id:(Ids.Turn_id.of_string "turn-000")
-   with
-   | Ok (Some restored) ->
-     let has_epoch0_payload =
-       List.exists
-         (fun (m : Agent_core.Types.message) ->
-            List.exists
-              (function
-                | Agent_core.Types.ToolResult { content; _ } ->
-                  contains ~needle:"OUTPUT_EPOCH_000_" content
-                | _ -> false)
-              m.content)
-         restored.messages
-     in
-     check bool "earliest rolled-off turn-000 losslessly retrievable verbatim" true has_epoch0_payload
-   | Ok None -> fail "earliest rolled-off turn-000 missing from SQLite archive"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  (* Also verify compact_evicted_messages bounds anchor growth across 40 epochs under Explicit_hard_limit *)
-  let ev_cap = 4_000 in
-  let ev_ceiling = Keeper_compaction.anchor_budget_for_window ~capacity_bytes:ev_cap ~reserved_bytes:0 in
-  let ev_history = ref [] in
+  let first = committed (compact ~keepers_dir ~keeper_id ~prefix:2 messages) in
+  check bool "leading atoms are covered by position" true
+    (first.coverage.through = Some (A.Through_leading 1));
+  let second = committed (compact ~keepers_dir ~keeper_id ~prefix:4 messages) in
+  check bool "the first stamped turn is covered whole" true
+    (second.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "l#1"; extent = A.Whole_turn }));
+  check (list name_t) "no leading atom is archived twice"
+    [ A.Leading 0; A.Leading 1; turn_name "l#1" 0; turn_name "l#1" 1 ]
+    (List.map (fun (_, name, _) -> name) (archived_atoms ~keepers_dir ~keeper_id));
+  check bool "the same eviction again commits nothing" true
+    (ok_compaction (compact ~keepers_dir ~keeper_id ~prefix:4 messages) = None)
+;;
+
+let test_current_turn_round_drop_is_not_archived_again () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "rounds" in
+  let rounds =
+    List.concat_map
+      (fun i ->
+         let id = Printf.sprintf "call-%d" i in
+         [ message
+             Agent_core.Types.Assistant
+             [ Agent_core.Types.ToolUse { id; name = Printf.sprintf "tool_%d" i; input = `Assoc [] } ]
+         ; { (message
+                Agent_core.Types.Tool
+                [ Agent_core.Types.ToolResult
+                    { tool_use_id = id
+                    ; content = "ok"
+                    ; outcome = Agent_core.Types.Tool_succeeded
+                    ; json = None
+                    ; content_blocks = None
+                    }
+                ])
+             with
+             tool_call_id = Some id
+           }
+         ])
+      [ 1; 2; 3 ]
+  in
+  let messages =
+    agent_core_turn ~turn:"d#1" ~prompt:"done turn" ~answer:"done" ()
+    @ (message ~metadata:(stamped "d#2") Agent_core.Types.User [ Agent_core.Types.Text "work" ]
+       :: rounds)
+  in
+  check (list name_t) "layout"
+    [ turn_name "d#1" 0; turn_name "d#1" 1; turn_name "d#2" 0; turn_name "d#2" 1
+    ; turn_name "d#2" 2; turn_name "d#2" 3 ]
+    (names (A.atoms_of_messages messages));
+  let first = committed (compact ~keepers_dir ~keeper_id ~prefix:2 ~later:[ 3 ] messages) in
+  check (list name_t) "the dropped round is archived past the boundary" [ turn_name "d#2" 1 ]
+    first.coverage.beyond;
+  check bool "the same drop with the same list commits nothing" true
+    (ok_compaction (compact ~keepers_dir ~keeper_id ~prefix:2 ~later:[ 3 ] messages) = None);
+  let second = committed (compact ~keepers_dir ~keeper_id ~prefix:2 ~later:[ 3; 4 ] messages) in
+  check (list name_t) "a second drop adds one round" [ turn_name "d#2" 1; turn_name "d#2" 2 ]
+    second.coverage.beyond;
+  let third = committed (compact ~keepers_dir ~keeper_id ~prefix:5 messages) in
+  check (list name_t) "a prefix past the rounds clears them from beyond" [] third.coverage.beyond;
+  check (list name_t) "every atom is archived exactly once"
+    [ turn_name "d#1" 0; turn_name "d#1" 1; turn_name "d#2" 1; turn_name "d#2" 2
+    ; turn_name "d#2" 0 ]
+    (List.map (fun (_, name, _) -> name) (archived_atoms ~keepers_dir ~keeper_id));
+  check (list string) "the consumer keeps only the last round"
+    [ "tool_3" ]
+    (tool_names (C.messages_after_anchor ~anchor:third messages));
+  check (list string) "an anchor with only beyond atoms cuts nothing"
+    [ "tool_1"; "tool_2"; "tool_3" ]
+    (tool_names
+       (C.messages_after_anchor
+          ~anchor:{ first with coverage = { first.coverage with through = None } }
+          messages))
+;;
+
+let test_consumer_cuts_after_the_covered_turn () =
+  with_temp_dir
+  @@ fun base_path ->
+  let keepers_dir =
+    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let keeper_id = "consumer" in
+  let turn0 = agent_core_turn ~turn:"u#0" ~prompt:"epoch1 turn 0" ~tool:"svc_old_a" ~answer:"a" () in
+  let turn1 = agent_core_turn ~turn:"u#1" ~prompt:"epoch1 turn 1" ~tool:"svc_old_b" ~answer:"b" () in
+  let turn2 = agent_core_turn ~turn:"u#2" ~prompt:"epoch2 turn 2" ~tool:"svc_live_c" ~answer:"c" () in
+  let history = turn0 @ turn1 @ turn2 in
+  check int "without an anchor the history is unchanged" (List.length history)
+    (List.length (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix:6 history) in
+  check (list string) "the persisted anchor drops the covered tool rounds" [ "svc_live_c" ]
+    (tool_names (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+  check (list string) "a covered turn that comes back later stays" [ "svc_live_c"; "svc_old_b" ]
+    (tool_names
+       (C.messages_after_anchor
+          ~anchor
+          (history @ agent_core_turn ~turn:"u#1" ~prompt:"again" ~tool:"svc_old_b" ~answer:"b" ())));
+  let older_inline =
+    message
+      ~origin:Agent_core.Types.Outside_context
+      ~metadata:Runtime_model_input_tail_window.compaction_anchor_metadata
+      Agent_core.Types.User
+      [ Agent_core.Types.Text "epoch-1 handoff" ]
+  in
+  check (list string) "the covered end wins over an older inline anchor" [ "svc_live_c" ]
+    (tool_names (C.messages_after_anchor ~anchor (turn0 @ [ older_inline ] @ turn1 @ turn2)));
+  check (list string) "an inline anchor past the covered end wins" [ "svc_live_c" ]
+    (tool_names
+       (C.messages_after_anchor
+          ~anchor:{ anchor with coverage = { A.through = Some (A.Through_leading 0); beyond = [] } }
+          (turn0 @ turn1 @ [ older_inline ] @ turn2)));
+  let unrelated =
+    { anchor with
+      coverage =
+        { A.through =
+            Some (A.Through_turn { turn = Ids.Turn_id.of_string "u#9"; extent = A.Whole_turn })
+        ; beyond = []
+        }
+    }
+  in
+  check (list string) "a boundary the history does not hold cuts nothing"
+    [ "svc_old_a"; "svc_old_b"; "svc_live_c" ]
+    (tool_names (C.messages_after_anchor ~anchor:unrelated history))
+;;
+
+let test_bounded_anchor_across_epochs () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let capacity_bytes = 4_000 in
+  let ceiling = C.anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0 in
+  let history = ref [] in
+  let last = ref None in
   for idx = 1 to 40 do
-    let t =
-      make_turn
-        ~idx
-        ~user_text:(Printf.sprintf "Runtime eviction milestone %03d" idx)
-        ~tool_name:"Read"
-        ~tool_output:(Printf.sprintf "EVICTED_RAW_%03d" idx)
-        ~assistant_text:
-          (Printf.sprintf "Concluded runtime step %03d with verified trace note." idx)
+    let turn = Printf.sprintf "b#%03d" idx in
+    history
+    := !history
+       @ agent_core_turn
+           ~turn
+           ~prompt:(Printf.sprintf "Runtime eviction milestone %03d" idx)
+           ~tool:"Read"
+           ~answer:(Printf.sprintf "Concluded runtime step %03d with verified trace note." idx)
+           ();
+    let atoms = A.atoms_of_messages !history in
+    let anchor =
+      committed
+        (compact
+           ~trigger:(C.Explicit_hard_limit { capacity_bytes; observed_bytes = capacity_bytes + 1000 })
+           ~keepers_dir
+           ~keeper_id:"bounded"
+           ~prefix:(Array.length atoms)
+           !history)
     in
-    ev_history := !ev_history @ t.messages;
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id:"keeper-evicted-bounded"
-        ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = ev_cap; observed_bytes = ev_cap + 1000 })
-        ~evicted_messages:!ev_history
-        ()
-    with
-    | Ok (Some a) ->
-      let sz = msg_bytes (Keeper_compaction.anchor_to_message a) in
-      check bool
-        (Printf.sprintf "compact_evicted_messages epoch %d bytes (%d) <= %d" idx sz ev_ceiling)
-        true
-        (sz <= ev_ceiling)
-    | Ok None -> fail (Printf.sprintf "expected epoch %d commit" idx)
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+    check int (Printf.sprintf "epoch %d" idx) idx anchor.epoch_id;
+    let size = msg_bytes (C.anchor_to_message anchor) in
+    check bool (Printf.sprintf "epoch %d anchor bytes (%d) <= %d" idx size ceiling) true
+      (size <= ceiling);
+    last := Some anchor
   done;
-  (* Provider switch from larger anchor down to tight capacity projects seamlessly *)
-  let small_turn =
-    [ make_turn ~idx:99 ~user_text:"Quick follow-up" ~tool_name:"Read"
-        ~tool_output:"ok" ~assistant_text:"ack" ]
+  check bool "the bounded anchor records its roll-off" true
+    (Option.is_some (Option.get !last).archived_epochs_through);
+  let archive = archived_atoms ~keepers_dir ~keeper_id:"bounded" in
+  check int "every evicted atom stays archived" 120 (List.length archive);
+  check bool "the first rolled-off atom is still archived" true
+    (match archive with
+     | (1, name, _) :: _ -> A.equal_name name (turn_name "b#001" 0)
+     | _ -> false);
+  let huge =
+    List.concat
+      (List.init 80 (fun i ->
+         let pad = String.make 1024 (Char.chr (65 + (i mod 26))) in
+         agent_core_turn
+           ~turn:(Printf.sprintf "h#%d" i)
+           ~prompt:(Printf.sprintf "user goal %d %s" i pad)
+           ~answer:(Printf.sprintf "decision %d %s" i pad)
+           ()))
   in
-  let tight_cap = 1_600 in
-  let tight_step =
-    Keeper_compaction.project_for_provider
-      ~anchor:(Some final_anchor)
-      ~measure_message_bytes:msg_bytes
-      ~capacity_bytes:tight_cap
-      ~reserved_bytes:100
-      small_turn
+  let none_limit =
+    committed
+      (compact
+         ~trigger:(C.Provider_context_overflow { provider_limit_tokens = None })
+         ~keepers_dir
+         ~keeper_id:"none-limit"
+         ~prefix:(Array.length (A.atoms_of_messages huge))
+         huge)
   in
-  match tight_step with
-  | Keeper_compaction.Fits_verbatim { anchor = Some projected; _ } ->
-    let sz = msg_bytes (Keeper_compaction.anchor_to_message projected) in
-    let tight_budget =
-      Keeper_compaction.anchor_budget_for_window ~capacity_bytes:tight_cap ~reserved_bytes:100
-    in
-    check bool "provider switch down bounds projected anchor" true (sz <= tight_budget)
-  | _ -> fail "expected tighter provider switch to bound projected anchor and fit verbatim"
+  check bool "an unknown provider limit still bounds the anchor" true
+    (msg_bytes (C.anchor_to_message none_limit) <= C.default_anchor_max_bytes);
+  check bool "and records the roll-off" true (Option.is_some none_limit.archived_epochs_through);
+  let medium =
+    List.concat
+      (List.init 15 (fun i ->
+         agent_core_turn
+           ~turn:(Printf.sprintf "m#%d" i)
+           ~prompt:(Printf.sprintf "mid goal %d" i)
+           ~answer:(Printf.sprintf "mid decision %d %s" i (String.make 900 (Char.chr (97 + (i mod 26)))))
+           ()))
+  in
+  let token_limit =
+    committed
+      (compact
+         ~trigger:(C.Provider_context_overflow { provider_limit_tokens = Some 32_000 })
+         ~keepers_dir
+         ~keeper_id:"token-limit"
+         ~prefix:(Array.length (A.atoms_of_messages medium))
+         medium)
+  in
+  let size = msg_bytes (C.anchor_to_message token_limit) in
+  check bool "a 32_000-token limit keeps a 32 KiB budget" true (size > 10_000 && size <= 32_000);
+  check bool "and does not roll off under it" true
+    (Option.is_none token_limit.archived_epochs_through)
 ;;
 
-let test_microcompaction_durable_blobs_protected_from_sweep () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
+let test_repeated_text_atoms_are_distinct_by_name () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "continue" in
+  let messages =
+    agent_core_turn ~turn:"k#1" ~prompt:"Continue." ~answer:"Reply" ()
+    @ agent_core_turn ~turn:"k#2" ~prompt:"Continue." ~answer:"Reply" ()
+    @ agent_core_turn ~turn:"k#3" ~prompt:"Continue." ~answer:"Reply" ()
+  in
+  ignore (committed (compact ~keepers_dir ~keeper_id ~prefix:2 messages) : C.compaction_anchor);
+  ignore (committed (compact ~keepers_dir ~keeper_id ~prefix:4 messages) : C.compaction_anchor);
+  check (list name_t) "byte-identical turns are archived under their own names"
+    [ turn_name "k#1" 0; turn_name "k#1" 1; turn_name "k#2" 0; turn_name "k#2" 1 ]
+    (List.map (fun (_, name, _) -> name) (archived_atoms ~keepers_dir ~keeper_id))
+;;
+
+let test_concurrent_compactions_serialize () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  Eio_main.run (fun _env ->
+    let errors = ref [] in
+    Eio.Fiber.all
+      (List.init 6 (fun i () ->
+         let messages =
+           agent_core_turn ~turn:(Printf.sprintf "race#%d" i) ~prompt:"u" ~answer:"a" ()
+           @ agent_core_turn ~turn:(Printf.sprintf "race-next#%d" i) ~prompt:"u" ~answer:"a" ()
+         in
+         match compact ~keepers_dir ~keeper_id:"race" ~prefix:2 messages with
+         | Ok (Some _) -> ()
+         | Ok None -> errors := "unexpected Ok None" :: !errors
+         | Error err -> errors := C.store_error_to_string err :: !errors));
+    check (list string) "no write conflicts under six concurrent compactions" [] !errors);
+  let stats = ok_compaction (C.inspect_stats ~keepers_dir ~keeper_id:"race") in
+  check int "six epochs committed" 6 stats.epoch_count;
+  check int "twelve atoms archived" 12 stats.archived_atom_count
+;;
+
+let test_epoch_listener_receives_the_workspace () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let seen = ref [] in
+  C.set_on_epoch_committed
+    (Some (fun ~keepers_dir:dir ~keeper_id anchor -> seen := (dir, keeper_id, anchor.epoch_id) :: !seen));
+  Fun.protect
+    ~finally:(fun () -> C.set_on_epoch_committed None)
+    (fun () ->
+       ignore
+         (committed
+            (compact
+               ~keepers_dir
+               ~keeper_id:"ws"
+               ~prefix:2
+               (agent_core_turn ~turn:"w#1" ~prompt:"ws check" ~answer:"ws ok" ()))
+          : C.compaction_anchor));
+  check (list (triple string string int)) "the listener receives the workspace keepers_dir"
+    [ keepers_dir, "ws", 1 ]
+    !seen
+;;
+
+let test_secrets_are_redacted_at_the_storage_boundary () =
+  with_temp_dir
+  @@ fun tmp ->
+  let keepers_dir = Filename.concat tmp ".masc/keepers" in
   Fs_compat.mkdir_p keepers_dir;
-  let blob_store = Tool_blob_store.create ~base_path in
-  let large_output idx =
-    Printf.sprintf "SWEEP_PROTECTED_HEAD_%d\n%s\nSWEEP_PROTECTED_TAIL_%d" idx (String.make 10_000 'q') idx
+  let secret = "sk" ^ "-ant-api03-" ^ "COMPACTSECRET9876543210ZYXWVU" in
+  let anchor =
+    committed
+      (compact
+         ~keepers_dir
+         ~keeper_id:"secret"
+         ~prefix:2
+         (agent_core_turn ~turn:"s#1" ~prompt:("token is " ^ secret) ~answer:("confirmed " ^ secret) ()))
   in
-  let turns =
-    List.init 6 (fun i ->
-      make_turn
-        ~idx:(i + 1)
-        ~user_text:(Printf.sprintf "Sweep check turn %d" (i + 1))
-        ~tool_name:"Read"
-        ~tool_output:(large_output (i + 1))
-        ~assistant_text:(Printf.sprintf "Checked %d" (i + 1)))
+  check bool "the anchor intent is redacted" false (contains ~needle:secret anchor.active_intent);
+  let archived =
+    String.concat "\n" (List.map (fun (_, _, raw) -> raw) (archived_atoms ~keepers_dir ~keeper_id:"secret"))
   in
-  let ctx =
-    match
-      Keeper_compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:2
-        ~keepers_dir
-        ~keeper_id:"keeper-sweep-root"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:50_000
-        ~reserved_bytes:1_000
-        turns
-    with
-    | Ok c -> c
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+  check bool "the archived atoms are redacted" false (contains ~needle:secret archived);
+  check bool "and carry the redaction marker" true (contains ~needle:"[REDACTED]" archived);
+  check bool "plain text holds no blob reference" true
+    (C.decode_live_blob_references_json (C.db_path ~keepers_dir ~keeper_id:"secret") = Ok None)
+;;
+
+let test_per_keeper_token_is_redacted_under_config_keepers () =
+  with_temp_dir
+  @@ fun base_path ->
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let keepers_dir = Filename.concat (Filename.concat masc_dir "config") "keepers" in
+  Fs_compat.mkdir_p keepers_dir;
+  let opaque = "OPAQUE_SSH_KEEPER_TOKEN_99441122" in
+  let redaction_dir = Filename.concat (Filename.concat masc_dir "ssh") "redaction" in
+  Fs_compat.mkdir_p redaction_dir;
+  ignore
+    (Fs_compat.save_file_atomic (Filename.concat redaction_dir "k-proj.token") opaque
+     : (unit, string) result);
+  let anchor =
+    committed
+      (compact
+         ~keepers_dir:(keepers_dir ^ "/")
+         ~keeper_id:"k-proj"
+         ~prefix:2
+         (agent_core_turn ~turn:"p#1" ~prompt:("deploy with " ^ opaque) ~answer:("applied " ^ opaque) ()))
   in
-  check int "4 microcompacted durable blobs created" 4 ctx.microcompacted_results;
-  let run_sweep mode =
-    match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope ~mode with
-    | Ok report -> report
-    | Error err -> fail (Tool_blob_maintenance.error_to_string err)
+  check bool "the per-keeper token is redacted from the anchor" false
+    (contains ~needle:opaque anchor.active_intent);
+  check bool "the redaction marker replaces it" true
+    (contains ~needle:"[REDACTED]" anchor.active_intent);
+  let archived =
+    String.concat "\n" (List.map (fun (_, _, raw) -> raw) (archived_atoms ~keepers_dir ~keeper_id:"k-proj"))
   in
-  let first = run_sweep Tool_blob_maintenance.Observe_only in
-  check (list string) "compaction WAL and sidecars have zero unclassified files" [] first.unclassified;
-  check bool "live_references includes all 4 active microcompacted blobs" true (first.live_references >= 4);
-  check int "zero candidates recorded for active microcompacted blobs" 0 first.candidates_recorded;
-  let second = run_sweep Tool_blob_maintenance.Delete_previous_candidates in
-  check (list string) "delete sweep has zero unclassified files" [] second.unclassified;
-  check int "zero active microcompacted blobs deleted" 0 second.deleted;
-  let third = run_sweep Tool_blob_maintenance.Observe_only in
-  check int "second observe still sees zero candidates" 0 third.candidates_recorded;
-  let fourth = run_sweep Tool_blob_maintenance.Delete_previous_candidates in
-  check int "second delete still deletes zero active blobs" 0 fourth.deleted;
-  (* Verify every structured handle in projected messages still fetches verbatim *)
-  let verified_handles = ref 0 in
-  List.iter
-    (fun (msg : Agent_core.Types.message) ->
-       List.iter
-         (function
-           | Agent_core.Types.ToolResult { content; _ } ->
-             (match Tool_output.decode_structured_handle content with
-              | Tool_output.Decoded ref_ ->
-                (match Tool_blob_store.fetch blob_store ~sha256:ref_.sha256 with
-                 | Ok (Some bytes) ->
-                   check int "surviving blob exact byte length" ref_.bytes (String.length bytes);
-                   incr verified_handles
-                 | Ok None -> fail "sweep deleted an active microcompacted blob"
-                 | Error err -> fail (Tool_blob_store.fetch_error_to_string err))
-              | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> ())
-           | _ -> ())
-         msg.content)
-    ctx.messages;
-  check int "all 4 microcompacted handles survived sweep verbatim" 4 !verified_handles
+  check bool "the per-keeper token is redacted from the archive" false (contains ~needle:opaque archived)
+;;
+
+let test_zero_byte_database_reads_as_empty () =
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let path = C.db_path ~keepers_dir ~keeper_id:"zero" in
+  Out_channel.with_open_bin path (fun _ -> ());
+  check bool "latest_anchor reads nothing" true (C.latest_anchor ~keepers_dir ~keeper_id:"zero" = Ok None);
+  check bool "the blob decoder reads nothing" true (C.decode_live_blob_references_json path = Ok None)
+;;
+
+let test_stores_written_before_the_hard_cut_are_refused () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "old-layout" in
+  let compaction_path = C.db_path ~keepers_dir ~keeper_id in
+  exec_all
+    compaction_path
+    [ "CREATE TABLE compaction_epochs (epoch_id INTEGER PRIMARY KEY, \
+       covers_through_turn TEXT NOT NULL, anchor_json TEXT NOT NULL, \
+       trigger_json TEXT NOT NULL, evicted_turn_ids_json TEXT NOT NULL, \
+       previous_epoch_id INTEGER)"
+    ];
+  let refused = function
+    | Error (C.Schema_not_current { found = 0L; _ }) -> true
+    | Ok _ | Error _ -> false
+  in
+  check bool "latest_anchor refuses the old compaction layout" true
+    (refused (C.latest_anchor ~keepers_dir ~keeper_id));
+  let history = agent_core_turn ~turn:"o#1" ~prompt:"p" ~answer:"a" () in
+  check bool "a commit refuses it too" true (refused (compact ~keepers_dir ~keeper_id ~prefix:2 history));
+  check bool "the blob sweep stops on it" true
+    (Result.is_error (C.decode_live_blob_references_json compaction_path));
+  check int "the consumer leaves the history whole" (List.length history)
+    (List.length (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+  let other = "old-canonical" in
+  exec_all
+    (Store.db_path ~keepers_dir ~keeper_id:other)
+    [ "CREATE TABLE canonical_turns (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
+       turn_id TEXT NOT NULL UNIQUE, parent_turn_id TEXT, runtime_kind TEXT NOT NULL, \
+       runtime_id TEXT NOT NULL, user_input TEXT NOT NULL, tool_calls_json TEXT NOT NULL, \
+       assistant_output TEXT NOT NULL, usage_json TEXT NOT NULL, \
+       compaction_epoch_id INTEGER, created_at REAL NOT NULL)"
+    ];
+  let store_refused = function
+    | Error (Store.Schema_not_current { found = 0L; _ }) -> true
+    | Ok _ | Error _ -> false
+  in
+  check bool "a canonical commit refuses the old layout" true
+    (store_refused
+       (Store.commit_turn
+          ~keepers_dir
+          ~keeper_id:other
+          ~turn_id:(Ids.Turn_id.of_string "o#1")
+          ~runtime_kind:Store.Agent_core_http
+          ~runtime_id:"runtime:1"
+          ~user_input:"p"
+          ~tool_calls_json:(`List [])
+          ~assistant_output:"a"
+          ~usage_json:(`Assoc [])
+          ~created_at:1.0
+          ()));
+  check bool "the handoff refuses it" true
+    (store_refused (Store.load_handoff_context ~keepers_dir ~keeper_id:other));
+  check bool "the dashboard read refuses it" true
+    (store_refused (Store.inspect_stats ~keepers_dir ~keeper_id:other))
+;;
+
+let test_watermark_follows_the_settled_turn () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "settled" in
+  let row turn at = ignore (commit_row ~keepers_dir ~keeper_id ~turn ~prompt:turn ~answer:"ok" at : Store.canonical_turn) in
+  row "w#1" 10.0;
+  row "w#2" 20.0;
+  row "w#3" 30.0;
+  let history =
+    agent_core_turn ~turn:"w#1" ~prompt:"w#1" ~answer:"ok" ()
+    @ agent_core_turn ~turn:"w#2" ~prompt:"w#2" ~tool:"read" ~answer:"ok" ()
+    @ agent_core_turn ~turn:"w#3" ~prompt:"w#3" ~answer:"ok" ()
+  in
+  let partial = committed (compact ~keepers_dir ~keeper_id ~prefix:4 history) in
+  check (option string) "covering part of w#2 settles w#1" (Some "w#1")
+    (Option.map Ids.Turn_id.to_string (A.settled_turn partial.coverage));
+  check (list string) "rows through w#1 are pruned; the partly covered turn stays"
+    [ "w#2"; "w#3" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let whole = committed (compact ~keepers_dir ~keeper_id ~prefix:5 history) in
+  check (option string) "covering all of w#2 settles it" (Some "w#2")
+    (Option.map Ids.Turn_id.to_string (A.settled_turn whole.coverage));
+  check (list string) "rows through w#2 are pruned" [ "w#3" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let handoff = ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id) in
+  check (list string) "the handoff carries the rows after the settled turn" [ "w#3" ]
+    (row_ids handoff.turns_after_anchor);
+  check (option int) "with the latest anchor" (Some 2)
+    (Option.map (fun (a : C.compaction_anchor) -> a.epoch_id) handoff.anchor)
+;;
+
+let test_acp_rebuilt_list_cuts_the_checkpoint_history () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "acp-rebuilt" in
+  List.iteri
+    (fun i turn -> ignore (commit_row ~keepers_dir ~keeper_id ~turn ~prompt:turn ~answer:"done" (float_of_int i) : Store.canonical_turn))
+    [ "trace-r#1"; "trace-r#2"; "trace-r#3"; "trace-r#4" ];
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
+  check int "the rollover keeps the last turn" 6 prefix;
+  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix messages) in
+  check bool "the rebuilt list names a whole turn" true
+    (anchor.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "trace-r#3"; extent = A.Whole_turn }));
+  check (list string) "the covered rows are pruned" [ "trace-r#4" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let checkpoint =
+    List.concat_map
+      (fun turn -> agent_core_turn ~turn ~prompt:turn ~tool:("tool-" ^ turn) ~answer:"done" ())
+      [ "trace-r#1"; "trace-r#2"; "trace-r#3"; "trace-r#4" ]
+  in
+  let live = C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint in
+  check (option string) "the checkpoint history starts after the covered turn" (Some "trace-r#4")
+    (first_turn_of live);
+  check (list string) "only the live turn's tools are carried" [ "tool-trace-r#4" ] (tool_names live)
+;;
+
+let test_acp_provisional_turn_id () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "acp-provisional" in
+  ignore (commit_row ~keepers_dir ~keeper_id ~turn:"trace-p#1" ~prompt:"one" ~answer:"a" 1.0 : Store.canonical_turn);
+  ignore (commit_row ~keepers_dir ~keeper_id ~turn:"trace-p#2" ~prompt:"two" ~answer:"b" 2.0 : Store.canonical_turn);
+  ignore
+    (commit_row ~kind:Store.Acp_cli ~keepers_dir ~keeper_id ~turn:"acp:sess-p:3" ~prompt:"three" ~answer:"c" 3.0
+     : Store.canonical_turn);
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
+  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix messages) in
+  check (option string) "the turn before the provisional one settles" (Some "trace-p#2")
+    (Option.map Ids.Turn_id.to_string (A.settled_turn anchor.coverage));
+  ok_store
+    (Store.bind_turn_ref
+       ~keepers_dir
+       ~keeper_id
+       ~from_turn_id:(Ids.Turn_id.of_string "acp:sess-p:3")
+       ~to_turn_id:(Ids.Turn_id.of_string "trace-p#3")
+       ~suppress_assistant_output:false
+       ());
+  check (list string) "the bound row is the only one left" [ "trace-p#3" ]
+    (row_ids (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).turns_after_anchor);
+  let checkpoint =
+    List.concat_map
+      (fun turn -> agent_core_turn ~turn ~prompt:turn ~answer:"done" ())
+      [ "trace-p#1"; "trace-p#2"; "trace-p#3" ]
+  in
+  check (option string) "the checkpoint history starts at the bound turn" (Some "trace-p#3")
+    (first_turn_of (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint))
 ;;
 
 let test_canonical_turn_store_compaction_watermark_and_failover () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
   let keeper_id = "keeper-e2-regression" in
-  let module C = Keeper_canonical_turn_store in
-  let require_c = function
-    | Ok v -> v
-    | Error err -> fail (C.store_error_to_string err)
-  in
-  (* 1. Fail-closed validation: blank turn_id & self-cycle parent_turn_id rejected. *)
   (match
-     C.commit_turn
-       ~keepers_dir ~keeper_id
-       ~turn_id:(Ids.Turn_id.of_string "   ")
-       ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-       ~user_input:"hi" ~tool_calls_json:(`List []) ~assistant_output:"ok"
-       ~usage_json:(`Assoc []) ~created_at:1.0 ()
+     Store.commit_turn ~keepers_dir ~keeper_id ~turn_id:(Ids.Turn_id.of_string "   ")
+       ~runtime_kind:Store.Agent_core_http ~runtime_id:"glm:1" ~user_input:"hi"
+       ~tool_calls_json:(`List []) ~assistant_output:"ok" ~usage_json:(`Assoc [])
+       ~created_at:1.0 ()
    with
-   | Error (C.Corrupt_record _) -> ()
-   | Error err -> fail (C.store_error_to_string err)
+   | Error (Store.Corrupt_record _) -> ()
+   | Error err -> fail (Store.store_error_to_string err)
    | Ok _ -> fail "blank turn_id must fail closed");
   let t1_id = Ids.Turn_id.of_string "trace-e2:1" in
-  let t2_id = Ids.Turn_id.of_string "acp:sess-1:2" in
-  let t3_id = Ids.Turn_id.of_string "trace-e2:3" in
   (match
-     C.commit_turn
-       ~keepers_dir ~keeper_id ~parent_turn_id:t1_id ~turn_id:t1_id
-       ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-       ~user_input:"hi" ~tool_calls_json:(`List []) ~assistant_output:"ok"
-       ~usage_json:(`Assoc []) ~created_at:1.0 ()
+     Store.commit_turn ~keepers_dir ~keeper_id ~parent_turn_id:t1_id ~turn_id:t1_id
+       ~runtime_kind:Store.Agent_core_http ~runtime_id:"glm:1" ~user_input:"hi"
+       ~tool_calls_json:(`List []) ~assistant_output:"ok" ~usage_json:(`Assoc [])
+       ~created_at:1.0 ()
    with
-   | Error (C.Corrupt_record _) -> ()
-   | Error err -> fail (C.store_error_to_string err)
+   | Error (Store.Corrupt_record _) -> ()
+   | Error err -> fail (Store.store_error_to_string err)
    | Ok _ -> fail "self-referencing parent_turn_id must fail closed");
-  (* 2. Commit HTTP Turn 1, ACP Turn 2, HTTP Turn 3. *)
   let t1 =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t1_id
-      ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-      ~user_input:"Inspect schema registry"
-      ~tool_calls_json:(`List [])
-      ~assistant_output:"HTTP Turn 1 completed schema audit."
-      ~usage_json:(`Assoc []) ~created_at:10.0 ()
-    |> require_c
+    commit_row ~keepers_dir ~keeper_id ~turn:"trace-e2:1" ~prompt:"Inspect schema registry"
+      ~answer:"HTTP Turn 1 completed schema audit." 10.0
   in
   let t2 =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t2_id
-      ~runtime_kind:C.Acp_cli ~runtime_id:"antigravity_acp:opus"
-      ~user_input:"Verify ACP failover"
-      ~tool_calls_json:(`List [])
-      ~assistant_output:"ACP Turn 2 completed failover check."
-      ~usage_json:(`Assoc []) ~created_at:20.0 ()
-    |> require_c
+    commit_row ~kind:Store.Acp_cli ~keepers_dir ~keeper_id ~turn:"acp:sess-1:2"
+      ~prompt:"Verify ACP failover" ~answer:"ACP Turn 2 completed failover check." 20.0
   in
-  let _t3 =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t3_id
-      ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-      ~user_input:"Post-eviction retained turn"
-      ~tool_calls_json:(`List [])
-      ~assistant_output:"HTTP Turn 3 stays retained verbatim."
-      ~usage_json:(`Assoc []) ~created_at:30.0 ()
-    |> require_c
+  let t3 =
+    commit_row ~keepers_dir ~keeper_id ~turn:"trace-e2:3" ~prompt:"Post-eviction retained turn"
+      ~answer:"HTTP Turn 3 stays retained verbatim." 30.0
   in
-  (* 3. ON CONFLICT idempotent re-commit of older t1 with parent_turn_id:None
-        MUST preserve t1's original parent (None), NEVER creating a forward cycle to t3! *)
   let t1_rewritten =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t1_id
-      ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-      ~user_input:"Inspect schema registry"
-      ~tool_calls_json:(`List [])
+    Store.commit_turn ~keepers_dir ~keeper_id ~turn_id:t1_id ~runtime_kind:Store.Agent_core_http
+      ~runtime_id:"glm:1" ~user_input:"Inspect schema registry" ~tool_calls_json:(`List [])
       ~assistant_output:"HTTP Turn 1 completed schema audit."
       ~usage_json:(`Assoc [ "input_tokens", `Int 42 ]) ~created_at:11.0 ()
-    |> require_c
+    |> ok_store
   in
   check (option string) "re-committing older t1 preserves original parent (None)" None
     (Option.map Ids.Turn_id.to_string t1_rewritten.parent_turn_id);
-  (* 4. Production Keeper_compaction.compact_evicted_messages (which mints
-        atom-<idx>-<hex16> covers_through_turn) over raw messages of Turn 1 + Turn 2
-        records exact durable compaction watermark cutting off seq <= 2 while
-        retaining un-evicted Turn 3! *)
-  let plain_msg role text : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content = [ Agent_core.Types.Text text ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let evicted_raw_messages =
-    [ plain_msg User t1.user_input
-    ; plain_msg Assistant t1.assistant_output
-    ; plain_msg User t2.user_input
-    ; plain_msg Assistant t2.assistant_output
-    ]
-  in
-  let anchor =
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id
-        ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-        ~evicted_messages:evicted_raw_messages
-        ()
-    with
-    | Ok (Some a) -> a
-    | Ok None -> fail "expected compact_evicted_messages to commit an anchor"
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
-  in
-  check bool "production anchor uses atom-<idx>-<hex16> id" true
-    (String.starts_with ~prefix:"atom-" (Ids.Turn_id.to_string anchor.covers_through_turn));
-  let handoff = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
+  let history = List.concat_map Store.messages_of_canonical_turn [ t1; t2; t3 ] in
+  ignore (committed (compact ~keepers_dir ~keeper_id ~prefix:4 history) : C.compaction_anchor);
+  let handoff = ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id) in
   check (list string) "load_handoff_context excludes compacted T1 & T2 and retains only T3"
     [ "trace-e2:3" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
-       handoff.turns_after_anchor);
-  (* 5. Bidirectional hydration deduplication:
-        - Cold start (existing_messages = []) hydrates [anchor; T3]
-        - Stale checkpoint containing T3 already hydrates [] (zero duplication)
-        - Stale checkpoint containing T3 + newer ACP Turn 4 hydrates ONLY [T4]! *)
-  let t4_id = Ids.Turn_id.of_string "acp:sess-2:4" in
-  let _t4 =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t4_id
-      ~runtime_kind:C.Acp_cli ~runtime_id:"antigravity_acp:opus"
-      ~user_input:"New ACP turn after stale HTTP checkpoint"
-      ~tool_calls_json:(`List [])
-      ~assistant_output:"ACP Turn 4 must hydrate onto stale T3 checkpoint without duplicating T3."
-      ~usage_json:(`Assoc []) ~created_at:40.0 ()
-    |> require_c
-  in
-  let stale_http_checkpoint_msgs =
-    [ plain_msg User "Post-eviction retained turn"
-    ; plain_msg Assistant "HTTP Turn 3 stays retained verbatim."
+    (row_ids handoff.turns_after_anchor);
+  ignore
+    (commit_row ~kind:Store.Acp_cli ~keepers_dir ~keeper_id ~turn:"acp:sess-2:4"
+       ~prompt:"New ACP turn after stale HTTP checkpoint"
+       ~answer:"ACP Turn 4 must hydrate onto stale T3 checkpoint without duplicating T3." 40.0
+     : Store.canonical_turn);
+  let stale_http_checkpoint =
+    [ message Agent_core.Types.User [ Agent_core.Types.Text "Post-eviction retained turn" ]
+    ; message Agent_core.Types.Assistant [ Agent_core.Types.Text "HTTP Turn 3 stays retained verbatim." ]
     ]
   in
-  let hydrated_onto_stale =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:stale_http_checkpoint_msgs
-    |> require_c
-  in
-  let hydrated_text =
-    hydrated_onto_stale
+  let hydrated =
+    Store.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:stale_http_checkpoint
+    |> ok_store
     |> List.concat_map (fun (m : Agent_core.Types.message) ->
       List.filter_map (function Agent_core.Types.Text s -> Some s | _ -> None) m.content)
     |> String.concat "\n"
   in
   check bool "stale checkpoint hydrates missing ACP T4" true
-    (contains ~needle:"ACP Turn 4 must hydrate" hydrated_text);
+    (contains ~needle:"ACP Turn 4 must hydrate" hydrated);
   check bool "stale checkpoint does NOT duplicate already-present T3" false
-    (contains ~needle:"HTTP Turn 3 stays retained verbatim." hydrated_text);
-  (* 6. Operator history clear (record_history_reset): pre-clear anchor AND
-        pre-clear turns are NEVER resurrected on empty or [System]-only
-        checkpoints, and post-reset turns start a fresh parent chain! *)
-  C.record_history_reset ~keepers_dir ~keeper_id |> require_c;
-  let post_clear_empty =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:[] |> require_c
-  in
+    (contains ~needle:"HTTP Turn 3 stays retained verbatim." hydrated);
+  ok_store (Store.record_history_reset ~keepers_dir ~keeper_id);
   check int "after history reset, empty checkpoint hydrates 0 messages" 0
-    (List.length post_clear_empty);
+    (List.length (ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:[])));
   let system_only =
-    [ { (plain_msg System "standing system prompt") with
-        origin = Agent_core.Llm_provider.Types.System_context
-      }
+    [ message ~origin:Agent_core.Types.System_context Agent_core.Types.System
+        [ Agent_core.Types.Text "standing system prompt" ]
     ]
   in
-  let post_clear_sys =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:system_only |> require_c
-  in
   check int "after history reset, [System]-only checkpoint hydrates 0 messages" 0
-    (List.length post_clear_sys);
-  let t5_id = Ids.Turn_id.of_string "trace-post-reset#1" in
+    (List.length
+       (ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id ~existing_messages:system_only)));
   let t5 =
-    C.commit_turn ~keepers_dir ~keeper_id ~turn_id:t5_id
-      ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-      ~user_input:"Fresh turn after operator history clear"
-      ~tool_calls_json:(`List [])
-      ~assistant_output:"Post-reset continuity works cleanly."
-      ~usage_json:(`Assoc []) ~created_at:50.0 ()
-    |> require_c
+    commit_row ~keepers_dir ~keeper_id ~turn:"trace-post-reset#1"
+      ~prompt:"Fresh turn after operator history clear" ~answer:"Post-reset continuity works cleanly."
+      50.0
   in
   check (option string) "first post-reset turn starts a fresh parent chain (None)" None
     (Option.map Ids.Turn_id.to_string t5.parent_turn_id);
-  let post_reset_handoff = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
-  check bool "pre-reset compaction anchor suppressed after reset" true
-    (Option.is_none post_reset_handoff.anchor);
+  let post_reset = ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id) in
+  check bool "pre-reset compaction anchor suppressed after reset" true (Option.is_none post_reset.anchor);
   check (list string) "only post-reset turns circulate" [ "trace-post-reset#1" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
-       post_reset_handoff.turns_after_anchor)
+    (row_ids post_reset.turns_after_anchor)
 ;;
 
 let test_canonical_turn_hydration_edge_cases () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let module C = Keeper_canonical_turn_store in
-  let require_c = function
-    | Ok v -> v
-    | Error err -> fail (C.store_error_to_string err)
-  in
-  let plain_msg ?(metadata = []) role blocks : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content = blocks
-    ; name = None
-    ; tool_call_id = None
-    ; metadata
-    }
-  in
-  let extract_text msgs =
-    msgs
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let extract_text messages =
+    messages
     |> List.concat_map (fun (m : Agent_core.Types.message) ->
       List.filter_map (function Agent_core.Types.Text s -> Some s | _ -> None) m.content)
     |> String.concat "\n"
   in
-  (* (a) Suppressed terminal-effect turn (assistant_output = "") + ACP bind_turn_ref:
-         checkpoint has User + ToolUse-only Assistant (no Text); zero duplication/resurrection! *)
   let k_sup = "keeper-suppressed" in
   ignore
-    (C.commit_turn ~keepers_dir ~keeper_id:k_sup
-       ~turn_id:(Ids.Turn_id.of_string "acp-raw-uuid-1")
-       ~runtime_kind:C.Acp_cli ~runtime_id:"agy:opus"
-       ~user_input:"Post board update"
+    (Store.commit_turn ~keepers_dir ~keeper_id:k_sup ~turn_id:(Ids.Turn_id.of_string "acp-raw-uuid-1")
+       ~runtime_kind:Store.Acp_cli ~runtime_id:"agy:opus" ~user_input:"Post board update"
        ~tool_calls_json:(`List [ `Assoc [ "tool_name", `String "board_post" ] ])
-       ~assistant_output:"Suppressed narration that must never resurrect"
-       ~usage_json:(`Assoc []) ~created_at:10.0 ()
-     |> require_c);
-  C.bind_turn_ref ~keepers_dir ~keeper_id:k_sup
-    ~from_turn_id:(Ids.Turn_id.of_string "acp-raw-uuid-1")
-    ~to_turn_id:(Ids.Turn_id.of_string "trace-sup#1")
-    ~suppress_assistant_output:true
-    ()
-  |> require_c;
-  let bridged_sup_msgs =
-    [ plain_msg ~metadata:[ "masc.bridged_turn_ref", `String "trace-sup#1" ] User
-        [ Agent_core.Types.Text "Post board update" ]
-    ; plain_msg ~metadata:[ "masc.bridged_turn_ref", `String "trace-sup#1" ] Assistant
+       ~assistant_output:"Suppressed narration that must never resurrect" ~usage_json:(`Assoc [])
+       ~created_at:10.0 ()
+     |> ok_store
+     : Store.canonical_turn);
+  ok_store
+    (Store.bind_turn_ref ~keepers_dir ~keeper_id:k_sup
+       ~from_turn_id:(Ids.Turn_id.of_string "acp-raw-uuid-1")
+       ~to_turn_id:(Ids.Turn_id.of_string "trace-sup#1") ~suppress_assistant_output:true ());
+  let bridged = [ Keeper_turn_ref_metadata.bridged_key, `String "trace-sup#1" ] in
+  let bridged_messages =
+    [ message ~metadata:bridged Agent_core.Types.User [ Agent_core.Types.Text "Post board update" ]
+    ; message ~metadata:bridged Agent_core.Types.Assistant
         [ Agent_core.Types.ToolUse { id = "tc1"; name = "board_post"; input = `Assoc [] } ]
     ]
   in
-  let hydrated_sup =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id:k_sup ~existing_messages:bridged_sup_msgs
-    |> require_c
-  in
-  check int "suppressed bridged turn hydrates 0 duplicates" 0 (List.length hydrated_sup);
-  (* Even on cold start without existing_messages, suppressed prose is blank (never resurrected). *)
-  let cold_sup =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id:k_sup ~existing_messages:[] |> require_c
-  in
+  check int "suppressed bridged turn hydrates 0 duplicates" 0
+    (List.length
+       (ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id:k_sup ~existing_messages:bridged_messages)));
   check bool "suppressed prose never resurrected on cold start" false
-    (contains ~needle:"Suppressed narration" (extract_text cold_sup));
-  (* (b) Multi-Text-block Assistant message matches joined text_of_content without duplication! *)
+    (contains ~needle:"Suppressed narration"
+       (extract_text (ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id:k_sup ~existing_messages:[]))));
   let k_multi = "keeper-multiblock" in
   ignore
-    (C.commit_turn ~keepers_dir ~keeper_id:k_multi
-       ~turn_id:(Ids.Turn_id.of_string "trace-multi#1")
-       ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-       ~user_input:"Summarize two parts"
-       ~tool_calls_json:(`List [])
-       ~assistant_output:"First paragraph.\nSecond paragraph."
-       ~usage_json:(`Assoc []) ~created_at:20.0 ()
-     |> require_c);
-  let legacy_multiblock_ckpt =
-    [ plain_msg User [ Agent_core.Types.Text "Summarize two parts" ]
-    ; plain_msg Assistant
-        [ Agent_core.Types.Text "First paragraph."
-        ; Agent_core.Types.Text "Second paragraph."
-        ]
+    (commit_row ~keepers_dir ~keeper_id:k_multi ~turn:"trace-multi#1" ~prompt:"Summarize two parts"
+       ~answer:"First paragraph.\nSecond paragraph." 20.0
+     : Store.canonical_turn);
+  let multiblock =
+    [ message Agent_core.Types.User [ Agent_core.Types.Text "Summarize two parts" ]
+    ; message Agent_core.Types.Assistant
+        [ Agent_core.Types.Text "First paragraph."; Agent_core.Types.Text "Second paragraph." ]
     ]
   in
-  let hydrated_multi =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id:k_multi
-      ~existing_messages:legacy_multiblock_ckpt
-    |> require_c
-  in
-  check int "multi-Text-block legacy checkpoint matches joined assistant_output (0 duplicates)" 0
-    (List.length hydrated_multi);
-  (* (c) Repeated identical autonomous prompts across T1 (HTTP checkpointed),
-         T2 (distinct ACP), and T3 (repeated identical prompt/reply as T1):
-         - Hydration MUST return BOTH T2 and T3 (never jumping cursor to T3)!
-         - Compaction evicting ONLY T1 MUST set cutoff_seq = 1, keeping T2 and T3! *)
+  check int "multi-Text-block checkpoint matches joined assistant_output (0 duplicates)" 0
+    (List.length
+       (ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id:k_multi ~existing_messages:multiblock)));
   let k_rep = "keeper-repeated-wake" in
   let wake_prompt = "Check inbox and board." in
   let wake_reply = "All clear." in
-  ignore
-    (C.commit_turn ~keepers_dir ~keeper_id:k_rep
-       ~turn_id:(Ids.Turn_id.of_string "trace-rep#1")
-       ~runtime_kind:C.Agent_core_http ~runtime_id:"glm:1"
-       ~user_input:wake_prompt ~tool_calls_json:(`List []) ~assistant_output:wake_reply
-       ~usage_json:(`Assoc []) ~created_at:10.0 ()
-     |> require_c);
-  ignore
-    (C.commit_turn ~keepers_dir ~keeper_id:k_rep
-       ~turn_id:(Ids.Turn_id.of_string "trace-rep#2")
-       ~runtime_kind:C.Acp_cli ~runtime_id:"agy:opus"
-       ~user_input:"Investigate ACP failover"
-       ~tool_calls_json:(`List []) ~assistant_output:"ACP Turn 2 unique result."
-       ~usage_json:(`Assoc []) ~created_at:20.0 ()
-     |> require_c);
-  ignore
-    (C.commit_turn ~keepers_dir ~keeper_id:k_rep
-       ~turn_id:(Ids.Turn_id.of_string "trace-rep#3")
-       ~runtime_kind:C.Acp_cli ~runtime_id:"agy:opus"
-       ~user_input:wake_prompt ~tool_calls_json:(`List []) ~assistant_output:wake_reply
-       ~usage_json:(`Assoc []) ~created_at:30.0 ()
-     |> require_c);
-  let legacy_t1_only =
-    [ plain_msg User [ Agent_core.Types.Text wake_prompt ]
-    ; plain_msg Assistant [ Agent_core.Types.Text wake_reply ]
+  let r1 = commit_row ~keepers_dir ~keeper_id:k_rep ~turn:"trace-rep#1" ~prompt:wake_prompt ~answer:wake_reply 10.0 in
+  let r2 =
+    commit_row ~kind:Store.Acp_cli ~keepers_dir ~keeper_id:k_rep ~turn:"trace-rep#2"
+      ~prompt:"Investigate ACP failover" ~answer:"ACP Turn 2 unique result." 20.0
+  in
+  let r3 =
+    commit_row ~kind:Store.Acp_cli ~keepers_dir ~keeper_id:k_rep ~turn:"trace-rep#3"
+      ~prompt:wake_prompt ~answer:wake_reply 30.0
+  in
+  let untagged_r1 =
+    [ message Agent_core.Types.User [ Agent_core.Types.Text wake_prompt ]
+    ; message Agent_core.Types.Assistant [ Agent_core.Types.Text wake_reply ]
     ]
   in
-  let hydrated_rep =
-    C.hydrate_missing_turns ~keepers_dir ~keeper_id:k_rep ~existing_messages:legacy_t1_only
-    |> require_c
-  in
-  let hydrated_rep_ids =
-    hydrated_rep
+  let hydrated_ids =
+    ok_store (Store.hydrate_missing_turns ~keepers_dir ~keeper_id:k_rep ~existing_messages:untagged_r1)
     |> List.filter_map (fun (m : Agent_core.Types.message) ->
-      if m.role = User
-      then
-        match List.assoc_opt C.canonical_turn_id_metadata_key m.metadata with
+      if m.role = Agent_core.Types.User
+      then (
+        match List.assoc_opt Store.canonical_turn_id_metadata_key m.metadata with
         | Some (`String s) -> Some s
-        | _ -> None
+        | Some _ | None -> None)
       else None)
   in
   check (list string) "repeated wake prompt hydrates BOTH T2 and T3 (never skips T2)"
     [ "trace-rep#2"; "trace-rep#3" ]
-    hydrated_rep_ids;
-  (* Compaction evicting ONLY T1's messages cuts off at seq 1, retaining T2 and T3! *)
-  (match
-     Keeper_compaction.compact_evicted_messages
-       ~keepers_dir ~keeper_id:k_rep
-       ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-       ~evicted_messages:legacy_t1_only
-       ()
-   with
-   | Ok (Some _) -> ()
-   | Ok None -> fail "expected compaction anchor for T1"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  let handoff_rep = C.load_handoff_context ~keepers_dir ~keeper_id:k_rep |> require_c in
-  check (list string) "compacting only T1 preserves both T2 and repeated-prompt T3"
+    hydrated_ids;
+  let history = List.concat_map Store.messages_of_canonical_turn [ r1; r2; r3 ] in
+  ignore (committed (compact ~keepers_dir ~keeper_id:k_rep ~prefix:2 history) : C.compaction_anchor);
+  check (list string) "compacting only T1 keeps T2 and the repeated-prompt T3"
     [ "trace-rep#2"; "trace-rep#3" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
-       handoff_rep.turns_after_anchor)
+    (row_ids (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id:k_rep)).turns_after_anchor)
 ;;
 
 let test_canonical_turn_multi_epoch_watermark_monotonicity () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let module C = Keeper_canonical_turn_store in
-  let require_c = function
-    | Ok v -> v
-    | Error err -> fail (C.store_error_to_string err)
-  in
-  let plain_msg role content : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
   let keeper_id = "multi-epoch-keeper" in
   let wake_prompt = "Routine autonomous check." in
   let wake_reply = "Everything green." in
-  let commit id kind prompt reply ts =
-    ignore
-      (C.commit_turn
-         ~keepers_dir
-         ~keeper_id
-         ~turn_id:(Ids.Turn_id.of_string id)
-         ~runtime_kind:kind
-         ~runtime_id:"runtime:1"
-         ~user_input:prompt
-         ~tool_calls_json:(`List [])
-         ~assistant_output:reply
-         ~usage_json:(`Assoc [])
-         ~created_at:ts
-         ()
-       |> require_c)
+  let row ?kind turn prompt answer at =
+    ignore (commit_row ?kind ~keepers_dir ~keeper_id ~turn ~prompt ~answer at : Store.canonical_turn)
   in
-  commit "trace-me#1" C.Agent_core_http wake_prompt wake_reply 10.0;
-  commit "trace-me#2" C.Acp_cli "Fix queue backpressure" "Applied bounded queue" 20.0;
-  commit "trace-me#3" C.Acp_cli wake_prompt wake_reply 30.0;
-  commit "trace-me#4" C.Agent_core_http "Live follow-up question" "Live answer" 40.0;
-  let compact evicted_messages =
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id
-        ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-        ~evicted_messages
-        ()
-    with
-    | Ok (Some anchor) -> anchor
-    | Ok None -> fail "expected compaction anchor"
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
-  in
-  (* Epoch 1 compacts legacy untagged [T1, T2] -> cutoff_seq = 2. *)
-  let a1 =
-    compact
-      [ plain_msg User [ Agent_core.Types.Text wake_prompt ]
-      ; plain_msg Assistant [ Agent_core.Types.Text wake_reply ]
-      ; plain_msg User [ Agent_core.Types.Text "Fix queue backpressure" ]
-      ; plain_msg Assistant [ Agent_core.Types.Text "Applied bounded queue" ]
-      ]
-  in
+  row "trace-me#1" wake_prompt wake_reply 10.0;
+  row ~kind:Store.Acp_cli "trace-me#2" "Fix queue backpressure" "Applied bounded queue" 20.0;
+  row ~kind:Store.Acp_cli "trace-me#3" wake_prompt wake_reply 30.0;
+  row "trace-me#4" "Live follow-up question" "Live answer" 40.0;
+  let rebuilt () = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let remaining () = row_ids (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).turns_after_anchor in
+  let a1 = committed (compact ~keepers_dir ~keeper_id ~prefix:4 (rebuilt ())) in
   check int "epoch 1" 1 a1.epoch_id;
-  let h1 = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
-  check (list string) "after epoch 1 only T3 and T4 remain"
-    [ "trace-me#3"; "trace-me#4" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) h1.turns_after_anchor);
-  (* Epoch 2 compacts legacy untagged [T3], which repeats T1's exact prompt & reply.
-     Must match seq 3 (NOT regress to seq 1!) and never resurrect T2 or T3. *)
-  let a2 =
-    compact
-      [ plain_msg User [ Agent_core.Types.Text wake_prompt ]
-      ; plain_msg Assistant [ Agent_core.Types.Text wake_reply ]
-      ]
-  in
+  check (list string) "after epoch 1 only T3 and T4 remain" [ "trace-me#3"; "trace-me#4" ] (remaining ());
+  let a2 = committed (compact ~keepers_dir ~keeper_id ~prefix:2 (rebuilt ())) in
   check int "epoch 2" 2 a2.epoch_id;
-  let h2 = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
-  check (list string) "after epoch 2 repeated-prompt T3 advances cutoff to 3 (only T4 remains)"
-    [ "trace-me#4" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) h2.turns_after_anchor);
-  (* Epoch 3 compacts an unmapped legacy turn absent from .canonical-turns.db.
-     Even with no watermark row for epoch 3, load_handoff_context must honor
-     prior epochs' MAX(cutoff_seq) = 3 and never resurrect T1, T2, or T3. *)
+  check (list string) "the repeated prompt in T3 advances the cutoff to T3" [ "trace-me#4" ] (remaining ());
   let a3 =
-    compact
-      [ plain_msg User [ Agent_core.Types.Text "Unmapped historical prompt" ]
-      ; plain_msg Assistant [ Agent_core.Types.Text "Unmapped historical reply" ]
-      ]
+    committed
+      (compact ~keepers_dir ~keeper_id ~prefix:2
+         [ message Agent_core.Types.User [ Agent_core.Types.Text "Unmapped historical prompt" ]
+         ; message Agent_core.Types.Assistant [ Agent_core.Types.Text "Unmapped historical reply" ]
+         ])
   in
   check int "epoch 3" 3 a3.epoch_id;
-  let h3 = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
-  check (list string) "after epoch 3 unmapped eviction still preserves floor cutoff (only T4 remains)"
-    [ "trace-me#4" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) h3.turns_after_anchor);
-  (* New post-epoch-3 turn T5 appears cleanly alongside T4. *)
-  commit "trace-me#5" C.Acp_cli "Post-epoch-3 ACP turn" "Post-epoch-3 reply" 50.0;
-  let h4 = C.load_handoff_context ~keepers_dir ~keeper_id |> require_c in
-  check (list string) "post-epoch-3 commit appends T5 after T4 without resurrecting T1..T3"
-    [ "trace-me#4"; "trace-me#5" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) h4.turns_after_anchor)
+  check bool "an untagged list settles no turn" true (Option.is_none (A.settled_turn a3.coverage));
+  check (list string) "the earlier cutoff still holds" [ "trace-me#4" ] (remaining ());
+  row ~kind:Store.Acp_cli "trace-me#5" "Post-epoch-3 ACP turn" "Post-epoch-3 reply" 50.0;
+  check (list string) "a later commit appends after T4" [ "trace-me#4"; "trace-me#5" ] (remaining ())
 ;;
 
 let test_canonical_turn_disk_lifecycle_prune_and_delete () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir = Server_tool_blob_scope.scope.config_keepers_dir ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let module C = Keeper_canonical_turn_store in
-  let require_c = function
-    | Ok v -> v
-    | Error err -> fail (C.store_error_to_string err)
-  in
-  let plain_msg role text : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content = [ Agent_core.Types.Text text ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  check int "declarative max_retained_turns default is 2000" 2000 C.max_retained_turns;
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  check int "declarative max_retained_turns default is 2000" 2000 Store.max_retained_turns;
   let keeper_id = "lifecycle-keeper" in
-  let commit ?max_retained_turns id prompt reply ts =
-    C.commit_turn
-      ~keepers_dir
-      ~keeper_id
-      ~turn_id:(Ids.Turn_id.of_string id)
-      ~runtime_kind:C.Agent_core_http
-      ~runtime_id:"glm:1"
-      ~user_input:prompt
-      ~tool_calls_json:(`List [])
-      ~assistant_output:reply
-      ~usage_json:(`Assoc [])
-      ?max_retained_turns
-      ~created_at:ts
-      ()
-    |> require_c
-  in
-  ignore (commit "lc#1" "prompt 1" "reply 1" 10.0 : C.canonical_turn);
-  ignore (commit "lc#2" "prompt 2" "reply 2" 20.0 : C.canonical_turn);
-  ignore (commit "lc#3" "prompt 3" "reply 3" 30.0 : C.canonical_turn);
-  (* 1. Verify PRAGMA auto_vacuum = INCREMENTAL (2) on newly created store. *)
-  let db_file = C.db_path ~keepers_dir ~keeper_id in
-  let auto_vacuum_mode =
+  let commit turn n = commit_row ~keepers_dir ~keeper_id ~turn ~prompt:("prompt " ^ n) ~answer:("reply " ^ n) in
+  let l1 = commit "lc#1" "1" 10.0 in
+  let l2 = commit "lc#2" "2" 20.0 in
+  let l3 = commit "lc#3" "3" 30.0 in
+  let db_file = Store.db_path ~keepers_dir ~keeper_id in
+  let pragma sql =
     let db = Sqlite3.db_open ~mode:`READONLY db_file in
     Fun.protect
       ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
       (fun () ->
-         let stmt = Sqlite3.prepare db "PRAGMA auto_vacuum;" in
+         let stmt = Sqlite3.prepare db sql in
          Fun.protect
            ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
            (fun () ->
@@ -1297,708 +1395,107 @@ let test_canonical_turn_disk_lifecycle_prune_and_delete () =
               | Sqlite3.Rc.ROW -> Sqlite3.column_int stmt 0
               | _ -> -1))
   in
-  check int "canonical turn DB enables PRAGMA auto_vacuum = INCREMENTAL (2)" 2 auto_vacuum_mode;
-  (* 2. Compaction watermark prunes seq <= 2 from SQLite while retaining lc#3 and preserving
-        parent_turn_id continuity even if all post-reset rows are pruned. *)
-  (match
-     Keeper_compaction.compact_evicted_messages
-       ~keepers_dir
-       ~keeper_id
-       ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-       ~evicted_messages:
-         [ plain_msg User "prompt 1"
-         ; plain_msg Assistant "reply 1"
-         ; plain_msg User "prompt 2"
-         ; plain_msg Assistant "reply 2"
-         ]
-       ()
-   with
-   | Ok (Some _) -> ()
-   | Ok None -> fail "expected compaction anchor"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  let after_compact_rows = C.list_turns ~keepers_dir ~keeper_id |> require_c in
-  check (list string) "compaction watermark pruned compacted lc#1 & lc#2 from SQLite"
-    [ "lc#3" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) after_compact_rows);
-  (* Compact remaining lc#3 too so canonical_turns becomes empty, then verify lc#4
-     still chains parent_turn_id = Some "lc#3"! *)
-  (match
-     Keeper_compaction.compact_evicted_messages
-       ~keepers_dir
-       ~keeper_id
-       ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-       ~evicted_messages:[ plain_msg User "prompt 3"; plain_msg Assistant "reply 3" ]
-       ()
-   with
-   | Ok (Some _) -> ()
-   | Ok None -> fail "expected epoch 2 compaction anchor"
-   | Error err -> fail (Keeper_compaction.store_error_to_string err));
-  check int "all compacted rows pruned from SQLite" 0
-    (List.length (C.list_turns ~keepers_dir ~keeper_id |> require_c));
-  let t4 = commit "lc#4" "prompt 4" "reply 4" 40.0 in
-  check (option string) "post-compaction commit chains parent across pruned watermark"
-    (Some "lc#3")
-    (Option.map Ids.Turn_id.to_string t4.parent_turn_id);
-  (* 3. record_history_reset prunes pre-reset rows from SQLite and starts fresh parent chain. *)
-  C.record_history_reset ~keepers_dir ~keeper_id |> require_c;
-  check int "history reset pruned all pre-reset rows from SQLite" 0
-    (List.length (C.list_turns ~keepers_dir ~keeper_id |> require_c));
-  let t5 = commit "lc#5" "prompt 5" "reply 5" 50.0 in
+  check int "canonical turn DB enables PRAGMA auto_vacuum = INCREMENTAL (2)" 2 (pragma "PRAGMA auto_vacuum;");
+  check int "canonical turn DB records its layout version" 1 (pragma "PRAGMA user_version;");
+  let next_user = message ~metadata:(stamped "lc#4") Agent_core.Types.User [ Agent_core.Types.Text "prompt 4" ] in
+  let history = List.concat_map Store.messages_of_canonical_turn [ l1; l2; l3 ] @ [ next_user ] in
+  ignore (committed (compact ~keepers_dir ~keeper_id ~prefix:4 history) : C.compaction_anchor);
+  check (list string) "compaction watermark pruned compacted lc#1 & lc#2" [ "lc#3" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  ignore (committed (compact ~keepers_dir ~keeper_id ~prefix:6 history) : C.compaction_anchor);
+  check int "all compacted rows pruned" 0 (List.length (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let l4 = commit "lc#4" "4" 40.0 in
+  check (option string) "post-compaction commit chains parent across the pruned watermark" (Some "lc#3")
+    (Option.map Ids.Turn_id.to_string l4.parent_turn_id);
+  ok_store (Store.record_history_reset ~keepers_dir ~keeper_id);
+  check int "history reset pruned all pre-reset rows" 0
+    (List.length (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let l5 = commit "lc#5" "5" 50.0 in
   check (option string) "first post-reset commit starts fresh parent chain (None)" None
-    (Option.map Ids.Turn_id.to_string t5.parent_turn_id);
-  (* 4. Retention safety cap prunes oldest rows past max_retained_turns without compaction. *)
+    (Option.map Ids.Turn_id.to_string l5.parent_turn_id);
   let cap_keeper = "cap-keeper" in
   for i = 1 to 12 do
     ignore
-      (C.commit_turn
-         ~keepers_dir
-         ~keeper_id:cap_keeper
-         ~turn_id:(Ids.Turn_id.of_string (Printf.sprintf "cap#%d" i))
-         ~runtime_kind:C.Acp_cli
-         ~runtime_id:"acp:1"
-         ~user_input:(Printf.sprintf "cap prompt %d" i)
-         ~tool_calls_json:(`List [])
-         ~assistant_output:(Printf.sprintf "cap reply %d" i)
-         ~usage_json:(`Assoc [])
-         ~max_retained_turns:5
-         ~created_at:(float_of_int i)
-         ()
-       |> require_c)
+      (Store.commit_turn ~keepers_dir ~keeper_id:cap_keeper
+         ~turn_id:(Ids.Turn_id.of_string (Printf.sprintf "cap#%d" i)) ~runtime_kind:Store.Acp_cli
+         ~runtime_id:"acp:1" ~user_input:(Printf.sprintf "cap prompt %d" i) ~tool_calls_json:(`List [])
+         ~assistant_output:(Printf.sprintf "cap reply %d" i) ~usage_json:(`Assoc [])
+         ~max_retained_turns:5 ~created_at:(float_of_int i) ()
+       |> ok_store
+       : Store.canonical_turn)
   done;
-  let retained = C.list_turns ~keepers_dir ~keeper_id:cap_keeper |> require_c in
   check (list string) "retention cap keeps strictly the newest 5 turns in seq order"
     [ "cap#8"; "cap#9"; "cap#10"; "cap#11"; "cap#12" ]
-    (List.map (fun (t : C.canonical_turn) -> Ids.Turn_id.to_string t.turn_id) retained);
-  (* 5. delete_store removes .db plus -wal, -shm, -journal sidecars cleanly and is idempotent. *)
-  let cap_db = C.db_path ~keepers_dir ~keeper_id:cap_keeper in
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:cap_keeper)));
+  let cap_db = Store.db_path ~keepers_dir ~keeper_id:cap_keeper in
   List.iter
     (fun suffix ->
-       let p = cap_db ^ suffix in
-       if not (Sys.file_exists p) then ignore (Fs_compat.save_file_atomic p "sidecar"))
+       let path = cap_db ^ suffix in
+       if not (Sys.file_exists path)
+       then ignore (Fs_compat.save_file_atomic path "sidecar" : (unit, string) result))
     [ "-wal"; "-shm"; "-journal" ];
   check bool "db exists before delete_store" true (Sys.file_exists cap_db);
-  C.delete_store ~keepers_dir ~keeper_id:cap_keeper |> require_c;
+  ok_store (Store.delete_store ~keepers_dir ~keeper_id:cap_keeper);
   List.iter
     (fun suffix ->
-       let p = cap_db ^ suffix in
-       check bool (Printf.sprintf "delete_store removed %s" suffix) false (Sys.file_exists p))
+       check bool (Printf.sprintf "delete_store removed %s" suffix) false
+         (Sys.file_exists (cap_db ^ suffix)))
     [ ""; "-wal"; "-shm"; "-journal" ];
-  (* Second call is an idempotent no-op when already absent. *)
-  C.delete_store ~keepers_dir ~keeper_id:cap_keeper |> require_c
-;;
-
-let test_p0_10_budget_continue_collision_concurrency_redaction_and_zero_byte_db () =
-  let plain_msg role text : Agent_core.Types.message =
-    { origin = Agent_core.Types.Conversation
-    ; role
-    ; content = [ Agent_core.Types.Text text ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let tmp = Filename.temp_dir "compaction-p010-" "" in
-  let keepers_dir = Filename.concat tmp ".masc/keepers" in
-  Fs_compat.mkdir_p keepers_dir;
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () ->
-    (* 1. provider_limit_tokens = None ALWAYS bounds anchor <= default_anchor_max_bytes *)
-    let huge_turns =
-      List.init 80 (fun i ->
-        let pad = String.make 1024 (Char.chr (65 + (i mod 26))) in
-        [ plain_msg User (Printf.sprintf "user goal %d %s" i pad)
-        ; plain_msg Assistant (Printf.sprintf "decision %d %s" i pad)
-        ])
-      |> List.concat
-    in
-    let anchor_none =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir
-          ~keeper_id:"k-none"
-          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-          ~evicted_messages:huge_turns
-          ()
-      with
-      | Ok (Some a) -> a
-      | Ok None -> fail "expected committed anchor for None token limit"
-      | Error err -> fail (Keeper_compaction.store_error_to_string err)
-    in
-    let rendered_none = msg_bytes (Keeper_compaction.anchor_to_message anchor_none) in
-    check bool
-      (Printf.sprintf "None limit anchor (%d) <= default_anchor_max_bytes (%d)"
-         rendered_none Keeper_compaction.default_anchor_max_bytes)
-      true
-      (rendered_none <= Keeper_compaction.default_anchor_max_bytes);
-    check bool "None limit rolled off archived_epochs_through" true
-      (Option.is_some anchor_none.archived_epochs_through);
-
-    (* 2. Some 32_000 tokens -> capacity_bytes = 128_000 -> budget = 32_000 bytes (NOT 8_000!) *)
-    let medium_turns =
-      List.init 15 (fun i ->
-        let pad = String.make 900 (Char.chr (97 + (i mod 26))) in
-        [ plain_msg User (Printf.sprintf "mid goal %d" i)
-        ; plain_msg Assistant (Printf.sprintf "mid decision %d %s" i pad)
-        ])
-      |> List.concat
-    in
-    let anchor_tok =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir
-          ~keeper_id:"k-tok"
-          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 32_000 })
-          ~evicted_messages:medium_turns
-          ()
-      with
-      | Ok (Some a) -> a
-      | Ok None -> fail "expected committed anchor for Some 32_000"
-      | Error err -> fail (Keeper_compaction.store_error_to_string err)
-    in
-    let rendered_tok = msg_bytes (Keeper_compaction.anchor_to_message anchor_tok) in
-    check bool
-      (Printf.sprintf "Some 32_000 anchor (%d) preserved > 8_000 bytes without 16x over-truncation"
-         rendered_tok)
-      true
-      (rendered_tok > 10_000 && rendered_tok <= 32_000);
-    check bool "Some 32_000 did not spuriously roll off under 32 KiB" true
-      (Option.is_none anchor_tok.archived_epochs_through);
-
-    (* 3. Identical "Continue." openers with distinct bodies never collide; even identical
-          byte-for-byte turns across non-adjacent epochs disambiguate instead of overwriting;
-          exact same prefix remains idempotent. *)
-    let cont_a = [ plain_msg User "Continue."; plain_msg Assistant "Reply Alpha" ] in
-    let cont_b = [ plain_msg User "Continue."; plain_msg Assistant "Reply Beta" ] in
-    let a1 =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir ~keeper_id:"k-cont"
-          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-          ~evicted_messages:cont_a ()
-      with
-      | Ok (Some a) -> a
-      | _ -> fail "epoch 1 Continue. failed"
-    in
-    let a2 =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir ~keeper_id:"k-cont"
-          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-          ~evicted_messages:cont_b ()
-      with
-      | Ok (Some a) -> a
-      | _ -> fail "epoch 2 Continue. failed"
-    in
-    check bool "distinct Continue. turns get distinct covers_through_turn IDs" false
-      (String.equal
-         (Ids.Turn_id.to_string a1.covers_through_turn)
-         (Ids.Turn_id.to_string a2.covers_through_turn));
-    (* Now repeat cont_a in epoch 3 (not covered by a2.covers_through_turn): must disambiguate, NOT overwrite a1! *)
-    let a3 =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir ~keeper_id:"k-cont"
-          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-          ~evicted_messages:cont_a ()
-      with
-      | Ok (Some a) -> a
-      | _ -> fail "epoch 3 identical Continue. disambiguation failed"
-    in
-    check bool "epoch 3 identical Continue. disambiguated from epoch 1" false
-      (String.equal
-         (Ids.Turn_id.to_string a1.covers_through_turn)
-         (Ids.Turn_id.to_string a3.covers_through_turn));
-    let ep1_turns =
-      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:1
-      |> Result.get_ok
-    in
-    let ep2_turns =
-      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:2
-      |> Result.get_ok
-    in
-    let ep3_turns =
-      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:3
-      |> Result.get_ok
-    in
-    check int "epoch 1 archived atoms preserved (not overwritten)" 2 (List.length ep1_turns);
-    check int "epoch 2 archived atoms preserved (Continue. disambiguated)" 2 (List.length ep2_turns);
-    check int "epoch 3 archived atoms preserved separately" 2 (List.length ep3_turns);
-    let all_ids =
-      List.map (fun (t : Keeper_compaction.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
-        (ep1_turns @ ep2_turns @ ep3_turns)
-    in
-    check int "all 6 archived atoms across 3 Continue. epochs have distinct turn_ids" 6
-      (List.length (List.sort_uniq String.compare all_ids));
-
-    (* 4. Concurrent compact_evicted_messages fibers serialize cleanly inside BEGIN IMMEDIATE *)
-    Eio_main.run (fun _env ->
-      let errors = ref [] in
-      Eio.Fiber.all
-        (List.init 6 (fun i () ->
-           let msgs =
-             [ plain_msg User (Printf.sprintf "concurrent-u-%d" i)
-             ; plain_msg Assistant (Printf.sprintf "concurrent-a-%d" i)
-             ]
-           in
-           match
-             Keeper_compaction.compact_evicted_messages
-               ~keepers_dir ~keeper_id:"k-race"
-               ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-               ~evicted_messages:msgs ()
-           with
-           | Ok (Some _) -> ()
-           | Ok None -> errors := "unexpected Ok None" :: !errors
-           | Error err -> errors := Keeper_compaction.store_error_to_string err :: !errors));
-      check (list string) "zero PRIMARY KEY errors under 6 concurrent compactions" [] !errors);
-    let race_epochs =
-      Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"k-race" |> Result.get_ok
-    in
-    check int "all 6 concurrent epochs committed monotonically" 6 (List.length race_epochs);
-
-    (* 5. Workspace-scoped on_epoch_committed receives exact keepers_dir *)
-    let seen_dirs = ref [] in
-    Keeper_compaction.set_on_epoch_committed
-      (Some (fun ~keepers_dir:kd ~keeper_id anchor ->
-         seen_dirs := (kd, keeper_id, anchor.epoch_id) :: !seen_dirs));
-    Fun.protect ~finally:(fun () -> Keeper_compaction.set_on_epoch_committed None) (fun () ->
-      ignore
-        (Keeper_compaction.compact_evicted_messages
-           ~keepers_dir ~keeper_id:"k-ws"
-           ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-           ~evicted_messages:[ plain_msg User "ws check"; plain_msg Assistant "ws ok" ]
-           ()
-         |> Result.get_ok));
-    check (list (triple string string int)) "callback receives workspace keepers_dir"
-      [ keepers_dir, "k-ws", 1 ]
-      !seen_dirs;
-
-    (* 6. Secret redaction before .compaction.db persistence and microcompaction *)
-    let secret_token = "sk" ^ "-ant-api03-" ^ "COMPACTSECRET9876543210ZYXWVU" in
-    let anchor_sec =
-      match
-        Keeper_compaction.compact_evicted_messages
-          ~keepers_dir ~keeper_id:"k-sec"
-          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-          ~evicted_messages:
-            [ plain_msg User ("token is " ^ secret_token)
-            ; plain_msg Assistant ("confirmed " ^ secret_token)
-            ]
-          ()
-      with
-      | Ok (Some a) -> a
-      | _ -> fail "expected secret-redacted epoch"
-    in
-    check bool "secret redacted from committed anchor active_intent" false
-      (String_util.contains_substring anchor_sec.active_intent secret_token);
-    let archived_sec =
-      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-sec" ~epoch_id:1
-      |> Result.get_ok
-    in
-    let archived_text =
-      archived_sec
-      |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
-      |> List.map (fun (m : Agent_core.Types.message) ->
-        Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
-      |> String.concat "\n"
-    in
-    check bool "secret redacted from archived_turns messages_json" false
-      (String_util.contains_substring archived_text secret_token);
-    check bool "[REDACTED] marker persisted in archived_turns" true
-      (String_util.contains_substring archived_text "[REDACTED]");
-
-    (* 7. Streaming decode_live_blob_references_json omits raw conversation text &
-          0-byte .compaction.db without companions returns Ok None *)
-    let decoded_sec =
-      Keeper_compaction.decode_live_blob_references_json
-        (Keeper_compaction.db_path ~keepers_dir ~keeper_id:"k-sec")
-      |> Result.get_ok
-    in
-    check bool "streaming blob decoder returns None when DB has only plain text (no full AST bloat)" true
-      (Option.is_none decoded_sec);
-    let zero_path = Keeper_compaction.db_path ~keepers_dir ~keeper_id:"k-zero" in
-    Out_channel.with_open_bin zero_path (fun _ -> ());
-    check bool "0-byte compaction DB without companions returns Ok None on latest_anchor" true
-      (Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"k-zero" = Ok None);
-    check bool "0-byte compaction DB without companions returns Ok None on blob decoder" true
-      (Keeper_compaction.decode_live_blob_references_json zero_path = Ok None))
-;;
-
-let test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project () =
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir =
-    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "keepers"
-  in
-  Fs_compat.mkdir_p keepers_dir;
-  (* Opaque per-keeper secret (no sk-/ghp_ regex shape) under .masc/ssh/redaction/<keeper>.token *)
-  let opaque_secret = "OPAQUE_SSH_KEEPER_TOKEN_99441122" in
-  let redaction_dir =
-    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "ssh") "redaction"
-  in
-  Fs_compat.mkdir_p redaction_dir;
-  let token_path = Filename.concat redaction_dir "k-proj.token" in
-  ignore (Fs_compat.save_file_atomic token_path opaque_secret : (unit, string) result);
-  let plain_msg role text : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Conversation
-    ; role
-    ; content = [ Agent_core.Types.Text text ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  (* 1. compact_evicted_messages with production <base>/.masc/config/keepers path
-        (trailing slash too!) resolves base_path and redacts opaque per-keeper secret. *)
-  let anchor_ev =
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir:(keepers_dir ^ "/")
-        ~keeper_id:"k-proj"
-        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-        ~evicted_messages:
-          [ plain_msg User ("deploy with " ^ opaque_secret)
-          ; plain_msg Assistant ("applied " ^ opaque_secret)
-          ]
-        ()
-    with
-    | Ok (Some a) -> a
-    | _ -> fail "expected epoch under config/keepers"
-  in
-  check bool "opaque per-keeper secret redacted from anchor active_intent" false
-    (contains ~needle:opaque_secret anchor_ev.active_intent);
-  check bool "[REDACTED] present in anchor active_intent" true
-    (contains ~needle:"[REDACTED]" anchor_ev.active_intent);
-  let archived_ev =
-    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-proj" ~epoch_id:1
-    |> Result.get_ok
-  in
-  let archived_ev_text =
-    archived_ev
-    |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
-    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
-    |> String.concat "\n"
-  in
-  check bool "opaque per-keeper secret redacted from archived_turns" false
-    (contains ~needle:opaque_secret archived_ev_text);
-
-  (* 2. compact_and_project redacts BEFORE bound_anchor_to_budget & enforce_capacity,
-        returning redacted messages and evicted_turns (never leaking raw secrets). *)
-  let short_opaque = "Z9Q8W7E6" in
-  let token_path_2 = Filename.concat redaction_dir "k-proj2.token" in
-  ignore (Fs_compat.save_file_atomic token_path_2 short_opaque : (unit, string) result);
-  let t1 =
-    make_turn ~idx:1
-      ~user_text:("rotate secret " ^ short_opaque ^ " " ^ String.make 80 'a')
-      ~tool_name:"bash"
-      ~tool_output:("output containing " ^ short_opaque)
-      ~assistant_text:("rotated " ^ short_opaque)
-  in
-  let t2 =
-    make_turn ~idx:2
-      ~user_text:"keep recent turn clean"
-      ~tool_name:"read"
-      ~tool_output:"ok"
-      ~assistant_text:"done"
-  in
-  let capacity_bytes = 2000 in
-  let reserved_bytes = 200 in
-  let projected =
-    Keeper_compaction.compact_and_project
-      ~keepers_dir
-      ~keeper_id:"k-proj2"
-      ~measure_message_bytes:msg_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
-      [ t1; t2 ]
-    |> Result.get_ok
-  in
-  let all_returned_msg_text =
-    projected.messages
-    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
-    |> String.concat "\n"
-  in
-  let all_returned_evicted_text =
-    projected.evicted_turns
-    |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
-    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
-    |> String.concat "\n"
-  in
-  check bool "compact_and_project returned messages do not leak opaque secret" false
-    (contains ~needle:short_opaque all_returned_msg_text);
-  check bool "compact_and_project returned evicted_turns do not leak opaque secret" false
-    (contains ~needle:short_opaque all_returned_evicted_text);
-  let total_projected_bytes =
-    List.fold_left (fun acc m -> acc + msg_bytes m) 0 projected.messages
-  in
-  check bool "compact_and_project enforces capacity AFTER redaction expansion" true
-    (reserved_bytes + total_projected_bytes <= capacity_bytes);
-
-  (* 3. Duplicate "Continue." turns across epochs in compact_and_project (disambiguate_turns_in_tx
-        inside commit_epoch_with_handles_full) never raise SQLITE_CONSTRAINT_PRIMARYKEY. *)
-  let dup_turn =
-    { Keeper_compaction.turn_id = Ids.Turn_id.of_string "turn-continue-dup"
-    ; messages = [ plain_msg User "Continue."; plain_msg Assistant "Continuing task." ]
-    }
-  in
-  let keep_turn_1 =
-    make_turn ~idx:10 ~user_text:"keep-1" ~tool_name:"read" ~tool_output:"ok" ~assistant_text:"a1"
-  in
-  let keep_turn_2 =
-    make_turn ~idx:11 ~user_text:"keep-2" ~tool_name:"read" ~tool_output:"ok" ~assistant_text:"a2"
-  in
-  let proj_ep1 =
-    Keeper_compaction.compact_and_project
-      ~keepers_dir
-      ~keeper_id:"k-dup-proj"
-      ~measure_message_bytes:msg_bytes
-      ~capacity_bytes:2000
-      ~reserved_bytes:200
-      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
-      [ dup_turn; keep_turn_1 ]
-    |> Result.get_ok
-  in
-  let anchor_ep1 = Option.get proj_ep1.anchor in
-  let proj_ep2 =
-    Keeper_compaction.compact_and_project
-      ~keepers_dir
-      ~keeper_id:"k-dup-proj"
-      ~measure_message_bytes:msg_bytes
-      ~capacity_bytes:2000
-      ~reserved_bytes:200
-      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
-      [ dup_turn; keep_turn_2 ]
-    |> Result.get_ok
-  in
-  let anchor_ep2 = Option.get proj_ep2.anchor in
-  check int "second compact_and_project epoch committed monotonically" 2 anchor_ep2.epoch_id;
-  check bool "duplicate turn_id disambiguated in epoch 2 covers_through_turn" false
-    (String.equal
-       (Ids.Turn_id.to_string anchor_ep1.covers_through_turn)
-       (Ids.Turn_id.to_string anchor_ep2.covers_through_turn));
-  let ep1_archived =
-    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-dup-proj" ~epoch_id:1
-    |> Result.get_ok
-  in
-  let ep2_archived =
-    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-dup-proj" ~epoch_id:2
-    |> Result.get_ok
-  in
-  check int "epoch 1 duplicate turn preserved" 1 (List.length ep1_archived);
-  check int "epoch 2 duplicate turn preserved separately" 1 (List.length ep2_archived);
-  check string "epoch 2 covers_through_turn matches disambiguated archived turn_id"
-    (Ids.Turn_id.to_string (List.hd ep2_archived).turn_id)
-    (Ids.Turn_id.to_string anchor_ep2.covers_through_turn)
-;;
-
-let test_p1_5_live_history_after_latest_anchor_scopes_tool_carry () =
-  with_temp_dir @@ fun base_path ->
-  let keepers_dir =
-    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "keepers"
-  in
-  Fs_compat.mkdir_p keepers_dir;
-  let turn_atom ~prompt ~tool_name ~answer : Agent_core.Types.message list =
-    let call_id = "call-" ^ tool_name in
-    [ { origin = Agent_core.Llm_provider.Types.Conversation
-      ; role = Agent_core.Types.User
-      ; content = [ Agent_core.Types.Text prompt ]
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      }
-    ; { origin = Agent_core.Llm_provider.Types.Conversation
-      ; role = Agent_core.Types.Assistant
-      ; content = [ Agent_core.Types.ToolUse { id = call_id; name = tool_name; input = `Assoc [] } ]
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      }
-    ; { origin = Agent_core.Llm_provider.Types.Conversation
-      ; role = Agent_core.Types.Tool
-      ; content =
-          [ Agent_core.Types.ToolResult
-              { tool_use_id = call_id
-              ; content = "ok"
-              ; outcome = Agent_core.Types.Tool_succeeded
-              ; json = None
-              ; content_blocks = None
-              }
-          ]
-      ; name = None
-      ; tool_call_id = Some call_id
-      ; metadata = []
-      }
-    ; { origin = Agent_core.Llm_provider.Types.Conversation
-      ; role = Agent_core.Types.Assistant
-      ; content = [ Agent_core.Types.Text answer ]
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      }
-    ]
-  in
-  let atom0 = turn_atom ~prompt:"epoch1 turn 0" ~tool_name:"svc_old_a" ~answer:"done a" in
-  let atom1 = turn_atom ~prompt:"epoch1 turn 1" ~tool_name:"svc_old_b" ~answer:"done b" in
-  let atom2 = turn_atom ~prompt:"epoch2 turn 2" ~tool_name:"svc_live_c" ~answer:"done c" in
-  let full_history = atom0 @ atom1 @ atom2 in
-  (* Before any compaction anchor exists, full history is returned unchanged. *)
-  check int "without anchor, full durable history is preserved"
-    (List.length full_history)
-    (List.length
-       (Keeper_compaction.live_history_after_latest_anchor
-          ~keepers_dir ~keeper_id:"k-tool-carry" full_history));
-  (* Commit compaction covering atoms 0 and 1. *)
-  let anchor =
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id:"k-tool-carry"
-        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 4096 })
-        ~evicted_messages:(atom0 @ atom1)
-        ()
-    with
-    | Ok (Some a) -> a
-    | Ok None -> fail "expected committed compaction anchor"
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
-  in
-  let live_tail =
-    Keeper_compaction.live_history_after_latest_anchor
-      ~keepers_dir ~keeper_id:"k-tool-carry" full_history
-  in
-  let tool_names_in msgs =
-    msgs
-    |> List.concat_map (fun (m : Agent_core.Types.message) ->
-      List.filter_map
-        (function
-          | Agent_core.Types.ToolUse { name; _ } -> Some name
-          | Text _ | Thinking _ | RedactedThinking _ | ToolResult _
-          | ToolReference _ | Image _ | Document _ | Audio _ | ReasoningDetails _ -> None)
-        m.content)
-  in
-  check (list string) "persisted anchor drops pre-compaction ToolUse atoms and keeps live tail"
-    [ "svc_live_c" ]
-    (tool_names_in live_tail);
-  (* Disambiguated covers_through_turn suffix (-ep2-0) also matches atom 1 cleanly. *)
-  let disambiguated_anchor =
-    { anchor with
-      covers_through_turn =
-        Ids.Turn_id.of_string (Ids.Turn_id.to_string anchor.covers_through_turn ^ "-ep2-0")
-    }
-  in
-  check (list string) "disambiguated covers_through_turn matches and slices live tail"
-    [ "svc_live_c" ]
-    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:disambiguated_anchor full_history));
-  (* Non-prefix re-indexed eviction (e.g., atom 1 compacted alone as atom-0-<hash>)
-     still matches atom 1 by content hash and slices strictly to atom 2. *)
-  let reindexed_anchor =
-    match
-      Keeper_compaction.compact_evicted_messages
-        ~keepers_dir
-        ~keeper_id:"k-tool-carry-reindexed"
-        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 4096 })
-        ~evicted_messages:atom1
-        ()
-    with
-    | Ok (Some a) -> a
-    | Ok None -> fail "expected reindexed compaction anchor"
-    | Error err -> fail (Keeper_compaction.store_error_to_string err)
-  in
-  check (list string) "reindexed evicted atom still slices strictly after atom 1"
-    [ "svc_live_c" ]
-    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:reindexed_anchor full_history));
-  (* When a later live-epoch turn repeats the exact same atom content hash as
-     a compacted re-indexed atom (e.g. repeated autonomous "Continue." turns),
-     messages_after_anchor must anchor at the earliest valid atom so live-epoch
-     carried tools are never dropped mid-epoch (zero prompt-cache bust). *)
-  let repeated_history = atom0 @ atom1 @ atom2 @ atom1 in
-  check (list string)
-    "reindexed anchor matches earliest valid atom and keeps live-epoch tools despite repeated later turn"
-    [ "svc_live_c"; "svc_old_b" ]
-    (tool_names_in
-       (Keeper_compaction.messages_after_anchor ~anchor:reindexed_anchor repeated_history));
-  (* When messages carry an older inline compaction anchor (e.g. epoch 1 after
-     atom0) while the persisted DB anchor has advanced to epoch 2 (covering
-     atom1), slice strictly past max(inline_pos, db_anchor_pos) so epoch-2
-     compacted messages do not leak back into tool carry. *)
-  let older_inline_anchor : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Outside_context
-    ; role = Agent_core.Types.User
-    ; content = [ Agent_core.Types.Text "epoch-1 handoff" ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = Runtime_model_input_tail_window.compaction_anchor_metadata
-    }
-  in
-  let history_with_stale_inline = atom0 @ [ older_inline_anchor ] @ atom1 @ atom2 in
-  check (list string)
-    "newer DB covers_through_turn advances past an older inline compaction anchor"
-    [ "svc_live_c" ]
-    (tool_names_in
-       (Keeper_compaction.messages_after_anchor ~anchor history_with_stale_inline));
-  let carry_id canonical_id messages =
-    match List.rev messages with
-    | (last : Agent_core.Types.message) :: rest ->
-      let metadata = ("canonical_turn_id", `String canonical_id) :: last.metadata in
-      List.rev ({ last with metadata } :: rest)
-    | [] -> fail "expected a nonempty atom"
-  in
-  let persisted_id = Ids.Turn_id.to_string anchor.covers_through_turn in
-  let repeated_canonical_history =
-    full_history @ carry_id persisted_id atom0 @ carry_id persisted_id atom1 @ atom2
-  in
-  check (list string)
-    "latest canonical ID wins over an earlier matching atom digest and canonical ID"
-    [ "svc_live_c" ]
-    (tool_names_in
-       (Keeper_compaction.messages_after_anchor ~anchor repeated_canonical_history));
-  let named_anchor =
-    { anchor with covers_through_turn = Ids.Turn_id.of_string "canonical-turn-2-ep3-0" }
-  in
-  check (list string)
-    "canonical IDs also match disambiguated anchors without a synthetic atom index"
-    [ "svc_live_c" ]
-    (tool_names_in
-       (Keeper_compaction.messages_after_anchor ~anchor:named_anchor
-          (atom0 @ carry_id "canonical-turn-2" atom1 @ atom2)));
-  (* Unmatched covers_through_turn fails open to full history so live turns are never dropped. *)
-  let unrelated_anchor =
-    { anchor with covers_through_turn = Ids.Turn_id.of_string "turn-not-in-history" }
-  in
-  check (list string) "unmatched anchor fails open to full history"
-    [ "svc_old_a"; "svc_old_b"; "svc_live_c" ]
-    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:unrelated_anchor full_history))
+  ok_store (Store.delete_store ~keepers_dir ~keeper_id:cap_keeper)
 ;;
 
 let () =
   run
-    "keeper_compaction"
-    [ ( "blob_store_and_handles"
+    "Keeper_compaction"
+    [ ( "atom names and coverage"
+      , [ test_case "names follow turns and continue on re-entry" `Quick test_atom_names_follow_turns
+        ; test_case "covered end reads names only" `Quick test_covered_end_reads_names_only
+        ; test_case "advance names the boundary, settled turn and beyond" `Quick
+            test_advance_names_the_boundary
+        ; test_case "settled turn stops at an open earlier turn" `Quick
+            test_settled_turn_stops_at_an_open_turn
+        ; test_case "coverage and anchor codecs are strict" `Quick test_codecs_are_strict
+        ] )
+    ; ( "tool output"
       , [ test_case "structured handle & 4 KiB head+tail preview & non-Scanf marker" `Quick
             test_tool_output_structured_handle_and_head_tail_preview
         ] )
-    ; ( "anchored_compaction"
-      , [ test_case "typed tool evidence, pre-change epochs and inline replay" `Quick
+    ; ( "anchored compaction"
+      , [ test_case "typed tool evidence survives restart" `Quick
             test_transcript_evidence_survives_restart
-        ; test_case "P0-10 & P1-9 budget, Continue. collision, concurrency, workspace hook, redaction & 0-byte DB" `Quick
-            test_p0_10_budget_continue_collision_concurrency_redaction_and_zero_byte_db
-        ; test_case "per-keeper SSH redaction under config/keepers & compact_and_project pre-budget redaction" `Quick
-            test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project
-        ; test_case "microcompaction, incremental epochs, lossless Turn_id pointers & WAL isolation" `Quick
-            test_microcompaction_and_anchored_iterative_epochs
-        ; test_case "Capacity_exceeded, compact_evicted_messages & live try_provider anchor wiring" `Quick
-            test_capacity_exceeded_and_live_try_provider_wiring
-        ; test_case "60-epoch bounded lossless anchor roll-off & provider down-switch" `Quick
-            test_multi_epoch_bounded_anchor_rolloff_and_lossless_recall
-        ; test_case "microcompaction put_durable handles protected by Tool_blob_maintenance sweep" `Quick
-            test_microcompaction_durable_blobs_protected_from_sweep
-        ; test_case "canonical turn store compaction watermark, cycle guard & failover hydration" `Quick
+        ; test_case "leading atoms are archived once" `Quick test_leading_atoms_are_archived_once
+        ; test_case "current-turn round drop is not archived again" `Quick
+            test_current_turn_round_drop_is_not_archived_again
+        ; test_case "consumer cuts after the covered turn" `Quick
+            test_consumer_cuts_after_the_covered_turn
+        ; test_case "bounded anchor across epochs and provider limits" `Quick
+            test_bounded_anchor_across_epochs
+        ; test_case "repeated text atoms are distinct by name" `Quick
+            test_repeated_text_atoms_are_distinct_by_name
+        ; test_case "concurrent compactions serialize" `Quick test_concurrent_compactions_serialize
+        ; test_case "epoch listener receives the workspace" `Quick
+            test_epoch_listener_receives_the_workspace
+        ; test_case "secrets are redacted at the storage boundary" `Quick
+            test_secrets_are_redacted_at_the_storage_boundary
+        ; test_case "per-keeper token is redacted under config/keepers" `Quick
+            test_per_keeper_token_is_redacted_under_config_keepers
+        ; test_case "zero-byte database reads as empty" `Quick test_zero_byte_database_reads_as_empty
+        ; test_case "stores written before the hard cut are refused" `Quick
+            test_stores_written_before_the_hard_cut_are_refused
+        ] )
+    ; ( "canonical turn store"
+      , [ test_case "watermark follows the settled turn" `Quick test_watermark_follows_the_settled_turn
+        ; test_case "ACP rebuilt list cuts the checkpoint history" `Quick
+            test_acp_rebuilt_list_cuts_the_checkpoint_history
+        ; test_case "ACP provisional turn id" `Quick test_acp_provisional_turn_id
+        ; test_case "compaction watermark, cycle guard & failover hydration" `Quick
             test_canonical_turn_store_compaction_watermark_and_failover
-        ; test_case "canonical turn hydration: suppressed terminal effect, multi-block & repeated prompts" `Quick
+        ; test_case "hydration: suppressed terminal effect, multi-block & repeated prompts" `Quick
             test_canonical_turn_hydration_edge_cases
-        ; test_case "canonical turn multi-epoch watermark monotonicity & unmapped epoch floor" `Quick
+        ; test_case "multi-epoch watermark monotonicity & unmapped epoch floor" `Quick
             test_canonical_turn_multi_epoch_watermark_monotonicity
-        ; test_case "canonical turn disk lifecycle: auto_vacuum, prune, retention cap & delete_store" `Quick
+        ; test_case "disk lifecycle: auto_vacuum, prune, retention cap & delete_store" `Quick
             test_canonical_turn_disk_lifecycle_prune_and_delete
-        ; test_case "P1-5 live_history_after_latest_anchor scopes non-Anthropic tool carry across compaction" `Quick
-            test_p1_5_live_history_after_latest_anchor_scopes_tool_carry
         ] )
     ]
 ;;

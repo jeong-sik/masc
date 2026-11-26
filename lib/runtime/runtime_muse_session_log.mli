@@ -87,6 +87,11 @@ type turn =
             record per MCP tool call it checked. Each is a model call of its
             own. *)
   ; reviews : int
+  ; compactions : int
+        (** The host's compactions in the prompt's runs, one
+            [context_compaction_installed] record each. Each replaced the
+            start of the session with a summary, so the session no longer
+            holds what was sent before it as it was sent. *)
   ; observers : observers
   }
 

@@ -755,6 +755,7 @@ type prompt_result =
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source
+  ; context_compacted : bool
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }
@@ -4119,6 +4120,21 @@ let resume_session
 
 (* ── Prompt execution with streaming & cancellation ───────────────────────── *)
 
+(* A host that keeps one session and only adds to it never counts less than it
+   held before. A count below the one before it means the host shrank the
+   session on its own: it compacted or reset it. The first count of a prompt
+   is compared with the session's last count before the prompt. *)
+let occupancy_fell ~prior_context_used readings =
+  let rec fell last = function
+    | [] -> false
+    | used :: rest ->
+      (match last with
+       | Some last when used < last -> true
+       | Some _ | None -> fell (Some used) rest)
+  in
+  fell prior_context_used readings
+;;
+
 (* The tokens of a prompt whose host reports none over ACP: its model requests,
    its approval reviews and its observers' requests, read from the host's
    journals. [acp_usage] keeps the context window the host does report. What
@@ -4149,6 +4165,7 @@ let prompt
       ?(timeout_s = Some default_timeout_s)
       ?(permission_policy = Allow_all)
       ?(on_event = ignore)
+      ?prior_context_used
       ()
   =
   let* () = validate_prompt_blocks ~driver:t.driver ~capabilities:t.capabilities blocks in
@@ -4160,6 +4177,7 @@ let prompt
   let tool_calls = ref 0 in
   let last_context_used = ref None in
   let last_context_size = ref None in
+  let context_readings = ref [] in
   let streamed_usage = ref empty_usage in
   let append_bounded buf s =
     let remaining = max_prompt_stream_bytes - Buffer.length buf in
@@ -4193,6 +4211,9 @@ let prompt
          ; total_tokens
          } ->
        (match used with Some _ as u -> last_context_used := u | None -> ());
+       (match used with
+        | Some u when u > 0 -> context_readings := u :: !context_readings
+        | Some _ | None -> ());
        (match size with Some _ as s -> last_context_size := s | None -> ());
        let prev = !streamed_usage in
        streamed_usage :=
@@ -4316,6 +4337,20 @@ let prompt
          | Ok turn -> usage_of_muse_turn acp_usage turn, Usage_from_muse_journal turn
          | Error err -> without_journal, Usage_unreadable err)
     in
+    (* A Muse prompt's [used] frames are the host's estimate, so its journal
+       says whether it compacted: each [context_compaction_installed] record,
+       and the count its last request left against the session's last count. *)
+    let context_compacted =
+      match usage_source with
+      | Usage_from_acp ->
+        occupancy_fell ~prior_context_used (List.rev !context_readings)
+      | Usage_from_muse_journal turn ->
+        turn.Runtime_muse_session_log.compactions > 0
+        || occupancy_fell
+             ~prior_context_used
+             (List.filter (fun used -> used > 0) (Option.to_list usage.context_used))
+      | Usage_unreadable _ -> false
+    in
     Ok
       { session_id
       ; stop_reason
@@ -4324,12 +4359,14 @@ let prompt
       ; thought = Buffer.contents thought_buf
       ; usage
       ; usage_source
+      ; context_compacted
       ; tool_calls_observed = !tool_calls
       ; wall_duration_s = Float.max 0.0 (Time_compat.now () -. started_at)
       }
 ;;
 
 module For_testing = struct
+  let occupancy_fell = occupancy_fell
   let build_environment = build_environment
   let build_argv = build_argv
   let utf8_safe_suffix = utf8_safe_suffix

@@ -22,14 +22,6 @@ let valid_rollover_keeper_id keeper_id =
   && not (String.contains keeper_id '\\')
 ;;
 
-(* In an append-only ACP session, a strict drop in reported context occupancy
-   between consecutive turns structurally indicates native compaction/reset. *)
-let compaction_detected ~prev_used ~cur_used =
-  match prev_used, cur_used with
-  | Some prev, Some cur when prev > 0 && cur > 0 -> cur < prev
-  | _ -> false
-;;
-
 (* Both values are counted or declared, never estimated: the window the agent
    reports ([usage_update.size]) and the operator's declared limit. The
    smaller one is where this session ends. *)
@@ -2896,6 +2888,7 @@ let run_without_lifecycle
                     ~permission_policy
                     ~on_event:(fun ev ->
                       if Option.is_none !host_stop_ref then stream.on_acp_event ev)
+                    ?prior_context_used:entry.last_context_used
                     ()
                 in
                 (match res with
@@ -2947,12 +2940,11 @@ let run_without_lifecycle
         stream.finish
           ~stop_reason:(stop_reason_of_acp_stop_reason prompt_res.stop_reason)
           ~usage:stream_usage;
-        let prev_used = entry.last_context_used in
         let cur_used = effective_context_used prompt_res.usage in
         (match cur_used with
          | Some _ -> entry.last_context_used <- cur_used
          | None -> ());
-        let compacted = compaction_detected ~prev_used ~cur_used in
+        let compacted = prompt_res.Acp.context_compacted in
         let rollover =
           rollover_of_usage
             ~threshold:(Runtime.context_rollover_threshold_of_runtime_id runtime_id)
@@ -3794,7 +3786,6 @@ module For_testing = struct
   let effective_context_used = effective_context_used
   let held_context_of_usage = held_context_of_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
-  let compaction_detected = compaction_detected
   let effective_context_limit_tokens = effective_context_limit_tokens
   let rollover_of_usage ~context_used ~context_size ~input_limit ~threshold =
     Option.map

@@ -26,6 +26,7 @@ type turn =
   ; last_request : counts option
   ; review : counts
   ; reviews : int
+  ; compactions : int
   ; observers : observers
   }
 
@@ -266,6 +267,7 @@ type record =
       { run_id : string
       ; journal : string option
       }
+  | Compaction_installed of { run_id : string }
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -415,6 +417,14 @@ let decode_record ~byte_offset json =
        let* run_id = run_id payload in
        let* journal = child_journal event in
        Ok (Some (Observer_linked { run_id; journal }))
+     | Some "run", Some "context_compaction_installed" ->
+       let* () =
+         check_schema
+           ~record:"run/context_compaction_installed"
+           ~payload_version:run_payload_schema_version
+       in
+       let* run_id = run_id payload in
+       Ok (Some (Compaction_installed { run_id }))
      | _ -> Ok None)
   | Some _ | None -> Ok None
 ;;
@@ -474,6 +484,7 @@ let no_counts =
   ; last_request = None
   ; review = zero_counts
   ; reviews = 0
+  ; compactions = 0
   ; observers = no_observers
   }
 ;;
@@ -510,8 +521,11 @@ let summarize records =
     List.filter_map
       (function
         | Run_started { run_id } -> Some run_id
-        | Run_terminal _ | Model_completed _ | Review_completed _ | Observer_linked _ ->
-          None)
+        | Run_terminal _
+        | Model_completed _
+        | Review_completed _
+        | Observer_linked _
+        | Compaction_installed _ -> None)
       records
     |> List.sort_uniq String.compare
   in
@@ -519,8 +533,11 @@ let summarize records =
     List.filter_map
       (function
         | Run_terminal { run_id } -> Some run_id
-        | Run_started _ | Model_completed _ | Review_completed _ | Observer_linked _ ->
-          None)
+        | Run_started _
+        | Model_completed _
+        | Review_completed _
+        | Observer_linked _
+        | Compaction_installed _ -> None)
       records
   in
   match started with
@@ -547,9 +564,12 @@ let summarize records =
                   review = add_counts turn.review counts
                 ; reviews = turn.reviews + 1
                 }
+              | Compaction_installed { run_id } when List.mem run_id started ->
+                { turn with compactions = turn.compactions + 1 }
               | Model_completed _
               | Review_completed _
               | Observer_linked _
+              | Compaction_installed _
               | Run_started _
               | Run_terminal _ -> turn)
            no_counts
@@ -563,6 +583,7 @@ let summarize records =
              | Observer_linked _
              | Model_completed _
              | Review_completed _
+             | Compaction_installed _
              | Run_started _
              | Run_terminal _ -> None)
            records
@@ -649,7 +670,11 @@ let last_request root ~session_id =
        (fun newest record ->
           match record with
           | Model_completed { counts; _ } -> Some counts
-          | Run_started _ | Run_terminal _ | Review_completed _ | Observer_linked _ -> newest)
+          | Run_started _
+          | Run_terminal _
+          | Review_completed _
+          | Observer_linked _
+          | Compaction_installed _ -> newest)
        None
        records)
 ;;

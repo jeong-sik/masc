@@ -156,7 +156,7 @@ let turn_t =
        Format.fprintf
          ppf
          "main in=%d out=%d cache_read=%d reasoning=%d write=%d requests=%d last=%s | \
-          review in=%d out=%d cache_read=%d reasoning=%d calls=%d | \
+          review in=%d out=%d cache_read=%d reasoning=%d calls=%d | compactions=%d | \
           observers in=%d out=%d cache_read=%d reasoning=%d cache_write=%d finished=%d running=%d \
           without_journal=%d"
          turn.main.input_tokens
@@ -173,6 +173,7 @@ let turn_t =
          turn.review.cache_read_tokens
          turn.review.reasoning_tokens
          turn.reviews
+         turn.compactions
          turn.observers.counts.input_tokens
          turn.observers.counts.output_tokens
          turn.observers.counts.cache_read_tokens
@@ -214,6 +215,7 @@ let prompt_1 =
   ; last_request = Some (counts ~input:23429 ~output:36 ~cache_read:23156 ~reasoning:19)
   ; review = counts ~input:12628 ~output:244 ~cache_read:0 ~reasoning:112
   ; reviews = 1
+  ; compactions = 0
   ; observers = no_observers
   }
 ;;
@@ -227,6 +229,7 @@ let prompt_2 =
   ; last_request = Some (counts ~input:23654 ~output:20 ~cache_read:23412 ~reasoning:4)
   ; review = counts ~input:15424 ~output:205 ~cache_read:0 ~reasoning:82
   ; reviews = 1
+  ; compactions = 0
   ; observers = no_observers
   }
 ;;
@@ -238,6 +241,7 @@ let both_prompts =
   ; last_request = Some (counts ~input:23654 ~output:20 ~cache_read:23412 ~reasoning:4)
   ; review = counts ~input:28052 ~output:449 ~cache_read:0 ~reasoning:194
   ; reviews = 2
+  ; compactions = 0
   ; observers = no_observers
   }
 ;;
@@ -306,6 +310,7 @@ let observers_prompt observers =
   ; last_request = Some (counts ~input:24763 ~output:269 ~cache_read:23921 ~reasoning:248)
   ; review = nothing
   ; reviews = 0
+  ; compactions = 0
   ; observers
   }
 ;;
@@ -461,6 +466,7 @@ let test_counts_a_run_that_made_no_request () =
       ; last_request = None
       ; review = nothing
       ; reviews = 0
+      ; compactions = 0
       ; observers = no_observers
       }
       (read_ok mark))
@@ -489,6 +495,37 @@ let test_ignores_the_records_of_a_run_the_prompt_did_not_start () =
       (text_of [ fixture_lines.(56) ]
        ^ text ~first:run_2_started ~last:run_2_terminal);
     check turn_t "only run 2 is counted" prompt_2 (read_ok mark))
+;;
+
+(* A [context_compaction_installed] record as the host writes it: a run record
+   of the same payload schema as the request it is copied from. *)
+let compaction_installed_after index =
+  set_field
+    fixture_lines.(index)
+    [ "payload"; "event" ]
+    (`Assoc
+        [ "kind", `String "context_compaction_installed"
+        ; "trigger", `String "soft_threshold_async"
+        ; "timing", `String "mid_turn"
+        ])
+;;
+
+let test_counts_the_compactions_of_the_prompts_runs () =
+  with_data_home (fun data_home ->
+    let path, mark = journal_before_run_2 data_home in
+    (* Run 1's compaction lands after the mark but is not the prompt's; run 2
+       compacts between its two requests. *)
+    append_file
+      path
+      (text_of [ compaction_installed_after 56 ]
+       ^ text ~first:run_2_started ~last:run_2_first_request
+       ^ text_of [ compaction_installed_after run_2_first_request ]
+       ^ text ~first:(run_2_first_request + 1) ~last:run_2_terminal);
+    check
+      turn_t
+      "run 2's requests and its one compaction"
+      { prompt_2 with compactions = 1 }
+      (read_ok mark))
 ;;
 
 let test_reports_a_prompt_that_added_no_run () =
@@ -1186,6 +1223,10 @@ let () =
             "ignores the records of a run the prompt did not start"
             `Quick
             test_ignores_the_records_of_a_run_the_prompt_did_not_start
+        ; test_case
+            "counts the compactions of the prompt's runs only"
+            `Quick
+            test_counts_the_compactions_of_the_prompts_runs
         ; test_case
             "reports a prompt that added no run"
             `Quick

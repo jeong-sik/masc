@@ -17,7 +17,8 @@ import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { authSession, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { markViewSynced } from '../../core/observer'
 import { formatObserved, observedValue, resourceCache } from '../../core/resource-cache'
 import { timeWindow, type TimeWindow } from '../../core/time-window'
@@ -74,7 +75,11 @@ function loadWorld(reason: 'mount' | 'manual') {
           return decoded.value
         },
       })
-      if (world.ok || (world.error.kind !== 'not_found' && world.error.status !== 404)) return world
+      if (
+        world.ok
+        || (world.error.kind !== 'not_found' && world.error.status !== 404)
+        || authSession.peek().kind !== 'single_user_local'
+      ) return world
       return apiGet('/api/v1/dashboard/workspace-memory-inventory', {
         signal,
         decode: (raw) => {
@@ -125,6 +130,8 @@ function summarizeDiffEntry(entry: unknown, idx: number): string {
 }
 
 export function MemoryTab(_props: WorkspaceViewProps) {
+  const session = authSession.value
+  const canAdminRecovery = session.kind === 'single_user_local' && !isAdminLockedForSession('admin', session)
   const activeWin: TimeWindow = timeWindow.value
   const epoch = sessionEpoch.value
   const worldObs = resourceCache.observe<WorldMemoryViewModel>(WORLD_KEY).value
@@ -161,6 +168,10 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         && diffObs.kind === 'value' && !diffObs.stale) markViewSynced()
   }, [worldObs, diffObs])
 
+  useEffect(() => {
+    if (!canAdminRecovery) setActKeeper(null)
+  }, [canAdminRecovery])
+
   const refresh = () => Promise.all([loadWorld('manual'), loadMemoryDiff(timeWindow.peek(), 'manual')])
 
   const executeRecoveryAct = async (
@@ -168,6 +179,8 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     kind: RecoveryActKind,
     override?: { observed?: string; turnLog?: string; line?: number; store?: string; at?: number; offset?: number },
   ) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     if (!isEpochCurrent(epoch)) return
     const payloadRes = buildMemoryRecoveryPayload({
       action: kind,
@@ -301,46 +314,48 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     {
       id: 'recovery',
       header: 'Recovery Acts',
-      cell: (r) => html`
-        <div class="kn-actions">
-          <button
-            type="button"
-            class="btn-ghost kn-btn-compact"
-            disabled=${actBusy !== null}
-            onClick=${() => void executeRecoveryAct(r.keeper, 'resume')}
-          >
-            resume
-          </button>
-          ${r.snapshotSha && html`
-            <button
-              type="button"
-              class="kn-btn-warn kn-btn-compact"
-              disabled=${actBusy !== null}
-              onClick=${() => void executeRecoveryAct(r.keeper, 'adopt', { observed: r.snapshotSha! })}
-            >
-              adopt
-            </button>
-          `}
-          <button
-            type="button"
-            class="btn-ghost kn-btn-compact"
-            onClick=${() => {
-              setActKeeper(r.keeper)
-              setActKind(r.snapshotSha ? 'adopt' : 'restart_reading')
-              setActObserved(r.snapshotSha ?? '')
-              setActTurnLog('')
-              setActLine('0')
-              setActStore('')
-              setActAt('0')
-              setActOffset('0')
-            }}
-          >
-            고급 복구…
-          </button>
-        </div>
-      `,
+      cell: (r) => canAdminRecovery
+        ? html`
+            <div class="kn-actions">
+              <button
+                type="button"
+                class="btn-ghost kn-btn-compact"
+                disabled=${actBusy !== null}
+                onClick=${() => void executeRecoveryAct(r.keeper, 'resume')}
+              >
+                resume
+              </button>
+              ${r.snapshotSha && html`
+                <button
+                  type="button"
+                  class="kn-btn-warn kn-btn-compact"
+                  disabled=${actBusy !== null}
+                  onClick=${() => void executeRecoveryAct(r.keeper, 'adopt', { observed: r.snapshotSha! })}
+                >
+                  adopt
+                </button>
+              `}
+              <button
+                type="button"
+                class="btn-ghost kn-btn-compact"
+                onClick=${() => {
+                  setActKeeper(r.keeper)
+                  setActKind(r.snapshotSha ? 'adopt' : 'restart_reading')
+                  setActObserved(r.snapshotSha ?? '')
+                  setActTurnLog('')
+                  setActLine('0')
+                  setActStore('')
+                  setActAt('0')
+                  setActOffset('0')
+                }}
+              >
+                고급 복구…
+              </button>
+            </div>
+          `
+        : html`<span class="dtable-absent" data-testid="memory-recovery-admin-locked">싱글유저 관리자 전용</span>`,
     },
-  ], [actBusy, epoch])
+  ], [actBusy, epoch, canAdminRecovery])
 
   const activeDiffList = diffData
     ? diffSubTab === 'added'
@@ -611,7 +626,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
               emptyLabel="이 프로세스에서 실행 중인 Librarian Writer가 없습니다."
             />
 
-            ${actKeeper && html`
+            ${canAdminRecovery && actKeeper && html`
               <form
                 class="kn-section kn-recovery-box"
                 onSubmit=${(e: Event) => {

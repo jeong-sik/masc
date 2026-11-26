@@ -150,6 +150,15 @@ function extractRuntimeInstanceId(health: Record<string, unknown>): string | nul
 export async function readWorkspacePrecondition(
   signal?: AbortSignal,
 ): Promise<Result<WorkspacePreconditionSnapshot, ApiError>> {
+  if (authSession.peek().kind !== 'single_user_local') {
+    return err({
+      kind: 'forbidden',
+      status: null,
+      code: 'single_user_only',
+      message: '작업 공간 경로 조회(/health?full=1)는 싱글유저 로컬 세션 전용입니다.',
+      retryable: false,
+    })
+  }
   const obs = await resourceCache.fetch<WorkspacePreconditionSnapshot>(
     'work:workspace-precondition',
     async (s) => {
@@ -201,6 +210,15 @@ export async function callMcpToolViaCore(
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<Result<{ rawText: string; parsed: unknown }, ApiError>> {
+  if (authSession.peek().kind !== 'single_user_local') {
+    return err({
+      kind: 'forbidden',
+      status: null,
+      code: 'single_user_only',
+      message: '워크스페이스 MCP 도구 호출은 싱글유저 로컬 세션 전용입니다.',
+      retryable: false,
+    })
+  }
   const id = `work-${Date.now()}-${mcpSeq++}`
   const body = {
     jsonrpc: '2.0',

@@ -17,8 +17,11 @@ import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import {
   activeWorkspaceId,
   authSession,
+  canAccessAdmin,
+  canAccessMemberWorkspace,
   currentSessionEpoch,
   isEpochCurrent,
+  isSingleUserMember,
   sessionEpoch,
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
@@ -582,8 +585,8 @@ export async function refreshPendingHitl(
 ): Promise<void> {
   hitlAbortCtrl?.abort()
   const seq = ++hitlRefreshSeq
-  const sessionKind = authSession.peek().kind
-  if (sessionKind !== 'single_user_local' && sessionKind !== 'multi_account_signed_in') {
+  const session = authSession.peek()
+  if (!canAccessMemberWorkspace(session)) {
     hitlAbortCtrl = null
     hitlLoading.value = false
     pendingApprovals.value = []
@@ -594,6 +597,7 @@ export async function refreshPendingHitl(
     hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     return
   }
+  const sessionKind = session.kind
   const ctrl = new AbortController()
   hitlAbortCtrl = ctrl
   const startEpoch = currentSessionEpoch()
@@ -870,6 +874,10 @@ export async function submitFastToolApproval(
   decision: 'approve' | 'deny',
   fetchImpl?: typeof fetch,
 ): Promise<{ readonly ok: boolean; readonly message: string }> {
+  const cur = authSession.peek()
+  if (cur.kind !== 'single_user_local' || !canAccessAdmin(cur)) {
+    return { ok: false, message: '도구 승인 결정은 싱글유저 관리자 세션에서만 실행할 수 있습니다.' }
+  }
   const startEpoch = currentSessionEpoch()
   const res = await apiMutate<Record<string, unknown>>(
     'POST',
@@ -1079,27 +1087,26 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
     pendingGoalConfirmations.value = []
     pendingVerifications.value = []
     hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
-    const kind = authSession.peek().kind
-    if (kind === 'single_user_local' || kind === 'multi_account_signed_in') {
+    if (canAccessMemberWorkspace(authSession.peek())) {
       void refreshPendingHitl(fetchImpl)
     }
   })
 
   const unsubAuth = authSession.subscribe((session) => {
-    if (session.kind !== 'single_user_local') {
+    if (!isSingleUserMember(session)) {
       pendingApprovals.value = []
       pendingAsks.value = []
       pendingGateApprovals.value = []
       pendingVerifications.value = []
     }
-    if (session.kind !== 'single_user_local' && session.kind !== 'multi_account_signed_in') {
+    if (!canAccessMemberWorkspace(session)) {
       pendingGoalConfirmations.value = []
+      hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     }
   })
 
   const unsubReconnect = subscribeObserverReconnect(() => {
-    const kind = authSession.peek().kind
-    if (kind === 'single_user_local' || kind === 'multi_account_signed_in') {
+    if (canAccessMemberWorkspace(authSession.peek())) {
       void refreshPendingHitl(fetchImpl)
     }
   })

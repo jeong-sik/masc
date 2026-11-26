@@ -14,7 +14,8 @@ import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/dashboard-goals'
-import { activeWorkspaceId, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
 import { formatObserved, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
@@ -38,7 +39,6 @@ import {
   goalActivitySourceLabel,
   goalPhaseLabel,
   goalPhaseTone,
-  isMultiAccountSession,
   isRecord,
   readWorkspacePrecondition,
   toExpectedWorkspaceBody,
@@ -256,7 +256,10 @@ function actionLabel(action: GoalAction): string {
 
 export function GoalsTab(props: WorkspaceViewProps) {
   const epoch = currentSessionEpoch()
-  const multiAccount = isMultiAccountSession()
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const multiAccount = !isSingleUser
+  const canAdminGoal = isSingleUser && !isAdminLockedForSession('admin', session)
   const goalObservation = resourceCache.observe<GoalListRead>(goalListKey).value
   const verificationObservation = resourceCache.observe<VerificationListRead>(verificationListKey).value
   const goalRead = useLastRead(goalObservation)
@@ -428,7 +431,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
       : '검증 증거'
 
   const loadConfirmation = useCallback(async (goalId: string, source: Observed<GoalListRead>) => {
-    if (multiAccount || !isEpochCurrent(epoch) || source.kind !== 'value' || source.stale) return
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur) || !isEpochCurrent(epoch) || source.kind !== 'value' || source.stale) return
     confirmAbortRef.current?.abort()
     const controller = new AbortController()
     confirmAbortRef.current = controller
@@ -482,7 +486,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     }
     setConfirmationRead({ ...owner, kind: 'ready', evidence: decoded.value })
     setLiveConfirmRev(decoded.value.criterionRevision)
-  }, [epoch, multiAccount])
+  }, [epoch, canAdminGoal])
 
   useEffect(() => {
     setTransitionNote('')
@@ -490,15 +494,18 @@ export function GoalsTab(props: WorkspaceViewProps) {
   }, [selectedGoal?.id])
 
   useEffect(() => {
-    if (selectedGoal && selectedGoal.phase === 'Awaiting_confirmation') {
+    if (canAdminGoal && selectedGoal && selectedGoal.phase === 'Awaiting_confirmation') {
       void loadConfirmation(selectedGoal.id, goalObservation)
+    } else if (!canAdminGoal) {
+      confirmAbortRef.current?.abort()
+      setConfirmationRead(null)
     }
     return () => confirmAbortRef.current?.abort()
-  }, [selectedGoal?.id, selectedGoal?.phase, goalObservation, loadConfirmation])
+  }, [selectedGoal?.id, selectedGoal?.phase, goalObservation, loadConfirmation, canAdminGoal])
 
   const handleCreateGoal = async (e: Event) => {
     e.preventDefault()
-    if (multiAccount || !isEpochCurrent(epoch) || creating) return
+    if (authSession.peek().kind !== 'single_user_local' || !isEpochCurrent(epoch) || creating) return
     setCreateError(null)
     const validated = validateNewGoalInput({
       title,
@@ -551,7 +558,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
   }
 
   const handleTransition = async (goal: GoalItem, action: GoalAction) => {
-    if (multiAccount || !isEpochCurrent(epoch) || !goalsCurrent || actionBusy !== null) return
+    if (authSession.peek().kind !== 'single_user_local' || !isEpochCurrent(epoch) || !goalsCurrent || actionBusy !== null) return
     setActionBusy(action)
     setActionFeedback(null)
     const wsRes = await readWorkspacePrecondition()
@@ -587,6 +594,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
   }
 
   const handleConfirmCompletion = async () => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const confirmation = currentConfirmation
     if (!confirmation || !confirmationCurrent || !isEpochCurrent(epoch) || actionBusy !== null
         || resourceCache.peek(goalListKey) !== goalObservation
@@ -629,6 +638,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
     req: VerificationRequestItem,
     verdict: 'approve' | 'reject',
   ) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     if (!isEpochCurrent(epoch) || !goalsCurrent || !verificationsCurrent || actionBusy !== null
         || resourceCache.peek(goalListKey) !== goalObservation
         || resourceCache.peek(verificationListKey) !== verificationObservation
@@ -1080,13 +1091,17 @@ export function GoalsTab(props: WorkspaceViewProps) {
                     증거 복사
                   </button>
                 `}
-                ${!multiAccount && html`
+                ${canAdminGoal && html`
                   <button type="button" class="btn-ghost" disabled=${!goalsCurrent} onClick=${() => void loadConfirmation(selectedGoal.id, goalObservation)}>
                     증거 다시 읽기
                   </button>
                 `}
               </div>
-              ${multiAccount && html`<div class="wk-notice wk-notice--info">이 세션에서는 완료 확인 증거를 조회할 수 없습니다.</div>`}
+              ${!canAdminGoal && html`
+                <div class="wk-notice wk-notice--info" data-testid="goal-confirm-admin-locked">
+                  ${isSingleUser ? '목표 완료 확인 증거 조회 및 확정은 관리자 전용입니다.' : '이 세션에서는 완료 확인 증거를 조회할 수 없습니다.'}
+                </div>
+              `}
               ${!currentConfirmation && selectedConfirmationRead?.kind === 'loading' && html`
                 <span class="dtable-absent" role="status"><${InlineSpinner} /> Verifier 증명 증거 불러오는 중…</span>
               `}
@@ -1247,35 +1262,39 @@ export function GoalsTab(props: WorkspaceViewProps) {
                           `)}</ul>
                         </div>
                       `}
-                      <input
-                        type="text"
-                        class="wk-input"
-                        placeholder="반려 사유 (reject 시 필수)"
-                        value=${verdictReasonByReq[req.requestId] ?? ''}
-                        onInput=${(e: Event) => setVerdictReasonByReq((prev) => ({
-                          ...prev,
-                          [req.requestId]: (e.target as HTMLInputElement).value,
-                        }))}
-                        aria-label=${`검증 ${req.requestId} 반려 사유`}
-                      />
-                      <div class="wk-actions">
-                        <button
-                          type="button"
-                          class="wk-btn-ok"
-                          disabled=${actionBusy !== null || !goalsCurrent || !verificationsCurrent}
-                          onClick=${() => void handleVerificationVerdict(req, 'approve')}
-                        >
-                          검증 승인
-                        </button>
-                        <button
-                          type="button"
-                          class="wk-btn-danger"
-                          disabled=${actionBusy !== null || !goalsCurrent || !verificationsCurrent}
-                          onClick=${() => void handleVerificationVerdict(req, 'reject')}
-                        >
-                          검증 반려
-                        </button>
-                      </div>
+                      ${canAdminGoal
+                        ? html`
+                            <input
+                              type="text"
+                              class="wk-input"
+                              placeholder="반려 사유 (reject 시 필수)"
+                              value=${verdictReasonByReq[req.requestId] ?? ''}
+                              onInput=${(e: Event) => setVerdictReasonByReq((prev) => ({
+                                ...prev,
+                                [req.requestId]: (e.target as HTMLInputElement).value,
+                              }))}
+                              aria-label=${`검증 ${req.requestId} 반려 사유`}
+                            />
+                            <div class="wk-actions">
+                              <button
+                                type="button"
+                                class="wk-btn-ok"
+                                disabled=${actionBusy !== null || !goalsCurrent || !verificationsCurrent}
+                                onClick=${() => void handleVerificationVerdict(req, 'approve')}
+                              >
+                                검증 승인
+                              </button>
+                              <button
+                                type="button"
+                                class="wk-btn-danger"
+                                disabled=${actionBusy !== null || !goalsCurrent || !verificationsCurrent}
+                                onClick=${() => void handleVerificationVerdict(req, 'reject')}
+                              >
+                                검증 반려
+                              </button>
+                            </div>
+                          `
+                        : html`<div class="wk-muted-sm" data-testid="goal-verdict-admin-locked">검증 판정(승인/반려)은 관리자 전용입니다.</div>`}
                     </div>
                   `)}
                 `}

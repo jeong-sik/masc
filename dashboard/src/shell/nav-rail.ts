@@ -12,7 +12,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { authSession, isAuthenticated } from '../core/auth'
+import { authSession, canAccessMemberWorkspace } from '../core/auth'
 import {
   FOOTER_NAV,
   TRUNK_NAV,
@@ -100,7 +100,7 @@ export function NavRail(): VNode {
   const route = currentRoute.value
   const session = authSession.value
   const pending = inboxPendingCount.value
-  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const pendingUnchecked = canAccessMemberWorkspace(session) && inboxUncheckedSources.value.length > 0
   const workBadge = formatInboxBadge(pending, pendingUnchecked)
   const workBadgeLabel = pendingUnchecked
     ? `Inbox ${formatInboxPendingCount(pending, true)}`

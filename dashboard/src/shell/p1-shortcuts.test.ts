@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { act, cleanup, render } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuickPeekDrawer } from '../components/primitives/quick-peek-drawer'
-import { activeWorkspaceId } from '../core/auth'
+import { activeWorkspaceId, authSession, resetAuthStateForTests } from '../core/auth'
 import {
   closeCommandPalette,
   commandPaletteOpen,
@@ -26,6 +26,16 @@ vi.mock('./shell-state', async (importOriginal) => {
 
 describe('P1 Dashboard shortcut & modal layering regressions', () => {
   beforeEach(() => {
+    resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: activeWorkspaceId.peek(),
+    }
     submitMock.mockClear()
     pendingApprovals.value = []
     closeCommandPalette()
@@ -34,6 +44,7 @@ describe('P1 Dashboard shortcut & modal layering regressions', () => {
 
   afterEach(() => {
     cleanup()
+    resetAuthStateForTests()
     pendingApprovals.value = []
     closeCommandPalette()
     mobileMoreOpen.value = false
@@ -166,5 +177,99 @@ describe('P1 Dashboard shortcut & modal layering regressions', () => {
       await Promise.resolve()
     })
     expect(document.activeElement).toBe(last)
+  })
+
+  it('blocks FastApprovalStrip [Y]/[N] hotkeys and buttons for non-admin workers and multi-account sessions', async () => {
+    pendingApprovals.value = [
+      {
+        approvalId: 'apr-rbac-1',
+        keeper: 'sangsu',
+        toolCallId: 'tc-1',
+        tool: 'bash',
+        args: '{}',
+        question: 'Run command?',
+        because: 'policy',
+        askedAt: 1_700_000_000,
+        workspaceId: activeWorkspaceId.peek(),
+        revision: '1',
+      },
+    ]
+
+    // 1. Single-user worker cannot approve via strip or [Y] hotkey
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    const { container, unmount } = render(html`<${FastApprovalStrip} onNavigate=${vi.fn()} />`)
+    expect(container.querySelector('[data-testid="fast-approval-admin-locked"]')).not.toBeNull()
+    expect(container.querySelectorAll('button')).toHaveLength(1) // Inbox [J] only, no Approve/Deny
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(submitMock).not.toHaveBeenCalled()
+    unmount()
+
+    // 2. Multi-account admin also cannot hit unbridged /api/v1/keepers/tool-approval
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'admin-1',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-1',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    const maView = render(html`<${FastApprovalStrip} onNavigate=${vi.fn()} />`)
+    expect(maView.container.querySelector('[data-testid="fast-approval-admin-locked"]')).not.toBeNull()
+    expect(maView.container.querySelectorAll('button')).toHaveLength(1)
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(submitMock).not.toHaveBeenCalled()
+    maView.unmount()
+
+    // 3. Single-user loopback with auth_enabled=false (role='admin', canTokenAdmin=false) matches Tool_actor CanAdmin
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    const localDisabledView = render(html`<${FastApprovalStrip} onNavigate=${vi.fn()} />`)
+    expect(localDisabledView.container.querySelector('[data-testid="fast-approval-admin-locked"]')).toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(submitMock).toHaveBeenCalledTimes(1)
+    expect(submitMock.mock.calls[0]![1]).toBe('approve')
+    localDisabledView.unmount()
+  })
+
+  it('hides authenticated Command Palette diagnostic actions when signed out', () => {
+    authSession.value = {
+      kind: 'multi_account_signed_out',
+      mode: 'multi_account',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    openCommandPalette()
+    const { container } = render(html`<${CommandPalette} />`)
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('Operator Digest')
+    expect(text).not.toContain('Runtime Defaults')
+    expect(text).not.toContain('Reconnect Observer')
   })
 })

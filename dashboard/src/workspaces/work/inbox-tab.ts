@@ -13,7 +13,16 @@ import { html } from 'htm/preact'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { activeWorkspaceId, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import {
+  activeWorkspaceId,
+  authSession,
+  canAccessAdmin,
+  canUseSingleUserTokenAdmin,
+  isEpochCurrent,
+  isSingleUserMember,
+  sessionEpoch,
+  type AuthSession,
+} from '../../core/auth'
 import {
   extractObserverTopics,
   markViewSynced,
@@ -52,7 +61,6 @@ import {
   decodeGoalConfirmation,
   decodeGoalItem,
   formatRelativeTime,
-  isMultiAccountSession,
   isRecord,
   readWorkspacePrecondition,
   type GatePendingItem,
@@ -362,10 +370,27 @@ function renderSourceSyncPill(sources: readonly { label: string; observation: Ob
   `
 }
 
+function canDecideInboxSource(source: InboxSource, session: AuthSession): boolean {
+  // Tool_actor CanAdmin (/keepers/tool-approval, /keepers/ask-answer) succeeds on loopback auth_enabled=false.
+  if (source === 'tool_approval' || source === 'keeper_ask') {
+    return isSingleUserMember(session) && canAccessAdmin(session)
+  }
+  // Token_permission CanAdmin (/dashboard/gate/resolve, /goals/confirmation, /goals/confirm) requires token admin.
+  return canUseSingleUserTokenAdmin(session)
+}
+
 export function InboxTab(props: WorkspaceViewProps) {
   const epoch = sessionEpoch.value
-  const multiAccount = isMultiAccountSession()
-  const availableSources = multiAccount ? multiAccountSources : singleUserSources
+  const session = authSession.value
+  const isSingleUser = isSingleUserMember(session)
+  const multiAccount = !isSingleUser
+  const canDecideToolActor = isSingleUser && canAccessAdmin(session)
+  const canDecideTokenAdmin = canUseSingleUserTokenAdmin(session)
+  const availableSources = isSingleUser
+    ? singleUserSources
+    : session.kind === 'multi_account_signed_in'
+      ? multiAccountSources
+      : ([] as readonly InboxSource[])
   const approvalsObs = resourceCache.observe<ReturnType<typeof decodeToolApprovals>>(inboxReads.tool_approval.key).value
   const asksObs = resourceCache.observe<ReturnType<typeof decodeKeeperAsks>>(inboxReads.keeper_ask.key).value
   const gateObs = resourceCache.observe<ReturnType<typeof decodeGatePayload>>(inboxReads.channel_gate.key).value
@@ -552,7 +577,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     && selectedGoalRead.planning === goalsObs && isCurrent(goalsObs)
 
   const loadGoalConf = useCallback(async (goalId: string, planning: Observed<readonly GoalItem[]>, explicit = false) => {
-    if (multiAccount || !isEpochCurrent(epoch) || !isCurrent(planning)) return
+    if (!canUseSingleUserTokenAdmin(authSession.peek()) || !isEpochCurrent(epoch) || !isCurrent(planning)) return
     goalConfAbortRef.current?.abort()
     const controller = new AbortController()
     goalConfAbortRef.current = controller
@@ -614,7 +639,7 @@ export function InboxTab(props: WorkspaceViewProps) {
         return next
       })
     }
-  }, [epoch, multiAccount])
+  }, [epoch, canDecideTokenAdmin])
 
   useEffect(() => {
     setGateRejectReason('')
@@ -622,12 +647,14 @@ export function InboxTab(props: WorkspaceViewProps) {
   }, [selectedKey])
 
   useEffect(() => {
-    if (!selectedGoal?.id || filter === 'audit' || multiAccount || !isCurrent(goalsObs)) return undefined
+    if (!selectedGoal?.id || filter === 'audit' || !canDecideTokenAdmin || !isCurrent(goalsObs)) return undefined
     void loadGoalConf(selectedGoal.id, goalsObs)
     return () => goalConfAbortRef.current?.abort()
-  }, [selectedGoal?.id, goalsObs, filter === 'audit', loadGoalConf, multiAccount])
+  }, [selectedGoal?.id, goalsObs, filter === 'audit', loadGoalConf, canDecideTokenAdmin])
 
   const canDecide = (source: InboxSource) => {
+    const cur = authSession.peek()
+    if (!canDecideInboxSource(source, cur)) return false
     if (busy || !isEpochCurrent(epoch)) return false
     const observation = resourceCache.peek(inboxReads[source].key)
     if (!observation || !isCurrent(observation)) return false
@@ -844,7 +871,10 @@ export function InboxTab(props: WorkspaceViewProps) {
   ], [])
 
   const wsId = activeWorkspaceId.value
-  const actionDisabled = busy || (selectedEntry !== null && !current[selectedEntry.kind])
+  const selectedCanDecide = selectedEntry === null
+    ? (canDecideToolActor || canDecideTokenAdmin)
+    : canDecideInboxSource(selectedEntry.kind, session)
+  const actionDisabled = !selectedCanDecide || busy || (selectedEntry !== null && !current[selectedEntry.kind])
   const refreshVisibleSources = () => {
     if (filter === 'all') return loadInbox('manual')
     return loadInbox('manual', [filter === 'audit' ? 'channel_gate' : filter])
@@ -886,7 +916,11 @@ export function InboxTab(props: WorkspaceViewProps) {
 
   const multiAccountNotice = multiAccount
     ? html`<div class="wk-notice wk-notice--info" role="note">멀티 계정 모드의 Inbox에는 Goal 완료 확인이 표시됩니다.</div>`
-    : null
+    : !canDecideToolActor && !canDecideTokenAdmin
+      ? html`<div class="wk-notice wk-notice--info" data-testid="inbox-admin-locked" role="status">HITL 승인·거절·답변·확정 결정은 관리자 전용입니다.</div>`
+      : !canDecideTokenAdmin
+        ? html`<div class="wk-notice wk-notice--info" data-testid="inbox-token-admin-partial" role="status">Channel Gate 및 Goal 최종 확정은 토큰 인증 관리자 전용입니다. Tool Approval·Keeper Ask 결정은 로컬 관리자 세션에서 실행할 수 있습니다.</div>`
+        : null
 
   if (filter === 'audit') {
     const auditSyncPill = renderSourceSyncPill([

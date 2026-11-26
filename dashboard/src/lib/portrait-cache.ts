@@ -17,6 +17,7 @@ import {
   currentSessionEpoch,
   getSingleUserToken,
   isEpochCurrent,
+  isSingleUserMember,
   resolveWorkspaceUrl,
   sessionEpoch,
   type AuthSession,
@@ -29,8 +30,9 @@ type PortraitCacheEntry =
 const portraitEntries = new Map<string, PortraitCacheEntry>()
 const inFlightPortraits = new Map<string, Promise<string | null>>()
 
-function canFetchPortraitForSession(session: AuthSession): boolean {
-  return session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+export function canFetchPortraitForSession(session: AuthSession): boolean {
+  // `/api/v1/keepers/:k/portrait.png` is single-user `CanReadState` (404 in multi_account, 403 for Player).
+  return isSingleUserMember(session)
 }
 
 function sessionCacheTag(session: AuthSession): string {

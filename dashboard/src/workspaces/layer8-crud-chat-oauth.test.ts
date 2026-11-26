@@ -138,6 +138,15 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
   beforeEach(() => {
     originalFetch = globalThis.fetch
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     releaseAllViewStreams()
     resourceCache.clearAll()

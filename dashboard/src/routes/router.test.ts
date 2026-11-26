@@ -76,7 +76,7 @@ describe('Proposal A+ declarative router & RBAC manifest', () => {
     expect(resolveRoute('/infra/logs')).toMatchObject({
       workspace: 'infra',
       subroute: 'logs',
-      access: 'admin',
+      access: 'su_read_ma_admin',
       defaultProvenance: 'LIVE SSE',
     })
     expect(resolveRoute('#overview').path).toBe('/pulse')
@@ -126,6 +126,47 @@ describe('Proposal A+ declarative router & RBAC manifest', () => {
     expect(isAdminLockedForSession('admin', adminSession)).toBe(false)
     expect(evaluateRouteAccess('admin', adminSession)).toEqual({ allowed: true })
     expect(evaluateRouteAccess('admin', singleLocal)).toEqual({ allowed: true })
+
+    // Fail-closed across all unauthenticated states and single-user non-admin roles
+    const probing: AuthSession = { kind: 'probing' }
+    const unavailable: AuthSession = { kind: 'unavailable', reason: 'offline' }
+    const singleAuthReq: AuthSession = { kind: 'single_user_auth_required', mode: 'single_user', authMethods: AUTH_METHODS, reason: 'missing_token' }
+    const accountChanged: AuthSession = {
+      kind: 'account_changed',
+      mode: 'multi_account',
+      previousAccountId: 'u-1',
+      nextAccountId: 'u-2',
+      authMethods: AUTH_METHODS,
+    }
+    const singleWorker: AuthSession = { ...singleLocal, role: 'worker', canTokenAdmin: false }
+    const singlePlayer: AuthSession = { ...singleLocal, role: 'player', canTokenAdmin: false }
+    const singleAuthDisabled: AuthSession = { ...singleLocal, role: 'admin', canTokenAdmin: false }
+
+    expect(isAdminLockedForSession('admin', probing)).toBe(true)
+    expect(isAdminLockedForSession('admin', unavailable)).toBe(true)
+    expect(isAdminLockedForSession('admin', signedOut)).toBe(true)
+    expect(isAdminLockedForSession('admin', singleAuthReq)).toBe(true)
+    expect(isAdminLockedForSession('admin', accountChanged)).toBe(true)
+    expect(isAdminLockedForSession('admin', singleWorker)).toBe(true)
+    expect(isAdminLockedForSession('admin', singlePlayer)).toBe(true)
+    expect(isAdminLockedForSession('admin', singleAuthDisabled)).toBe(true)
+    expect(evaluateRouteAccess('admin', singleWorker)).toEqual({ allowed: false, reason: 'admin_only' })
+    expect(evaluateRouteAccess('admin', singlePlayer)).toEqual({ allowed: false, reason: 'admin_only' })
+    expect(evaluateRouteAccess('admin', singleAuthDisabled)).toEqual({ allowed: false, reason: 'admin_only' })
+    // su_read_ma_admin: SU Admin/Worker/auth-disabled + MA Admin allowed; MA Worker & SU Player locked
+    expect(evaluateRouteAccess('su_read_ma_admin', singleWorker)).toEqual({ allowed: true })
+    expect(evaluateRouteAccess('su_read_ma_admin', singleAuthDisabled)).toEqual({ allowed: true })
+    expect(evaluateRouteAccess('su_read_ma_admin', adminSession)).toEqual({ allowed: true })
+    expect(evaluateRouteAccess('su_read_ma_admin', workerSession)).toEqual({ allowed: false, reason: 'admin_only' })
+    expect(evaluateRouteAccess('su_read_ma_admin', singlePlayer)).toEqual({ allowed: false, reason: 'admin_only' })
+    expect(evaluateRouteAccess('member', singlePlayer)).toEqual({ allowed: false, reason: 'role_restricted' })
+    expect(evaluateRouteAccess('public', singlePlayer)).toEqual({ allowed: true })
+    expect(evaluateRouteAccess('member', singleWorker)).toEqual({ allowed: true })
+    expect(isAdminLockedForSession('member', singlePlayer)).toBe(true)
+    expect(isAdminLockedForSession('member', singleWorker)).toBe(false)
+    expect(isAdminLockedForSession('su_read_ma_admin', workerSession)).toBe(true)
+    expect(isAdminLockedForSession('su_read_ma_admin', singleWorker)).toBe(false)
+    expect(isAdminLockedForSession('member', probing)).toBe(false)
   })
 
   it('syncs navigate() into currentRoute and window.location.hash', () => {

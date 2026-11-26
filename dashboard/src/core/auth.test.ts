@@ -18,12 +18,18 @@ import {
   authSession,
   bootstrapAuthSession,
   bumpSessionEpoch,
+  canAccessAdmin,
+  canAccessMemberWorkspace,
+  canAccessTokenAdmin,
+  canUseSingleUserTokenAdmin,
+  canUseSingleUserTokenRead,
   currentSessionEpoch,
   getActiveCsrfToken,
   getSingleUserToken,
   installAuthLifecycleGuards,
   isAuthenticated,
   isEpochCurrent,
+  isSingleUserMember,
   normalizeBearerToken,
   refreshMultiAccountCsrf,
   registerWorkspaceTargets,
@@ -712,5 +718,363 @@ describe('core/auth', () => {
       getItemSpy.mockRestore()
       removeItemSpy.mockRestore()
     }
+  })
+
+  it('parses single-user shell.auth role/canTokenAdmin and rejects loopback HTTP 200 when require_token && !token_valid', async () => {
+    // 1. Loopback HTTP 200 with enabled && require_token && !token_valid MUST fail closed
+    const missingTokenFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: false,
+            effective_role: null,
+            effective_admin: false,
+          },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const unauth = await bootstrapAuthSession({ fetchImpl: missingTokenFetch as unknown as typeof fetch })
+    expect(unauth.kind).toBe('single_user_auth_required')
+    expect(canAccessAdmin(unauth)).toBe(false)
+
+    // verifyAndApplySingleUserToken also rejects loopback HTTP 200 when token_valid is false
+    const verifyRejected = await verifyAndApplySingleUserToken('bad-token', {
+      fetchImpl: missingTokenFetch as unknown as typeof fetch,
+    })
+    expect(verifyRejected.ok).toBe(false)
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+
+    // 2. Worker token -> single_user_local with role='worker', canTokenAdmin=false
+    const workerFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: true,
+            effective_role: 'worker',
+            effective_admin: false,
+          },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const verifyWorker = await verifyAndApplySingleUserToken('worker-token', {
+      fetchImpl: workerFetch as unknown as typeof fetch,
+    })
+    expect(verifyWorker.ok).toBe(true)
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: true,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(true)
+    expect(canAccessMemberWorkspace(authSession.value)).toBe(true)
+    expect(isSingleUserMember(authSession.value)).toBe(true)
+
+    // 3. Player token -> role='player', canAccessAdmin=false, canTokenRead=false, member denied
+    const playerFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: true,
+            effective_role: 'player',
+            effective_admin: false,
+          },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const playerRes = await verifyAndApplySingleUserToken('player-token', {
+      fetchImpl: playerFetch as unknown as typeof fetch,
+    })
+    expect(playerRes.ok).toBe(true)
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(false)
+    expect(canAccessMemberWorkspace(authSession.value)).toBe(false)
+    expect(isSingleUserMember(authSession.value)).toBe(false)
+
+    // 4. Admin token -> role='admin', canTokenAdmin=true, canTokenRead=true
+    const adminFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: true,
+            effective_role: 'admin',
+            effective_admin: true,
+          },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const adminRes = await verifyAndApplySingleUserToken('admin-token', {
+      fetchImpl: adminFetch as unknown as typeof fetch,
+    })
+    expect(adminRes.ok).toBe(true)
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(true)
+    expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(true)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(true)
+
+    // 5. Auth disabled -> role='admin', canTokenAdmin=false, canTokenRead=false
+    const disabledFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: { enabled: false, require_token: false, token_valid: false, effective_role: null, effective_admin: true },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    resetAuthStateForTests()
+    const disabled = await bootstrapAuthSession({ fetchImpl: disabledFetch as unknown as typeof fetch })
+    expect(disabled).toMatchObject({
+      kind: 'single_user_local',
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(disabled)).toBe(true)
+    expect(canUseSingleUserTokenAdmin(disabled)).toBe(false)
+    expect(canUseSingleUserTokenRead(disabled)).toBe(false)
+    expect(canAccessMemberWorkspace(disabled)).toBe(true)
+  })
+
+  it('fails closed on unverified setSingleUserToken and external manual token changes while keeping dev admin metadata', () => {
+    authSession.value = {
+      kind: 'single_user_auth_required',
+      mode: 'single_user',
+      authMethods: { google: false, github: false, dev_token: false },
+      reason: 'Authorization required',
+    }
+
+    // Manual unverified token must NOT elevate to Admin before shell verification
+    setSingleUserToken('unverified-manual-tok')
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(false)
+
+    // External dev token with explicit admin metadata carries admin capabilities
+    setStoredToken('verified-dev-tok', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(true)
+
+    // Rotating to an unverified manual token demotes back to fail-closed worker until verified
+    setStoredToken('rotated-unknown-tok', { source: 'manual' })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
+  })
+
+  it('bumps sessionEpoch on in-place multi-account role demotion via visibilitychange and CSRF refresh', async () => {
+    let serverRole: 'admin' | 'worker' = 'admin'
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') {
+        return jsonResponse({ user_id: 'acct-demote', expires_at_ms: 1, csrf_token: 'csrf-d1' })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'acct-demote' }, role: serverRole })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(authSession.value).toMatchObject({ kind: 'multi_account_signed_in', role: 'admin' })
+
+    const dispose = installAuthLifecycleGuards(fetchMock as unknown as typeof fetch)
+    try {
+      serverRole = 'worker'
+      const epochBefore = currentSessionEpoch()
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.waitFor(() => {
+        expect(authSession.value).toMatchObject({ kind: 'multi_account_signed_in', role: 'worker' })
+      })
+      expect(currentSessionEpoch()).toBe(epochBefore + 1)
+
+      // Role promotion/change via refreshMultiAccountCsrf also bumps sessionEpoch
+      serverRole = 'admin'
+      const epochBeforeCsrf = currentSessionEpoch()
+      await refreshMultiAccountCsrf(fetchMock as unknown as typeof fetch)
+      expect(authSession.value).toMatchObject({ kind: 'multi_account_signed_in', role: 'admin' })
+      expect(currentSessionEpoch()).toBe(epochBeforeCsrf + 1)
+    } finally {
+      dispose()
+      wipeTransientSecrets()
+    }
+  })
+
+  it('fails closed on missing shell.auth, null/malformed shell body, HTML 200 captive portal, and probeShell:false', async () => {
+    // 1. Omitted auth ({ auth: undefined } / {}) -> lowest capability worker, never admin
+    const omittedAuthFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ auth: undefined })
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const omittedSession = await bootstrapAuthSession({ fetchImpl: omittedAuthFetch as unknown as typeof fetch })
+    expect(omittedSession).toMatchObject({
+      kind: 'single_user_local',
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(omittedSession)).toBe(false)
+    expect(canAccessTokenAdmin(omittedSession)).toBe(false)
+    expect(canUseSingleUserTokenAdmin(omittedSession)).toBe(false)
+    expect(canUseSingleUserTokenRead(omittedSession)).toBe(false)
+
+    const verifyOmitted = await verifyAndApplySingleUserToken('tok-omitted-auth', {
+      fetchImpl: omittedAuthFetch as unknown as typeof fetch,
+    })
+    expect(verifyOmitted.ok).toBe(true)
+    if (verifyOmitted.ok) {
+      expect(verifyOmitted.session).toMatchObject({
+        role: 'worker',
+        canTokenAdmin: false,
+        canTokenRead: false,
+      })
+      expect(canAccessAdmin(verifyOmitted.session)).toBe(false)
+      expect(canAccessTokenAdmin(verifyOmitted.session)).toBe(false)
+    }
+
+    // 2. Malformed non-object auth ({ auth: null }, { auth: 'admin' }) -> unavailable / rejected
+    for (const badAuthPayload of [{ auth: null }, { auth: 'admin' }, { auth: [] }]) {
+      resetAuthStateForTests()
+      const badAuthFetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+        if (url === '/api/v1/dashboard/shell') return jsonResponse(badAuthPayload)
+        throw new Error(`unexpected url: ${url}`)
+      })
+      const session = await bootstrapAuthSession({ fetchImpl: badAuthFetch as unknown as typeof fetch })
+      expect(session.kind).toBe('unavailable')
+      expect(isAuthenticated.value).toBe(false)
+      expect(canAccessAdmin(session)).toBe(false)
+
+      const verifyRes = await verifyAndApplySingleUserToken('tok-bad-auth', {
+        fetchImpl: badAuthFetch as unknown as typeof fetch,
+      })
+      expect(verifyRes.ok).toBe(false)
+      expect(getSingleUserToken()).toBeNull()
+    }
+
+    // 3. JSON null body -> unavailable / rejected
+    resetAuthStateForTests()
+    const nullBodyFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse(null)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const nullSession = await bootstrapAuthSession({ fetchImpl: nullBodyFetch as unknown as typeof fetch })
+    expect(nullSession).toEqual({
+      kind: 'unavailable',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    })
+    expect(isAuthenticated.value).toBe(false)
+    expect(canAccessAdmin(nullSession)).toBe(false)
+    const verifyNull = await verifyAndApplySingleUserToken('tok-null-body', {
+      fetchImpl: nullBodyFetch as unknown as typeof fetch,
+    })
+    expect(verifyNull.ok).toBe(false)
+    expect(getSingleUserToken()).toBeNull()
+
+    // 4. HTML 200 captive portal / proxy page -> unavailable / rejected (never elevates to admin)
+    resetAuthStateForTests()
+    const html200Fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') {
+        return new Response('<!doctype html><html><body>Captive Portal</body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const htmlSession = await bootstrapAuthSession({ fetchImpl: html200Fetch as unknown as typeof fetch })
+    expect(htmlSession).toEqual({
+      kind: 'unavailable',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    })
+    expect(isAuthenticated.value).toBe(false)
+    expect(canAccessAdmin(htmlSession)).toBe(false)
+    expect(canAccessTokenAdmin(htmlSession)).toBe(false)
+    const verifyHtml = await verifyAndApplySingleUserToken('tok-html-200', {
+      fetchImpl: html200Fetch as unknown as typeof fetch,
+    })
+    expect(verifyHtml.ok).toBe(false)
+    expect(getSingleUserToken()).toBeNull()
+
+    // 5. bootstrapAuthSession({ probeShell: false }) defaults to lowest capability worker/false/false
+    resetAuthStateForTests()
+    const noProbeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const noProbeSession = await bootstrapAuthSession({
+      fetchImpl: noProbeFetch as unknown as typeof fetch,
+      probeShell: false,
+    })
+    expect(noProbeSession).toMatchObject({
+      kind: 'single_user_local',
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(noProbeSession)).toBe(false)
+    expect(canAccessTokenAdmin(noProbeSession)).toBe(false)
+    expect(canUseSingleUserTokenRead(noProbeSession)).toBe(false)
   })
 })

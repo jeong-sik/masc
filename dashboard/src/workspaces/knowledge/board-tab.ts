@@ -27,6 +27,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, VirtualList } from '../../components/primitives'
+import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
@@ -216,7 +217,10 @@ function ReactionBar(props: {
 }
 
 export function BoardTab(props: WorkspaceViewProps) {
-  const isMultiAccount = authSession.value.kind === 'multi_account_signed_in'
+  const session = authSession.value
+  const isSingleUser = session.kind === 'single_user_local'
+  const isMultiAccount = !isSingleUser
+  const canAdminBoard = isSingleUser && !isAdminLockedForSession('admin', session)
   const [bundle, setBundle] = useState<BoardBundle>({
     posts: [],
     hearths: [],
@@ -762,6 +766,7 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const handleCreatePost = async (e: Event) => {
     e.preventDefault()
+    if (authSession.peek().kind !== 'single_user_local') return
     if (!newTitle.trim() || !newBody.trim()) {
       setFeedback({ kind: 'err', message: '제목과 본문을 모두 입력하세요.' })
       return
@@ -793,6 +798,7 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const handleReply = async (e: Event) => {
     e.preventDefault()
+    if (authSession.peek().kind !== 'single_user_local') return
     const view = replyViewRef.current
     if (!activePost || view?.postId !== activePost.id || !replyText.trim()) return
     const startEpoch = currentSessionEpoch()
@@ -822,6 +828,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleVotePost = async (postId: string, direction: 'up' | 'down') => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_vote', {
@@ -842,6 +849,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleVoteComment = async (commentId: string, direction: 'up' | 'down') => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const startEpoch = currentSessionEpoch()
     const targetPostId = selectedPostIdRef.current
     setBusy(true)
@@ -862,6 +870,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleToggleReaction = async (targetType: 'post' | 'comment', targetId: string, emoji: string) => {
+    if (authSession.peek().kind !== 'single_user_local') return
     const startEpoch = currentSessionEpoch()
     const targetPostId = selectedPostIdRef.current
     setBusy(true)
@@ -882,6 +891,8 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handlePinPost = async (post: BoardPostItem) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/board/pin', {
@@ -903,6 +914,8 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleDeletePost = async (postId: string) => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/board/delete', { post_id: postId })
@@ -1184,22 +1197,24 @@ export function BoardTab(props: WorkspaceViewProps) {
                 >
                   ▼
                 </button>
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  disabled=${busy}
-                  onClick=${() => void handlePinPost(activePost)}
-                >
-                  ${activePost.pinned ? '고정 해제' : '고정'}
-                </button>
-                <button
-                  type="button"
-                  class="kn-btn-danger"
-                  disabled=${busy}
-                  onClick=${() => void handleDeletePost(activePost.id)}
-                >
-                  삭제
-                </button>
+                ${canAdminBoard && html`
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    disabled=${busy}
+                    onClick=${() => void handlePinPost(activePost)}
+                  >
+                    ${activePost.pinned ? '고정 해제' : '고정'}
+                  </button>
+                  <button
+                    type="button"
+                    class="kn-btn-danger"
+                    disabled=${busy}
+                    onClick=${() => void handleDeletePost(activePost.id)}
+                  >
+                    삭제
+                  </button>
+                `}
               </div>
             `}
           </div>

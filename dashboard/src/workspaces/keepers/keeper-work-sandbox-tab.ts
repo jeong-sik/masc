@@ -180,19 +180,15 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
 
 function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | 'onInspect'>) {
   const { keeperName } = props
-  const [toolLimit, setToolLimit] = useState(50)
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const noteRead = useKeeperRead(useCallback(
     (signal: AbortSignal) => fetchKeeperOperatorNoteApi(keeperName, signal), [keeperName],
   ), true)
   const statsRead = useKeeperRead(useCallback(
     (signal: AbortSignal) => fetchKeeperToolStatsApi(keeperName, 24, signal), [keeperName],
   ))
-  const callsRead = useKeeperRead(useCallback(
-    (signal: AbortSignal) => fetchKeeperToolCallsApi(keeperName, toolLimit, signal), [keeperName, toolLimit],
-  ))
   const { data: note } = noteRead
   const { data: toolStats } = statsRead
-  const { data: toolCalls } = callsRead
   const [editedNote, setEditedNote] = useState<string | null>(null)
   const noteDraft = editedNote ?? note?.text ?? ''
   const [noteSaving, setNoteSaving] = useState(false)
@@ -201,7 +197,8 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
   useEffect(() => () => saving.current?.abort(), [])
 
   const handleSaveNote = async () => {
-    if (authSession.peek().kind !== 'single_user_local' || saving.current || noteDraft.trim() === '') return
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur) || saving.current || noteDraft.trim() === '') return
     const epoch = currentSessionEpoch()
     const controller = new AbortController()
     saving.current = controller
@@ -221,34 +218,10 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
     pushShellToast('운영자 노트 저장 완료', 'success')
   }
 
-  const toolCallColumns = useMemo<readonly DataTableColumn<KeeperToolCallEntry>[]>(() => [
-    { id: 'tool', header: 'Tool', accessor: (r) => r.tool, sortable: true },
-    { id: 'kind', header: 'Kind', accessor: (r) => r.record_kind },
-    {
-      id: 'outcome',
-      header: 'Outcome',
-      cell: (r) => html`
-        <span class="kp-pill" data-tone=${recordedToolOutcomeTone(r)}>
-          ${r.disposition ?? r.wire_outcome}
-        </span>
-      `,
-    },
-    {
-      id: 'duration',
-      header: 'Duration (ms)',
-      accessor: (r) => Math.round(r.duration_ms),
-      numeric: true,
-      sortable: true,
-    },
-    { id: 'turn', header: 'Turn', accessor: (r) => r.turn ?? null, numeric: true },
-  ], [])
-
   const noteBytes = useMemo(() => new TextEncoder().encode(noteDraft).length, [noteDraft])
 
   const statsWarning = toolSourceWarning(toolStats)
-  const callsWarning = toolSourceWarning(toolCalls)
   const statsLimited = statsWarning !== null || toolStats?.retained != null
-  const callsLimited = callsWarning !== null || toolCalls?.retained != null
 
   return html`
     <${Fragment}>
@@ -274,10 +247,13 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
           rows=${3}
           aria-label="운영자 노트 입력"
           placeholder="다음 턴 시작 시 Keeper에게 전달할 운영자 지시를 작성하세요… (⌘↵ 저장)"
+          readOnly=${adminLocked}
           value=${noteDraft}
-          onInput=${(e: Event) => setEditedNote((e.currentTarget as HTMLTextAreaElement).value)}
+          onInput=${(e: Event) => {
+            if (!adminLocked) setEditedNote((e.currentTarget as HTMLTextAreaElement).value)
+          }}
           onKeyDown=${(e: KeyboardEvent) => {
-            if (e.isComposing || e.keyCode === 229) return
+            if (adminLocked || e.isComposing || e.keyCode === 229) return
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !noteSaving) {
               e.preventDefault()
               void handleSaveNote()
@@ -285,9 +261,13 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
           }}
         />
         <div class="kp-lifecycle-bar">
-          <button type="button" class="btn-primary" disabled=${noteSaving || noteDraft.trim() === ''} onClick=${() => void handleSaveNote()}>
-            ${noteSaving ? html`<${InlineSpinner} size="xs" /> 저장 중…` : '운영자 노트 저장'}
-          </button>
+          ${adminLocked
+            ? html`<span class="kp-roster-sub" data-testid="keeper-note-admin-locked">운영자 노트 저장은 관리자 전용입니다.</span>`
+            : html`
+                <button type="button" class="btn-primary" disabled=${noteSaving || noteDraft.trim() === ''} onClick=${() => void handleSaveNote()}>
+                  ${noteSaving ? html`<${InlineSpinner} size="xs" /> 저장 중…` : '운영자 노트 저장'}
+                </button>
+              `}
           ${noteSaving && html`<span class="sr-only" role="status">운영자 노트 저장 중…</span>`}
           ${noteFeedback?.kind === 'failed' && html`<span class="ap-error" role="alert">저장 실패 · ${noteFeedback.text}</span>`}
         </div>
@@ -317,48 +297,97 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
             `}
       </section>
 
-      <!-- Paginated Virtualized Tool Calls -->
-      <section class="kp-card" aria-label="도구 호출 내역">
-        <div class="kp-card-head">
-          <h3>Tool Calls (${observedCount(callsRead.received, toolCalls?.count, callsLimited)})</h3>
-          <div class="kp-pill-row">
-            <button
-              type="button"
-              class="btn-ghost"
-              disabled=${!callsRead.received || toolLimit >= 200}
-              onClick=${() => setToolLimit((n) => Math.min(200, n + 50))}
-            >
-              더 불러오기 (+50)
-            </button>
-          </div>
-        </div>
-        <${KeeperReadNotice} label="도구 호출 내역" read=${callsRead} />
-        <${RetainedNotice} observation=${toolCalls?.retained} />
-        ${callsWarning && html`<p class="kp-roster-sub" role="status">${callsWarning}</p>`}
-        ${toolCalls && (toolCalls.entries.length > 0 || (callsRead.received && !callsLimited)) && html`
-        <${DataTable}
-          data=${toolCalls.entries}
-          columns=${toolCallColumns}
-          getRowId=${(r: KeeperToolCallEntry, idx: number) => r.execution_id ?? `${r.ts}-${idx}`}
-          onRowClick=${(row: KeeperToolCallEntry) => props.onInspect({
-            title: `Tool Call · ${row.tool}`,
-            subtitle: `${keeperName} · ${Math.round(row.duration_ms)}ms`,
-            kind: 'tool_call',
-            data: row,
-            render: () => html`
-              <${KeeperToolCallInspector}
-                key=${`${keeperName}:${row.execution_id ?? `${row.ts}-${row.tool}`}`}
-                keeperName=${keeperName}
-                entry=${row}
-              />
-            `,
-          })}
-          maxHeight=${320}
-          virtualizeThreshold=${30}
-          emptyLabel="도구 호출 기록 없음"
-          caption="Keeper Tool Calls"
-        />`}
-      </section>
+      ${adminLocked
+        ? html`
+            <section class="kp-card" aria-label="도구 호출 내역">
+              <div class="kp-card-head">
+                <h3>Tool Calls</h3>
+              </div>
+              <div class="kp-empty" data-testid="keeper-tool-calls-admin-locked" role="status">
+                도구 호출 상세 내역 조회는 관리자 전용입니다.
+              </div>
+            </section>
+          `
+        : html`<${KeeperLocalToolCalls} keeperName=${keeperName} onInspect=${props.onInspect} />`}
     <//>
+  `
+}
+
+function KeeperLocalToolCalls(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | 'onInspect'>) {
+  const { keeperName } = props
+  const [toolLimit, setToolLimit] = useState(50)
+  const callsRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperToolCallsApi(keeperName, toolLimit, signal), [keeperName, toolLimit],
+  ))
+  const { data: toolCalls } = callsRead
+
+  const toolCallColumns = useMemo<readonly DataTableColumn<KeeperToolCallEntry>[]>(() => [
+    { id: 'tool', header: 'Tool', accessor: (r) => r.tool, sortable: true },
+    { id: 'kind', header: 'Kind', accessor: (r) => r.record_kind },
+    {
+      id: 'outcome',
+      header: 'Outcome',
+      cell: (r) => html`
+        <span class="kp-pill" data-tone=${recordedToolOutcomeTone(r)}>
+          ${r.disposition ?? r.wire_outcome}
+        </span>
+      `,
+    },
+    {
+      id: 'duration',
+      header: 'Duration (ms)',
+      accessor: (r) => Math.round(r.duration_ms),
+      numeric: true,
+      sortable: true,
+    },
+    { id: 'turn', header: 'Turn', accessor: (r) => r.turn ?? null, numeric: true },
+  ], [])
+
+  const callsWarning = toolSourceWarning(toolCalls)
+  const callsLimited = callsWarning !== null || toolCalls?.retained != null
+
+  return html`
+    <!-- Paginated Virtualized Tool Calls -->
+    <section class="kp-card" aria-label="도구 호출 내역">
+      <div class="kp-card-head">
+        <h3>Tool Calls (${observedCount(callsRead.received, toolCalls?.count, callsLimited)})</h3>
+        <div class="kp-pill-row">
+          <button
+            type="button"
+            class="btn-ghost"
+            disabled=${!callsRead.received || toolLimit >= 200}
+            onClick=${() => setToolLimit((n) => Math.min(200, n + 50))}
+          >
+            더 불러오기 (+50)
+          </button>
+        </div>
+      </div>
+      <${KeeperReadNotice} label="도구 호출 내역" read=${callsRead} />
+      <${RetainedNotice} observation=${toolCalls?.retained} />
+      ${callsWarning && html`<p class="kp-roster-sub" role="status">${callsWarning}</p>`}
+      ${toolCalls && (toolCalls.entries.length > 0 || (callsRead.received && !callsLimited)) && html`
+      <${DataTable}
+        data=${toolCalls.entries}
+        columns=${toolCallColumns}
+        getRowId=${(r: KeeperToolCallEntry, idx: number) => r.execution_id ?? `${r.ts}-${idx}`}
+        onRowClick=${(row: KeeperToolCallEntry) => props.onInspect({
+          title: `Tool Call · ${row.tool}`,
+          subtitle: `${keeperName} · ${Math.round(row.duration_ms)}ms`,
+          kind: 'tool_call',
+          data: row,
+          render: () => html`
+            <${KeeperToolCallInspector}
+              key=${`${keeperName}:${row.execution_id ?? `${row.ts}-${row.tool}`}`}
+              keeperName=${keeperName}
+              entry=${row}
+            />
+          `,
+        })}
+        maxHeight=${320}
+        virtualizeThreshold=${30}
+        emptyLabel="도구 호출 기록 없음"
+        caption="Keeper Tool Calls"
+      />`}
+    </section>
   `
 }

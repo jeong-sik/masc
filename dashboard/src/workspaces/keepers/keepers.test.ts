@@ -9,7 +9,7 @@ import { formatObserved, observedFailed, observedValue, resourceCache } from '..
 import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { setStoredToken } from '../../lib/dashboard-bearer'
-import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
+import { canFetchPortraitForSession, resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import { navigate, resetRouterForTests } from '../../routes/router'
 import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import {
@@ -21,6 +21,7 @@ import {
   decodeKeeperRoster,
   enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
+  fetchKeeperSandboxApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
@@ -33,6 +34,8 @@ import {
   parseSourceBoundMemoryBranch,
   recordedToolOutcomeTone,
   reconstructJournalReply,
+  recoverCutReplyFromJournal,
+  runQueuedChatOperationNext,
   streamKeeperChat,
   transcribeVoiceAudio,
 } from './keepers-api'
@@ -517,7 +520,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   })
 
   it('authorizes native Discord reply in the active Keeper chat from the authenticated shell', async () => {
-    setStoredToken('fixture-admin')
+    setStoredToken('fixture-admin', { source: 'dev', actor: 'dashboard', role: 'admin' })
     const keeper = makeRosterKeeper()
     const history = [
       {
@@ -3252,5 +3255,317 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     )
     expect(coldView.container.querySelector('.kp-empty')).not.toBeNull()
     coldView.unmount()
+  })
+
+  it('enforces multi-account zero-404 mode gate, portrait gating, sandbox 403 ownership UX, and single-user worker RBAC', async () => {
+    const seenUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.includes('/api/v1/infra/sandboxes/other-keeper')) {
+        return new Response(JSON.stringify({ error: { code: 'forbidden', message: 'not owner' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/oauth/attached-tools')) {
+        return new Response(JSON.stringify({
+          keeper: 'code-reviewer-sister',
+          providers: [{ provider: 'github', provider_label: 'GitHub', attached: true, enabled: true, tools: ['gh_pr'] }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    // 1. Multi-account Admin: KeepersWorkspace renders mode notice with 0x /gate/keepers or /keepers/* 404s
+    const maAdmin = {
+      kind: 'multi_account_signed_in' as const,
+      mode: 'multi_account' as const,
+      accountId: 'acc-admin',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin' as const,
+      csrfToken: 'csrf-ma',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    authSession.value = maAdmin
+    expect(canFetchPortraitForSession(maAdmin)).toBe(false)
+
+    const wsView = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(wsView.getByTestId('keepers-mode-notice')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls).toEqual([])
+    wsView.unmount()
+
+    // Sandbox 403 surfaces clear ownership message in multi_account
+    const sandboxRes = await fetchKeeperSandboxApi('other-keeper')
+    expect(sandboxRes.ok).toBe(false)
+    if (!sandboxRes.ok) {
+      expect(sandboxRes.error.message).toContain('소유')
+    }
+
+    // 2. Single-user Worker: GET /keepers/oauth/attached-tools (Public_read) stays readable while mutations/CanAdmin fail closed
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    expect(canFetchPortraitForSession(authSession.value)).toBe(true)
+
+    const cfgView = render(html`<${KeeperConfigTab} keeperName="code-reviewer-sister" onMutated=${vi.fn()} />`)
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/keepers/oauth/attached-tools'))).toBe(true)
+    })
+    expect(cfgView.getByTestId('keeper-config-admin-locked')).toBeTruthy()
+    expect(cfgView.getByTestId('keeper-secrets-admin-locked')).toBeTruthy()
+    expect(cfgView.queryByRole('button', { name: '연결 해제' })).toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/config/schema'))).toBe(false)
+    cfgView.unmount()
+
+    // KeeperMemoryTab & KeeperHeader & KeeperWorkSandboxTab enforce CanAdmin for SU Worker
+    seenUrls.length = 0
+    const memView = render(html`<${KeeperMemoryTab} keeperName="code-reviewer-sister" />`)
+    expect(memView.getByTestId('keeper-memory-admin-locked')).toBeTruthy()
+    expect(seenUrls).toEqual([])
+    memView.unmount()
+
+    const hdrView = render(
+      html`<${KeeperHeader} keeper=${makeRosterKeeper()} activeTab="chat" onSelectTab=${vi.fn()} onMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(hdrView.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(hdrView.queryByRole('button', { name: 'Delete' })).toBeNull()
+    hdrView.unmount()
+
+    const workView = render(html`<${KeeperWorkSandboxTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} />`)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls.some((u) => u.includes('/tool-calls'))).toBe(false)
+    workView.unmount()
+
+    // CanAdmin chat helpers reject before fetch() for SU Worker
+    seenUrls.length = 0
+    const sttRes = await transcribeVoiceAudio(new Uint8Array([1, 2, 3]), 'audio/webm')
+    expect(sttRes.ok).toBe(false)
+    const runNextRes = await runQueuedChatOperationNext('code-reviewer-sister', 'op-1')
+    expect(runNextRes.ok).toBe(false)
+    expect(seenUrls).toEqual([])
+
+    // 3. KeeperDebugCompanion Context tab under SU Worker: skips CanAdmin /last-prompt, /checkpoints, /provider-input
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const workerCmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    fireEvent.click(workerCmp.getByRole('tab', { name: 'Context' }))
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/turn-records'))).toBe(true)
+    })
+    expect(workerCmp.getByTestId('companion-last-prompt-admin-locked')).toBeTruthy()
+    expect(workerCmp.getByTestId('companion-checkpoints-admin-locked')).toBeTruthy()
+    expect(seenUrls.some((u) => u.includes('/last-prompt'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/checkpoints'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/provider-input'))).toBe(false)
+    workerCmp.unmount()
+
+    // 4. SU auth_enabled=false (canTokenRead=false, canTokenAdmin=false): 0x Token_permission 401s across Debug Companion & Portrait/Items
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const noTokCmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(noTokCmp.getByTestId('companion-turn-records-token-locked')).toBeTruthy()
+    fireEvent.click(noTokCmp.getByRole('tab', { name: 'Context' }))
+    expect(noTokCmp.getByTestId('companion-last-prompt-admin-locked')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls).toEqual([])
+    noTokCmp.unmount()
+
+    const portraitTab = render(
+      html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/candle/ledger'))).toBe(true)
+    })
+    expect(seenUrls.some((u) => u.includes('/items'))).toBe(false)
+    portraitTab.unmount()
+
+    // 5. SU Player denied portrait fetches
+    expect(canFetchPortraitForSession({
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    })).toBe(false)
+  })
+
+  it('gates chat /tool-result, /chat/events recovery, and voice transcribe on token-admin while allowing Interrupt Turn for SU Worker & loopback auth_enabled=false', async () => {
+    const seenUrls: string[] = []
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.includes('/chat/history/page')) {
+        return json({
+          has_more: false,
+          next_cursor: null,
+          messages: [
+            {
+              id: 'asst-tool-1',
+              role: 'assistant',
+              content: '',
+              ts: 1_700_000_010,
+              tool_calls: [{ id: 'tc-1', execution_id: 'exec-rbac-1', name: 'bash', args: '{"cmd":"ls"}' }],
+            },
+          ],
+        })
+      }
+      if (url.includes('/chat/operations')) return json(queuedOperations())
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        // Cut stream without RUN_FINISHED -> must NOT hit /chat/events for SU Worker
+        const sse = `data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial before cut' })}\n\n`
+        return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (url.includes('/api/v1/keepers/turn/interrupt')) {
+        return json({ ok: true, interrupted: true })
+      }
+      if (url.includes('/api/v1/keepers/tool-approval-mode')) {
+        return json({ default: 'auto', overrides: [], restore_error: null })
+      }
+      return json({ ok: true })
+    }))
+
+    // 1. Direct recoverCutReplyFromJournal fails closed for SU Worker and SU auth_enabled=false
+    for (const nonTokenAdmin of [
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: true,
+        role: 'worker' as const,
+        canTokenAdmin: false,
+        canTokenRead: true,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: false,
+        role: 'admin' as const,
+        canTokenAdmin: false,
+        canTokenRead: false,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+    ]) {
+      authSession.value = nonTokenAdmin
+      const rec = await recoverCutReplyFromJournal('code-reviewer-sister', 'op-cut-1')
+      expect(rec.ok).toBe(false)
+    }
+    expect(seenUrls.some((u) => u.includes('/chat/events'))).toBe(false)
+
+    // 2. KeeperChatTab under SU Worker: expanding tool card & cut stream fire 0x /tool-result or /chat/events
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(chat.container.querySelector('[data-testid="chat-tool-result-admin-locked"]')).not.toBeNull()
+    })
+    expect(chat.queryByRole('button', { name: '실행 결과 불러오기' })).toBeNull()
+
+    // Trigger cut stream under SU Worker -> 0x /chat/events & no 저널 복구 button
+    const composer = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(composer, { target: { value: 'Trigger cut stream' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() => expect(chat.container.textContent).toContain('Partial before cut'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls.some((u) => u.includes('/tool-result'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/chat/events'))).toBe(false)
+    expect(chat.queryByRole('button', { name: '저널 복구' })).toBeNull()
+    chat.unmount()
+
+    // 3. KeeperHeader: Interrupt Turn (CanBroadcast) IS available for SU Worker & SU auth_enabled=false while Pause/Delete stay locked
+    seenUrls.length = 0
+    const activeTurnKeeper = makeRosterKeeper({
+      keepalive_running: true,
+      status: 'running',
+      phase: 'running',
+      paused: false,
+      active_turn: { lane: 'chat_operation', started_at_unix: 1_700_000_000 },
+    })
+    const workerHdr = render(
+      html`<${KeeperHeader} keeper=${activeTurnKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(workerHdr.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(workerHdr.queryByRole('button', { name: 'Delete' })).toBeNull()
+    const interruptBtn = workerHdr.getByRole('button', { name: 'Interrupt Turn' })
+    fireEvent.click(interruptBtn)
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/keepers/turn/interrupt'))).toBe(true)
+    })
+    workerHdr.unmount()
+
+    // Idle booted keeper under SU Worker exposes Interrupt Turn in overflow menu without Delete
+    const idleHdr = render(
+      html`<${KeeperHeader} keeper=${makeRosterKeeper()} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    fireEvent.click(idleHdr.getByTestId('keeper-actions-menu'))
+    expect(idleHdr.getByTestId('keeper-actions-popover').textContent).toContain('Interrupt Turn')
+    expect(idleHdr.getByTestId('keeper-actions-popover').textContent).not.toContain('Delete')
+    idleHdr.unmount()
+
+    // SU Player cannot see Interrupt Turn
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const playerHdr = render(
+      html`<${KeeperHeader} keeper=${activeTurnKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(playerHdr.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
+    playerHdr.unmount()
   })
 })

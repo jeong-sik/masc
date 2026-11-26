@@ -12,10 +12,14 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   apiGetV2,
   apiMutate,
+  authSession,
+  canAccessTokenAdmin,
+  canReadSuOrMaAdmin,
   formatObserved,
   observedUnreported,
   observedValue,
   resourceCache,
+  sessionEpoch,
 } from '../../core'
 import { DataTable, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -287,6 +291,10 @@ function decodeInfraSandboxesData(raw: unknown): InfraSandboxesData {
 }
 
 export function SandboxesTab(props: WorkspaceViewProps) {
+  const epoch = sessionEpoch.value
+  const session = authSession.value
+  const canReadSandboxes = canReadSuOrMaAdmin(session)
+  const canTriggerProbe = canAccessTokenAdmin(session)
   const obs = resourceCache.observe<InfraSandboxesData>('infra:sandboxes').value
   const [probing, setProbing] = useState(false)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
@@ -300,6 +308,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   }, [props.onNavigate])
 
   const loadSandboxes = (reason: 'mount' | 'manual' = 'mount') => {
+    if (!canReadSuOrMaAdmin(authSession.peek())) return
     void resourceCache.fetch<InfraSandboxesData>(
       'infra:sandboxes',
       (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', {
@@ -311,10 +320,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   }
 
   useEffect(() => {
-    loadSandboxes('mount')
-  }, [])
+    if (canReadSandboxes) loadSandboxes('mount')
+  }, [epoch, canReadSandboxes])
 
   const handleTriggerProbe = async () => {
+    if (!canAccessTokenAdmin(authSession.peek())) return
     setProbing(true)
     setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/infra/sandboxes/probe', {})
@@ -626,17 +636,19 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               probe: ${data.probe_state.kind}
             </span>
           `}
-          <button
-            type="button"
-            class="btn-ghost"
-            data-testid="sandbox-settings-btn"
-            onClick=${() => props.onNavigate('/settings?section=sandbox')}
-          >
-            Sandbox & SSH 설정 →
-          </button>
-          <button type="button" class="btn-primary v2-probe-btn" disabled=${probing} onClick=${handleTriggerProbe}>
-            ${probing ? '프로브 실행 중…' : '지금 프로브 실행'}
-          </button>
+          ${canTriggerProbe && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              data-testid="sandbox-settings-btn"
+              onClick=${() => props.onNavigate('/settings?section=sandbox')}
+            >
+              Sandbox & SSH 설정 →
+            </button>
+            <button type="button" class="btn-primary v2-probe-btn" disabled=${probing} onClick=${handleTriggerProbe}>
+              ${probing ? '프로브 실행 중…' : '지금 프로브 실행'}
+            </button>
+          `}
           <button type="button" class="btn-ghost" onClick=${() => loadSandboxes('manual')}>새로고침</button>
         </div>
       </header>

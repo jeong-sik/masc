@@ -69,12 +69,18 @@ function principalLabel(session: AuthSession): {
   switch (session.kind) {
     case 'probing':
       return { avatar: '…', name: 'Checking session', roleBadge: null }
-    case 'single_user_local':
+    case 'single_user_local': {
+      const roleBadge = session.role === 'worker'
+        ? 'Worker'
+        : session.role === 'player'
+          ? 'Player'
+          : (session.tokenPresent ? 'Bearer' : 'Local')
       return {
         avatar: 'OP',
         name: 'Local Operator',
-        roleBadge: session.tokenPresent ? 'Bearer' : 'Local',
+        roleBadge,
       }
+    }
     case 'single_user_auth_required':
       return { avatar: '!', name: 'Auth Required', roleBadge: 'Token' }
     case 'multi_account_signed_out':

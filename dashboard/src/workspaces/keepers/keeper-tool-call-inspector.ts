@@ -9,7 +9,8 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { prettyFormatPayload, toolResultMarkdownPreview } from './chat-blocks'
 import { fetchKeeperToolResultApi, recordedToolOutcomeTone } from './keepers-api'
 import {
@@ -49,10 +50,12 @@ function isPreviewTruncated(entry: KeeperToolCallEntry): boolean {
 
 export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   const { keeperName, entry } = props
+  const session = authSession.value
+  const canInspectResult = session.kind === 'single_user_local' && !isAdminLockedForSession('admin', session)
   const executionId = entry.execution_id?.trim() || ''
 
   const [resultState, setResultState] = useState<ToolResultState | null>(() =>
-    executionId ? { status: 'loading' } : null,
+    executionId && canInspectResult ? { status: 'loading' } : null,
   )
   const [inputExpanded, setInputExpanded] = useState(false)
   const [outputExpanded, setOutputExpanded] = useState(false)
@@ -84,7 +87,8 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   }, [])
 
   const loadInitialPage = useCallback(async (force = false) => {
-    if (!executionId) {
+    const cur = authSession.peek()
+    if (!executionId || cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) {
       setResultState(null)
       return
     }
@@ -127,6 +131,8 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   }, [abortActive, executionId, keeperName])
 
   const loadMorePages = useCallback(async (maxPages: number) => {
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) return
     const cur = resultStateRef.current
     if (!executionId || !cur || cur.status !== 'loaded' || cur.eof || cur.isBinary) return
     if (activeControllerRef.current) return

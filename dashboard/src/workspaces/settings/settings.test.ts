@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  authSession,
   resetAuthStateForTests,
   resourceCache,
 } from '../../core'
@@ -78,6 +79,15 @@ describe('workspaces/settings', () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetRouterForTests('/settings')
     resetShellStateForTests()
     resourceCache.clearAll()
@@ -383,5 +393,61 @@ describe('workspaces/settings', () => {
     expect(matchCanonicalCategoryId({ id: 'sandbox_infra', title: '샌드박스', field_count: 0, fields: [] })).toBe('sandbox')
     expect(matchCanonicalCategoryId({ id: 'economy_connectors', title: '연동', field_count: 0, fields: [] })).toBe('voice')
     expect(matchCanonicalCategoryId({ id: 'memory_knowledge', title: '메모리', field_count: 0, fields: [] })).toBe('board_memory_candle')
+  })
+
+  it('hides single-user-only Export World Config in multi_account admin and skips all schema reads for non-admin workers', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/config/schema')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-ma',
+          generated_at_unix: 1_700_000_000,
+          data: SAMPLE_SCHEMA,
+        })
+      }
+      return jsonResponse({ error: 'unexpected' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin reads bridged config/schema but never sees Export World Config (SU-only)
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'admin-ma',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-ma',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('select[aria-label="server.log_level"]')).not.toBeNull()
+    })
+    const exportBtns = [...container.querySelectorAll('button')].filter((b) =>
+      b.textContent?.includes('Export World Config'),
+    )
+    expect(exportBtns).toHaveLength(0)
+    expect(seenUrls.some((u) => u.includes('/api/v1/world/configuration/export'))).toBe(false)
+
+    // 2. Single-user Worker makes zero config/schema or export fetches
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(seenUrls).toEqual([])
   })
 })

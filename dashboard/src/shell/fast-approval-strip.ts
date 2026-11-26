@@ -12,7 +12,13 @@ import { html } from 'htm/preact'
 import { isEditableTarget } from '../lib/keyboard'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { activeWorkspaceId, isAuthenticated, sessionEpoch } from '../core/auth'
+import {
+  activeWorkspaceId,
+  authSession,
+  canAccessAdmin,
+  canAccessMemberWorkspace,
+  sessionEpoch,
+} from '../core/auth'
 import { TargetLockedAction, type TargetLockState } from '../components/primitives/target-locked-action'
 import { navigate } from '../routes/router'
 import {
@@ -34,6 +40,10 @@ import {
 } from './shell-state'
 
 export function FastApprovalStrip(): VNode | null {
+  const session = authSession.value
+  // POST /api/v1/keepers/tool-approval uses Tool_actor CanAdmin (succeeds on loopback
+  // even when auth_enabled=false), symmetric with submitFastToolApproval.
+  const canApproveTools = session.kind === 'single_user_local' && canAccessAdmin(session)
   const approvals = pendingApprovals.value
   const asks = pendingAsks.value
   const gates = pendingGateApprovals.value
@@ -68,6 +78,11 @@ export function FastApprovalStrip(): VNode | null {
     : null
 
   const submitDecision = (approval: PendingApprovalItem, decision: 'approve' | 'deny') => {
+    const cur = authSession.peek()
+    if (cur.kind !== 'single_user_local' || !canAccessAdmin(cur)) {
+      pushShellToast('도구 승인 결정은 싱글유저 관리자 세션에서만 실행할 수 있습니다.', 'info')
+      return
+    }
     const approvalId = approval.approvalId
     setSubmittingId(approvalId)
     void submitFastToolApproval(approval, decision)
@@ -109,7 +124,9 @@ export function FastApprovalStrip(): VNode | null {
       if (typing && !allowedWhileTyping) return
       if (!typing && event.altKey && key !== 'y' && key !== 'n') return
 
-      // Respect TargetLockedAction epoch, revision & workspace fence before firing keyboard action
+      // Respect RBAC + TargetLockedAction epoch, revision & workspace fence before firing keyboard action
+      const curSession = authSession.peek()
+      if (curSession.kind !== 'single_user_local' || !canAccessAdmin(curSession)) return
       const epochLocked = sessionEpoch.peek() !== capturedEpoch
       const wsLocked = activeWorkspaceId.peek() !== headApproval.workspaceId
       const revisionLocked = lockedRevision !== null && headApproval.revision !== lockedRevision
@@ -132,7 +149,7 @@ export function FastApprovalStrip(): VNode | null {
 
   // 0px when genuinely clear with all inbox HITL sources observed.
   if (!headApproval && !headAsk && !headGate && !headGoalConfirm) {
-    if (!isAuthenticated.value || inboxUnchecked.length === 0) return null
+    if (!canAccessMemberWorkspace(session) || inboxUnchecked.length === 0) return null
     const allUnbridged = inboxUnchecked.every((u) => u.state.kind === 'unbridged')
     const detailText = inboxUnchecked
       .map((source) => `${source.label}(${uncheckedHitlStatusLabel(source.state)})`)
@@ -202,22 +219,26 @@ export function FastApprovalStrip(): VNode | null {
                 `}
               </div>
               <div class="ap-fast-actions">
-                <button
-                  type="button"
-                  class="btn-primary ap-fast-btn"
-                  disabled=${lockState.locked || busy}
-                  onClick=${() => submitDecision(headApproval, 'approve')}
-                >
-                  승인 <kbd class="ap-kbd">Y</kbd>
-                </button>
-                <button
-                  type="button"
-                  class="btn-ghost ap-fast-btn ap-fast-deny"
-                  disabled=${lockState.locked || busy}
-                  onClick=${() => submitDecision(headApproval, 'deny')}
-                >
-                  거절 <kbd class="ap-kbd">N</kbd>
-                </button>
+                ${canApproveTools
+                  ? html`
+                      <button
+                        type="button"
+                        class="btn-primary ap-fast-btn"
+                        disabled=${lockState.locked || busy}
+                        onClick=${() => submitDecision(headApproval, 'approve')}
+                      >
+                        승인 <kbd class="ap-kbd">Y</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost ap-fast-btn ap-fast-deny"
+                        disabled=${lockState.locked || busy}
+                        onClick=${() => submitDecision(headApproval, 'deny')}
+                      >
+                        거절 <kbd class="ap-kbd">N</kbd>
+                      </button>
+                    `
+                  : html`<span class="ap-fast-question" data-testid="fast-approval-admin-locked">관리자 전용</span>`}
                 <button
                   type="button"
                   class="btn-ghost ap-fast-btn"

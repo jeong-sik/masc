@@ -72,6 +72,15 @@ describe('workspaces/knowledge', () => {
 
   beforeEach(() => {
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     resetTimeWindowForTests('24h')
     resourceCache.clearAll()
@@ -2111,7 +2120,6 @@ describe('workspaces/knowledge', () => {
       expect(container.textContent).not.toContain('Good body')
     })
   })
-
   it('rejects Wiki page payload missing required frontmatter as a decode error and clears stale pageDetail', async () => {
     let pageCalls = 0
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2247,5 +2255,79 @@ describe('workspaces/knowledge', () => {
       const alert = container.querySelector('[role="alert"]')
       expect(alert?.textContent).toContain('pages[0]')
     })
+  })
+
+  it('skips unbridged Artifacts and workspace-memory-inventory fallback in multi_account_signed_in and hides CanAdmin Board/Memory controls for single-user workers', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/memory/world')) {
+        return jsonResponse({ error: { code: 'not_found', message: 'not found' } }, 404)
+      }
+      if (url.startsWith('/api/v1/memory/diff')) {
+        return jsonResponse({
+          schema_version: 2,
+          instance_id: 'i1',
+          generated_at_unix: 1,
+          data: { scope: 'world', window: '24h', buckets: [], summary: { promoted: 0, retracted: 0, net_total: 0 } },
+        })
+      }
+      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [] })
+      if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
+      if (url.startsWith('/api/v1/board')) {
+        return jsonResponse({
+          posts: [{
+            id: 'post-rbac-1',
+            title: 'Worker read post',
+            body: 'Hello board',
+            author: 'sangsu',
+            hearth: 'ops',
+            created_at: '2026-11-26T00:00:00Z',
+            reply_count: 0,
+          }],
+        })
+      }
+      return jsonResponse({ error: 'unexpected' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin: Artifacts skips /api/v1/published-artifacts; Memory skips /workspace-memory-inventory fallback
+    setMultiAccountSessionForTest()
+    render(html`<${KnowledgeWorkspace} subroute="artifacts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(8)
+    expect(seenUrls.some((u) => u.includes('/api/v1/published-artifacts'))).toBe(false)
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${KnowledgeWorkspace} subroute="memory" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(8)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/workspace-memory-inventory'))).toBe(false)
+
+    // 2. Single-user Worker: Board hides Pin & Delete (CanAdmin) buttons
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${KnowledgeWorkspace} subroute="board" entityId="post-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '')
+    expect(buttons.some((t) => t.includes('고정') || t.includes('삭제'))).toBe(false)
+
+    // 3. Single-user Worker skips Token_permission CanAdmin catalog GET /api/v1/published-artifacts
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${KnowledgeWorkspace} subroute="artifacts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    expect(container.querySelector('[data-testid="artifacts-admin-locked"]')).not.toBeNull()
+    expect(seenUrls.some((u) => u === '/api/v1/published-artifacts')).toBe(false)
   })
 })

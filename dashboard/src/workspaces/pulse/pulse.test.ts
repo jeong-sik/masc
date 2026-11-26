@@ -540,7 +540,8 @@ describe('PulseWorkspace DOM Integration', () => {
     })
     vi.stubGlobal('fetch', mockFetch)
 
-    // 1. All keepers healthy, approvals & asks unbridged -> MUST NOT claim green 0건 or empty queue
+    // 1. Multi-account session skips all unbridged single-user routes (0x 404)
+    //    and MUST NOT claim green 0건 or empty queue
     const first = render(
       html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
     )
@@ -549,6 +550,7 @@ describe('PulseWorkspace DOM Integration', () => {
       expect(attn?.textContent).toContain('일부 미확인')
       expect(attn?.textContent).toContain('도구 승인 (멀티 계정 미지원)')
       expect(attn?.textContent).toContain('Keeper 질문 (멀티 계정 미지원)')
+      expect(attn?.textContent).toContain('Keeper 상태 (멀티 계정 미지원)')
       expect(attn?.textContent).toContain('비어 있음으로 확정할 수 없습니다')
     })
     const attn1 = first.container.querySelector('section[aria-label="주의 필요 대기열"]')!
@@ -559,11 +561,30 @@ describe('PulseWorkspace DOM Integration', () => {
     expect(attn1.textContent).toContain('비어 있음으로 확정할 수 없습니다')
     expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
     expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/gate/keepers'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/keeper-costs'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/provider-usage-history'))).toBe(false)
     first.unmount()
 
-    // 2. One keeper failing while approvals & asks remain unbridged -> count + partial unchecked notice
+    // 2. In single-user mode, one failing keeper while approvals/asks are absent renders "1건 · 일부 미확인"
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resourceCache.clearAll()
     keeperHealth = 'failing'
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/keepers/tool-approvals') || url.includes('/api/v1/keepers/asks')) {
+        return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      return mockFetch(input)
+    }))
     const second = render(
       html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
     )

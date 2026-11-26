@@ -30,6 +30,7 @@ export { normalizeBearerToken, type BearerTokenValidation }
 
 export type AccountMode = 'single_user' | 'multi_account'
 export type UserRole = 'admin' | 'worker' | 'viewer'
+export type SingleUserRole = 'admin' | 'worker' | 'player'
 
 export interface AuthMethods {
   readonly google: boolean
@@ -50,6 +51,9 @@ export type AuthSession =
       readonly kind: 'single_user_local'
       readonly mode: 'single_user'
       readonly tokenPresent: boolean
+      readonly role?: SingleUserRole
+      readonly canTokenAdmin?: boolean
+      readonly canTokenRead?: boolean
       readonly authMethods: AuthMethods
       readonly workspaceId: string
     }
@@ -89,6 +93,7 @@ export type AuthSession =
 
 const ACCOUNT_MARKER_STORAGE_KEY = 'masc.core.account_marker'
 const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 12_000
+const FORBIDDEN_RECHECK_COOLDOWN_MS = 5_000
 const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
   google: false,
   github: false,
@@ -102,6 +107,8 @@ const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
 let singleUserBearerToken: string | null = null
 let activeCsrfToken: string | null = null
 let internalBearerWriteDepth = 0
+let lastForbiddenRecheckAt = 0
+let forbiddenRecheckInFlight: Promise<void> | null = null
 
 function withInternalBearerWrite<T>(fn: () => T): T {
   internalBearerWriteDepth += 1
@@ -148,7 +155,7 @@ export const activeWorkspaceId = signal<string>('default')
 // Keep the shell's in-memory bearer cache, epoch fence, and single-user session
 // synchronized whenever API modules (e.g. api/dev-token.ts) clear or replace
 // the shared tab-scoped bearer store.
-subscribeStoredTokenChanges(({ token }) => {
+subscribeStoredTokenChanges(({ token, meta }) => {
   if (internalBearerWriteDepth > 0) return
   const prevToken = singleUserBearerToken
   singleUserBearerToken = token
@@ -158,10 +165,14 @@ subscribeStoredTokenChanges(({ token }) => {
     const cur = authSession.peek()
     if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
       if (token !== null) {
+        const isVerifiedDevAdmin = meta?.source === 'dev' && meta.role === 'admin'
         authSession.value = {
           kind: 'single_user_local',
           mode: 'single_user',
           tokenPresent: true,
+          role: isVerifiedDevAdmin ? 'admin' : 'worker',
+          canTokenAdmin: isVerifiedDevAdmin,
+          canTokenRead: isVerifiedDevAdmin,
           authMethods: cur.authMethods,
           workspaceId: activeWorkspaceId.peek(),
         }
@@ -187,6 +198,122 @@ export const currentAccountMode = computed<AccountMode | null>(() => {
   if (s.kind === 'probing' || s.kind === 'unavailable') return null
   return s.mode
 })
+
+/**
+ * Fail-closed admin capability check across both modes:
+ * - `multi_account_signed_in`: requires `role === 'admin'`.
+ * - `single_user_local`: requires `role === 'admin'` (or omitted `role` in legacy fixtures).
+ * - ALL unauthenticated / probing / unavailable / account_changed states return `false`.
+ */
+export function canAccessAdmin(session: AuthSession): boolean {
+  switch (session.kind) {
+    case 'multi_account_signed_in':
+      return session.role === 'admin'
+    case 'single_user_local':
+      return session.role === undefined || session.role === 'admin'
+    case 'probing':
+    case 'unavailable':
+    case 'account_changed':
+    case 'multi_account_signed_out':
+    case 'single_user_auth_required':
+      return false
+  }
+}
+
+/**
+ * Checks whether the current session may access member workspace routes and
+ * `CanReadState` endpoints (`/pulse`, `/work`, `/knowledge`, `/keepers`, `/runtime`,
+ * observer SSE, HITL queues).
+ * - `multi_account_signed_in`: allowed (`admin`/`worker`/`viewer`).
+ * - `single_user_local`: allowed ONLY when `role !== 'player'` (`Player` holds
+ *   only `CanPlayMachine` in `lib/types/types_auth.ml:482-484`).
+ * - All unauthenticated / probing / unavailable / account_changed states: denied.
+ */
+export function canAccessMemberWorkspace(session: AuthSession): boolean {
+  switch (session.kind) {
+    case 'multi_account_signed_in':
+      return true
+    case 'single_user_local':
+      return session.role !== 'player'
+    case 'probing':
+    case 'unavailable':
+    case 'account_changed':
+    case 'multi_account_signed_out':
+    case 'single_user_auth_required':
+      return false
+  }
+}
+
+/**
+ * Checks whether the current session is an authenticated non-player single-user
+ * local session (`single_user_local` with `role !== 'player'`).
+ */
+export function isSingleUserMember(session: AuthSession): boolean {
+  return session.kind === 'single_user_local' && session.role !== 'player'
+}
+
+/**
+ * Checks whether the current session satisfies single-user `Token_permission CanReadState`
+ * (`enabled && require_token && token_valid && role !== 'player'`, server_auth.ml:1187-1225).
+ */
+export function canUseSingleUserTokenRead(session: AuthSession): boolean {
+  if (session.kind !== 'single_user_local') return false
+  if (session.canTokenRead !== undefined) return session.canTokenRead
+  return session.role !== 'player'
+}
+
+/**
+ * Checks whether the current session satisfies single-user `Token_permission CanAdmin`
+ * (`enabled && require_token && token_valid && effective_admin`, server_auth.ml:1187-1225).
+ */
+export function canUseSingleUserTokenAdmin(session: AuthSession): boolean {
+  if (session.kind !== 'single_user_local') return false
+  if (session.canTokenAdmin !== undefined) return session.canTokenAdmin
+  return session.role === undefined || session.role === 'admin'
+}
+
+/**
+ * Checks whether the current session satisfies `Token_permission CanAdmin` in
+ * single-user mode OR `Admin_only` in multi-account mode (e.g. `/api/v1/config/schema`,
+ * `/api/v1/config/patch`, `/api/v1/infra/sandboxes/probe`, `PUT /api/v1/wiki/:slug`,
+ * `/api/v1/dashboard/exact-lane-runs`). Prevents speculative 401s when single-user
+ * `shell.auth` reports `enabled=false` or `require_token=false` (`canTokenAdmin=false`).
+ */
+export function canAccessTokenAdmin(session: AuthSession): boolean {
+  switch (session.kind) {
+    case 'multi_account_signed_in':
+      return session.role === 'admin'
+    case 'single_user_local':
+      return canUseSingleUserTokenAdmin(session)
+    case 'probing':
+    case 'unavailable':
+    case 'account_changed':
+    case 'multi_account_signed_out':
+    case 'single_user_auth_required':
+      return false
+  }
+}
+
+/**
+ * Checks whether the current session satisfies routes that are `Public_read` or
+ * `Permission CanReadState` in single-user mode (Admin + Worker, even when auth is
+ * disabled) and `Admin_only` in multi-account bridge (e.g. `GET /api/v1/infra/sandboxes`,
+ * `GET /api/v1/dashboard/logs`, `GET /api/v1/repositories`).
+ */
+export function canReadSuOrMaAdmin(session: AuthSession): boolean {
+  switch (session.kind) {
+    case 'multi_account_signed_in':
+      return session.role === 'admin'
+    case 'single_user_local':
+      return session.role !== 'player'
+    case 'probing':
+    case 'unavailable':
+    case 'account_changed':
+    case 'multi_account_signed_out':
+    case 'single_user_auth_required':
+      return false
+  }
+}
 
 export function currentSessionEpoch(): number {
   return sessionEpoch.peek()
@@ -223,15 +350,23 @@ export function setSingleUserToken(token: string | null): void {
   if (singleUserBearerToken === normalized && readSessionBearerToken() === normalized
       && storedSource === nextSource) return
   batch(() => {
+    const tokenChanged = singleUserBearerToken !== normalized
     singleUserBearerToken = normalized
     bumpSessionEpoch()
     const cur = authSession.peek()
     if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
       if (normalized !== null) {
+        // Fail closed for an unverified manual token until verified via
+        // `verifyAndApplySingleUserToken` / `bootstrapAuthSession`; preserve
+        // verified capabilities only when the token value itself did not change.
+        const preserveVerified = !tokenChanged && cur.kind === 'single_user_local'
         authSession.value = {
           kind: 'single_user_local',
           mode: 'single_user',
           tokenPresent: true,
+          role: preserveVerified ? cur.role : 'worker',
+          canTokenAdmin: preserveVerified ? cur.canTokenAdmin : false,
+          canTokenRead: preserveVerified ? cur.canTokenRead : false,
           authMethods: cur.authMethods,
           workspaceId: activeWorkspaceId.peek(),
         }
@@ -329,6 +464,86 @@ function parseRole(raw: unknown): UserRole {
   if (val === 'admin') return 'admin'
   if (val === 'worker') return 'worker'
   return 'viewer'
+}
+
+type ParsedSingleUserShellAuth =
+  | {
+      readonly kind: 'ok'
+      readonly role: SingleUserRole
+      readonly canTokenAdmin: boolean
+      readonly canTokenRead: boolean
+    }
+  | { readonly kind: 'auth_required'; readonly reason: string }
+  | { readonly kind: 'malformed'; readonly reason: string }
+
+function parseSingleUserRoleValue(raw: unknown): SingleUserRole | null {
+  const val = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (val === 'admin') return 'admin'
+  if (val === 'worker') return 'worker'
+  if (val === 'player') return 'player'
+  return null
+}
+
+/**
+ * Parses `shell.auth` returned by single-user `GET /api/v1/dashboard/shell`
+ * (`lib/server/server_dashboard_http_core.ml:628-760`).
+ *
+ * Fail-closed rules:
+ * - Non-object response body (`null` from HTML 200 / JSON parse failure, array,
+ *   primitive) or malformed non-undefined `auth` field returns `malformed`,
+ *   preventing captive portals or broken proxies from opening the dashboard.
+ * - Omitted `auth` (`rec.auth === undefined`) falls back to lowest capability
+ *   (`worker`, `canTokenAdmin: false`, `canTokenRead: false`) and never elevates
+ *   to admin.
+ * - Non-strict loopback rule (`server_auth.ml:1359-1366`):
+ *   When `enabled && require_token && !token_valid`, loopback `Public_read` returns
+ *   HTTP 200 with `token_valid=false, effective_role=null`. Reject it as `auth_required`
+ *   instead of accepting the unauthenticated/invalid token.
+ */
+function parseSingleUserShellAuth(body: unknown): ParsedSingleUserShellAuth {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return {
+      kind: 'malformed',
+      reason: 'GET /api/v1/dashboard/shell returned malformed payload',
+    }
+  }
+  const rec = body as Record<string, unknown>
+  const rawAuth = rec.auth
+  if (rawAuth === undefined) {
+    return { kind: 'ok', role: 'worker', canTokenAdmin: false, canTokenRead: false }
+  }
+  if (typeof rawAuth !== 'object' || rawAuth === null || Array.isArray(rawAuth)) {
+    return {
+      kind: 'malformed',
+      reason: 'GET /api/v1/dashboard/shell returned malformed auth metadata',
+    }
+  }
+  const auth = rawAuth as Record<string, unknown>
+  const enabled = auth.enabled === true
+  const requireToken = auth.require_token === true
+  const tokenValid = auth.token_valid === true
+  const effectiveAdmin = auth.effective_admin === true
+  const effectiveRole = parseSingleUserRoleValue(auth.effective_role)
+
+  if (enabled && requireToken && !tokenValid) {
+    const detail = nonEmptyString(auth.auth_error_detail)
+    const code = nonEmptyString(auth.auth_error_code)
+    return {
+      kind: 'auth_required',
+      reason: detail ?? code ?? 'Authorization required (missing or invalid bearer token)',
+    }
+  }
+
+  const role: SingleUserRole = effectiveRole !== null
+    ? effectiveRole
+    : effectiveAdmin
+      ? 'admin'
+      : !enabled
+        ? 'admin'
+        : 'worker'
+  const canTokenAdmin = enabled && requireToken && tokenValid && effectiveAdmin
+  const canTokenRead = enabled && requireToken && tokenValid && role !== 'player'
+  return { kind: 'ok', role, canTokenAdmin, canTokenRead }
 }
 
 function writeAccountMarker(accountId: string | null): void {
@@ -594,11 +809,31 @@ export async function verifyAndApplySingleUserToken(
     if (!shellRes.ok) {
       return { ok: false, error: `서버 상태 오류 (HTTP ${shellRes.status})` }
     }
+    const shellBody = await shellRes.json().catch(() => null)
+    if (!isEpochCurrent(epoch) || currentStoredTokenRevision() !== bearerRevision) {
+      return { ok: false, error: '검증 중 다른 인증 변경이 발생했습니다. 다시 시도하세요.' }
+    }
+    const parsedShellAuth = parseSingleUserShellAuth(shellBody)
+    if (parsedShellAuth.kind === 'auth_required') {
+      return {
+        ok: false,
+        error: `토큰 인증 실패 (${parsedShellAuth.reason}) — 유효한 토큰인지 확인하세요.`,
+      }
+    }
+    if (parsedShellAuth.kind === 'malformed') {
+      return {
+        ok: false,
+        error: parsedShellAuth.reason,
+      }
+    }
 
     const next: Extract<AuthSession, { readonly kind: 'single_user_local' }> = {
       kind: 'single_user_local',
       mode: 'single_user',
       tokenPresent: true,
+      role: parsedShellAuth.role,
+      canTokenAdmin: parsedShellAuth.canTokenAdmin,
+      canTokenRead: parsedShellAuth.canTokenRead,
       authMethods,
       workspaceId: activeWorkspaceId.peek(),
     }
@@ -737,6 +972,9 @@ export async function bootstrapAuthSession(
     }
 
     if (!ownsCredential()) return authSession.peek()
+    let resolvedRole: SingleUserRole = 'worker'
+    let resolvedCanTokenAdmin = false
+    let resolvedCanTokenRead = false
     if (opts.probeShell !== false) {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (singleUserBearerToken) headers.Authorization = `Bearer ${singleUserBearerToken}`
@@ -770,12 +1008,40 @@ export async function bootstrapAuthSession(
         authSession.value = next
         return next
       }
+      const shellBody = await shellRes.json().catch(() => null)
+      if (!ownsCredential()) return authSession.peek()
+      const parsedShellAuth = parseSingleUserShellAuth(shellBody)
+      if (parsedShellAuth.kind === 'auth_required') {
+        persistBearer(null)
+        const next: AuthSession = {
+          kind: 'single_user_auth_required',
+          mode: 'single_user',
+          authMethods,
+          reason: parsedShellAuth.reason,
+        }
+        authSession.value = next
+        return next
+      }
+      if (parsedShellAuth.kind === 'malformed') {
+        const next: AuthSession = {
+          kind: 'unavailable',
+          reason: parsedShellAuth.reason,
+        }
+        authSession.value = next
+        return next
+      }
+      resolvedRole = parsedShellAuth.role
+      resolvedCanTokenAdmin = parsedShellAuth.canTokenAdmin
+      resolvedCanTokenRead = parsedShellAuth.canTokenRead
     }
 
     const next: AuthSession = {
       kind: 'single_user_local',
       mode: 'single_user',
       tokenPresent: singleUserBearerToken !== null,
+      role: resolvedRole,
+      canTokenAdmin: resolvedCanTokenAdmin,
+      canTokenRead: resolvedCanTokenRead,
       authMethods,
       workspaceId: activeWorkspaceId.peek(),
     }
@@ -792,8 +1058,32 @@ export async function bootstrapAuthSession(
   }
 }
 
+function applyMultiAccountTransition(
+  cur: Extract<AuthSession, { readonly kind: 'multi_account_signed_in' }>,
+  next: AuthSession,
+): void {
+  if (next.kind === 'account_changed' || next.kind === 'multi_account_signed_out') {
+    activeCsrfToken = null
+    batch(() => {
+      bumpSessionEpoch()
+      authSession.value = next
+    })
+    return
+  }
+  if (next.kind === 'multi_account_signed_in') {
+    const roleChanged = cur.role !== next.role
+    batch(() => {
+      if (roleChanged) {
+        bumpSessionEpoch()
+      }
+      authSession.value = next
+    })
+  }
+}
+
 /**
- * Re-reads `/api/v1/auth/session` to refresh an expired CSRF token in `multi_account` mode.
+ * Re-reads `/auth/session` and `/api/v1/auth/whoami` to refresh an expired CSRF token
+ * or detect role/account changes in `multi_account` mode.
  * Returns the fresh token or null if the account changed or session expired.
  */
 export async function refreshMultiAccountCsrf(
@@ -813,13 +1103,88 @@ export async function refreshMultiAccountCsrf(
   if (next === null) return null
   const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs
   if (!isEpochCurrent(startEpoch) && !workspaceBumpedBySelf) return null
-  if (next.kind === 'account_changed') {
-    bumpSessionEpoch()
+  if (next.kind === 'unavailable') {
     authSession.value = next
     return null
   }
-  authSession.value = next
+  applyMultiAccountTransition(cur, next)
   return next.kind === 'multi_account_signed_in' ? next.csrfToken : null
+}
+
+/**
+ * Triggers a throttled background `GET /api/v1/auth/whoami` recheck after a non-CSRF
+ * HTTP 403 in `multi_account_signed_in` mode so freshly demoted admins transition
+ * promptly and bump `sessionEpoch` (aborting in-flight admin reads and clearing cache)
+ * without touching `/auth/session` (no CSRF refresh on ordinary RBAC 403).
+ */
+export function scheduleForbiddenRoleRecheck(
+  fetchImpl: typeof fetch = globalThis.fetch,
+): void {
+  const cur = authSession.peek()
+  if (cur.kind !== 'multi_account_signed_in') return
+  const now = Date.now()
+  if (forbiddenRecheckInFlight !== null || now - lastForbiddenRecheckAt < FORBIDDEN_RECHECK_COOLDOWN_MS) {
+    return
+  }
+  lastForbiddenRecheckAt = now
+  const startEpoch = currentSessionEpoch()
+  forbiddenRecheckInFlight = fetchWithBootstrapTimeout(
+    fetchImpl,
+    '/api/v1/auth/whoami',
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    },
+    DEFAULT_BOOTSTRAP_TIMEOUT_MS,
+  ).then(async (whoRes) => {
+    if (!isEpochCurrent(startEpoch)) return
+    if (whoRes.status === 401) {
+      activeCsrfToken = null
+      writeAccountMarker(null)
+      batch(() => {
+        bumpSessionEpoch()
+        authSession.value = {
+          kind: 'multi_account_signed_out',
+          mode: 'multi_account',
+          authMethods: cur.authMethods,
+        }
+      })
+      return
+    }
+    if (!whoRes.ok) return
+    const whoBody = (await whoRes.json().catch(() => null)) as AuthWhoamiWirePayload | null
+    if (!isEpochCurrent(startEpoch) || whoBody === null) return
+    const principalKind = whoBody.principal?.kind
+    const principalId = nonEmptyString(whoBody.principal?.id)
+    if (principalKind !== 'human' || principalId === null) return
+    if (principalId !== cur.accountId) {
+      activeCsrfToken = null
+      writeAccountMarker(principalId)
+      batch(() => {
+        bumpSessionEpoch()
+        authSession.value = {
+          kind: 'account_changed',
+          mode: 'multi_account',
+          previousAccountId: cur.accountId,
+          nextAccountId: principalId,
+          authMethods: cur.authMethods,
+        }
+      })
+      return
+    }
+    const nextRole = parseRole(whoBody.role)
+    if (nextRole !== cur.role) {
+      batch(() => {
+        bumpSessionEpoch()
+        authSession.value = { ...cur, role: nextRole }
+      })
+    }
+  }).catch(() => {
+    // Transient network error while probing role; keep current session state.
+  }).finally(() => {
+    forbiddenRecheckInFlight = null
+  })
 }
 
 /**
@@ -870,13 +1235,7 @@ export function installAuthLifecycleGuards(
     ).then((next) => {
       const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs
       if (!isEpochCurrent(startEpoch) && !workspaceBumpedBySelf) return
-      if (next.kind === 'account_changed' || next.kind === 'multi_account_signed_out') {
-        activeCsrfToken = null
-        bumpSessionEpoch()
-        authSession.value = next
-      } else if (next.kind === 'multi_account_signed_in') {
-        authSession.value = next
-      }
+      applyMultiAccountTransition(cur, next)
     }).catch(() => { /* transient offline on tab focus */ })
   }
 
@@ -894,6 +1253,8 @@ export function installAuthLifecycleGuards(
 export function resetAuthStateForTests(): void {
   wipeTransientSecrets()
   writeSessionBearerToken(null)
+  lastForbiddenRecheckAt = 0
+  forbiddenRecheckInFlight = null
   authSession.value = { kind: 'probing' }
   sessionEpoch.value = 1
   activeWorkspaceId.value = 'default'

@@ -5,7 +5,7 @@
 import { effect, type Signal } from '@preact/signals'
 import { route } from '../router'
 import type { RouteState } from '../types'
-import { authSession, getActiveCsrfToken, getSingleUserToken } from '../core/auth'
+import { authSession, canAccessMemberWorkspace, getActiveCsrfToken, getSingleUserToken } from '../core/auth'
 
 export interface NavEvent {
   surface: string
@@ -29,8 +29,8 @@ const ENDPOINT = '/api/v1/dashboard/nav-event'
 
 function defaultSend(event: NavEvent): void {
   const session = authSession.peek()
-  // Never emit unauthenticated nav-event POSTs (prevents 401 console spam on boot/sign-out)
-  if (session.kind !== 'single_user_local' && session.kind !== 'multi_account_signed_in') {
+  // Never emit unauthenticated or player nav-event POSTs (prevents 401/403 console spam)
+  if (!canAccessMemberWorkspace(session)) {
     return
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }

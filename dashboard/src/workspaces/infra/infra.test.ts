@@ -64,6 +64,15 @@ describe('workspaces/infra', () => {
       return 0
     })
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     resetShellStateForTests()
     releaseAllViewStreams()
@@ -580,9 +589,15 @@ describe('workspaces/infra', () => {
       workspaceId: 'default',
     }
     setObserverSseInstanceId('account-observer.1')
-    const request = vi.fn(async () => status === 200
-      ? jsonResponse({ entries: [{ seq: 1, message: 'Log snapshot row' }] })
-      : jsonResponse({ error: 'Log access refused' }, status))
+    const request = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'operator-1' }, role: 'admin' })
+      }
+      return status === 200
+        ? jsonResponse({ entries: [{ seq: 1, message: 'Log snapshot row' }] })
+        : jsonResponse({ error: 'Log access refused' }, status)
+    })
     globalThis.fetch = request as typeof fetch
     render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await vi.waitFor(() => {
@@ -590,7 +605,8 @@ describe('workspaces/infra', () => {
     })
 
     expect(activeViewStreamKey.value).toBeNull()
-    expect(request.mock.calls).toHaveLength(1)
+    const logCalls = request.mock.calls.filter(([u]) => String(u).startsWith('/api/v1/dashboard/logs'))
+    expect(logCalls).toHaveLength(1)
     expect(request).toHaveBeenCalledWith('/api/v1/dashboard/logs?limit=200', expect.objectContaining({
       credentials: 'same-origin',
     }))
@@ -965,5 +981,96 @@ describe('workspaces/infra', () => {
         expect(alert?.textContent).toContain('repositories[0]')
       })
     }
+  })
+
+  it('skips Repos in multi_account admin (0x 404) and gates CanAdmin Repos activity, Logs, and Sandboxes for single-user workers', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url === '/api/v1/repositories') {
+        return jsonResponse({
+          repositories: [{ id: 'repo-1', name: 'masc', url: 'https://example.com/masc', local_path: '/ws/masc', default_branch: 'main', status: 'ready' }],
+        })
+      }
+      return jsonResponse({ error: 'unexpected' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin on Repos: 0x 404
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'admin-infra',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-infra',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.querySelector('[data-testid="infra-repos-mode-notice"]')).not.toBeNull()
+    expect(seenUrls).toEqual([])
+
+    // 2. Single-user Worker: Repos reads Public_read list while locking CanAdmin activity/add/sync;
+    //    Logs (Public_read) & Sandboxes (CanReadState) remain readable while Probe/Settings stay locked;
+    //    Multi-account Worker is locked out of Logs & Sandboxes (Admin_only bridge).
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(seenUrls).toContain('/api/v1/repositories')
+      expect(container.querySelector('[data-testid="infra-repo-activity-admin-locked"]')).not.toBeNull()
+    })
+    expect(seenUrls).toEqual(['/api/v1/repositories'])
+    const actionBtns = [...container.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '')
+    expect(actionBtns.some((t) => t.includes('저장소 추가') || t === '동기화')).toBe(false)
+
+    // Single-user Worker can read Sandboxes inventory (CanReadState) but cannot see Probe or Settings buttons (Token_permission CanAdmin)
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(seenUrls).toContain('/api/v1/infra/sandboxes')
+    })
+    expect(container.querySelector('[data-testid="sandbox-settings-btn"]')).toBeNull()
+    expect(container.querySelector('.v2-probe-btn')).toBeNull()
+
+    // Multi-account Worker makes zero Logs or Sandboxes fetches (Admin_only in MA bridge)
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'worker-infra',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.querySelector('[data-testid="logs-stream-status"]')?.textContent).toContain('ADMIN ONLY')
+    expect(seenUrls).toEqual([])
+
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(seenUrls).toEqual([])
   })
 })

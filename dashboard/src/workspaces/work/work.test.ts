@@ -73,6 +73,15 @@ describe('workspaces/work', () => {
 
   beforeEach(() => {
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     resetPortraitCacheForTests()
     resourceCache.clearAll()
@@ -1981,5 +1990,251 @@ describe('workspaces/work', () => {
 
     expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
     expect(container.querySelector('.md-detail')!.textContent).toContain('Linked goal')
+  })
+
+  it('prevents unbridged 404s in multi_account_signed_in (admin) and CanAdmin 403s in single_user worker across Goals, Tasks, Inbox, and Candle', async () => {
+    const seenUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({
+          tree: [{
+            id: 'goal-rbac-1',
+            title: 'Ship RBAC',
+            phase: 'Awaiting_confirmation',
+            priority: 1,
+            measure: { kind: 'done_when', condition: 'All gates pass' },
+            procedure: 'Verify',
+            criterion_revision: 'crev-1',
+            criterion_review: { state: 'viable', reason: 'Clear' },
+            linked_task_count: 0,
+            tasks: [],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) return jsonResponse({ tasks: [], goals: [] })
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/dashboard/scheduled-automation')) return jsonResponse({ schedules: [] })
+      if (url.startsWith('/api/v1/candle/ledger')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 1000,
+          data: {
+            ledger_state: 'present',
+            total_events: 0,
+            balance_error: null,
+            policy: {
+              configuration: 'enabled',
+              disabled_reason: null,
+              pricing_mode: 'supply_scaled',
+              half_life: { mode: 'decay', half_life_hours: 168, half_life_sec: 604800 },
+              half_life_sec: 604800,
+            },
+            supply: {
+              issued_milli: '0',
+              burned_milli: '0',
+              circulating_milli: '0',
+              total_supply_milli: '0',
+              active_keepers: 0,
+            },
+            balances: [],
+            recent_events: [],
+            diagnostics: {
+              held_windows_count: 1,
+              unattributed_count: 0,
+              backlog_fenced_count: 0,
+              zero_linked_tasks_goals: 0,
+              items: [
+                {
+                  kind: 'candidate_window_held',
+                  goal_id: 'goal-rbac-1',
+                  title: 'Ship RBAC',
+                  observation: 'Held',
+                  diagnostic_hint: 'Pending release',
+                  at_unix: 1000,
+                },
+              ],
+            },
+          },
+        })
+      }
+      return jsonResponse({ error: 'unexpected unbridged route' }, 404)
+    }) as typeof fetch
+
+    // 1. Multi-account Admin across all 4 tabs: 0x unbridged 404 calls
+    setMultiAccountSessionForTest()
+    for (const subroute of ['goals', 'tasks', 'inbox', 'candle'] as const) {
+      render(null, container)
+      resourceCache.clearAll()
+      render(html`<${WorkWorkspace} subroute=${subroute} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi(10)
+    }
+    expect(seenUrls.some((u) => u.startsWith('/health?full=1'))).toBe(false)
+    expect(seenUrls.some((u) => u === '/mcp')).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/verification/requests'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/goals/candle'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/gate'))).toBe(false)
+
+    // 2. Single-user Worker: skips CanAdmin goal confirmation & hides CanAdmin controls
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${WorkWorkspace} subroute="goals" entityId="goal-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+    expect(container.textContent).not.toContain('최종 완료 확정')
+
+    // 3. Single-user Worker & auth_enabled=false Admin on CandleTab with entityId: 0x GET /goals/candle or /health?full=1
+    for (const suSession of [
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: true,
+        role: 'worker' as const,
+        canTokenAdmin: false,
+        canTokenRead: true,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: false,
+        role: 'admin' as const,
+        canTokenAdmin: false,
+        canTokenRead: false,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+    ]) {
+      seenUrls.length = 0
+      render(null, container)
+      resourceCache.clearAll()
+      authSession.value = suSession
+      render(html`<${WorkWorkspace} subroute="candle" entityId="goal-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi(10)
+      expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/goals/candle'))).toBe(false)
+      expect(seenUrls.some((u) => u.startsWith('/health?full=1'))).toBe(false)
+      expect(container.querySelector('[data-testid="candle-goal-admin-locked"]')).not.toBeNull()
+      expect(container.querySelector('input[aria-label="Goal Candle 조회 ID"]')).toBeNull()
+      expect(container.textContent).not.toContain('보류 확인')
+    }
+
+    // 4. InboxTab loopback auth_enabled=false: Tool_actor CanAdmin (tool_approval, keeper_ask) enabled, Token_permission CanAdmin (channel_gate, goal_confirmation) locked
+    seenUrls.length = 0
+    let postedApproval = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) {
+        return jsonResponse({
+          pending: [{
+            approval_id: 'apr-local-1',
+            keeper: 'sangsu',
+            tool_call_id: 'tc-local-1',
+            tool: 'bash',
+            args: { cmd: 'pwd' },
+            question: 'Run pwd?',
+            because: 'policy',
+            asked_at: 1_700_000_000,
+            revision: '1',
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/keepers/tool-approval') && init?.method === 'POST') {
+        postedApproval = true
+        return jsonResponse({ settled: true })
+      }
+      if (url.startsWith('/api/v1/keepers/asks')) {
+        return jsonResponse({
+          asks: [{
+            ask_id: 'ask-local-1',
+            keeper: 'sangsu',
+            asked_at: 1_700_000_000,
+            revision: '1',
+            questions: [{ question_id: 'q1', header: 'Confirm', prompt: 'Proceed?', mode: 'single', choices: [] }],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return jsonResponse({
+          approval_queue_state: { state: 'ready' },
+          approval_queue: [{
+            id: 'gate-local-1',
+            keeper_name: 'sangsu',
+            tool_name: 'deploy',
+            phase: 'awaiting_operator',
+            sequence: 1,
+          }],
+          recent_resolved_state: { state: 'ready' },
+          recent_resolved: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          tasks: [],
+          goals: [{ id: 'goal-local-1', title: 'Local Goal', phase: 'Awaiting_confirmation', priority: 1 }],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    expect(container.querySelector('[data-testid="inbox-token-admin-partial"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="inbox-admin-locked"]')).toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+
+    // Tool approval is enabled under loopback auth_enabled=false
+    const approveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('승인 (Approve)'))!
+    expect(approveBtn.disabled).toBe(false)
+    approveBtn.click()
+    await flushUi(5)
+    expect(postedApproval).toBe(true)
+
+    // Keeper Ask is enabled under loopback auth_enabled=false
+    const askRow = [...container.querySelectorAll<HTMLButtonElement>('.wk-row-btn')]
+      .find((b) => b.textContent?.includes('Confirm'))!
+    askRow.click()
+    await flushUi(3)
+    const submitAskBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('답변 제출 (Submit Answer)'))!
+    expect(submitAskBtn.disabled).toBe(false)
+
+    // Channel gate remains disabled under loopback auth_enabled=false
+    const gateRow = [...container.querySelectorAll<HTMLButtonElement>('.wk-row-btn')]
+      .find((b) => b.textContent?.includes('deploy'))!
+    gateRow.click()
+    await flushUi(3)
+    const gateApproveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('승인 (Approve)'))!
+    expect(gateApproveBtn.disabled).toBe(true)
   })
 })

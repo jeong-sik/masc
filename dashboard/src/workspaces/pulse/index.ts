@@ -321,7 +321,11 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
     )
   }
   if (bundle.keepers.kind === 'absent' || bundle.keepers.kind === 'unreported') {
-    attentionUnchecked.push('Keeper 상태 (미확인)')
+    attentionUnchecked.push(
+      bundle.keepers.kind === 'absent' && bundle.keepers.reason === 'multi_account_unbridged'
+        ? 'Keeper 상태 (멀티 계정 미지원)'
+        : 'Keeper 상태 (미확인)',
+    )
   }
   const attentionLoading =
     bundle.approvals.kind === 'loading' || bundle.asks.kind === 'loading' || bundle.keepers.kind === 'loading'

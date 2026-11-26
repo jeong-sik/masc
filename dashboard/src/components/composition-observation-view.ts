@@ -12,9 +12,6 @@ const json = (value: unknown) => JSON.stringify(value, null, 2)
 /** No global result cache: the exact target, access revision and accepted
  * workspace object own each request, including its later page fetches. */
 function asyncSource(result: AsyncRequestStatus): string | null {
-  if (result.status === 'unavailable' || result.status === 'rejected') {
-    throw new Error(`Request ${result.status}: ${result.status === 'unavailable' ? result.detail : result.reason}`)
-  }
   return result.status === 'observed' ? asyncRequestSourceKey(result) : null
 }
 function originalSource(result: OriginalToolResult): string | null {

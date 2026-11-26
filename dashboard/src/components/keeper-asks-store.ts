@@ -28,7 +28,7 @@ export const askError = signal<string | null>(null)
 export const askConflict = signal<string | null>(null)
 
 export function refreshKeeperAsks(): Promise<AsksSnapshot | undefined> {
-  return asksResource.load(async () => fetchKeeperAsks())
+  return asksResource.load(async (signal) => fetchKeeperAsks(undefined, { signal }))
 }
 
 export function selectAsk(row: AskRow): void {

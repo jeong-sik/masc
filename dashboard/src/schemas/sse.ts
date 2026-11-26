@@ -188,6 +188,7 @@ const STRING_FIELDS = new Set([
   'event',
   'tool_name',
   'disposition',
+  'wire_outcome',
   'error_text',
   'tool_args_preview',
   'tool_output_preview',
@@ -1360,6 +1361,17 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
       return fail(
         'disposition',
         'Expected keeper_tool_call disposition to be completed, deferred, or failed',
+      )
+    }
+    if (
+      value.wire_outcome !== undefined
+      && value.wire_outcome !== 'ok'
+      && value.wire_outcome !== 'error'
+      && value.wire_outcome !== 'unknown'
+    ) {
+      return fail(
+        'wire_outcome',
+        'Expected keeper_tool_call wire_outcome to be ok, error, or unknown',
       )
     }
   }

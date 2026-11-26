@@ -114,7 +114,7 @@ function StoredBlobView({
             variant="subtle" size="sm"
             disabled=${loading.value}
             onClick=${() => void onLoad()}>
-            ${loading.value ? '\uad6c\uac00\uc624\ub294 \uc911\u2026' : '\uc804\uccb4 \ucd9c\ub825 \uc5f4\uae30'}
+            ${loading.value ? '불러오는 중…' : '전체 출력 열기'}
           <//>
         </div>
         <div class="px-3 py-2 overflow-x-auto max-h-50 overflow-y-auto">

@@ -34,9 +34,12 @@ export class AskAnswerConflict extends Error {
   }
 }
 
-export async function fetchKeeperAsks(keeper?: string): Promise<AsksSnapshot> {
+export async function fetchKeeperAsks(
+  keeper?: string,
+  opts?: { readonly signal?: AbortSignal },
+): Promise<AsksSnapshot> {
   const query = keeper !== undefined && keeper !== '' ? `?name=${encodeURIComponent(keeper)}` : ''
-  const raw = await get<unknown>(`/api/v1/keepers/asks${query}`)
+  const raw = await get<unknown>(`/api/v1/keepers/asks${query}`, opts)
   const parsed = parseAsksSnapshot(raw)
   if (!parsed.ok) throw new Error(`keeper asks response could not be read: ${parsed.error}`)
   return parsed.value

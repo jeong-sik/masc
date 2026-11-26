@@ -10,7 +10,14 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import {
+  extractObserverTopics,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
+} from '../../core/observer'
 import { formatDateTimeKo } from '../../lib/format-time'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { LoadingState } from '../common/feedback-state'
 import {
   clearQuestion,
@@ -159,9 +166,32 @@ function AskCard({ row }: { row: AskRow }) {
 
 export function KeeperAsksSurface() {
   const { data, loading, error } = asksResource.state.value
-  useEffect(() => {
-    void refreshKeeperAsks()
-  }, [])
+  useEffect(() => setupObservationRefresh(() => refreshKeeperAsks(), {
+    topics: [],
+    cancelRead: () => asksResource.cancel(),
+    readError: () => asksResource.readError(),
+    resetRead: () => asksResource.reset(),
+    subscribeChanges: (invalidate, recover) => {
+      const unsubFrames = subscribeObserverFrames((frame) => {
+        const topics = extractObserverTopics(frame)
+        if (
+          topics.includes('keeper_ask')
+          || topics.includes('ask')
+          || topics.includes('keeper_asks_changed')
+          || topics.includes('keeper_waiting_inventory_changed')
+        ) {
+          invalidate()
+        }
+      })
+      const unsubReconnect = subscribeObserverReconnect(recover)
+      const unsubResync = subscribeObserverResync(recover)
+      return () => {
+        unsubFrames()
+        unsubReconnect()
+        unsubResync()
+      }
+    },
+  }), [])
 
   // A question already on screen is kept while a refresh is in flight;
   // blanking the panel would take it away from someone mid-answer.

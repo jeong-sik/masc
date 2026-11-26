@@ -24,6 +24,7 @@ import {
 } from '../../core/observer'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
+import { refreshPendingHitl } from '../../shell/shell-state'
 import {
   decodeGateQueueStrict,
   decodeKeeperAsksWire,
@@ -534,6 +535,14 @@ export function InboxTab(props: WorkspaceViewProps) {
     () => filteredEntries.find((e) => e.key === selectedKey) ?? null,
     [filteredEntries, selectedKey],
   )
+  const isToolApprovalSelected = selectedEntry?.kind === 'tool_approval'
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    if (!isToolApprovalSelected) return undefined
+    setCountdownNowMs(Date.now())
+    const timer = setInterval(() => setCountdownNowMs(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [isToolApprovalSelected])
   const selectedGoal = selectedEntry?.kind === 'goal_confirmation' ? selectedEntry.goal : null
   const selectedGoalRead = goalRead?.epoch === epoch && goalRead.goalId === selectedGoal?.id
     ? goalRead : null
@@ -652,6 +661,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     }
     resourceCache.invalidateTopic('tool_approval')
     await loadInbox('manual', ['tool_approval'])
+    void refreshPendingHitl()
   }
 
   const handleGateResolve = async (item: GatePendingItem, decision: 'approve' | 'reject') => {
@@ -677,9 +687,28 @@ export function InboxTab(props: WorkspaceViewProps) {
     }
     setGateRejectReason('')
     setGateRememberRule(false)
-    setFeedback({ kind: 'ok', message: `Gate ${item.id} (${item.toolName}) → ${decision}` })
+    const receipts = isRecord(res.value) && Array.isArray(res.value.audit_receipts)
+      ? res.value.audit_receipts
+      : []
+    const auditFailed = receipts.some((r) => isRecord(r) && r.recorded === false)
+    setFeedback({
+      kind: auditFailed ? 'err' : 'ok',
+      message: auditFailed
+        ? `Gate ${item.id} (${item.toolName}) → ${decision} · 감사 기록 저장 실패`
+        : `Gate ${item.id} (${item.toolName}) → ${decision}`,
+    })
     resourceCache.invalidateTopic('gate')
     await loadInbox('manual', ['channel_gate'])
+    void refreshPendingHitl()
+  }
+
+  const clearAskDraft = (askId: string) => {
+    setAskDrafts((prev) => {
+      if (!(askId in prev)) return prev
+      const next = { ...prev }
+      delete next[askId]
+      return next
+    })
   }
 
   const handleAnswerAsk = async (ask: KeeperAskItem) => {
@@ -716,12 +745,44 @@ export function InboxTab(props: WorkspaceViewProps) {
     if (!isEpochCurrent(epoch)) return
     setBusy(false)
     if (!res.ok) {
+      const errBody = isRecord(res.error.body) ? res.error.body : null
+      if (
+        res.error.status === 500
+        && errBody?.recorded === true
+        && errBody.state !== 'recording_unconfirmed'
+      ) {
+        clearAskDraft(ask.askId)
+        setFeedback({
+          kind: 'ok',
+          message: `${ask.keeper} 질문(${ask.askId}) 답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.`,
+        })
+        resourceCache.invalidateTopic('ask')
+        await loadInbox('manual', ['keeper_ask'])
+        void refreshPendingHitl()
+        return
+      }
+      if (res.error.kind === 'conflict_cas' || res.error.status === 409) {
+        clearAskDraft(ask.askId)
+        setFeedback({ kind: 'err', message: '다른 사람이 먼저 답변했습니다. 목록을 새로 읽었습니다.' })
+        resourceCache.invalidateTopic('ask')
+        await loadInbox('manual', ['keeper_ask'])
+        void refreshPendingHitl()
+        return
+      }
       setFeedback({ kind: 'err', message: `Ask 답변 제출 실패: ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: `${ask.keeper} 질문(${ask.askId})에 답변을 전달했습니다.` })
+    clearAskDraft(ask.askId)
+    const deliveredFalse = isRecord(res.value) && res.value.delivered === false
+    setFeedback({
+      kind: 'ok',
+      message: deliveredFalse
+        ? `${ask.keeper} 질문(${ask.askId}) 답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.`
+        : `${ask.keeper} 질문(${ask.askId})에 답변을 전달했습니다.`,
+    })
     resourceCache.invalidateTopic('ask')
     await loadInbox('manual', ['keeper_ask'])
+    void refreshPendingHitl()
   }
 
   const handleConfirmGoal = async (ev: GoalConfirmationEvidence) => {
@@ -747,6 +808,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     setFeedback({ kind: 'ok', message: `목표 ${ev.goalId} 완료 확정됨` })
     resourceCache.invalidateTopic('goals')
     await loadInbox('manual', ['goal_confirmation'])
+    void refreshPendingHitl()
   }
 
   const setQuestionDraft = (askId: string, questionId: string, next: AskAnswerDraft | null) => {
@@ -956,7 +1018,7 @@ export function InboxTab(props: WorkspaceViewProps) {
             <div class="wk-kv-grid">
               <div class="wk-kv">
                 <span class="wk-kv-k">응답 기한</span>
-                <span class="wk-kv-v tnum">${toolApprovalTimeoutText(selectedEntry.item, Date.now())}</span>
+                <span class="wk-kv-v tnum">${toolApprovalTimeoutText(selectedEntry.item, countdownNowMs)}</span>
               </div>
             </div>
             <pre class="wk-code-preview">${selectedEntry.item.argsPreview}</pre>

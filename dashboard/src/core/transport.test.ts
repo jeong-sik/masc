@@ -228,4 +228,23 @@ describe('core/transport', () => {
     const notOk = unwrapOkData({ ok: false, error: 'denied', code: 'forbidden' })
     expect(notOk.ok).toBe(false)
   })
+
+  it('preserves parsed JSON error body on ApiError for HTTP 500 recovery inspection', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ recorded: true, state: 'wakeup_deferred', error: 'wakeup queued' }, 500),
+    )
+
+    const res = await apiMutate('POST', '/api/v1/keepers/ask-answer', { ask_id: 'a1' }, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error.status).toBe(500)
+      expect(res.error.body).toEqual({
+        recorded: true,
+        state: 'wakeup_deferred',
+        error: 'wakeup queued',
+      })
+    }
+  })
 })

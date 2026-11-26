@@ -16,6 +16,20 @@ import {
 } from './gate-signals'
 export { refreshGate }
 
+const activeGateActions = new Set<string>()
+
+async function withGateActing<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  activeGateActions.add(key)
+  gateApprovalActing.value = key
+  try {
+    return await fn()
+  } finally {
+    activeGateActions.delete(key)
+    const remaining = activeGateActions.values().next().value
+    gateApprovalActing.value = remaining ?? null
+  }
+}
+
 export async function respondToKeeperApproval(
   id: string,
   decision: 'approve' | 'reject',
@@ -32,26 +46,25 @@ export async function respondToKeeperApproval(
     showToast('거부 이유를 입력해야 합니다', 'warning')
     return
   }
-  gateApprovalActing.value = id
-  try {
-    const result = await resolveGateApproval(id, resolution)
-    observeGateAuditReceipts(result.audit_receipts, { id, transport: 'http' })
-    const auditFailed = result.audit_receipts.some(receipt => !receipt.recorded)
-    const message = decision === 'approve'
-      ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
-      : 'keeper 승인 요청을 거부했습니다'
-    showToast(
-      auditFailed ? `${message} · 감사 기록은 저장되지 않았습니다` : message,
-      auditFailed ? 'warning' : 'success',
-    )
-    await refreshGate({ force: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
-    gateError.value = message
-    showToast(message, 'error')
-  } finally {
-    gateApprovalActing.value = null
-  }
+  await withGateActing(id, async () => {
+    try {
+      const result = await resolveGateApproval(id, resolution)
+      observeGateAuditReceipts(result.audit_receipts, { id, transport: 'http' })
+      const auditFailed = result.audit_receipts.some(receipt => !receipt.recorded)
+      const message = decision === 'approve'
+        ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
+        : 'keeper 승인 요청을 거부했습니다'
+      showToast(
+        auditFailed ? `${message} · 감사 기록은 저장되지 않았습니다` : message,
+        auditFailed ? 'warning' : 'success',
+      )
+      await refreshGate({ force: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
+      gateError.value = message
+      showToast(message, 'error')
+    }
+  })
 }
 
 export async function retryKeeperAutoJudge(
@@ -59,41 +72,39 @@ export async function retryKeeperAutoJudge(
   expected: KeeperAutoJudgeRearmExpectation,
 ) {
   if (!id) return
-  gateApprovalActing.value = id
-  try {
-    await retryGateAutoJudge(id, expected)
-    showToast('Auto Judge를 한 번 다시 요청했습니다', 'success')
-    await refreshGate({ force: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Auto Judge를 다시 요청하지 못했습니다'
-    gateError.value = message
-    showToast(message, 'error')
-  } finally {
-    gateApprovalActing.value = null
-  }
+  await withGateActing(id, async () => {
+    try {
+      await retryGateAutoJudge(id, expected)
+      showToast('Auto Judge를 한 번 다시 요청했습니다', 'success')
+      await refreshGate({ force: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Auto Judge를 다시 요청하지 못했습니다'
+      gateError.value = message
+      showToast(message, 'error')
+    }
+  })
 }
 
 export async function deleteKeeperApprovalRule(id: string) {
   if (!id) return
-  gateApprovalActing.value = `rule:${id}`
-  try {
-    const result = await deleteGateApprovalRule(id)
-    observeGateAuditReceipts([result.audit], { id, transport: 'http' })
-    const auditFailed = !result.audit.recorded
-    showToast(
-      auditFailed
-        ? 'Always 규칙을 삭제했습니다 · 감사 기록은 저장되지 않았습니다'
-        : 'Always 규칙을 삭제했습니다',
-      auditFailed ? 'warning' : 'success',
-    )
-    await refreshGate({ force: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
-    gateError.value = message
-    showToast(message, 'error')
-  } finally {
-    gateApprovalActing.value = null
-  }
+  await withGateActing(`rule:${id}`, async () => {
+    try {
+      const result = await deleteGateApprovalRule(id)
+      observeGateAuditReceipts([result.audit], { id, transport: 'http' })
+      const auditFailed = !result.audit.recorded
+      showToast(
+        auditFailed
+          ? 'Always 규칙을 삭제했습니다 · 감사 기록은 저장되지 않았습니다'
+          : 'Always 규칙을 삭제했습니다',
+        auditFailed ? 'warning' : 'success',
+      )
+      await refreshGate({ force: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
+      gateError.value = message
+      showToast(message, 'error')
+    }
+  })
 }
 
 export const GATE_MODE_ACTING_KEY = 'gate-mode'
@@ -177,8 +188,7 @@ async function setGateModeForLane(
   save: (mode: GateMode) => Promise<SetGateModeResponse>,
   mode: GateMode,
 ) {
-  gateApprovalActing.value = actingKey
-  try {
+  await withGateActing(actingKey, async () => {
     let result: SetGateModeResponse
     try {
       result = await save(mode)
@@ -192,15 +202,18 @@ async function setGateModeForLane(
     showGateModeSaved(result)
     try {
       await refreshGate({ force: true })
+      if (gateError.value) {
+        const message = `Gate 모드는 저장됐지만 새로고침하지 못했습니다: ${gateError.value}`
+        gateError.value = message
+        showToast(message, 'warning')
+      }
     } catch (err) {
       const detail = err instanceof Error ? err.message : '상세 오류 없음'
       const message = `Gate 모드는 저장됐지만 새로고침하지 못했습니다: ${detail}`
       gateError.value = message
       showToast(message, 'warning')
     }
-  } finally {
-    gateApprovalActing.value = null
-  }
+  })
 }
 
 export async function setKeeperGateMode(mode: GateMode) {

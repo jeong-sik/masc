@@ -165,4 +165,15 @@ describe('exact observation views', () => {
     await screen.findByText('changed context payload rejected')
     expect(screen.queryByText('Request state: done')).toBeNull()
   })
+
+  it('settles loading state when a refresh rejects after an unavailable async status', async () => {
+    api.fetchAsyncRequestStatus
+      .mockResolvedValueOnce({ status: 'unavailable', detail: 'not yet indexed' })
+      .mockRejectedValueOnce(new Error('transport failed after unavailable'))
+    render(html`<${AsyncRequestDetails} identity=${lookup} isCurrent=${() => true} />`)
+    await screen.findByText(/not yet indexed/)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh exact request' }))
+    await screen.findByText('transport failed after unavailable')
+    expect(screen.queryByText('Loading exact request…')).toBeNull()
+  })
 })

@@ -62,6 +62,16 @@ val status_style :
 
 val selection_style : theme:Theme.t -> ?attrs:Attr.t -> unit -> Style.t
 
+val row_text_style :
+  theme:Theme.t ->
+  selected:bool ->
+  focused:bool ->
+  bg:Theme.rgb ->
+  Style.t
+(** Primary text style for selectable list rows: bold {!anchor_style} only when
+    [selected && focused], and calm {!text_style} (on [surface_2] when blurred,
+    or [surface_1] when unselected) otherwise. *)
+
 val make_badge :
   ?glyph:Glyph.t -> ?tone:Theme.status_token -> string -> Card.badge
 

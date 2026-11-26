@@ -4561,6 +4561,153 @@ let test_runtime_quotas_grouped_paused_runtimes_parity () =
     ("renders multi-day local release clock " ^ expected_multiday_clock) true
     (contains_sub ~needle:expected_multiday_clock ~haystack:txt)
 
+let test_pr2_rail_focus_and_runtime_p3_invariants () =
+  let now_unix = 1795658400.0 in
+  let now_mono = Clock.Mono.of_ns 1_000_000_000L in
+  (* 1. File Peek: Left_rail ▎ is never clobbered by line numbers AND respects focus/blur *)
+  let peek : Nav.file_peek =
+    { keeper = "keeper-a"; path = "lib/sample.ml"; line = 2 }
+  in
+  let m0 = Model.initial ~lang:Say.Lang_en ~cols:90 ~rows:24 () in
+  let infra =
+    m0.infra
+    |> Infra_store.open_file_peek ~keeper:peek.keeper ~path:peek.path
+    |> Infra_store.apply_file_peek ~observed_at:now_mono ~keeper:peek.keeper
+         ~path:peek.path
+         {
+           path = peek.path;
+           content = "let alpha = 1\nlet beta = 2\nlet gamma = 3";
+           revision = "rev-1";
+         }
+  in
+  let m_focused = { m0 with infra } in
+  let m_blurred =
+    { m_focused with nav = { m_focused.nav with pane_index = 1 } }
+  in
+  let theme = Theme.of_preset m_focused.theme_preset in
+  let rail_utf8 = Glyph.to_utf8 Glyph.Left_rail in
+  let find_rail_cell grid =
+    let found = ref None in
+    for y = 0 to Cell_grid.rows grid - 1 do
+      for x = 0 to Cell_grid.cols grid - 1 do
+        if Option.is_none !found then
+          let c = Cell_grid.get grid ~x ~y in
+          if Cell_grid.glyph_equal c.glyph (Cell_grid.Utf8 rail_utf8) then
+            found := Some (x, y, c)
+      done
+    done;
+    !found
+  in
+  let g_foc =
+    render_into ~cols:90 ~rows:24 (fun ~cache ~rect gr ->
+        Screen_file_peek.render ~peek ~model:m_focused ~cache ~rect gr)
+  in
+  let g_blur =
+    render_into ~cols:90 ~rows:24 (fun ~cache ~rect gr ->
+        Screen_file_peek.render ~peek ~model:m_blurred ~cache ~rect gr)
+  in
+  Alcotest.(check bool) "File Peek shows target line code without clobbering rail"
+    true (contains_sub ~needle:"let beta = 2" ~haystack:(grid_all_text g_foc));
+  (match find_rail_cell g_foc with
+  | None -> Alcotest.fail "Focused File Peek must preserve Left_rail ▎ on target row"
+  | Some (rx, ry, c) ->
+      Alcotest.(check bool) "Focused File Peek rail uses theme.accent fg" true
+        (Color.equal c.style.fg (Color.of_rgb theme.accent));
+      Alcotest.(check bool) "Focused File Peek rail uses selection_bg" true
+        (Color.equal c.style.bg (Color.of_rgb theme.selection_bg));
+      Alcotest.(check bool) "Blurred File Peek omits active Left_rail ▎" true
+        (Option.is_none (find_rail_cell g_blur));
+      let blur_cell = Cell_grid.get g_blur ~x:rx ~y:ry in
+      Alcotest.(check bool) "Blurred File Peek target row uses calm surface_2 bg"
+        true (Color.equal blur_cell.style.bg (Color.of_rgb theme.surface_2)));
+  (* 2. #54848 P3 #1 & #2: honest avail_n subtracts rate_limited runtimes,
+        localized Rate limit label, and UTF-8 safe provider_disambiguator *)
+  let mk_rt ~id ~provider ~model : Wire_runtime.runtime_option =
+    {
+      id;
+      provider_id = provider;
+      provider;
+      model = Some model;
+      declared_reasoning_effort = None;
+      transport = Some "cli";
+      is_default = false;
+    }
+  in
+  let resolved : Wire_runtime.runtime_resolved_snapshot =
+    {
+      generated_at_iso = "2026-11-26T02:00:00Z";
+      config_path = Some ".masc/runtime.toml";
+      default_route = Some "default";
+      lanes = [];
+      runtimes =
+        [
+          mk_rt ~id:"claude_팀프로덕션갑:opus" ~provider:"claude_팀프로덕션갑" ~model:"opus";
+          mk_rt ~id:"claude_팀프로덕션을:sonnet" ~provider:"claude_팀프로덕션을" ~model:"sonnet";
+          mk_rt ~id:"gemini:pro" ~provider:"gemini" ~model:"gemini-pro";
+        ];
+      usage_windows = Some { since_unix = now_unix -. 3600.0; accounts = [] };
+    }
+  in
+  let standings : (string * Wire_runtime.runtime_standing) list =
+    [
+      ( "claude_팀프로덕션갑:opus"
+      , {
+          quota_rest_cause = Some "provider_quota_refused";
+          quota_rest_until_unix = Some (now_unix +. 3600.0);
+          quota_rest_reset_stated = true;
+          credential_refused_at_unix = None;
+          rate_limited = false;
+          rate_limit_resets_at_unix = None;
+          failed_attempt_failure = None;
+          failed_attempt_noted_at_unix = None;
+          failed_attempt_by = None;
+        } );
+      ( "claude_팀프로덕션을:sonnet"
+      , {
+          quota_rest_cause = None;
+          quota_rest_until_unix = None;
+          quota_rest_reset_stated = false;
+          credential_refused_at_unix = None;
+          rate_limited = true;
+          rate_limit_resets_at_unix = Some (now_unix +. 120.0);
+          failed_attempt_failure = None;
+          failed_attempt_noted_at_unix = None;
+          failed_attempt_by = None;
+        } );
+    ]
+  in
+  List.iter
+    (fun (lang, expected_avail, expected_rl) ->
+      let m_rt0 = Model.initial ~lang ~cols:140 ~rows:40 () in
+      let rt =
+        m_rt0.runtime
+        |> Runtime_store.set_tab Nav.Runtime_quotas_credits
+        |> Runtime_store.apply_runtime_resolved ~observed_at:now_mono resolved
+        |> Runtime_store.apply_runtime_standings standings
+      in
+      let m_rt =
+        {
+          m_rt0 with
+          nav = { m_rt0.nav with workspace = Nav.Runtime };
+          freshness = { m_rt0.freshness with last_wall_unix = now_unix };
+          runtime = rt;
+        }
+      in
+      let g_rt =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render ~model:m_rt ~cache ~rect gr)
+      in
+      let txt = grid_all_text g_rt in
+      Alcotest.(check bool) "UTF-8 provider_disambiguator emits valid UTF-8" true
+        (String.is_valid_utf_8 txt);
+      Alcotest.(check bool) "avail_n subtracts non-quota_rest rate_limited runtime"
+        true (contains_sub ~needle:expected_avail ~haystack:txt);
+      Alcotest.(check bool) "rate_limited standing uses localized label" true
+        (contains_sub ~needle:expected_rl ~haystack:txt);
+      Alcotest.(check bool) "rate_limited standing does not emit raw HTTP 429"
+        false (contains_sub ~needle:"HTTP 429" ~haystack:txt))
+    [ (Say.Lang_ko, "가용 1", "속도 제한"); (Say.Lang_en, "1 avail", "Rate limit") ]
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -4579,6 +4726,9 @@ let () =
           Alcotest.test_case
             "Quotas grouped paused runtimes parity (causes, soonest-first, ratios & local clock)"
             `Quick test_runtime_quotas_grouped_paused_runtimes_parity;
+          Alcotest.test_case
+            "PR 2: File Peek rail/focus parity & #54848 P3 avail_n + UTF-8 disambiguator"
+            `Quick test_pr2_rail_focus_and_runtime_p3_invariants;
         ] );
       ( "infra"
       , [

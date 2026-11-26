@@ -91,7 +91,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
     | Knowledge_store.Thread_post, _ ->
         false
   in
-  if reading_comments then
+  if reading_comments then begin
     match post_opt with
     | None -> ()
     | Some p ->
@@ -201,6 +201,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           | (Some _ | None), None ->
               H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
                 ~theme ~lang thread
+  end
   else
   let zoomed = Model.is_zoomed_active model in
   let preview_title =
@@ -955,8 +956,8 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      | Some _ | None -> ()
                    end;
                    let title_style =
-                     if is_sel then H.anchor_style ~theme ~bg:row_bg ()
-                     else H.text_style ~theme ~bg:row_bg ()
+                     H.row_text_style ~theme ~selected:is_sel
+                       ~focused:left_focused ~bg:row_bg
                    in
                    let closed_prefix =
                      match Knowledge_store.post_extras_for ~post_id:p.id k with
@@ -998,7 +999,9 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      (H.put_clipped ~grid ~clip:r_rect ~x:tx ~y:py
                         ~max_w:(Int.max 0 (right_edge - tx - aw - 2))
                         ~style:
-                          (if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                          (if is_sel then
+                             H.row_text_style ~theme ~selected:true
+                               ~focused:left_focused ~bg:row_bg
                            else H.secondary_style ~theme ~bg:row_bg ())
                         left_s);
                    ignore
@@ -1160,7 +1163,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                 Card.draw_v_hairline grid ~x:vline_x ~y:below.y ~h:below.h ~theme;
                 let rail_rect =
                   Rect.make ~x:(vline_x + 1) ~y:below.y ~w:toc_w ~h:below.h
-                  |> Card.pad_inner ~pad_x:1 ~pad_y:0
+                  |> Card.pad_inner ~pad_x:1 ~pad_y:1
                 in
                 if not (Rect.is_empty prose_rect) then
                   ignore
@@ -1725,8 +1728,8 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                      let mw = Grapheme.display_width meta in
                      let tx = list_area.x + 4 in
                      let title_style =
-                       if is_sel then H.anchor_style ~theme ~bg:row_bg ()
-                       else H.text_style ~theme ~bg:row_bg ()
+                       H.row_text_style ~theme ~selected:is_sel
+                         ~focused:left_focused ~bg:row_bg
                      in
                      ignore
                        (H.put_clipped ~grid ~clip:r_rect ~x:tx ~y:py
@@ -1868,37 +1871,21 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
              (Printf.sprintf "%s%s · r%d/%d · %s%s" chk_s fmt_tok eff_rev
                 (Int.max eff_rev rev_total) mode_lbl share_s))
   in
+  let is_html_artifact =
+    match art_opt with
+    | Some a -> Wire_knowledge.artifact_format_of_entry a = `Html
+    | None -> false
+  in
   let hotkey =
-    let ext_s, fmt_s =
-      match art_opt with
-      | Some a ->
-          let fmt = Wire_knowledge.artifact_format_of_entry a in
-          ( Wire_knowledge.artifact_extension fmt
-          , match fmt with `Html -> "HTML" | `Markdown -> "MD" )
-      | None -> (".md", "MD")
-    in
-    if show_published_fallback then
+    if is_html_artifact then
       Say.resolve lang
-        (Say.make
-           ~ko:
-             (Printf.sprintf
-                "[v] 뷰 · [y] %s · [e] %s · < / > 리비전 · [c] 확인 · [P] 공유 · [/] 검색"
-                fmt_s ext_s)
-           ~en:
-             (Printf.sprintf
-                "[v] View · [y] %s · [e] %s · < / > Rev · [c] Check · [P] Share · [/] Search"
-                fmt_s ext_s))
+        (Say.make ~ko:"[y] 복사 · [e] .html" ~en:"[y] Copy · [e] .html")
+    else if show_published_fallback then
+      Say.resolve lang
+        (Say.make ~ko:"[v] 뷰 · [/] 검색" ~en:"[v] View · [/] Search")
     else
       Say.resolve lang
-        (Say.make
-           ~ko:
-             (Printf.sprintf
-                "[v] 뷰 · [y] %s · [e] %s · [/] 검색 · [c] 확인 · [P] 공유 · [Enter/z] 확대"
-                fmt_s ext_s)
-           ~en:
-             (Printf.sprintf
-                "[v] View · [y] %s · [e] %s · [/] Search · [c] Check · [P] Share · [Enter/z] Zoom"
-                fmt_s ext_s))
+        (Say.make ~ko:"[v] 뷰 · [Enter/z] 확대" ~en:"[v] View · [Enter/z] Zoom")
   in
   let title =
     if show_published_fallback then
@@ -2599,21 +2586,21 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (fun local_i (c : Wire_knowledge.memory_conflict) ->
               let idx = start_c + local_i in
               if !y + writer_reserve < bottom then begin
-                let is_sel =
-                  focused && Option.equal Int.equal sel_c_opt (Some idx)
-                in
+                let is_sel = Option.equal Int.equal sel_c_opt (Some idx) in
                 let row_bg =
-                  if is_sel then theme.selection_bg else theme.surface_1
+                  if is_sel then H.selected_row_bg ~theme ~focused
+                  else theme.surface_1
                 in
                 if is_sel then begin
                   let r_rect =
                     Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
                   in
                   H.paint_selected_row_bg ~grid ~clip:content ~row_rect:r_rect
-                    ~theme ()
+                    ~theme ~focused ~tone:Theme.Status_attention ()
                 end;
                 let prefix =
-                  if is_sel then Glyph.to_utf8 Glyph.Focus_caret ^ " " else ""
+                  if is_sel && focused then Glyph.to_utf8 Glyph.Focus_caret ^ " "
+                  else ""
                 in
                 let hdr =
                   Printf.sprintf "%s%s #%s (%d) %s" prefix
@@ -2621,13 +2608,17 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     (H.short_hash ~len:8 c.conflict_id)
                     c.member_count c.description
                 in
+                let hdr_style =
+                  if is_sel then
+                    H.row_text_style ~theme ~selected:true ~focused ~bg:row_bg
+                  else
+                    H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold
+                      Theme.Status_attention
+                in
                 ignore
-                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                     ~max_w:content.w
-                     ~style:
-                       (H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold
-                          Theme.Status_attention)
-                     hdr);
+                  (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                     ~max_w:(Int.max 0 (content.w - 2))
+                     ~style:hdr_style hdr);
                 incr y;
                 let draw_claim_rail ~tag ~tone
                     (cl : Wire_knowledge.competing_claim) =
@@ -2786,16 +2777,17 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   let abs_s = start_s + local_i in
                   if !y < bottom - reserve_acts then begin
                     let is_sel =
-                      focused && Option.equal Int.equal sel_s_idx (Some abs_s)
+                      Option.equal Int.equal sel_s_idx (Some abs_s)
                     in
                     let row_bg =
-                      if is_sel then theme.selection_bg else theme.surface_1
+                      if is_sel then H.selected_row_bg ~theme ~focused
+                      else theme.surface_1
                     in
                     if is_sel then
                       H.paint_selected_row_bg ~grid ~clip:content
                         ~row_rect:
                           (Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
-                        ~theme ();
+                        ~theme ~focused ();
                     (match entry with
                     | `World ->
                         let is_active = Option.is_none k.memory_diff_keeper in
@@ -2804,7 +2796,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           else Glyph.to_utf8 Glyph.Live_idle
                         in
                         let left_s =
-                          Printf.sprintf "  %s %s" mark
+                          Printf.sprintf "%s %s" mark
                             (Say.resolve lang
                                (Say.make ~ko:"월드 메모리 (전체)"
                                   ~en:"World Memory (Global)"))
@@ -2813,16 +2805,20 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           if is_active then Theme.Status_active
                           else Theme.Status_historical
                         in
+                        let st =
+                          if is_sel then
+                            H.row_text_style ~theme ~selected:true ~focused
+                              ~bg:row_bg
+                          else
+                            H.status_style ~theme ~bg:row_bg
+                              ~attrs:(if is_active then Attr.bold else Attr.none)
+                              tone
+                        in
                         ignore
-                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                             ~max_w:content.w
-                             ~style:
-                               (H.status_style ~theme ~bg:row_bg
-                                  ~attrs:
-                                    (if is_sel || is_active then Attr.bold
-                                     else Attr.none)
-                                  tone)
-                             left_s)
+                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                             ~y:!y
+                             ~max_w:(Int.max 0 (content.w - 2))
+                             ~style:st left_s)
                     | `Writer (w : Wire_knowledge.librarian_writer_row) ->
                         let is_active =
                           Option.equal String.equal k.memory_diff_keeper
@@ -2847,25 +2843,30 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           | [] -> ""
                           | xs -> String.concat ", " xs
                         in
-                        let scope_mark = if is_active then "▸ " else "  " in
+                        let scope_mark = if is_active then "▸ " else "" in
                         let left_s =
                           Printf.sprintf "%s%s %s · %s%s" scope_mark
                             (Glyph.to_utf8 g) w.keeper (Say.resolve lang lbl)
                             snap_s
                         in
                         let aw = Grapheme.display_width acts_s in
+                        let tx = content.x + 2 in
+                        let tw = Int.max 0 (content.w - 2) in
+                        let st =
+                          if is_sel then
+                            H.row_text_style ~theme ~selected:true ~focused
+                              ~bg:row_bg
+                          else
+                            H.status_style ~theme ~bg:row_bg
+                              ~attrs:(if is_active then Attr.bold else Attr.none)
+                              tone
+                        in
                         ignore
-                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                          (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
                              ~max_w:
-                               (if aw > 0 then Int.max 10 (content.w - aw - 2)
-                                else content.w)
-                             ~style:
-                               (H.status_style ~theme ~bg:row_bg
-                                  ~attrs:
-                                    (if is_sel || is_active then Attr.bold
-                                     else Attr.none)
-                                  tone)
-                             left_s);
+                               (if aw > 0 then Int.max 10 (tw - aw - 2)
+                                else tw)
+                             ~style:st left_s);
                         if aw > 0 then
                           ignore
                             (H.put_right ~grid ~clip:content

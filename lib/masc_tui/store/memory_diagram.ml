@@ -294,8 +294,8 @@ let keeper_memory_content_of_tabs_body ~(model : Model.t) ~name ~bp ~embedded
   if Rect.is_empty inner then Rect.empty
   else
     let after_hero =
-      if embedded && has_keeper && inner.h >= 16 then
-        snd (Rect.split_v inner ~top_h:5)
+      if embedded && has_keeper && inner.h >= 10 then
+        snd (Rect.split_v inner ~top_h:1)
       else inner
     in
     let content_rect =

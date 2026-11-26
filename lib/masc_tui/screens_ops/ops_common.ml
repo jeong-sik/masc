@@ -255,14 +255,15 @@ let draw_observed_empty grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang obs
     let max_w = Int.max 0 (Rect.right rect - px - pad) in
     match obs with
     | Observed.Failed { reason; _ } ->
+        let clean_reason = scrub_secrets_in_text reason in
         Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid ~x:px ~y:py
           ~h:1 ~theme;
         let line =
           Glyph.to_utf8 Glyph.Live_failing ^ " "
           ^ Say.resolve lang
               (Say.make
-                 ~ko:("조회 실패: " ^ reason)
-                 ~en:("Fetch failed: " ^ reason))
+                 ~ko:("조회 실패: " ^ clean_reason)
+                 ~en:("Fetch failed: " ^ clean_reason))
         in
         ignore
           (put_line ~clip:rect grid ~x:(px + 2) ~y:py

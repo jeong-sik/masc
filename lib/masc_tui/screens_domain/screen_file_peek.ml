@@ -12,13 +12,14 @@ let render ~(peek : Nav.file_peek) ~(model : Model.t) ~cache ~(rect : Rect.t) gr
     let lang = model.lang in
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
+    let focused = Model.pane_focused model 0 in
     let inner =
       Card.draw ~cache grid ~rect:body ~theme
-        (H.card_spec ~focused:true ~subtitle:peek.keeper
+        (H.card_spec ~focused ~subtitle:peek.keeper
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[↑/↓] 스크롤 · [Enter] 코드에서 열기 · [Esc] 닫기"
-                   ~en:"[↑/↓] Scroll · [Enter] Open in Code · [Esc] Close"))
+                (Say.make ~ko:"[Enter] 코드 열기 · [Esc] 닫기"
+                   ~en:"[Enter] Open · [Esc] Close"))
            peek.path)
     in
     let content = H.pad_content ~bp inner in
@@ -39,6 +40,10 @@ let render ~(peek : Nav.file_peek) ~(model : Model.t) ~cache ~(rect : Rect.t) gr
           let skip =
             Int.min (Int.max 0 (total - Int.max 1 vis.h)) (Int.max 0 model.nav.inspector_scroll_offset)
           in
+          let rail_offset = 2 in
+          let body_x = vis.x + rail_offset in
+          let body_w = Int.max 0 (vis.w - rail_offset) in
+          let lnum_w = Int.min line_number_cells body_w in
           List.iteri
             (fun i text ->
               let y = vis.y + i in
@@ -47,16 +52,20 @@ let render ~(peek : Nav.file_peek) ~(model : Model.t) ~cache ~(rect : Rect.t) gr
                 let target = Int.equal number peek.line in
                 let row_rect = Rect.make ~x:vis.x ~y ~w:vis.w ~h:1 in
                 if target then
-                  H.paint_selected_row_bg ~grid ~clip:vis ~row_rect ~theme ~focused:true ();
-                let bg = if target then Some (H.selected_row_bg ~theme ~focused:true) else None in
+                  H.paint_selected_row_bg ~grid ~clip:vis ~row_rect ~theme ~focused ();
+                let row_bg =
+                  if target then H.selected_row_bg ~theme ~focused
+                  else theme.surface_1
+                in
                 ignore
-                  (H.put_clipped ~grid ~clip:row_rect ~x:vis.x ~y ~max_w:line_number_cells
-                     ~style:(H.whisper_style ~theme ?bg ())
+                  (H.put_clipped ~grid ~clip:row_rect ~x:body_x ~y ~max_w:lnum_w
+                     ~style:(H.whisper_style ~theme ~bg:row_bg ())
                      (Printf.sprintf "%*d " (line_number_cells - 1) number));
                 ignore
-                  (H.put_clipped ~grid ~clip:row_rect ~x:(vis.x + line_number_cells) ~y
-                     ~max_w:(Int.max 0 (vis.w - line_number_cells))
-                     ~style:(H.text_style ~theme ?bg ()) text)
+                  (H.put_clipped ~grid ~clip:row_rect ~x:(body_x + lnum_w) ~y
+                     ~max_w:(Int.max 0 (body_w - lnum_w))
+                     ~style:(H.row_text_style ~theme ~selected:target ~focused ~bg:row_bg)
+                     text)
               end)
             (Store_scroll.drop skip lines)
   end

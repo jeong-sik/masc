@@ -482,8 +482,15 @@ let provider_disambiguator provider_id =
         String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
     | Some _ | None -> trimmed
   in
-  let len = String.length raw in
-  if len <= 8 then raw else String.sub raw (len - 8) 8
+  let clusters = Grapheme.split_clusters raw in
+  let rec take_suffix acc width = function
+    | [] -> acc
+    | (g, w) :: rest ->
+        let gw = Int.max 1 w in
+        if width + gw > 8 then acc
+        else take_suffix (g :: acc) (width + gw) rest
+  in
+  String.concat "" (take_suffix [] 0 (List.rev clusters))
 
 let group_active_quota_rest_standings ~now_unix ~runtimes ~runtimes_tbl
     (degraded : (string * Wire_runtime.runtime_standing) list) =
@@ -822,9 +829,23 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
     (* 2. Paused Runtimes & Exhausted Alerts *)
     if !y < bottom then begin
       let total_runtimes_n = List.length runtimes in
+      let restricted_n =
+        List.fold_left
+          (fun acc (r : Wire_runtime.runtime_option) ->
+            let http_bad =
+              List.exists
+                (fun (p : Wire_runtime.provider_probe_row) ->
+                  String.equal p.runtime_id r.id)
+                active_http_bad
+            in
+            if standing_restricts_readiness ~now_unix ~rt r.id || http_bad then
+              acc + 1
+            else acc)
+          0 runtimes
+      in
+      let avail_n = Int.max 0 (total_runtimes_n - restricted_n) in
       let alerts_label =
         if paused_runtimes_n > 0 && total_runtimes_n > 0 then
-          let avail_n = Int.max 0 (total_runtimes_n - paused_runtimes_n) in
           Say.resolve lang
             (Say.make
                ~ko:
@@ -833,6 +854,15 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
                ~en:
                  (Printf.sprintf "Paused & Alerts (%d/%d · %d avail)"
                     paused_runtimes_n total_runtimes_n avail_n))
+        else if restricted_n > 0 && total_runtimes_n > 0 then
+          Say.resolve lang
+            (Say.make
+               ~ko:
+                 (Printf.sprintf "일시 중지 · 한도 경고 (가용 %d/%d)"
+                    avail_n total_runtimes_n)
+               ~en:
+                 (Printf.sprintf "Paused & Alerts (%d/%d avail)"
+                    avail_n total_runtimes_n))
         else
           Say.resolve lang
             (Say.make ~ko:"일시 중지 · 한도 경고" ~en:"Paused & Alerts")
@@ -919,7 +949,8 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
                     in
                     ( Glyph.Live_paused
                     , Theme.Status_attention
-                    , Printf.sprintf "HTTP 429%s" eta )
+                    , Say.resolve lang (Say.make ~ko:"속도 제한" ~en:"Rate limit")
+                      ^ eta )
                   else
                     match st.failed_attempt_failure with
                     | Some f ->
@@ -1459,7 +1490,7 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             in
             let style =
               if is_sel then
-                H.anchor_style ~theme ~bg:row_bg ()
+                H.row_text_style ~theme ~selected:true ~focused ~bg:row_bg
               else H.whisper_style ~theme ~bg:row_bg ()
             in
             let adv =
@@ -2956,6 +2987,51 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     in
     standalone_pill @ inv_pill @ verif_pill @ preview_pill
   in
+  let narrow_header = header_rect.w < 120 in
+  let probe_age_pills =
+    if narrow_header then []
+    else
+      [
+        {
+          H.label = probe_age_txt;
+          active = false;
+          tone = Some Theme.Status_active;
+          glyph = None;
+        };
+      ]
+  in
+  let external_probe_pills =
+    if narrow_header && outside_failed = 0 && not rt.show_outside_lane_probes
+    then
+      [
+        {
+          H.label =
+            Say.resolve lang
+              (Say.make ~ko:"외부 0 [Space]" ~en:"Ext 0 [Space]");
+          active = false;
+          tone = Some Theme.Status_historical;
+          glyph = None;
+        };
+      ]
+    else
+      [
+        {
+          H.label =
+            Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "외부 프로브: %d 실패 [Space]" outside_failed)
+                 ~en:(Printf.sprintf "External probes: %d failed [Space]" outside_failed));
+          active = rt.show_outside_lane_probes;
+          tone = Some Theme.Status_historical;
+          glyph = Some Glyph.Historical_incident;
+        };
+      ]
+  in
+  let visible_extra_pills =
+    if narrow_header then
+      List.filter (fun (p : H.pill) -> p.active) extra_lane_pills
+    else extra_lane_pills
+  in
   let header_pills =
     [
       {
@@ -2968,24 +3044,8 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         tone = Some ssot_tone;
         glyph = Some ssot_glyph;
       };
-      {
-        H.label = probe_age_txt;
-        active = false;
-        tone = Some Theme.Status_active;
-        glyph = None;
-      };
-      {
-        H.label =
-          Say.resolve lang
-            (Say.make
-               ~ko:(Printf.sprintf "외부 프로브: %d 실패 [Space]" outside_failed)
-               ~en:(Printf.sprintf "External probes: %d failed [Space]" outside_failed));
-        active = rt.show_outside_lane_probes;
-        tone = Some Theme.Status_historical;
-        glyph = Some Glyph.Historical_incident;
-      };
     ]
-    @ extra_lane_pills
+    @ probe_age_pills @ external_probe_pills @ visible_extra_pills
   in
   ignore (H.draw_pills ~grid ~rect:header_rect ~theme header_pills);
   let left_rect, right_rect =
@@ -3001,9 +3061,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make
-                 ~ko:"[n] 생성 · [e] 편집 · [R] 이름 · [d] 삭제 · [D] 실행 · [a] 배정"
-                 ~en:"[n] New · [e] Edit · [R] Rename · [d] Del · [D] Run · [a] Assign"))
+              (Say.make ~ko:"[n] 생성 · [e] 편집" ~en:"[n] New · [e] Edit"))
          (Say.resolve lang
             (Say.make ~ko:"페일오버 캐스케이드" ~en:"Failover Cascade")))
   in
@@ -3088,7 +3146,9 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                   Int.max 8 (right_edge - (cascade_inner.x + 2) - meta_w - 2)
                 in
                 let lane_style =
-                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  if is_sel then
+                    H.row_text_style ~theme ~selected:true ~focused:lane_focused
+                      ~bg:row_bg
                   else H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ()
                 in
                 ignore
@@ -4345,8 +4405,8 @@ let draw_tool_series_analytics ~table_focused ~grid ~cache
     in
     ignore
       (Table.draw grid ~rect:tbl_inner ~theme ~caps:H.default_caps ~lang
-         ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
-         ~columns rows)
+         ~focused:table_focused ~col_gap:(Layout.table_col_gap bp)
+         ~scroll:rt.scroll_offset ~columns rows)
   end;
   if not (Rect.is_empty err_rect) then begin
     let err_inner =

@@ -41,14 +41,12 @@ let draw_changes ~(model : Model.t) ~grid ~(rect : Rect.t) ~(theme : Theme.t) =
               H.paint_selected_row_bg ~grid ~clip:rect ~row_rect ~theme ~focused ();
             let marker, tone = change_marker c in
             ignore
-              (H.put_clipped ~grid ~clip:row_rect ~x:(rect.x + 1) ~y ~max_w:1
+              (H.put_clipped ~grid ~clip:row_rect ~x:(rect.x + 2) ~y ~max_w:1
                  ~style:(H.status_style ~theme ~bg tone) marker);
             ignore
-              (H.put_clipped ~grid ~clip:row_rect ~x:(rect.x + 3) ~y
-                 ~max_w:(Int.max 0 (rect.w - 4))
-                 ~style:
-                   (if is_sel then H.anchor_style ~theme ~bg ()
-                    else H.text_style ~theme ~bg ())
+              (H.put_clipped ~grid ~clip:row_rect ~x:(rect.x + 4) ~y
+                 ~max_w:(Int.max 0 (rect.w - 5))
+                 ~style:(H.row_text_style ~theme ~selected:is_sel ~focused ~bg)
                  c.path)
           end)
         (Store_scroll.drop start_i changes)
@@ -82,28 +80,40 @@ let draw_half ~grid ~theme ~(clip : Rect.t) ~x ~y ~w = function
         (H.put_clipped ~grid ~clip ~x ~y ~max_w:w ~style:(style_of ~theme tone)
            (Printf.sprintf "%s %c %s" (Diff.line_number_cell number) marker l.text))
 
+let draw_single ~grid ~theme ~(rect : Rect.t) ~y (l : Wire_infra.git_diff_line) =
+  let tone, marker = line_tone l in
+  ignore
+    (H.put_clipped ~grid ~clip:rect ~x:rect.x ~y ~max_w:rect.w
+       ~style:(style_of ~theme tone)
+       (Diff.numbered_gutter ~old_line:l.old_line ~new_line:l.new_line ~marker
+       ^ l.text))
+
+(* Draw one side-by-side row with a crisp 1-col vertical hairline divider. *)
+let draw_pair ~grid ~theme ~(rect : Rect.t) ~y ~left ~right =
+  let half = rect.w / 2 in
+  let div_x = rect.x + half in
+  let left_w = Int.max 0 (half - 1) in
+  let right_x = div_x + 2 in
+  let right_w = Int.max 0 (Rect.right rect - right_x) in
+  draw_half ~grid ~theme ~clip:rect ~x:rect.x ~y ~w:left_w left;
+  if half > 0 && div_x < Rect.right rect then
+    Card.draw_v_hairline grid ~x:div_x ~y ~h:1 ~theme;
+  if right_w > 0 then
+    draw_half ~grid ~theme ~clip:rect ~x:right_x ~y ~w:right_w right
+
 let draw_row ~grid ~theme ~(rect : Rect.t) ~y = function
   | L.Hunk_header h ->
       ignore
         (H.put_clipped ~grid ~clip:rect ~x:rect.x ~y ~max_w:rect.w
            ~style:(H.accent_style ~theme ()) (hunk_text h))
-  | L.Single l ->
-      let tone, marker = line_tone l in
-      ignore
-        (H.put_clipped ~grid ~clip:rect ~x:rect.x ~y ~max_w:rect.w
-           ~style:(style_of ~theme tone)
-           (Diff.numbered_gutter ~old_line:l.old_line ~new_line:l.new_line ~marker
-           ^ l.text))
-  | L.Pair { left; right } ->
-      let half = rect.w / 2 in
-      draw_half ~grid ~theme ~clip:rect ~x:rect.x ~y ~w:(half - 1) left;
-      draw_half ~grid ~theme ~clip:rect ~x:(rect.x + half) ~y ~w:(rect.w - half) right
+  | L.Single l -> draw_single ~grid ~theme ~rect ~y l
+  | L.Pair { left; right } -> draw_pair ~grid ~theme ~rect ~y ~left ~right
 
 let draw_diff ~(model : Model.t) ~grid ~(hdr_rect : Rect.t) ~(vis_rect : Rect.t)
     ~(theme : Theme.t) =
   let inf = model.infra in
   let lang = model.lang in
-  let cols = model.viewport.cols in
+  let cols = vis_rect.w in
   let rows = Infra_store.review_diff_rows ~cols inf in
   let selected =
     Option.bind (Infra_store.review_selected_index inf) (fun i ->

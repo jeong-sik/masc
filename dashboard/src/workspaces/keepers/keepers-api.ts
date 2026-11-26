@@ -1299,7 +1299,7 @@ export function reconstructJournalReply(events: readonly ChatJournalEvent[]): {
 export async function recoverCutReplyFromJournal(
   keeper: string,
   operationId: string,
-): Promise<Result<ReturnType<typeof reconstructJournalReply>, ApiError>> {
+): Promise<Result<ReturnType<typeof reconstructJournalReply> & { readonly eventCount: number }, ApiError>> {
   const allEvents: ChatJournalEvent[] = []
   let cursor: ChatJournalCursor | null = null
   let pages = 0
@@ -1324,7 +1324,7 @@ export async function recoverCutReplyFromJournal(
     cursor = res.value.next
   }
 
-  return ok(reconstructJournalReply(allEvents))
+  return ok({ ...reconstructJournalReply(allEvents), eventCount: allEvents.length })
 }
 
 export type ChatSubmitMode =
@@ -1589,6 +1589,7 @@ export async function enqueueKeeperChat(params: {
   readonly fetchImpl?: typeof fetch
 }): Promise<{
   readonly accepted: boolean
+  readonly rejected: boolean
   readonly state: string | null
   readonly controlToken: string | null
   readonly error: string | null
@@ -1596,7 +1597,7 @@ export async function enqueueKeeperChat(params: {
   const fetchImpl = params.fetchImpl ?? globalThis.fetch
   const startEpoch = currentSessionEpoch()
   if (params.signal?.aborted) {
-    return { accepted: false, state: null, controlToken: null, error: 'aborted' }
+    return { accepted: false, rejected: false, state: null, controlToken: null, error: 'aborted' }
   }
 
   const controller = new AbortController()
@@ -1618,14 +1619,14 @@ export async function enqueueKeeperChat(params: {
     })
 
     if (!isEpochCurrent(startEpoch)) {
-      return { accepted: false, state: null, controlToken: null, error: 'session_epoch_changed' }
+      return { accepted: false, rejected: false, state: null, controlToken: null, error: 'session_epoch_changed' }
     }
     if (!res.ok) {
       const txt = await res.text().catch(() => `HTTP ${res.status}`)
-      return { accepted: false, state: null, controlToken: null, error: txt.trim() || `HTTP ${res.status}` }
+      return { accepted: false, rejected: true, state: null, controlToken: null, error: txt.trim() || `HTTP ${res.status}` }
     }
     if (!res.body) {
-      return { accepted: false, state: null, controlToken: null, error: '스트림 본문 없음' }
+      return { accepted: false, rejected: false, state: null, controlToken: null, error: '스트림 본문 없음' }
     }
 
     const reader = res.body.getReader()
@@ -1633,6 +1634,7 @@ export async function enqueueKeeperChat(params: {
     let buf = ''
     let result: {
       readonly accepted: boolean
+      readonly rejected: boolean
       readonly state: string | null
       readonly controlToken: string | null
       readonly error: string | null
@@ -1658,6 +1660,7 @@ export async function enqueueKeeperChat(params: {
       if (evType === 'RUN_ERROR') {
         result = {
           accepted: false,
+          rejected: true,
           state: null,
           controlToken: null,
           error: asStr(ev.message) ?? '전송 오류',
@@ -1668,6 +1671,7 @@ export async function enqueueKeeperChat(params: {
         const inter = isRecord(ev.value.interactive) ? ev.value.interactive : null
         result = {
           accepted: true,
+          rejected: false,
           state: asStr(ev.value.state) ?? 'Queued',
           controlToken: inter ? asStr(inter.chat_control_token) : null,
           error: null,
@@ -1707,22 +1711,24 @@ export async function enqueueKeeperChat(params: {
 
     if (result !== null) return result
     if (!isEpochCurrent(startEpoch)) {
-      return { accepted: false, state: null, controlToken: null, error: 'session_epoch_changed' }
+      return { accepted: false, rejected: false, state: null, controlToken: null, error: 'session_epoch_changed' }
     }
     if (abortedBeforeClose) {
       return {
         accepted: false,
+        rejected: false,
         state: null,
         controlToken: null,
         error: abortReasonBeforeClose === 'session_epoch_changed' ? 'session_epoch_changed' : 'aborted',
       }
     }
-    return { accepted: false, state: null, controlToken: null, error: 'acceptance_unconfirmed' }
+    return { accepted: false, rejected: false, state: null, controlToken: null, error: 'acceptance_unconfirmed' }
   } catch (e) {
     if (controller.signal.aborted) {
       const reason = controller.signal.reason
       return {
         accepted: false,
+        rejected: false,
         state: null,
         controlToken: null,
         error: reason === 'session_epoch_changed' ? 'session_epoch_changed' : 'aborted',
@@ -1730,6 +1736,7 @@ export async function enqueueKeeperChat(params: {
     }
     return {
       accepted: false,
+      rejected: false,
       state: null,
       controlToken: null,
       error: e instanceof Error ? e.message : String(e),
@@ -1759,6 +1766,7 @@ export function createChatStreamFrameDispatcher(params: {
 }): ChatStreamFrameDispatcher {
   let terminal = false
   let acceptedTerminalState: 'Succeeded' | 'Failed' | 'Cancelled' | null = null
+  let seenReplyDetails = false
   let mediaOwnership = FRESH_OWNERSHIP
   const completedMedia = new Map<string, RetainedChatImage>()
 
@@ -1934,6 +1942,7 @@ export function createChatStreamFrameDispatcher(params: {
           acceptedTerminalState = state
         }
       } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
+        seenReplyDetails = true
         params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
       }
     }
@@ -1943,14 +1952,19 @@ export function createChatStreamFrameDispatcher(params: {
   const finalizeOnEof = (): boolean => {
     if (terminal) return true
     if (acceptedTerminalState === null) return false
-    terminal = true
     if (acceptedTerminalState === 'Succeeded') {
+      // Only finalize Succeeded without RUN_FINISHED when authoritative
+      // KEEPER_REPLY_DETAILS arrived; otherwise leave non-terminal so the
+      // caller reconciles the full reply from /chat/events journal.
+      if (!seenReplyDetails) return false
+      terminal = true
       params.callbacks.onFinished?.()
-    } else {
-      params.callbacks.onError?.(
-        acceptedTerminalState === 'Cancelled' ? '작업이 취소되었습니다.' : '작업이 실패했습니다.',
-      )
+      return true
     }
+    terminal = true
+    params.callbacks.onError?.(
+      acceptedTerminalState === 'Cancelled' ? '작업이 취소되었습니다.' : '작업이 실패했습니다.',
+    )
     return true
   }
 

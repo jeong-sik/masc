@@ -604,17 +604,35 @@ let run_admitted_request
       ~urgency
 ;;
 
+(* One exclusive maintenance attempt on the Keeper's Owner. Both the registered
+   path and the dormant-Keeper cancellation path commit through it, so the
+   commit never overlaps a turn or a chat operation the Owner is running. *)
+let run_under_owner_maintenance ~base_path ~keeper_name run =
+  match Keeper_owner_registry.run_maintenance_if_idle ~base_path ~keeper_name run with
+  | Ok (`Ran result) -> result
+  | Ok (`Busy block) ->
+    Error ("keeper owner is busy: " ^ Keeper_owner.autonomous_block_to_string block)
+  | Error error ->
+    Error
+      ("keeper owner unavailable: "
+       ^ Keeper_owner_registry.command_error_to_string error)
+;;
+
 let run_fresh_request ~config ~base_path ~keeper_name request =
   match Keeper_registry.get ~base_path keeper_name with
   | None ->
     (match request with
      | Transfer _ | Reprioritize _ -> Error "keeper is not registered"
      | Cancel _ ->
-       (* Cancellation is the recovery path for a queue whose owner was
-          intentionally removed.  Reserve the lifecycle key before proving
-          that both live and durable owner identities are absent; registration
-          and Keeper creation use the same reservation boundary, so no owner
-          can appear between admission and the durable transition commit. *)
+       (* Cancellation is the recovery path for a queue whose Keeper has no
+          live registration. Two kinds of Keeper reach it: one whose metadata
+          was intentionally removed (an orphan queue), and one that is still
+          configured but was not booted (manual activation, or paused). The
+          second keeps its Owner, so the commit runs on the Owner like the
+          registered path does. Reserve the lifecycle key before reading either
+          fact; registration and Keeper creation use the same reservation
+          boundary, so no registration can appear between admission and the
+          durable transition commit. *)
        (match
           Keeper_lifecycle_reservation.acquire
             ~base_path
@@ -632,7 +650,7 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
             | ( Keeper_lifecycle_reservation.Release_missing
               | Keeper_lifecycle_reservation.Release_not_owner _ ) as outcome ->
               Log.Keeper.error
-                "orphan event cancellation reservation release failed keeper=%s outcome=%s"
+                "unregistered event cancellation reservation release failed keeper=%s outcome=%s"
                 keeper_name
                 (Keeper_lifecycle_reservation.release_outcome_to_string outcome)
           in
@@ -640,14 +658,21 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
             ~finally:(fun () -> Eio.Cancel.protect release)
             (fun () ->
                match Keeper_registry.get ~base_path keeper_name with
-               | Some _ -> Error "keeper registered during orphan cancellation admission"
+               | Some _ -> Error "keeper registered during cancellation admission"
                | None ->
                  (match Keeper_meta_store.read_meta config keeper_name with
                   | Error detail ->
                     Error ("keeper metadata is unavailable: " ^ detail)
                   | Ok (Some _) ->
-                    Error
-                      "keeper metadata exists; boot or resume the owner before cancelling events"
+                    run_under_owner_maintenance
+                      ~base_path
+                      ~keeper_name
+                      (fun () ->
+                         run_admitted_request
+                           ~config
+                           ~base_path
+                           ~keeper_name
+                           request)
                   | Ok None ->
                     run_admitted_request
                       ~config
@@ -655,27 +680,18 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
                       ~keeper_name
                       request))))
   | Some _ ->
-    (match
-       Keeper_owner_registry.run_maintenance_if_idle
-         ~base_path
-         ~keeper_name
-         (fun () ->
-            match Keeper_registry.get ~base_path keeper_name with
-            | None -> Error "keeper registration disappeared"
-            | Some _ ->
-              run_admitted_request
-                ~config
-                ~base_path
-                ~keeper_name
-                request)
-     with
-     | Ok (`Ran result) -> result
-     | Ok (`Busy block) ->
-       Error ("keeper owner is busy: " ^ Keeper_owner.autonomous_block_to_string block)
-     | Error error ->
-       Error
-         ("keeper owner unavailable: "
-          ^ Keeper_owner_registry.command_error_to_string error))
+    run_under_owner_maintenance
+      ~base_path
+      ~keeper_name
+      (fun () ->
+         match Keeper_registry.get ~base_path keeper_name with
+         | None -> Error "keeper registration disappeared"
+         | Some _ ->
+           run_admitted_request
+             ~config
+             ~base_path
+             ~keeper_name
+             request)
 ;;
 
 let run ~config ~keeper_name request =

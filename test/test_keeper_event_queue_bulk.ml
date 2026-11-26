@@ -181,6 +181,78 @@ let test_committed_projection_failure_stays_visible () =
     check int "exact outbox retained for recovery" 1 (List.length (State.transition_outbox state)))
 ;;
 
+(* A configured Keeper that was not booted (manual activation, or paused) has
+   metadata and an Owner but no live registration. The operator can still clear
+   its queue; the commit runs on the Owner. *)
+let test_dormant_keeper_queue_is_cancelled () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_file "bulk-dormant" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) (fun () ->
+        let config = Workspace_core.default_config base_path in
+        ignore (Workspace_core.init config ~agent_name:(Some "test"));
+        (match
+           Keeper_owner_registry.install_from_store
+             ~sw
+             ~operation_runner:None
+             ~on_turn_slot_released:None
+             config
+         with
+         | Ok _ -> ()
+         | Error error ->
+           fail
+             ("owner inventory install failed: "
+              ^ Keeper_owner_registry.install_error_to_string error));
+        let keeper_name = "bulk-dormant" in
+        let meta =
+          match
+            Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ])
+          with
+          | Ok meta -> meta
+          | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
+        in
+        (match Keeper_owner_registry.create_meta ~base_path meta with
+         | Ok (Some _) -> ()
+         | Ok None -> fail "keeper create did not persist meta"
+         | Error err ->
+           fail
+             ("keeper create failed: "
+              ^ Keeper_owner_registry.command_error_to_string err));
+        check
+          bool
+          "keeper has no live registration"
+          false
+          (Option.is_some (Masc.Keeper_registry.get ~base_path keeper_name));
+        enqueue ~base_path ~keeper_name "stale-board-alert";
+        let planned = Bulk.rows_for_keeper ~base_path keeper_name |> require_ok in
+        let results =
+          Bulk.execute_rows
+            ~cancel:(Bulk.cancel_row ~config)
+            ~operation_id:"dormant-keeper"
+            ~reason:"operator cleared a keeper that is not booted"
+            planned
+        in
+        check int "the row has an outcome" 1 (List.length results);
+        List.iter
+          (fun (result : Bulk.row_result) ->
+             match result.status with
+             | Bulk.Cancelled -> ()
+             | Bulk.Committed_followup_failed -> fail "projection did not complete"
+             | Bulk.Failed detail -> fail detail)
+          results;
+        let state = read_pending ~base_path ~keeper_name in
+        check int "no pending work" 0 (List.length (State.pending_selections state))))
+;;
+
 (* The census must not turn a read failure into an empty fleet. The dry-run
    count and the executed set are the same plan, so a dropped keeper would
    make both wrong: the operator would read a failed read as an empty queue
@@ -285,6 +357,7 @@ let () =
                    ; test_case "filters and admission age" `Quick test_filters_and_age ]
     ; "durable", [ test_case "two rows of one keeper finish their own outboxes" `Quick test_two_cancellations_project_before_next
                  ; test_case "new enqueue outside preview survives" `Quick test_new_enqueue_survives_execution
-                 ; test_case "committed cancellation survives projection failure" `Quick test_committed_projection_failure_stays_visible ]
+                 ; test_case "committed cancellation survives projection failure" `Quick test_committed_projection_failure_stays_visible
+                 ; test_case "keeper with metadata and no registration is cancelled through its owner" `Quick test_dormant_keeper_queue_is_cancelled ]
     ; "census", [ test_case "read failure stays an error" `Quick test_census_read_failure_is_an_error ]
     ; "backup", [ test_case "creates operation target record folder" `Quick test_backup_is_written_on_a_workspace_without_the_folder ] ]

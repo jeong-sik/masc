@@ -161,7 +161,7 @@ let test_load_overrides_files () =
     ~finally:(fun () ->
       (try Sys.remove (Filename.concat dir "midnight.toml") with Sys_error _ -> ());
       (try Sys.remove (Filename.concat dir "nord.toml") with Sys_error _ -> ());
-      (try Sys.remove dir with Sys_error _ -> ());
+      (try Unix.rmdir dir with Unix.Unix_error _ -> ());
       Theme.clear_palette_overrides ())
     (fun () ->
       (* An absent directory is quiet: no warnings, built-in kept. *)

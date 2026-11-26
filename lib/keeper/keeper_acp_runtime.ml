@@ -1847,17 +1847,25 @@ type next_start =
   | History_before_rows of
       { history : Agent_core.Types.message list
       ; before_rows : int
-      ; rows_follow : bool
       }
-  (* No summary applies yet, and the first [before_rows] atoms of [history]
+  (* No summary applies yet, the first [before_rows] atoms of [history]
      belong to turns the handoff list does not hold, such as the turns before
-     a Fresh state. The summary takes them. Its settled turn has no row, so
-     the watermark prunes none and the handoff list then holds the summary and
-     every row. When [rows_follow], the next atom's turn has a row, and that
-     handoff list is compacted next, as with a summary. Otherwise
-     [before_rows] counts every atom: there is no row, or no row's turn is in
-     the history, such as a row that still carries the current turn's ACP
-     turn id. *)
+     a Fresh state, and the next atom's turn has a row. The summary takes
+     those atoms. Its settled turn has no row, so the watermark prunes none,
+     and the handoff list, which then holds the summary and every row, is
+     compacted next. *)
+  | History_without_rows of
+      { history : Agent_core.Types.message list
+      ; atom_count : int
+      }
+  (* No summary applies yet, and no turn of [history] has a row: there is no
+     row, or every row carries an id the history lacks, such as the current
+     turn's ACP turn id. The summary takes every atom, and the start holds it
+     and every row. Nothing tells which turns those rows are: the summary may
+     hold them under Keeper turn ids, and summarizing them again could make
+     an older request the active intent (#55026). So the rows stay whole, and
+     when an overflow retry still overflows, a later shrink drops the oldest
+     of them from its start window. *)
   | History_list of Agent_core.Types.message list
   (* The canonical turn store cannot be read, and this is the history. The
      start sends it while the store stays unreadable, so the most recent
@@ -1870,10 +1878,8 @@ let next_start_list ~keepers_dir ~keeper_id ~history =
   | Ok { Keeper_canonical_turn_store.anchor = None; messages; turns_after_anchor = rows } ->
     (match first_atom_with_row ~rows history with
      | _, Some 0, _ | _, None, 0 -> Ok (Handoff_list messages)
-     | history, Some before_rows, _ ->
-       Ok (History_before_rows { history; before_rows; rows_follow = true })
-     | history, None, atom_count ->
-       Ok (History_before_rows { history; before_rows = atom_count; rows_follow = false }))
+     | history, Some before_rows, _ -> Ok (History_before_rows { history; before_rows })
+     | history, None, atom_count -> Ok (History_without_rows { history; atom_count }))
   | Error (Keeper_canonical_turn_store.Compaction_store err) ->
     (* The compaction would fail on the same store. *)
     Error err
@@ -1913,13 +1919,11 @@ let compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source =
     ~prefix
 ;;
 
+(* [Ok (Some _)] when an epoch committed, the later one when two did, and
+   [Error] only when none did. *)
 let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
   let* start = next_start_list ~keepers_dir ~keeper_id ~history in
-  match start with
-  | Handoff_list source ->
-    compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source
-  | History_list source ->
-    let messages, prefix = split_older_for_rollover ?keep_ratio source in
+  let compact_history ~messages ~prefix =
     compact_prefix
       ~keepers_dir
       ~keeper_id
@@ -1927,33 +1931,38 @@ let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~histor
       ~frame:Keeper_compaction_atom.Message_history
       ~messages
       ~prefix
-  | History_before_rows { history; before_rows; rows_follow } ->
-    let* summary =
-      compact_prefix
-        ~keepers_dir
-        ~keeper_id
-        ~trigger
-        ~frame:Keeper_compaction_atom.Message_history
-        ~messages:history
-        ~prefix:before_rows
-    in
-    (match summary, rows_follow with
-     | Some _, true ->
+  in
+  match start with
+  | Handoff_list source ->
+    compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source
+  | History_list source ->
+    let messages, prefix = split_older_for_rollover ?keep_ratio source in
+    compact_history ~messages ~prefix
+  | History_without_rows { history; atom_count } ->
+    compact_history ~messages:history ~prefix:atom_count
+  | History_before_rows { history; before_rows } ->
+    let* summary = compact_history ~messages:history ~prefix:before_rows in
+    (match summary with
+     | None -> Ok None
+     | Some _ ->
+       (* The summary committed. A failure from here keeps every row whole,
+          and the next compaction takes the handoff list. *)
+       let rows_kept detail =
+         Log.Keeper.warn
+           ~keeper_name:keeper_id
+           "ACP compaction kept every row after its summary: %s"
+           detail;
+         Ok summary
+       in
        (match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
         | Ok { Keeper_canonical_turn_store.anchor = Some _; messages; turns_after_anchor = _ } ->
-          let* later =
-            compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger messages
-          in
-          Ok (if Option.is_some later then later else summary)
+          (match compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger messages with
+           | Ok (Some _ as later) -> Ok later
+           | Ok None -> Ok summary
+           | Error err -> rows_kept (Keeper_compaction.store_error_to_string err))
         | Ok { Keeper_canonical_turn_store.anchor = None; messages = _; turns_after_anchor = _ }
-          -> Ok summary
-        | Error err ->
-          Log.Keeper.warn
-            ~keeper_name:keeper_id
-            "ACP compaction kept every row after its summary; handoff list unreadable: %s"
-            (Keeper_canonical_turn_store.store_error_to_string err);
-          Ok summary)
-     | Some _, false | None, (true | false) -> Ok summary)
+          -> rows_kept "the summary it committed does not apply"
+        | Error err -> rows_kept (Keeper_canonical_turn_store.store_error_to_string err)))
 ;;
 
 let compact_for_rollover

@@ -421,10 +421,11 @@ type model_spec =
     (** [compaction-keep-ratio] — per-model fraction of atoms kept after a
         rollover eviction, in [0.0, 1.0]. [None] uses the fallback default at
         the consumer (historically 0.25, i.e. keep the newest quarter). An ACP
-        compaction applies it to the canonical turn handoff list. Before any
-        summary applies, it first summarizes every atom of the history before
-        the first turn with a row, all of them when no row's turn is in the
-        history. *)
+        compaction applies it to the canonical turn handoff list, and to the
+        message history while the canonical turn store cannot be read. Before
+        any summary applies, it first summarizes every atom of the history
+        before the first turn with a row, all of them when no row's turn is in
+        the history. *)
   ; agent_compaction_threshold : float option
     (** [agent-compaction-threshold] — the fraction of the lane's declared
         limit at which an ACP host compacts its own session during a turn,

@@ -1652,9 +1652,12 @@ let test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request () =
    turns no row holds, such as those before a Fresh state, reach the start
    only through the summary, so they compact those turns of the message
    history first, then the handoff list that holds that summary and every
-   row. When no row's turn is in the history, as with no row or a row that
-   still carries its ACP turn id, the summary takes all of the history and
-   the start holds it and every row. With the canonical turn store
+   row. When no row's turn is in the history, as with no row or rows that
+   still carry ACP turn ids, the summary takes all of the history and the
+   start holds it and every row: those rows may repeat the summarized turns,
+   and summarizing them again could make an older request the last one. An
+   overflow retry marks its run compacted once an epoch commits. With the
+   canonical turn store
    unreadable they compact the history, leaving its most recent atoms for
    the start, which sends it. An unreadable compaction store skips the
    compaction, which would fail on the same store. *)
@@ -1674,6 +1677,11 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
     Result.get_ok
       (Llm_provider.Input_budget.of_agent_window ~model_id:"acp-test" ~max_context_tokens:200_000)
   in
+  let epoch_count keeper_id =
+    match C.inspect_stats ~keepers_dir ~keeper_id with
+    | Ok stats -> stats.C.epoch_count
+    | Error err -> fail (C.store_error_to_string err)
+  in
   let producers =
     [ ( "rollover"
       , fun keeper_id ->
@@ -1685,15 +1693,19 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
             ~initial_messages:history )
     ; ( "overflow"
       , fun keeper_id ->
+          let already_compacted = ref false in
+          let epochs_before = epoch_count keeper_id in
           Keeper_acp_runtime.For_testing.compact_once_for_overflow
-            ~already_compacted:(ref false)
+            ~already_compacted
             ~keepers_dir
             ~keeper_id
             ~input_limit
             ~previous_capacity:400_000
             ~refused_sent_bytes:None
             ~capacity:200_000
-            ~initial_messages:history )
+            ~initial_messages:history;
+          check bool "overflow: a committed epoch marks the run compacted"
+            (epoch_count keeper_id > epochs_before) !already_compacted )
     ]
   in
   let archives ~needle keeper_id =
@@ -1703,6 +1715,14 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
   in
   let archives_a_tool_round = archives ~needle:"call-k#1-grep" in
   let archives_the_answer_to turn = archives ~needle:("answer " ^ turn) in
+  let turns_archived_by ~epoch keeper_id =
+    List.map
+      (fun (_, (name : A.name), _) ->
+         match name with
+         | A.In_turn { turn; ordinal = _ } -> Ids.Turn_id.to_string turn
+         | A.Leading index -> Printf.sprintf "leading %d" index)
+      (atoms_of_epoch ~keepers_dir ~keeper_id epoch)
+  in
   let start_length keeper_id =
     List.length
       (Keeper_acp_runtime.For_testing.hydrate_start_messages
@@ -1723,6 +1743,8 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        compact_for fresh_state;
        check (list string) (producer ^ ": the history before the rows, then the handoff list")
          [ "message_history"; "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:fresh_state);
+       check (list string) (producer ^ ": the history summary stops before the first row's turn")
+         [ "k#1"; "k#1"; "k#1" ] (turns_archived_by ~epoch:1 fresh_state);
        check bool (producer ^ ": k#1, which no row holds, with its tool round") true
          (archives_a_tool_round fresh_state);
        check bool (producer ^ ": then the oldest row") true (archives_the_answer_to "k#2" fresh_state);
@@ -1739,6 +1761,26 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        check bool (producer ^ ": leaving k#4's row") false (archives_the_answer_to "k#4" fresh_state);
        check string (producer ^ ": whose last request is k#3's") "ask k#3" (latest_intent fresh_state);
        check int (producer ^ ": for the start, after the anchor") 3 (start_length fresh_state);
+       let one_row = producer ^ "-one-row" in
+       commit_rows ~keepers_dir ~keeper_id:one_row [ "k#3" ];
+       compact_for one_row;
+       check (list string) (producer ^ ": a handoff list of one row is left whole")
+         [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:one_row);
+       check (list string) (producer ^ ": after the history before it is summarized")
+         [ "k#1"; "k#1"; "k#1"; "k#2"; "k#2"; "k#2" ] (turns_archived_by ~epoch:1 one_row);
+       check int (producer ^ ": so the start holds the summary and the row") 3
+         (start_length one_row);
+       let current_turn = producer ^ "-with-the-current-turn-row" in
+       commit_rows ~keepers_dir ~keeper_id:current_turn [ "k#2"; "k#3"; "acp:sess-1:4" ];
+       compact_for current_turn;
+       check (list string) (producer ^ ": rows after the history are compacted after it")
+         [ "message_history"; "canonical_turns" ]
+         (epoch_frames ~keepers_dir ~keeper_id:current_turn);
+       check bool (producer ^ ": through k#3") true (archives_the_answer_to "k#3" current_turn);
+       check (list string) (producer ^ ": leaving the current turn's row")
+         [ "acp:sess-1:4" ]
+         (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:current_turn)));
+       check int (producer ^ ": for the start, after the anchor") 3 (start_length current_turn);
        let provisional = producer ^ "-acp-turn-id-row" in
        commit_rows ~keepers_dir ~keeper_id:provisional [ "acp:sess-1:4" ];
        compact_for provisional;
@@ -1748,6 +1790,18 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        check (list string) (producer ^ ": and the row")
          [ "acp:sess-1:4" ] (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:provisional)));
        check int (producer ^ ": which the start holds after the anchor") 3 (start_length provisional);
+       let stale = producer ^ "-acp-turn-id-rows" in
+       commit_rows ~keepers_dir ~keeper_id:stale [ "acp:sess-1:1"; "acp:sess-1:2"; "acp:sess-1:3" ];
+       compact_for stale;
+       check (list string) (producer ^ ": rows that may repeat the summarized turns stay whole")
+         [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:stale);
+       check (list string) (producer ^ ": all of them")
+         [ "acp:sess-1:1"; "acp:sess-1:2"; "acp:sess-1:3" ]
+         (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id:stale)));
+       check string (producer ^ ": so no older request becomes the last one") "ask k#3"
+         (latest_intent stale);
+       check int (producer ^ ": and the start holds the summary and every row") 7
+         (start_length stale);
        let from_the_start = producer ^ "-rows-from-the-first-turn" in
        commit_rows ~keepers_dir ~keeper_id:from_the_start turns;
        compact_for from_the_start;

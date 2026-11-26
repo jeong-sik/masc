@@ -136,7 +136,8 @@ val latest_over : frame -> latest -> coverage option
 type front =
   | Front of int
       (** Both kinds' latest boundaries land in the list: the summary holds
-          its atoms through this index, and no later ones ([-1]: none). *)
+          its atoms through this index ([-1]: none), and of the later ones
+          only those a boundary archived past itself ([beyond]). *)
   | Front_at_least of int
       (** A latest boundary names a turn the list does not hold: the summary
           holds the atoms through this index and may hold later ones. *)

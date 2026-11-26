@@ -204,6 +204,11 @@ val prefix_eviction_of_window
       request is no newer than the summary's. Observations of tool rounds
       still archived past a boundary ([beyond]) do not count, because the
       summary has not taken their turn's request.
+    - When no atom of [messages] belongs to a turn an observation names,
+      nothing holds the active intent back. A canonical turn list whose
+      covered rows were pruned holds only newer turns, but when every row
+      the summary holds still keeps its ACP turn id (#55026), an older
+      request can become the active intent.
 
     The new atoms are secret-redacted and archived verbatim. The committed
     anchor is always bounded via {!bound_anchor_to_budget} (falling back to
@@ -226,9 +231,11 @@ val compact_evicted_messages
     [latest] covers ({!Keeper_compaction_atom.front}) and the last inline
     compaction anchor message. Returns [messages] unchanged when neither is in
     it. A latest boundary whose turn [messages] does not hold cuts nothing, so
-    the cut may land before the previous call's; it never lands past what the
-    summary holds. Reads message metadata once; nothing is serialized or
-    hashed. *)
+    the cut may land before the previous call's. It never lands past a turn a
+    summary holds, though a boundary written over the canonical turn list
+    also cuts the tool rounds of the turns it covers, which that summary does
+    not hold: the cut decides only which tools the next turn carries. Reads
+    message metadata once; nothing is serialized or hashed. *)
 val messages_after_front
   :  latest:Keeper_compaction_atom.latest
   -> Agent_core.Types.message list

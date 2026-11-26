@@ -1781,40 +1781,67 @@ let make_stream_projection
 
 let default_keep_ratio = 0.25
 
+(* A rollover keeps at least this many of the most recent atoms, so a list of
+   this many atoms or fewer is not compacted. *)
+let min_kept_atoms = 2
+
+let without_synthetic_preamble (messages : Agent_core.Types.message list) =
+  List.filter
+    (fun (m : Agent_core.Types.message) ->
+       not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+    messages
+;;
+
 (* [messages] without synthetic preambles, and how many of its atoms to evict
    from the front. The split is on [Runtime_model_input_tail_window] [Atom]
    boundaries, so pinned entries (System, compaction anchors, working state,
    outside context) are never counted or evicted and [Assistant(tool_use)] +
    [Tool(tool_result)] pairs are never split apart. *)
 let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message list) =
-  let without_preamble =
-    List.filter
-      (fun (m : Agent_core.Types.message) ->
-         not (Runtime_model_input_tail_window.is_synthetic_preamble m))
-      messages
-  in
+  let without_preamble = without_synthetic_preamble messages in
   let ratio = Option.value keep_ratio ~default:default_keep_ratio in
   let _, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
-  if atom_count <= 2
+  if atom_count <= min_kept_atoms
   then without_preamble, 0
   else (
-    let keep_recent = max 2 (int_of_float (Float.of_int atom_count *. ratio)) in
+    let keep_recent =
+      max min_kept_atoms (int_of_float (Float.of_int atom_count *. ratio))
+    in
     without_preamble, max 1 (atom_count - keep_recent))
 ;;
 
-(* The list the next fresh session starts from. After a rollover or an
-   overflow retry the start prefers the handoff list when it holds anything,
-   else the run's message history ({!hydrate_start_messages}); both producers
-   compact that list, so they write over one kind of list while the handoff
-   list holds anything. [history] is [initial_messages]. A projected start
-   window would not do: a boundary covers everything before it, so the turns
-   in front of the window would count as archived and the watermark would
-   prune their rows. *)
+(* [messages] without synthetic preambles, and all of its atoms to evict. A
+   list this short is left whole: nothing is committed, so the start sends it
+   ({!next_start}). *)
+let split_whole (messages : Agent_core.Types.message list) =
+  let without_preamble = without_synthetic_preamble messages in
+  let _, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
+  if atom_count <= min_kept_atoms then without_preamble, 0 else without_preamble, atom_count
+;;
+
+(* What the next fresh session starts from once a compaction commits, holding
+   the list both ACP producers compact. After a rollover or an overflow retry
+   the start prefers the handoff list when it holds anything, else it sends the
+   run's message history ({!hydrate_start_messages}). The list is
+   [initial_messages], never a projected start window: a boundary covers
+   everything before it, so the turns in front of the window would count as
+   archived and the watermark would prune their rows. *)
+type next_start =
+  | Handoff_list of Agent_core.Types.message list
+  (* The anchor and the rows past the watermark. The start keeps the rows
+     past the new boundary, so the most recent atoms stay whole. *)
+  | Anchor_alone of Agent_core.Types.message list
+  (* The handoff list is empty, and this is the history. The anchor the
+     compaction commits fills the handoff list, so the start holds that
+     anchor and no atom of the history: the summary takes them all. *)
+  | History_list of Agent_core.Types.message list
+  (* The canonical turn store cannot be read, and this is the history. The
+     start sends it, so the most recent atoms stay whole. *)
+
 let next_start_list ~keepers_dir ~keeper_id ~history =
   match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
-  | Ok handoff when handoff.messages <> [] ->
-    Ok (Keeper_compaction_atom.Canonical_turns, handoff.messages)
-  | Ok _ -> Ok (Keeper_compaction_atom.Message_history, history)
+  | Ok handoff when handoff.messages <> [] -> Ok (Handoff_list handoff.messages)
+  | Ok _ -> Ok (Anchor_alone history)
   | Error (Keeper_canonical_turn_store.Compaction_store err) ->
     (* The compaction would fail on the same store. *)
     Error err
@@ -1826,12 +1853,19 @@ let next_start_list ~keepers_dir ~keeper_id ~history =
       ~keeper_name:keeper_id
       "ACP compaction uses the message history; handoff list unreadable: %s"
       (Keeper_canonical_turn_store.store_error_to_string err);
-    Ok (Keeper_compaction_atom.Message_history, history)
+    Ok (History_list history)
 ;;
 
 let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
-  let* frame, source_messages = next_start_list ~keepers_dir ~keeper_id ~history in
-  let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
+  let* start = next_start_list ~keepers_dir ~keeper_id ~history in
+  let frame, (messages, prefix) =
+    match start with
+    | Handoff_list source ->
+      Keeper_compaction_atom.Canonical_turns, split_older_for_rollover ?keep_ratio source
+    | Anchor_alone source -> Keeper_compaction_atom.Message_history, split_whole source
+    | History_list source ->
+      Keeper_compaction_atom.Message_history, split_older_for_rollover ?keep_ratio source
+  in
   if prefix = 0
   then Ok None
   else
@@ -3950,6 +3984,8 @@ module For_testing = struct
   let rollover_marker_matches = rollover_marker_matches
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
+
+  type nonrec next_start = next_start
 
   let next_start_list = next_start_list
 

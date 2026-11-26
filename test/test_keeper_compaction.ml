@@ -1645,11 +1645,13 @@ let test_a_boundary_turn_missing_from_the_rows_keeps_the_last_request () =
     (List.mem "x#2/1 assistant said \"answer x#2\"" (summary_lines behind))
 ;;
 
-(* A rollover and an overflow retry both open a fresh session, which starts
-   from the handoff list when the canonical turn store holds one and
-   otherwise from the message history: both compact that list, whether the
-   store is empty or unreadable. An unreadable compaction store skips the
-   compaction, which would fail on the same store. *)
+(* A rollover and an overflow retry both open a fresh session, and both
+   compact the list it starts from. With rows that is the handoff list: the
+   start holds the anchor and the rows past it. With none, the anchor they
+   commit is all the start holds, so they compact the whole message history.
+   With the canonical turn store unreadable the start is the message history
+   itself, whose most recent atoms they leave. An unreadable compaction store
+   skips the compaction, which would fail on the same store. *)
 let test_acp_producers_compact_the_list_the_next_session_starts_from () =
   with_pool
   @@ fun () ->
@@ -1688,10 +1690,20 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
             ~initial_messages:history )
     ]
   in
-  let archives_a_tool_round keeper_id =
+  let archives ~needle keeper_id =
     List.exists
-      (fun (_, _, json) -> contains ~needle:"call-k#1-grep" json)
+      (fun (_, _, json) -> contains ~needle json)
       (archived_atoms ~keepers_dir ~keeper_id)
+  in
+  let archives_a_tool_round = archives ~needle:"call-k#1-grep" in
+  let archives_the_last_answer = archives ~needle:"answer k#3" in
+  let start_length keeper_id =
+    List.length
+      (Keeper_acp_runtime.For_testing.hydrate_start_messages
+         ~keepers_dir
+         ~keeper_id
+         ~prefer_handoff:true
+         history)
   in
   List.iter
     (fun (producer, compact_for) ->
@@ -1701,11 +1713,16 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        check (list string) (producer ^ ": with rows it compacts the canonical turn list")
          [ "canonical_turns" ] (epoch_frames ~keepers_dir ~keeper_id:with_rows);
        check bool (producer ^ ": which holds no tool round") false (archives_a_tool_round with_rows);
+       check bool (producer ^ ": and leaves k#3's row") false (archives_the_last_answer with_rows);
+       check int (producer ^ ": for the start, after the anchor") 3 (start_length with_rows);
        let without_rows = producer ^ "-without-rows" in
        compact_for without_rows;
        check (list string) (producer ^ ": without rows it compacts the message history")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:without_rows);
        check bool (producer ^ ": the history it was given") true (archives_a_tool_round without_rows);
+       check bool (producer ^ ": all of it, since the start holds only the anchor") true
+         (archives_the_last_answer without_rows);
+       check int (producer ^ ": which is then the whole start") 1 (start_length without_rows);
        let unreadable = producer ^ "-unreadable-rows" in
        exec_all
          (Store.db_path ~keepers_dir ~keeper_id:unreadable)
@@ -1719,7 +1736,11 @@ let test_acp_producers_compact_the_list_the_next_session_starts_from () =
        check (list string) (producer ^ ": an unreadable store leaves the message history too")
          [ "message_history" ] (epoch_frames ~keepers_dir ~keeper_id:unreadable);
        check bool (producer ^ ": compacted from the history it was given") true
-         (archives_a_tool_round unreadable))
+         (archives_a_tool_round unreadable);
+       check bool (producer ^ ": up to its most recent atoms") false
+         (archives_the_last_answer unreadable);
+       check int (producer ^ ": since the start sends that history")
+         (List.length history) (start_length unreadable))
     producers;
   let broken = "unreadable-compaction-store" in
   exec_all

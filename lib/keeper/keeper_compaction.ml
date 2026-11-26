@@ -262,7 +262,13 @@ let first_nonblank_text (blocks : Agent_core.Types.content_block list) =
 (* Index of the last atom of [atoms] whose turn an observation of [previous]
    names, or [-1]. Observations of atoms still archived past a boundary
    ([beyond]) do not count: they are tool rounds of a turn in progress, whose
-   request the summary has not taken. *)
+   request the summary has not taken.
+
+   A turn that comes back later in the list counts at its last atom, so the
+   turns between its runs do not set the intent either. The names say which
+   turns the summary holds, not which of a turn's runs, and the later run may
+   hold a request newer than those turns: stopping at the first run would let
+   an older request replace it. *)
 let last_held_index
       ~(previous : compaction_anchor option)
       ~(latest : Keeper_compaction_atom.latest)

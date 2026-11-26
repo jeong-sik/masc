@@ -185,16 +185,20 @@ module For_testing : sig
     -> Agent_core.Types.message list
     -> Agent_core.Types.message list * int
 
-  (** The list a rollover and an overflow retry compact: the handoff list when
-      it holds anything, else [history]. [Error] when the compaction store
-      cannot be read, which the compaction would hit too. *)
+  (** What a fresh session after a rollover or an overflow retry starts from
+      once a compaction commits, holding the list both compact. *)
+  type next_start
+
+  (** The handoff list when it holds anything, kept to its most recent atoms.
+      Else [history], which the start then leaves for the anchor alone, so the
+      summary takes all of it. When the canonical turn store cannot be read,
+      [history] again, which the start sends itself. [Error] when the
+      compaction store cannot be read, which the compaction would hit too. *)
   val next_start_list
     :  keepers_dir:string
     -> keeper_id:string
     -> history:Agent_core.Types.message list
-    -> ( Keeper_compaction_atom.frame * Agent_core.Types.message list
-         , Keeper_compaction.store_error )
-         result
+    -> (next_start, Keeper_compaction.store_error) result
 
   val compact_for_rollover
     :  keepers_dir:string

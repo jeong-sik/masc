@@ -560,12 +560,26 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
     ; artifact reference body
     ; prefix
     ; Store.Evidence_note "run attached" ] in
-  check (list string) "only the complete artifact past the cap is withheld"
-    [ reference ] (Store.withheld_artifact_references items);
+  (* The transport decides what a request carries, and no second rule does.
+     Here the truncated prefix and the complete artifact past the aggregate cap
+     are both left out, in item order. *)
+  let omitted_of_transport items =
+    Store.submitted_evidence_access_transport_to_yojson
+      (Store.Evidence_available
+         { request = { Store.id = "vr-1"; task_id = "task-1"; worker = "producer"; created_at = 0. }
+         ; items })
+    |> member "items" |> to_list
+    |> List.filter_map (fun item ->
+      if member "content_omitted" item = `Bool true
+      then Some (member "reference" item |> to_string)
+      else None)
+  in
+  check (list string) "the transport omits the capped artifact and the truncated prefix"
+    [ reference; "artifact:oversize.txt" ] (omitted_of_transport (restored items));
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
     |> require "request-bound surface" in
   let name = "keeper_artifact_read" in
-  check bool "a withheld artifact brings the record reader" true (offers surface name);
+  check bool "the review offers the record reader" true (offers surface name);
   let bridge args =
     let result = call surface name args in
     let content = match Tool_bridge.to_agent_core_typed_result ~base_path:config.Workspace.base_path result with
@@ -611,30 +625,32 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   denied surface name (artifact_args "artifact:oversize.txt") "verification_source_unavailable";
   denied surface name (artifact_args "artifact:missing.txt") "verification_source_access_denied";
   denied surface name (artifact_args "note:run attached") "verification_source_access_denied";
-  invalid_input surface name (`Assoc ["sha256", `String (String.make 64 '0')]);
+  (* A stored page is read only through a fetch of this review. The gate is
+     exercised with a real fetch in the authority tools tests; here no fetch
+     answered, so any sha256 names no readable text. *)
+  denied surface name (`Assoc ["sha256", `String (String.make 64 '0')])
+    "verification_source_access_denied";
   invalid_input surface name (`Assoc ["reference", `String ""]);
-  (* The verifier declares its own input: the Keeper reader's paging arguments
-     are not this reader's. *)
+  (* The submitted form continues with cursor. The Keeper reader's paging
+     members belong to the sha256 form. *)
   invalid_input surface name
-    (`Assoc ["reference", `String "artifact:small.txt"; "offset", `Int 0]))
+    (`Assoc ["reference", `String "artifact:small.txt"; "offset", `Int 0]);
+  (* The two forms do not mix, even when each member is well formed. *)
+  invalid_input surface name
+    (`Assoc [ "sha256", `String (String.make 64 '0')
+            ; "cursor", `Assoc ["source_sha256", `String (String.make 64 '0'); "byte_offset", `Int 10] ]))
 
-(* Nothing withheld means nothing for the reader to do; the surface does not
-   grow a tool the review has no use for. *)
-let test_record_reader_is_offered_only_for_a_withheld_artifact () = with_fixture (fun config ->
+(* The reader is offered with every surface, because a web fetch can store a
+   long page at any time. A carried artifact is read from the record too: the
+   record holds its captured content whatever the transport carried. *)
+let test_record_reader_is_offered_and_serves_a_carried_artifact () = with_fixture (fun config ->
   let surface = VAT.create ~config ~producer:"producer"
     ~submitted_evidence:(restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ])
     |> require "request-bound surface" in
-  check (list string) "an artifact inside the cap is not withheld"
-    [] (Store.withheld_artifact_references
-          (restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ]));
-  check bool "a carried artifact needs no record reader" false
-    (offers surface "keeper_artifact_read");
-  (match call surface "keeper_artifact_read" (artifact_args "artifact:small.txt") with
-   | Tool_result.Failed _ as result ->
-     check bool "an unoffered reader is an unknown tool" true
-       (String_util.contains_substring (Tool_result.message result) "unknown tool")
-   | (Tool_result.Completed _ | Tool_result.Deferred _) ->
-     fail "a reader the review does not offer answered"))
+  check bool "the review offers the record reader" true (offers surface "keeper_artifact_read");
+  let carried = read surface "keeper_artifact_read" (artifact_args "artifact:small.txt") in
+  check string "a carried artifact is served from the record" "SMALL_BODY_9a0f"
+    (Yojson.Safe.Util.member "content" carried |> Yojson.Safe.Util.to_string))
 
 let () = run "Verifier submitted collaboration sources" ["submission", [
   test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;
@@ -647,4 +663,4 @@ let () = run "Verifier submitted collaboration sources" ["submission", [
   test_case "Task request owns snapshot before commit" `Quick test_task_request_persists_snapshot;
   test_case "full Board and Fusion bytes survive actual bridge paging" `Quick test_large_sources_survive_actual_bridge;
   test_case "withheld artifact is read from the record, not the file" `Quick test_withheld_artifact_is_read_from_the_record;
-  test_case "record reader is offered only for a withheld artifact" `Quick test_record_reader_is_offered_only_for_a_withheld_artifact]]
+  test_case "record reader is offered and serves a carried artifact" `Quick test_record_reader_is_offered_and_serves_a_carried_artifact]]

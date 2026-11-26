@@ -87,12 +87,6 @@ val submitted_evidence_identity_lines :
   Yojson.Safe.t -> (string list, string) result
 val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
 
-val withheld_artifact_references : submitted_evidence_item list -> string list
-(** References of the complete text artifacts the transport leaves out of the
-    review request for the aggregate evidence cap, in submission order. Their
-    whole content is in the submitted record. The transport and this list read
-    the same choice of carried artifacts. *)
-
 val evidence_read_failure_code : evidence_read_failure -> string
 val evidence_access_failure_to_string :
   request_id:string -> evidence_access_failure -> string

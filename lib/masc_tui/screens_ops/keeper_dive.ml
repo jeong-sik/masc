@@ -1332,15 +1332,16 @@ let build_progress_rows ~(theme : Theme.t) ~(model : Model.t) ~rail_rgb
       List.concat_map
         (function
           | Chat_transcript.Progress_single activity -> [ activity_row ~indent:"  " activity ]
-          | Chat_transcript.Progress_batch { size; members } ->
+          | Chat_transcript.Progress_batch { members; _ } ->
+              let running = List.length members in
               let header =
                 single_span_row ~rail_rgb
                   ~prefix:("  " ^ Glyph.to_utf8 Glyph.Tree_tee ^ " ")
                   ~prefix_fg:theme.status_active ~prefix_attrs:Attr.bold
                   ~text:
                     (Ops_common.say model
-                       ~ko:(Printf.sprintf "동시 실행 %d개" size)
-                       ~en:(Printf.sprintf "%d running at once" size))
+                       ~ko:(Printf.sprintf "동시 실행 %d개" running)
+                       ~en:(Printf.sprintf "%d running at once" running))
                   ~text_fg:theme.status_active ~attrs:Attr.bold
                   ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
               in
@@ -1394,8 +1395,11 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
             ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ();
         ]
   in
+  (* The open work shows while the turn runs, whether or not the header
+     above it does: the status strip names one thing, these rows name each. *)
+  let progress_rows = build_progress_rows ~theme ~model ~rail_rgb turn in
   if not (Chat_transcript.show_active_turn_summary ~model ~keeper turn) then
-    tail_rows
+    progress_rows @ tail_rows
   else
     let summary =
       Printf.sprintf "%s · %s"
@@ -1432,7 +1436,7 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
         ~right_meta_fg:rail_rgb ~right_meta_attrs:Attr.italic
         ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
     in
-    (hdr_row :: build_progress_rows ~theme ~model ~rail_rgb turn) @ tail_rows
+    (hdr_row :: progress_rows) @ tail_rows
 
 let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~pad_x ~scroll rows =

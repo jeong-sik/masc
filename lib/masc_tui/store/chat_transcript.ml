@@ -2873,11 +2873,9 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
           | Section_history msgs -> count_history msgs
           | Section_active_turn turn ->
               let summary =
-                if show_active_turn_summary ~model ~keeper turn then
-                  1 + progress_row_count turn
-                else 0
+                if show_active_turn_summary ~model ~keeper turn then 1 else 0
               in
-              summary
+              summary + progress_row_count turn
               + if Option.is_some (active_turn_preview_tail turn) then 1 else 0
           | Section_pending txs -> List.length txs
           | Section_stream sp -> count_stream sp

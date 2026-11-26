@@ -771,6 +771,26 @@ let test_acp_read_and_full_run_in_the_keepers_private_folder () =
       (cwd Runtime_native_tools.Native_none))
 ;;
 
+(* A read Keeper whose posture comes from its Keeper file reads the sandbox
+   from that file. With no file the folder rule stops at the typed field,
+   before any session is claimed, and makes no folder. *)
+let test_acp_read_without_a_keeper_file_stops_at_the_sandbox_field () =
+  let base_path = Filename.temp_dir "acp-native-cwd-no-keeper-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    (match
+       Keeper_acp_runtime.For_testing.native_cwd_of_posture ~base_path ~keeper_name:"keeper-a"
+         ~required_native_posture:None Runtime_native_tools.Native_read
+     with
+     | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+       check string "the error names the Keeper sandbox field" "keeper.sandbox_profile" field
+     | Error err -> fail ("another error: " ^ Agent_core.Error.to_string err)
+     | Ok _ -> fail "a read Keeper with no Keeper file got a folder");
+    check bool "no ACP workspace folder was made" false
+      (Sys.file_exists
+         (List.fold_left Filename.concat base_path
+            [ ".masc"; "official-clients"; "acp-workspaces" ])))
+;;
+
 (* The name the bridge of the Keeper [keeper-a] has under [driver]. *)
 let bridge_name_of driver = Runtime_acp_client.bridge_server_name driver ~owner:"keeper-a"
 
@@ -6288,6 +6308,8 @@ let () =
             test_vibe_start_spawns_the_host_with_the_posture_allowlist
         ; test_case "acp read and full run in the Keeper's private folder" `Quick
             test_acp_read_and_full_run_in_the_keepers_private_folder
+        ; test_case "acp read without a Keeper file stops at the sandbox field" `Quick
+            test_acp_read_without_a_keeper_file_stops_at_the_sandbox_field
         ; test_case "server record reads every field from the bridge" `Quick
             test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
         ; test_case "bridge server name per driver" `Quick test_bridge_server_names

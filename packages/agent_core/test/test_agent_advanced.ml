@@ -1121,6 +1121,7 @@ let test_advanced_tool_round_ceiling_fails_the_run () =
   let result =
     Agent.Advanced.run_blocks
       ~sw
+      ~api_strategy:Agent.Sync
       ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
       agent
       [ Types.Text "work" ]

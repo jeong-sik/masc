@@ -725,7 +725,7 @@ let complete_prepared_stream
          let latency_ms =
            match !latency_counter_ref with
            | Some counter -> latency_ms_int counter
-           | None -> 0
+           | None -> None
          in
          let resp = Pricing.annotate_response_cost ~source:(Provider_config.pricing_source config) resp in
          let existing_telemetry = resp.telemetry in

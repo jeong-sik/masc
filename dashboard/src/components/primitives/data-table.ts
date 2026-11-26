@@ -142,6 +142,10 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
     columns: tanstackColumns,
     state: { sorting },
     onSortingChange: setSorting,
+    // A table that opens in a column's order always says its order: a press
+    // on a header turns the order round or moves it to that column. It never
+    // leaves the rows in an order that no header names.
+    enableSortingRemoval: props.initialSort === undefined,
     getRowId: props.getRowId
       ? (row, index) => props.getRowId!(row, index)
       : undefined,

@@ -1050,7 +1050,6 @@ export interface AskQuestionItem {
 export interface KeeperAskItem {
   readonly askId: string
   readonly keeper: string
-  readonly askedAt: number
   readonly context: string | null
   readonly questions: readonly AskQuestionItem[]
   readonly revision: string
@@ -1086,10 +1085,10 @@ export interface GateResolvedAuditRow {
 }
 
 export type InboxEntry =
-  | { readonly kind: 'tool_approval'; readonly key: string; readonly sortTs: number; readonly item: ToolApprovalWait }
-  | { readonly kind: 'keeper_ask'; readonly key: string; readonly sortTs: number; readonly item: KeeperAskItem }
-  | { readonly kind: 'channel_gate'; readonly key: string; readonly sortTs: number; readonly item: GatePendingItem }
-  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly sortTs: number; readonly goal: GoalItem }
+  | { readonly kind: 'tool_approval'; readonly key: string; readonly item: ToolApprovalWait }
+  | { readonly kind: 'keeper_ask'; readonly key: string; readonly item: KeeperAskItem }
+  | { readonly kind: 'channel_gate'; readonly key: string; readonly item: GatePendingItem }
+  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly goal: GoalItem }
 
 // ── 4. Candle Ledger & Decimal-String Milli Parsers (`#36`) ───────────────
 

@@ -118,7 +118,6 @@ function decodeKeeperAsks(raw: unknown): KeeperAskItem[] {
     out.push({
       askId: ask.askId,
       keeper: ask.keeper,
-      askedAt: ask.askedAt ?? 0,
       context: ask.context,
       questions: ask.questions.map((q) => ({
         questionId: q.questionId,
@@ -501,16 +500,16 @@ export function InboxTab(props: WorkspaceViewProps) {
   const entries = useMemo<readonly InboxEntry[]>(() => {
     const list: InboxEntry[] = []
     for (const item of approvals) {
-      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, sortTs: item.askedAt ?? 0, item })
+      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, item })
     }
     for (const item of asks) {
-      list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, sortTs: item.askedAt, item })
+      list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, item })
     }
     for (const item of gates) {
-      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, sortTs: -(item.waitingSec ?? 0), item })
+      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, item })
     }
     for (const goal of goals) {
-      list.push({ kind: 'goal_confirmation', key: `goal:${goal.id}`, sortTs: Date.parse(goal.updatedAt ?? '') || 0, goal })
+      list.push({ kind: 'goal_confirmation', key: `goal:${goal.id}`, goal })
     }
     return list
   }, [approvals, asks, gates, goals])

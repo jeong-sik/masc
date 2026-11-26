@@ -4057,23 +4057,23 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
           if rect.w >= 88 then
             Some
               (Ops_common.say model
-                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지(2회) · [Enter/z] 확대 · [c] 채팅 · [V] PTT"
-                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop(2x) · [Enter/z] Zoom · [c] Chat · [V] PTT")
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [Enter/z] 확대 · [c] 채팅 · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [Enter/z] Zoom · [c] Chat · [V] PTT")
           else
             Some
               (Ops_common.say model
-                 ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지 · [Enter/z] 확대 · [V] PTT"
-                 ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop · [Enter/z] Zoom · [V] PTT")
+                 ~ko:"[Ctrl+O] 도구 펼치기 · [Enter/z] 확대 · [V] PTT"
+                 ~en:"[Ctrl+O] Expand tools · [Enter/z] Zoom · [V] PTT")
         else if rect.w >= 73 then
           Some
             (Ops_common.say model
-               ~ko:"[W] 깨우기 · [D] 중지(2회) · [Enter/z] 확대 · [c] 채팅 · [V] 음성 PTT"
-               ~en:"[W] Wake/Online · [D] Stop(2x) · [Enter/z] Zoom · [c] Chat · [V] PTT")
+               ~ko:"[Enter/z] 확대 · [c] 채팅 · [V] 음성 PTT"
+               ~en:"[Enter/z] Zoom · [c] Chat · [V] Voice PTT")
         else
           Some
             (Ops_common.say model
-               ~ko:"[W] 깨우기 · [D] 중지 · [Enter/z] 확대 · [c] 채팅 · [V] PTT"
-               ~en:"[W] Wake · [D] Stop · [Enter/z] Zoom · [c] Chat · [V] PTT")
+               ~ko:"[Enter/z] 확대 · [c] 채팅 · [V] PTT"
+               ~en:"[Enter/z] Zoom · [c] Chat · [V] PTT")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat then
         if rect.w >= 72 then
           Some

@@ -1376,7 +1376,7 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     let start = Int.max 0 (total - view_h - clamped_scroll) in
     let visible = Int.min view_h (total - start) in
     let content = Card.pad_inner ~pad_x rect in
-    let col_w = Chat_transcript.prose_width ~content_w:content.w in
+    let col_w = content.w in
     let col_x = content.x in
     for i = 0 to visible - 1 do
       let r = arr.(start + i) in

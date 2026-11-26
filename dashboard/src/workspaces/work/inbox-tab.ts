@@ -189,15 +189,21 @@ function decodeResolvedAuditRow(row: unknown): GateResolvedAuditRow | null {
   const toolName = asNonEmptyString(row.tool_name)
   const decision = decodeDecisionKind(row.decision_kind)
   const seconds = asFiniteNumber(row.resolved_at)
-  const date = seconds === null ? null : new Date(seconds * 1000)
+  const date = seconds === null || seconds < 0 ? null : new Date(seconds * 1000)
   if (!id || !keeper || !toolName || decision === null || date === null || Number.isNaN(date.getTime())) return null
+  // audit.ml: an approve carries no reason, a reject must carry one.
+  const reason = asNonEmptyString(row.decision_reason)
+  const reasonFits = decision === 'approve'
+    ? row.decision_reason === null
+    : reason !== null
+  if (!reasonFits) return null
   return {
     id,
     keeper,
     toolName,
     decision,
     decisionSource: normalizeGateDecisionSource(row.decision_source),
-    reason: asNonEmptyString(row.decision_reason),
+    reason,
     actor: asNonEmptyString(row.actor),
     resolvedAt: date.toISOString(),
   }
@@ -228,7 +234,9 @@ export function decodeGatePayload(raw: unknown): {
       const keeper = isRecord(row) ? asNonEmptyString(row.keeper_name) : null
       const toolName = isRecord(row) ? asNonEmptyString(row.tool_name) : null
       const sequence = isRecord(row) ? asSafeInt(row.sequence) : null
-      if (!isRecord(row) || !id || !keeper || !toolName || sequence === null) {
+      // board.ts normalizeKeeperApprovalQueueItem rejects a sequence <= 0 too:
+      // it is the revision TargetLockedAction locks the decision to.
+      if (!isRecord(row) || !id || !keeper || !toolName || sequence === null || sequence <= 0) {
         queueError = '대기 목록에 서버 계약과 다른 줄이 있어요(id·keeper_name·tool_name·sequence).'
         pending = []
         break

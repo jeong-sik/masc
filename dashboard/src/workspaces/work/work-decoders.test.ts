@@ -132,8 +132,8 @@ describe('Inbox › gate payload', () => {
   it('missing decision_source is not a human decision', () => {
     const gate = decodeGatePayload(payload({
       recent_resolved: [
-        { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', resolved_at: 1_795_700_000 },
-        { id: 'r2', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', resolved_at: 1_795_700_000, decision_source: 'auto_judge' },
+        { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', decision_reason: null, resolved_at: 1_795_700_000 },
+        { id: 'r2', keeper_name: 'k', tool_name: 'bash', decision_kind: 'approve', decision_reason: null, resolved_at: 1_795_700_000, decision_source: 'auto_judge' },
       ],
     }))
     expect(gate.resolved.map((row) => row.decisionSource)).toEqual([null, 'auto_judge'])
@@ -144,13 +144,21 @@ describe('Inbox › gate payload', () => {
     const gate = decodeGatePayload(payload({ approval_queue: [queueRow({}), queueRow({ id: 'ap2', sequence: undefined })] }))
     expect(gate.pending).toEqual([])
     expect(gate.queueError).toContain('sequence')
+    for (const sequence of [0, -1]) {
+      const bad = decodeGatePayload(payload({ approval_queue: [queueRow({ sequence })] }))
+      expect(bad.pending).toEqual([])
+      expect(bad.queueError).toContain('sequence')
+    }
   })
 
   it('reads an audit row without its tool, decision or time as an unreadable history', () => {
-    const good = { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'reject', resolved_at: 1_795_700_000 }
+    const good = { id: 'r1', keeper_name: 'k', tool_name: 'bash', decision_kind: 'reject', decision_reason: 'too wide', resolved_at: 1_795_700_000 }
     const ok = decodeGatePayload(payload({ recent_resolved: [good] }))
     expect(ok.resolved[0]).toMatchObject({ toolName: 'bash', decision: 'reject', resolvedAt: new Date(1_795_700_000_000).toISOString() })
-    for (const broken of [{ tool_name: undefined }, { decision_kind: 'maybe' }, { resolved_at: 'yesterday' }]) {
+    for (const broken of [
+      { tool_name: undefined }, { decision_kind: 'maybe' }, { resolved_at: 'yesterday' }, { resolved_at: -1 },
+      { decision_reason: null }, { decision_kind: 'approve', decision_reason: 'looks fine' },
+    ]) {
       const gate = decodeGatePayload(payload({ recent_resolved: [good, { ...good, id: 'r2', ...broken }] }))
       expect(gate.resolved).toEqual([])
       expect(gate.auditError).not.toBeNull()

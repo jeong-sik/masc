@@ -821,13 +821,15 @@ let test_due_schedule_waits_from_its_due_time () =
        ~schedule_id:"sched-due"
        ~scheduled_by:(automated keeper_name)
       : Schedule_domain.schedule_request);
-  (match Schedule_store.load_for_mutation config with
-   | Error _ -> fail "schedule store load failed"
-   | Ok state ->
-     let schedules = List.map (Schedule_domain.mark_due ~now:201.0) state.schedules in
-     (match Schedule_store.write_state config { state with schedules } with
-      | Ok _ -> ()
-      | Error _ -> fail "schedule store write failed"));
+  (match
+     Schedule_store.refresh_due
+       config
+       ~now:201.0
+       ~retention_days:Schedule_store.terminal_schedule_retention_days
+   with
+   | Ok (_state, 1) -> ()
+   | Ok (_state, changed) -> failf "expected one schedule marked due, got %d" changed
+   | Error err -> fail ("schedule refresh failed: " ^ Schedule_store.store_error_to_string err));
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   (* Requested at 100, due at 200: the Keeper has waited since 200. *)
   match U.(json |> member "rows" |> to_list) with

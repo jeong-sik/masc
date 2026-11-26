@@ -321,7 +321,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ? html`
               <button
                 type="button"
-                class="btn-ghost"
+                class="btn-ghost v2-sandbox-row-btn"
                 onClick=${() => openKeeperSandboxConfig(keeper)}
               >
                 설정 →
@@ -450,7 +450,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ? html`
               <button
                 type="button"
-                class="btn-ghost"
+                class="btn-ghost v2-sandbox-row-btn"
                 onClick=${() => openKeeperSandboxConfig(keeper)}
               >
                 키퍼 설정 →
@@ -492,7 +492,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ? html`
               <button
                 type="button"
-                class="btn-ghost"
+                class="btn-ghost v2-sandbox-row-btn"
                 onClick=${() => openKeeperSandboxConfig(keeper)}
               >
                 설정 →
@@ -630,8 +630,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           `}
 
           <!-- MicroVM Guests -->
-          <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
-            <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>MicroVM 게스트 (${data.microvm_guests.length})</h3>
+          <section class="v2-sandbox-section">
+            <div class="wka-h">
+              <h3>MicroVM 게스트 (${data.microvm_guests.length})</h3>
+            </div>
             <${DataTable}
               data=${data.microvm_guests}
               columns=${microVmColumns}
@@ -643,16 +645,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           </section>
 
           <!-- SSH Pools -->
-          <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
+          <section class="v2-sandbox-section">
             <div class="wka-h">
-              <h3>SSH 풀 (${data.ssh_pools.length}) · 미바인딩 Keeper ${data.summary.ssh_unbound_keepers}명</h3>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => props.onNavigate('/settings?section=sandbox')}
-              >
-                SSH 풀 설정 →
-              </button>
+              <h3>
+                SSH 풀 (${data.ssh_pools.length})${unboundKeepers.length === 0 && data.summary.ssh_unbound_keepers > 0 ? ` · 미바인딩 Keeper ${data.summary.ssh_unbound_keepers}명` : ''}
+              </h3>
             </div>
             <${DataTable}
               data=${data.ssh_pools}
@@ -682,8 +679,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           `}
 
           <!-- Docker Keepers -->
-          <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
-            <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>Docker Keepers (${data.docker_keepers.length})</h3>
+          <section class="v2-sandbox-section">
+            <div class="wka-h">
+              <h3>Docker Keepers (${data.docker_keepers.length})</h3>
+            </div>
             <${DataTable}
               data=${data.docker_keepers}
               columns=${dockerColumns}

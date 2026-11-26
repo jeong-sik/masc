@@ -192,7 +192,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
+  padding: 0 var(--sp-2);
   background: var(--bg-1);
   border-bottom: 1px solid var(--line-1);
   overflow-x: auto;
@@ -208,9 +208,18 @@
 }
 
 .ap-mobile-subtabs .ap-subtab {
+  height: var(--mobile-touch-target-min);
   min-height: var(--mobile-touch-target-min);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-pill);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.ap-mobile-subtabs .ap-subtab.is-active {
+  background: transparent;
+  border-color: transparent;
+  border-bottom-color: var(--brass-1);
 }
 
 .ap-mobile-subtabs .ap-subtab:focus-visible {

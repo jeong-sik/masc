@@ -84,24 +84,6 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
-export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
-  'overview',
-  'keepers',
-  'monitoring',
-  'workspace',
-  'approvals',
-  'schedule',
-  'board',
-  'fusion',
-  'logs',
-  'connectors',
-  'settings',
-]
-
-export function isPrimaryDashboardSurface(tabId: TabId): boolean {
-  return V2_PRIMARY_SURFACE_IDS.includes(tabId)
-}
-
 const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'overview',
   'logs',
@@ -219,21 +201,6 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
   defaultParams: surface.defaultParams,
   hidden: surface.hidden,
 }))
-
-export const VISIBLE_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
-  DASHBOARD_NAV_ITEMS.filter(item => item.hidden !== true)
-
-export const PRIMARY_DASHBOARD_SURFACES: DashboardNavGroup[] =
-  V2_PRIMARY_SURFACE_IDS.flatMap(id => {
-    const surface = DASHBOARD_SURFACES.find(item => item.id === id && item.hidden !== true)
-    return surface ? [surface] : []
-  })
-
-export const PRIMARY_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
-  V2_PRIMARY_SURFACE_IDS.flatMap(id => {
-    const item = DASHBOARD_NAV_ITEMS.find(navItem => navItem.id === id && navItem.hidden !== true)
-    return item ? [item] : []
-  })
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   approvals: [],

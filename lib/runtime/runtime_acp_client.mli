@@ -243,8 +243,6 @@ val resolve_mode_for_posture
 
 (** {1 Named protocol bounds} *)
 
-val protocol_version : int
-val default_timeout_s : float
 val default_admission_timeout_s : float
 
 (** {1 Configuration & wire types} *)

@@ -1000,6 +1000,38 @@ let validate_explicit_context_cache_ttl_s (provider : Runtime_schema.provider)
             provider.id spec.id provider.protocol))
 ;;
 
+(* Only an ACP host whose driver takes it compacts its own session at a point
+   MASC passes. Anywhere else the key would reach no process, so the binding
+   is refused instead of leaving the operator's point unused. *)
+let validate_agent_compaction_threshold (provider : Runtime_schema.provider)
+    ~(spec : Runtime_schema.model_spec)
+  : (unit, string) result =
+  match spec.agent_compaction_threshold with
+  | None -> Ok ()
+  | Some _ ->
+    (match provider.api_format with
+     | Runtime_schema.Acp_runtime ->
+       (match provider.acp with
+        | Some options when Runtime_acp_client.takes_compaction_point options.driver -> Ok ()
+        | Some options ->
+          Error
+            (Printf.sprintf
+               "model %S declares agent-compaction-threshold, but the %s host takes no \
+                compaction point"
+               spec.id
+               (Runtime_acp_client.driver_to_string options.driver))
+        (* [acp_execution] refuses a provider without ACP options. *)
+        | None -> Ok ())
+     | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api
+     | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime ->
+       Error
+         (Printf.sprintf
+            "model %S declares agent-compaction-threshold, but protocol %s starts no \
+             ACP host to take it"
+            spec.id
+            provider.protocol))
+;;
+
 let validate_provider_routing_filter (provider : Runtime_schema.provider)
     ~(model_id : string) ~supports_provider_routing_filter
     ~(provider_only : string list) ~(provider_ignore : string list) =
@@ -1137,6 +1169,7 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
        let* explicit_context_cache_ttl_s =
          validate_explicit_context_cache_ttl_s provider ~spec ~prompt_cache_wire
        in
+       let* () = validate_agent_compaction_threshold provider ~spec in
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
            ~wire:kind
@@ -1611,19 +1644,6 @@ let acp_execution (provider : Runtime_schema.provider)
          "provider %S uses protocol acp and must declare is-non-interactive = true"
          provider.id)
   | Cli command ->
-    (* A host that takes no compaction point would leave the operator's point
-       unused without a word, so the binding is refused instead. *)
-    let refuse_unused_compaction_point (options : Runtime_schema.acp_options) =
-      match spec.agent_compaction_threshold with
-      | Some _ when not (Runtime_acp_client.takes_compaction_point options.driver) ->
-        Error
-          (Printf.sprintf
-             "model %S declares agent-compaction-threshold, but the %s host takes no \
-              compaction point"
-             spec.id
-             (Runtime_acp_client.driver_to_string options.driver))
-      | Some _ | None -> Ok ()
-    in
     let make_acp_execution (options : Runtime_schema.acp_options) ~oauth_source =
       let install_client = Runtime_acp_client.install_client_of_driver options.driver in
       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
@@ -1656,14 +1676,8 @@ let acp_execution (provider : Runtime_schema.provider)
             "provider %S uses protocol acp with a relative credential path %S"
             provider.id
             path)
-     | Some options, Some (File path) ->
-       Result.map
-         (fun () -> make_acp_execution options ~oauth_source:(Some path))
-         (refuse_unused_compaction_point options)
-     | Some options, None ->
-       Result.map
-         (fun () -> make_acp_execution options ~oauth_source:None)
-         (refuse_unused_compaction_point options))
+     | Some options, Some (File path) -> Ok (make_acp_execution options ~oauth_source:(Some path))
+     | Some options, None -> Ok (make_acp_execution options ~oauth_source:None))
 ;;
 
 let refuse_anthropic_thinking_control_on_official_client
@@ -1727,6 +1741,7 @@ let validate_official_binding
         validate_explicit_context_cache_ttl_s provider ~spec
           ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
       in
+      let* () = validate_agent_compaction_threshold provider ~spec in
       validate_provider_routing_filter provider ~model_id:binding.model_id
         ~supports_provider_routing_filter:false
         ~provider_only:binding.provider_only

@@ -429,8 +429,8 @@ type model_spec =
         limit at which an ACP host compacts its own session during a turn,
         in (0, 1). MASC passes it when it starts the host (Muse Code). A
         driver whose host takes no compaction point (Antigravity, Kimi Code,
-        Mistral Vibe) refuses it at load. [None] leaves the host's own
-        default. *)
+        Mistral Vibe) refuses it at load, and so does a binding on any
+        protocol other than ACP. [None] leaves the host's own default. *)
   ; turn_timeout_s : float option
     (** [turn-timeout-s] — per-model liveness window for one official-client
         turn, in seconds. Codex, Claude, and Antigravity reset it on every

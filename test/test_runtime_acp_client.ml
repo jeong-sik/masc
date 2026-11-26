@@ -309,8 +309,9 @@ default = "agy_test.m_agy"
   check (option string) "vibe mode" (Some "auto-approve") vibe.mode
 ;;
 
-(* A host that takes no compaction point refuses the key at load, so the
-   operator's point is never left unused. *)
+(* A host that takes no compaction point, or a protocol that starts no ACP
+   host, refuses the key at load, so the operator's point is never left
+   unused. *)
 let test_compaction_point_on_a_host_without_one_drops_the_binding () =
   let source =
     {|
@@ -345,6 +346,15 @@ args = ["acp"]
 is-non-interactive = true
 timeout-s = 120.0
 
+[providers.http_test]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.m_http]
+api-name = "test-model"
+max-context = 8192
+agent-compaction-threshold = 0.95
+
 [models.m_kimi]
 api-name = "kimi-code/k3.1-pro"
 max-context = 400000
@@ -369,6 +379,7 @@ agent-compaction-threshold = 0.95
 [vibe_test.m_vibe]
 [agy_test.m_agy]
 [muse_test.m_muse]
+[http_test.m_http]
 
 [runtime]
 default = "muse_test.m_muse"
@@ -386,9 +397,11 @@ default = "muse_test.m_muse"
   check (list string) "muse takes the point"
     [ "muse_test.m_muse" ]
     (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes);
-  check (list string) "agy, kimi and vibe are dropped with the reason"
+  check (list string) "agy, kimi, vibe and an HTTP lane are dropped with the reason"
     [ "model \"m_agy\" declares agent-compaction-threshold, but the antigravity host takes \
        no compaction point"
+    ; "model \"m_http\" declares agent-compaction-threshold, but protocol \
+       openai-compatible-http starts no ACP host to take it"
     ; "model \"m_kimi\" declares agent-compaction-threshold, but the kimi_code host takes \
        no compaction point"
     ; "model \"m_vibe\" declares agent-compaction-threshold, but the mistral_vibe host takes \

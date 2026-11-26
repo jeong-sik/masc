@@ -879,6 +879,21 @@
   overflow-wrap: anywhere;
 }
 
+/* What the stream says beside the reply: retry, protocol break, checkpoint,
+   an interrupt that did not land. */
+.kp-stream-notice {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-left: 2px solid var(--line-1);
+  overflow-wrap: anywhere;
+}
+
+.kp-stream-notice[data-kind="retry"],
+.kp-stream-notice[data-kind="interrupt"] { border-left-color: var(--warn-border); color: var(--warn-fg); }
+.kp-stream-notice[data-kind="protocol_error"] { border-left-color: var(--err-fg); color: var(--err-fg); }
+.kp-stream-notice[data-kind="checkpoint"] { border-left-color: var(--info-border); }
+
 /* RFC open-tool-carries-cohort-and-reach D4: one row per open piece of work. */
 .kp-open-work {
   list-style: none;

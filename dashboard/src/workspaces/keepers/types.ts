@@ -18,6 +18,24 @@ export interface KeeperRosterTurnSlot {
   readonly failed: number
 }
 
+export interface ChatRuntimeAttempt {
+  readonly runtimeId: string | null
+  readonly attemptIndex: number | null
+}
+
+export interface ChatProviderRetry {
+  readonly runtimeId: string
+  readonly attempt: number
+  readonly maxRetries: number
+  readonly delayMs: number
+  readonly errorStatus: number | null
+}
+
+export interface ChatStreamNotice {
+  readonly kind: 'protocol_error' | 'checkpoint' | 'interrupt'
+  readonly text: string
+}
+
 /** Which part of a model response is still arriving. */
 export type TurnResponseChannel = 'none' | 'thinking' | 'text'
 
@@ -257,6 +275,15 @@ export interface ChatTranscriptEntry {
   readonly deliveryState?: ChatDeliveryState
   readonly cutStream?: boolean
   readonly errorDetail?: string
+  /** The runtime attempt now streaming this reply, from
+   *  KEEPER_RUNTIME_ATTEMPT_STARTED. */
+  readonly runtimeAttempt?: ChatRuntimeAttempt
+  /** The latest provider retry while no reply text has arrived yet. Cleared
+   *  by the next attempt or the first text. */
+  readonly providerRetry?: ChatProviderRetry
+  /** What the stream reported beside the reply: protocol breaks, a
+   *  continuation checkpoint, an interrupt that did not land. */
+  readonly streamNotices?: readonly ChatStreamNotice[]
   readonly speakerAuthority?: ChatSpeakerAuthority | null
   readonly speakerName?: string | null
   readonly speakerId?: string | null

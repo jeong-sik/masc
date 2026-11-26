@@ -1673,6 +1673,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let committed_verification_id = ref None in
           let captured_prompt = ref None in
           let captured_lookup = ref None in
+          let captured_record_read = ref None in
           (* Verdict notification precedes mark_completed; wait for the owned
              run to finish before inspecting its result or cleaning the store. *)
           Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
@@ -1867,6 +1868,12 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                captured_lookup := Some
                  (lookup.dispatch ~name:"masc_board_post_get"
                     ~args:(`Assoc [ "post_id", `String post_id ]));
+               (* The aggregate cap withheld complete.txt, so the review offers
+                  the record reader. Read the small artifact through the real
+                  review surface: its content is the captured copy. *)
+               captured_record_read := Some
+                 (lookup.dispatch ~name:"keeper_artifact_read"
+                    ~args:(`Assoc [ "reference", `String "artifact:small.txt" ]));
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok { Masc.Task.Anti_rationalization.selected_runtime_id = "test-system-evaluator"
                   ; evaluator_execution = None; verdict = Some (Masc.Task.Anti_rationalization.Approve "") });
@@ -1889,6 +1896,19 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                (source = captured_source)
            | Some result -> Alcotest.fail (Tool_result.message result)
            | None -> Alcotest.fail "reviewer did not perform the captured-source lookup");
+          (match !captured_record_read with
+           | Some (Tool_result.Completed _ as result) ->
+             let open Yojson.Safe.Util in
+             let observation = Tool_result.data result in
+             Alcotest.(check bool) "withheld artifact brings a working record read" true
+               (member "evidence_lookup_succeeded" observation = `Bool true);
+             let source =
+               observation |> member "lookup_result" |> to_string |> Yojson.Safe.from_string
+             in
+             Alcotest.(check string) "the record read serves the captured content" small_body
+               (member "content" source |> to_string)
+           | Some result -> Alcotest.fail (Tool_result.message result)
+           | None -> Alcotest.fail "reviewer did not read an artifact from the record");
           (match Masc.Verification_run_registry.get
              (Masc.Verification_run_registry.global ()) ~verification_id:request_id with
            | Some { status = Masc.Verification_run_registry.Completed _; _ } -> ()
@@ -1916,7 +1936,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
              List.iter (fun expected ->
                Alcotest.(check bool) ("review keeps " ^ expected) true
                  (String_util.contains_substring prompt expected))
-               (small_body :: "snapshot-evidence" :: "content_omitted" :: "verification tools"
+               (small_body :: "snapshot-evidence" :: "content_omitted" :: "artifact read tool"
                 :: "persisted gate artifact" :: evidence_refs));
           (match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()

@@ -16,6 +16,10 @@
     descriptor over immutable submitted bytes, never a live backlog listing.
     That descriptor is offered only when the submission contains a Task source;
     Task-free retained originals keep their existing lookup authority.
+    A complete text artifact that the aggregate evidence cap kept out of the
+    review request is read back from the submitted record through a narrowed
+    keeper_artifact_read descriptor. It is offered only when the transport
+    withheld such an artifact, and it never reads the producer's current file.
     Neither surface grants general access to the MASC storage directory.
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)

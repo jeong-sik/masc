@@ -258,3 +258,27 @@ let read_task ~submitted_evidence ~args = protect (fun () ->
        | Ok _ | Error _ -> Error (Storage_failed "submitted Task identity does not match reference"))
     | _ -> Error (Storage_failed "invalid submitted Task snapshot") in
   page_source ~args source)
+
+(* A complete text artifact in this submission, read from the captured content.
+   The producer's current file is not read: it may have changed since
+   submission. A truncated artifact stored only a prefix, which would read as
+   the whole file, so it is refused here. *)
+let read_artifact ~submitted_evidence ~args = protect (fun () ->
+  let* reference = required_id args "reference" in
+  match List.find_opt (function
+    | Store.Evidence_artifact { reference = submitted; _ } -> String.equal submitted reference
+    | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact_unreadable _
+    | Store.Evidence_artifact_binary _ | Store.Evidence_collaboration _ -> false) submitted_evidence with
+  | Some (Store.Evidence_artifact { content; bytes; truncated = false; _ }) ->
+    page_source ~args (`Assoc
+      [ "source", `String "artifact"
+      ; "reference", `String reference
+      ; "bytes", `Int bytes
+      ; "content", `String content ])
+  | Some (Store.Evidence_artifact _) ->
+    Error (Source_unavailable
+      "only a prefix of this artifact was captured; read the actual file with the file tools")
+  | Some (Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact_unreadable _
+         | Store.Evidence_artifact_binary _ | Store.Evidence_collaboration _)
+  | None ->
+    Error (Access_denied "artifact was not captured in this verification submission"))

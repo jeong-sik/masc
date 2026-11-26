@@ -11,6 +11,7 @@ type tool =
   | Board_source
   | Fusion_source
   | Task_source
+  | Artifact_source
 
 let tool_name = function
   | Read_file -> "tool_read_file"
@@ -19,8 +20,13 @@ let tool_name = function
   | Board_source -> "masc_board_post_get"
   | Fusion_source -> "masc_fusion_status"
   | Task_source -> "keeper_tasks_list"
+  | Artifact_source -> "keeper_artifact_read"
 ;;
 
+(* The Board and Fusion readers are always offered. The Task reader comes only
+   when the submission froze a Task. The artifact reader comes when the
+   aggregate evidence cap kept a complete artifact out of the review request:
+   the submitted record holds that content, and nothing else reads it there. *)
 let source_tools submitted_evidence =
   let has_task_source = List.exists (function
     | Workspace_verification_store.Evidence_collaboration {reference; _} ->
@@ -29,7 +35,11 @@ let source_tools submitted_evidence =
        | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
     | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
     | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
-  [Board_source; Fusion_source] @ if has_task_source then [Task_source] else []
+  let has_withheld_artifact =
+    Workspace_verification_store.withheld_artifact_references submitted_evidence <> [] in
+  [Board_source; Fusion_source]
+  @ (if has_task_source then [Task_source] else [])
+  @ (if has_withheld_artifact then [Artifact_source] else [])
 
 type t =
   { ownership_root : string
@@ -75,6 +85,29 @@ let exact_task_source_schema =
       "minItems", `Int 1; "maxItems", `Int 1]];
     "required", `List [`String "task_ids"]; "additionalProperties", `Bool false]
 
+(* A Keeper's keeper_artifact_read restores a stored blob by sha256. This reader
+   serves a text artifact frozen in the submission by its reference instead, so
+   the verifier declares its own input; dispatch validates against it. *)
+let exact_artifact_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "reference"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String
+                      "Exact reference of one submitted text artifact, spelled \
+                       as the evidence list spells it (for example \
+                       artifact:evidence/run.log)." )
+                ] )
+          ] )
+    ; "required", `List [ `String "reference" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let source_pagination_schema = function
   | `Assoc fields ->
     let open Result.Syntax in
@@ -104,6 +137,9 @@ let descriptor_of_tool tool =
      | Task_source ->
        Result.map (fun input_schema -> tool, { descriptor with input_schema })
          (source_pagination_schema exact_task_source_schema)
+     | Artifact_source ->
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema exact_artifact_schema)
      | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
   | [] ->
     Error
@@ -416,6 +452,8 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
          "Read Fusion panel/judge/source-context evidence frozen in this verification submission and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
        | Task_source ->
          "Read exactly one Task frozen by an explicit task:<id> reference in this verification submission. Supply task_ids with that one id. Includes the canonical Task state, completion timestamp and notes plus primary backlog revision; no live listing, recovery snapshot or other Task is read. A Done row is committed state, not complete approval history or external acceptance. Large sources return source_json_page fragments; follow next_cursor to null and concatenate the exact JSON. Read-only."
+       | Artifact_source ->
+         "Read one text artifact frozen in this verification submission by its exact reference. Offered when the evidence byte cap kept a complete artifact out of the review request. It serves the content captured at submission, never the producer's current file. Large artifacts return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate content to recover the exact text. Read-only."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -529,6 +567,8 @@ let run t tool ~args =
     collaboration_read Verification_collaboration_evidence.read_fusion
   | (Keeper_producer _ | Workspace_producer), Task_source ->
     collaboration_read Verification_collaboration_evidence.read_task
+  | (Keeper_producer _ | Workspace_producer), Artifact_source ->
+    collaboration_read Verification_collaboration_evidence.read_artifact
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     Tool_misc_web_fetch.handle
       ~tool_name:(tool_name Web_fetch)
@@ -664,7 +704,7 @@ let media_result t tool ~name ~args ~start_time =
                    ; Llm_provider.Types.image_block ~media_type
                        ~source:(Llm_provider.Types.Base64 (Base64.encode_exn bytes)) ] ()) ))
      | _ -> None)
-  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source), _ -> None
+  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source | Artifact_source), _ -> None
 ;;
 
 let dispatch t ~name ~args =

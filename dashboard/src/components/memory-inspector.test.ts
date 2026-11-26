@@ -187,46 +187,59 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+// The memory view's composition line for one stored turn record.
+async function memoryCompositionText(record: Record<string, unknown>): Promise<string> {
+  const payload = turnRecordsPayload()
+  const fixtureKeeper: MemoryKeeper = { id: String(record.keeper), status: 'run' }
+  const ts = Number(record.ts)
+  // Only the HTTP envelope is synthetic; the stored record is unchanged.
+  stubFetch({
+    ...payload,
+    keeper: fixtureKeeper.id,
+    durable_store: `.masc/keepers/${fixtureKeeper.id}/turn-records`,
+    latest_ts_unix: ts,
+    latest_ts_iso: new Date(Math.floor(ts) * 1000).toISOString().replace('.000Z', 'Z'),
+    memory_os: {
+      ...payload.memory_os,
+      keeper: fixtureKeeper.id,
+      snapshot_store: `.masc/keepers/${fixtureKeeper.id}.memory-current.json`,
+    },
+    entries: [{ record, diff_vs_prev: null }],
+  })
+  const { container } = render(
+    html`<${MemoryInspector} keeper=${fixtureKeeper} keepers=${[fixtureKeeper]} onClose=${vi.fn()} />`,
+  )
+  await waitFor(() => expect(container.querySelector('.mem-compo-sub')).toBeTruthy())
+  return container.querySelector('.mem-compo-sub')?.textContent ?? ''
+}
+
 describe('MemoryInspector current snapshot', () => {
   it.each(writerRows)('keeps actual writer usage scope $usage_scope in the memory view', async record => {
-    const payload = turnRecordsPayload()
-    const fixtureKeeper: MemoryKeeper = { id: String(record.keeper), status: 'run' }
-    const ts = Number(record.ts)
-    // Only the HTTP envelope is synthetic; the stored record is unchanged.
-    stubFetch({
-      ...payload,
-      keeper: fixtureKeeper.id,
-      durable_store: `.masc/keepers/${fixtureKeeper.id}/turn-records`,
-      latest_ts_unix: ts,
-      latest_ts_iso: new Date(Math.floor(ts) * 1000).toISOString().replace('.000Z', 'Z'),
-      memory_os: {
-        ...payload.memory_os,
-        keeper: fixtureKeeper.id,
-        snapshot_store: `.masc/keepers/${fixtureKeeper.id}.memory-current.json`,
-      },
-      entries: [{ record, diff_vs_prev: null }],
-    })
-    const { container } = render(
-      html`<${MemoryInspector} keeper=${fixtureKeeper} keepers=${[fixtureKeeper]} onClose=${vi.fn()} />`,
-    )
-    await waitFor(() => expect(container.querySelector('.mem-compo-sub')).toBeTruthy())
-
-    const text = container.querySelector('.mem-compo-sub')?.textContent ?? ''
+    const text = await memoryCompositionText(record)
     expect(text).toContain('18.0k provider tok')
     expect(text).toContain('설정 131,072')
     expect(text).toContain('클라이언트 보고 미측정')
     expect(text).toContain(String(record.request_runtime_profile))
-    if (record.usage_scope === 'per_request') {
-      expect(text).toContain('14%')
-      expect(text).toContain('요청별')
-    } else {
-      expect(text).not.toContain('%')
-      expect(text).toContain('점유율 미상')
-      const expectedLabel = record.usage_scope === 'turn_total'
+    // The writer rows carry no input_provenance, so none reads as a fill:
+    // the server's context projection does not read one either.
+    expect(text).not.toContain('%')
+    expect(text).toContain('점유율 미상')
+    const expectedLabel = record.usage_scope === 'per_request'
+      ? '요청별'
+      : record.usage_scope === 'turn_total'
         ? '클라이언트 턴 합계'
         : record.usage_scope === 'conversation_cumulative' ? '대화 누적' : '범위 미상'
-      expect(text).toContain(expectedLabel)
-    }
+    expect(text).toContain(expectedLabel)
+  })
+
+  it.each([
+    { input_provenance: 'measured_request', fill: '점유율 14%' },
+    { input_provenance: 'agent_held_context', fill: '점유율 14%' },
+    { input_provenance: 'context_estimate', fill: '점유율 ~14%' },
+  ])('reads a per-request $input_provenance input as its fill', async ({ input_provenance, fill }) => {
+    const perRequest = writerRows.find(row => row.usage_scope === 'per_request')!
+    const text = await memoryCompositionText({ ...perRequest, input_provenance })
+    expect(text).toContain(`설정 기준 컨텍스트 ${fill}`)
   })
 
   it('renders exact provider composition and the current snapshot delta', async () => {

@@ -15,7 +15,7 @@ import { isDismissEscape } from '../lib/keyboard'
 // rows (no-stub): disclose absence instead of faking presence.
 
 import { Fragment } from 'preact'
-import { turnContextWindow } from '../lib/turn-context-window'
+import { formatContextFill, turnContextWindow } from '../lib/turn-context-window'
 import { ContextWindowFacts } from './common/context-window-facts'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -349,7 +349,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   const requestBodyBytes = row.record.request_body_bytes
   const inputComponentsUnavailable = row.record.input_components === null
   const context = turnContextWindow(row.record)
-  const pct = context.percent === null ? null : Math.round(context.percent)
+  const fill = formatContextFill(context, 0)
   return html`
     <div class="mem-compo">
       <div class="mem-compo-head">
@@ -364,7 +364,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
             : html`${parts.length}개 구성요소`}
           · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}
           · <${ContextWindowFacts} record=${row.record} />
-          · ${context.label} 점유율 ${pct != null ? `${pct}%` : '미상'}
+          · ${context.label} 점유율 ${fill ?? '미상'}
           ${row.record.request_runtime_profile != null
             ? html` · ${row.record.request_runtime_profile}`
             : null}

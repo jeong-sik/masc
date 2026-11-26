@@ -548,6 +548,14 @@ type mention_policy = Parse_mentions | Passive_context
     [Passive_context] persists an empty mention list, even for literal @names or
     supplied extra mentions. An already-present row keeps its original metadata. *)
 
+val accepted_user_row_id :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  (string option, string) result
+(** Exact accepted-user slot lookup using the incremental append-once index.
+    A conflicting or unreadable slot is an error. *)
+
 (** Idempotent accepted-user append for a direct/queued delivery identity. *)
 val append_user_message_once :
   base_dir:string ->

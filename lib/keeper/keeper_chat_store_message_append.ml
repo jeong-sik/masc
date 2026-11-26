@@ -296,6 +296,27 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
 
 type mention_policy = Parse_mentions | Passive_context
 
+let accepted_user_row_id ~base_dir ~keeper_name ~delivery_key =
+  let provenance =
+    { Keeper_chat_delivery_identity.delivery_key; transcript_slot = Accepted_user }
+  in
+  try
+    ensure_dir_once ~base_dir;
+    let path = chat_path ~base_dir ~keeper_name in
+    match update_indexed_transcript path (fun index ->
+        None, Result.bind index (fun index -> find_indexed_provenance index ~provenance)) with
+    | Private_file_succeeded result -> result
+    | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+      Error (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+    | Private_file_failed error
+    | Private_file_failed_with_cleanup_failure { error; _ } ->
+      Error (Fs_compat.durable_append_error_to_string error)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error detail -> Error detail
+  | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+;;
+
 let append_user_message_once
       ~base_dir
       ~keeper_name

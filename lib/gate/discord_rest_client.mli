@@ -153,6 +153,15 @@ val get_guild_channels :
   (Yojson.Safe.t, error) result
 (** List all guild channels visible to the bot. *)
 
+val get_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:snowflake ->
+  message_id:snowflake ->
+  unit -> (Yojson.Safe.t, error) result
+(** Read the exact message and refresh its signed attachment URLs. *)
+
 val get_channel_messages :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

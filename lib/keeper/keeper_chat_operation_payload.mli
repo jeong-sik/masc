@@ -17,6 +17,8 @@ val admit_person_caller
   -> pat:Authz_types.Pat_binding.t
   -> (person_caller, Runtime_account_access.refusal) result
 
+type connector_attachment = Discord_image of { attachment_id : string }
+
 type decoded_source =
   { submitted_by : string
   ; thread_id : string
@@ -29,6 +31,7 @@ type decoded_source =
   ; conversation_id : string option
   ; external_message_id : string option
   ; workspace_id : string option
+  ; connector_attachments : connector_attachment list
   ; extra_mentions : Keeper_identity.Keeper_id.t list
   ; sender_keeper : Keeper_identity.Keeper_id.t option
       (** The registered Keeper that sent this operation, decided where the
@@ -93,6 +96,11 @@ val input_to_json :
   surface_context:Yojson.Safe.t option ->
   attachments:Keeper_chat_store.attachment list ->
   Yojson.Safe.t
+
+val with_connector_attachments :
+  source:Yojson.Safe.t -> connector_attachment list -> (Yojson.Safe.t, string) result
+(** Retain attachment IDs on a Discord source matching its original message.
+    Sources without attachments retain their existing wire version. *)
 
 val source_of_json : Yojson.Safe.t -> (decoded_source, string) result
 val input_of_json : Yojson.Safe.t -> (decoded_input, string) result

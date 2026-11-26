@@ -6378,6 +6378,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
                }
          ; conversation_id = Some "discord:guild-1:channel:channel-1"
          ; external_message_id = Some "message-1"
+         ; attachments = []
          ; workspace_id = Some "guild-1"
          }
        in

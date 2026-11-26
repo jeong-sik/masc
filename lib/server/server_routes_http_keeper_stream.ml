@@ -603,11 +603,101 @@ let operation_payload_error_to_string = function
   | Operation_input_invalid detail | Operation_media_store_unavailable detail -> detail
 ;;
 
-let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~input =
+let connector_input ~base_path ~clock ~keeper_name ~operation_id
+      (source : Keeper_chat_operation_payload.decoded_source)
+      (input : Keeper_chat_operation_payload.decoded_input) =
+  let open Result.Syntax in
+  let with_images ~message images =
+    let blocks =
+      List.map (fun (image : Keeper_chat_store.attachment) ->
+        Keeper_multimodal_input.User_image (Attached
+          { attachment_id = image.id; name = image.name;
+            mime_type = image.mime_type; size = Some image.size })) images
+    in
+    { input with message; user_blocks = input.user_blocks @ blocks;
+      attachments = input.attachments @ images }
+  in
+  match source.connector_attachments with
+  | [] -> Ok (input, false)
+  | _ :: _ ->
+    let* request_id = Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_chat_operation.Operation_id.to_string operation_id) in
+    let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
+    let* row_id =
+      Keeper_chat_store.accepted_user_row_id ~base_dir:base_path ~keeper_name ~delivery_key
+    in
+    (match row_id with
+     | None ->
+       let media = Server_discord_inbound_media.load ~base_path ~clock ~keeper_name source in
+       let warnings =
+         List.map (fun (id, failure) ->
+           Printf.sprintf "[Discord image %s unavailable: %s]" id
+             (Server_discord_inbound_media.reason failure)) media.failures
+       in
+       let message = String.concat "\n" (input.message :: warnings) in
+       Ok (with_images ~message media.images, false)
+     | Some row_id ->
+       Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+         let* captures =
+           Keeper_chat_store.load_captured_result ~base_dir:base_path ~keeper_name
+             ~select:(fun row -> row.id = row_id)
+           |> Result.map_error Keeper_chat_store.strict_decode_error_to_string
+         in
+         let* row =
+           match captures with
+           | [ capture ] ->
+             let row = Keeper_chat_store.captured_row_message capture in
+             if row.role = Keeper_chat_store.Role.User
+                && row.external_message_id = source.external_message_id
+                && row.surface = Some source.surface then Ok row
+             else Error "Accepted Discord image row differs from the original message"
+           | _ -> Error "Accepted Discord image row is missing or ambiguous"
+         in
+         let store = Tool_blob_store.create ~base_path in
+         let rec rehydrate acc = function
+           | [] -> Ok (List.rev acc)
+           | (image : Keeper_chat_store.attachment) :: rest ->
+             let* () =
+               if List.exists (fun (Keeper_chat_operation_payload.Discord_image { attachment_id }) ->
+                    String.equal attachment_id image.id) source.connector_attachments
+               then Ok () else Error "Accepted Discord image was not admitted on the original operation"
+             in
+             let* reference =
+               match Tool_output.decode_from_agent_core image.data with
+               | Tool_output.Decoded reference -> Ok reference
+               | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+                 Error "Accepted Discord image has no retained payload reference"
+             in
+             let* bytes =
+               Tool_blob_store.fetch_bounded store ~sha256:reference.sha256 ~max_bytes:reference.bytes
+               |> Result.map_error Tool_blob_store.fetch_error_to_string
+             in
+             (match bytes with
+              | Some data -> rehydrate ({ image with data } :: acc) rest
+              | None -> Error "Accepted Discord image payload is missing")
+         in
+         let* images = rehydrate [] (Option.value row.attachments ~default:[]) in
+         Ok (with_images ~message:row.content images, true)))
+;;
+
+let operation_payload_of_json ?connector_source ~media_store ~keeper_name ~operation_id ~source ~input () =
   let open Result.Syntax in
   let invalid result = Result.map_error (fun detail -> Operation_input_invalid detail) result in
   let* source = invalid (Keeper_chat_operation_payload.source_of_json source) in
   let* input = invalid (Keeper_chat_operation_payload.input_of_json input) in
+  let* input, accepted_user_exists =
+    match connector_source with
+    | Some (base_path, clock) ->
+      connector_input ~base_path ~clock ~keeper_name ~operation_id source input
+      |> Result.map_error (fun detail -> Operation_media_store_unavailable detail)
+    | None when source.connector_attachments = [] -> Ok (input, false)
+    | None -> Error (Operation_input_invalid "Connector images require an individual operation")
+  in
+  let source =
+    if accepted_user_exists then
+      { source with user_row_origin = Keeper_chat_store.Already_persisted_upstream }
+    else source
+  in
   let raw_message = input.message in
   let message =
     if String.equal (String.trim raw_message) ""
@@ -634,6 +724,11 @@ let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~i
       ~turn_instructions:input.turn_instructions
       ~surface_context:input.surface_context
   in
+  let model_blocks =
+    match source.connector_attachments, input.user_blocks with
+    | _ :: _, _ :: _ -> Keeper_multimodal_input.User_text invocation_prompt :: input.user_blocks
+    | _ -> input.user_blocks
+  in
   let* direct_message =
     Keeper_invocation_contract.direct_message
       ~media_store
@@ -642,7 +737,7 @@ let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~i
       ~direct_reply:true
       ?turn_instructions
       ~channel:source.channel
-      ~user_blocks:input.user_blocks
+      ~user_blocks:model_blocks
       ~attachments:input.attachments
       ()
     |> Result.map_error (function
@@ -2602,7 +2697,7 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
       let* decoded = operation_payload_of_json
         ~media_store:(Tool_blob_media_store.of_base_path ~base_path:base_dir)
         ~keeper_name ~operation_id:operation.operation_id
-        ~source:operation.source ~input
+        ~source:operation.source ~input ()
         |> Result.map_error operation_payload_error_to_string in
       let source = decoded.source in
       match source.user_row_origin with
@@ -2655,12 +2750,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
            "Running Keeper chat operation has no execution input"
        | Some input ->
          (match
-            operation_payload_of_json
+            operation_payload_of_json ~connector_source:(base_path, clock)
               ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
               ~keeper_name
               ~operation_id:operation.operation_id
               ~source:operation.source
-              ~input
+              ~input ()
           with
           | Error (Operation_input_invalid detail) ->
             failed Keeper_chat_operation.Invalid_input detail

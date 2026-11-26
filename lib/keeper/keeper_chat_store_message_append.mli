@@ -105,6 +105,12 @@ val append_user_message :
 
 type mention_policy = Parse_mentions | Passive_context
 
+val accepted_user_row_id :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  (string option, string) result
+
 val append_user_message_once :
   base_dir:string ->
   keeper_name:string ->

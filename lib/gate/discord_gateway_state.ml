@@ -522,10 +522,10 @@ let decode_ready ~payload =
    can be told about, and inventing a name for it would be worse than saying
    nothing. [content_type] is optional in the Attachment object and stays
    absent rather than being guessed from the filename. *)
-let attachment_lines attachments =
+let attachment_lines ~hide_urls_for attachments =
   List.map
     (fun (a : inbound_attachment) ->
-      Printf.sprintf "[file] %s%s%s %s"
+      Printf.sprintf "[file] %s%s%s%s"
         a.ia_filename
         (if a.ia_size > 0 then
            Printf.sprintf " \xc2\xb7 %d bytes" a.ia_size
@@ -533,14 +533,17 @@ let attachment_lines attachments =
         (match a.ia_content_type with
          | None -> ""
          | Some t -> " \xc2\xb7 " ^ t)
-        a.ia_url)
+        (if List.mem a.ia_id hide_urls_for then "" else " " ^ a.ia_url))
     attachments
 
-let content_with_attachments ~content ~attachments =
-  match attachment_lines attachments with
+let content_with_attachments_hiding_urls ~hide_urls_for ~content ~attachments =
+  match attachment_lines ~hide_urls_for attachments with
   | [] -> content
   | lines ->
     String.concat "\n" (if String.trim content = "" then lines else content :: lines)
+
+let content_with_attachments ~content ~attachments =
+  content_with_attachments_hiding_urls ~hide_urls_for:[] ~content ~attachments
 
 let decode_inbound_attachments payload =
   match assoc_opt "attachments" payload with

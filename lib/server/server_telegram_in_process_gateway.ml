@@ -31,7 +31,7 @@ let accept_update ~claim_root ~resolve ~dispatch_for_delivery ~bot_user_id ~oper
           let delivery:Gate_keeper_backend.connector_delivery={continuation_channel;
             surface=Keeper_telegram_coordinates.surface ~bot_user_id ~chat_id:message.chat_id
               ~message_thread_id:message.message_thread_id ~direct_messages_topic_id:message.direct_messages_topic_id ~reply_to_message_id;
-            conversation_id=Some conversation_id;external_message_id=Some external_message_id;workspace_id=None} in
+            conversation_id=Some conversation_id;external_message_id=Some external_message_id;workspace_id=None; attachments=[]} in
           let kind=match update.kind with Message _ -> "message" | Edited_message _ -> "edited_message" | Unsupported -> "unsupported" in
           let inbound:Channel_gate.inbound_message={channel=State.channel;channel_user_id=Int64.to_string user.id;
             channel_user_name=(match user.username with None -> user.first_name | Some username -> username);

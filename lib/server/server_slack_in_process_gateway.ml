@@ -129,6 +129,7 @@ let slack_delivery ~team_id ~channel_id ~channel_name
              }
        ; conversation_id = Some (slack_conversation_id ~channel_id)
        ; external_message_id = Some ts
+       ; attachments = []
        ; workspace_id = team_id
        })
     (Keeper_continuation_channel.slack

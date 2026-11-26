@@ -417,9 +417,9 @@ let trigger_typing ?clock ?(timeout_sec = Masc_http_client.default_request_timeo
     | Ok (status, body) ->
       parse_empty_response ~request_id:(next_request_id "typing") ~status ~body ()
 
-let get_json ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+let get_json ?clock ?max_body_bytes ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~request_id ~url ~headers () =
-  match Masc_http_client.get_sync ?clock ~timeout_sec ~url ~headers () with
+  match Masc_http_client.get_sync ?clock ?max_body_bytes ~timeout_sec ~url ~headers () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_json_response ~request_id ~status ~body ()
 
@@ -437,6 +437,16 @@ let get_guild_channels ?clock ?timeout_sec ~token ~guild_id () =
   let url, headers, _ = build_guild_channels_request ~token ~guild_id () in
   get_json ?clock ?timeout_sec ~request_id:(next_request_id "guild-channels")
     ~url ~headers ()
+
+let get_message ?clock ?timeout_sec ~token ~channel_id ~message_id () =
+  let url =
+    Printf.sprintf "%s/channels/%s/messages/%s" api_base
+      (snowflake_to_string channel_id) (snowflake_to_string message_id)
+  in
+  (* The response is metadata JSON, including editable embeds and message
+     snapshots. Image bytes use the separate vision budget at download. *)
+  get_json ?clock ?timeout_sec ~max_body_bytes:(256 * 1024)
+    ~request_id:(next_request_id "message") ~url ~headers:(auth_headers ~token) ()
 
 let get_channel_messages
       ?clock

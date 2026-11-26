@@ -12,11 +12,13 @@ type t =
           one. No request was dispatched at this size and no response
           exists for it. *)
   | Agent_held_context
-      (** An ACP host reported the context its session holds after the turn
-          ([usage_update.used]) as its newest request's input plus output, as
-          the provider counted them. A count, not an estimate, but no request
-          was dispatched at exactly this size: it includes that request's
-          output. *)
+      (** What an ACP session holds after the turn: its newest model request's
+          input plus output as the provider counted them. ACP names this
+          [usage_update.used], "tokens currently in context" (Session Context
+          Size and Cost, stable since 2026-06-05); Muse sends an estimate
+          there, so its count comes from the host's journal. A count, but no
+          request was dispatched at exactly this size: it includes that
+          request's output. *)
 [@@deriving enumerate]
 
 val to_string : t -> string

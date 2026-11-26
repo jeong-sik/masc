@@ -134,23 +134,19 @@ type output_accounting =
 type usage_channel =
   | Usage_over_acp
       (** The host reports a prompt's token counts in the [session/prompt]
-          result or in [usage_update] frames. *)
+          result or in [usage_update] frames. [usage_update.used], ACP's
+          "tokens currently in context", is the newest model request's input
+          plus output as the provider counted them: checked on 2026-11-26
+          against the request logs of Antigravity 1.5.16 and Kimi Code 2.7.2
+          and the installed source of Mistral Vibe 3.1.0. *)
   | Usage_in_muse_session_journal
-      (** The host reports none over ACP. It writes the counts of every model
-          request and approval review to its session journal, and those of its
-          observer children to their own journals, which {!prompt} reads
-          ({!Runtime_muse_session_log}). *)
-
-type window_used_accounting =
-  | Newest_request_count
-      (** [usage_update.used] is the newest model request's input plus its
-          output, as the provider counted them (Antigravity, Kimi Code,
-          Mistral Vibe; checked against each host's request log on
-          2026-11-26). *)
-  | Host_prompt_estimate
-      (** [usage_update.used] is the host's own estimate of the next prompt
-          (Muse writes it as [estimated_prompt_tokens] beside the counted
-          request in its session journal). *)
+      (** The host reports no counts over ACP. It writes the counts of every
+          model request and approval review to its session journal, and those
+          of its observer children to their own journals, which {!prompt}
+          reads ({!Runtime_muse_session_log}). Its [usage_update.used] is an
+          estimate ({!Runtime_muse_session_log}), so [context_used] after a
+          prompt, and [replayed_context_used] after a load or resume, are the
+          newest request's counted input plus output from the journal. *)
 
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
@@ -199,7 +195,6 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
-  ; window_used_accounting : window_used_accounting
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -340,7 +335,6 @@ type usage =
   ; total_tokens : int
   ; context_used : int option
   ; context_size : int option
-  ; last_request_input_tokens : int option
   }
 
 val empty_usage : usage

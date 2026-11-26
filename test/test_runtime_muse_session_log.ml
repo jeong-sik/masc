@@ -155,7 +155,7 @@ let turn_t =
     (fun ppf (turn : Log.turn) ->
        Format.fprintf
          ppf
-         "main in=%d out=%d cache_read=%d reasoning=%d write=%d requests=%d last_in=%s | \
+         "main in=%d out=%d cache_read=%d reasoning=%d write=%d requests=%d last=%s | \
           review in=%d out=%d cache_read=%d reasoning=%d calls=%d | \
           observers in=%d out=%d cache_read=%d reasoning=%d cache_write=%d finished=%d running=%d \
           without_journal=%d"
@@ -165,8 +165,8 @@ let turn_t =
          turn.main.reasoning_tokens
          turn.main_cache_write_tokens
          turn.main_requests
-         (match turn.last_request_input_tokens with
-          | Some n -> string_of_int n
+         (match turn.last_request with
+          | Some last -> Printf.sprintf "%d/%d" last.input_tokens last.output_tokens
           | None -> "none")
          turn.review.input_tokens
          turn.review.output_tokens
@@ -211,7 +211,7 @@ let prompt_1 =
   { Log.main = counts ~input:46670 ~output:170 ~cache_read:23156 ~reasoning:83
   ; main_cache_write_tokens = 0
   ; main_requests = 2
-  ; last_request_input_tokens = Some 23429
+  ; last_request = Some (counts ~input:23429 ~output:36 ~cache_read:23156 ~reasoning:19)
   ; review = counts ~input:12628 ~output:244 ~cache_read:0 ~reasoning:112
   ; reviews = 1
   ; observers = no_observers
@@ -224,7 +224,7 @@ let prompt_2 =
   { Log.main = counts ~input:47181 ~output:94 ~cache_read:46824 ~reasoning:8
   ; main_cache_write_tokens = 0
   ; main_requests = 2
-  ; last_request_input_tokens = Some 23654
+  ; last_request = Some (counts ~input:23654 ~output:20 ~cache_read:23412 ~reasoning:4)
   ; review = counts ~input:15424 ~output:205 ~cache_read:0 ~reasoning:82
   ; reviews = 1
   ; observers = no_observers
@@ -235,7 +235,7 @@ let both_prompts =
   { Log.main = counts ~input:93851 ~output:264 ~cache_read:69980 ~reasoning:91
   ; main_cache_write_tokens = 0
   ; main_requests = 4
-  ; last_request_input_tokens = Some 23654
+  ; last_request = Some (counts ~input:23654 ~output:20 ~cache_read:23412 ~reasoning:4)
   ; review = counts ~input:28052 ~output:449 ~cache_read:0 ~reasoning:194
   ; reviews = 2
   ; observers = no_observers
@@ -303,7 +303,7 @@ let observers_prompt observers =
   { Log.main = counts ~input:48704 ~output:407 ~cache_read:47714 ~reasoning:277
   ; main_cache_write_tokens = 0
   ; main_requests = 2
-  ; last_request_input_tokens = Some 24763
+  ; last_request = Some (counts ~input:24763 ~output:269 ~cache_read:23921 ~reasoning:248)
   ; review = nothing
   ; reviews = 0
   ; observers
@@ -458,7 +458,7 @@ let test_counts_a_run_that_made_no_request () =
       { Log.main = nothing
       ; main_cache_write_tokens = 0
       ; main_requests = 0
-      ; last_request_input_tokens = None
+      ; last_request = None
       ; review = nothing
       ; reviews = 0
       ; observers = no_observers
@@ -1098,6 +1098,61 @@ let test_refuses_a_link_row_it_cannot_decode () =
     | other -> failf "expected a malformed record, got %s" (describe other))
 ;;
 
+(* ── What the session held when it was left ──────────────────────────────── *)
+
+let counts_t =
+  testable
+    (fun ppf (c : Log.counts) ->
+       Format.fprintf
+         ppf
+         "in=%d out=%d cache_read=%d reasoning=%d"
+         c.input_tokens
+         c.output_tokens
+         c.cache_read_tokens
+         c.reasoning_tokens)
+    ( = )
+;;
+
+let last_request_ok root ~id =
+  match Log.last_request root ~session_id:id with
+  | Ok newest -> newest
+  | Error err -> failf "last_request: %s" (Log.error_to_string err)
+;;
+
+let test_last_request_is_the_newest_request_at_the_end_of_the_journal () =
+  with_data_home (fun data_home ->
+    let root = root_of data_home in
+    let path = journal_path data_home ~day:"2026/11/25" ~id:session_id in
+    write_file path (text ~first:0 ~last:(first_line_of_prompt_1 - 1));
+    check (option counts_t) "no request yet" None (last_request_ok root ~id:session_id);
+    append_file path (text ~first:first_line_of_prompt_1 ~last:run_1_terminal);
+    check
+      (option counts_t)
+      "prompt 1's second request"
+      (Some (counts ~input:23429 ~output:36 ~cache_read:23156 ~reasoning:19))
+      (last_request_ok root ~id:session_id);
+    append_file path (text ~first:(run_1_terminal + 1) ~last:last_line);
+    let prompt_2_last = counts ~input:23654 ~output:20 ~cache_read:23412 ~reasoning:4 in
+    check
+      (option counts_t)
+      "prompt 2's second request"
+      (Some prompt_2_last)
+      (last_request_ok root ~id:session_id);
+    append_file path (text_of [ fixture_lines.(run_2_review) ]);
+    check
+      (option counts_t)
+      "a review after it is a model call of its own, not the session's"
+      (Some prompt_2_last)
+      (last_request_ok root ~id:session_id);
+    check
+      (result unit error_t)
+      "no such session"
+      (Error
+         (Log.Session_log_not_found
+            { searched = Log.root_directory root; session_id = "no-such-session" }))
+      (Result.map ignore (Log.last_request root ~session_id:"no-such-session")))
+;;
+
 let () =
   run
     "runtime_muse_session_log"
@@ -1159,6 +1214,10 @@ let () =
             "reports a journal that shrank"
             `Quick
             test_reports_a_journal_that_shrank
+        ; test_case
+            "reads the newest request at the end of the journal"
+            `Quick
+            test_last_request_is_the_newest_request_at_the_end_of_the_journal
         ] )
     ; ( "observers"
       , [ test_case

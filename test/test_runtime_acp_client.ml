@@ -171,7 +171,6 @@ let test_driver_aware_usage_normalization () =
     ; total_tokens = 27086
     ; context_used = Some 9322
     ; context_size = Some 400000
-    ; last_request_input_tokens = None
     }
   in
   let vibe_api =
@@ -190,7 +189,6 @@ let test_driver_aware_usage_normalization () =
     ; total_tokens = 21888
     ; context_used = Some 11093
     ; context_size = Some 1048576
-    ; last_request_input_tokens = None
     }
   in
   let agy_api =
@@ -4626,35 +4624,21 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
   check (option int) "effective_context_used returns None when all counts are 0" None
     (Keeper_acp_runtime.For_testing.effective_context_used
        Runtime_acp_client.empty_usage);
-  (* The gauge's number and its label: the host's [used] labelled by what the
-     driver's host puts there, else the last counted request input. The
-     turn's summed inputTokens never stands in. *)
-  let held ~driver usage =
+  (* The gauge reads the session's count; the turn's summed inputTokens never
+     stands in for it. *)
+  let held usage =
     Option.map
       (fun (c : Runtime_observation.request_context) ->
          c.input_tokens, c.output_tokens, c.provenance)
-      (Keeper_acp_runtime.For_testing.held_context_of_usage ~driver usage)
+      (Keeper_acp_runtime.For_testing.held_context_of_usage usage)
   in
-  check bool "turn-summed input without usage_update holds no context" true
-    (held ~driver:Antigravity agy_usage_no_ctx = None);
-  List.iter
-    (fun driver ->
-       check bool
-         (Runtime_acp_client.driver_to_string driver
-          ^ ": usage_update.used is the newest request's count")
-         true
-         (held ~driver { agy_usage_no_ctx with context_used = Some 77777 }
-          = Some (77777, None, Turn_input_provenance.Agent_held_context)))
-    [ Antigravity; Kimi_code; Mistral_vibe ];
-  check bool "muse: usage_update.used is the host's estimate" true
-    (held ~driver:Muse_code { agy_usage_no_ctx with context_used = Some 77777 }
-     = Some (77777, None, Turn_input_provenance.Context_estimate));
-  check bool "muse without used: the journal's last request input is a request" true
-    (held ~driver:Muse_code
-       { agy_usage_no_ctx with last_request_input_tokens = Some 23429 }
-     = Some (23429, None, Turn_input_provenance.Measured_request));
-  check bool "a zero usage_update.used holds no context" true
-    (held ~driver:Kimi_code { agy_usage_no_ctx with context_used = Some 0 } = None);
+  check bool "turn-summed input without a session count holds no context" true
+    (held agy_usage_no_ctx = None);
+  check bool "the session's count is the held context, with no output" true
+    (held { agy_usage_no_ctx with context_used = Some 77777 }
+     = Some (77777, None, Turn_input_provenance.Agent_held_context));
+  check bool "a zero count holds no context" true
+    (held { agy_usage_no_ctx with context_used = Some 0 } = None);
   (* 5. process_config_sha256 tracks spawn-time config but stays stable on model/effort/mode *)
   let base_cfg : Runtime_execution.acp_client =
     { driver = Runtime_acp_client.Antigravity
@@ -5865,10 +5849,10 @@ let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
   check int "reasoning" (83 + 112) usage.Runtime_acp_client.thought_tokens;
   check int "total is input plus output" (46670 + 12628 + 170 + 244)
     usage.Runtime_acp_client.total_tokens;
-  check (option int) "the occupancy the host sent over ACP" (Some 23500)
-    usage.Runtime_acp_client.context_used;
-  check (option int) "the last request's input rides apart" (Some 23429)
-    usage.Runtime_acp_client.last_request_input_tokens;
+  check (option int)
+    "the session holds the newest request's counted input plus output, not \
+     the host's estimate"
+    (Some (23429 + 36)) usage.Runtime_acp_client.context_used;
   check (option int) "the window the host sent over ACP" (Some 262144)
     usage.Runtime_acp_client.context_size;
   (match result.Runtime_acp_client.usage_source with
@@ -5888,25 +5872,27 @@ let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
     normalized.Runtime_acp_client.cache_read_input_tokens
 ;;
 
-let test_muse_prompt_without_occupancy_takes_the_last_request_input () =
+let test_muse_prompt_without_occupancy_counts_the_session_from_its_journal () =
   let result, _ = run_muse_prompt ~writes_journal:true ~sends_occupancy:false in
   let usage = result.Runtime_acp_client.usage in
-  check (option int) "no occupancy was sent" None
-    usage.Runtime_acp_client.context_used;
-  check (option int) "the last request's input, not the input of the whole prompt"
-    (Some 23429) usage.Runtime_acp_client.last_request_input_tokens;
-  check (option int) "the rollover reads the last request's input" (Some 23429)
+  check (option int)
+    "the newest request's counted input plus output, not the input of the whole \
+     prompt"
+    (Some (23429 + 36)) usage.Runtime_acp_client.context_used;
+  check (option int) "the rollover reads the same count" (Some (23429 + 36))
     (Keeper_acp_runtime.For_testing.effective_context_used usage);
   check (option int) "no window was sent" None usage.Runtime_acp_client.context_size
 ;;
 
 let test_muse_prompt_without_a_journal_keeps_the_prompt_and_says_why () =
   let result, sessions_directory =
-    run_muse_prompt ~writes_journal:false ~sends_occupancy:false
+    run_muse_prompt ~writes_journal:false ~sends_occupancy:true
   in
   check string "the reply" "pong" result.Runtime_acp_client.text;
   check int "no token counts are made up" 0
     result.Runtime_acp_client.usage.Runtime_acp_client.input_tokens;
+  check (option int) "the host's estimate is no count of the session" None
+    result.Runtime_acp_client.usage.Runtime_acp_client.context_used;
   match result.Runtime_acp_client.usage_source with
   | Runtime_acp_client.Usage_unreadable
       (Runtime_muse_session_log.Session_log_not_found { searched; session_id }) ->
@@ -6010,8 +5996,8 @@ let () =
     ; ( "muse_usage_journal"
       , [ test_case "prompt reads its token counts from the host journal" `Quick
             test_muse_prompt_reads_its_token_counts_from_the_host_journal
-        ; test_case "prompt without occupancy takes the last request input" `Quick
-            test_muse_prompt_without_occupancy_takes_the_last_request_input
+        ; test_case "prompt without occupancy counts the session from its journal" `Quick
+            test_muse_prompt_without_occupancy_counts_the_session_from_its_journal
         ; test_case "prompt without a journal keeps the reply and says why" `Quick
             test_muse_prompt_without_a_journal_keeps_the_prompt_and_says_why
         ] )

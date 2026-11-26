@@ -593,9 +593,9 @@ let usage_source_to_yojson (source : Runtime_acp_client.usage_source) : Yojson.S
       ; "main", muse_counts_to_yojson turn.Runtime_muse_session_log.main
       ; ( "main_cache_write_tokens"
         , `Int turn.Runtime_muse_session_log.main_cache_write_tokens )
-      ; ( "last_request_input_tokens"
-        , match turn.Runtime_muse_session_log.last_request_input_tokens with
-          | Some n -> `Int n
+      ; ( "last_request"
+        , match turn.Runtime_muse_session_log.last_request with
+          | Some counts -> muse_counts_to_yojson counts
           | None -> `Null )
       ; "reviews", `Int turn.Runtime_muse_session_log.reviews
       ; "review", muse_counts_to_yojson turn.Runtime_muse_session_log.review

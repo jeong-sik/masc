@@ -23,7 +23,7 @@ type turn =
   { main : counts
   ; main_cache_write_tokens : int
   ; main_requests : int
-  ; last_request_input_tokens : int option
+  ; last_request : counts option
   ; review : counts
   ; reviews : int
   ; observers : observers
@@ -471,7 +471,7 @@ let no_counts =
   { main = zero_counts
   ; main_cache_write_tokens = 0
   ; main_requests = 0
-  ; last_request_input_tokens = None
+  ; last_request = None
   ; review = zero_counts
   ; reviews = 0
   ; observers = no_observers
@@ -540,7 +540,7 @@ let summarize records =
                 ; main_cache_write_tokens =
                     turn.main_cache_write_tokens + cache_write_tokens
                 ; main_requests = turn.main_requests + 1
-                ; last_request_input_tokens = Some counts.input_tokens
+                ; last_request = Some counts
                 }
               | Review_completed { run_id; counts } when List.mem run_id started ->
                 { turn with
@@ -631,4 +631,25 @@ let read_turn m =
       read_observers ~session_directory:(Filename.dirname m.path) observer_journals
     in
     Ok { turn with observers }
+;;
+
+(* ── What the session held when it was left ──────────────────────────────── *)
+
+(* How much of a journal's end {!last_request} reads. After a prompt's last
+   model request the host writes that run's end, its hooks, reminders and
+   observer links: at most 279,592 bytes, and at most 17,996 for half of them,
+   in 47 journals of muse acp 1.4.25 on 2026-11-26. *)
+let last_request_window_bytes = 4 * 1024 * 1024
+
+let last_request root ~session_id =
+  let* { path; offset = size } = mark root ~session_id in
+  let* records = read_records { path; offset = max 0 (size - last_request_window_bytes) } in
+  Ok
+    (List.fold_left
+       (fun newest record ->
+          match record with
+          | Model_completed { counts; _ } -> Some counts
+          | Run_started _ | Run_terminal _ | Review_completed _ | Observer_linked _ -> newest)
+       None
+       records)
 ;;

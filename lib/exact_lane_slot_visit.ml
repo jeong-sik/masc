@@ -163,8 +163,10 @@ let codex_info (info : Runtime_codex_app_server.Codex_error_info.t) : 'rejection
 (* A client's overflow is a refusal before generation only when it shows that
    nothing was generated: no tool ran, and for Claude no response came.
 
-   A client's [Timeout] is its idle window: the stream said nothing for that
-   long. It is [Lost], as the idle phases of {!timeout_phase} are. *)
+   A client's [Timeout] is a deadline that passed: the stream said nothing
+   for that long, or a stdin write, a MASC state callback or an ACP RPC
+   admission step did not finish in time. The error does not say which. It
+   is [Lost], as the idle phases of {!timeout_phase} are. *)
 
 let codex (error : Runtime_codex_app_server.error) : 'rejection Outcome.unanswered =
   match error with

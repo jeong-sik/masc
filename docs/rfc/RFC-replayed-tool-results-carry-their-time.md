@@ -114,9 +114,7 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 
 ## 4. 운영자에게 보이는 변화
 
-- 새 세션 씨앗의 도구 결과마다 `result_time` 이 붙는다. 기록이 있으면 붙인 시각과 나이, 없으면 `unrecorded` 다.
-- 배포 직후 한 번, Muse·Antigravity 의 저장된 세션은 새 세션으로 시작한다. 코덱 schema 가 바뀌어 digest 가 한 번 바뀌기 때문이다. Keeper 마다 Start 가 한 번 더 생긴다.
-- 대시보드·TUI 화면은 바뀌지 않는다. 새 Gate 는 없다. 「확인했다」는 말을 막는 장치도 없다.
+- 새 세션 씨앗의 도구 결과마다 `result_time` 이 붙는다. 기록이 있으면 붙인 시각과 나이, 없으면 `unrecorded` 다.- 대시보드·TUI 화면은 바뀌지 않는다. 새 Gate 는 없다. 「확인했다」는 말을 막는 장치도 없다.
 
 ## 5. 한계와 열린 질문
 

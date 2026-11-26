@@ -127,10 +127,10 @@ masc 는 이 400 을 `Unknown_invalid_request` 로 읽는다. 문장을 읽어 �
 
 ### 1.6 거절이 남기는 것
 
-- 거절된 범위를 typed 로 적는 칸은 있다(`Turn_record.refused_model_input`, `lib/types/turn_record.mli:134-148`). 생성자는 Muse 의 `Model_error_not_retryable` 하나다. 칸은 턴 기록마다 하나다(`turn_record.mli:284`).
-- `refused_model_input` 을 채우는 런타임은 Muse 하나다(`lib/keeper/keeper_turn_driver.ml:3322`, :3356). Codex, Antigravity, Claude Code 는 버린다(:3006, :3185, :3475). Agent Core 갈래는 부르지 않는다. 기록을 쓰는 길은 이미 있다(`keeper_agent_run.ml:1605-1606`, :2362). 그 길은 거절이 올 때마다 칸을 덮어쓴다.
+- 거절된 범위를 typed 로 적는 칸은 있다(`Turn_record.refused_model_input`). 거절 사유의 생성자는 `Model_error_not_retryable` 하나다. 칸은 턴 기록마다 하나다.
+- `refused_model_input` 은 공식 클라이언트 갈래 넷이 채운다. 갈래마다 `Keeper_turn_driver_try_provider.is_size_refusal` 인 거절에서 `record_refused_model_input` 을 부른다(`keeper_turn_driver.ml`). 이 기록은 그 시도가 클라이언트에 씨앗을 넘겼을 때만 남는다. 이어 간 세션은 씨앗을 넘기지 않아서 범위를 남기지 않는다. Agent Core 갈래는 부르지 않는다. 턴 기록은 마지막에 남은 거절 하나를 담는다(`keeper_agent_run.ml` 의 `refused_model_input_ref`).
 - 읽는 쪽도 공식 클라이언트 host 하나다(`lib/keeper/keeper_official_client_host.ml:491-552`). Agent Core 조립은 씨앗 읽기 결과에서 `seed` 만 읽는다(`keeper_turn_driver_try_provider.ml:1951`, :1985).
-- 읽는 쪽의 scan(`scan_refusal`, `lib/keeper/keeper_carried_front.ml:151-158`)은 새 기록부터 읽는다. 응답이 있는 기록을 만나면 그 기록의 거절도 답한 것으로 본다(:139-143). Muse 는 새 세션 씨앗의 거절만 적는다. 그래서 Muse 의 기록에서는 같은 기록의 응답이 늘 거절 뒤다. Agent Core 는 응답마다 응답 칸을 덮어쓴다(`keeper_turn_driver_try_provider.ml:2370-2393`, `keeper_agent_run.ml:1601-1604`).
+- 읽는 쪽의 scan(`scan_refusal`, `lib/keeper/keeper_carried_front.ml:151-158`)은 새 기록부터 읽는다. 응답이 있는 기록을 만나면 그 기록의 거절도 답한 것으로 본다(:139-143). 공식 클라이언트 갈래는 새 세션 씨앗의 거절만 적는다. 그래서 그 기록에서는 같은 기록의 응답이 늘 거절 뒤다. Agent Core 는 응답마다 응답 칸을 덮어쓴다(`keeper_turn_driver_try_provider.ml:2370-2393`, `keeper_agent_run.ml:1601-1604`).
 - 실패한 턴의 `model_input_window` 는 시도한 마지막 범위다. 응답 관측이 없으면 끊긴 연결과 모양이 같다(`turn_record.mli:150-158`). 거절이라는 표시가 없다.
 - 거절이 옮긴 앞머리는 `run_named` 한 번에만 산다(`keeper_turn_driver.ml:2219`). 그 칸은 턴의 것이다. 같은 턴의 모든 Agent Core 후보가 읽고(:3720-3722), 공식 클라이언트 씨앗도 읽는다(:2219-2243). ledger 는 프로세스 메모리이고 응답에서만 움직인다.
 - 턴 기록은 턴 끝에서 한 번 쓴다(`keeper_agent_run.ml:2317-2362`). 프로세스가 턴 중간에 끝나면 그 턴의 응답도 거절도 파일에 남지 않는다.

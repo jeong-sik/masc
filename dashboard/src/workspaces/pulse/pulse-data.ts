@@ -10,7 +10,7 @@
  */
 
 import { ok, type Result } from '../../lib/result'
-import { authSession } from '../../core/auth'
+import { authSession, canAccessMemberWorkspace } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
 import { decodeKeeperAsksWire, decodeToolApprovalsWire } from '../../api/hitl-decoders'
 import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/dashboard-goals'
@@ -496,8 +496,10 @@ export async function loadPulseBundle(
   win: TimeWindow,
   reason: FetchReason = 'mount',
 ): Promise<void> {
+  const cur = authSession.peek()
+  if (!canAccessMemberWorkspace(cur)) return
   const usageDays = timeWindowProviderDays(win)
-  const isMultiAccount = authSession.peek().kind === 'multi_account_signed_in'
+  const isMultiAccount = cur.kind === 'multi_account_signed_in'
 
   await Promise.all([
     resourceCache.fetch<PulseShellSnapshot>(

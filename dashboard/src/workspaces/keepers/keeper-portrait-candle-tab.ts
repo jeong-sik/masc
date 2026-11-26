@@ -11,7 +11,13 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import {
+  authSession,
+  canAccessMemberWorkspace,
+  canUseSingleUserTokenRead,
+  currentSessionEpoch,
+  isEpochCurrent,
+} from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { EQUIPMENT_IDS, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -48,7 +54,7 @@ const DEFAULT_SLOT_ITEM: Readonly<Record<PortraitSlot, string>> = {
 
 export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
   const { keeper } = props
-  const isSingleUser = authSession.value.kind === 'single_user_local'
+  const canReadItems = canUseSingleUserTokenRead(authSession.value)
   const [ledger, setLedger] = useState<KeeperCandleLedgerData | null>(null)
   const [items, setItems] = useState<KeeperItemsData | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -73,8 +79,13 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
     loadAbortRef.current = ctrl
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
+    const curSession = authSession.peek()
+    if (!canAccessMemberWorkspace(curSession)) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    const allowItems = authSession.peek().kind === 'single_user_local'
+    const allowItems = canUseSingleUserTokenRead(curSession)
     const [ledRes, itRes] = await Promise.all([
       fetchKeeperCandleLedgerApi(targetKeeper, 100, ctrl.signal),
       allowItems ? fetchKeeperItemsApi(targetKeeper, ctrl.signal) : Promise.resolve(null),
@@ -99,7 +110,7 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
       setItems(null)
     }
     setLoadError(errors.length > 0 ? errors.join(' · ') : null)
-  }, [keeper.name, isSingleUser])
+  }, [keeper.name, canReadItems])
 
   useEffect(() => {
     setLedger(null)

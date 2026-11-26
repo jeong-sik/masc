@@ -126,6 +126,49 @@ describe('Proposal A+ Application Shell (src/app.ts)', () => {
     expect(historicalIncidents.value).toHaveLength(0)
   })
 
+  it('blocks single-user Player role on member routes without observer SSE or HITL fetches', async () => {
+    const requestedUrls: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      requestedUrls.push(url)
+      if (url === '/health') {
+        return jsonResponse({
+          account_mode: 'Single_user',
+          auth_methods: { google: false, github: false, dev_token: false },
+        })
+      }
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          auth: {
+            enabled: true,
+            require_token: true,
+            token_valid: true,
+            effective_role: 'player',
+            effective_admin: false,
+          },
+        })
+      }
+      return jsonResponse({ error: 'forbidden' }, 403)
+    })
+
+    window.location.hash = '#/pulse'
+    resetRouterForTests('/pulse')
+
+    await act(async () => {
+      render(h(App, {}), container)
+    })
+
+    await waitFor(() => {
+      expect(authSession.value).toMatchObject({ kind: 'single_user_local', role: 'player' })
+      expect(container.querySelector('[data-testid="route-gate-role-restricted"]')).not.toBeNull()
+    })
+    expect(requestedUrls.some((u) => u.includes('/mcp?sse_kind=observer'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/goals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/board'))).toBe(false)
+  })
+
   it('wires global shortcuts: [b] rail toggle, [1]-[6] trunks, [,] settings, [i] incidents, [⌘T] queue, and [⌘K] palette', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url

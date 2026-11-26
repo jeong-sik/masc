@@ -11,7 +11,12 @@
  */
 
 import { signal, type ReadonlySignal } from '@preact/signals'
-import { canAccessTokenAdmin, canReadSuOrMaAdmin, type AuthSession } from '../core/auth'
+import {
+  canAccessMemberWorkspace,
+  canAccessTokenAdmin,
+  canReadSuOrMaAdmin,
+  type AuthSession,
+} from '../core/auth'
 import type { ViewProvenance } from '../core/observer'
 import type { WorkspaceId } from '../workspaces/types'
 
@@ -485,15 +490,20 @@ export function resolveRoute(rawInput: string): ResolvedRoute {
 
 export type RouteGuardDecision =
   | { readonly allowed: true }
-  | { readonly allowed: false; readonly reason: 'probing' | 'auth_required' | 'admin_only' | 'account_changed' | 'unavailable' }
+  | {
+      readonly allowed: false
+      readonly reason: 'probing' | 'auth_required' | 'admin_only' | 'role_restricted' | 'account_changed' | 'unavailable'
+    }
 
 /**
  * Judges whether the current `AuthSession` may mount a route with `access`.
  * - `public` routes (e.g. `/account`) always mount.
- * - `single_user_local`: Admin unlocks `member` + `admin`; verified `worker`/`player`
- *   receive `admin_only` WITHOUT mounting or firing speculative 403 requests.
- * - `multi_account_signed_in`: `role === 'admin'` unlocks `admin`; `worker`/`viewer`
- *   receive `admin_only` WITHOUT mounting or firing speculative 403 requests.
+ * - `single_user_local`: Admin unlocks `member` + `su_read_ma_admin` + `admin` (when token-admin);
+ *   `worker` unlocks `member` + `su_read_ma_admin` and receives `admin_only` on `admin`;
+ *   `player` (holds only `CanPlayMachine`) receives `role_restricted` on `member` and `admin_only`
+ *   on `su_read_ma_admin` / `admin` WITHOUT mounting or firing speculative 403 requests.
+ * - `multi_account_signed_in`: `role === 'admin'` unlocks `admin` + `su_read_ma_admin`;
+ *   `worker`/`viewer` unlock `member` and receive `admin_only` on `su_read_ma_admin` / `admin`.
  */
 export function evaluateRouteAccess(
   access: RouteAccess,
@@ -512,6 +522,9 @@ export function evaluateRouteAccess(
     case 'single_user_auth_required':
       return { allowed: false, reason: 'auth_required' }
     case 'single_user_local':
+      if (access === 'member' && !canAccessMemberWorkspace(session)) {
+        return { allowed: false, reason: 'role_restricted' }
+      }
       if (access === 'su_read_ma_admin' && !canReadSuOrMaAdmin(session)) {
         return { allowed: false, reason: 'admin_only' }
       }
@@ -531,6 +544,9 @@ export function evaluateRouteAccess(
 }
 
 export function isAdminLockedForSession(access: RouteAccess, session: AuthSession): boolean {
+  if (access === 'member') {
+    return session.kind === 'single_user_local' && session.role === 'player'
+  }
   if (access === 'su_read_ma_admin') return !canReadSuOrMaAdmin(session)
   if (access === 'admin') return !canAccessTokenAdmin(session)
   return false

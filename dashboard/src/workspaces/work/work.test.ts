@@ -2018,10 +2018,46 @@ describe('workspaces/work', () => {
       if (url.startsWith('/api/v1/dashboard/scheduled-automation')) return jsonResponse({ schedules: [] })
       if (url.startsWith('/api/v1/candle/ledger')) {
         return jsonResponse({
-          schema_version: 2,
+          schema_version: 1,
           instance_id: 'i1',
-          generated_at_unix: 1,
-          data: { entries: [], balances: [] },
+          generated_at_unix: 1000,
+          data: {
+            ledger_state: 'present',
+            total_events: 0,
+            balance_error: null,
+            policy: {
+              configuration: 'enabled',
+              disabled_reason: null,
+              pricing_mode: 'supply_scaled',
+              half_life: { mode: 'decay', half_life_hours: 168, half_life_sec: 604800 },
+              half_life_sec: 604800,
+            },
+            supply: {
+              issued_milli: '0',
+              burned_milli: '0',
+              circulating_milli: '0',
+              total_supply_milli: '0',
+              active_keepers: 0,
+            },
+            balances: [],
+            recent_events: [],
+            diagnostics: {
+              held_windows_count: 1,
+              unattributed_count: 0,
+              backlog_fenced_count: 0,
+              zero_linked_tasks_goals: 0,
+              items: [
+                {
+                  kind: 'candidate_window_held',
+                  goal_id: 'goal-rbac-1',
+                  title: 'Ship RBAC',
+                  observation: 'Held',
+                  diagnostic_hint: 'Pending release',
+                  at_unix: 1000,
+                },
+              ],
+            },
+          },
         })
       }
       return jsonResponse({ error: 'unexpected unbridged route' }, 404)
@@ -2061,5 +2097,41 @@ describe('workspaces/work', () => {
     await flushUi(10)
     expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
     expect(container.textContent).not.toContain('최종 완료 확정')
+
+    // 3. Single-user Worker & auth_enabled=false Admin on CandleTab with entityId: 0x GET /goals/candle or /health?full=1
+    for (const suSession of [
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: true,
+        role: 'worker' as const,
+        canTokenAdmin: false,
+        canTokenRead: true,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: false,
+        role: 'admin' as const,
+        canTokenAdmin: false,
+        canTokenRead: false,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+    ]) {
+      seenUrls.length = 0
+      render(null, container)
+      resourceCache.clearAll()
+      authSession.value = suSession
+      render(html`<${WorkWorkspace} subroute="candle" entityId="goal-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi(10)
+      expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/goals/candle'))).toBe(false)
+      expect(seenUrls.some((u) => u.startsWith('/health?full=1'))).toBe(false)
+      expect(container.querySelector('[data-testid="candle-goal-admin-locked"]')).not.toBeNull()
+      expect(container.querySelector('input[aria-label="Goal Candle 조회 ID"]')).toBeNull()
+      expect(container.textContent).not.toContain('보류 확인')
+    }
   })
 })

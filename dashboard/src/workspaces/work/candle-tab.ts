@@ -13,8 +13,14 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { activeWorkspaceId, authSession, sessionEpoch } from '../../core/auth'
-import { isAdminLockedForSession } from '../../routes/router'
+import {
+  activeWorkspaceId,
+  authSession,
+  canAccessMemberWorkspace,
+  canUseSingleUserTokenAdmin,
+  isSingleUserMember,
+  sessionEpoch,
+} from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { observedAbsent, observedValue, resourceCache } from '../../core/resource-cache'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
@@ -57,8 +63,9 @@ interface GoalCandleObservation {
 
 export function CandleTab(props: WorkspaceViewProps) {
   const session = authSession.value
-  const isSingleUser = session.kind === 'single_user_local'
-  const canReleaseHold = isSingleUser && !isAdminLockedForSession('admin', session)
+  const isSingleUser = isSingleUserMember(session)
+  const canInspectGoalCandle = canUseSingleUserTokenAdmin(session)
+  const canReleaseHold = canInspectGoalCandle
   const [ledger, setLedger] = useState<CandleLedgerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -72,6 +79,10 @@ export function CandleTab(props: WorkspaceViewProps) {
   const inspectAbortRef = useRef<AbortController | null>(null)
 
   const loadLedger = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
+    if (!canAccessMemberWorkspace(authSession.peek())) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setLoadError(null)
     const obs = await resourceCache.fetch<CandleLedgerData>(
@@ -107,7 +118,7 @@ export function CandleTab(props: WorkspaceViewProps) {
   }, [loadLedger])
 
   const inspectGoalCandle = useCallback(async (goalIdRaw: string) => {
-    if (authSession.peek().kind !== 'single_user_local') return
+    if (!canUseSingleUserTokenAdmin(authSession.peek())) return
     const goalId = goalIdRaw.trim()
     if (!goalId) return
     inspectAbortRef.current?.abort()
@@ -151,16 +162,17 @@ export function CandleTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
-    if (props.entityId && isSingleUser) {
+    if (props.entityId && canInspectGoalCandle) {
       setInspectGoalId(props.entityId)
       void inspectGoalCandle(props.entityId)
-    } else if (!isSingleUser) {
+    } else if (!canInspectGoalCandle) {
       inspectAbortRef.current?.abort()
       setObservation(null)
+      setGoalCandleLoading(false)
       setGoalCandleError(null)
     }
     return () => inspectAbortRef.current?.abort()
-  }, [props.entityId, isSingleUser, inspectGoalCandle])
+  }, [props.entityId, canInspectGoalCandle, inspectGoalCandle])
 
   const currentObservation = observation?.goalId === inspectGoalId.trim() ? observation : null
   const observedLedger = currentObservation?.data.ledger
@@ -170,8 +182,7 @@ export function CandleTab(props: WorkspaceViewProps) {
   const heldVerificationId = asNonEmptyString(held?.verification_run_id)
 
   const handleReleaseHold = async (target: GoalCandleObservation, requestId: string, verificationRunId: string) => {
-    const curSession = authSession.peek()
-    if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) return
+    if (!canUseSingleUserTokenAdmin(authSession.peek())) return
     if (releaseBusy !== null || sessionEpoch.peek() !== target.epoch
         || activeWorkspaceId.peek() !== target.workspaceId || currentObservation !== target) return
     const { goalId } = target
@@ -406,7 +417,7 @@ export function CandleTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            ${isSingleUser
+            ${canInspectGoalCandle
               ? html`
                   <div class="wk-row-wrap">
                     <input
@@ -435,11 +446,17 @@ export function CandleTab(props: WorkspaceViewProps) {
                     </button>
                   </div>
                 `
-              : html`
-                  <div class="wk-notice wk-notice--info" data-testid="candle-goal-mode-notice" role="status">
-                    Goal별 Candle 지급 진단 및 보류 해제는 싱글유저 로컬 세션 전용입니다.
-                  </div>
-                `}
+              : isSingleUser
+                ? html`
+                    <div class="wk-notice wk-notice--info" data-testid="candle-goal-admin-locked" role="status">
+                      Goal별 Candle 지급 진단 및 보류 해제는 관리자(토큰 인증) 세션 전용입니다.
+                    </div>
+                  `
+                : html`
+                    <div class="wk-notice wk-notice--info" data-testid="candle-goal-mode-notice" role="status">
+                      Goal별 Candle 지급 진단 및 보류 해제는 싱글유저 로컬 세션 전용입니다.
+                    </div>
+                  `}
 
             ${goalCandleError && html`<div class="wk-notice wk-notice--err" role="alert">${goalCandleError}</div>`}
             ${currentObservation && html`
@@ -494,19 +511,21 @@ export function CandleTab(props: WorkspaceViewProps) {
                             ${item.diagnosticHint || item.observation}
                           </div>
                         </div>
-                        <div class="wk-actions">
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            disabled=${releaseBusy !== null}
-                            onClick=${() => {
-                              setInspectGoalId(item.goalId)
-                              void inspectGoalCandle(item.goalId)
-                            }}
-                          >
-                            ${item.kind === 'candidate_window_held' ? '보류 확인' : '관측'}
-                          </button>
-                        </div>
+                        ${canInspectGoalCandle && html`
+                          <div class="wk-actions">
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              disabled=${releaseBusy !== null}
+                              onClick=${() => {
+                                setInspectGoalId(item.goalId)
+                                void inspectGoalCandle(item.goalId)
+                              }}
+                            >
+                              ${item.kind === 'candidate_window_held' ? '보류 확인' : '관측'}
+                            </button>
+                          </div>
+                        `}
                       </div>
                     `)}
                   </div>

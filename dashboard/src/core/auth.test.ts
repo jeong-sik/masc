@@ -19,13 +19,16 @@ import {
   bootstrapAuthSession,
   bumpSessionEpoch,
   canAccessAdmin,
+  canAccessMemberWorkspace,
   canUseSingleUserTokenAdmin,
+  canUseSingleUserTokenRead,
   currentSessionEpoch,
   getActiveCsrfToken,
   getSingleUserToken,
   installAuthLifecycleGuards,
   isAuthenticated,
   isEpochCurrent,
+  isSingleUserMember,
   normalizeBearerToken,
   refreshMultiAccountCsrf,
   registerWorkspaceTargets,
@@ -770,11 +773,15 @@ describe('core/auth', () => {
       kind: 'single_user_local',
       role: 'worker',
       canTokenAdmin: false,
+      canTokenRead: true,
     })
     expect(canAccessAdmin(authSession.value)).toBe(false)
     expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(true)
+    expect(canAccessMemberWorkspace(authSession.value)).toBe(true)
+    expect(isSingleUserMember(authSession.value)).toBe(true)
 
-    // 3. Player token -> role='player', canAccessAdmin=false
+    // 3. Player token -> role='player', canAccessAdmin=false, canTokenRead=false, member denied
     const playerFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
@@ -795,10 +802,18 @@ describe('core/auth', () => {
       fetchImpl: playerFetch as unknown as typeof fetch,
     })
     expect(playerRes.ok).toBe(true)
-    expect(authSession.value).toMatchObject({ kind: 'single_user_local', role: 'player', canTokenAdmin: false })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
     expect(canAccessAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(false)
+    expect(canAccessMemberWorkspace(authSession.value)).toBe(false)
+    expect(isSingleUserMember(authSession.value)).toBe(false)
 
-    // 4. Admin token -> role='admin', canTokenAdmin=true
+    // 4. Admin token -> role='admin', canTokenAdmin=true, canTokenRead=true
     const adminFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
@@ -819,11 +834,17 @@ describe('core/auth', () => {
       fetchImpl: adminFetch as unknown as typeof fetch,
     })
     expect(adminRes.ok).toBe(true)
-    expect(authSession.value).toMatchObject({ kind: 'single_user_local', role: 'admin', canTokenAdmin: true })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+    })
     expect(canAccessAdmin(authSession.value)).toBe(true)
     expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(true)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(true)
 
-    // 5. Auth disabled -> role='admin', canTokenAdmin=false
+    // 5. Auth disabled -> role='admin', canTokenAdmin=false, canTokenRead=false
     const disabledFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
@@ -836,9 +857,60 @@ describe('core/auth', () => {
     })
     resetAuthStateForTests()
     const disabled = await bootstrapAuthSession({ fetchImpl: disabledFetch as unknown as typeof fetch })
-    expect(disabled).toMatchObject({ kind: 'single_user_local', role: 'admin', canTokenAdmin: false })
+    expect(disabled).toMatchObject({
+      kind: 'single_user_local',
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
     expect(canAccessAdmin(disabled)).toBe(true)
     expect(canUseSingleUserTokenAdmin(disabled)).toBe(false)
+    expect(canUseSingleUserTokenRead(disabled)).toBe(false)
+    expect(canAccessMemberWorkspace(disabled)).toBe(true)
+  })
+
+  it('fails closed on unverified setSingleUserToken and external manual token changes while keeping dev admin metadata', () => {
+    authSession.value = {
+      kind: 'single_user_auth_required',
+      mode: 'single_user',
+      authMethods: { google: false, github: false, dev_token: false },
+      reason: 'Authorization required',
+    }
+
+    // Manual unverified token must NOT elevate to Admin before shell verification
+    setSingleUserToken('unverified-manual-tok')
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenAdmin(authSession.value)).toBe(false)
+    expect(canUseSingleUserTokenRead(authSession.value)).toBe(false)
+
+    // External dev token with explicit admin metadata carries admin capabilities
+    setStoredToken('verified-dev-tok', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(true)
+
+    // Rotating to an unverified manual token demotes back to fail-closed worker until verified
+    setStoredToken('rotated-unknown-tok', { source: 'manual' })
+    expect(authSession.value).toMatchObject({
+      kind: 'single_user_local',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: false,
+    })
+    expect(canAccessAdmin(authSession.value)).toBe(false)
   })
 
   it('bumps sessionEpoch on in-place multi-account role demotion via visibilitychange and CSRF refresh', async () => {

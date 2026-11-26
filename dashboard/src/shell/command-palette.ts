@@ -20,6 +20,8 @@ import { useFocusScope } from '../../design-system/headless-preact/use-focus-sco
 import {
   authSession,
   bootstrapAuthSession,
+  canAccessMemberWorkspace,
+  isSingleUserMember,
   type AuthSession,
 } from '../core/auth'
 import { startObserverStream } from '../core/observer'
@@ -81,6 +83,8 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
 
   // 2. Account: namespace (Operator Identity & Workspace Access — NEVER LLM Providers)
   const adminLocked = isAdminLockedForSession('admin', session)
+  const memberLocked = isAdminLockedForSession('member', session)
+  const operatorDigestLocked = isAdminLockedForSession('su_read_ma_admin', session)
   cmds.push(
     {
       id: 'account:profile',
@@ -174,7 +178,8 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       category: 'Provider',
       keywords: ['provider', 'quota', 'codex', 'claude', 'antigravity', 'glm', 'kimi', '429', '할당량'],
       group: 'Provider',
-      subtitle: '/runtime/quotas — Manage LLM Provider keys & subscriptions',
+      subtitle: memberLocked ? '/runtime/quotas · Restricted' : '/runtime/quotas — Manage LLM Provider keys & subscriptions',
+      locked: memberLocked,
       run: () => navigate('/runtime/quotas'),
     },
     {
@@ -183,7 +188,8 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       category: 'Provider',
       keywords: ['provider', 'cache', 'spend', 'cost', 'token', '캐시'],
       group: 'Provider',
-      subtitle: '/runtime/efficiency',
+      subtitle: memberLocked ? '/runtime/efficiency · Restricted' : '/runtime/efficiency',
+      locked: memberLocked,
       run: () => navigate('/runtime/efficiency'),
     },
     {
@@ -192,7 +198,8 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       category: 'Provider',
       keywords: ['provider', 'lane', 'failover', 'exact', 'fusion', 'model', '레인'],
       group: 'Provider',
-      subtitle: '/runtime/lanes',
+      subtitle: memberLocked ? '/runtime/lanes · Restricted' : '/runtime/lanes',
+      locked: memberLocked,
       run: () => navigate('/runtime/lanes'),
     },
   )
@@ -307,7 +314,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       shortcut: 'B',
       run: () => toggleRail(),
     },
-    ...(session.kind === 'single_user_local'
+    ...(isSingleUserMember(session)
       ? [{
           id: 'action:refresh-hitl',
           label: 'Action: Refresh Pending Approvals & Asks',
@@ -316,7 +323,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
           group: 'Action' as const,
           subtitle: 'Fetch /api/v1/keepers/tool-approvals & /asks',
           run: async () => {
-            if (authSession.peek().kind !== 'single_user_local') {
+            if (!isSingleUserMember(authSession.peek())) {
               pushShellToast('승인 대기열 새로고침은 싱글유저 세션 전용입니다.', 'info')
               return
             }
@@ -325,7 +332,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
           },
         }]
       : []),
-    ...(session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+    ...(canAccessMemberWorkspace(session)
       ? [{
           id: 'action:reconnect-observer',
           label: 'Action: Reconnect Observer SSE Stream',
@@ -334,8 +341,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
           group: 'Action' as const,
           subtitle: 'Restart shared observer stream',
           run: () => {
-            const cur = authSession.peek()
-            if (cur.kind !== 'single_user_local' && cur.kind !== 'multi_account_signed_in') {
+            if (!canAccessMemberWorkspace(authSession.peek())) {
               pushShellToast('로그인된 세션에서만 Observer SSE를 재연결할 수 있습니다.', 'info')
               return
             }
@@ -350,12 +356,12 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       category: 'Action',
       keywords: ['operator', 'digest', 'probe', 'health', '운영자'],
       group: 'Action',
-      subtitle: adminLocked
+      subtitle: operatorDigestLocked
         ? 'GET /api/v1/operator/digest · Admin only'
         : 'GET /api/v1/operator/digest (read-only)',
-      locked: adminLocked,
+      locked: operatorDigestLocked,
       run: async () => {
-        if (isAdminLockedForSession('admin', authSession.peek())) {
+        if (isAdminLockedForSession('su_read_ma_admin', authSession.peek())) {
           pushShellToast('운영자 다이제스트 조회는 관리자 전용입니다.', 'info')
           return
         }
@@ -378,7 +384,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
         pushShellToast(`Operator digest: ${status}`, 'success')
       },
     },
-    ...(session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in'
+    ...(canAccessMemberWorkspace(session)
       ? [{
           id: 'action:runtime-defaults-check',
           label: 'Action: Inspect Resolved Runtime Defaults',
@@ -387,8 +393,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
           group: 'Action' as const,
           subtitle: 'GET /api/v1/dashboard/runtime-defaults (read-only)',
           run: async () => {
-            const cur = authSession.peek()
-            if (cur.kind !== 'single_user_local' && cur.kind !== 'multi_account_signed_in') {
+            if (!canAccessMemberWorkspace(authSession.peek())) {
               pushShellToast('로그인된 세션에서만 런타임 기본값을 조회할 수 있습니다.', 'info')
               return
             }

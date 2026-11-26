@@ -12,7 +12,7 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { authSession, currentSessionEpoch, sessionEpoch } from '../../core/auth'
+import { authSession, currentSessionEpoch, isSingleUserMember, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import type { WorkspaceViewProps } from '../types'
@@ -29,7 +29,7 @@ import './keepers.css'
 
 export function KeepersWorkspace(props: WorkspaceViewProps) {
   const session = authSession.value
-  const isSingleUser = session.kind === 'single_user_local'
+  const isSingleUser = isSingleUserMember(session)
   const epoch = sessionEpoch.value
   const { roster: listing, turns } = readKeeperRosterSources()
   const roster = useMemo(() => {
@@ -60,7 +60,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
   }, [props.entityId])
 
   const refreshRoster = useCallback(async (reason: 'mount' | 'sse' | 'manual') => {
-    if (authSession.peek().kind !== 'single_user_local') return
+    if (!isSingleUserMember(authSession.peek())) return
     const startEpoch = currentSessionEpoch()
     // Wait for any superseded read before starting a replacement snapshot.
     if (reason === 'sse' && rosterRead.current) await rosterRead.current

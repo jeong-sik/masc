@@ -12,9 +12,15 @@ import { html } from 'htm/preact'
 import { isEditableTarget } from '../lib/keyboard'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { activeWorkspaceId, authSession, isAuthenticated, sessionEpoch } from '../core/auth'
+import {
+  activeWorkspaceId,
+  authSession,
+  canAccessAdmin,
+  canAccessMemberWorkspace,
+  sessionEpoch,
+} from '../core/auth'
 import { TargetLockedAction, type TargetLockState } from '../components/primitives/target-locked-action'
-import { isAdminLockedForSession, navigate } from '../routes/router'
+import { navigate } from '../routes/router'
 import {
   commandPaletteOpen,
   formatInboxPendingCount,
@@ -35,7 +41,9 @@ import {
 
 export function FastApprovalStrip(): VNode | null {
   const session = authSession.value
-  const canApproveTools = session.kind === 'single_user_local' && !isAdminLockedForSession('admin', session)
+  // POST /api/v1/keepers/tool-approval uses Tool_actor CanAdmin (succeeds on loopback
+  // even when auth_enabled=false), symmetric with submitFastToolApproval.
+  const canApproveTools = session.kind === 'single_user_local' && canAccessAdmin(session)
   const approvals = pendingApprovals.value
   const asks = pendingAsks.value
   const gates = pendingGateApprovals.value
@@ -71,7 +79,7 @@ export function FastApprovalStrip(): VNode | null {
 
   const submitDecision = (approval: PendingApprovalItem, decision: 'approve' | 'deny') => {
     const cur = authSession.peek()
-    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) {
+    if (cur.kind !== 'single_user_local' || !canAccessAdmin(cur)) {
       pushShellToast('도구 승인 결정은 싱글유저 관리자 세션에서만 실행할 수 있습니다.', 'info')
       return
     }
@@ -118,7 +126,7 @@ export function FastApprovalStrip(): VNode | null {
 
       // Respect RBAC + TargetLockedAction epoch, revision & workspace fence before firing keyboard action
       const curSession = authSession.peek()
-      if (curSession.kind !== 'single_user_local' || isAdminLockedForSession('admin', curSession)) return
+      if (curSession.kind !== 'single_user_local' || !canAccessAdmin(curSession)) return
       const epochLocked = sessionEpoch.peek() !== capturedEpoch
       const wsLocked = activeWorkspaceId.peek() !== headApproval.workspaceId
       const revisionLocked = lockedRevision !== null && headApproval.revision !== lockedRevision
@@ -141,7 +149,7 @@ export function FastApprovalStrip(): VNode | null {
 
   // 0px when genuinely clear with all inbox HITL sources observed.
   if (!headApproval && !headAsk && !headGate && !headGoalConfirm) {
-    if (!isAuthenticated.value || inboxUnchecked.length === 0) return null
+    if (!canAccessMemberWorkspace(session) || inboxUnchecked.length === 0) return null
     const allUnbridged = inboxUnchecked.every((u) => u.state.kind === 'unbridged')
     const detailText = inboxUnchecked
       .map((source) => `${source.label}(${uncheckedHitlStatusLabel(source.state)})`)

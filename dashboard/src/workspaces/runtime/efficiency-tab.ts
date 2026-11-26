@@ -20,9 +20,12 @@ import {
   acquireViewStream,
   apiGet,
   authSession,
+  canAccessMemberWorkspace,
+  canUseSingleUserTokenRead,
   extractObserverTopics,
   formatObserved,
   isEpochCurrent,
+  isSingleUserMember,
   markViewSynced,
   observedAbsent,
   observedUnreported,
@@ -146,9 +149,10 @@ interface JoinedKeeperSpendRow {
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
   const session = authSession.value
-  const isSingleUser = session.kind === 'single_user_local'
+  const isSingleUser = isSingleUserMember(session)
   const isMultiAccountSignedIn = session.kind === 'multi_account_signed_in'
   const adminLocked = isAdminLockedForSession('admin', session)
+  const canTokenRead = canUseSingleUserTokenRead(session)
   const sseInstanceId = isSingleUser ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
   const params = windowToModelsParams(win)
@@ -179,9 +183,8 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
   const loadSnapshots = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
     const curSession = authSession.peek()
-    const singleLocal = curSession.kind === 'single_user_local'
-    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
-    if (!singleLocal && !multiSignedIn) return
+    if (!canAccessMemberWorkspace(curSession)) return
+    const singleLocal = isSingleUserMember(curSession)
 
     const startEpoch = epoch
     const jobs: Promise<unknown>[] = [
@@ -232,15 +235,19 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           }),
           { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
         ),
-        resourceCache.fetch<KeeperEfficiencyPayload>(
-          effKey,
-          (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
-            signal,
-            decode: decodeKeeperEfficiencyPayload,
-          }),
-          { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
-        ),
       )
+      if (canUseSingleUserTokenRead(curSession)) {
+        jobs.push(
+          resourceCache.fetch<KeeperEfficiencyPayload>(
+            effKey,
+            (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
+              signal,
+              decode: decodeKeeperEfficiencyPayload,
+            }),
+            { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
+          ),
+        )
+      }
     }
     void Promise.all(jobs).then(() => {
       if (isEpochCurrent(startEpoch)) markViewSynced()
@@ -252,7 +259,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     setLiveMetrics(null)
     setStreamError(null)
     loadSnapshots('mount')
-  }, [win, epoch, session.kind, adminLocked])
+  }, [win, epoch, session.kind, isSingleUser, adminLocked, canTokenRead])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
@@ -330,7 +337,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       unsubResync()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
-  }, [win, epoch, session.kind, adminLocked])
+  }, [win, epoch, session.kind, isSingleUser, adminLocked, canTokenRead])
 
   const effectiveModels = !isSingleUser
     ? null

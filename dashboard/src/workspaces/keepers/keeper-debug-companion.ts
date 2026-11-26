@@ -11,7 +11,14 @@ import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import {
+  activeWorkspaceId,
+  authSession,
+  canUseSingleUserTokenRead,
+  currentSessionEpoch,
+  isEpochCurrent,
+  isSingleUserMember,
+} from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
@@ -213,25 +220,30 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }, [keeperName])
 
   const session = authSession.value
-  const isSingleUser = session.kind === 'single_user_local'
+  const isSingleUser = isSingleUserMember(session)
   const adminLocked = isAdminLockedForSession('admin', session)
   const canAdminDebug = isSingleUser && !adminLocked
+  const canTokenReadDebug = canUseSingleUserTokenRead(session)
 
   const loadTrace = useCallback(async () => {
     const cur = authSession.peek()
-    if (cur.kind !== 'single_user_local') return
+    if (!isSingleUserMember(cur)) return
+    const allowTokenRead = canUseSingleUserTokenRead(cur)
     const allowAdmin = !isAdminLockedForSession('admin', cur)
+    if (!allowTokenRead && !allowAdmin) return
     const seq = ++traceSeqRef.current
     const startEpoch = currentSessionEpoch()
     setTraceError(null)
-    const trPromise = fetchKeeperTurnRecordsApi(keeperName, 60)
+    const trPromise = allowTokenRead ? fetchKeeperTurnRecordsApi(keeperName, 60) : Promise.resolve(null)
     const tcPromise = allowAdmin ? fetchKeeperToolCallsApi(keeperName, 50) : Promise.resolve(null)
     const rtPromise = allowAdmin ? fetchKeeperRawTracesApi(keeperName, 12) : Promise.resolve(null)
     const [tr, tc, rt] = await Promise.all([trPromise, tcPromise, rtPromise])
     if (!mountedRef.current || seq !== traceSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
-    if (tr.ok) setTurns(tr.value)
-    else errs.push(`턴 기록: ${tr.error.message}`)
+    if (allowTokenRead && tr && canUseSingleUserTokenRead(authSession.peek())) {
+      if (tr.ok) setTurns(tr.value)
+      else errs.push(`턴 기록: ${tr.error.message}`)
+    }
     if (allowAdmin && !isAdminLockedForSession('admin', authSession.peek())) {
       if (tc) {
         if (tc.ok) setToolCalls(tc.value)
@@ -247,40 +259,50 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   const loadContext = useCallback(async () => {
     const cur = authSession.peek()
-    if (cur.kind !== 'single_user_local') return
+    if (!isSingleUserMember(cur)) return
+    const allowTokenRead = canUseSingleUserTokenRead(cur)
     const allowAdmin = !isAdminLockedForSession('admin', cur)
+    if (!allowTokenRead && !allowAdmin) return
     const seq = ++contextSeqRef.current
     const startEpoch = currentSessionEpoch()
     setContextError(null)
-    const trPromise = fetchKeeperTurnRecordsApi(keeperName, 60)
-    const lpPromise = fetchKeeperLastPromptApi(keeperName)
+    const trPromise = allowTokenRead ? fetchKeeperTurnRecordsApi(keeperName, 60) : Promise.resolve(null)
+    const lpPromise = allowAdmin ? fetchKeeperLastPromptApi(keeperName) : Promise.resolve(null)
     const cpPromise = allowAdmin ? fetchKeeperCheckpointsApi(keeperName) : Promise.resolve(null)
-    const osPromise = fetchKeeperMemoryOsInternalsApi(keeperName)
+    const osPromise = allowTokenRead ? fetchKeeperMemoryOsInternalsApi(keeperName) : Promise.resolve(null)
     const [tr, lp, cp, os] = await Promise.all([trPromise, lpPromise, cpPromise, osPromise])
     if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
-    if (tr.ok) {
-      setTurns(tr.value)
-      const latestTurnRef = tr.value.entries[0]?.record.turn_ref
-      if (allowAdmin && latestTurnRef && !isAdminLockedForSession('admin', authSession.peek())) {
-        const pi = await fetchKeeperProviderInputApi(keeperName, latestTurnRef)
-        if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch) || isAdminLockedForSession('admin', authSession.peek())) return
-        if (pi.ok) setProviderInput(pi.value)
-        else errs.push(`Provider 입력: ${pi.error.message}`)
+    if (allowTokenRead && tr && canUseSingleUserTokenRead(authSession.peek())) {
+      if (tr.ok) {
+        setTurns(tr.value)
+        const latestTurnRef = tr.value.entries[0]?.record.turn_ref
+        if (allowAdmin && latestTurnRef && !isAdminLockedForSession('admin', authSession.peek())) {
+          const pi = await fetchKeeperProviderInputApi(keeperName, latestTurnRef)
+          if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch) || isAdminLockedForSession('admin', authSession.peek())) return
+          if (pi.ok) setProviderInput(pi.value)
+          else errs.push(`Provider 입력: ${pi.error.message}`)
+        } else {
+          setProviderInput(null)
+        }
       } else {
-        setProviderInput(null)
+        errs.push(`턴 기록: ${tr.error.message}`)
       }
     } else {
-      errs.push(`턴 기록: ${tr.error.message}`)
+      setProviderInput(null)
     }
-    if (lp.ok) setLastPrompt(lp.value)
-    else errs.push(`최근 프롬프트: ${lp.error.message}`)
+    if (allowAdmin && lp && !isAdminLockedForSession('admin', authSession.peek())) {
+      if (lp.ok) setLastPrompt(lp.value)
+      else errs.push(`최근 프롬프트: ${lp.error.message}`)
+    }
     if (allowAdmin && cp && !isAdminLockedForSession('admin', authSession.peek())) {
       if (cp.ok) setCheckpoints(cp.value)
       else errs.push(`체크포인트: ${cp.error.message}`)
     }
-    if (os.ok) setCompactionEpochs(os.value.compaction.epoch_count)
-    else errs.push(`Memory OS: ${os.error.message}`)
+    if (allowTokenRead && os && canUseSingleUserTokenRead(authSession.peek())) {
+      if (os.ok) setCompactionEpochs(os.value.compaction.epoch_count)
+      else errs.push(`Memory OS: ${os.error.message}`)
+    }
     if (errs.length > 0) setContextError(errs.join(' · '))
   }, [keeperName])
 
@@ -334,6 +356,12 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }, [keeperName])
 
   useEffect(() => {
+    if (!canTokenReadDebug) {
+      traceSeqRef.current += 1
+      contextSeqRef.current += 1
+      setTurns(null)
+      setCompactionEpochs(null)
+    }
     if (!canAdminDebug) {
       traceSeqRef.current += 1
       contextSeqRef.current += 1
@@ -341,6 +369,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
       setToolCalls(null)
       setRawTraces([])
       setRawTracePage(null)
+      setLastPrompt(null)
       setProviderInput(null)
       setCheckpoints(null)
       setPendingDanger(null)
@@ -350,10 +379,10 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
       setMemActStatus(null)
     }
     if (!isSingleUser) return
-    if (tab === 'trace') void loadTrace()
-    else if (tab === 'context') void loadContext()
+    if (tab === 'trace' && (canTokenReadDebug || canAdminDebug)) void loadTrace()
+    else if (tab === 'context' && (canTokenReadDebug || canAdminDebug)) void loadContext()
     else if (tab === 'memory' && canAdminDebug) void loadMemory()
-  }, [tab, isSingleUser, canAdminDebug, loadTrace, loadContext, loadMemory])
+  }, [tab, isSingleUser, canTokenReadDebug, canAdminDebug, loadTrace, loadContext, loadMemory])
 
   useEffect(() => {
     if (adminLocked) {
@@ -537,11 +566,13 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Turn Gantt Waterfall (${turnRecords.length})</h3>
-              <button type="button" class="btn-ghost" onClick=${() => void loadTrace()}>갱신</button>
+              <button type="button" class="btn-ghost" disabled=${!canTokenReadDebug && !canAdminDebug} onClick=${() => void loadTrace()}>갱신</button>
             </div>
-            ${turnRecords.length === 0
-              ? html`<div class="kp-empty">턴 기록 없음</div>`
-              : turnRecords.slice(0, 14).map((r) => {
+            ${!canTokenReadDebug
+              ? html`<div class="kp-empty" data-testid="companion-turn-records-token-locked" role="status">턴 기록 조회는 토큰 인증 싱글유저 세션 전용입니다.</div>`
+              : turnRecords.length === 0
+                ? html`<div class="kp-empty">턴 기록 없음</div>`
+                : turnRecords.slice(0, 14).map((r) => {
                   const totalPct = Math.max(2, Math.min(100, Math.round(((r.request_latency_ms ?? 0) / maxLatencyMs) * 100)))
                   const ttfrcPct = Math.max(1, Math.min(totalPct, Math.round(((r.ttfrc_ms ?? 0) / maxLatencyMs) * 100)))
                   return html`
@@ -688,30 +719,34 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
             <div class="kp-card-head">
               <h3>Last Prompt & Provider Input</h3>
             </div>
-            ${lastPrompt
-              ? html`
-                  <div class="kp-roster-sub">
-                    Turn #${lastPrompt.absolute_turn} · ${lastPrompt.assembled_bytes.toLocaleString('en-US')} bytes · ${lastPrompt.blocks.length} blocks
-                  </div>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    onClick=${() => props.onInspect({
-                      title: `Last Prompt #${lastPrompt.absolute_turn}`,
-                      subtitle: keeperName,
-                      kind: 'last_prompt',
-                      data: lastPrompt,
-                    })}
-                  >
-                    Last Prompt 전체 검사
-                  </button>
-                `
-              : html`<div class="kp-empty">캡처된 프롬프트 없음</div>`}
-            ${providerInput && html`
-              <div class="kp-roster-sub">
-                Provider Input: ${providerInput.wire.provider}/${providerInput.wire.model} (${providerInput.parts.length} parts · ${providerInput.wire.body_bytes.toLocaleString('en-US')} B)
-              </div>
-            `}
+            ${!canAdminDebug
+              ? html`<div class="kp-empty" data-testid="companion-last-prompt-admin-locked" role="status">최근 프롬프트 및 Provider 입력 조회는 관리자 전용입니다.</div>`
+              : html`
+                  ${lastPrompt
+                    ? html`
+                        <div class="kp-roster-sub">
+                          Turn #${lastPrompt.absolute_turn} · ${lastPrompt.assembled_bytes.toLocaleString('en-US')} bytes · ${lastPrompt.blocks.length} blocks
+                        </div>
+                        <button
+                          type="button"
+                          class="btn-ghost"
+                          onClick=${() => props.onInspect({
+                            title: `Last Prompt #${lastPrompt.absolute_turn}`,
+                            subtitle: keeperName,
+                            kind: 'last_prompt',
+                            data: lastPrompt,
+                          })}
+                        >
+                          Last Prompt 전체 검사
+                        </button>
+                      `
+                    : html`<div class="kp-empty">캡처된 프롬프트 없음</div>`}
+                  ${providerInput && html`
+                    <div class="kp-roster-sub">
+                      Provider Input: ${providerInput.wire.provider}/${providerInput.wire.model} (${providerInput.parts.length} parts · ${providerInput.wire.body_bytes.toLocaleString('en-US')} B)
+                    </div>
+                  `}
+                `}
           </div>
 
           <div class="kp-card">

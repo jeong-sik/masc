@@ -1411,6 +1411,58 @@ describe('Proposal A+ Shell components', () => {
     expect(currentRoute.value.path).toBe('/work/inbox')
     expect(window.location.hash).not.toContain('/infra')
     expect(shellToasts.value.some((t) => t.tone === 'info' && t.message.includes('Infra') && t.message.includes('관리자 전용'))).toBe(true)
+
+    // Single-user Worker and auth_enabled=false Admin unlock GET /api/v1/operator/digest (Public_read in SU)
+    seenUrls.length = 0
+    for (const suSession of [
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: true,
+        role: 'worker' as const,
+        canTokenAdmin: false,
+        canTokenRead: true,
+        workspaceId: 'default',
+        authMethods: AUTH_METHODS,
+      },
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: false,
+        role: 'admin' as const,
+        canTokenAdmin: false,
+        canTokenRead: false,
+        workspaceId: 'default',
+        authMethods: AUTH_METHODS,
+      },
+    ]) {
+      authSession.value = suSession
+      const suDigestCmd = buildPaletteCommands(suSession).find((c) => c.id === 'action:operator-snapshot-check')!
+      expect(Boolean(suDigestCmd.locked)).toBe(false)
+      await suDigestCmd.run()
+    }
+    expect(seenUrls.filter((u) => u === '/api/v1/operator/digest')).toHaveLength(2)
+
+    // Single-user Player cannot access operator/digest, runtime-defaults, or refreshPendingHitl
+    seenUrls.length = 0
+    const playerSession = {
+      kind: 'single_user_local' as const,
+      mode: 'single_user' as const,
+      tokenPresent: true,
+      role: 'player' as const,
+      canTokenAdmin: false,
+      canTokenRead: false,
+      workspaceId: 'default',
+      authMethods: AUTH_METHODS,
+    }
+    authSession.value = playerSession
+    const playerCmds = buildPaletteCommands(playerSession)
+    expect(playerCmds.find((c) => c.id === 'action:operator-snapshot-check')!.locked).toBe(true)
+    expect(playerCmds.find((c) => c.id === 'action:refresh-hitl')).toBeUndefined()
+    expect(playerCmds.find((c) => c.id === 'action:runtime-defaults-check')).toBeUndefined()
+    await playerCmds.find((c) => c.id === 'action:operator-snapshot-check')!.run()
+    await refreshPendingHitl(fetchSpy as unknown as typeof fetch)
+    expect(seenUrls).toEqual([])
   })
 
   it('pauses shell toast auto-dismiss while keyboard focus or hover is inside the toast and resumes on leave', async () => {

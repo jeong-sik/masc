@@ -53,6 +53,7 @@ export type AuthSession =
       readonly tokenPresent: boolean
       readonly role?: SingleUserRole
       readonly canTokenAdmin?: boolean
+      readonly canTokenRead?: boolean
       readonly authMethods: AuthMethods
       readonly workspaceId: string
     }
@@ -154,7 +155,7 @@ export const activeWorkspaceId = signal<string>('default')
 // Keep the shell's in-memory bearer cache, epoch fence, and single-user session
 // synchronized whenever API modules (e.g. api/dev-token.ts) clear or replace
 // the shared tab-scoped bearer store.
-subscribeStoredTokenChanges(({ token }) => {
+subscribeStoredTokenChanges(({ token, meta }) => {
   if (internalBearerWriteDepth > 0) return
   const prevToken = singleUserBearerToken
   singleUserBearerToken = token
@@ -164,10 +165,14 @@ subscribeStoredTokenChanges(({ token }) => {
     const cur = authSession.peek()
     if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
       if (token !== null) {
+        const isVerifiedDevAdmin = meta?.source === 'dev' && meta.role === 'admin'
         authSession.value = {
           kind: 'single_user_local',
           mode: 'single_user',
           tokenPresent: true,
+          role: isVerifiedDevAdmin ? 'admin' : 'worker',
+          canTokenAdmin: isVerifiedDevAdmin,
+          canTokenRead: isVerifiedDevAdmin,
           authMethods: cur.authMethods,
           workspaceId: activeWorkspaceId.peek(),
         }
@@ -213,6 +218,48 @@ export function canAccessAdmin(session: AuthSession): boolean {
     case 'single_user_auth_required':
       return false
   }
+}
+
+/**
+ * Checks whether the current session may access member workspace routes and
+ * `CanReadState` endpoints (`/pulse`, `/work`, `/knowledge`, `/keepers`, `/runtime`,
+ * observer SSE, HITL queues).
+ * - `multi_account_signed_in`: allowed (`admin`/`worker`/`viewer`).
+ * - `single_user_local`: allowed ONLY when `role !== 'player'` (`Player` holds
+ *   only `CanPlayMachine` in `lib/types/types_auth.ml:482-484`).
+ * - All unauthenticated / probing / unavailable / account_changed states: denied.
+ */
+export function canAccessMemberWorkspace(session: AuthSession): boolean {
+  switch (session.kind) {
+    case 'multi_account_signed_in':
+      return true
+    case 'single_user_local':
+      return session.role !== 'player'
+    case 'probing':
+    case 'unavailable':
+    case 'account_changed':
+    case 'multi_account_signed_out':
+    case 'single_user_auth_required':
+      return false
+  }
+}
+
+/**
+ * Checks whether the current session is an authenticated non-player single-user
+ * local session (`single_user_local` with `role !== 'player'`).
+ */
+export function isSingleUserMember(session: AuthSession): boolean {
+  return session.kind === 'single_user_local' && session.role !== 'player'
+}
+
+/**
+ * Checks whether the current session satisfies single-user `Token_permission CanReadState`
+ * (`enabled && require_token && token_valid && role !== 'player'`, server_auth.ml:1187-1225).
+ */
+export function canUseSingleUserTokenRead(session: AuthSession): boolean {
+  if (session.kind !== 'single_user_local') return false
+  if (session.canTokenRead !== undefined) return session.canTokenRead
+  return session.role !== 'player'
 }
 
 /**
@@ -303,15 +350,23 @@ export function setSingleUserToken(token: string | null): void {
   if (singleUserBearerToken === normalized && readSessionBearerToken() === normalized
       && storedSource === nextSource) return
   batch(() => {
+    const tokenChanged = singleUserBearerToken !== normalized
     singleUserBearerToken = normalized
     bumpSessionEpoch()
     const cur = authSession.peek()
     if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
       if (normalized !== null) {
+        // Fail closed for an unverified manual token until verified via
+        // `verifyAndApplySingleUserToken` / `bootstrapAuthSession`; preserve
+        // verified capabilities only when the token value itself did not change.
+        const preserveVerified = !tokenChanged && cur.kind === 'single_user_local'
         authSession.value = {
           kind: 'single_user_local',
           mode: 'single_user',
           tokenPresent: true,
+          role: preserveVerified ? cur.role : 'worker',
+          canTokenAdmin: preserveVerified ? cur.canTokenAdmin : false,
+          canTokenRead: preserveVerified ? cur.canTokenRead : false,
           authMethods: cur.authMethods,
           workspaceId: activeWorkspaceId.peek(),
         }
@@ -412,7 +467,12 @@ function parseRole(raw: unknown): UserRole {
 }
 
 type ParsedSingleUserShellAuth =
-  | { readonly kind: 'ok'; readonly role: SingleUserRole; readonly canTokenAdmin: boolean }
+  | {
+      readonly kind: 'ok'
+      readonly role: SingleUserRole
+      readonly canTokenAdmin: boolean
+      readonly canTokenRead: boolean
+    }
   | { readonly kind: 'auth_required'; readonly reason: string }
 
 function parseSingleUserRoleValue(raw: unknown): SingleUserRole | null {
@@ -434,12 +494,12 @@ function parseSingleUserRoleValue(raw: unknown): SingleUserRole | null {
  */
 function parseSingleUserShellAuth(body: unknown): ParsedSingleUserShellAuth {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { kind: 'ok', role: 'admin', canTokenAdmin: true }
+    return { kind: 'ok', role: 'admin', canTokenAdmin: true, canTokenRead: true }
   }
   const rec = body as Record<string, unknown>
   const rawAuth = rec.auth
   if (typeof rawAuth !== 'object' || rawAuth === null || Array.isArray(rawAuth)) {
-    return { kind: 'ok', role: 'admin', canTokenAdmin: true }
+    return { kind: 'ok', role: 'admin', canTokenAdmin: true, canTokenRead: true }
   }
   const auth = rawAuth as Record<string, unknown>
   const enabled = auth.enabled === true
@@ -457,7 +517,6 @@ function parseSingleUserShellAuth(body: unknown): ParsedSingleUserShellAuth {
     }
   }
 
-  const canTokenAdmin = enabled && requireToken && tokenValid && effectiveAdmin
   const role: SingleUserRole = effectiveRole !== null
     ? effectiveRole
     : effectiveAdmin
@@ -465,7 +524,9 @@ function parseSingleUserShellAuth(body: unknown): ParsedSingleUserShellAuth {
       : !enabled
         ? 'admin'
         : 'worker'
-  return { kind: 'ok', role, canTokenAdmin }
+  const canTokenAdmin = enabled && requireToken && tokenValid && effectiveAdmin
+  const canTokenRead = enabled && requireToken && tokenValid && role !== 'player'
+  return { kind: 'ok', role, canTokenAdmin, canTokenRead }
 }
 
 function writeAccountMarker(accountId: string | null): void {
@@ -749,6 +810,7 @@ export async function verifyAndApplySingleUserToken(
       tokenPresent: true,
       role: parsedShellAuth.role,
       canTokenAdmin: parsedShellAuth.canTokenAdmin,
+      canTokenRead: parsedShellAuth.canTokenRead,
       authMethods,
       workspaceId: activeWorkspaceId.peek(),
     }
@@ -889,6 +951,7 @@ export async function bootstrapAuthSession(
     if (!ownsCredential()) return authSession.peek()
     let resolvedRole: SingleUserRole = 'admin'
     let resolvedCanTokenAdmin = true
+    let resolvedCanTokenRead = true
     if (opts.probeShell !== false) {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (singleUserBearerToken) headers.Authorization = `Bearer ${singleUserBearerToken}`
@@ -938,6 +1001,7 @@ export async function bootstrapAuthSession(
       }
       resolvedRole = parsedShellAuth.role
       resolvedCanTokenAdmin = parsedShellAuth.canTokenAdmin
+      resolvedCanTokenRead = parsedShellAuth.canTokenRead
     }
 
     const next: AuthSession = {
@@ -946,6 +1010,7 @@ export async function bootstrapAuthSession(
       tokenPresent: singleUserBearerToken !== null,
       role: resolvedRole,
       canTokenAdmin: resolvedCanTokenAdmin,
+      canTokenRead: resolvedCanTokenRead,
       authMethods,
       workspaceId: activeWorkspaceId.peek(),
     }

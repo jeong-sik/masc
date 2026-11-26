@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   authSession,
   bootstrapAuthSession,
+  canAccessMemberWorkspace,
   installAuthLifecycleGuards,
   isAuthenticated,
   sessionEpoch,
@@ -214,6 +215,25 @@ function WorkspaceHost(): VNode {
         </section>
       `
     }
+    if (decision.reason === 'role_restricted') {
+      return html`
+        <section class="ap-gate" role="status" data-testid="route-gate-role-restricted">
+          <div class="ap-card">
+            <span class="ap-eyebrow">RBAC · ROLE RESTRICTED</span>
+            <h1 class="ap-card-title">대시보드 접근 권한이 없습니다</h1>
+            <p class="ap-muted">
+              현재 역할은 <code class="mono">${route.path}</code> 조회 권한이 없습니다.
+              권한 없는 API 요청은 전송하지 않습니다.
+            </p>
+            <div class="ap-placeholder-actions">
+              <button type="button" class="btn-primary" onClick=${() => navigate('/account')}>
+                Account 확인
+              </button>
+            </div>
+          </div>
+        </section>
+      `
+    }
     if (decision.reason === 'admin_only') {
       return html`
         <section class="ap-gate" role="status" data-testid="route-gate-admin-only">
@@ -405,7 +425,7 @@ export function App(): VNode {
       if (disposed || !bootstrapped || epoch === lastObserverEpoch) return
       lastObserverEpoch = epoch
       const cur = authSession.peek()
-      if (cur.kind === 'single_user_local' || cur.kind === 'multi_account_signed_in') {
+      if (canAccessMemberWorkspace(cur)) {
         void startObserverStream()
       }
     })
@@ -414,7 +434,7 @@ export function App(): VNode {
       if (disposed) return
       bootstrapped = true
       lastObserverEpoch = sessionEpoch.peek()
-      if (session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in') {
+      if (canAccessMemberWorkspace(session)) {
         void startObserverStream()
         void probeBuildConnectionInfo()
         void refreshPendingHitl()
@@ -484,7 +504,12 @@ export function App(): VNode {
         if (trunk) {
           event.preventDefault()
           if (isAdminLockedForSession(trunk.access, authSession.peek())) {
-            pushShellToast(`${trunk.label} 워크스페이스는 관리자 전용입니다.`, 'info')
+            pushShellToast(
+              trunk.access === 'member'
+                ? `${trunk.label} 워크스페이스에 접근할 권한이 없습니다.`
+                : `${trunk.label} 워크스페이스는 관리자 전용입니다.`,
+              'info',
+            )
             return
           }
           navigate(trunk.defaultPath)

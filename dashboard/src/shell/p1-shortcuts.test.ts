@@ -236,6 +236,27 @@ describe('P1 Dashboard shortcut & modal layering regressions', () => {
     })
     expect(submitMock).not.toHaveBeenCalled()
     maView.unmount()
+
+    // 3. Single-user loopback with auth_enabled=false (role='admin', canTokenAdmin=false) matches Tool_actor CanAdmin
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: activeWorkspaceId.peek(),
+    }
+    const localDisabledView = render(html`<${FastApprovalStrip} onNavigate=${vi.fn()} />`)
+    expect(localDisabledView.container.querySelector('[data-testid="fast-approval-admin-locked"]')).toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(submitMock).toHaveBeenCalledTimes(1)
+    expect(submitMock.mock.calls[0]![1]).toBe('approve')
+    localDisabledView.unmount()
   })
 
   it('hides authenticated Command Palette diagnostic actions when signed out', () => {

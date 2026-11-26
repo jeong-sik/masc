@@ -10,7 +10,7 @@ import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { useFocusScope } from '../../design-system/headless-preact/use-focus-scope'
-import { authSession, isAuthenticated } from '../core/auth'
+import { authSession, canAccessMemberWorkspace } from '../core/auth'
 import {
   WORKSPACE_NAV_BY_ID,
   currentRoute,
@@ -39,7 +39,7 @@ export function MobileNav(): VNode {
   const session = authSession.value
   const moreOpen = mobileMoreOpen.value
   const pending = inboxPendingCount.value
-  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const pendingUnchecked = canAccessMemberWorkspace(session) && inboxUncheckedSources.value.length > 0
   const workBadge = formatInboxBadge(pending, pendingUnchecked)
   const workBadgeLabel = pendingUnchecked
     ? `Inbox ${formatInboxPendingCount(pending, true)}`

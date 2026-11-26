@@ -519,7 +519,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   })
 
   it('authorizes native Discord reply in the active Keeper chat from the authenticated shell', async () => {
-    setStoredToken('fixture-admin')
+    setStoredToken('fixture-admin', { source: 'dev', actor: 'dashboard', role: 'admin' })
     const keeper = makeRosterKeeper()
     const history = [
       {
@@ -3356,5 +3356,70 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const runNextRes = await runQueuedChatOperationNext('code-reviewer-sister', 'op-1')
     expect(runNextRes.ok).toBe(false)
     expect(seenUrls).toEqual([])
+
+    // 3. KeeperDebugCompanion Context tab under SU Worker: skips CanAdmin /last-prompt, /checkpoints, /provider-input
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const workerCmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    fireEvent.click(workerCmp.getByRole('tab', { name: 'Context' }))
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/turn-records'))).toBe(true)
+    })
+    expect(workerCmp.getByTestId('companion-last-prompt-admin-locked')).toBeTruthy()
+    expect(workerCmp.getByTestId('companion-checkpoints-admin-locked')).toBeTruthy()
+    expect(seenUrls.some((u) => u.includes('/last-prompt'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/checkpoints'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/provider-input'))).toBe(false)
+    workerCmp.unmount()
+
+    // 4. SU auth_enabled=false (canTokenRead=false, canTokenAdmin=false): 0x Token_permission 401s across Debug Companion & Portrait/Items
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const noTokCmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(noTokCmp.getByTestId('companion-turn-records-token-locked')).toBeTruthy()
+    fireEvent.click(noTokCmp.getByRole('tab', { name: 'Context' }))
+    expect(noTokCmp.getByTestId('companion-last-prompt-admin-locked')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls).toEqual([])
+    noTokCmp.unmount()
+
+    const portraitTab = render(
+      html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/candle/ledger'))).toBe(true)
+    })
+    expect(seenUrls.some((u) => u.includes('/items'))).toBe(false)
+    portraitTab.unmount()
+
+    // 5. SU Player denied portrait fetches
+    expect(canFetchPortraitForSession({
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    })).toBe(false)
   })
 })

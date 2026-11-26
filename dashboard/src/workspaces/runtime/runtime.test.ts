@@ -2230,5 +2230,25 @@ describe('workspaces/runtime', () => {
       b.textContent?.includes('질문 응답 제출'),
     )
     expect(submitBtns).toHaveLength(0)
+
+    // 3. Single-user auth_enabled=false (canTokenRead=false, canTokenAdmin=false): EfficiencyTab skips Token_permission /api/v1/keeper-efficiency & /exact-lane-runs
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/cache-stats'))).toBe(true)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keeper-efficiency'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/exact-lane-runs'))).toBe(false)
   })
 })

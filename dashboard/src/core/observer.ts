@@ -150,6 +150,7 @@ export function resolveObserverEndpoint(session: AuthSession): {
     }
   }
   if (session.kind === 'single_user_local') {
+    if (session.role === 'player') return null
     const headers: Record<string, string> = { Accept: 'text/event-stream' }
     const token = getSingleUserToken()
     if (token) headers.Authorization = `Bearer ${token}`

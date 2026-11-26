@@ -71,30 +71,32 @@ type t = {
   gradient_ai_flow : rgb array;
 }
 
-type palette = {
-  surface_0 : rgb;
-  surface_1 : rgb;
-  surface_2 : rgb;
-  border_subtle : rgb;
-  border_inactive : rgb;
-  border_focused : rgb;
-  text_bright : rgb;
-  text_primary : rgb;
-  text_secondary : rgb;
-  text_muted : rgb;
-  status_ok : rgb;
-  status_active : rgb;
-  status_attention : rgb;
-  status_critical : rgb;
-  status_ai : rgb;
-  status_historical : rgb;
-  accent : rgb;
-  selection_bg : rgb;
-  selection_fg : rgb;
-  cool_stops : rgb * rgb * rgb;
-  warm_stops : rgb * rgb * rgb;
-  ai_stops : rgb * rgb * rgb;
-}
+module Palette = struct
+  type t = {
+    surface_0 : rgb;
+    surface_1 : rgb;
+    surface_2 : rgb;
+    border_subtle : rgb;
+    border_inactive : rgb;
+    border_focused : rgb;
+    text_bright : rgb;
+    text_primary : rgb;
+    text_secondary : rgb;
+    text_muted : rgb;
+    status_ok : rgb;
+    status_active : rgb;
+    status_attention : rgb;
+    status_critical : rgb;
+    status_ai : rgb;
+    status_historical : rgb;
+    accent : rgb;
+    selection_bg : rgb;
+    selection_fg : rgb;
+    cool_stops : rgb * rgb * rgb;
+    warm_stops : rgb * rgb * rgb;
+    ai_stops : rgb * rgb * rgb;
+  }
+end
 
 let clamp_byte v = Int.max 0 (Int.min 255 v)
 
@@ -419,7 +421,8 @@ let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
     gradient_ai_flow;
   }
 
-let of_palette preset palette =
+let of_palette preset (palette : Palette.t) =
+  let open Palette in
   build_theme ~preset
     ~surface_0:palette.surface_0
     ~surface_1:palette.surface_1
@@ -444,7 +447,8 @@ let of_palette preset palette =
     ~warm_stops:palette.warm_stops
     ~ai_stops:palette.ai_stops
 
-let equal_palette a b =
+let equal_palette (a : Palette.t) (b : Palette.t) =
+  let open Palette in
   Int.equal a.surface_0 b.surface_0
   && Int.equal a.surface_1 b.surface_1
   && Int.equal a.surface_2 b.surface_2
@@ -475,7 +479,7 @@ let equal_palette a b =
    reads it on every call. [Stdlib.Mutex] because the locked section is a
    short table lookup with no I/O, and tests call [of_preset] outside
    [Eio_main.run] (see the OCaml checklist §4). *)
-let overrides_table : (preset, palette) Hashtbl.t = Hashtbl.create 16
+let overrides_table : (preset, Palette.t) Hashtbl.t = Hashtbl.create 16
 let overrides_mutex = Mutex.create ()
 
 let with_overrides_locked fn =
@@ -500,7 +504,9 @@ let down_tone_cool_stops = (0x69AABA, 0x7DB1DD, 0xAFD4EA)
 let down_tone_warm_stops = (0xA693C9, 0xD494B8, 0xEFBBC2)
 let down_tone_ai_stops = (0x9F92C8, 0xB89DD9, 0xDBC8EA)
 
-let builtin_palette = function
+let builtin_palette =
+  let open Palette in
+  function
   (* Preset 1: Midnight — Linear Dark x Obsidian Slate (v2.5 verified WCAG 2.1 AA) *)
   | Midnight ->
       {

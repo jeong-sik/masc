@@ -12,7 +12,7 @@ val default_dir : base_path:string -> string
     "config") "themes"]. *)
 
 val parse_palette_text :
-  preset:Masc_tui_core.Theme.preset -> text:string -> (Masc_tui_core.Theme.palette, string) result
+  preset:Masc_tui_core.Theme.preset -> text:string -> (Masc_tui_core.Theme.Palette.t, string) result
 (** Parse one palette file's text and merge it onto [Theme.builtin_palette
     preset]. [Error] names the offending key or the parse failure; unknown
     keys are [Error], never silently ignored. *)

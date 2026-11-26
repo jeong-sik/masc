@@ -38,7 +38,8 @@ let stops_value key = function
   | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
       Error (Printf.sprintf "%s must hold exactly 3 \"#RRGGBB\" strings" key)
 
-let apply_key palette key value =
+let apply_key (palette : Theme.Palette.t) key value =
+  let open Theme.Palette in
   match key with
   | "surface_0" -> Result.map (fun c -> { palette with surface_0 = c }) (rgb_value key value)
   | "surface_1" -> Result.map (fun c -> { palette with surface_1 = c }) (rgb_value key value)

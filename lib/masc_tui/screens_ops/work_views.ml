@@ -334,6 +334,32 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
          ~scroll:model.nav.json_scroll_offset lines)
   end
 
+let evidence_matches_required ~required ev =
+  let req = String.lowercase_ascii (String.trim required) in
+  let hay = String.lowercase_ascii (String.trim ev) in
+  let rlen = String.length req and hlen = String.length hay in
+  if rlen = 0 || rlen > hlen then false
+  else if String.equal hay req then true
+  else
+    let is_left_boundary = function
+      | '/' | ':' | ' ' | '\t' | '(' | '[' | '=' -> true
+      | _ -> false
+    in
+    let is_right_boundary = function
+      | '/' | ':' | ' ' | '\t' | ')' | ']' | ',' | ';' | '(' -> true
+      | _ -> false
+    in
+    let rec scan i =
+      if i + rlen > hlen then false
+      else
+        let left_ok = i = 0 || is_left_boundary hay.[i - 1] in
+        let right_ok = i + rlen = hlen || is_right_boundary hay.[i + rlen] in
+        if left_ok && right_ok && String.equal (String.sub hay i rlen) req then
+          true
+        else scan (i + 1)
+    in
+    scan 0
+
 let draw_evidence_checklist ?(scroll = 0) grid ~(rect : Rect.t)
     ~(theme : Theme.t) ~(model : Model.t) (v : Wire_work.verification_request) =
   if Rect.is_empty rect then ()
@@ -343,8 +369,7 @@ let draw_evidence_checklist ?(scroll = 0) grid ~(rect : Rect.t)
     List.iter
       (fun req ->
         let present =
-          List.exists
-            (fun ev -> Ops_common.contains_ci ~needle:req ev)
+          List.exists (evidence_matches_required ~required:req)
             v.submitted_evidence
         in
         rows_acc := `Req (req, present) :: !rows_acc)
@@ -3594,17 +3619,11 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
             List.map
               (fun (r : Wire_work.gate_resolved_row) ->
                 let kind_raw = Option.value r.decision_kind ~default:r.decision in
-                let kind_s = String.lowercase_ascii (String.trim kind_raw) in
-                let approved =
-                  String.equal kind_s "approve"
-                  || String.equal kind_s "approved"
-                  || String.equal kind_s "allow"
-                in
-                let g =
-                  if approved then Glyph.Check_mark else Glyph.Live_failing
-                in
-                let tok =
-                  if approved then Theme.Status_ok else Theme.Status_critical
+                let g, tok =
+                  match Wire_work.classify_gate_decision r with
+                  | Wire_work.Gate_approved -> (Glyph.Check_mark, Theme.Status_ok)
+                  | Wire_work.Gate_rejected_or_other _ ->
+                      (Glyph.Live_failing, Theme.Status_critical)
                 in
                 let summary =
                   match r.decision_reason with
@@ -5853,13 +5872,11 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           let rows =
             List.mapi
               (fun i (v : Wire_work.harness_verdict_row) ->
-                let vl = String.lowercase_ascii v.verdict in
                 let tone =
-                  if String.equal vl "approve" || String.equal vl "approved" then
-                    Theme.Status_ok
-                  else if String.equal vl "reject" || String.equal vl "rejected" then
-                    Theme.Status_critical
-                  else Theme.Status_attention
+                  match Wire_work.classify_harness_verdict v.verdict with
+                  | Wire_work.Verdict_approve -> Theme.Status_ok
+                  | Wire_work.Verdict_reject -> Theme.Status_critical
+                  | Wire_work.Verdict_other _ -> Theme.Status_attention
                 in
                 {
                   Table.id = Printf.sprintf "%d:%s:%s" i v.task_id v.notes_hash;
@@ -5937,21 +5954,25 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           Int.min max_s (Int.max 0 model.work.detail_scroll_offset)
         in
         List.iteri
-          (fun i ln ->
+          (fun i (ln : Update_nav.styled_line) ->
             let py = content.y + i in
             if py < Rect.bottom content then
               let st =
-                if String.starts_with ~prefix:"──" ln then
-                  Typography.accent ~bg ~bold:true theme
-                else if String.starts_with ~prefix:"notes_hash (valid" ln then
-                  Typography.status ~bg ~bold:true theme Theme.Status_ok
-                else if String.starts_with ~prefix:"notes_hash (invalid" ln then
-                  Typography.status ~bg ~bold:true theme Theme.Status_attention
-                else Typography.primary ~bg theme
+                match ln.tone with
+                | Update_nav.Line_section | Update_nav.Line_accent ->
+                    Typography.accent ~bg ~bold:true theme
+                | Update_nav.Line_ok ->
+                    Typography.status ~bg ~bold:true theme Theme.Status_ok
+                | Update_nav.Line_warn ->
+                    Typography.status ~bg ~bold:true theme Theme.Status_attention
+                | Update_nav.Line_error ->
+                    Typography.status ~bg ~bold:true theme Theme.Status_critical
+                | Update_nav.Line_plain | Update_nav.Line_selected ->
+                    Typography.primary ~bg theme
               in
               ignore
                 (Ops_common.put_line ~clip:content grid ~x:content.x ~y:py
-                   ~max_w:content.w ~style:st ln))
+                   ~max_w:content.w ~style:st ln.text))
           (Store_scroll.drop scroll lines |> List.take content.h)
       end
     end

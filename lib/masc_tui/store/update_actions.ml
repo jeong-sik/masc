@@ -988,9 +988,11 @@ let open_runtime_lane_edit_modal ~now (m : Model.t)
     ({ next with nav = { next.nav with modal_edit_cursor = String.length value }; inline_modal }, cmds)
   else (
   let exact_output, bare_id =
-    if String.starts_with ~prefix:"exact/" lane.id then
-      (true, String.sub lane.id 6 (String.length lane.id - 6))
-    else (false, lane.id)
+    match Wire_runtime.classify_routing_lane lane.id with
+    | Wire_runtime.Route_exact bare -> (true, bare)
+    | Wire_runtime.Route_default | Wire_runtime.Route_media_failover
+    | Wire_runtime.Route_named _ ->
+        (false, lane.id)
   in
   let opened_revision = runtime_config_revision_opt m in
   let kind =
@@ -1041,11 +1043,7 @@ let open_named_lane_delete_modal (m : Model.t) lane_id =
 
 let open_runtime_lane_delete_modal ~now (m : Model.t)
     (lane : Wire_runtime.failover_lane) =
-  if
-    (not lane.declared)
-    || String.equal lane.id "default"
-    || String.equal lane.id "media_failover"
-    || String.starts_with ~prefix:"exact/" lane.id
+  if (not lane.declared) || not (Wire_runtime.is_named_routing_lane lane.id)
   then
     ( Model.with_toast ~now ~level:Model.Toast_warning
         (Say.make

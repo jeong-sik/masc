@@ -198,22 +198,26 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Int.min max_s (Int.max 0 model.nav.inspector_scroll_offset)
               in
               List.iteri
-                (fun i ln ->
+                (fun i (ln : Update_nav.styled_line) ->
                   let py = rect.y + i in
                   if py < Rect.bottom rect then
                     let st =
-                      if String.starts_with ~prefix:"[CanAdmin" ln then
-                        Typography.status ~bg ~bold:true theme
-                          Theme.Status_attention
-                      else if String.starts_with ~prefix:"[unreadable" ln then
-                        Typography.status ~bg theme Theme.Status_critical
-                      else if String.starts_with ~prefix:"[" ln then
-                        Typography.accent ~bg ~bold:true theme
-                      else Typography.primary ~bg theme
+                      match ln.tone with
+                      | Update_nav.Line_warn ->
+                          Typography.status ~bg ~bold:true theme
+                            Theme.Status_attention
+                      | Update_nav.Line_error ->
+                          Typography.status ~bg theme Theme.Status_critical
+                      | Update_nav.Line_ok ->
+                          Typography.status ~bg theme Theme.Status_ok
+                      | Update_nav.Line_accent | Update_nav.Line_section ->
+                          Typography.accent ~bg ~bold:true theme
+                      | Update_nav.Line_plain | Update_nav.Line_selected ->
+                          Typography.primary ~bg theme
                     in
                     ignore
                       (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:py
-                         ~max_w:rect.w ~style:st ln))
+                         ~max_w:rect.w ~style:st ln.text))
                 (Store_scroll.drop scroll lines |> List.take rect.h)
           in
           let tab_lines =

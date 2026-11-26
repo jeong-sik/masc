@@ -312,19 +312,33 @@ val keeper_facts_categories :
 val code_fuzzy_matches : query:string -> Model.t -> string list
 val keeper_identity_entries : Model.t -> name:string -> keeper_identity_entry list
 
+type line_tone =
+  | Line_plain
+  | Line_selected
+  | Line_section
+  | Line_ok
+  | Line_warn
+  | Line_error
+  | Line_accent
+
+type styled_line = {
+  tone : line_tone;
+  text : string;
+}
+
 val fusion_detail_lines :
-  width:int -> Model.t -> run_id:string -> string list
-val harness_verdict_detail_lines : width:int -> Model.t -> string list
+  width:int -> Model.t -> run_id:string -> styled_line list
+val harness_verdict_detail_lines : width:int -> Model.t -> styled_line list
 val addon_catalog_preview_lines :
   width:int -> Wire_runtime.addon_package_preview -> string list
 val knowledge_memory_subview_lines :
-  width:int -> Knowledge_store.t -> string list
+  width:int -> Knowledge_store.t -> styled_line list
 val keeper_memory_subview_lines :
-  width:int -> name:string -> Knowledge_store.t -> string list
+  width:int -> name:string -> Knowledge_store.t -> styled_line list
 val keeper_logs_lines :
   width:int -> name:string -> Keeper_context_store.keeper_state -> string list
 val keeper_identity_lines :
   width:int -> name:string -> Model.t -> string list
 val verification_dive_tab_lines :
-  width:int -> Model.t -> Wire_work.verification_request -> string list
+  width:int -> Model.t -> Wire_work.verification_request -> styled_line list
 val code_right_pane_line_count : Model.t -> int

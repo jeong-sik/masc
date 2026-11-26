@@ -825,6 +825,19 @@ type keeper_tool_calls_page = {
   entries : tool_call_entry list;
 }
 
+type tool_call_disposition =
+  | Disposition_deferred
+  | Disposition_completed
+  | Disposition_failed
+  | Disposition_other of string
+
+let classify_tool_call_disposition s =
+  match String.lowercase_ascii (String.trim s) with
+  | "deferred" -> Disposition_deferred
+  | "completed" | "succeeded" -> Disposition_completed
+  | "failed" -> Disposition_failed
+  | other -> Disposition_other other
+
 let decode_tool_call_entry json =
   let* ts_unix =
     if has_field json "ts" then required_finite_float json "ts" else Ok 0.0
@@ -849,10 +862,11 @@ let decode_tool_call_entry json =
             | Some "ok" -> Some true
             | Some "error" -> Some false
             | Some _ | None -> (
-                match Option.map String.lowercase_ascii disposition with
-                | Some ("completed" | "succeeded") -> Some true
-                | Some "failed" -> Some false
-                | Some _ | None -> None)))
+                match Option.map classify_tool_call_disposition disposition with
+                | Some Disposition_completed -> Some true
+                | Some Disposition_failed -> Some false
+                | Some (Disposition_deferred | Disposition_other _) | None ->
+                    None)))
   in
   let* failure_class = optional_nonblank_string json "failure_class" in
   let execution_mode =
@@ -1140,6 +1154,28 @@ type oauth_attached_tools_snapshot = {
   keeper : string;
   providers : oauth_attached_provider list;
 }
+
+type oauth_attempt_state =
+  | Oauth_completed
+  | Oauth_active
+  | Oauth_settled_other
+  | Oauth_other of string
+
+let classify_oauth_attempt_kind kind =
+  match String.lowercase_ascii (String.trim kind) with
+  | "completed" | "complete" -> Oauth_completed
+  | "awaiting_consent" | "callback_admitted" -> Oauth_active
+  | "failed"
+  | "canceled"
+  | "cancelled"
+  | "expired"
+  | "error"
+  | "denied"
+  | "unavailable"
+  | "superseded"
+  | "credential_publication_incomplete" ->
+      Oauth_settled_other
+  | other -> Oauth_other other
 
 type oauth_attempt_status = {
   kind : string;

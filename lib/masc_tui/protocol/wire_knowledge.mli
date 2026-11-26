@@ -761,6 +761,13 @@ type world_change_history = {
   retained_from_seq : int option;
 }
 
+type world_revision_op =
+  | World_op_added
+  | World_op_retracted
+  | World_op_other of string
+
+val classify_world_revision_op : string -> world_revision_op
+
 type world_revision_tick = {
   rev : int;
   batch_id : string;

@@ -5467,10 +5467,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   else
                     match kind with
                     | Wire_runtime.Lane_failover ->
-                        if
-                          String.equal raw_lane_id "default"
-                          || String.equal raw_lane_id "media_failover"
-                          || String.starts_with ~prefix:"exact/" raw_lane_id
+                        if not (Wire_runtime.is_named_routing_lane raw_lane_id)
                         then
                           set_modal_error
                             "Reserved route name: choose a failover lane ID (not default, media_failover, or exact/*)"
@@ -5491,11 +5488,12 @@ let submit_inline_modal ~now (m : Model.t) =
                             ] )
                     | Wire_runtime.Lane_exact_output ->
                         let bare_id =
-                          if String.starts_with ~prefix:"exact/" raw_lane_id
-                          then
-                            String.sub raw_lane_id 6
-                              (String.length raw_lane_id - 6)
-                          else raw_lane_id
+                          match Wire_runtime.classify_routing_lane raw_lane_id with
+                          | Wire_runtime.Route_exact bare -> bare
+                          | Wire_runtime.Route_default
+                          | Wire_runtime.Route_media_failover
+                          | Wire_runtime.Route_named _ ->
+                              raw_lane_id
                         in
                         if not (Wire_runtime.is_known_exact_lane_id bare_id)
                         then
@@ -7450,10 +7448,26 @@ let wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~(rect : Rect.t)
 let wrap_lines ~width text =
   Chat_transcript.wrap_plain_lines ~width:(max 1 width) text
 
-let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
+type line_tone =
+  | Line_plain
+  | Line_selected
+  | Line_section
+  | Line_ok
+  | Line_warn
+  | Line_error
+  | Line_accent
+
+type styled_line = {
+  tone : line_tone;
+  text : string;
+}
+
+let styled_line ?(tone = Line_plain) text = { tone; text }
+
+let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
   let push_wrapped prefix text =
     let wrapped = wrap_lines ~width:(max 10 (w - String.length prefix)) text in
     match wrapped with
@@ -7491,12 +7505,12 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
   in
   (match m.runtime.fusion_replay with
   | Some (Wire_runtime.Replay_incomplete { reason; lines_read; malformed_lines }) ->
-      push
+      push ~tone:Line_warn
         (Printf.sprintf "[REPLAY WARNING] incomplete (%s) · %d lines · %d malformed"
            reason lines_read malformed_lines)
   | Some (Wire_runtime.Replay_complete { malformed_lines; dropped_running; _ })
     when malformed_lines > 0 || dropped_running > 0 ->
-      push
+      push ~tone:Line_warn
         (Printf.sprintf "[REPLAY NOTICE] %d malformed · %d dropped running"
            malformed_lines dropped_running)
   | Some (Wire_runtime.Replay_complete _ | Wire_runtime.Replay_not_replayed | Wire_runtime.Replay_absent)
@@ -7568,26 +7582,28 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
   in
   (match detail_opt, evidence_post_opt with
   | _, Some ev ->
-      push "── Pipeline: Question -> Panel -> Judge -> Evidence ──";
+      push ~tone:Line_section
+        "── Pipeline: Question -> Panel -> Judge -> Evidence ──";
       push
         (Printf.sprintf "Board Evidence: %s (%s)%s" ev.post_id ev.title
            (if reloaded_board_post then " [board]" else ""));
       Option.iter (fun q -> push_wrapped "Question: " q) ev.question;
       if ev.panel <> [] then (
-        push (Printf.sprintf "── Panel (%d) ──" (List.length ev.panel));
+        push ~tone:Line_section
+          (Printf.sprintf "── Panel (%d) ──" (List.length ev.panel));
         List.iter
           (fun (pe : Wire_runtime.fusion_panel_entry) ->
-            let st =
+            let st, tone =
               match pe.status with
-              | `Answered -> "OK"
-              | `Failed -> "FAIL"
+              | `Answered -> ("OK", Line_ok)
+              | `Failed -> ("FAIL", Line_error)
             in
             let toks =
               match pe.input_tokens, pe.output_tokens with
               | Some i, Some o -> Printf.sprintf " (%di/%do tok)" i o
               | _ -> ""
             in
-            push (Printf.sprintf "  [%s] %s%s" st pe.model toks);
+            push ~tone (Printf.sprintf "  [%s] %s%s" st pe.model toks);
             (match pe.answer with
             | Some a when not (String.equal (String.trim a) "") ->
                 push_wrapped "    " a
@@ -7599,7 +7615,7 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
             | None, None -> ())
           ev.panel);
       if ev.seat_routes <> [] then (
-        push
+        push ~tone:Line_section
           (Printf.sprintf "── Seat Routing (%d) ──"
              (List.length ev.seat_routes));
         List.iter
@@ -7619,7 +7635,7 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
                   att.detail)
               sr.failed_attempts)
           ev.seat_routes);
-      push "── Judge Synthesis ──";
+      push ~tone:Line_section "── Judge Synthesis ──";
       (match ev.judge_status, ev.judge_decision with
       | Some st, Some dec ->
           push (Printf.sprintf "  status=%s · decision=%s" st dec)
@@ -7650,7 +7666,7 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
           ev.judges;
       (match ev.tool_trace with
       | Some tr ->
-          push
+          push ~tone:Line_section
             (Printf.sprintf "── Tool Trace (%s · %d events · %d dropped) ──"
                tr.status tr.events_count tr.dropped_events);
           if tr.observed_actors <> [] then
@@ -7663,8 +7679,8 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
         && Option.is_none ev.judge_synthesis
         && not (String.equal (String.trim ev.body) "")
       then (
-        push "── Board Body ──";
-        List.iter push (wrap_lines ~width:w ev.body))
+        push ~tone:Line_section "── Board Body ──";
+        List.iter (fun ln -> push ln) (wrap_lines ~width:w ev.body))
   | Some { evidence = Wire_runtime.Evidence_pending; _ }, None ->
       push "Evidence: Board publication pending"
   | Some { evidence = Wire_runtime.Evidence_absent; _ }, None -> (
@@ -7681,14 +7697,17 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
       ());
   List.rev !lines
 
-let harness_verdict_detail_lines ~width (m : Model.t) : string list =
+let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
   let say ~ko ~en = Say.resolve m.lang (Say.make ~ko ~en) in
   (match m.work.harness_read with
   | Observed.Failed { reason; _ } ->
-      List.iter push
+      push_all
         (wrap_lines ~width:w
            (say ~ko:("조회 실패 · [r] 다시 읽기 · " ^ reason)
               ~en:("Read failed · [r] retry · " ^ reason)))
@@ -7719,7 +7738,7 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
           ~ko:(Printf.sprintf "%d건 수신 · %d건 읽기 실패" n unreadable)
           ~en:(Printf.sprintf "%d received · %d unreadable" n unreadable)
       in
-      List.iter push (wrap_lines ~width:w (label ^ " · " ^ age ^ " · " ^ counts)))
+      push_all (wrap_lines ~width:w (label ^ " · " ^ age ^ " · " ^ counts)))
     sample;
   (match Work_store.selected_harness_verdict m.work with
   | None -> push "No harness verdict selected."
@@ -7731,10 +7750,10 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
            v.evaluator_runtime);
       (match v.fallback_reason with
       | Some r ->
-          List.iter push (wrap_lines ~width:w ("Fallback reason: " ^ r))
+          push_all (wrap_lines ~width:w ("Fallback reason: " ^ r))
       | None -> push "Fallback reason: none");
       let hash_valid = Wire_work.is_valid_notes_hash v.notes_hash in
-      push
+      push ~tone:(if hash_valid then Line_ok else Line_warn)
         (Printf.sprintf "notes_hash (%s): %s"
            (if hash_valid then "valid 64-hex" else "invalid/missing")
            (if String.equal v.notes_hash "" then "-" else v.notes_hash));
@@ -7744,7 +7763,7 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
   (match sample with
   | Some hh ->
       let c = hh.calibration in
-      push "── Evaluator Calibration ──";
+      push ~tone:Line_section "── Evaluator Calibration ──";
       push
         (Printf.sprintf "Evaluator at sample: %s · Fallback ratio: %.1f%%"
            hh.evaluator_status (hh.fallback_ratio *. 100.0));
@@ -7768,7 +7787,7 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
         push "Recent fallback reasons:";
         List.iter (fun r -> push ("  · " ^ r)) c.recent_fallback_reasons);
       if not (String.equal (String.trim hh.scope_note) "") then
-        List.iter push (wrap_lines ~width:w ("Scope: " ^ hh.scope_note))
+        push_all (wrap_lines ~width:w ("Scope: " ^ hh.scope_note))
   | None -> ());
   List.rev !lines
 
@@ -7800,14 +7819,22 @@ let addon_catalog_preview_lines ~width (p : Wire_runtime.addon_package_preview)
     List.iter (fun c -> push ("  · " ^ c)) p.contributions);
   List.rev !lines
 
-let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list =
+let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) :
+    styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
+  let alert_tone = function
+    | Wire_knowledge.Alert_error -> Line_error
+    | Wire_knowledge.Alert_warn -> Line_warn
+  in
   match k.memory_subview with
   | Knowledge_store.Mem_diff_flow -> []
   | Knowledge_store.Mem_health_ledger ->
-      push "── Fleet Keeper Memory Health ──";
+      push ~tone:Line_section "── Fleet Keeper Memory Health ──";
       (match Observed.to_option k.keeper_memory_health with
       | None -> push "  (loading /api/v1/dashboard/keeper-memory-health...)"
       | Some fl ->
@@ -7830,7 +7857,7 @@ let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list 
                    (List.length row.alerts));
               List.iter
                 (fun (al : Wire_knowledge.memory_health_alert) ->
-                  List.iter push
+                  push_all ~tone:(alert_tone al.severity)
                     (wrap_lines ~width:w
                        (Printf.sprintf "    [%s/%s] %s"
                           (Wire_knowledge.memory_health_alert_severity_to_string
@@ -7838,10 +7865,10 @@ let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list 
                           al.code al.message)))
                 row.alerts)
             fl.keepers);
-      push "── Workspace Memory Ledger ──";
+      push ~tone:Line_section "── Workspace Memory Ledger ──";
       (match k.workspace_memory_ledger with
       | Observed.Failed { reason; _ } ->
-          push
+          push ~tone:Line_error
             ("  [auth/error] " ^ reason
             ^ (if k.workspace_memory_ledger_auth_denied then
                  " (requires CanReadState — press [r] to retry)"
@@ -7856,29 +7883,29 @@ let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list 
           Option.iter (fun sha -> push ("  SHA-256: " ^ sha)) led.ledger_sha256;
           List.iter
             (fun (cid, text) ->
-              List.iter push
+              push_all
                 (wrap_lines ~width:w (Printf.sprintf "  [claim %s] %s" cid text)))
             led.claims;
           List.iter
             (fun (cid, desc) ->
-              List.iter push
+              push_all ~tone:Line_error
                 (wrap_lines ~width:w
                    (Printf.sprintf "  [conflict %s] %s" cid desc)))
             led.conflicts;
           List.iter
             (fun (f : Wire_knowledge.workspace_ledger_fact) ->
               let txt = Option.value ~default:"-" f.claim_text in
-              List.iter push
+              push_all
                 (wrap_lines ~width:w
                    (Printf.sprintf "  [%s/%s] %s" f.disposition_kind
                       f.source_state txt)))
             led.facts);
       List.rev !lines
   | Knowledge_store.Mem_context ->
-      push "── Workspace Memory Context ──";
+      push ~tone:Line_section "── Workspace Memory Context ──";
       (match k.workspace_memory_context with
       | Observed.Failed { reason; _ } ->
-          push
+          push ~tone:Line_error
             ("  [auth/error] " ^ reason
             ^ (if k.workspace_memory_context_auth_denied then
                  " (requires CanReadState — press [r] to retry)"
@@ -7909,14 +7936,21 @@ let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list 
       List.rev !lines
 
 let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
-    string list =
+    styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
+  let alert_tone = function
+    | Wire_knowledge.Alert_error -> Line_error
+    | Wire_knowledge.Alert_warn -> Line_warn
+  in
   match k.keeper_memory_subview with
   | Knowledge_store.Kmem_diff_flow -> []
   | Knowledge_store.Kmem_health ->
-      push ("── Memory Health: " ^ name ^ " ──");
+      push ~tone:Line_section ("── Memory Health: " ^ name ^ " ──");
       (match Knowledge_store.memory_health_for_keeper ~keeper:name k with
       | None -> push "  (no health observation for this keeper yet)"
       | Some row ->
@@ -7946,7 +7980,7 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
             push (Printf.sprintf "  Alerts (%d):" (List.length row.alerts));
             List.iter
               (fun (al : Wire_knowledge.memory_health_alert) ->
-                List.iter push
+                push_all ~tone:(alert_tone al.severity)
                   (wrap_lines ~width:w
                      (Printf.sprintf "    [%s/%s] %s: %s"
                         (Wire_knowledge.memory_health_alert_severity_to_string
@@ -7995,21 +8029,22 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
                 in
                 "molt:" ^ kind ^ categories
           in
-          List.iter push
+          push_all
             (wrap_lines ~width:w
                (Printf.sprintf "  OS %s · %s · %s · %s"
                   compaction_summary turns_summary digest_summary molt_summary))
       | Observed.Failed { reason; _ } ->
-          List.iter push (wrap_lines ~width:w ("  OS read error: " ^ reason))
+          push_all (wrap_lines ~width:w ("  OS read error: " ^ reason))
       | Observed.Value _ | Observed.Unreported | Observed.Absent | Observed.Loading _ -> ());
       List.rev !lines
   | Knowledge_store.Kmem_facts_tree ->
-      push ("── Facts Tree: " ^ name ^ " ([Space/Enter] fold/expand) ──");
+      push ~tone:Line_section
+        ("── Facts Tree: " ^ name ^ " ([Space/Enter] fold/expand) ──");
       (match Knowledge_store.memory_facts_for_keeper ~keeper:name k with
       | None -> (
           match Knowledge_store.keeper_memory_facts_for ~keeper:name k with
           | Observed.Failed { reason; _ } ->
-              push
+              push ~tone:Line_error
                 ("  [auth/error] " ^ reason
                 ^ (if
                      Knowledge_store.String_set.mem name
@@ -8058,13 +8093,13 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
               in
               let mark = if idx = sel then ">" else " " in
               let arrow = if collapsed then "▸" else "▾" in
-              push
+              push ~tone:(if idx = sel then Line_selected else Line_plain)
                 (Printf.sprintf "%s %s %s (%d)" mark arrow cat
                    (List.length items));
               if not collapsed then
                 List.iter
                   (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
-                    List.iter push
+                    push_all
                       (wrap_lines ~width:w
                          (Printf.sprintf "    · [%s] %s"
                             (Wire_knowledge.memory_fact_origin_to_string f.origin)
@@ -8072,23 +8107,23 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
                   items)
             cats;
           if src_facts <> [] then (
-            push
+            push ~tone:Line_section
               (Printf.sprintf "── Source-Bound Facts (%d) ──"
                  (List.length src_facts));
             List.iter
               (fun (sf : Wire_knowledge.keeper_source_fact) ->
-                List.iter push
+                push_all
                   (wrap_lines ~width:w
                      (Printf.sprintf "  · %s (%s)" sf.claim sf.path)))
               src_facts));
       List.rev !lines
   | Knowledge_store.Kmem_journal ->
-      push ("── Memory Journal & Activity: " ^ name ^ " ──");
+      push ~tone:Line_section ("── Memory Journal & Activity: " ^ name ^ " ──");
       (match Knowledge_store.memory_journal_for_keeper ~keeper:name k with
       | None -> (
           match k.keeper_memory_journal with
           | Observed.Failed { reason; _ } ->
-              push
+              push ~tone:Line_error
                 ("  [auth/error] " ^ reason
                 ^ (if
                      Knowledge_store.String_set.mem name
@@ -8117,7 +8152,7 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
               Option.iter (fun err -> push ("    err: " ^ err)) e.error)
             j.entries;
           if j.activity_events <> [] then (
-            push "── Activity Stream ──";
+            push ~tone:Line_section "── Activity Stream ──";
             List.iter
               (fun (ev : Wire_knowledge.journal_activity_event) ->
                 push
@@ -8332,14 +8367,18 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
   List.rev !lines
 
 let verification_dive_tab_lines ~width (m : Model.t)
-    (v : Wire_work.verification_request) : string list =
+    (v : Wire_work.verification_request) : styled_line list =
   let w = max 20 width in
   let lines = ref [] in
-  let push s = lines := s :: !lines in
+  let push ?(tone = Line_plain) s = lines := styled_line ~tone s :: !lines in
+  let push_all ?(tone = Line_plain) xs =
+    List.iter (fun s -> push ~tone s) xs
+  in
   match m.work.verification_dive_tab with
   | Work_store.Verif_tab_evidence ->
       if m.work.verification_evidence_auth_denied then (
-        push "[CanAdmin required] GET /api/v1/verification/evidence returned 401/403";
+        push ~tone:Line_warn
+          "[CanAdmin required] GET /api/v1/verification/evidence returned 401/403";
         push "Configure an admin token or switch tabs with [v] for Summary / Specs / TLC.")
       else (
         match
@@ -8361,28 +8400,32 @@ let verification_dive_tab_lines ~width (m : Model.t)
             else
               List.iter
                 (function
-                  | Wire_work.Verif_ev_note txt ->
-                      List.iter push (wrap_lines ~width:w ("[note] " ^ txt))
+                  | Wire_work.Verif_ev_note txt -> (
+                      match wrap_lines ~width:w ("[note] " ^ txt) with
+                      | [] -> ()
+                      | first :: rest ->
+                          push ~tone:Line_accent first;
+                          push_all rest)
                   | Wire_work.Verif_ev_artifact
                       { reference; content; bytes; truncated } ->
-                      push
+                      push ~tone:Line_accent
                         (Printf.sprintf "[artifact] %s (%dB%s)" reference bytes
                            (if truncated then " truncated" else ""));
-                      List.iter push (wrap_lines ~width:w ("  " ^ content))
+                      push_all (wrap_lines ~width:w ("  " ^ content))
                   | Wire_work.Verif_ev_binary
                       { reference; bytes; sha256; format; body } ->
-                      push
+                      push ~tone:Line_accent
                         (Printf.sprintf "[binary:%s] %s (%dB sha=%s)" format
                            reference bytes sha256);
                       Option.iter
-                        (fun b -> List.iter push (wrap_lines ~width:w ("  " ^ b)))
+                        (fun b -> push_all (wrap_lines ~width:w ("  " ^ b)))
                         body
                   | Wire_work.Verif_ev_collab { reference; content; sha256 } ->
-                      push
+                      push ~tone:Line_accent
                         (Printf.sprintf "[collab] %s (sha=%s)" reference sha256);
-                      List.iter push (wrap_lines ~width:w ("  " ^ content))
+                      push_all (wrap_lines ~width:w ("  " ^ content))
                   | Wire_work.Verif_ev_unreadable { reference; code; detail } ->
-                      push
+                      push ~tone:Line_error
                         (Printf.sprintf "[unreadable:%s] %s%s" code
                            (Option.value ~default:"-" reference)
                            (match detail with Some d -> " · " ^ d | None -> "")))
@@ -8470,7 +8513,7 @@ let verification_dive_tab_lines ~width (m : Model.t)
                    e.cfg_name e.category st_s);
               Option.iter
                 (fun viol ->
-                  List.iter push (wrap_lines ~width:w ("    violation: " ^ viol)))
+                  push_all (wrap_lines ~width:w ("    violation: " ^ viol)))
                 e.violation)
             tlc.entries);
       List.rev !lines

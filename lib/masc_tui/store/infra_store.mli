@@ -267,6 +267,14 @@ val change_preview_rows : Wire_infra.file_change -> Masc_tui_ui.Diff.numbered li
     position. A materialized blob has no text to show. *)
 val selected_log : t -> Wire_infra.system_log_entry option
 val selected_timeline_entry : t -> timeline_entry option
+val is_sandbox_related_log : Wire_infra.system_log_entry -> bool
+(** [true] iff the log's source or module carries a sandbox/VM/SSH/container
+    token (matched on identifier boundaries, not loose substrings). *)
+
+val sandbox_inspector_logs : keeper:string -> t -> Wire_infra.system_log_entry list
+(** Logs rendered in the sandbox inspector tail pane for [keeper]: keeper-scoped
+    logs when present, else {!is_sandbox_related_log} entries. *)
+
 val sandbox_inspector_event_count : keeper:string -> t -> int
 (** Exact combined log + activity row count rendered in the sandbox inspector
     tail pane for [keeper]. *)

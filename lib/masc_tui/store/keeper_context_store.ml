@@ -1618,20 +1618,12 @@ let set_oauth_attempt_status ~keeper status t =
     t
 
 let is_oauth_attempt_settled kind =
-  match String.lowercase_ascii (String.trim kind) with
-  | "completed"
-  | "complete"
-  | "failed"
-  | "canceled"
-  | "cancelled"
-  | "expired"
-  | "error"
-  | "denied"
-  | "unavailable"
-  | "superseded"
-  | "credential_publication_incomplete" ->
+  match Wire_keeper_context.classify_oauth_attempt_kind kind with
+  | Wire_keeper_context.Oauth_completed
+  | Wire_keeper_context.Oauth_settled_other ->
       true
-  | _ -> false
+  | Wire_keeper_context.Oauth_active | Wire_keeper_context.Oauth_other _ ->
+      false
 
 let oauth_poll_interval_ns = 2_000_000_000L
 let oauth_poll_max_window_ns = 600_000_000_000L
@@ -1684,9 +1676,15 @@ let is_oauth_exchange_pollable ~now_ns ?wall_unix (ks : keeper_state)
   in
   let confirmed_active =
     match ks.oauth_attempt_status with
-    | Some { kind = ("awaiting_consent" | "callback_admitted"); _ } ->
-        ks.oauth_poll_consecutive_errors = 0
-    | Some _ | None -> false
+    | Some st -> (
+        match Wire_keeper_context.classify_oauth_attempt_kind st.kind with
+        | Wire_keeper_context.Oauth_active ->
+            ks.oauth_poll_consecutive_errors = 0
+        | Wire_keeper_context.Oauth_completed
+        | Wire_keeper_context.Oauth_settled_other
+        | Wire_keeper_context.Oauth_other _ ->
+            false)
+    | None -> false
   in
   (* An admitted callback can publish after the consent deadline. A healthy
      status read keeps following the server to its terminal receipt. *)

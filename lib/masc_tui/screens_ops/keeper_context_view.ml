@@ -1555,13 +1555,34 @@ let draw_response_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 | Some c ->
                     let tok, st_lbl =
                       match
-                        ( Option.map String.lowercase_ascii c.disposition
+                        ( Option.map
+                            Wire_keeper_context.classify_tool_call_disposition
+                            c.disposition
                         , c.ok )
                       with
-                      | Some "deferred", _ -> (Theme.Status_attention, "◐")
-                      | _, Some true -> (Theme.Status_ok, "✓")
-                      | _, Some false -> (Theme.Status_critical, "✕")
-                      | _, None -> (Theme.Status_historical, "?")
+                      | Some Wire_keeper_context.Disposition_deferred, _ ->
+                          (Theme.Status_attention, "◐")
+                      | ( ( Some
+                              ( Wire_keeper_context.Disposition_completed
+                              | Wire_keeper_context.Disposition_failed
+                              | Wire_keeper_context.Disposition_other _ )
+                          | None )
+                        , Some true ) ->
+                          (Theme.Status_ok, "✓")
+                      | ( ( Some
+                              ( Wire_keeper_context.Disposition_completed
+                              | Wire_keeper_context.Disposition_failed
+                              | Wire_keeper_context.Disposition_other _ )
+                          | None )
+                        , Some false ) ->
+                          (Theme.Status_critical, "✕")
+                      | ( ( Some
+                              ( Wire_keeper_context.Disposition_completed
+                              | Wire_keeper_context.Disposition_failed
+                              | Wire_keeper_context.Disposition_other _ )
+                          | None )
+                        , None ) ->
+                          (Theme.Status_historical, "?")
                     in
                     let disp =
                       match c.disposition with
@@ -1874,13 +1895,34 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 in
                 let st_txt, st_tone =
                   match
-                    ( Option.map String.lowercase_ascii c.disposition
+                    ( Option.map
+                        Wire_keeper_context.classify_tool_call_disposition
+                        c.disposition
                     , c.ok )
                   with
-                  | Some "deferred", _ -> ("◐", Theme.Status_attention)
-                  | _, Some true -> ("✓", Theme.Status_ok)
-                  | _, Some false -> ("✕", Theme.Status_critical)
-                  | _, None -> ("?", Theme.Status_historical)
+                  | Some Wire_keeper_context.Disposition_deferred, _ ->
+                      ("◐", Theme.Status_attention)
+                  | ( ( Some
+                          ( Wire_keeper_context.Disposition_completed
+                          | Wire_keeper_context.Disposition_failed
+                          | Wire_keeper_context.Disposition_other _ )
+                      | None )
+                    , Some true ) ->
+                      ("✓", Theme.Status_ok)
+                  | ( ( Some
+                          ( Wire_keeper_context.Disposition_completed
+                          | Wire_keeper_context.Disposition_failed
+                          | Wire_keeper_context.Disposition_other _ )
+                      | None )
+                    , Some false ) ->
+                      ("✕", Theme.Status_critical)
+                  | ( ( Some
+                          ( Wire_keeper_context.Disposition_completed
+                          | Wire_keeper_context.Disposition_failed
+                          | Wire_keeper_context.Disposition_other _ )
+                      | None )
+                    , None ) ->
+                      ("?", Theme.Status_historical)
                 in
                 let dur_s =
                   match c.duration_ms with

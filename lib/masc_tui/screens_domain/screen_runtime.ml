@@ -3994,23 +3994,25 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let max_s = Int.max 0 (List.length lines - Int.max 1 c.h) in
         let scroll = Int.min max_s (Int.max 0 rt.detail_scroll_offset) in
         List.iteri
-          (fun i ln ->
+          (fun i (ln : Update_nav.styled_line) ->
             let py = c.y + i in
             if py < Rect.bottom c then
               let st =
-                if String.starts_with ~prefix:"[REPLAY" ln then
-                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
-                else if String.starts_with ~prefix:"──" ln then
-                  H.accent_style ~theme ~attrs:Attr.bold ()
-                else if String.starts_with ~prefix:"  [FAIL]" ln then
-                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
-                else if String.starts_with ~prefix:"  [OK]" ln then
-                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
-                else H.text_style ~theme ()
+                match ln.tone with
+                | Update_nav.Line_warn ->
+                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
+                | Update_nav.Line_section | Update_nav.Line_accent ->
+                    H.accent_style ~theme ~attrs:Attr.bold ()
+                | Update_nav.Line_error ->
+                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
+                | Update_nav.Line_ok ->
+                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
+                | Update_nav.Line_plain | Update_nav.Line_selected ->
+                    H.text_style ~theme ()
               in
               ignore
                 (H.put_clipped ~grid ~clip:c ~x:c.x ~y:py ~max_w:c.w ~style:st
-                   ln))
+                   ln.text))
           (Store_scroll.drop scroll lines |> H.safe_take c.h)
   end
 

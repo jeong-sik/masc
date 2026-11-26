@@ -46,7 +46,8 @@ import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
-import type { KeeperRosterItem, KeeperToolCallEntry, TurnRecordItem } from './types'
+import type { KeeperRosterItem, KeeperToolCallEntry } from './types'
+import type { TurnRecordEntry } from '../../api/dashboard-turn-records'
 
 const queuedOperations = (
   sequences: readonly number[] = [],
@@ -243,12 +244,22 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
   })
 
   it('computes a 4-segment cache bar and detects compaction across 60 turns', () => {
-    const sampleRecord: TurnRecordItem = {
+    const sampleRecord: TurnRecordEntry = {
+      request_observations: [],
+      execution_ids: [],
+      keeper: 'code-reviewer-sister',
+      agent_name: 'keeper-code-reviewer-sister-agent',
       trace_id: 'tr1',
       absolute_turn: 10,
       turn_ref: 'tr1#10',
       turn_kind: 'direct',
       runtime_profile: 'default',
+      usage_scope: 'per_request',
+      input_provenance: 'measured_request',
+      input_components: [],
+      request_runtime_profile: null,
+      request_body_bytes: null,
+      response_observed_model_input: null,
       input_tokens: 100_000,
       cache_read_input_tokens: 70_000,
       cache_creation_input_tokens: 10_000,
@@ -272,6 +283,27 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
     ])
     expect(series.data[1]).toEqual([50, 20])
     expect(series.compactionTurns).toEqual([2])
+
+    // A turn total sums every request of its turn (an ACP turn written before
+    // #54872), and an input above its window is no fill either. Both are gaps,
+    // not points at 100% that read the next turn as a compaction.
+    const gaps = buildContextFillSeries([
+      { ...sampleRecord, absolute_turn: 1, ts: 100, input_tokens: 100_000 },
+      { ...sampleRecord, absolute_turn: 2, ts: 200, usage_scope: 'turn_total', input_tokens: 900_000 },
+      { ...sampleRecord, absolute_turn: 3, ts: 300, input_tokens: 300_000 },
+      { ...sampleRecord, absolute_turn: 4, ts: 400, input_tokens: 90_000 },
+    ])
+    expect(gaps.data[1]).toEqual([50, null, null, 45])
+    expect(gaps.compactionTurns).toEqual([])
+
+    // An ACP Keeper on a build before #54872 writes only turn totals: no turn
+    // is a fill, so the chart gets no points and shows its empty label.
+    const totals = buildContextFillSeries([
+      { ...sampleRecord, absolute_turn: 1, ts: 100, usage_scope: 'turn_total', input_tokens: 1_897_206 },
+      { ...sampleRecord, absolute_turn: 2, ts: 200, usage_scope: 'turn_total', input_tokens: 7_520_731 },
+    ])
+    expect(totals.data).toEqual([[], []])
+    expect(totals.compactionTurns).toEqual([])
   })
 
   it('builds Portrait preview URLs (bare item id + 5-key object) and decimal-string Candle values', () => {
@@ -1292,7 +1324,57 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/api/v1/keepers/chat/stream'))).toBe(false)
   })
 
-  it('sends raw binary audio for Voice STT, decodes diff_vs_prev.changed, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {
+  it('reads debug companion turn records with the turn inspector decoder', async () => {
+    // Unmodified writer output; the OCaml codec suite reads the same file.
+    const record = JSON.parse(readFileSync(
+      resolve(__dirname, '../../api/fixtures/turn-record-writer.jsonl'), 'utf8',
+    ).split('\n')[0]!) as Record<string, unknown>
+    const keeper = String(record.keeper)
+    const ts = Number(record.ts)
+    const canonical = {
+      keeper, count: 1, skipped_rows: 0, source: 'turn_record',
+      producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+      durable_store: `.masc/keepers/${keeper}/turn-records`,
+      dashboard_surface: '/api/v1/keepers/:name/turn-records',
+      freshness_slo_s: 300, live_turn_in_progress: false,
+      live_turn_started_at_unix: null, live_turn_last_progress_at_unix: null,
+      latest_ts_unix: ts, latest_ts_iso: new Date(Math.floor(ts) * 1000).toISOString().replace('.000Z', 'Z'),
+      latest_age_s: 10, health: 'ok', stale_reason: null,
+      memory_os: {
+        keeper, snapshot_store: `.masc/keepers/${keeper}.memory-current.json`, recall_enabled: true,
+        revision: 0, updated_at: null, update_source: null, read_errors: [],
+        facts: { shown: 0, current: 0, items: [] },
+        change: { added: [], removed: [], retained: 0, invalidated: [] },
+      },
+      entries: [{ record, diff_vs_prev: null }],
+    }
+    // The shape the companion's own decoder used to accept: no usage scope,
+    // no provenance, and unknown values filled in.
+    const lenient = {
+      keeper, count: 1, live_turn_in_progress: false, health: 'ok',
+      entries: [{
+        record: { trace_id: 'tr1', absolute_turn: 2, turn_ref: 'tr1#2', turn_kind: 'direct', runtime_profile: 'default', ts: 100, blocks: [], raw_trace_run_ref: null },
+        diff_vs_prev: null,
+      }],
+    }
+    let body: unknown = canonical
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const read = await fetchKeeperTurnRecordsApi(keeper, 60)
+    expect(read.ok).toBe(true)
+    if (read.ok) {
+      expect(read.value.entries[0]?.record.usage_scope).toBe('per_request')
+      expect(read.value.entries[0]?.record.input_tokens).toBe(18000)
+    }
+
+    body = lenient
+    const drift = await fetchKeeperTurnRecordsApi(keeper, 60)
+    expect(drift.ok).toBe(false)
+    if (!drift.ok) expect(drift.error).toMatchObject({ kind: 'decode', code: 'schema_drift' })
+  })
+
+  it('sends raw binary audio for Voice STT, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {
     let voiceContentType: string | null = null
     let voiceBodyWasBinary = false
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1304,24 +1386,6 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         voiceContentType = hdrs?.['Content-Type'] ?? null
         voiceBodyWasBinary = init?.body instanceof ArrayBuffer || init?.body instanceof Uint8Array
         return json({ text: 'hello world' })
-      }
-      if (url.includes('/turn-records')) {
-        return json({
-          keeper: 'code-reviewer-sister',
-          count: 1,
-          live_turn_in_progress: false,
-          health: 'ok',
-          entries: [
-            {
-              record: { trace_id: 'tr1', absolute_turn: 2, turn_ref: 'tr1#2', turn_kind: 'direct', runtime_profile: 'default', ts: 100, blocks: [], raw_trace_run_ref: null },
-              diff_vs_prev: {
-                added: [],
-                removed: [],
-                changed: [{ prev: { block: 'sys', bytes: 100, digest: 'a' }, next: { block: 'sys', bytes: 120, digest: 'b' } }],
-              },
-            },
-          ],
-        })
       }
       if (url.includes('/checkpoints')) {
         return json({ keeper: 'code-reviewer-sister', trace_id: 'tr1', current_status: 'available', current: { snapshot_id: 'snap-1', message_count: 4, created_at: 100, latest_preview: null }, history: [] })
@@ -1360,15 +1424,6 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     if (sttRes.ok) expect(sttRes.value).toBe('hello world')
     expect(voiceContentType).toBe('audio/webm')
     expect(voiceBodyWasBinary).toBe(true)
-
-    // P2-3: diff_vs_prev.changed decoded properly
-    const trRes = await fetchKeeperTurnRecordsApi('code-reviewer-sister', 10)
-    expect(trRes.ok).toBe(true)
-    if (trRes.ok) {
-      expect(trRes.value.entries[0]?.diff_vs_prev?.changed).toEqual([
-        { prev: { block: 'sys', bytes: 100, digest: 'a' }, next: { block: 'sys', bytes: 120, digest: 'b' } },
-      ])
-    }
 
     // P2-2: Clear/Reset require confirmation inside TargetLockedAction
     const cmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)

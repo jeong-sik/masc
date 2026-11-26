@@ -25,11 +25,7 @@ let body_rect ~bp (rect : Rect.t) =
 let pad_content ~bp ?(pad_y = 0) (inner : Rect.t) =
   Card.pad_inner ~pad_x:(Layout.card_pad_x_for_width bp inner.w) ~pad_y inner
 
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let clamp_index = Text_util.clamp_index
 
 let safe_take n xs =
   if n <= 0 then []
@@ -99,25 +95,7 @@ let card_spec ?subtitle ?badge ?hotkey ?footer_hint ?(focused = false)
     unicode_borders = true;
   }
 
-let sanitize_single_line s =
-  let len = String.length s in
-  if len = 0 then ""
-  else
-    let buf = Buffer.create len in
-    let prev_space = ref false in
-    for i = 0 to len - 1 do
-      match s.[i] with
-      | '\n' | '\r' | '\t' ->
-          if not !prev_space then begin
-            Buffer.add_char buf ' ';
-            prev_space := true
-          end
-      | c ->
-          let is_sp = Char.equal c ' ' in
-          if not (is_sp && !prev_space) then Buffer.add_char buf c;
-          prev_space := is_sp
-    done;
-    String.trim (Buffer.contents buf)
+let sanitize_single_line = Text_util.sanitize_single_line
 
 let put_clipped ~grid ~clip ~x ~y ~max_w ~style text =
   if max_w <= 0 || Rect.is_empty clip then 0
@@ -536,12 +514,7 @@ let wrap_lines ~max_width text =
     in
     List.rev (flush_cur acc cur)
 
-let short_hash ?(len = 8) s =
-  let trimmed = String.trim s in
-  if String.length trimmed <= len then trimmed else String.sub trimmed 0 len
-
-let human_account_alias (acct : Wire_runtime.account_usage) =
-  Wire_runtime.human_provider_label acct
+let short_hash = Text_util.short_hash
 
 let format_json_scalar = function
   | `String s ->
@@ -569,43 +542,7 @@ let json_kv_summary = function
         kvs
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> []
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let extract_embedded_json s =
-  let len = String.length s in
-  let find_first_delim () =
-    let rec loop i =
-      if i >= len then None
-      else
-        match s.[i] with
-        | '{' | '[' -> Some i
-        | _ -> loop (i + 1)
-    in
-    loop 0
-  in
-  match find_first_delim () with
-  | None -> None
-  | Some idx -> (
-      let prefix = String.trim (String.sub s 0 idx) in
-      let rest = String.sub s idx (len - idx) in
-      match Yojson.Safe.from_string rest with
-      | json -> Some (prefix, json)
-      | exception Yojson.Json_error _ -> None)
+let contains_ci = Text_util.contains_ci
 
 let is_wrap_punct = function
   | '"' | '\'' | ',' | ';' | '{' | '}' | '[' | ']' | '(' | ')' -> true

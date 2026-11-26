@@ -15,13 +15,14 @@ let compact_window_label = function
       if m >= 1440 && m mod 1440 = 0 then Printf.sprintf "%dd" (m / 1440)
       else if m >= 60 && m mod 60 = 0 then Printf.sprintf "%dh" (m / 60)
       else Printf.sprintf "%dm" m
-  | Wire_runtime.Window_provider_label s ->
-      let low = String.lowercase_ascii (String.trim s) in
-      if String.equal low "session" then "sess"
-      else if String.equal low "weekly" || String.equal low "week" then "7d"
-      else if String.equal low "daily" || String.equal low "day" then "24h"
-      else if String.equal low "monthly" || String.equal low "month" then "30d"
-      else Grapheme.truncate_to_width ~max_width:6 (H.sanitize_single_line s)
+  | Wire_runtime.Window_provider_label s -> (
+      match Wire_runtime.classify_window_provider_label s with
+      | Wire_runtime.Window_label_session -> "sess"
+      | Wire_runtime.Window_label_weekly -> "7d"
+      | Wire_runtime.Window_label_daily -> "24h"
+      | Wire_runtime.Window_label_monthly -> "30d"
+      | Wire_runtime.Window_label_other raw ->
+          Grapheme.truncate_to_width ~max_width:6 (H.sanitize_single_line raw))
 
 let is_window_exhausted (w : Wire_runtime.usage_window) =
   match w.utilization with
@@ -402,20 +403,20 @@ let standing_restricts_readiness ~now_unix ~(rt : Runtime_store.t) rid =
   | None -> false
 
 let quota_rest_cause_presentation ~lang cause =
-  match String.trim cause with
-  | "provider_quota_refused" ->
+  match Wire_runtime.classify_quota_rest_cause cause with
+  | Wire_runtime.Rest_provider_quota_refused ->
       ( Glyph.Live_paused
       , Theme.Status_attention
       , Say.resolve lang (Say.make ~ko:"한도 초과" ~en:"Quota limit") )
-  | "payment_refused" ->
+  | Wire_runtime.Rest_payment_refused ->
       ( Glyph.Live_failing
       , Theme.Status_critical
       , Say.resolve lang (Say.make ~ko:"결제 거절" ~en:"Payment refused") )
-  | "usage_read" ->
+  | Wire_runtime.Rest_usage_read ->
       ( Glyph.Live_paused
       , Theme.Status_attention
       , Say.resolve lang (Say.make ~ko:"사용량 100%" ~en:"Usage 100%") )
-  | other ->
+  | Wire_runtime.Rest_other other ->
       let lbl =
         if String.equal other "" then
           Say.resolve lang (Say.make ~ko:"일시 중지" ~en:"Paused")
@@ -557,10 +558,9 @@ let group_active_quota_rest_standings ~now_unix ~runtimes ~runtimes_tbl
                       (None, cur.soonest_reset_stated && st.quota_rest_reset_stated)
                 in
                 let primary_cause =
-                  if String.equal (String.trim cur.primary_cause) "payment_refused" then
-                    cur.primary_cause
-                  else if String.equal (String.trim cause) "payment_refused" then
-                    cause
+                  if Wire_runtime.is_payment_refused_cause cur.primary_cause
+                  then cur.primary_cause
+                  else if Wire_runtime.is_payment_refused_cause cause then cause
                   else cur.primary_cause
                 in
                 {
@@ -705,7 +705,7 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
   let has_payment_refused =
     List.exists
       (fun (g : quota_rest_provider_group) ->
-        String.equal (String.trim g.primary_cause) "payment_refused")
+        Wire_runtime.is_payment_refused_cause g.primary_cause)
       quota_rest_groups
   in
   let any_failed =
@@ -3371,8 +3371,9 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
           let supported_n =
             List.fold_left
               (fun acc (i : Wire_runtime.setup_integration) ->
-                if not (String.equal i.setup_support "unsupported") then acc + 1
-                else acc)
+                match Wire_runtime.classify_setup_support i.setup_support with
+                | Wire_runtime.Setup_unsupported -> acc
+                | Wire_runtime.Setup_supported _ -> acc + 1)
               0 inv.integrations
           in
           Printf.sprintf "%d setup" supported_n
@@ -4927,10 +4928,10 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if !y < bot then begin
               let is_sel = Int.equal abs_i sel_idx in
               let kind_tone =
-                match sf.kind with
-                | "composition" -> Theme.Status_ai
-                | "instruction" -> Theme.Status_ok
-                | _ -> Theme.Status_attention
+                match Wire_runtime.classify_skill_surface_kind sf.kind with
+                | Wire_runtime.Skill_composition -> Theme.Status_ai
+                | Wire_runtime.Skill_instruction -> Theme.Status_ok
+                | Wire_runtime.Skill_kind_other _ -> Theme.Status_attention
               in
               let prefix =
                 if is_sel && pane1_focused then "▸ "

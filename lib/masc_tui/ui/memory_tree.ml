@@ -24,15 +24,7 @@ type line = {
   text : string;
 }
 
-let sanitize_single_line text =
-  let len = String.length text in
-  let buf = Buffer.create len in
-  for i = 0 to len - 1 do
-    match text.[i] with
-    | '\n' | '\r' | '\t' -> Buffer.add_char buf ' '
-    | ch -> Buffer.add_char buf ch
-  done;
-  Grapheme.sanitize_controls (Buffer.contents buf)
+let sanitize_single_line = Memory_lineage.sanitize_single_line
 
 let fit ~max_width text =
   let clean = sanitize_single_line text in

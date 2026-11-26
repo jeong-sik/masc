@@ -3899,9 +3899,9 @@ let test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics () =
           ( "e-masc-the-leader"
           , {
               Wire_fleet.empty_keeper_diagnostics with
-              operator_disposition = Some "pass";
+              operator_disposition = Some Wire_fleet.Disp_pass;
               operator_disposition_reason = Some "healthy";
-              next_action = Some "direct_message";
+              next_action = Some Wire_fleet.Action_direct_message;
             } );
         ];
     }

@@ -1797,3 +1797,97 @@ let decode_repository_observation json =
         None
   in
   Ok { repo_id; git_status; sync_currency }
+
+type activity_event_category =
+  | Act_tool_call
+  | Act_turn_complete
+  | Act_agent_core
+
+let classify_activity_event_kind raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "tool.called" | "keeper.tool_exec" -> Act_tool_call
+  | "keeper.turn_completed"
+  | "keeper.turn_input_required"
+  | "keeper.turn_blocked"
+  | "keeper.turn_cancelled"
+  | "keeper.turn_skipped" ->
+      Act_turn_complete
+  | k when String.starts_with ~prefix:"tool." k -> Act_tool_call
+  | k
+    when String.starts_with ~prefix:"turn." k
+         || String.starts_with ~prefix:"keeper.turn_" k ->
+      Act_turn_complete
+  | _ -> Act_agent_core
+
+type guest_presence =
+  | Presence_running
+  | Presence_unobserved
+  | Presence_other of string
+
+let classify_guest_presence raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "running" -> Presence_running
+  | "unobserved" -> Presence_unobserved
+  | _ -> Presence_other raw
+
+type pr_entry_state =
+  | Pr_entry_read
+  | Pr_entry_failed
+  | Pr_entry_other of string
+
+let classify_pr_entry_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "read" -> Pr_entry_read
+  | "failed" -> Pr_entry_failed
+  | _ -> Pr_entry_other raw
+
+type pr_checks_state =
+  | Checks_passing
+  | Checks_running
+  | Checks_failing
+  | Checks_other of string
+
+let classify_pr_checks_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "passing" -> Checks_passing
+  | "running" -> Checks_running
+  | "failing" -> Checks_failing
+  | _ -> Checks_other raw
+
+type pr_mergeable_state =
+  | Mergeable_conflicting
+  | Mergeable_other of string
+
+let classify_pr_mergeable_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "conflicting" -> Mergeable_conflicting
+  | _ -> Mergeable_other raw
+
+type pr_review_state =
+  | Review_approved
+  | Review_changes_requested
+  | Review_other of string
+
+let classify_pr_review_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "approved" -> Review_approved
+  | "changes_requested" -> Review_changes_requested
+  | _ -> Review_other raw
+
+type pr_head_review_state =
+  | Head_not_reviewed
+  | Head_review_other of string
+
+let classify_pr_head_review_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "not_reviewed_on_head" -> Head_not_reviewed
+  | _ -> Head_review_other raw
+
+type pulls_reader_state =
+  | Reader_ready
+  | Reader_other of string
+
+let classify_pulls_reader_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "ready" -> Reader_ready
+  | _ -> Reader_other raw

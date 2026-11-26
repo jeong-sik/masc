@@ -617,7 +617,9 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
            ~en:(Printf.sprintf "Signal Only (-%d Verify)" hidden_verify))
     else Say.resolve lang (Say.make ~ko:"신호만" ~en:"Signal Only")
   in
-  let sort_lbl = Printf.sprintf "[S] %s" k.board_sort_by in
+  let sort_lbl =
+    Printf.sprintf "[S] %s" (Wire_knowledge.board_sort_to_string k.board_sort_by)
+  in
   let hearth_pill_lbl =
     match k.board_hearth with
     | Some h -> "[h] #" ^ h
@@ -642,7 +644,10 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       };
       {
         H.label = sort_lbl;
-        active = not (String.equal k.board_sort_by "recent");
+        active =
+          not
+            (Wire_knowledge.equal_board_sort k.board_sort_by
+               Wire_knowledge.Sort_recent);
         tone = Some Theme.Status_active;
         glyph = None;
       };

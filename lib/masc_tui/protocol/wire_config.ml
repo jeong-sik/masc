@@ -373,8 +373,47 @@ let is_safe_secret_default_display s =
       true
   | _ -> false
 
+type entity_group =
+  | Group_provider of string
+  | Group_model of string
+  | Group_section of string
+  | Group_custom of string
+
+let entity_group_of_string raw =
+  let eg = String.trim raw in
+  if String.starts_with ~prefix:"provider:" eg then
+    Group_provider (String.sub eg 9 (String.length eg - 9))
+  else if String.starts_with ~prefix:"model:" eg then
+    Group_model (String.sub eg 6 (String.length eg - 6))
+  else if String.starts_with ~prefix:"section:" eg then
+    Group_section (String.sub eg 8 (String.length eg - 8))
+  else Group_custom eg
+
+let entity_group_to_string = function
+  | Group_provider pid -> "provider:" ^ pid
+  | Group_model mid -> "model:" ^ mid
+  | Group_section sid -> "section:" ^ sid
+  | Group_custom raw -> raw
+
+let equal_entity_group a b =
+  match (a, b) with
+  | Group_provider x, Group_provider y
+  | Group_model x, Group_model y
+  | Group_section x, Group_section y
+  | Group_custom x, Group_custom y ->
+      String.equal x y
+  | ( Group_provider _
+    , (Group_model _ | Group_section _ | Group_custom _) )
+  | ( Group_model _
+    , (Group_provider _ | Group_section _ | Group_custom _) )
+  | ( Group_section _
+    , (Group_provider _ | Group_model _ | Group_custom _) )
+  | ( Group_custom _
+    , (Group_provider _ | Group_model _ | Group_section _) ) ->
+      false
+
 type field_entity_meta = {
-  entity_group : string option;
+  entity_group : entity_group option;
   entity_title : string option;
   sub_group : string option;
 }
@@ -396,7 +435,8 @@ let decode_schema_field_with_meta json =
     | Ok None -> Ok full_key
     | Error _ as err -> err
   in
-  let* entity_group = optional_nonblank_string json "entity_group" in
+  let* entity_group_raw = optional_nonblank_string json "entity_group" in
+  let entity_group = Option.map entity_group_of_string entity_group_raw in
   let* entity_title = optional_nonblank_string json "entity_title" in
   let* sub_group = optional_nonblank_string json "sub_group" in
   let* env = optional_nonblank_string json "env" in

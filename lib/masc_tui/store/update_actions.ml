@@ -476,27 +476,25 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
                     };
                 ] )
           | Wire_config.Set_scalar { value; _ }
-            when String.equal key "tui.board_sort" ->
-              let norm = String.lowercase_ascii (String.trim value) in
-              if
-                List.exists (String.equal norm)
-                  Config_store.valid_board_sort_values
-              then
-                ( {
-                    m1 with
-                    knowledge =
-                      Knowledge_store.set_board_sort norm m1.knowledge;
-                  }
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_tui_preference
-                            (Wire_config.Pref_board_sort norm);
-                      };
-                  ] )
-              else (m1, [])
+            when String.equal key "tui.board_sort" -> (
+              match Wire_knowledge.board_sort_of_string value with
+              | Some sort ->
+                  let norm = Wire_knowledge.board_sort_to_string sort in
+                  ( {
+                      m1 with
+                      knowledge =
+                        Knowledge_store.set_board_sort sort m1.knowledge;
+                    }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_tui_preference
+                              (Wire_config.Pref_board_sort norm);
+                        };
+                    ] )
+              | None -> (m1, []))
           | Wire_config.Set_scalar _
           | Wire_config.Set_bool _
           | Wire_config.Set_int _
@@ -568,7 +566,8 @@ let step_artifact_revision ~now ~delta (m : Model.t) =
 
 let sync_settings_live_tui (m : Model.t) (cfg : Config_store.t) =
   Config_store.sync_live_tui_values ~theme_preset:m.theme_preset ~lang:m.lang
-    ~board_sort:m.knowledge.board_sort_by cfg
+    ~board_sort:(Wire_knowledge.board_sort_to_string m.knowledge.board_sort_by)
+    cfg
 
 let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
   let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
@@ -7029,12 +7028,15 @@ and execute_action ~now (m : Model.t) action =
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_board ->
                 let knowledge = Knowledge_store.cycle_board_sort m.knowledge in
+                let sort_s =
+                  Wire_knowledge.board_sort_to_string knowledge.board_sort_by
+                in
                 let next =
                   { m with knowledge }
                   |> Model.with_toast ~now ~level:Model.Toast_info
                        (Say.make
-                          ~ko:("보드 정렬: " ^ knowledge.board_sort_by)
-                          ~en:("Board sort: " ^ knowledge.board_sort_by))
+                          ~ko:("보드 정렬: " ^ sort_s)
+                          ~en:("Board sort: " ^ sort_s))
                 in
                 (next, View_fetches.fetches_for_current_view next)
             | Nav.Work
@@ -7673,26 +7675,9 @@ and execute_action ~now (m : Model.t) action =
                        && Runtime_store.equal_tools_subview
                             m.runtime.tools_subview
                             Runtime_store.Tools_prompts_presets ->
-                    let next_sec =
-                      if delta >= 0 then
-                        match m.runtime.pp_section with
-                        | Runtime_store.Sec_prompts -> Runtime_store.Sec_presets
-                        | Runtime_store.Sec_presets -> Runtime_store.Sec_params
-                        | Runtime_store.Sec_params ->
-                            Runtime_store.Sec_async_requests
-                        | Runtime_store.Sec_async_requests ->
-                            Runtime_store.Sec_prompts
-                      else
-                        match m.runtime.pp_section with
-                        | Runtime_store.Sec_prompts ->
-                            Runtime_store.Sec_async_requests
-                        | Runtime_store.Sec_presets -> Runtime_store.Sec_prompts
-                        | Runtime_store.Sec_params -> Runtime_store.Sec_presets
-                        | Runtime_store.Sec_async_requests ->
-                            Runtime_store.Sec_params
-                    in
                     let runtime =
-                      Runtime_store.set_prompts_presets_section next_sec m.runtime
+                      Runtime_store.cycle_prompts_presets_section ~delta
+                        m.runtime
                     in
                     let next = { m with runtime } in
                     (next, View_fetches.fetches_for_current_view next)

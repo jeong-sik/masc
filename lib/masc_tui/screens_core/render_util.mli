@@ -65,10 +65,6 @@ val format_milli_candles : string -> string
 val contains_ci : needle:string -> string -> bool
 (** Case-insensitive ASCII substring search (zero regex). *)
 
-val fuzzy_score : query:string -> string -> int option
-(** Deterministic case-insensitive fuzzy match score (higher is better,
-    [None] when no match). *)
-
 val draw_hline :
   ?clip:Rect.t ->
   Cell_grid.t ->

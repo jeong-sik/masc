@@ -2382,10 +2382,50 @@ type tools_dashboard_snapshot = {
   keeper_cleanup_summary : string option;
 }
 
+type tool_domain =
+  | Domain_board
+  | Domain_work
+  | Domain_run
+  | Domain_keeper_ops
+  | Domain_keeper_self
+  | Domain_system
+  | Domain_unsorted
+  | Domain_other of string
+
+let tool_domain_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "board" -> Domain_board
+  | "work" -> Domain_work
+  | "run" -> Domain_run
+  | "keeper ops" -> Domain_keeper_ops
+  | "keeper self" -> Domain_keeper_self
+  | "system" -> Domain_system
+  | "unsorted" -> Domain_unsorted
+  | _ -> Domain_other (String.trim raw)
+
+let tool_domain_to_string = function
+  | Domain_board -> "board"
+  | Domain_work -> "work"
+  | Domain_run -> "run"
+  | Domain_keeper_ops -> "keeper ops"
+  | Domain_keeper_self -> "keeper self"
+  | Domain_system -> "system"
+  | Domain_unsorted -> "unsorted"
+  | Domain_other s -> s
+
+let tool_domain_rank = function
+  | Domain_board -> 0
+  | Domain_work -> 1
+  | Domain_run -> 2
+  | Domain_keeper_ops -> 3
+  | Domain_keeper_self -> 4
+  | Domain_system -> 5
+  | Domain_unsorted | Domain_other _ -> 6
+
 let classify_tool_domain_family name =
   let lc = String.lowercase_ascii (String.trim name) in
   let has p = String.starts_with ~prefix:p lc in
-  if has "masc_board" || has "board_" then ("board", "board")
+  if has "masc_board" || has "board_" then (Domain_board, "board")
   else if has "masc_goal" || has "masc_task" || has "masc_schedule" || has "masc_verify" || has "masc_verif" || has "masc_plan" then
     let fam =
       if has "masc_goal" then "goals"
@@ -2393,17 +2433,17 @@ let classify_tool_domain_family name =
       else if has "masc_schedule" then "schedules"
       else "verification"
     in
-    ("work", fam)
+    (Domain_work, fam)
   else if has "masc_run" || has "execute" || has "bash" || has "shell" || has "read" || has "write" || has "edit" || has "grep" || has "glob" || has "web_" || has "browser_" then
     let fam =
       if has "browser_" || has "web_" then "web & browser"
       else if has "read" || has "write" || has "edit" || has "grep" || has "glob" then "files"
       else "exec"
     in
-    ("run", fam)
+    (Domain_run, fam)
   else if has "keeper_" && (has "keeper_memory" || has "keeper_journal" || has "keeper_note" || has "keeper_self") then
-    ("keeper self", "memory & reflection")
-  else if has "keeper_" || has "masc_keeper" then ("keeper ops", "keeper")
+    (Domain_keeper_self, "memory & reflection")
+  else if has "keeper_" || has "masc_keeper" then (Domain_keeper_ops, "keeper")
   else if has "masc_" then
     let rest = String.sub lc 5 (String.length lc - 5) in
     let fam =
@@ -2411,8 +2451,8 @@ let classify_tool_domain_family name =
       | Some idx when idx > 0 -> String.sub rest 0 idx
       | Some _ | None -> rest
     in
-    ("system", fam)
-  else ("unsorted", "general")
+    (Domain_system, fam)
+  else (Domain_unsorted, "general")
 
 type usage_row = {
   u_name : string;
@@ -2597,7 +2637,9 @@ let decode_tools_dashboard ~observed_at json =
         let* domain_opt = optional_nonblank_string item "domain" in
         let* family_opt = optional_nonblank_string item "family" in
         let def_dom, def_fam = classify_tool_domain_family name in
-        let domain = Option.value ~default:def_dom domain_opt in
+        let domain =
+          Option.value ~default:(tool_domain_to_string def_dom) domain_opt
+        in
         let family = Option.value ~default:def_fam family_opt in
         let calls_count, failure_count, failure_rate_pct, p95_ms, public_names =
           match Hashtbl.find_opt usage_tbl name with
@@ -2657,7 +2699,8 @@ let decode_tools_dashboard ~observed_at json =
         let* p95_ms = optional_finite_float item "p95_ms" in
         let* direct_call_allowed = optional_bool_field item "direct_call_allowed" in
         let* surfaces = optional_string_list item "surfaces" in
-        let domain, family = classify_tool_domain_family name in
+        let domain_kind, family = classify_tool_domain_family name in
+        let domain = tool_domain_to_string domain_kind in
         let failure_count =
           match Observed.to_option calls_count, Observed.to_option failure_rate_pct with
           | Some c, Some pct -> int_of_float (Float.round (float_of_int c *. pct /. 100.0))
@@ -7367,3 +7410,60 @@ let decode_browser_op_receipt json =
         | None -> if ok then "ok" else "failed")
   in
   Ok { ok; summary; data_json; error }
+
+type window_label_kind =
+  | Window_label_session
+  | Window_label_weekly
+  | Window_label_daily
+  | Window_label_monthly
+  | Window_label_other of string
+
+let classify_window_provider_label raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "session" -> Window_label_session
+  | "weekly" | "week" -> Window_label_weekly
+  | "daily" | "day" -> Window_label_daily
+  | "monthly" | "month" -> Window_label_monthly
+  | _ -> Window_label_other raw
+
+type quota_rest_cause =
+  | Rest_provider_quota_refused
+  | Rest_payment_refused
+  | Rest_usage_read
+  | Rest_other of string
+
+let classify_quota_rest_cause raw =
+  let trimmed = String.trim raw in
+  match trimmed with
+  | "provider_quota_refused" -> Rest_provider_quota_refused
+  | "payment_refused" -> Rest_payment_refused
+  | "usage_read" -> Rest_usage_read
+  | _ -> Rest_other trimmed
+
+let is_payment_refused_cause raw =
+  match classify_quota_rest_cause raw with
+  | Rest_payment_refused -> true
+  | Rest_provider_quota_refused | Rest_usage_read | Rest_other _ -> false
+
+type setup_support_kind =
+  | Setup_unsupported
+  | Setup_supported of string
+
+let classify_setup_support raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "unsupported" -> Setup_unsupported
+  | _ -> Setup_supported raw
+
+type skill_surface_kind =
+  | Skill_composition
+  | Skill_instruction
+  | Skill_kind_other of string
+
+let classify_skill_surface_kind raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "composition" -> Skill_composition
+  | "instruction" -> Skill_instruction
+  | _ -> Skill_kind_other raw
+
+let is_dos_machine_addon (inst : addon_instance) =
+  String.equal inst.addon_id "dos-machine"

@@ -569,7 +569,7 @@ val next_mcp_rpc_id : t -> t * int
 val equal_prompts_presets_section :
   prompts_presets_section -> prompts_presets_section -> bool
 val set_prompts_presets_section : prompts_presets_section -> t -> t
-val cycle_prompts_presets_section : t -> t
+val cycle_prompts_presets_section : ?delta:int -> t -> t
 val apply_skill_editor_sources :
   observed_at:Clock.Mono.t -> string list -> t -> t
 val apply_skill_editor_tools :

@@ -660,17 +660,23 @@ let tui_language_enum_val (selected_code : string) =
     ]
 
 let tui_board_sort_enum_val (selected_sort : string) =
-  let allowed = Config_store.valid_board_sort_values in
-  let norm = String.lowercase_ascii (String.trim selected_sort) in
   let selected =
-    let rec find i = function
-      | [] -> 0
-      | x :: _ when String.equal x norm -> i
-      | _ :: rest -> find (i + 1) rest
-    in
-    find 0 allowed
+    match Wire_knowledge.board_sort_of_string selected_sort with
+    | None -> 0
+    | Some target ->
+        let rec find i = function
+          | [] -> 0
+          | x :: _ when Wire_knowledge.equal_board_sort x target -> i
+          | _ :: rest -> find (i + 1) rest
+        in
+        find 0 Wire_knowledge.all_board_sorts
   in
-  Form.enum_val ~selected (List.map (fun s -> (s, Say.literal s)) allowed)
+  Form.enum_val ~selected
+    (List.map
+       (fun s ->
+         let label = Wire_knowledge.board_sort_to_string s in
+         (label, Say.literal label))
+       Wire_knowledge.all_board_sorts)
 
 let apply_staged_op_to_value ~full_key ~(kind : Wire_config.field_kind)
     (op : Wire_config.patch_op) =
@@ -718,12 +724,8 @@ let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
     else if String.equal f.full_key "tui.language" then
       tui_language_enum_val (Say.lang_code m.lang)
     else if String.equal f.full_key "tui.board_sort" then
-      let live =
-        String.lowercase_ascii (String.trim m.knowledge.board_sort_by)
-      in
-      if List.exists (String.equal live) Config_store.valid_board_sort_values
-      then tui_board_sort_enum_val live
-      else form_value_of_wire_field f
+      tui_board_sort_enum_val
+        (Wire_knowledge.board_sort_to_string m.knowledge.board_sort_by)
     else form_value_of_wire_field f
   in
   let value =

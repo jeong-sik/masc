@@ -3258,37 +3258,37 @@ let test_v25_data_pipeline_and_settings_2pane () =
     [
       ( f_cc1_proto.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = None;
         } );
       ( f_cc1_bind1.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f_cc1_bind2.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f_cc2_raw.full_key,
         {
-          entity_group = Some "provider:claude_code_b2c3d4e5";
+          entity_group = Some (Wire_config.Group_provider "claude_code_b2c3d4e5");
           entity_title = Some "claude_code_b2c3d4e5";
           sub_group = None;
         } );
       ( f_agy_proto.full_key,
         {
-          entity_group = Some "provider:antigravity_e5f60718";
+          entity_group = Some (Wire_config.Group_provider "antigravity_e5f60718");
           entity_title = Some "Antigravity E5f60718";
           sub_group = None;
         } );
       ( f_custom_dn.full_key,
         {
-          entity_group = Some "provider:claude_code_c3d4e5f6";
+          entity_group = Some (Wire_config.Group_provider "claude_code_c3d4e5f6");
           entity_title = Some "Anthropic Work";
           sub_group = None;
         } );
@@ -26731,7 +26731,9 @@ let () =
                   (Msg.Key_event (key Keymap.Input.Right))
               in
               Alcotest.(check string) "Right updates board_sort recent -> hot"
-                "hot" m_bs1.knowledge.board_sort_by;
+                "hot"
+                (Wire_knowledge.board_sort_to_string
+                   m_bs1.knowledge.board_sort_by);
               Alcotest.(check int) "tui.board_sort leaves dirty_count = 0" 0
                 (Config_store.dirty_count m_bs1.config);
               Alcotest.(check bool) "tui.board_sort emits Pref_board_sort hot"
@@ -26810,7 +26812,9 @@ let () =
                     Update.step ~now:t1 m (Msg.Key_event (char_key "S"))
                   in
                   collect_sorts (n - 1)
-                    (m_next.knowledge.board_sort_by :: acc)
+                    (Wire_knowledge.board_sort_to_string
+                       m_next.knowledge.board_sort_by
+                    :: acc)
                     m_next
               in
               let cycled = collect_sorts 5 [] m_board0 in

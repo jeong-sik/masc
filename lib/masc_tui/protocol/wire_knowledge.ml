@@ -3707,3 +3707,51 @@ let decode_keeper_memory_journal json =
       activity_events;
       activity_notes;
     }
+
+type board_sort =
+  | Sort_recent
+  | Sort_hot
+  | Sort_trending
+  | Sort_updated
+  | Sort_discussed
+
+let all_board_sorts =
+  [ Sort_recent; Sort_hot; Sort_trending; Sort_updated; Sort_discussed ]
+
+let board_sort_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "recent" -> Some Sort_recent
+  | "hot" -> Some Sort_hot
+  | "trending" -> Some Sort_trending
+  | "updated" -> Some Sort_updated
+  | "discussed" -> Some Sort_discussed
+  | _ -> None
+
+let board_sort_to_string = function
+  | Sort_recent -> "recent"
+  | Sort_hot -> "hot"
+  | Sort_trending -> "trending"
+  | Sort_updated -> "updated"
+  | Sort_discussed -> "discussed"
+
+let equal_board_sort a b =
+  match (a, b) with
+  | Sort_recent, Sort_recent
+  | Sort_hot, Sort_hot
+  | Sort_trending, Sort_trending
+  | Sort_updated, Sort_updated
+  | Sort_discussed, Sort_discussed ->
+      true
+  | Sort_recent, (Sort_hot | Sort_trending | Sort_updated | Sort_discussed)
+  | Sort_hot, (Sort_recent | Sort_trending | Sort_updated | Sort_discussed)
+  | Sort_trending, (Sort_recent | Sort_hot | Sort_updated | Sort_discussed)
+  | Sort_updated, (Sort_recent | Sort_hot | Sort_trending | Sort_discussed)
+  | Sort_discussed, (Sort_recent | Sort_hot | Sort_trending | Sort_updated) ->
+      false
+
+let next_board_sort = function
+  | Sort_recent -> Sort_hot
+  | Sort_hot -> Sort_trending
+  | Sort_trending -> Sort_updated
+  | Sort_updated -> Sort_discussed
+  | Sort_discussed -> Sort_recent

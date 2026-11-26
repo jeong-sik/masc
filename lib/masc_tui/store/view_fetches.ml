@@ -675,7 +675,8 @@ let fetches_for_workspace ~force (m : Model.t) =
            (needs_fetch ~force m.knowledge.board)
            (Cmd.Get_board_feed
               {
-                sort_by = m.knowledge.board_sort_by;
+                sort_by =
+                  Wire_knowledge.board_sort_to_string m.knowledge.board_sort_by;
                 hearth = m.knowledge.board_hearth;
                 signal_only = m.knowledge.board_signal_only;
                 limit = Some 30;
@@ -810,7 +811,8 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.knowledge.board)
                (Cmd.Get_board_feed
                   {
-                    sort_by = m.knowledge.board_sort_by;
+                    sort_by =
+                  Wire_knowledge.board_sort_to_string m.knowledge.board_sort_by;
                     hearth = m.knowledge.board_hearth;
                     signal_only = m.knowledge.board_signal_only;
                     limit = Some 50;

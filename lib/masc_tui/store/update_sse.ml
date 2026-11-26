@@ -162,7 +162,9 @@ let apply_dataset_invalidation (m : Model.t) ds =
               get_cmd e
                 (Cmd.Get_board_feed
                    {
-                     sort_by = knowledge.board_sort_by;
+                     sort_by =
+                       Wire_knowledge.board_sort_to_string
+                         knowledge.board_sort_by;
                      hearth = knowledge.board_hearth;
                      signal_only = knowledge.board_signal_only;
                      limit = Some 50;

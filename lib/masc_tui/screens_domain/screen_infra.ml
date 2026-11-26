@@ -148,19 +148,30 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
       | Entry_microvm g ->
           let sg, _, sl = socket_status_display g.agent_socket in
           let honest_presence =
-            match g.agent_socket with
-            | Wire_infra.Socket_absent _
-              when model.infra.sandboxes_fallback_404
-                   || String.equal g.presence "unobserved" ->
+            match
+              ( g.agent_socket
+              , Wire_infra.classify_guest_presence g.presence )
+            with
+            | Wire_infra.Socket_absent _, Wire_infra.Presence_unobserved ->
                 Say.resolve lang
-                  (Say.make ~ko:"미관측 (Legacy API)" ~en:"unobserved (Legacy API)")
-            | Wire_infra.Socket_absent _ when String.equal g.presence "running" ->
+                  (Say.make ~ko:"미관측 (Legacy API)"
+                     ~en:"unobserved (Legacy API)")
+            | ( Wire_infra.Socket_absent _
+              , (Wire_infra.Presence_running | Wire_infra.Presence_other _) )
+              when model.infra.sandboxes_fallback_404 ->
+                Say.resolve lang
+                  (Say.make ~ko:"미관측 (Legacy API)"
+                     ~en:"unobserved (Legacy API)")
+            | Wire_infra.Socket_absent _, Wire_infra.Presence_running ->
                 Say.resolve lang
                   (Say.make ~ko:"소켓 없음" ~en:"socket absent")
-            | Wire_infra.Socket_present _
-            | Wire_infra.Socket_absent _
-            | Wire_infra.Socket_non_socket _
-            | Wire_infra.Socket_unreadable _ ->
+            | Wire_infra.Socket_absent _, Wire_infra.Presence_other _
+            | ( ( Wire_infra.Socket_present _
+                | Wire_infra.Socket_non_socket _
+                | Wire_infra.Socket_unreadable _ )
+              , ( Wire_infra.Presence_running
+                | Wire_infra.Presence_unobserved
+                | Wire_infra.Presence_other _ ) ) ->
                 g.presence
           in
           ( Printf.sprintf "%s %s · vm" (Glyph.to_utf8 sg) sl
@@ -2032,152 +2043,10 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                            (Glyph.to_utf8 Glyph.Live_failing) err));
                    incr y
                | None -> (
-                   match Infra_store.pulls_entry_for ~repo_id:r.id inf with
-                   | Some entry when String.equal entry.state "failed" ->
-                       let detail =
-                         Option.value entry.failure_summary ~default:"fetch failed"
-                       in
-                       ignore
-                         (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                            ~max_w:pr_clip.w
-                            ~style:(H.status_style ~theme Theme.Status_critical)
-                            (Printf.sprintf "%s PRs: %s"
-                               (Glyph.to_utf8 Glyph.Live_failing) detail));
-                       incr y
-                   | Some entry when String.equal entry.state "read" ->
-                       let n_prs = List.length entry.pulls in
-                       let undec_s =
-                         if entry.undecodable > 0 then
-                           Printf.sprintf " (+%d undecodable)" entry.undecodable
-                         else ""
-                       in
-                       let pr_tone (pr : Wire_infra.repository_pull_row) =
-                         if
-                           String.equal pr.checks "failing"
-                           || String.equal pr.mergeable "conflicting"
-                         then Theme.Status_critical
-                         else if
-                           String.equal pr.review "changes_requested"
-                           || String.equal pr.checks "running"
-                         then Theme.Status_attention
-                         else if
-                           String.equal pr.checks "passing"
-                           && String.equal pr.review "approved"
-                         then Theme.Status_ok
-                         else Theme.Status_active
-                       in
-                       if not (Model.is_zoomed_active model) then begin
-                         (* Split view: default-collapse Open PRs to a crisp 1-line summary
-                            so the working-tree diff stays visible above the fold. *)
-                         let summary_line, tone_opt =
-                           match entry.pulls with
-                           | [] ->
-                               ( Say.resolve lang
-                                   (Say.make
-                                      ~ko:(Printf.sprintf "GitHub PR: 0건%s" undec_s)
-                                      ~en:(Printf.sprintf "Open PRs: 0%s" undec_s))
-                               , None )
-                           | pr :: rest ->
-                               let extra_n = List.length rest in
-                               let extra_s =
-                                 if extra_n > 0 then Printf.sprintf " (+%d)" extra_n
-                                 else ""
-                               in
-                               let draft_tag = if pr.draft then "[DRAFT] " else "" in
-                               let head_rev_s =
-                                 if String.equal pr.head_review "not_reviewed_on_head"
-                                 then " !head-rev"
-                                 else ""
-                               in
-                               let title_s =
-                                 match pr.title with
-                                 | Some t when not (String.equal (String.trim t) "") ->
-                                     " " ^ t
-                                 | Some _ | None -> ""
-                               in
-                               let prefix =
-                                 Say.resolve lang
-                                   (Say.make
-                                      ~ko:(Printf.sprintf "PR %d건%s" n_prs undec_s)
-                                      ~en:(Printf.sprintf "Open PRs: %d%s" n_prs undec_s))
-                               in
-                               ( Printf.sprintf "%s · #%d %s[%s/%s/%s]%s%s%s"
-                                   prefix pr.number draft_tag pr.checks pr.review
-                                   pr.mergeable head_rev_s extra_s title_s
-                               , Some (pr_tone pr) )
-                         in
-                         let st =
-                           match tone_opt with
-                           | Some tone -> H.status_style ~theme tone
-                           | None -> H.secondary_style ~theme ()
-                         in
-                         ignore
-                           (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                              ~max_w:pr_clip.w ~style:st summary_line);
-                         incr y
-                       end
-                       else begin
-                         let hdr =
-                           Say.resolve lang
-                             (Say.make
-                                ~ko:(Printf.sprintf "GitHub PR (%d건)%s" n_prs undec_s)
-                                ~en:(Printf.sprintf "Open PRs (%d)%s" n_prs undec_s))
-                         in
-                         ignore
-                           (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                              ~max_w:pr_clip.w
-                              ~style:(H.secondary_style ~theme ()) hdr);
-                         incr y;
-                         let avail = Int.max 0 (bot - !y - 2) in
-                         let max_pr_rows, show_more =
-                           if avail <= 0 || n_prs = 0 then (0, false)
-                           else if n_prs <= Int.min 3 avail then (n_prs, false)
-                           else if avail = 1 then (1, false)
-                           else (Int.min 3 (avail - 1), true)
-                         in
-                         List.iteri
-                           (fun idx (pr : Wire_infra.repository_pull_row) ->
-                             if idx < max_pr_rows && !y < bot then begin
-                               let tone = pr_tone pr in
-                               let draft_tag = if pr.draft then "[DRAFT] " else "" in
-                               let author_s =
-                                 match pr.keeper, pr.author with
-                                 | Some k, _ -> "@" ^ k
-                                 | None, Some a -> "@" ^ a
-                                 | None, None -> ""
-                               in
-                               let title_s = Option.value pr.title ~default:"" in
-                               let head_rev_s =
-                                 if String.equal pr.head_review "not_reviewed_on_head"
-                                 then " !head-rev"
-                                 else ""
-                               in
-                               let row_txt =
-                                 Printf.sprintf "  #%d %s[%s/%s/%s]%s %s %s"
-                                   pr.number draft_tag pr.checks pr.review
-                                   pr.mergeable head_rev_s author_s title_s
-                               in
-                               ignore
-                                 (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
-                                    ~y:!y ~max_w:pr_clip.w
-                                    ~style:(H.status_style ~theme tone) row_txt);
-                               incr y
-                             end)
-                           entry.pulls;
-                         let hidden_prs = n_prs - max_pr_rows in
-                         if show_more && hidden_prs > 0 && !y < bot then begin
-                           ignore
-                             (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                                ~max_w:pr_clip.w ~style:(H.whisper_style ~theme ())
-                                (Say.resolve lang
-                                   (Say.make
-                                      ~ko:(Printf.sprintf "  … 외 PR %d건 더" hidden_prs)
-                                      ~en:(Printf.sprintf "  … +%d more PRs" hidden_prs))));
-                           incr y
-                         end
-                       end
-                   | Some _ | None ->
-                       if not (String.equal snap.reader_state "ready") then begin
+                   let draw_reader_state () =
+                     match Wire_infra.classify_pulls_reader_state snap.reader_state with
+                     | Wire_infra.Reader_ready -> ()
+                     | Wire_infra.Reader_other _ ->
                          let detail =
                            match snap.reader_detail with
                            | Some d -> " (" ^ d ^ ")"
@@ -2190,7 +2059,178 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                               (Printf.sprintf "PR reader: %s%s"
                                  snap.reader_state detail));
                          incr y
-                       end))
+                   in
+                   match Infra_store.pulls_entry_for ~repo_id:r.id inf with
+                   | Some entry -> (
+                       match Wire_infra.classify_pr_entry_state entry.state with
+                       | Wire_infra.Pr_entry_failed ->
+                           let detail =
+                             Option.value entry.failure_summary
+                               ~default:"fetch failed"
+                           in
+                           ignore
+                             (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
+                                ~y:!y ~max_w:pr_clip.w
+                                ~style:(H.status_style ~theme Theme.Status_critical)
+                                (Printf.sprintf "%s PRs: %s"
+                                   (Glyph.to_utf8 Glyph.Live_failing) detail));
+                           incr y
+                       | Wire_infra.Pr_entry_read ->
+                           let n_prs = List.length entry.pulls in
+                           let undec_s =
+                             if entry.undecodable > 0 then
+                               Printf.sprintf " (+%d undecodable)"
+                                 entry.undecodable
+                             else ""
+                           in
+                           let pr_tone (pr : Wire_infra.repository_pull_row) =
+                             let checks =
+                               Wire_infra.classify_pr_checks_state pr.checks
+                             in
+                             let mergeable =
+                               Wire_infra.classify_pr_mergeable_state pr.mergeable
+                             in
+                             let review =
+                               Wire_infra.classify_pr_review_state pr.review
+                             in
+                             match (checks, mergeable) with
+                             | ( Wire_infra.Checks_failing
+                               , ( Wire_infra.Mergeable_conflicting
+                                 | Wire_infra.Mergeable_other _ ) )
+                             | ( ( Wire_infra.Checks_passing
+                                 | Wire_infra.Checks_running
+                                 | Wire_infra.Checks_other _ )
+                               , Wire_infra.Mergeable_conflicting ) ->
+                                 Theme.Status_critical
+                             | Wire_infra.Checks_running, Wire_infra.Mergeable_other _ ->
+                                 Theme.Status_attention
+                             | Wire_infra.Checks_passing, Wire_infra.Mergeable_other _ -> (
+                                 match review with
+                                 | Wire_infra.Review_changes_requested ->
+                                     Theme.Status_attention
+                                 | Wire_infra.Review_approved -> Theme.Status_ok
+                                 | Wire_infra.Review_other _ ->
+                                     Theme.Status_active)
+                             | Wire_infra.Checks_other _, Wire_infra.Mergeable_other _ -> (
+                                 match review with
+                                 | Wire_infra.Review_changes_requested ->
+                                     Theme.Status_attention
+                                 | Wire_infra.Review_approved
+                                 | Wire_infra.Review_other _ ->
+                                     Theme.Status_active)
+                           in
+                           let head_rev_tag (pr : Wire_infra.repository_pull_row) =
+                             match
+                               Wire_infra.classify_pr_head_review_state
+                                 pr.head_review
+                             with
+                             | Wire_infra.Head_not_reviewed -> " !head-rev"
+                             | Wire_infra.Head_review_other _ -> ""
+                           in
+                           if not (Model.is_zoomed_active model) then begin
+                             (* Split view: default-collapse Open PRs to a crisp 1-line summary
+                                so the working-tree diff stays visible above the fold. *)
+                             let summary_line, tone_opt =
+                               match entry.pulls with
+                               | [] ->
+                                   ( Say.resolve lang
+                                       (Say.make
+                                          ~ko:(Printf.sprintf "GitHub PR: 0건%s" undec_s)
+                                          ~en:(Printf.sprintf "Open PRs: 0%s" undec_s))
+                                   , None )
+                               | pr :: rest ->
+                                   let extra_n = List.length rest in
+                                   let extra_s =
+                                     if extra_n > 0 then Printf.sprintf " (+%d)" extra_n
+                                     else ""
+                                   in
+                                   let draft_tag = if pr.draft then "[DRAFT] " else "" in
+                                   let head_rev_s = head_rev_tag pr in
+                                   let title_s =
+                                     match pr.title with
+                                     | Some t when not (String.equal (String.trim t) "") ->
+                                         " " ^ t
+                                     | Some _ | None -> ""
+                                   in
+                                   let prefix =
+                                     Say.resolve lang
+                                       (Say.make
+                                          ~ko:(Printf.sprintf "PR %d건%s" n_prs undec_s)
+                                          ~en:(Printf.sprintf "Open PRs: %d%s" n_prs undec_s))
+                                   in
+                                   ( Printf.sprintf "%s · #%d %s[%s/%s/%s]%s%s%s"
+                                       prefix pr.number draft_tag pr.checks pr.review
+                                       pr.mergeable head_rev_s extra_s title_s
+                                   , Some (pr_tone pr) )
+                             in
+                             let st =
+                               match tone_opt with
+                               | Some tone -> H.status_style ~theme tone
+                               | None -> H.secondary_style ~theme ()
+                             in
+                             ignore
+                               (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                                  ~max_w:pr_clip.w ~style:st summary_line);
+                             incr y
+                           end
+                           else begin
+                             let hdr =
+                               Say.resolve lang
+                                 (Say.make
+                                    ~ko:(Printf.sprintf "GitHub PR (%d건)%s" n_prs undec_s)
+                                    ~en:(Printf.sprintf "Open PRs (%d)%s" n_prs undec_s))
+                             in
+                             ignore
+                               (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                                  ~max_w:pr_clip.w
+                                  ~style:(H.secondary_style ~theme ()) hdr);
+                             incr y;
+                             let avail = Int.max 0 (bot - !y - 2) in
+                             let max_pr_rows, show_more =
+                               if avail <= 0 || n_prs = 0 then (0, false)
+                               else if n_prs <= Int.min 3 avail then (n_prs, false)
+                               else if avail = 1 then (1, false)
+                               else (Int.min 3 (avail - 1), true)
+                             in
+                             List.iteri
+                               (fun idx (pr : Wire_infra.repository_pull_row) ->
+                                 if idx < max_pr_rows && !y < bot then begin
+                                   let tone = pr_tone pr in
+                                   let draft_tag = if pr.draft then "[DRAFT] " else "" in
+                                   let author_s =
+                                     match pr.keeper, pr.author with
+                                     | Some k, _ -> "@" ^ k
+                                     | None, Some a -> "@" ^ a
+                                     | None, None -> ""
+                                   in
+                                   let title_s = Option.value pr.title ~default:"" in
+                                   let head_rev_s = head_rev_tag pr in
+                                   let row_txt =
+                                     Printf.sprintf "  #%d %s[%s/%s/%s]%s %s %s"
+                                       pr.number draft_tag pr.checks pr.review
+                                       pr.mergeable head_rev_s author_s title_s
+                                   in
+                                   ignore
+                                     (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
+                                        ~y:!y ~max_w:pr_clip.w
+                                        ~style:(H.status_style ~theme tone) row_txt);
+                                   incr y
+                                 end)
+                               entry.pulls;
+                             let hidden_prs = n_prs - max_pr_rows in
+                             if show_more && hidden_prs > 0 && !y < bot then begin
+                               ignore
+                                 (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                                    ~max_w:pr_clip.w ~style:(H.whisper_style ~theme ())
+                                    (Say.resolve lang
+                                       (Say.make
+                                          ~ko:(Printf.sprintf "  … 외 PR %d건 더" hidden_prs)
+                                          ~en:(Printf.sprintf "  … +%d more PRs" hidden_prs))));
+                               incr y
+                             end
+                           end
+                       | Wire_infra.Pr_entry_other _ -> draw_reader_state ())
+                   | None -> draw_reader_state ()))
           | Observed.Failed { reason; _ } when !y < bot ->
               let pr_clip =
                 Rect.make ~x:(diff_inner.x + pad_x) ~y:!y

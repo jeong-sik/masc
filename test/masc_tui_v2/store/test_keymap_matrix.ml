@@ -6246,7 +6246,9 @@ let test_wave2_100pct_menu_reachability_matrix () =
     m_b_s.knowledge.board_signal_only;
   let m_b_sort, _ = step m_board (char_key ~shift:true "S") in
   Alcotest.(check bool) "Board [S] cycles sort_by" true
-    (not (String.equal m_b_sort.knowledge.board_sort_by m_board.knowledge.board_sort_by));
+    (not
+       (Wire_knowledge.equal_board_sort m_b_sort.knowledge.board_sort_by
+          m_board.knowledge.board_sort_by));
   let m_b_h, _ = step m_board (char_key "h") in
   Alcotest.(check (option string)) "Board [h] cycles hearth from live hearths"
     (Some "ops") m_b_h.knowledge.board_hearth;

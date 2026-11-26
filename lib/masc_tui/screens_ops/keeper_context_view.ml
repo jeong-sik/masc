@@ -781,14 +781,16 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                     | None, Some rsn -> " · " ^ rsn
                     | None, None -> ""
                   in
-                  let tok =
-                    match String.lowercase_ascii ev.status with
-                    | "ok" | "completed" | "succeeded" -> Theme.Status_ok
-                    | "error" | "failed" -> Theme.Status_critical
-                    | _ -> Theme.Status_active
+                  let tok, status_s =
+                    match ev.status with
+                    | Wire_keeper_context.Flow_ok s -> (Theme.Status_ok, s)
+                    | Wire_keeper_context.Flow_failed s ->
+                        (Theme.Status_critical, s)
+                    | Wire_keeper_context.Flow_active s ->
+                        (Theme.Status_active, s)
                   in
                   push (Typography.status ~bg theme tok)
-                    (Printf.sprintf "    %s [%s] rt=%s%s" ev.event ev.status rt
+                    (Printf.sprintf "    %s [%s] rt=%s%s" ev.event status_s rt
                        act))
                 (List.take 16 flow.events);
               if List.length flow.events > 16 then

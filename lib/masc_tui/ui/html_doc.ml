@@ -363,18 +363,8 @@ let project source =
   { blocks = flow 0 nodes; images = collect_images nodes }
 
 let contains_ci ~needle ~haystack =
-  let n = String.lowercase_ascii (String.trim needle) in
-  let h = String.lowercase_ascii haystack in
-  let nl = String.length n and hl = String.length h in
-  if nl = 0 then false
-  else if nl > hl then false
-  else
-    let rec loop i =
-      if i + nl > hl then false
-      else if String.equal (String.sub h i nl) n then true
-      else loop (i + 1)
-    in
-    loop 0
+  let n = String.trim needle in
+  not (String.equal n "") && Masc_tui_core.Text_util.contains_ci ~needle:n haystack
 
 let split_long_word ~max_width word =
   let clusters = Grapheme.split_clusters word in

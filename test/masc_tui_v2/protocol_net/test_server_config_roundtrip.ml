@@ -307,7 +307,8 @@ let test_quoted_model_entity_meta_roundtrip () =
     Alcotest.(check (option string))
       "client decoded entity_group for quoted model"
       (Some "model:gpt-5.6")
-      (Option.bind gpt_meta (fun m -> m.entity_group)))
+      (Option.bind gpt_meta (fun m ->
+           Option.map Wc.entity_group_to_string m.entity_group)))
 ;;
 
 let () =

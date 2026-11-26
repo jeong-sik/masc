@@ -2718,43 +2718,43 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
     [
       ( f1.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = None;
         } );
       ( f2.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f3.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f4.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f5.full_key,
         {
-          entity_group = Some "provider:claude_code_a1b2c3d4";
+          entity_group = Some (Wire_config.Group_provider "claude_code_a1b2c3d4");
           entity_title = Some "Claude Code A1b2c3d4";
           sub_group = Some "model_bindings";
         } );
       ( f6.full_key,
         {
-          entity_group = Some "provider:claude_code_b2c3d4e5";
+          entity_group = Some (Wire_config.Group_provider "claude_code_b2c3d4e5");
           entity_title = Some "claude_code_b2c3d4e5";
           sub_group = None;
         } );
       ( f7.full_key,
         {
-          entity_group = Some "provider:antigravity_e5f60718";
+          entity_group = Some (Wire_config.Group_provider "antigravity_e5f60718");
           entity_title = Some "Antigravity E5f60718";
           sub_group = None;
         } );
@@ -3939,7 +3939,8 @@ let test_settings_tui_enum_rendering_and_zero_double_brackets () =
       base_ko with
       theme_preset = Theme.Arcade_hi;
       knowledge =
-        Knowledge_store.set_board_sort "trending" base_ko.knowledge;
+        Knowledge_store.set_board_sort Wire_knowledge.Sort_trending
+          base_ko.knowledge;
       nav =
         {
           base_ko.nav with

@@ -1,10 +1,6 @@
 let default_viewport_rows = 15
 
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let clamp_index = Masc_tui_core.Text_util.clamp_index
 
 let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
   let vr = max 1 viewport_rows in
@@ -28,22 +24,7 @@ let clamp_scroll ?max_scroll offset =
   | None -> non_neg
   | Some hi -> min (max 0 hi) non_neg
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
+let contains_ci = Masc_tui_core.Text_util.contains_ci
 
 let rec drop n xs =
   if n <= 0 then xs

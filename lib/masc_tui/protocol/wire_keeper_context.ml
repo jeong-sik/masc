@@ -1641,9 +1641,23 @@ type turn_source_outcomes =
     }
   | Outcomes_unavailable of string
 
+type turn_flow_status =
+  | Flow_ok of string
+  | Flow_failed of string
+  | Flow_active of string
+
+let turn_flow_status_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "ok" | "completed" | "succeeded" -> Flow_ok raw
+  | "error" | "failed" -> Flow_failed raw
+  | _ -> Flow_active raw
+
+let turn_flow_status_to_string = function
+  | Flow_ok s | Flow_failed s | Flow_active s -> s
+
 type turn_flow_event = {
   event : string;
-  status : string;
+  status : turn_flow_status;
   runtime_id : string option;
   routing_action : string option;
   routing_reason : string option;
@@ -1749,7 +1763,10 @@ let decode_turn_flow ~keeper ~trace_id ~turn_id json =
           else
             let* event = required_nonblank_string row "event" in
             let* status_opt = optional_nonblank_string row "status" in
-            let status = Option.value ~default:"unknown" status_opt in
+            let status =
+              turn_flow_status_of_string
+                (Option.value ~default:"unknown" status_opt)
+            in
             let* runtime_id = optional_nonblank_string row "runtime_id" in
             let* dec_opt = optional_object_field row "decision" in
             let* routing_action, routing_reason =

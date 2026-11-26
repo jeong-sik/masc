@@ -723,6 +723,27 @@ let test_terminal_out_nonblock_pipe_large_frame () =
             (Bytes.sub_string buf 0 n)))
     [ Float.nan; Float.neg_infinity; -1.0; 0.0 ]
 
+let test_text_util () =
+  Alcotest.(check int) "clamp_index empty" 0 (Text_util.clamp_index 0 3);
+  Alcotest.(check int) "clamp_index neg" 0 (Text_util.clamp_index 5 (-2));
+  Alcotest.(check int) "clamp_index hi" 4 (Text_util.clamp_index 5 99);
+  Alcotest.(check int) "clamp_index mid" 2 (Text_util.clamp_index 5 2);
+  Alcotest.(check bool) "contains_ci empty needle" true
+    (Text_util.contains_ci ~needle:"" "anything");
+  Alcotest.(check bool) "contains_ci mixed case" true
+    (Text_util.contains_ci ~needle:"KeEpEr" "masc_keeper_status");
+  Alcotest.(check bool) "contains_ci miss" false
+    (Text_util.contains_ci ~needle:"missing" "short");
+  Alcotest.(check string) "sanitize_single_line collapses controls and spaces"
+    "hello world"
+    (Text_util.sanitize_single_line "  hello\n\t\r  \x07world  ");
+  Alcotest.(check string) "short_hash trims and truncates" "abcdef12"
+    (Text_util.short_hash "  abcdef1234567890  ");
+  Alcotest.(check string) "short_hash custom len" "abc"
+    (Text_util.short_hash ~len:3 "abcdef");
+  Alcotest.(check string) "short_hash negative len clamps to 0" ""
+    (Text_util.short_hash ~len:(-4) "abcdef")
+
 let () =
   Alcotest.run "masc_tui_v2_core_term"
     [
@@ -753,5 +774,6 @@ let () =
         [
           Alcotest.test_case "Observed / Format_val / Exit_reason / Nav" `Quick test_observed_and_format_val;
           Alcotest.test_case "Hit_map / Probe / Clipboard / Health" `Quick test_hit_map_probe_clipboard;
+          Alcotest.test_case "Text_util shared SSOT helpers" `Quick test_text_util;
         ] );
     ]

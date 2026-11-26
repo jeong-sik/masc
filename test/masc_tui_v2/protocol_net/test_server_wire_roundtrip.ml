@@ -1820,7 +1820,8 @@ let test_keeper_turns_preview_roundtrip () =
                    Alcotest.(check (option string)) "Task reference stays with its turn"
                      (Some "task-42") work.task_id;
                    Alcotest.(check (list string)) "decision inputs cross the wire"
-                     [ "scheduled_automation_due"; "task_backlog" ] work.start_reasons)
+                     [ "scheduled_automation_due"; "task_backlog" ]
+                     (List.map Wire_fleet.start_reason_to_string work.start_reasons))
           | None -> Alcotest.fail "expected preview on r1")
       | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ ->
           Alcotest.fail "expected Turn_active for r1");

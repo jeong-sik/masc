@@ -548,9 +548,17 @@ type turn_source_outcomes =
     }
   | Outcomes_unavailable of string
 
+type turn_flow_status =
+  | Flow_ok of string
+  | Flow_failed of string
+  | Flow_active of string
+
+val turn_flow_status_of_string : string -> turn_flow_status
+val turn_flow_status_to_string : turn_flow_status -> string
+
 type turn_flow_event = {
   event : string;
-  status : string;
+  status : turn_flow_status;
   runtime_id : string option;
   routing_action : string option;
   routing_reason : string option;

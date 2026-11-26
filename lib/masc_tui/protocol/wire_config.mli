@@ -122,8 +122,18 @@ type config_schema = {
   sections : schema_section list;
 }
 
+type entity_group =
+  | Group_provider of string
+  | Group_model of string
+  | Group_section of string
+  | Group_custom of string
+
+val entity_group_of_string : string -> entity_group
+val entity_group_to_string : entity_group -> string
+val equal_entity_group : entity_group -> entity_group -> bool
+
 type field_entity_meta = {
-  entity_group : string option;
+  entity_group : entity_group option;
   entity_title : string option;
   sub_group : string option;
 }

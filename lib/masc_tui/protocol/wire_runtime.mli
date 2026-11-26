@@ -736,7 +736,20 @@ val decode_tools_dashboard :
   Yojson.Safe.t ->
   (tools_dashboard_snapshot, string) result
 
-val classify_tool_domain_family : string -> string * string
+type tool_domain =
+  | Domain_board
+  | Domain_work
+  | Domain_run
+  | Domain_keeper_ops
+  | Domain_keeper_self
+  | Domain_system
+  | Domain_unsorted
+  | Domain_other of string
+
+val tool_domain_of_string : string -> tool_domain
+val tool_domain_to_string : tool_domain -> string
+val tool_domain_rank : tool_domain -> int
+val classify_tool_domain_family : string -> tool_domain * string
 
 type skill_surface_entry = {
   reference : string;
@@ -1903,3 +1916,36 @@ type browser_op_receipt = {
 
 val decode_browser_op_receipt :
   Yojson.Safe.t -> (browser_op_receipt, string) result
+
+type window_label_kind =
+  | Window_label_session
+  | Window_label_weekly
+  | Window_label_daily
+  | Window_label_monthly
+  | Window_label_other of string
+
+val classify_window_provider_label : string -> window_label_kind
+
+type quota_rest_cause =
+  | Rest_provider_quota_refused
+  | Rest_payment_refused
+  | Rest_usage_read
+  | Rest_other of string
+
+val classify_quota_rest_cause : string -> quota_rest_cause
+val is_payment_refused_cause : string -> bool
+
+type setup_support_kind =
+  | Setup_unsupported
+  | Setup_supported of string
+
+val classify_setup_support : string -> setup_support_kind
+
+type skill_surface_kind =
+  | Skill_composition
+  | Skill_instruction
+  | Skill_kind_other of string
+
+val classify_skill_surface_kind : string -> skill_surface_kind
+
+val is_dos_machine_addon : addon_instance -> bool

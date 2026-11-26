@@ -87,10 +87,12 @@ val draw_hairline :
   y:int ->
   theme:Theme.t ->
   unit
-(** Paint a 1-row internal hairline divider ([─] in [theme.border_subtle])
-    across [rect] inset by [pad_x] (default [0]). When [label] is given, paints
-    [── Label ──────────] with [label] in Tier 3 ([text_secondary] Bold).
-    Replaces nested boxes-inside-boxes. *)
+(** Paint a 1-row internal hairline divider across [rect] inset by [pad_x]
+    (default [0]). Unlabeled dividers paint [─] in [theme.border_subtle];
+    when a non-empty [label] is given, paints a left-aligned section header
+    ([▸ Label ──────────]) with an accent caret, Tier 1 ([text_bright] Bold)
+    title, and trailing rule in [theme.border_inactive]. Replaces nested
+    boxes-inside-boxes. *)
 
 val draw_v_hairline :
   ?unicode:bool ->

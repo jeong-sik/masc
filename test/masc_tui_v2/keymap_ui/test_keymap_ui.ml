@@ -1475,9 +1475,13 @@ let test_v25_typography_layout_and_card () =
     (Color.equal (Cell_grid.get grid ~x:inner.x ~y:inner.y).style.bg
        (Color.of_rgb theme.surface_2));
   Card.draw_hairline ~pad_x:2 ~label:"Details" grid ~rect:inner ~y:(inner.y + 3) ~theme;
-  Alcotest.(check bool) "hairline paints border_subtle" true
+  Alcotest.(check bool) "hairline paints accent caret at label start" true
     (Color.equal (Cell_grid.get grid ~x:(inner.x + 2) ~y:(inner.y + 3)).style.fg
-       (Color.of_rgb theme.border_subtle));
+       (Color.of_rgb theme.accent));
+  Alcotest.(check bool) "hairline paints visible border_inactive rule" true
+    (Color.equal
+       (Cell_grid.get grid ~x:(inner.x + inner.w - 3) ~y:(inner.y + 3)).style.fg
+       (Color.of_rgb theme.border_inactive));
   Card.draw_left_rail ~tone:Theme.Status_ai grid ~x:(inner.x + 2) ~y:(inner.y + 5) ~h:2 ~theme;
   let rail_cell = Cell_grid.get grid ~x:(inner.x + 2) ~y:(inner.y + 5) in
   Alcotest.(check bool) "left_rail uses Glyph.Left_rail in Violet" true

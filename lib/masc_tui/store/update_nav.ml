@@ -7086,7 +7086,8 @@ let sandbox_entry_info_for_keeper ~use_keeper_detail ~keeper
 let sandbox_inspector_rem_rows ~inner_h (info : sandbox_entry_info) =
   let band_h = if inner_h >= 8 then 2 else 1 in
   let content_h = max 0 (inner_h - band_h) in
-  max 0 (content_h - (6 + info.backend_rows))
+  let spacer_rows = if content_h >= 17 then 3 else 0 in
+  max 0 (content_h - (6 + spacer_rows + info.backend_rows))
 
 let help_max_scroll (m : Model.t) =
   let modal_w = min (max 0 (m.viewport.cols - 4)) 128 in

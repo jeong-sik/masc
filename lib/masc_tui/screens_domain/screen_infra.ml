@@ -204,23 +204,29 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
     else
       let y = ref content.y in
       let bottom = Rect.bottom content in
-      let key_w = if content.w >= 34 then 10 else 8 in
+      let use_spacers = content.h >= 17 in
+      let body_indent = if content.w >= 26 then 2 else 0 in
+      let body_x = content.x + body_indent in
+      let body_w = Int.max 0 (content.w - body_indent) in
+      let key_w = if body_w >= 32 then 10 else 8 in
       let put_row ?value_style key value =
         if !y < bottom then begin
-          H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
+          H.put_kv ~grid ~clip:content ~x:body_x ~y:!y ~max_w:body_w
             ~theme ~key_w ~key ?value_style value;
           incr y
         end
       in
+      let begin_section label =
+        if use_spacers && !y < bottom then incr y;
+        if !y < bottom then begin
+          H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label ();
+          incr y
+        end
+      in
       (* Section 2: Resource & Connection Specs *)
-      if !y < bottom then begin
-        H.draw_divider ~grid ~rect:content ~y:!y ~theme
-          ~label:
-            (Say.resolve lang
-               (Say.make ~ko:"리소스 · 연결 스펙" ~en:"Resource & Connection"))
-          ();
-        incr y
-      end;
+      begin_section
+        (Say.resolve lang
+           (Say.make ~ko:"리소스 · 연결 스펙" ~en:"Resource & Connection"));
       (match entry with
        | Entry_microvm g ->
            put_row
@@ -252,16 +258,22 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
              ~value_style:(H.status_style ~theme sht)
              (Say.resolve lang (Say.make ~ko:"심/패리티" ~en:"Shim"))
              (Printf.sprintf "%s %s" (Glyph.to_utf8 shg) shl);
+           let ram_s =
+             let v =
+               Format_val.format_observed Format_val.Count
+                 (Observed.map float_of_int g.memory_mib)
+                 ~lang
+             in
+             if Observed.is_value g.memory_mib then v ^ " MiB" else v
+           in
            put_row
              (Say.resolve lang (Say.make ~ko:"네트워크" ~en:"Network"))
-             (Printf.sprintf "%s · CPU %s · RAM %s MiB"
+             (Printf.sprintf "%s · CPU %s · RAM %s"
                 (network_mode_label g.network_mode)
                 (Format_val.format_observed Format_val.Count
                    (Observed.map float_of_int g.cpus)
                    ~lang)
-                (Format_val.format_observed Format_val.Count
-                   (Observed.map float_of_int g.memory_mib)
-                   ~lang));
+                ram_s);
            let vol_style, vol_txt =
              match g.volume with
              | Wire_infra.Volume_declared name ->
@@ -312,10 +324,10 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
                     ~lang)
                  pool.max_sessions
              in
-             H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
+             H.put_kv ~grid ~clip:content ~x:body_x ~y:!y ~max_w:body_w
                ~theme ~key_w ~key:sess_lbl sess_txt;
              (match active_opt with
-              | Some a when pool.max_sessions > 0 && content.w >= 34 ->
+              | Some a when pool.max_sessions > 0 && body_w >= 34 ->
                   let bw = 10 in
                   ignore
                     (Chart.draw_ratio_bar_run ~clip:content grid
@@ -358,14 +370,9 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
              (network_mode_label d.network_mode));
       (* Section 3: 24h Tool Execution Summary *)
       let m = entry_metrics entry in
-      if !y < bottom then begin
-        H.draw_divider ~grid ~rect:content ~y:!y ~theme
-          ~label:
-            (Say.resolve lang
-               (Say.make ~ko:"24h 도구 실행 요약" ~en:"24h Tool Execution"))
-          ();
-        incr y
-      end;
+      begin_section
+        (Say.resolve lang
+           (Say.make ~ko:"24h 도구 실행 요약" ~en:"24h Tool Execution"));
       if !y < bottom then begin
         let fail_rate =
           if m.calls > 0 then
@@ -381,12 +388,14 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
           Printf.sprintf "%d calls · %d fail (%.1f%%)" m.calls m.failures
             (fail_rate *. 100.0)
         in
-        H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w ~theme
-          ~key_w
+        let bw = 8 in
+        let draw_bar = m.calls > 0 && body_w >= 48 in
+        H.put_kv ~grid ~clip:content ~x:body_x ~y:!y
+          ~max_w:(if draw_bar then body_w - bw - 1 else body_w)
+          ~theme ~key_w
           ~key:(Say.resolve lang (Say.make ~ko:"호출/실패" ~en:"Calls/Fail"))
           ~value_style:(H.status_style ~theme fail_tone) calls_s;
-        if m.calls > 0 && content.w >= 44 then begin
-          let bw = 8 in
+        if draw_bar then begin
           ignore
             (Chart.draw_ratio_bar_run ~clip:content grid
                ~x:(Rect.right content - bw) ~y:!y ~width:bw ~theme ~bg
@@ -412,10 +421,10 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
           ]
         in
         ignore
-          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y ~max_w:key_w
+          (H.put_clipped ~grid ~clip:content ~x:body_x ~y:!y ~max_w:key_w
              ~style:(H.secondary_style ~theme ())
              (Say.resolve lang (Say.make ~ko:"오류 분류" ~en:"Failures")));
-        let cx = ref (content.x + key_w + 1) in
+        let cx = ref (body_x + key_w + 1) in
         let right_e = Rect.right content in
         List.iteri
           (fun i (lbl, cnt, tone) ->
@@ -445,14 +454,9 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
         incr y
       end;
       (* Section 4: Recent Logs & Sandbox Events (fills remaining space — kills 70% void!) *)
-      if !y < bottom then begin
-        H.draw_divider ~grid ~rect:content ~y:!y ~theme
-          ~label:
-            (Say.resolve lang
-               (Say.make ~ko:"최근 로그 · 이벤트" ~en:"Recent Logs & Events"))
-          ();
-        incr y
-      end;
+      begin_section
+        (Say.resolve lang
+           (Say.make ~ko:"최근 로그 · 이벤트" ~en:"Recent Logs & Events"));
       let rem_rows = Int.max 0 (bottom - !y) in
       if rem_rows > 0 then begin
         let display_logs =
@@ -466,7 +470,7 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
         in
         if display_logs = [] && keeper_acts = [] then begin
           let empty_box =
-            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:rem_rows
+            Rect.make ~x:body_x ~y:!y ~w:body_w ~h:rem_rows
           in
           Card.draw_left_rail ~bg ~color:theme.border_inactive grid
             ~x:empty_box.x ~y:empty_box.y ~h:(Int.min 2 rem_rows) ~theme;
@@ -478,17 +482,24 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
                   (Say.make ~ko:"최근 24h 샌드박스 오류/이벤트 없음"
                      ~en:"No sandbox errors or events in last 24h")));
           if rem_rows >= 2 then
+            let empty_hint =
+              if model.nav.zoomed && Model.can_zoom_current_view model then
+                Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
+                  ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe"
+              else
+                Say.make ~ko:"[Enter/z] 확대 보기 · [e] 설정"
+                  ~en:"[Enter/z] Zoom · [e] Config"
+            in
             ignore
               (H.put_clipped ~grid ~clip:empty_box ~x:(empty_box.x + 2)
                  ~y:(empty_box.y + 1) ~max_w:(Int.max 0 (empty_box.w - 2))
                  ~style:(H.whisper_style ~theme ())
-                 (Say.resolve lang
-                    (Say.make ~ko:"[Enter/z] 확대 보기" ~en:"[Enter/z] Zoom")))
+                 (Say.resolve lang empty_hint))
         end
         else begin
           let log_bg_rgb = theme.surface_0 in
           let log_bg = Color.of_rgb log_bg_rgb in
-          let box = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:rem_rows in
+          let box = Rect.make ~x:body_x ~y:!y ~w:body_w ~h:rem_rows in
           Cell_grid.fill_rect ~clip:content grid ~rect:box
             ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ()) ();
           let combined =
@@ -722,13 +733,20 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
             else "[Space] Json_tree"))
     else None
   in
+  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+  let hotkey =
+    if zoomed then
+      Say.resolve lang
+        (Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
+           ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe")
+    else
+      Say.resolve lang
+        (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [p] 프로브"
+           ~en:"[Enter/z] Zoom · [e] Config · [p] Probe")
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ?subtitle ?badge ~focused
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make ~ko:"[Enter/z] 확대 · [p] 프로브"
-                 ~en:"[Enter/z] Zoom · [p] Probe"))
+      (H.card_spec ?subtitle ?badge ~focused ~hotkey
          (Say.resolve lang (Say.make ~ko:"샌드박스 인스펙터" ~en:"Sandbox Inspector")))
   in
   if Rect.is_empty inner then ()
@@ -751,9 +769,7 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
           ignore
             (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme ~scroll
                lines)
-        else if
-          model.nav.zoomed && Model.can_zoom_current_view model && inner.h >= 10
-        then begin
+        else if zoomed && inner.h >= 10 then begin
           let top_rect, body_rect =
             match Layout.split_v inner [ Layout.Fixed 3; Layout.Flex 1 ] with
             | [ a; b ] -> (a, b)
@@ -1021,7 +1037,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  let bar_w =
                    if i2.w >= 34 && Option.is_some sess_ratio_opt then 5 else 0
                  in
-                 let stats_txt = Printf.sprintf "%s %s" rtt_s sess_s in
+                 let stats_txt = Printf.sprintf "%s · %s" rtt_s sess_s in
                  let stats_w = Grapheme.display_width stats_txt in
                  let right_block =
                    stats_w + if bar_w > 0 then bar_w + 1 else 0
@@ -1239,7 +1255,10 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let tbl_inner =
     Card.draw ~cache grid ~rect:tbl_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter/z] 확대" ~en:"[Enter/z] Zoom"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[Enter/z] 확대 · [e] 설정 · [S] SSH 풀"
+                 ~en:"[Enter/z] Zoom · [e] Config · [S] SSH Pools"))
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 샌드박스 플릿 (%d)" (List.length entries))

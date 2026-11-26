@@ -6972,6 +6972,16 @@ and execute_action ~now (m : Model.t) action =
                 ( Model.with_toast ~now ~level:Model.Toast_info lbl
                     { m with work }
                 , [] )
+            | Nav.Infra
+              when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes ->
+                let config =
+                  m.config
+                  |> Config_store.set_search_query ""
+                  |> Config_store.set_target Wire_config.Target_runtime
+                  |> Config_store.set_tab Nav.Settings_sandbox_ssh
+                in
+                Update_nav.open_overlay { m with config }
+                  (Nav.Settings Nav.Settings_sandbox_ssh)
             | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
             | Nav.Infra ->
                 (m, [])))
@@ -8417,6 +8427,23 @@ and execute_action ~now (m : Model.t) action =
                              ~en:"No active CLI login session (press [l] to start)")
                           m
                       , [] ))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Infra
+                  && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes
+                then
+                  let target =
+                    match Infra_store.selected_sandbox_keeper m.infra with
+                    | Some name -> Wire_config.Target_keeper name
+                    | None -> Wire_config.Target_runtime
+                  in
+                  let config =
+                    m.config
+                    |> Config_store.set_search_query ""
+                    |> Config_store.set_target target
+                    |> Config_store.set_tab Nav.Settings_sandbox_ssh
+                  in
+                  Update_nav.open_overlay { m with config }
+                    (Nav.Settings Nav.Settings_sandbox_ssh)
                 else (m, [])))
   | Keymap.Configure_provider_key -> (
       match active_keeper_for_tab Nav.Keeper_identity m with

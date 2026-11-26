@@ -797,12 +797,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun refusal ->
         Setup_failure (Runtime_account_access.refusal_to_string refusal))
     in
-    let effective_timeout_s =
-      resolved_timeout_s
-        ~turn_timeout_s:runtime.model.turn_timeout_s
-        ~override_s:timeout_s
-        ~default_timeout_s:execution.timeout_s
-    in
     let profile = Runtime_acp_client.profile_of_driver execution.driver in
     let effective_effort =
       Runtime_acp_client.resolve_effective_effort
@@ -891,15 +885,33 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                  with
                  | Error err -> acp_failed err
                  | Ok session ->
-                   (match
-                      Runtime_acp_client.prompt
-                        client
-                        ~session_id:session.session_id
-                        ~blocks
-                        ~timeout_s:effective_timeout_s
-                        ~permission_policy:Runtime_acp_client.Deny_all
-                        ()
-                    with
+                   let run_prompt () =
+                     Runtime_acp_client.prompt
+                       client
+                       ~session_id:session.session_id
+                       ~blocks
+                       ~permission_policy:Runtime_acp_client.Deny_all
+                       ()
+                   in
+                   (* An ACP prompt has no silence window of its own, so the
+                      preset's declared deadline bounds the whole request.
+                      Cancelling the prompt fiber sends session/cancel. *)
+                   let prompt_result =
+                     match timeout_s with
+                     | None -> run_prompt ()
+                     | Some secs ->
+                       (match
+                          Eio.Time.with_timeout clock secs (fun () -> Ok (run_prompt ()))
+                        with
+                        | Ok result -> result
+                        | Error `Timeout ->
+                          Error
+                            (Runtime_acp_client.Timeout
+                               (Runtime_timeout_payload.of_acp
+                                  ~stage:"session/prompt"
+                                  ~timeout_s:secs)))
+                   in
+                   (match prompt_result with
                     | Error err -> acp_failed err
                     | Ok res ->
                       if caps.close_session && Runtime_acp_client.is_alive client

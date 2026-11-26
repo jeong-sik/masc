@@ -230,15 +230,12 @@ let acp_error_to_core_error = function
          { message = Printf.sprintf "ACP timeout after %.1fs" seconds
          ; phase = None
          })
-  | Acp.Process_exited { detail; stderr_tail } ->
-    let tail = String.trim stderr_tail in
-    let detail =
-      if tail = ""
-      then "ACP process exited: " ^ detail
-      else Printf.sprintf "ACP process exited: %s (stderr: %s)" detail tail
-    in
+  | Acp.Process_exited _ as exited ->
+    (* The rendering carries the agent's last activity, so the blocker summary
+       and the turn record say where the agent stopped. *)
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "acp"; detail = Acp.error_to_string exited })
   | Acp.Client_closed ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -2012,7 +2009,6 @@ let run_without_lifecycle
       ~runtime_id
       ~host:_
       ~configured_reasoning_effort
-      ~turn_timeout_s
       ~keeper_name
       ~on_model_input_window_observation
       ~carried_front_seed
@@ -2404,12 +2400,6 @@ let run_without_lifecycle
           prepared.messages
       in
       None, held)
-  in
-  let effective_timeout_s =
-    match turn_timeout_s with
-    | None -> Some config.timeout_s
-    | Some secs when secs <= 0.0 -> None
-    | Some secs -> Some secs
   in
   let effective_effort =
     Acp.resolve_effective_effort
@@ -2927,7 +2917,6 @@ let run_without_lifecycle
                     entry.client
                     ~session_id
                     ~blocks:prompt_blocks
-                    ~timeout_s:effective_timeout_s
                     ~permission_policy
                     ~on_event:(fun ev ->
                       if Option.is_none !host_stop_ref then stream.on_acp_event ev)
@@ -3647,7 +3636,6 @@ let run
       ~runtime_id
       ~host
       ~configured_reasoning_effort
-      ~turn_timeout_s
       ~keeper_name
       ~pre_tool_rejects
       ~base_path
@@ -3781,7 +3769,6 @@ let run
              ~runtime_id
              ~host
              ~configured_reasoning_effort
-             ~turn_timeout_s
              ~keeper_name
              ~on_model_input_window_observation
              ~carried_front_seed

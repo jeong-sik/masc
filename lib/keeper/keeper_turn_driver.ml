@@ -3885,7 +3885,6 @@ let run_named
               ?on_native_tool_completion
               ~host
               ~configured_reasoning_effort:runtime.model.reasoning_effort
-              ~turn_timeout_s:runtime.model.turn_timeout_s
               ?argument_source:official_argument_source
               ?on_tool_execution
               ?composed_context:official_client_composed_context

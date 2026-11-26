@@ -2832,7 +2832,7 @@ let test_typed_tool_call_classification_and_schema_boundary () =
       agy_profile.effort_config_id)
 ;;
 
-let test_set_model_toolcall_correlation_and_idle_liveness () =
+let test_set_model_toolcall_correlation_and_quiet_agent () =
   let tmp = Filename.temp_dir "acp-proto-hardening-" "" in
   let log_file = Filename.concat tmp "mock_events.json" in
   let settings_copy = Filename.concat tmp "observed_settings.json" in
@@ -2988,7 +2988,7 @@ for line in sys.stdin:
                     ]
                 }})
             elif text == "active-stream":
-                # Emit 4 progress updates spaced 0.15s apart (0.60s total > 0.35s idle timeout)
+                # Emit 4 progress updates spaced 0.15s apart
                 for idx in range(4):
                     time.sleep(0.15)
                     send({"jsonrpc": "2.0", "method": "session/update", "params": {
@@ -2996,12 +2996,12 @@ for line in sys.stdin:
                         "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"chunk-{idx} "}}
                     }})
                 send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
-            elif text == "external-work":
-                # Stay silent for 0.45s while caller brackets MASC MCP tool work via with_external_activity
+            elif text == "late-answer":
+                # Stay silent, then answer: a quiet agent is not a failed one
                 time.sleep(0.45)
                 send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
             elif text == "silent-hang":
-                # Deliberately stay silent; caller must timeout and send session/cancel
+                # Deliberately stay silent; the caller cancels and must send session/cancel
                 pass
     else:
         rid = str(msg.get("id"))
@@ -3071,7 +3071,6 @@ for line in sys.stdin:
              client
              ~session_id:session.session_id
              ~blocks:[ Runtime_acp_client.Text_block "perm-correlation" ]
-             ~timeout_s:(Some 5.0)
              ~permission_policy:policy
              ()
          with
@@ -3095,57 +3094,59 @@ for line in sys.stdin:
         check (option string) "Antigravity call_mcp_tool (kind=execute) allowed"
           (Some "allow_once_agy")
           (perms |> member "agy-1" |> member "optionId" |> to_string_option);
-        (* 2. Activity-based idle liveness: active stream exceeds single-window timeout and succeeds *)
+        (* 2. A streaming turn completes. *)
         (match
            Runtime_acp_client.prompt
              client
              ~session_id:session.session_id
              ~blocks:[ Runtime_acp_client.Text_block "active-stream" ]
-             ~timeout_s:(Some 0.35)
              ~permission_policy:policy
              ()
          with
          | Ok r ->
            check string "active stream completed all chunks" "chunk-0 chunk-1 chunk-2 chunk-3 " r.text
          | Error err ->
-           failf "active stream should not timeout under idle liveness: %s"
-             (Runtime_acp_client.error_to_string err));
-        (* 2b. with_external_activity suspends idle watchdog while MASC runs a long MCP tool *)
-        let ext_res = ref None in
-        Eio.Fiber.both
-          (fun () ->
-             Runtime_acp_client.with_external_activity client (fun () ->
-               Eio.Time.sleep clock 0.50))
-          (fun () ->
-             ext_res :=
-               Some
-                 (Runtime_acp_client.prompt
-                    client
-                    ~session_id:session.session_id
-                    ~blocks:[ Runtime_acp_client.Text_block "external-work" ]
-                    ~timeout_s:(Some 0.25)
-                    ~permission_policy:policy
-                    ()));
-        (match !ext_res with
-         | Some (Ok _) -> ()
-         | Some (Error err) ->
-           failf "with_external_activity should prevent idle timeout: %s"
-             (Runtime_acp_client.error_to_string err)
-         | None -> fail "external-work prompt did not complete");
-        (* 3. True silent hang times out and emits session/cancel *)
+           failf "active stream failed: %s" (Runtime_acp_client.error_to_string err));
+        (* 2b. An agent that stays silent and then answers is not failed: the
+               prompt has no silence deadline. *)
         (match
            Runtime_acp_client.prompt
              client
              ~session_id:session.session_id
-             ~blocks:[ Runtime_acp_client.Text_block "silent-hang" ]
-             ~timeout_s:(Some 0.25)
+             ~blocks:[ Runtime_acp_client.Text_block "late-answer" ]
              ~permission_policy:policy
              ()
          with
-         | Error (Runtime_acp_client.Timeout { stage = Some "session/prompt"; _ }) -> ()
-         | Ok _ -> fail "silent hang unexpectedly succeeded"
+         | Ok _ -> ()
          | Error err ->
-           failf "expected Timeout for silent hang, got %s"
+           failf "a late answer must not fail the prompt: %s"
+             (Runtime_acp_client.error_to_string err));
+        (* 2c. A MASC tool call in flight is what the trace reports. *)
+        Runtime_acp_client.with_external_activity client (fun () ->
+          let trace = Runtime_acp_client.last_activity client in
+          check int "one MASC tool call in flight" 1
+            trace.Runtime_acp_client.masc_tools_in_flight;
+          match trace.Runtime_acp_client.last with
+          | Runtime_acp_client.Masc_tool_started -> ()
+          | other ->
+            failf "expected Masc_tool_started, got %s"
+              (Runtime_acp_client.agent_activity_to_string other));
+        (* 3. A silent hang runs until its caller cancels; the cancel sends
+              session/cancel. *)
+        (match
+           Eio.Time.with_timeout clock 0.25 (fun () ->
+             Ok
+               (Runtime_acp_client.prompt
+                  client
+                  ~session_id:session.session_id
+                  ~blocks:[ Runtime_acp_client.Text_block "silent-hang" ]
+                  ~permission_policy:policy
+                  ()))
+         with
+         | Error `Timeout -> ()
+         | Ok (Ok _) -> fail "silent hang unexpectedly succeeded"
+         | Ok (Error err) ->
+           failf "a silent hang must wait for its caller, got %s"
              (Runtime_acp_client.error_to_string err));
         let rec wait_for_cancelled attempts =
           let count =
@@ -3158,7 +3159,8 @@ for line in sys.stdin:
             Eio.Time.sleep clock 0.025;
             wait_for_cancelled (attempts - 1))
         in
-        check bool "session/cancel emitted on idle timeout" true (wait_for_cancelled 80 >= 1);
+        check bool "session/cancel emitted when the caller cancels" true
+          (wait_for_cancelled 80 >= 1);
         (* 4. session/set_model WITHOUT preceding config_option_update must treat
               effort current_value as stale and apply explicit effort override. *)
         (match
@@ -5806,6 +5808,133 @@ let test_final_message_is_the_last_message_of_the_turn () =
           | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)))))
 ;;
 
+(* An agent that reports a tool call of its own and then dies. The prompt it
+   was answering must end with the process exit and say what it last did. *)
+let dying_host_script =
+  {|#!/usr/bin/env python3
+import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-dying"}})
+    elif method == "session/prompt":
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-dying",
+            "update": {"sessionUpdate": "tool_call", "toolCallId": "tc-1", "title": "bash",
+                       "kind": "execute", "status": "in_progress"}}})
+        sys.exit(3)
+|}
+;;
+
+let test_process_exit_ends_the_prompt_with_the_last_activity () =
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-dying-host-" "" in
+  let mock_script = Filename.concat tmp "mock_dying.py" in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc dying_host_script);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          let session =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s
+            | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          match
+            Runtime_acp_client.prompt
+              client
+              ~session_id:session.session_id
+              ~blocks:[ Runtime_acp_client.Text_block "go" ]
+              ()
+          with
+          | Ok _ -> fail "a dead agent cannot answer"
+          | Error
+              (Runtime_acp_client.Process_exited
+                 { last_activity =
+                     Some
+                       { Runtime_acp_client.last =
+                           Runtime_acp_client.Agent_tool_call_started { title; status }
+                       ; masc_tools_in_flight
+                       ; _
+                       }
+                 ; _
+                 } as err) ->
+            check string "the tool the agent was running" "bash" title;
+            check string "its reported status" "in_progress"
+              (Runtime_acp_client.tool_call_status_to_string status);
+            check int "no MASC tool call in flight" 0 masc_tools_in_flight;
+            let rendered = Runtime_acp_client.error_to_string err in
+            let needle = "the agent started its own tool call \"bash\" (in_progress)" in
+            let rec contains i =
+              i + String.length needle <= String.length rendered
+              && (String.equal (String.sub rendered i (String.length needle)) needle
+                  || contains (i + 1))
+            in
+            check bool "the rendered reason names the tool" true (contains 0)
+          | Error err ->
+            failf "expected Process_exited with the last activity, got %s"
+              (Runtime_acp_client.error_to_string err)))))
+;;
+
+let test_process_exit_reason_reads_the_last_activity () =
+  let exited last_activity =
+    Runtime_acp_client.error_to_string
+      (Runtime_acp_client.Process_exited
+         { detail = "stdout EOF"; stderr_tail = ""; last_activity })
+  in
+  check string "outside a prompt the reason is the exit alone"
+    "ACP process exited: stdout EOF" (exited None);
+  check string "a prompt that waited on MASC says so"
+    "ACP process exited: stdout EOF; last activity: a MASC tool call finished 210s ago; \
+     no MASC tool call running"
+    (exited
+       (Some
+          { Runtime_acp_client.last = Runtime_acp_client.Masc_tool_finished
+          ; age_s = 210.4
+          ; masc_tools_in_flight = 0
+          }));
+  check string "a prompt the agent never answered says what MASC sent"
+    "ACP process exited: stdout EOF; last activity: nothing since MASC sent session/prompt \
+     5s ago; 2 MASC tool calls running (stderr: boom)"
+    (Runtime_acp_client.error_to_string
+       (Runtime_acp_client.Process_exited
+          { detail = "stdout EOF"
+          ; stderr_tail = "boom\n"
+          ; last_activity =
+              Some
+                { Runtime_acp_client.last = Runtime_acp_client.Request_sent "session/prompt"
+                ; age_s = 5.0
+                ; masc_tools_in_flight = 2
+                }
+          }))
+;;
+
 let muse_mock_host_script ~writes_journal ~sends_occupancy =
   let python_bool b = if b then "True" else "False" in
   Printf.sprintf
@@ -6067,8 +6196,12 @@ let () =
     ; ( "protocol_hardening"
       , [ test_case "typed tool_call_identity, schema boundary & acp_settings_json" `Quick
             test_typed_tool_call_classification_and_schema_boundary
-        ; test_case "session/set_model, toolCallId permission correlation & activity idle liveness" `Quick
-            test_set_model_toolcall_correlation_and_idle_liveness
+        ; test_case "session/set_model, toolCallId permission correlation & a quiet agent is not failed" `Quick
+            test_set_model_toolcall_correlation_and_quiet_agent
+        ; test_case "a process exit ends the prompt with the agent's last activity" `Quick
+            test_process_exit_ends_the_prompt_with_the_last_activity
+        ; test_case "the process exit reason reads the last activity" `Quick
+            test_process_exit_reason_reads_the_last_activity
         ; test_case "typed Tool_call_started effect fencing across postures" `Quick
             test_keeper_typed_tool_call_effect_fencing
         ; test_case "Layer 3 policy denies, posture mode clamp, UTF-8/secret stderr & fail-closed oauth"

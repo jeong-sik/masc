@@ -756,7 +756,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                  ; cwd = isolated_cwd
                  ; oauth_source = execution.oauth_source
                  ; dangerously_skip_permissions = false
-                 ; admission_timeout_s = Float.min timeout_s execution.timeout_s
+                 ; admission_timeout_s = Float.min timeout_s execution.admission_timeout_s
                  }
                in
                match
@@ -807,7 +807,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                              client
                              ~session_id:session.session_id
                              ~blocks:[ Runtime_acp_client.Text_block prompt ]
-                             ~timeout_s:(Some timeout_s)
                              ~permission_policy:
                                (Runtime_acp_client.Allow_masc_mcp_only
                                   { mcp_server_name

@@ -428,7 +428,6 @@ let resolve_mode_for_posture ~driver ~(posture : Runtime_native_tools.posture) ~
 (* ── Named protocol constants ─────────────────────────────────────────────── *)
 
 let protocol_version = 1
-let default_timeout_s = Runtime_timeout_budget.acp_default_turn_timeout_s
 let default_admission_timeout_s = Runtime_timeout_budget.acp_default_admission_timeout_s
 let cancel_write_timeout_s = 1.0
 let default_reap_grace_seconds = 5.0
@@ -759,6 +758,87 @@ type prompt_result =
   ; wall_duration_s : float
   }
 
+(* What the agent was last seen doing. A prompt waits on the agent with no
+   silence deadline, so when one ends without an answer this is how the
+   operator learns where the agent stopped: the last frame it sent, or the last
+   MASC tool call it was waiting on. *)
+type agent_activity =
+  | Request_sent of string
+  | Agent_message
+  | Agent_thought
+  | Agent_tool_call_started of
+      { title : string
+      ; status : tool_call_status
+      }
+  | Agent_tool_call_updated of
+      { title : string option
+      ; status : tool_call_status option
+      }
+  | Agent_usage
+  | Agent_mode of string
+  | Agent_config_options
+  | Agent_session_update of string option
+  | Agent_permission_request of string option
+  | Masc_tool_started
+  | Masc_tool_finished
+
+type activity_trace =
+  { last : agent_activity
+  ; age_s : float
+  ; masc_tools_in_flight : int
+  }
+
+let tool_call_status_to_string = function
+  | Tool_pending -> "pending"
+  | Tool_in_progress -> "in_progress"
+  | Tool_completed -> "completed"
+  | Tool_failed -> "failed"
+  | Tool_other_status s -> s
+;;
+
+let agent_activity_to_string = function
+  | Request_sent method_name ->
+    Printf.sprintf "nothing since MASC sent %s" method_name
+  | Agent_message -> "the agent sent answer text"
+  | Agent_thought -> "the agent sent thinking text"
+  | Agent_tool_call_started { title; status } ->
+    Printf.sprintf
+      "the agent started its own tool call %S (%s)"
+      title
+      (tool_call_status_to_string status)
+  | Agent_tool_call_updated { title; status } ->
+    Printf.sprintf
+      "the agent updated its own tool call %s (%s)"
+      (match title with
+       | Some title -> Printf.sprintf "%S" title
+       | None -> "without a title")
+      (match status with
+       | Some status -> tool_call_status_to_string status
+       | None -> "no status")
+  | Agent_usage -> "the agent sent a usage report"
+  | Agent_mode mode -> Printf.sprintf "the agent switched to mode %S" mode
+  | Agent_config_options -> "the agent sent a config options update"
+  | Agent_session_update (Some kind) ->
+    Printf.sprintf "the agent sent a session/update of kind %S" kind
+  | Agent_session_update None -> "the agent sent a session/update without a kind"
+  | Agent_permission_request (Some title) ->
+    Printf.sprintf "the agent asked permission for %S" title
+  | Agent_permission_request None -> "the agent asked permission for a tool call"
+  | Masc_tool_started -> "a MASC tool call started"
+  | Masc_tool_finished -> "a MASC tool call finished"
+;;
+
+let activity_trace_to_string { last; age_s; masc_tools_in_flight } =
+  Printf.sprintf
+    "last activity: %s %.0fs ago; %s"
+    (agent_activity_to_string last)
+    age_s
+    (match masc_tools_in_flight with
+     | 0 -> "no MASC tool call running"
+     | 1 -> "1 MASC tool call running"
+     | n -> Printf.sprintf "%d MASC tool calls running" n)
+;;
+
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -777,6 +857,7 @@ type error =
   | Process_exited of
       { detail : string
       ; stderr_tail : string
+      ; last_activity : activity_trace option
       }
   | Client_closed
 
@@ -812,6 +893,18 @@ let bounded_redacted_json_summary (json : Yojson.Safe.t) =
   else String_util.utf8_prefix ~max_bytes:(max_bytes - 3) redacted ^ "..."
 ;;
 
+let process_exited_to_string ~detail ~stderr_tail ~last_activity =
+  let activity =
+    match last_activity with
+    | Some trace -> "; " ^ activity_trace_to_string trace
+    | None -> ""
+  in
+  let tail = String.trim stderr_tail in
+  if tail = ""
+  then Printf.sprintf "ACP process exited: %s%s" detail activity
+  else Printf.sprintf "ACP process exited: %s%s (stderr: %s)" detail activity tail
+;;
+
 let error_to_string = function
   | Invalid_config detail -> "invalid ACP config: " ^ detail
   | Spawn_refused refusal ->
@@ -831,11 +924,8 @@ let error_to_string = function
   | Timeout { seconds; stage = Some stage; _ } ->
     Printf.sprintf "ACP timeout in %s after %.1fs" stage seconds
   | Timeout { seconds; _ } -> Printf.sprintf "ACP timeout after %.1fs" seconds
-  | Process_exited { detail; stderr_tail } ->
-    let tail = String.trim stderr_tail in
-    if tail = ""
-    then Printf.sprintf "ACP process exited: %s" detail
-    else Printf.sprintf "ACP process exited: %s (stderr: %s)" detail tail
+  | Process_exited { detail; stderr_tail; last_activity } ->
+    process_exited_to_string ~detail ~stderr_tail ~last_activity
   | Client_closed -> "ACP client is closed"
 ;;
 
@@ -2376,6 +2466,11 @@ type usage_journal =
   | Muse_usage_journal of
       (Runtime_muse_session_log.root, Runtime_muse_session_log.error) result
 
+type activity_mark =
+  { seen : agent_activity
+  ; seen_at_ns : int64
+  }
+
 type t =
   { driver : driver
   ; admission_timeout_s : float
@@ -2402,7 +2497,7 @@ type t =
   ; mutable cached_available_modes : string list
   ; mutable cached_available_models : string list
   ; mutable cached_config_options : config_option list
-  ; last_activity_ns : int64 Atomic.t
+  ; activity : activity_mark Atomic.t
   ; in_flight_external_work : int Atomic.t
   ; alive : bool Atomic.t
   ; closed : bool Atomic.t
@@ -2423,22 +2518,35 @@ let with_state_lock t f =
 
 let monotonic_now_ns () = Mtime_clock.now_ns ()
 
-let note_activity t =
-  Atomic.set t.last_activity_ns (monotonic_now_ns ())
+let note_activity t seen =
+  Atomic.set t.activity { seen; seen_at_ns = monotonic_now_ns () }
+;;
+
+let last_activity_ns t = (Atomic.get t.activity).seen_at_ns
+
+let activity_trace t =
+  let { seen; seen_at_ns } = Atomic.get t.activity in
+  let age_ns = Int64.max 0L (Int64.sub (monotonic_now_ns ()) seen_at_ns) in
+  { last = seen
+  ; age_s = Int64.to_float age_ns /. 1e9
+  ; masc_tools_in_flight = Atomic.get t.in_flight_external_work
+  }
 ;;
 
 let with_external_activity t f =
-  note_activity t;
+  note_activity t Masc_tool_started;
   Atomic.incr t.in_flight_external_work;
   Fun.protect
     ~finally:(fun () ->
-      (* Stamp liveness BEFORE decrementing in-flight count so a waking
-         watchdog never observes [in_flight = 0] paired with a pre-tool timestamp. *)
-      note_activity t;
+      (* Stamp BEFORE decrementing the in-flight count so a waking
+         session/load watchdog never observes [in_flight = 0] paired with a
+         pre-tool timestamp. *)
+      note_activity t Masc_tool_finished;
       Atomic.decr t.in_flight_external_work)
     f
 ;;
 
+let last_activity = activity_trace
 let driver t = t.driver
 let mcp_server_isolation t = t.mcp_server_isolation
 let capabilities t = t.capabilities
@@ -2574,6 +2682,7 @@ let send_json t json =
           (Process_exited
              { detail = "stdin write failed: " ^ Printexc.to_string exn
              ; stderr_tail = stderr_tail t
+             ; last_activity = None
              })))
 ;;
 
@@ -2640,6 +2749,17 @@ let record_turn_tool_call_wire (turn : active_turn_hooks) (incoming : tool_call_
       incoming)
 ;;
 
+let agent_activity_of_update ~update_kind = function
+  | Some (Text_delta _) -> Agent_message
+  | Some (Thought_delta _) -> Agent_thought
+  | Some (Tool_call_started { title; status; _ }) -> Agent_tool_call_started { title; status }
+  | Some (Tool_call_updated { title; status; _ }) -> Agent_tool_call_updated { title; status }
+  | Some (Usage_updated _) -> Agent_usage
+  | Some (Mode_updated mode) -> Agent_mode mode
+  | Some (Config_options_updated _) -> Agent_config_options
+  | None -> Agent_session_update update_kind
+;;
+
 let handle_permission_request t ~id ~params =
   let req_session_id = json_string_opt "sessionId" params in
   let tool_call = Option.value (json_field "toolCall" params) ~default:(`Assoc []) in
@@ -2656,7 +2776,7 @@ let handle_permission_request t ~id ~params =
     match matched_turn with
     | None -> false, incoming_wire, false
     | Some (policy, mcp_server_name, effective_wire) ->
-      note_activity t;
+      note_activity t (Agent_permission_request effective_wire.title);
       let identity =
         classify_tool_call
           ~driver:t.driver
@@ -2774,10 +2894,6 @@ let dispatch_incoming_message t msg =
       | Some turn, Some sid -> String.equal sid turn.session_id
       | _ -> false
     in
-    (* Refresh idle liveness on ANY session-matched [session/update] frame,
-       including non-event replay frames such as [user_message_chunk], [plan],
-       and [available_commands_update]. *)
-    if matches_observer || matches_active then note_activity t;
     let event_opt =
       parse_session_update_with
         ~driver:t.driver
@@ -2786,6 +2902,12 @@ let dispatch_incoming_message t msg =
         ?merged_wire
         params
     in
+    (* Stamp ANY session-matched [session/update] frame, including non-event
+       replay frames such as [user_message_chunk], [plan], and
+       [available_commands_update]: session/load reads the stamp as liveness,
+       and a prompt that ends without an answer reports its kind. *)
+    if matches_observer || matches_active
+    then note_activity t (agent_activity_of_update ~update_kind event_opt);
     (match event_opt with
      | Some (Config_options_updated (_ :: _ as opts))
        when matches_observer || matches_active ->
@@ -2833,6 +2955,8 @@ let dispatch_incoming_message t msg =
   | _ -> ()
 ;;
 
+(* session/load replays a whole session, so its admission budget is a silence
+   window rather than a deadline: every replayed frame restarts it. *)
 let await_promise_with_idle_timeout
       ~clock
       ~stage
@@ -2842,7 +2966,7 @@ let await_promise_with_idle_timeout
       promise
   =
   let elapsed_since_last_activity_s () =
-    let last = Atomic.get last_activity_ns in
+    let last = last_activity_ns () in
     let now = monotonic_now_ns () in
     Int64.to_float (Int64.max 0L (Int64.sub now last)) /. 1e9
   in
@@ -2923,7 +3047,9 @@ let rpc_call_with_wait
        | Rpc_err (code, message, data) ->
          Error (rpc_error ~method_name ~code ~message ~data)
        | Rpc_closed reason ->
-         Error (Process_exited { detail = reason; stderr_tail = stderr_tail t })))
+         Error
+           (Process_exited
+              { detail = reason; stderr_tail = stderr_tail t; last_activity = None })))
 ;;
 
 let rpc_call_decoded
@@ -2971,6 +3097,7 @@ let send_json_bounded t ~timeout_s json =
                      (Process_exited
                         { detail = "stdin write failed: " ^ Printexc.to_string exn
                         ; stderr_tail = stderr_tail t
+                        ; last_activity = None
                         })))
           with
           | Ok res -> Ok res
@@ -3351,7 +3478,8 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   ; cached_available_modes = []
                   ; cached_available_models = []
                   ; cached_config_options = []
-                  ; last_activity_ns = Atomic.make (monotonic_now_ns ())
+                  ; activity = Atomic.make
+                      { seen = Request_sent "initialize"; seen_at_ns = monotonic_now_ns () }
                   ; in_flight_external_work = Atomic.make 0
                   ; alive = Atomic.make true
                   ; closed = Atomic.make false
@@ -4016,7 +4144,7 @@ let attach_existing_session
            | Error _ -> Ok (fallback_session_info ~session_id json))
     }
   in
-  note_activity t;
+  note_activity t (Request_sent method_name);
   let* raw_info =
     with_session_observer t ~session_id ~on_event:on_replay_event (fun () ->
       if use_idle_liveness
@@ -4026,7 +4154,7 @@ let attach_existing_session
             ~clock:t.clock
             ~stage:method_name
             ~idle_timeout_s:t.admission_timeout_s
-            ~last_activity_ns:t.last_activity_ns
+            ~last_activity_ns:(fun () -> last_activity_ns t)
             ~in_flight_work:t.in_flight_external_work
             promise)
       else
@@ -4146,7 +4274,6 @@ let prompt
       t
       ~session_id
       ~blocks
-      ?(timeout_s = Some default_timeout_s)
       ?(permission_policy = Allow_all)
       ?(on_event = ignore)
       ()
@@ -4214,7 +4341,7 @@ let prompt
     | Allow_read_and_masc_mcp { mcp_server_name; _ } -> Some mcp_server_name
     | Allow_all | Deny_all -> t.mcp_server_name
   in
-  note_activity t;
+  note_activity t (Request_sent "session/prompt");
   with_state_lock t (fun () ->
     t.active_turn <-
       Some
@@ -4260,19 +4387,11 @@ let prompt
            Ok (stop_reason, merged_usage))
     }
   in
-  let wait_prompt promise =
-    match timeout_s with
-    | None -> Ok (Eio.Promise.await promise)
-    | Some secs when (not (Float.is_finite secs)) || secs <= 0.0 -> Ok (Eio.Promise.await promise)
-    | Some secs ->
-      await_promise_with_idle_timeout
-        ~clock:t.clock
-        ~stage:"session/prompt"
-        ~idle_timeout_s:secs
-        ~last_activity_ns:t.last_activity_ns
-        ~in_flight_work:t.in_flight_external_work
-        promise
-  in
+  (* No silence deadline: an agent that is thinking, running its own tool, or
+     waiting on its provider sends nothing, and that is not a failure. The
+     prompt ends when the agent answers, when its stdout closes (the reader
+     fails every pending request), or when the caller cancels this fiber. *)
+  let wait_prompt promise = Ok (Eio.Promise.await promise) in
   (* The journal's length before the prompt is sent: what it gains after that
      is the prompt's. A journal that cannot be found never stops the prompt. *)
   let journal_mark =
@@ -4285,24 +4404,21 @@ let prompt
   in
   let result =
     Fun.protect ~finally:clear_active_turn (fun () ->
-      try
-        let res =
-          rpc_call_with_wait t ~method_name:"session/prompt" ~params ~decoder ~wait:wait_prompt
-        in
-        (match res with
-         | Error (Timeout _) -> cancel t ~session_id
-         | Ok _
-         | Error
-             ( Invalid_config _ | Spawn_refused _ | Protocol_error _
-             | Rpc_error _ | Process_exited _ | Client_closed ) -> ());
-        res
-      with
+      try rpc_call_with_wait t ~method_name:"session/prompt" ~params ~decoder ~wait:wait_prompt with
       | Eio.Cancel.Cancelled _ as exn ->
+        Log.Runtime_agent.info
+          "ACP session/prompt %s cancelled by its caller; %s"
+          session_id
+          (activity_trace_to_string (activity_trace t));
         Eio.Cancel.protect (fun () -> cancel t ~session_id);
         raise exn)
   in
   match result with
-  | Error _ as err -> err
+  | Error (Process_exited { detail; stderr_tail; last_activity = _ }) ->
+    Error (Process_exited { detail; stderr_tail; last_activity = Some (activity_trace t) })
+  | Error
+      (( Invalid_config _ | Spawn_refused _ | Protocol_error _ | Rpc_error _ | Timeout _
+       | Client_closed ) as err) -> Error err
   | Ok (stop_reason, acp_usage) ->
     (* Without its journal a Muse prompt has no count of the session: the
        [used] its frames carried is the host's estimate. *)

@@ -546,6 +546,42 @@ type prompt_result =
   ; wall_duration_s : float
   }
 
+(** What was last seen on an ACP client: the last frame the agent sent, the
+    last request MASC sent it, or the last MASC tool call it waited on. *)
+type agent_activity =
+  | Request_sent of string
+      (** MASC sent this request (method name) and has heard nothing since. *)
+  | Agent_message
+  | Agent_thought
+  | Agent_tool_call_started of
+      { title : string
+      ; status : tool_call_status
+      }
+      (** The agent reported a tool call of its own ([tool_call]). *)
+  | Agent_tool_call_updated of
+      { title : string option
+      ; status : tool_call_status option
+      }
+  | Agent_usage
+  | Agent_mode of string
+  | Agent_config_options
+  | Agent_session_update of string option
+      (** A [session/update] MASC turns into no event, by its [sessionUpdate]. *)
+  | Agent_permission_request of string option
+  | Masc_tool_started
+  | Masc_tool_finished
+
+type activity_trace =
+  { last : agent_activity
+  ; age_s : float  (** Seconds between [last] and the moment the trace was read. *)
+  ; masc_tools_in_flight : int
+      (** MASC tool calls bracketed by {!with_external_activity} still running. *)
+  }
+
+val tool_call_status_to_string : tool_call_status -> string
+val agent_activity_to_string : agent_activity -> string
+val activity_trace_to_string : activity_trace -> string
+
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -564,6 +600,9 @@ type error =
   | Process_exited of
       { detail : string
       ; stderr_tail : string
+      ; last_activity : activity_trace option
+          (** Set when a {!prompt} ended this way: what the agent last did and
+              how long before the end. [None] outside a prompt. *)
       }
   | Client_closed
 
@@ -733,19 +772,18 @@ val set_config_option
   -> value:string
   -> (config_option list, error) result
 
-val note_activity : t -> unit
-(** Refresh the client's monotonic activity timestamp for idle-liveness checks. *)
-
 val with_external_activity : t -> (unit -> 'a) -> 'a
 (** Bracket caller-owned work (such as executing a loopback MASC MCP tool call)
-    so an active {!prompt} suspends its idle-silence deadline while the ACP
-    child is waiting on MASC, and refreshes liveness upon completion. *)
+    so the client's activity trace records that the agent is waiting on MASC,
+    and so a [session/load] replay does not count that wait as silence. *)
+
+val last_activity : t -> activity_trace
+(** What was last seen on this client and how long ago. *)
 
 val prompt
   :  t
   -> session_id:string
   -> blocks:prompt_block list
-  -> ?timeout_s:float option
   -> ?permission_policy:permission_policy
   -> ?on_event:(stream_event -> unit)
   -> unit
@@ -753,10 +791,11 @@ val prompt
 (** Execute one [session/prompt] turn on an existing ACP session, streaming
     [session/update] notifications to [on_event] and answering server-initiated
     [session/request_permission] requests according to [permission_policy].
-    [timeout_s] bounds inactivity (time with no session-matched ACP frames and
-    no in-flight {!with_external_activity} work) rather than cutting off
-    actively progressing multi-tool turns. Cancelling the calling fiber or
-    hitting the idle deadline sends [session/cancel]. *)
+    The prompt has no silence deadline: an agent that is thinking, running its
+    own tool or waiting on its provider may send nothing for a long time. It
+    ends when the agent answers, when the agent's stdout closes
+    ([Process_exited] carrying the {!activity_trace} at that moment), or when
+    the calling fiber is cancelled, which sends [session/cancel]. *)
 
 val cancel : t -> session_id:string -> unit
 (** Send a best-effort [session/cancel] notification for [session_id]. *)

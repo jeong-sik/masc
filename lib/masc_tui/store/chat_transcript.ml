@@ -4,27 +4,6 @@ open Masc_tui_protocol
 open Masc_tui_term
 open Masc_tui_ui
 
-let secret_token_prefixes =
-  [
-    "github_pat_";
-    "sk_live_";
-    "sk_test_";
-    "rk_live_";
-    "sk-";
-    "ghp_";
-    "gho_";
-    "ghu_";
-    "ghs_";
-    "ghr_";
-    "xoxb-";
-    "xoxp-";
-    "xoxa-";
-    "xoxr-";
-    "xoxs-";
-    "AKIA";
-    "ASIA";
-  ]
-
 let is_secret_token_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' | '/' | '+' | '=' ->
       true
@@ -38,8 +17,81 @@ let is_horiz_ws = function ' ' | '\t' -> true | _ -> false
 let is_ascii_ws = function ' ' | '\t' | '\n' | '\r' -> true | _ -> false
 
 let is_unquoted_val_char = function
-  | ',' | '}' | ']' | '"' | '\'' | '\\' | ' ' | '\t' | '\n' | '\r' -> false
+  | ',' | ';' | '}' | ']' | '"' | '\'' | '\\' | ' ' | '\t' | '\n' | '\r' -> false
   | _ -> true
+
+let scan_cookie_header_value ~enclosed_in_double_quote ~enclosed_in_single_quote
+    raw start =
+  let len = String.length raw in
+  let rec skip_quoted q k =
+    if k >= len then len
+    else
+      match raw.[k] with
+      | '\n' | '\r' -> k
+      | '"' when enclosed_in_double_quote && not (Char.equal q '"') -> k
+      | '\\'
+        when k + 1 < len
+             && (not (Char.equal raw.[k + 1] '\n'))
+             && not (Char.equal raw.[k + 1] '\r') ->
+          skip_quoted q (k + 2)
+      | c when Char.equal c q -> k + 1
+      | _ -> skip_quoted q (k + 1)
+  in
+  let rec prev_non_horiz_ws p =
+    if p >= start && is_horiz_ws raw.[p] then prev_non_horiz_ws (p - 1) else p
+  in
+  let rec next_non_horiz_ws p =
+    if p < len && is_horiz_ws raw.[p] then next_non_horiz_ws (p + 1) else p
+  in
+  let opens_pair_value j =
+    let prev_pos = prev_non_horiz_ws (j - 1) in
+    prev_pos >= start
+    && Char.equal raw.[prev_pos] '='
+    &&
+    let next_pos = next_non_horiz_ws (j + 1) in
+    next_pos < len
+    &&
+    match raw.[next_pos] with
+    | ',' | '}' | ']' | '\n' | '\r' -> false
+    | _ -> true
+  in
+  let rec loop j =
+    if j >= len then len
+    else
+      match raw.[j] with
+      | '\n' | '\r' | '}' | ']' -> j
+      | '\\'
+        when j + 1 < len
+             && (Char.equal raw.[j + 1] '"'
+                 || Char.equal raw.[j + 1] '\''
+                 || Char.equal raw.[j + 1] '\\') ->
+          loop (j + 2)
+      | '"' ->
+          if opens_pair_value j then loop (skip_quoted '"' (j + 1)) else j
+      | '\'' ->
+          if opens_pair_value j then loop (skip_quoted '\'' (j + 1))
+          else if enclosed_in_single_quote then
+            let next_pos = next_non_horiz_ws (j + 1) in
+            if
+              next_pos >= len
+              ||
+              match raw.[next_pos] with
+              | ',' | '}' | ']' | '\n' | '\r' -> true
+              | _ -> false
+            then j
+            else loop (j + 1)
+          else
+            (* RFC 6265 §4.1.1: apostrophe (%x27) is a valid unquoted
+               cookie-octet; keep scanning the rest of the header value. *)
+            loop (j + 1)
+      | _ -> loop (j + 1)
+  in
+  loop start
+
+let is_cookie_header_key key =
+  match String.lowercase_ascii key with
+  | "cookie" | "set-cookie" -> true
+  | _ -> false
 
 let is_http_auth_scheme s =
   match String.lowercase_ascii s with
@@ -68,9 +120,6 @@ let starts_at_exact s idx prefix =
     k >= plen || (Char.equal s.[idx + k] prefix.[k] && loop (k + 1))
   in
   loop 0
-
-let match_secret_prefix s i =
-  List.find_opt (fun p -> starts_at_exact s i p) secret_token_prefixes
 
 let scan_while s pred from =
   let len = String.length s in
@@ -154,13 +203,13 @@ let find_url_cred_end s i =
     in
     scan (i + 3) false
 
-let scrub_secrets_in_text raw =
+let scrub_secrets_in_text_with ~replacement raw =
   let len = String.length raw in
   let buf = Buffer.create len in
   let scan_quoted start_pos =
     let qch = raw.[start_pos] in
     Buffer.add_char buf qch;
-    Buffer.add_string buf "[redacted]";
+    Buffer.add_string buf replacement;
     let rec scan_q j esc =
       if j >= len then len
       else if esc then scan_q (j + 1) false
@@ -177,138 +226,146 @@ let scrub_secrets_in_text raw =
     else
       match find_pem_private_key_end raw i with
       | Some pem_end ->
-          Buffer.add_string buf "[redacted]";
+          Buffer.add_string buf replacement;
           loop pem_end
       | None -> (
           match find_url_cred_end raw i with
           | Some at_pos ->
-              Buffer.add_string buf "://[redacted]@";
+              Buffer.add_string buf ("://" ^ replacement ^ "@");
               loop (at_pos + 1)
-          | None -> (
-              match match_secret_prefix raw i with
-              | Some p ->
-                  let tok_end =
-                    scan_while raw is_secret_token_char (i + String.length p)
+          | None ->
+              let prev_ok = i = 0 || not (is_ident_char raw.[i - 1]) in
+              if
+                prev_ok
+                && starts_at_ci raw i "bearer"
+                && i + 6 < len
+                && is_ascii_ws raw.[i + 6]
+              then begin
+                let val_start = scan_sep_ws raw (i + 6) in
+                let val_end =
+                  scan_while raw is_secret_token_char val_start
+                in
+                if val_end > val_start then begin
+                  Buffer.add_string buf ("Bearer " ^ replacement);
+                  loop val_end
+                end
+                else begin
+                  Buffer.add_char buf raw.[i];
+                  loop (i + 1)
+                end
+              end
+              else if is_ident_char raw.[i] then begin
+                let key_end = scan_while raw is_ident_char i in
+                let key = String.sub raw i (key_end - i) in
+                if prev_ok && Json_tree.is_secret_key key then begin
+                  let after_q =
+                    if
+                      key_end < len
+                      && (Char.equal raw.[key_end] '"'
+                          || Char.equal raw.[key_end] '\'')
+                    then key_end + 1
+                    else key_end
                   in
-                  if tok_end > i + String.length p then begin
-                    Buffer.add_string buf "[redacted]";
-                    loop tok_end
-                  end
-                  else begin
-                    Buffer.add_char buf raw.[i];
-                    loop (i + 1)
-                  end
-              | None ->
-                  let prev_ok = i = 0 || not (is_ident_char raw.[i - 1]) in
+                  let sep_pos =
+                    scan_while raw is_horiz_ws after_q
+                  in
                   if
-                    prev_ok
-                    && starts_at_ci raw i "bearer"
-                    && i + 6 < len
-                    && is_ascii_ws raw.[i + 6]
+                    sep_pos < len
+                    && (Char.equal raw.[sep_pos] ':'
+                        || Char.equal raw.[sep_pos] '=')
                   then begin
-                    let val_start = scan_sep_ws raw (i + 6) in
-                    let val_end =
-                      scan_while raw is_secret_token_char val_start
-                    in
-                    if val_end > val_start then begin
-                      Buffer.add_string buf "Bearer [redacted]";
-                      loop val_end
+                    let val_start = scan_sep_ws raw (sep_pos + 1) in
+                    Buffer.add_substring buf raw i (val_start - i);
+                    if val_start >= len then ()
+                    else if
+                      Char.equal raw.[val_start] '"'
+                      || Char.equal raw.[val_start] '\''
+                    then loop (scan_quoted val_start)
+                    else if
+                      Char.equal raw.[sep_pos] ':' && is_cookie_header_key key
+                    then begin
+                      let enclosed_in_double_quote =
+                        i > 0 && Char.equal raw.[i - 1] '"'
+                      in
+                      let enclosed_in_single_quote =
+                        i > 0 && Char.equal raw.[i - 1] '\''
+                      in
+                      let val_end =
+                        scan_cookie_header_value ~enclosed_in_double_quote
+                          ~enclosed_in_single_quote raw val_start
+                      in
+                      if val_end = val_start then loop val_start
+                      else begin
+                        Buffer.add_string buf replacement;
+                        loop val_end
+                      end
                     end
                     else begin
-                      Buffer.add_char buf raw.[i];
-                      loop (i + 1)
-                    end
-                  end
-                  else if is_ident_char raw.[i] then begin
-                    let key_end = scan_while raw is_ident_char i in
-                    let key = String.sub raw i (key_end - i) in
-                    if prev_ok && Json_tree.is_secret_key key then begin
-                      let after_q =
-                        if
-                          key_end < len
-                          && (Char.equal raw.[key_end] '"'
-                              || Char.equal raw.[key_end] '\'')
-                        then key_end + 1
-                        else key_end
+                      let val_end =
+                        scan_while raw is_unquoted_val_char val_start
                       in
-                      let sep_pos =
-                        scan_while raw is_horiz_ws after_q
-                      in
-                      if
-                        sep_pos < len
-                        && (Char.equal raw.[sep_pos] ':'
-                            || Char.equal raw.[sep_pos] '=')
-                      then begin
-                        let val_start = scan_sep_ws raw (sep_pos + 1) in
-                        Buffer.add_substring buf raw i (val_start - i);
-                        if val_start >= len then ()
-                        else if
-                          Char.equal raw.[val_start] '"'
-                          || Char.equal raw.[val_start] '\''
-                        then loop (scan_quoted val_start)
-                        else begin
-                          let val_end =
-                            scan_while raw is_unquoted_val_char val_start
-                          in
-                          if val_end = val_start then loop val_start
-                          else
-                            let first_tok =
-                              String.sub raw val_start (val_end - val_start)
-                            in
-                            if is_http_auth_scheme first_tok then begin
-                              let ws_end = scan_sep_ws raw val_end in
-                              if ws_end > val_end && ws_end < len then begin
-                                if
-                                  Char.equal raw.[ws_end] '"'
-                                  || Char.equal raw.[ws_end] '\''
-                                then begin
-                                  Buffer.add_string buf first_tok;
-                                  Buffer.add_char buf ' ';
-                                  loop (scan_quoted ws_end)
-                                end
-                                else
-                                  let cred_end =
-                                    scan_while raw is_unquoted_val_char ws_end
-                                  in
-                                  if cred_end > ws_end then begin
-                                    Buffer.add_string buf first_tok;
-                                    Buffer.add_char buf ' ';
-                                    Buffer.add_string buf "[redacted]";
-                                    loop cred_end
-                                  end
-                                  else begin
-                                    Buffer.add_string buf "[redacted]";
-                                    loop val_end
-                                  end
+                      if val_end = val_start then loop val_start
+                      else
+                        let first_tok =
+                          String.sub raw val_start (val_end - val_start)
+                        in
+                        if is_http_auth_scheme first_tok then begin
+                          let ws_end = scan_sep_ws raw val_end in
+                          if ws_end > val_end && ws_end < len then begin
+                            if
+                              Char.equal raw.[ws_end] '"'
+                              || Char.equal raw.[ws_end] '\''
+                            then begin
+                              Buffer.add_string buf first_tok;
+                              Buffer.add_char buf ' ';
+                              loop (scan_quoted ws_end)
+                            end
+                            else
+                              let cred_end =
+                                scan_while raw is_unquoted_val_char ws_end
+                              in
+                              if cred_end > ws_end then begin
+                                Buffer.add_string buf first_tok;
+                                Buffer.add_char buf ' ';
+                                Buffer.add_string buf replacement;
+                                loop cred_end
                               end
                               else begin
-                                Buffer.add_string buf "[redacted]";
+                                Buffer.add_string buf replacement;
                                 loop val_end
                               end
-                            end
-                            else begin
-                              Buffer.add_string buf "[redacted]";
-                              loop val_end
-                            end
+                          end
+                          else begin
+                            Buffer.add_string buf replacement;
+                            loop val_end
+                          end
                         end
-                      end
-                      else begin
-                        Buffer.add_substring buf raw i (key_end - i);
-                        loop key_end
-                      end
-                    end
-                    else begin
-                      Buffer.add_substring buf raw i (key_end - i);
-                      loop key_end
+                        else begin
+                          Buffer.add_string buf replacement;
+                          loop val_end
+                        end
                     end
                   end
                   else begin
-                    Buffer.add_char buf raw.[i];
-                    loop (i + 1)
-                  end))
+                    Buffer.add_substring buf raw i (key_end - i);
+                    loop key_end
+                  end
+                end
+                else begin
+                  Buffer.add_substring buf raw i (key_end - i);
+                  loop key_end
+                end
+              end
+              else begin
+                Buffer.add_char buf raw.[i];
+                loop (i + 1)
+              end)
   in
   loop 0;
-  Buffer.contents buf
+  Secret_patterns.redact_structural_values ~replacement (Buffer.contents buf)
+
+let scrub_secrets_in_text raw =
+  scrub_secrets_in_text_with ~replacement:"[redacted]" raw
 
 let rec scrub_json_secrets (j : Yojson.Safe.t) : Yojson.Safe.t =
   match j with

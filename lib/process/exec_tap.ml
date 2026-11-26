@@ -94,11 +94,15 @@ let add_json_bool buf value =
 
 (* ── argv secret redaction ─────────────────────────────────────── *)
 
-let token_prefixes = [ "sk-" ]
-
 let is_token_char c =
   match c with
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '/' | '+' | '=' -> true
+  | _ -> false
+;;
+
+let is_word_char c =
+  match c with
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
   | _ -> false
 ;;
 
@@ -106,37 +110,50 @@ let rec skip_token s i =
   if i < String.length s && is_token_char s.[i] then skip_token s (i + 1) else i
 ;;
 
-let redact_arg s =
-  let s = Url_userinfo.redact_text s in
+let is_hspace = function
+  | ' ' | '\t' -> true
+  | _ -> false
+;;
+
+let rec skip_hspace s i =
+  if i < String.length s && is_hspace s.[i] then skip_hspace s (i + 1) else i
+;;
+
+let starts_with_ci_at s pos prefix =
+  let plen = String.length prefix in
+  pos + plen <= String.length s
+  &&
+  let rec loop k =
+    k >= plen
+    || (Char.equal (Char.lowercase_ascii s.[pos + k]) (Char.lowercase_ascii prefix.[k])
+        && loop (k + 1))
+  in
+  loop 0
+;;
+
+(* Case-insensitive word-bounded Bearer token redaction that preserves the
+   [Bearer [REDACTED]] shape in the exec corpus. *)
+let redact_bearer_tokens s =
   let len = String.length s in
   let buf = Buffer.create len in
   let rec loop i =
     if i >= len
     then Buffer.contents buf
-    else if i + 7 <= len && String.sub s i 7 = "Bearer "
+    else if
+      (i = 0 || not (is_word_char s.[i - 1]))
+      && starts_with_ci_at s i "bearer"
+      && i + 6 < len
+      && is_hspace s.[i + 6]
     then (
-      Buffer.add_string buf "Bearer ";
-      let j = skip_token s (i + 7) in
-      if j > i + 7
+      let tok_start = skip_hspace s (i + 6) in
+      let tok_end = skip_token s tok_start in
+      if tok_end > tok_start
       then (
-        Buffer.add_string buf "[REDACTED]";
-        loop j)
-      else loop (i + 1))
-    else if List.exists
-              (fun prefix ->
-                 let plen = String.length prefix in
-                 i + plen <= len && String.sub s i plen = prefix)
-              token_prefixes
-    then (
-      let prefix =
-        List.find
-          (fun prefix ->
-             let plen = String.length prefix in
-             i + plen <= len && String.sub s i plen = prefix)
-          token_prefixes
-      in
-      Buffer.add_string buf "[REDACTED]";
-      loop (skip_token s (i + String.length prefix)))
+        Buffer.add_string buf "Bearer [REDACTED]";
+        loop tok_end)
+      else (
+        Buffer.add_char buf s.[i];
+        loop (i + 1)))
     else (
       Buffer.add_char buf s.[i];
       loop (i + 1))
@@ -144,12 +161,38 @@ let redact_arg s =
   loop 0
 ;;
 
+let is_auth_bearer_header s =
+  let lower = String.lowercase_ascii (String.trim s) in
+  let after_name =
+    if String.starts_with ~prefix:"authorization:" lower
+    then Some (String.sub lower 14 (String.length lower - 14))
+    else if String.starts_with ~prefix:"proxy-authorization:" lower
+    then Some (String.sub lower 20 (String.length lower - 20))
+    else None
+  in
+  match after_name with
+  | Some rest ->
+    let trimmed = String.trim rest in
+    String.starts_with ~prefix:"bearer " trimmed
+    || String.starts_with ~prefix:"bearer\t" trimmed
+  | None -> false
+;;
+
+let redact_arg s =
+  let s = Url_userinfo.redact_text s in
+  if is_auth_bearer_header s
+  then s |> redact_bearer_tokens |> Secret_patterns.redact_structural_values
+  else s |> redact_bearer_tokens |> Secret_patterns.redact_text
+;;
+
 (* Header values are redacted by where they sit, not by what they look like.
-   [redact_arg] knows three shapes -- Bearer, sk-, credentials in a URL -- and
-   a key shaped like none of them travelled to the corpus as written:
-   [-H "xi-api-key: <key>"] was recorded in full. A redactor built on value
-   shapes lags every provider that spells its key differently, and the shape
-   list only grows after someone finds the next one in an audit file.
+   [redact_arg] delegates to [Secret_patterns] for known credential shapes
+   (Bearer, URL userinfo, sk-, Stripe, GitHub, Slack, AWS, PEM, and known
+   sensitive HTTP headers), yet a custom provider key shaped like none of them
+   travelled to the corpus as written: [-H "xi-api-key: <key>"] was recorded
+   in full. A redactor built on value shapes lags every provider that spells
+   its key differently, and the shape list only grows after someone finds the
+   next one in an audit file.
 
    So the rule is positional. The argument after -H or --header is a header,
    and a header not named below is treated as carrying a credential. Being

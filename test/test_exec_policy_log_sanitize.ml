@@ -113,6 +113,27 @@ let at_sign_outside_the_authority_is_not_userinfo () =
        [ "curl"; "https://host.example?next=a@b" ])
 ;;
 
+let structural_secret_tokens_redact_without_flag_markers () =
+  let ghp = "ghp_" ^ "16C7e42F292c6912E7710c838347Ae178B4a" in
+  let akia = "AKIA" ^ "IOSFODNN7EXAMPLE" in
+  let sk = "sk-" ^ "proj-secretvalue12345" in
+  check_hidden "bare sk- in parts" [ "curl"; "-d"; sk ] "secretvalue12345";
+  check_hidden "bare ghp_ in parts" [ "curl"; "-d"; ghp ] "16C7e42F292c6912";
+  check_hidden "bare AKIA in parts" [ "aws"; akia ] "IOSFODNN7EXAMPLE";
+  let logged_cmd =
+    Exec_policy_log_sanitize.sanitize_command_for_log_of_ir
+      ~fallback_cmd:("curl -H 'Authorization: Basic dXNlcjpwYXNz' " ^ sk)
+      (Masc_exec.Shell_ir.Pipeline [])
+  in
+  Alcotest.(check bool) "basic auth hidden in fallback cmd" false
+    (String_util.contains_substring logged_cmd "dXNlcjpwYXNz");
+  Alcotest.(check bool) "sk hidden in fallback cmd" false
+    (String_util.contains_substring logged_cmd "secretvalue12345");
+  Alcotest.(check string) "task-1234 and ASIA/SEOUL preserved"
+    "echo task-1234 ASIA/SEOUL"
+    (Exec_policy_log_sanitize.sanitize_parts [ "echo"; "task-1234"; "ASIA/SEOUL" ])
+;;
+
 let () =
   Alcotest.run
     "exec_policy_log_sanitize"
@@ -133,6 +154,8 @@ let () =
             url_userinfo_is_redacted_whole
         ; Alcotest.test_case "@ outside the authority is not userinfo" `Quick
             at_sign_outside_the_authority_is_not_userinfo
+        ; Alcotest.test_case "structural secret tokens redact without flag markers" `Quick
+            structural_secret_tokens_redact_without_flag_markers
         ] )
     ]
 ;;

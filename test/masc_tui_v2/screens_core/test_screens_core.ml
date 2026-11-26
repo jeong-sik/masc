@@ -4165,6 +4165,41 @@ let test_render_util_redaction_linear_and_embedded_cap () =
     ~needle:"ghp_UNTERMINATED666" redacted_unterm;
   assert_contains ~label:"unterminated_secret_redacted" ~needle:"[redacted]"
     redacted_unterm;
+  (* Cookie / Set-Cookie headers scrub unquoted, apostrophe, RFC-quoted, and spaced-quoted session values across Render_util too. *)
+  let redacted_cookie =
+    Render_util.redact_plain_text_secrets
+      "Cookie: session=sess_abc123; csrf=tok_xyz\nSet-Cookie: sid=secret999; HttpOnly\nCookie: session=\"q_abc123\"; csrf = 'q_xyz987'\nSet-Cookie: sid= \"q_secret999\"; HttpOnly\nCookie: session=abc'def456; csrf=apos_xyz987\nSet-Cookie: sid=it's_secret; HttpOnly"
+  in
+  assert_not_contains ~label:"cookie_session_hidden" ~needle:"sess_abc123"
+    redacted_cookie;
+  assert_not_contains ~label:"cookie_csrf_hidden" ~needle:"tok_xyz"
+    redacted_cookie;
+  assert_not_contains ~label:"set_cookie_sid_hidden" ~needle:"secret999"
+    redacted_cookie;
+  assert_not_contains ~label:"quoted_cookie_session_hidden" ~needle:"q_abc123"
+    redacted_cookie;
+  assert_not_contains ~label:"quoted_cookie_csrf_hidden" ~needle:"q_xyz987"
+    redacted_cookie;
+  assert_not_contains ~label:"quoted_set_cookie_sid_hidden" ~needle:"q_secret999"
+    redacted_cookie;
+  assert_not_contains ~label:"apostrophe_cookie_suffix_hidden" ~needle:"def456"
+    redacted_cookie;
+  assert_not_contains ~label:"apostrophe_cookie_csrf_hidden" ~needle:"apos_xyz987"
+    redacted_cookie;
+  assert_not_contains ~label:"apostrophe_set_cookie_hidden" ~needle:"s_secret"
+    redacted_cookie;
+  assert_contains ~label:"cookie_redacted_marker" ~needle:"[redacted]"
+    redacted_cookie;
+  (* 3b. Non-secret key prefixes (arg=sk-..., header:ghp_...), single-quoted
+     values, and lowercase PEM blocks must all redact cleanly. *)
+  let non_secret_prefix =
+    Render_util.redact_plain_text_secrets
+      "arg=sk-proj-LEAK111 header:ghp_LEAK222 api_key='LEAK333' -----begin private key-----\nLEAK444\n-----end private key-----"
+  in
+  List.iter
+    (fun needle ->
+      assert_not_contains ~label:("hidden_" ^ needle) ~needle non_secret_prefix)
+    [ "LEAK111"; "LEAK222"; "LEAK333"; "LEAK444" ];
   (* 4. extract_embedded_json caps oversized strings and repeated invalid openings. *)
   let oversized = "{" ^ String.make 300_000 ' ' ^ "}" in
   Alcotest.(check bool) "oversized embedded json rejected" true

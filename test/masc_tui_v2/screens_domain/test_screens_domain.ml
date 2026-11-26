@@ -2206,7 +2206,29 @@ let test_p1_p2_verifier_regressions () =
   Alcotest.(check string) "format_countdown guards now_unix=0.0" missing_glyph
     (Domain_helpers.format_countdown ~now_unix:0.0 1_795_252_092.0);
   Alcotest.(check string) "format_age guards now_unix=0.0" missing_glyph
-    (Domain_helpers.format_age ~now_unix:0.0 1_795_252_092.0)
+    (Domain_helpers.format_age ~now_unix:0.0 1_795_252_092.0);
+  let redacted_dom_cookie =
+    Domain_helpers.redact_secrets_in_text
+      "Cookie: session=dom_sess_42; csrf=dom_csrf_99\nSet-Cookie: sid=dom_sid_7; HttpOnly\nCookie: session= \"dom_q_abc\"; csrf = 'dom_q_xyz'\nSet-Cookie: sid = \"dom_q_sid\"; HttpOnly\nCookie: session=abc'dom_def456; csrf=dom_apos_987\nSet-Cookie: sid=it's_dom; HttpOnly"
+  in
+  Alcotest.(check bool) "domain_helpers hides Cookie session" false
+    (contains_sub ~needle:"dom_sess_42" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides Set-Cookie sid" false
+    (contains_sub ~needle:"dom_sid_7" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides quoted Cookie session" false
+    (contains_sub ~needle:"dom_q_abc" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides quoted Cookie csrf" false
+    (contains_sub ~needle:"dom_q_xyz" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides quoted Set-Cookie sid" false
+    (contains_sub ~needle:"dom_q_sid" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides apostrophe Cookie suffix" false
+    (contains_sub ~needle:"dom_def456" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides apostrophe Cookie csrf" false
+    (contains_sub ~needle:"dom_apos_987" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers hides apostrophe Set-Cookie" false
+    (contains_sub ~needle:"s_dom" ~haystack:redacted_dom_cookie);
+  Alcotest.(check bool) "domain_helpers uses uppercase REDACTED" true
+    (contains_sub ~needle:"[REDACTED]" ~haystack:redacted_dom_cookie)
 
 let grid_row_text (grid : Cell_grid.t) ~y ~x0 ~x1 =
   let cols = Cell_grid.cols grid in

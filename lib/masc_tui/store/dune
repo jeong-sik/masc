@@ -14,6 +14,7 @@
   masc_tui_ui
   masc.masc_types
   masc.masc_random_id
+  masc.secret_patterns
   masc.sse_event
   masc.sse_wire
   unix

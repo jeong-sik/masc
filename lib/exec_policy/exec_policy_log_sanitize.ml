@@ -47,7 +47,11 @@ let sanitize_parts parts =
       let part =
         if prev_sensitive && part <> ""
         then "[REDACTED]"
-        else part |> Url_userinfo.redact_text |> redact_inline_secret_assignment
+        else
+          part
+          |> Url_userinfo.redact_text
+          |> redact_inline_secret_assignment
+          |> Secret_patterns.redact_text
       in
       let next_sensitive = List.mem (String.lowercase_ascii part) sensitive_flags in
       redact next_sensitive (part :: acc) rest
@@ -61,7 +65,11 @@ let sanitize_command_for_log cmd =
   then "[EMPTY]"
   else if command_has_sensitive_marker cmd
   then "[REDACTED]"
-  else cmd |> Url_userinfo.redact_text |> redact_inline_secret_assignment
+  else
+    cmd
+    |> Url_userinfo.redact_text
+    |> redact_inline_secret_assignment
+    |> Secret_patterns.redact_text
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =

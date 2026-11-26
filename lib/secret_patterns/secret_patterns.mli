@@ -9,10 +9,21 @@
 
 val redact_text : string -> string
 (** Replace known secret-shaped substrings (a URL's [user:password@], the
-    value of an HTTP Authorization field, [sk-]/[AKIA] keys, GitHub tokens,
-    PEM private-key blocks) with [\[REDACTED\]]. Never truncates or trims.
+    value of sensitive HTTP headers such as Authorization / X-Api-Key / Cookie,
+    [sk-]/[sk_live_]/[AKIA]/[ASIA] keys, GitHub/Slack tokens, PEM private-key
+    blocks) with [\[REDACTED\]]. Never truncates or trims.
     A value of no known shape is not found here: an exact value is masked
     where it is registered ([Keeper_secret_redaction]). *)
+
+val redact_structural_values : ?replacement:string -> string -> string
+(** Replace structural secret values only (PEM private-key blocks, URL
+    userinfo, and word-bounded API/token prefixes) using [replacement]
+    (default ["[REDACTED]"]), without rewriting HTTP header lines. Useful for
+    callers that format header/Bearer contexts themselves. *)
+
+val has_secret_token_shape : string -> bool
+(** [true] when the string contains a PEM private-key block, URL userinfo
+    credential, or a word-bounded structural secret token prefix. *)
 
 type source_span = { first_byte : int; past_byte : int }
 (** Half-open byte coordinates in the original input, before any replacement. *)

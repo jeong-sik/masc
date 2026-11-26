@@ -124,6 +124,7 @@ let is_secret_key key =
   else if
     List.exists (fun suffix -> String.ends_with ~suffix lower) safe_metadata_suffixes
   then false
+  else if Secret_patterns.is_sensitive_key lower then true
   else if
     List.exists
       (fun needle -> contains_substring ~needle ~haystack:lower)
@@ -142,84 +143,17 @@ let is_secret_key key =
 let is_alnum_ascii c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 
-let is_upper_alnum_ascii c = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-
-let has_url_credentials s =
-  let len = String.length s in
-  let rec find_scheme i =
-    if i + 3 > len then None
-    else if
-      Char.equal s.[i] ':' && Char.equal s.[i + 1] '/' && Char.equal s.[i + 2] '/'
-    then Some (i + 3)
-    else find_scheme (i + 1)
-  in
-  match find_scheme 0 with
-  | None -> false
-  | Some after_scheme ->
-      (* Find '@' before authority ends ('/', '?', '#', whitespace). *)
-      let rec scan i colon_idx =
-        if i >= len then false
-        else
-          match s.[i] with
-          | '/' | '?' | '#' | ' ' | '\t' | '\n' | '\r' -> false
-          | ':' ->
-              let next_colon =
-                match colon_idx with None -> Some i | Some _ as c -> c
-              in
-              scan (i + 1) next_colon
-          | '@' -> (
-              match colon_idx with
-              | Some c -> c > after_scheme && i > c + 1
-              | None -> false)
-          | _ -> scan (i + 1) colon_idx
-      in
-      scan after_scheme None
-
 let is_secret_value raw =
   let s = String.trim raw in
   let len = String.length s in
   if len < 8 then false
+  else if Secret_patterns.has_secret_token_shape s then true
   else
     let lower = String.lowercase_ascii s in
-    let has_prefix p = String.starts_with ~prefix:p s in
-    if
-      has_prefix "sk-"
-      || has_prefix "sk_live_"
-      || has_prefix "sk_test_"
-      || has_prefix "rk_live_"
-      || has_prefix "ghp_"
-      || has_prefix "gho_"
-      || has_prefix "ghu_"
-      || has_prefix "ghs_"
-      || has_prefix "ghr_"
-      || has_prefix "github_pat_"
-      || has_prefix "xoxb-"
-      || has_prefix "xoxp-"
-      || has_prefix "xoxa-"
-      || has_prefix "xoxr-"
-      || has_prefix "xoxs-"
-    then true
-    else if
-      (has_prefix "AKIA" || has_prefix "ASIA")
-      && len >= 16
-      &&
-      let ok = ref true in
-      for i = 4 to 15 do
-        if not (is_upper_alnum_ascii s.[i]) then ok := false
-      done;
-      !ok
-    then true
-    else if
-      String.starts_with ~prefix:"bearer " lower
-      &&
-      let rest = String.trim (String.sub s 7 (len - 7)) in
-      String.length rest >= 6 && is_alnum_ascii rest.[0]
-    then true
-    else if
-      contains_substring ~needle:"-----BEGIN " ~haystack:s
-      && contains_substring ~needle:"PRIVATE KEY-----" ~haystack:s
-    then true
-    else has_url_credentials s
+    String.starts_with ~prefix:"bearer " lower
+    &&
+    let rest = String.trim (String.sub s 7 (len - 7)) in
+    String.length rest >= 6 && is_alnum_ascii rest.[0]
 
 let toggle_path path ~collapsed =
   if List.exists (String.equal path) collapsed then

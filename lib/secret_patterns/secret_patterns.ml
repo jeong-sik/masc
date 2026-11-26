@@ -16,6 +16,7 @@ let sensitive_keys =
   ; "authorization"
   ; "bearer_token"
   ; "client_secret"
+  ; "cookie"
   ; "credential"
   ; "credentials"
   ; "id_token"
@@ -23,14 +24,18 @@ let sensitive_keys =
   ; "password"
   ; "passwd"
   ; "private_key"
+  ; "proxy-authorization"
   ; "refresh_token"
   ; "secret"
   ; "secret_access_key"
   ; "secret_key"
   ; "secretaccesskey"
   ; "session_token"
+  ; "set-cookie"
   ; "token"
   ; "x-api-key"
+  ; "x-auth-token"
+  ; "x-goog-api-key"
   ]
 
 let is_sensitive_key key =
@@ -78,8 +83,38 @@ let url_credential_re = Re.compile url_credential
 let sk = Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])]
 let sk_re = Re.compile sk
 
+let stripe_key =
+  Re.seq
+    [ Re.bow
+    ; Re.alt [ Re.str "sk_live_"; Re.str "sk_test_"; Re.str "rk_live_" ]
+    ; Re.rep1 (Re.alt [ Re.alnum; Re.char '_' ])
+    ]
+let stripe_key_re = Re.compile stripe_key
+
 let awsakia = Re.seq [Re.bow; Re.str "AKIA"; Re.repn Re.alnum 16 (Some 16); Re.eow]
 let awsakia_re = Re.compile awsakia
+
+(* AWS STS temporary access keys start with ASIA followed by 16 uppercase
+   alphanumeric characters. Requiring uppercase + exact length + word boundary
+   prevents false positives on ordinary words/timezones like "ASIAN" or
+   "ASIA/SEOUL". *)
+let awsasia =
+  Re.seq
+    [ Re.bow
+    ; Re.str "ASIA"
+    ; Re.repn (Re.alt [ Re.rg 'A' 'Z'; Re.rg '0' '9' ]) 16 (Some 16)
+    ; Re.eow
+    ]
+let awsasia_re = Re.compile awsasia
+
+let slack_token =
+  Re.seq
+    [ Re.bow
+    ; Re.alt
+        [ Re.str "xoxb-"; Re.str "xoxp-"; Re.str "xoxa-"; Re.str "xoxr-"; Re.str "xoxs-" ]
+    ; Re.rep1 (Re.alt [ Re.alnum; Re.char '-' ])
+    ]
+let slack_token_re = Re.compile slack_token
 
 (* GitHub token prefixes, per the official token-format table
    (docs.github.com "About authentication to GitHub", checked 2026-08-17):
@@ -131,8 +166,11 @@ let github_token_re = Re.compile github_token
 let pem_private_key_re =
   let header_or_footer word =
     Re.seq
-      [ Re.str "-----"; Re.str word; Re.rep (Re.set "ABCDEFGHIJKLMNOPQRSTUVWXYZ ")
-      ; Re.str "PRIVATE KEY-----"
+      [ Re.str "-----"
+      ; Re.no_case (Re.str word)
+      ; Re.rep (Re.no_case (Re.set "ABCDEFGHIJKLMNOPQRSTUVWXYZ "))
+      ; Re.no_case (Re.str "PRIVATE KEY")
+      ; Re.str "-----"
       ]
   in
   Re.compile
@@ -209,7 +247,7 @@ let normalize_pieces pieces =
     [] pieces
   |> List.rev
 
-let replace_matches ?prefix_group pattern pieces =
+let replace_matches ?(replacement = "[REDACTED]") ?prefix_group pattern pieces =
   let text = render_pieces pieces in
   let matches = Re.all pattern text in
   match matches with
@@ -234,7 +272,7 @@ let replace_matches ?prefix_group pattern pieces =
                  { first_byte = min source.first_byte next.first_byte;
                    past_byte = max source.past_byte next.past_byte })
                    (source_of_piece first_piece) rest in
-               let masked = Masked { source; replacement = "[REDACTED]" } in
+               let masked = Masked { source; replacement } in
                masked :: List.rev_append copied reversed, remaining, past)
       ([], pieces, 0) matches
   in
@@ -255,45 +293,85 @@ let mask_matches pattern pieces = replace_matches pattern pieces
     by the identifier char 'a'. [Re.bow]/[eow] are zero-width assertions, so
     [Re.replace_string] preserves the boundary character (=, space, quote)
     automatically. The [sk-] body allows [-] so modern [sk-proj-...] keys are
-    matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
-    at both ends so a 17-char run is not truncated to its first 16 chars. *)
+    matched in one shot instead of leaving a [-abc...] tail. [AKIA]/[ASIA] are
+    anchored at both ends so a 17-char run is not truncated to its first 16 chars. *)
 let secret_res =
   [ url_credential_re
   ; sk_re
+  ; stripe_key_re
   ; awsakia_re
+  ; awsasia_re
   ; github_token_re
+  ; slack_token_re
   ]
 
 (* A text matches [Re.alt] of the patterns exactly when it matches one of them,
    and a replacement pass that finds no match returns its input. So when this
    scan finds nothing, every pass in [secret_res] would leave the text as it
-   is, and [redact_text] skips them: one scan instead of four for the text
+   is, and [redact_text] skips them: one scan instead of seven for the text
    that carries no secret. When the scan finds a match the passes run in
    their order. *)
-let any_secret_re = Re.compile (Re.alt [ url_credential; sk; awsakia; github_token ])
+let any_secret_re =
+  Re.compile
+    (Re.alt
+       [ url_credential; sk; stripe_key; awsakia; awsasia; github_token; slack_token ])
 
-(* An HTTP Authorization header: the field name, a colon, and the rest of the
-   line. The name and the colon stay; the value is replaced. *)
+(* Sensitive HTTP headers: field name, colon, and the rest of the line.
+   Longer hyphenated names precede their suffixes so [proxy-authorization],
+   [set-cookie], and [x-goog-api-key] match whole. The name and colon stay;
+   the value is replaced. *)
 let horizontal_space = Re.rep (Re.set " \t")
 
-let authorization_header_re =
+let sensitive_header_re =
   Re.compile
     (Re.seq
        [ Re.group
-           (Re.seq [ Re.bow; Re.no_case (Re.str "authorization")
-                   ; horizontal_space; Re.char ':'; horizontal_space ])
-       ; Re.rep1 (Re.compl [ Re.set "\r\n" ]) ])
+           (Re.seq
+              [ Re.bow
+              ; Re.no_case
+                  (Re.alt
+                     [ Re.str "proxy-authorization"
+                     ; Re.str "authorization"
+                     ; Re.str "x-goog-api-key"
+                     ; Re.str "x-api-key"
+                     ; Re.str "x-auth-token"
+                     ; Re.str "set-cookie"
+                     ; Re.str "cookie"
+                     ])
+              ; horizontal_space
+              ; Re.char ':'
+              ; horizontal_space
+              ])
+       ; Re.rep1 (Re.compl [ Re.set "\r\n" ])
+       ])
 ;;
 
 let redact_pieces pieces =
   let pieces = mask_matches pem_private_key_re pieces in
-  let pieces = replace_matches ~prefix_group:1 authorization_header_re pieces in
+  let pieces = replace_matches ~prefix_group:1 sensitive_header_re pieces in
   if Re.execp any_secret_re (render_pieces pieces)
   then List.fold_left (fun pieces pattern -> mask_matches pattern pieces) pieces secret_res
   else pieces
 
 let redact_text_mapped text = redact_pieces (copied_text text)
 let redact_text text = render_pieces (redact_text_mapped text)
+
+let redact_structural_values ?(replacement = "[REDACTED]") text =
+  let pieces = copied_text text in
+  let pieces = replace_matches ~replacement pem_private_key_re pieces in
+  if Re.execp any_secret_re (render_pieces pieces)
+  then
+    List.fold_left
+      (fun pieces pattern -> replace_matches ~replacement pattern pieces)
+      pieces
+      secret_res
+    |> render_pieces
+  else render_pieces pieces
+;;
+
+let has_secret_token_shape text =
+  Re.execp pem_private_key_re text || Re.execp any_secret_re text
+;;
 
 (* A key is text too: a map keyed by URL (registry [auths], remote lists)
    carries credentials in its keys, so the key's text is redacted like any

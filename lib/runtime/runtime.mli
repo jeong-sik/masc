@@ -849,6 +849,11 @@ val context_rollover_threshold_of_runtime_id : string -> float option
 val tail_window_atoms_of_runtime_id : string -> int option
 val compaction_keep_ratio_of_runtime_id : string -> float option
 
+val agent_compaction_threshold_of_runtime_id : string -> float option
+(** Per-model [agent-compaction-threshold] from runtime.toml, or [None] when
+    unset or the runtime id is unknown. The ACP Keeper passes it, times the
+    lane's limit, to the host it starts. *)
+
 val turn_timeout_s_of_runtime_id : string -> float option
 (** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
     runtime id is unknown. Official-client adapters interpret it as the maximum

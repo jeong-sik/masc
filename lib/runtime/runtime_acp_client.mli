@@ -182,6 +182,21 @@ type bridge_naming =
           or a [.mcp.json] it loads, and the operator can write any fixed
           name. *)
 
+(** How a driver's host takes the point at which it compacts its own session
+    during a turn (checked 2026-11-26). *)
+type compaction_point_channel =
+  | Muse_compaction_settings
+      (** [-c context_compaction.*] settings (Muse Code 1.4.25): the limit as
+          [provider_context_limit_tokens], the point as [soft_threshold], and
+          [hard_threshold] at the whole limit, since the soft fraction must
+          stay below the hard one (0.9 unless set). *)
+  | No_compaction_point
+      (** The host takes none per process for every model: Kimi Code 2.7.2;
+          Mistral Vibe 3.1.0, whose [VIBE_AUTO_COMPACT_THRESHOLD] fills only a
+          model without a threshold of its own; Antigravity 1.5.18, whose
+          [AGY_CLI_AUTO_COMPACT_OVERRIDE] reaches its interactive client but
+          not [agy acp]. *)
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -203,6 +218,7 @@ type driver_profile =
   ; effort_config_id : string option
       (** ACP config option id that carries reasoning effort. [None] when the
           client takes effort only as a process setting ([muse acp]). *)
+  ; compaction_point : compaction_point_channel
   }
 
 val profile_of_driver : driver -> driver_profile
@@ -263,6 +279,17 @@ val mcp_http_server_of_bridge : Runtime_official_client_mcp_http.t -> mcp_http_s
     tool names are all read from the bridge, so they cannot disagree with what
     the bridge serves. *)
 
+(** Where the operator wants the host to compact its session during a turn:
+    [threshold] of [limit_tokens], from the model's [agent-compaction-threshold]
+    and the lane's limit. *)
+type agent_compaction =
+  { limit_tokens : int
+  ; threshold : float
+  }
+
+val takes_compaction_point : driver -> bool
+(** The driver's host takes a compaction point when it starts. *)
+
 type config =
   { driver : driver
   ; cli_path : string
@@ -285,6 +312,10 @@ type config =
           [session/set_config_option], and the default wait of [session/close].
           Provider TOML key [admission-timeout-s]; [default_admission_timeout_s]
           when the key is absent. *)
+  ; agent_compaction : agent_compaction option
+      (** Passed to the host through its {!compaction_point_channel} when it
+          starts. [None] leaves the host's own default. {!start} refuses
+          [Some _] for a driver whose host takes no compaction point. *)
   }
 
 val default_config : driver:driver -> cwd:string -> config

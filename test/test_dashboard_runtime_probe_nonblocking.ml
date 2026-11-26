@@ -277,6 +277,7 @@ let fanout_model =
   ; context_rollover_threshold = None
   ; tail_window_atoms = None
   ; compaction_keep_ratio = None
+  ; agent_compaction_threshold = None
   }
 
 let fanout_binding ~provider_id ~is_default =

@@ -623,6 +623,11 @@ max-context = 1048576
 # context-rollover-threshold = 0.80
 # tail-window-atoms = 60
 # compaction-keep-ratio = 0.25
+# ACP lanes: the fraction of max-context at which the host compacts its own
+# session during a turn. Absent keeps the host's default. Only a Muse Code
+# lane takes it; an Antigravity, Kimi Code or Mistral Vibe lane refuses it,
+# since those hosts take no such point from MASC.
+# agent-compaction-threshold = 0.95
 tools-support = true
 streaming = true
 

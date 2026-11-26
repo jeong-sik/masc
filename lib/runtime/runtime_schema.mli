@@ -369,6 +369,7 @@ type model_spec =
   ; context_rollover_threshold : float option
   ; tail_window_atoms : int option
   ; compaction_keep_ratio : float option
+  ; agent_compaction_threshold : float option
   ; turn_timeout_s : float option
   ; explicit_context_cache_ttl_s : int option
     (** [models.<id>.explicit-context-cache-ttl-s] — positive TTL in seconds for

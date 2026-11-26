@@ -1611,6 +1611,19 @@ let acp_execution (provider : Runtime_schema.provider)
          "provider %S uses protocol acp and must declare is-non-interactive = true"
          provider.id)
   | Cli command ->
+    (* A host that takes no compaction point would leave the operator's point
+       unused without a word, so the binding is refused instead. *)
+    let refuse_unused_compaction_point (options : Runtime_schema.acp_options) =
+      match spec.agent_compaction_threshold with
+      | Some _ when not (Runtime_acp_client.takes_compaction_point options.driver) ->
+        Error
+          (Printf.sprintf
+             "model %S declares agent-compaction-threshold, but the %s host takes no \
+              compaction point"
+             spec.id
+             (Runtime_acp_client.driver_to_string options.driver))
+      | Some _ | None -> Ok ()
+    in
     let make_acp_execution (options : Runtime_schema.acp_options) ~oauth_source =
       let install_client = Runtime_acp_client.install_client_of_driver options.driver in
       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
@@ -1643,8 +1656,14 @@ let acp_execution (provider : Runtime_schema.provider)
             "provider %S uses protocol acp with a relative credential path %S"
             provider.id
             path)
-     | Some options, Some (File path) -> Ok (make_acp_execution options ~oauth_source:(Some path))
-     | Some options, None -> Ok (make_acp_execution options ~oauth_source:None))
+     | Some options, Some (File path) ->
+       Result.map
+         (fun () -> make_acp_execution options ~oauth_source:(Some path))
+         (refuse_unused_compaction_point options)
+     | Some options, None ->
+       Result.map
+         (fun () -> make_acp_execution options ~oauth_source:None)
+         (refuse_unused_compaction_point options))
 ;;
 
 let refuse_anthropic_thinking_control_on_official_client

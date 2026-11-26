@@ -2058,6 +2058,12 @@ let compaction_keep_ratio_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
+let agent_compaction_threshold_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.agent_compaction_threshold
+  | None -> None
+;;
+
 
 
 

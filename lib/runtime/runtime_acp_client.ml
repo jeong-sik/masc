@@ -154,6 +154,13 @@ type bridge_naming =
   | Shared_name of string
   | Per_owner_name of string
 
+(* How a host takes the point at which it compacts its own session, checked on
+   2026-11-26 against Antigravity 1.5.18, Kimi Code 2.7.2, Mistral Vibe 3.1.0
+   and Muse Code 1.4.25. *)
+type compaction_point_channel =
+  | Muse_compaction_settings
+  | No_compaction_point
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -173,6 +180,7 @@ type driver_profile =
   ; mode_for_native_full : string
   ; model_config_id : string
   ; effort_config_id : string option
+  ; compaction_point : compaction_point_channel
   }
 
 (* The name the drivers whose host takes it as is give their bridge, and the
@@ -209,6 +217,11 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
     ; effort_config_id = Some "thought_level"
+    (* [AGY_CLI_AUTO_COMPACT_OVERRIDE] reaches only the interactive client:
+       with 30000 its /context reads "Auto-compact at 30.0k tokens", while
+       [agy acp] with the same variable let a session grow to 51,026 tokens
+       over two prompts without compacting. *)
+    ; compaction_point = No_compaction_point
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -233,6 +246,11 @@ let profile_of_driver = function
     ; mode_for_native_full = "yolo"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
+    (* [kimi acp] takes only --login and --region. The window behind its
+       compaction ratio comes from the model in its settings, and the one
+       variable that sets it ([KIMI_MODEL_MAX_CONTEXT_SIZE]) is read only for
+       a provider named by environment instead of the signed-in one. *)
+    ; compaction_point = No_compaction_point
     }
   | Mistral_vibe ->
     { driver = Mistral_vibe
@@ -266,6 +284,11 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto-approve"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
+    (* [VIBE_AUTO_COMPACT_THRESHOLD] fills only a model without a threshold of
+       its own, and the model catalog gives mistral-large-4-0-3 400,000 of its
+       own; the settings' environment layer refuses a per-model value. A point
+       passed through it could go unused without a word. *)
+    ; compaction_point = No_compaction_point
     }
   | Muse_code ->
     { driver = Muse_code
@@ -351,6 +374,15 @@ let profile_of_driver = function
     ; mode_for_native_full = "allowAll"
     ; model_config_id = "model"
     ; effort_config_id = None
+    (* Its soft fraction must stay below its hard fraction, 0.9 unless set, so
+       MASC sets the hard one to the whole limit. On muse-spark-1.3 with a
+       60,000 limit and 0.95 the host compacted during the turn, from about
+       65,000 tokens to 32,000, yet sent three requests of up to 60,330: its
+       own estimate runs a little under the provider's count. The host
+       reports the limit it was given as its window ([usage_update.size]), so
+       a limit above the model's own window shows up as the provider's
+       overflow, not as the start-time window check. *)
+    ; compaction_point = Muse_compaction_settings
     }
 ;;
 
@@ -466,6 +498,33 @@ let mcp_http_server_of_bridge bridge =
   }
 ;;
 
+(* Where the operator wants the host to compact its session: a fraction of the
+   lane's limit, from [agent-compaction-threshold] and [max-context]. *)
+type agent_compaction =
+  { limit_tokens : int
+  ; threshold : float
+  }
+
+let takes_compaction_point driver =
+  match (profile_of_driver driver).compaction_point with
+  | Muse_compaction_settings -> true
+  | No_compaction_point -> false
+;;
+
+(* [-c] values are JSON. *)
+let compaction_point_args (profile : driver_profile) agent_compaction =
+  match profile.compaction_point, agent_compaction with
+  | Muse_compaction_settings, Some { limit_tokens; threshold } ->
+    [ "-c"
+    ; Printf.sprintf "context_compaction.provider_context_limit_tokens=%d" limit_tokens
+    ; "-c"
+    ; "context_compaction.soft_threshold=" ^ Yojson.Safe.to_string (`Float threshold)
+    ; "-c"
+    ; "context_compaction.hard_threshold=1.0"
+    ]
+  | Muse_compaction_settings, None | No_compaction_point, (Some _ | None) -> []
+;;
+
 type config =
   { driver : driver
   ; cli_path : string
@@ -477,6 +536,7 @@ type config =
   ; oauth_source : string option
   ; dangerously_skip_permissions : bool
   ; admission_timeout_s : float
+  ; agent_compaction : agent_compaction option
   }
 
 let default_config ~driver ~cwd =
@@ -491,6 +551,7 @@ let default_config ~driver ~cwd =
   ; oauth_source = None
   ; dangerously_skip_permissions = false
   ; admission_timeout_s = default_admission_timeout_s
+  ; agent_compaction = None
   }
 ;;
 
@@ -3184,6 +3245,7 @@ let build_argv ?native_posture ?mcp_server (config : config) ~temp_gemini_dir =
     (config.cli_path :: base_args)
     @ muse_required_args
     @ muse_contributor_args config.contributor_mode
+    @ compaction_point_args profile config.agent_compaction
     @ muse_toolset_args ?mcp_server native_posture
 ;;
 
@@ -3199,6 +3261,13 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
   then Error (Invalid_config "cwd must be non-empty")
   else if config.driver = Muse_code && Option.is_some config.oauth_source
   then Error (Invalid_config "ACP driver muse_code requires host sign-in with the credential file binding unset")
+  else if Option.is_some config.agent_compaction && not (takes_compaction_point config.driver)
+  then
+    Error
+      (Invalid_config
+         (Printf.sprintf
+            "ACP driver %s takes no compaction point; leave agent-compaction-threshold unset"
+            (driver_to_string config.driver)))
   else (
     let* temp_gemini_dir, managed_schema_root =
       match profile.mcp_wiring with

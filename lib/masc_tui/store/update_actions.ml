@@ -1748,7 +1748,7 @@ let artifact_search_match_lines (m : Model.t) (a : Wire_knowledge.artifact_entry
                  ~left_ratio:0.44 ~top_ratio:0.48 bp body_after_bar)
         in
         let inner_w = max 0 (right_rect.w - 2) in
-        let pad_x = Masc_tui_ui.Layout.card_pad_x bp in
+        let pad_x = Masc_tui_ui.Layout.card_pad_x_for_width bp inner_w in
         let width = max 1 (inner_w - (2 * pad_x)) in
         let is_json = Knowledge_store.is_json_artifact a in
         match
@@ -7519,7 +7519,8 @@ and execute_action ~now (m : Model.t) action =
       then
         let diff_cols =
           Code_review_layout.effective_diff_pane_width
-            ~zoomed:(Model.is_zoomed_active m) ~viewport_cols:m.viewport.cols
+            ~zoomed:(Model.is_zoomed_active m) ~viewport_rows:m.viewport.rows
+            ~viewport_cols:m.viewport.cols
             ~sidebar_docked:(Model.sidebar_docked m) ()
         in
         let infra =

@@ -2860,8 +2860,10 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
                       ~scroll:model.work.detail_scroll_offset md_text
                   in
-                  if total_md > md_avail && md_avail >= 2 then begin
-                    let more_n = total_md - (md_avail - 1) in
+                  let scroll = Int.max 0 model.work.detail_scroll_offset in
+                  let remaining_below = total_md - (scroll + md_avail) in
+                  if remaining_below > 0 && md_avail >= 2 then begin
+                    let more_n = remaining_below + 1 in
                     let more_s =
                       Ops_common.say model
                         ~ko:
@@ -6023,22 +6025,33 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           (fun i (ln : Update_nav.styled_line) ->
             let py = content.y + i in
             if py < Rect.bottom content then
-              let st =
-                match ln.tone with
-                | Update_nav.Line_section | Update_nav.Line_accent ->
-                    Typography.accent ~bg ~bold:true theme
-                | Update_nav.Line_ok ->
-                    Typography.status ~bg ~bold:true theme Theme.Status_ok
-                | Update_nav.Line_warn ->
-                    Typography.status ~bg ~bold:true theme Theme.Status_attention
-                | Update_nav.Line_error ->
-                    Typography.status ~bg ~bold:true theme Theme.Status_critical
-                | Update_nav.Line_plain | Update_nav.Line_selected ->
-                    Typography.primary ~bg theme
+              let put st =
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:py
+                     ~max_w:content.w ~style:st ln.text)
               in
-              ignore
-                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:py
-                   ~max_w:content.w ~style:st ln.text))
+              match ln.tone with
+              | Update_nav.Line_section ->
+                  let lbl =
+                    Option.value (Card.legacy_rule_label ln.text)
+                      ~default:ln.text
+                  in
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                    ~y:py ~theme
+              | Update_nav.Line_accent ->
+                  put (Typography.accent ~bg ~bold:true theme)
+              | Update_nav.Line_ok ->
+                  put (Typography.status ~bg ~bold:true theme Theme.Status_ok)
+              | Update_nav.Line_warn ->
+                  put
+                    (Typography.status ~bg ~bold:true theme
+                       Theme.Status_attention)
+              | Update_nav.Line_error ->
+                  put
+                    (Typography.status ~bg ~bold:true theme
+                       Theme.Status_critical)
+              | Update_nav.Line_plain | Update_nav.Line_selected ->
+                  put (Typography.primary ~bg theme))
           (Store_scroll.drop scroll lines |> List.take content.h)
       end
     end

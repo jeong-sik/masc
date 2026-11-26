@@ -3089,23 +3089,32 @@ let draw_memory_subview_card ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let max_skip = Int.max 0 (List.length lines - content.h) in
     let skip = Int.min max_skip (Int.max 0 k.memory_subview_scroll) in
+    let bg = Color.of_rgb theme.surface_1 in
     let y = ref content.y and bot = Rect.bottom content in
     List.iter
       (fun (ln : Update_nav.styled_line) ->
         if !y < bot then begin
-          let st =
-            match ln.tone with
-            | Update_nav.Line_section | Update_nav.Line_accent ->
-                H.accent_style ~theme ~attrs:Attr.bold ()
-            | Update_nav.Line_error -> H.status_style ~theme Theme.Status_critical
-            | Update_nav.Line_warn -> H.status_style ~theme Theme.Status_attention
-            | Update_nav.Line_ok -> H.status_style ~theme Theme.Status_ok
-            | Update_nav.Line_plain | Update_nav.Line_selected ->
-                H.text_style ~theme ()
+          let put st =
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:st ln.text)
           in
-          ignore
-            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-               ~max_w:content.w ~style:st ln.text);
+          (match ln.tone with
+          | Update_nav.Line_section ->
+              let lbl =
+                Option.value (Card.legacy_rule_label ln.text) ~default:ln.text
+              in
+              Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                ~y:!y ~theme
+          | Update_nav.Line_accent ->
+              put (H.accent_style ~theme ~attrs:Attr.bold ())
+          | Update_nav.Line_error ->
+              put (H.status_style ~theme Theme.Status_critical)
+          | Update_nav.Line_warn ->
+              put (H.status_style ~theme Theme.Status_attention)
+          | Update_nav.Line_ok -> put (H.status_style ~theme Theme.Status_ok)
+          | Update_nav.Line_plain | Update_nav.Line_selected ->
+              put (H.text_style ~theme ()));
           incr y
         end)
       (Store_scroll.drop skip lines)

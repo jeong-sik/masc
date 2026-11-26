@@ -4387,6 +4387,7 @@ let enter_plan (m : Model.t) : enter_plan =
                     let diff_cols =
                       Code_review_layout.effective_diff_pane_width
                         ~zoomed:(Model.is_zoomed_active m)
+                        ~viewport_rows:m.viewport.rows
                         ~viewport_cols:m.viewport.cols
                         ~sidebar_docked:(Model.sidebar_docked m) ()
                     in
@@ -6738,7 +6739,9 @@ let ui_card_inner (r : Rect.t) =
   else Rect.empty
 
 let ui_pad_content ~bp ?(pad_y = 0) (r : Rect.t) =
-  Masc_tui_ui.Card.pad_inner ~pad_x:(Masc_tui_ui.Layout.card_pad_x bp) ~pad_y r
+  Masc_tui_ui.Card.pad_inner
+    ~pad_x:(Masc_tui_ui.Layout.card_pad_x_for_width bp r.w)
+    ~pad_y r
 
 let markdown_max_scroll ~theme ~width ~height text =
   if width <= 0 || height <= 0 then 0
@@ -6793,9 +6796,10 @@ let extract_embedded_json s =
       Some (prefix_opt, json)
   | None -> None
 
-let ops_pad_content (r : Rect.t) =
-  let pad_x = if r.w >= 60 then 2 else 1 in
-  Masc_tui_ui.Card.pad_inner ~pad_x ~pad_y:0 r
+let ops_pad_content ~bp (r : Rect.t) =
+  Masc_tui_ui.Card.pad_inner
+    ~pad_x:(Masc_tui_ui.Layout.card_pad_x_for_width bp r.w)
+    ~pad_y:0 r
 
 let rejection_diff_row_count ~lang (v : Wire_work.verification_request) =
   let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
@@ -6969,12 +6973,12 @@ let split_dive_with_json_store ~bp ~(show_raw_json : bool) (rect : Rect.t) =
   else if show_raw_json then (Rect.empty, rect)
   else (rect, Rect.empty)
 
-let json_card_max_scroll ~max_depth (json_card_rect : Rect.t)
+let json_card_max_scroll ~bp ~max_depth (json_card_rect : Rect.t)
     (json : Yojson.Safe.t) =
   let inner = ui_card_inner json_card_rect in
   if Rect.is_empty inner then 0
   else
-    let content = ops_pad_content inner in
+    let content = ops_pad_content ~bp inner in
     if Rect.is_empty content then 0
     else
       let lines =
@@ -8583,7 +8587,8 @@ let code_right_pane_line_count (m : Model.t) : int =
   | Infra_store.Code_review ->
       let diff_cols =
         Code_review_layout.effective_diff_pane_width
-          ~zoomed:(Model.is_zoomed_active m) ~viewport_cols:m.viewport.cols
+          ~zoomed:(Model.is_zoomed_active m) ~viewport_rows:m.viewport.rows
+          ~viewport_cols:m.viewport.cols
           ~sidebar_docked:(Model.sidebar_docked m) ()
       in
       List.length (Infra_store.review_diff_rows ~cols:diff_cols m.infra)
@@ -8869,7 +8874,7 @@ let work_detail_max_scroll (m : Model.t) =
             else right_rect
           in
           let r_inner = ui_card_inner right_rect in
-          let content = ops_pad_content r_inner in
+          let content = ops_pad_content ~bp r_inner in
           if Rect.is_empty content then 0
           else
             let y = ref r_inner.y in
@@ -9204,7 +9209,7 @@ let work_detail_max_scroll (m : Model.t) =
           Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
             ~left_ratio:0.48 ~top_ratio:0.48 bp br
       in
-      let content = ui_card_inner right_rect |> ops_pad_content in
+      let content = ui_card_inner right_rect |> ops_pad_content ~bp in
       if Rect.is_empty content then 0
       else
         let total =
@@ -9244,19 +9249,42 @@ let work_detail_max_scroll (m : Model.t) =
                   | _ -> Rect.empty
               in
               let d_inner = ui_card_inner detail_rect in
-              let content = ops_pad_content d_inner in
+              let content = ops_pad_content ~bp d_inner in
               if Rect.is_empty content then 0
               else
-                let overhead =
-                  (if d_inner.h >= 7 then
-                     2 + if d_inner.h >= 12 then 1 else 0
-                   else 0)
-                  + 4
+                let band_rows =
+                  if d_inner.h >= 7 then
+                    2 + if d_inner.h >= 12 then 1 else 0
+                  else 0
                 in
-                let md_h = max 1 (content.h - overhead) in
-                let theme = Theme.of_preset m.theme_preset in
-                markdown_max_scroll ~theme ~width:content.w ~height:md_h
-                  (Chat_transcript.rewrite_masc_links_for_markdown desc)))
+                let status_extra =
+                  match tk.status with
+                  | Wire_work.AwaitingVerification _ | Wire_work.Done _ -> 1
+                  | Wire_work.Todo
+                  | Wire_work.Claimed _
+                  | Wire_work.InProgress _
+                  | Wire_work.Cancelled _ ->
+                      0
+                in
+                let has_evidence_row =
+                  List.exists
+                    (fun (v : Wire_work.verification_request) ->
+                      String.equal v.task_id tk.id)
+                    (Work_store.verifications_list m.work)
+                  || Work_store.verification_read_notices m.work <> []
+                in
+                let meta_rows =
+                  band_rows + 2 + status_extra
+                  + if has_evidence_row then 1 else 0
+                in
+                let rem = max 0 (content.h - meta_rows) in
+                let hairline = if rem >= 3 then 1 else 0 in
+                let md_h = max 0 (rem - hairline) in
+                if md_h <= 0 then 0
+                else
+                  let theme = Theme.of_preset m.theme_preset in
+                  markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                    (Chat_transcript.rewrite_masc_links_for_markdown desc)))
   | Nav.Work_schedules -> (
       match Work_store.selected_schedule m.work with
       | None -> 0
@@ -9283,19 +9311,24 @@ let work_detail_max_scroll (m : Model.t) =
                   | _ -> Rect.empty
               in
               let d_inner = ui_card_inner detail_rect in
-              let content = ops_pad_content d_inner in
+              let content = ops_pad_content ~bp d_inner in
               if Rect.is_empty content then 0
               else
-                let overhead =
-                  (if d_inner.h >= 6 then
-                     2 + if d_inner.h >= 10 then 1 else 0
-                   else 0)
-                  + 5
+                let band_rows =
+                  if d_inner.h >= 6 then
+                    2 + if d_inner.h >= 10 then 1 else 0
+                  else 0
                 in
-                let md_h = max 1 (content.h - overhead) in
-                let theme = Theme.of_preset m.theme_preset in
-                markdown_max_scroll ~theme ~width:content.w ~height:md_h
-                  summary_txt))
+                let meta_rows =
+                  band_rows + 3 + if Option.is_some sc.last_wake_unix then 1 else 0
+                in
+                let rem = max 0 (content.h - meta_rows) in
+                if rem < 3 then 0
+                else
+                  let md_h = rem - 1 in
+                  let theme = Theme.of_preset m.theme_preset in
+                  markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                    summary_txt))
   | Nav.Work_candle_scorecard -> (
       match Observed.to_option m.work.candle_ledger with
       | None -> 0
@@ -9385,12 +9418,25 @@ let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
   else
     match Observed.to_option m.runtime.tools_dashboard with
     | Some
-        {
-          effective_keeper_surface =
-            Some (Wire_runtime.Keeper_surface_available s);
-          _;
-        } ->
-        max 0 (List.length s.tools + 8 + (if lc.h >= 8 then 1 else 0) - max 1 lc.h)
+        ({
+           effective_keeper_surface =
+             Some (Wire_runtime.Keeper_surface_available s);
+           _;
+         } as dash) ->
+        let hdr_rows =
+          3
+          + (if s.skills_left_out <> [] then 1 else 0)
+          + (if s.lane_addon_conflicts <> [] then 1 else 0)
+          + (if
+               Option.is_some dash.volume_gc_summary
+               || Option.is_some dash.keeper_cleanup_summary
+             then 1
+             else 0)
+          + (if lc.h >= 8 then 1 else 0)
+          + 1
+        in
+        let vis = max 1 (lc.h - hdr_rows) in
+        max 0 (List.length s.tools - vis)
     | Some
         {
           effective_keeper_surface =
@@ -9399,6 +9445,36 @@ let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
         }
     | None ->
         0
+
+let runtime_tools_quality_pane0_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let body_rect =
+    match
+      Masc_tui_ui.Layout.split_v br
+        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ _; b ] -> b
+    | _ -> br
+  in
+  let left_rect, _ =
+    Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+      ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+  in
+  let lc = ui_card_inner left_rect |> ui_pad_content ~bp in
+  if Rect.is_empty lc then 0
+  else
+    match Observed.to_option m.runtime.tool_quality with
+    | None -> 0
+    | Some tq ->
+        let total_lines =
+          4 + Int.min 20 (List.length tq.by_tool)
+          + (if tq.failure_categories = [] then 0
+             else 2 + Int.min 12 (List.length tq.failure_categories))
+          + (if tq.by_keeper = [] then 0
+             else 2 + Int.min 10 (List.length tq.by_keeper))
+        in
+        max 0 (total_lines - lc.h)
 
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -9510,17 +9586,39 @@ let runtime_detail_max_scroll (m : Model.t) =
             detail_rect_for ~left_ratio:0.52 ~top_ratio:0.50 body_rect
           in
           let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
-          let rej_n =
-            match Observed.to_option m.runtime.gate_tool_events with
-            | Some ev -> List.length ev.tool_rejections
-            | None -> 0
+          let gate_n =
+            match m.runtime.gate_tool_events with
+            | Observed.Value { data = ev; _ } ->
+                if ev.tool_rejections = [] then 2
+                else 2 + Int.min 12 (List.length ev.tool_rejections)
+            | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+            | Observed.Unreported ->
+                1
+          in
+          let keeper_names =
+            match Observed.to_option m.fleet.keepers with
+            | Some ks ->
+                List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+            | None -> []
           in
           let wait_n =
-            match Observed.to_option m.runtime.keeper_waiting_inventory with
-            | Some (_, inv) -> List.length inv.rows
+            match
+              Runtime_store.selected_tools_surface_keeper ~keeper_names m.runtime
+            with
             | None -> 0
+            | Some keeper ->
+                2
+                +
+                (match m.runtime.keeper_waiting_inventory with
+                | Observed.Value { data = k, inv; _ }
+                  when String.equal k keeper ->
+                    if inv.rows = [] then 2
+                    else 1 + Int.min 20 (List.length inv.rows)
+                | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+                | Observed.Value _ | Observed.Unreported ->
+                    1)
           in
-          let total_lines = rej_n + wait_n + 6 in
+          let total_lines = gate_n + wait_n in
           if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
       | Runtime_store.Tools_prompts_presets ->
           let right_rect =
@@ -9541,8 +9639,28 @@ let runtime_detail_max_scroll (m : Model.t) =
                     match Runtime_store.preset_detail_for ~name:pm.name m.runtime with
                     | None -> 5
                     | Some d -> 10 + Int.min 12 (List.length d.assignments)))
-            | Runtime_store.Sec_params -> 10
-            | Runtime_store.Sec_async_requests -> 12
+            | Runtime_store.Sec_params -> (
+                match Runtime_store.selected_runtime_param m.runtime with
+                | None -> 1
+                | Some _ -> 6)
+            | Runtime_store.Sec_async_requests ->
+                let summary_n =
+                  match Observed.to_option m.runtime.async_requests with
+                  | Some snap ->
+                      1 + if Option.is_some snap.error_detail then 1 else 0
+                  | None -> 0
+                in
+                let sel_n =
+                  match Runtime_store.selected_async_request m.runtime with
+                  | None -> 1
+                  | Some r ->
+                      5
+                      +
+                      (match r.result_preview with
+                      | Some pv -> 1 + List.length (String.split_on_char '\n' pv)
+                      | None -> 0)
+                in
+                summary_n + sel_n
           in
           if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
       | Runtime_store.Tools_usage_calls ->
@@ -10142,8 +10260,13 @@ let dive_max_scroll (m : Model.t) active =
       else
         match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
         | Some loaded ->
+            let preview_n =
+              match Observed.to_option m.runtime.skill_editor_preview with
+              | None -> 0
+              | Some pv -> 1 + max 1 (List.length pv.diagnostics)
+            in
             let lines = List.length (String.split_on_char '\n' loaded.source_text) in
-            max 0 (lines + 10 - max 1 content.h)
+            max 0 (3 + preview_n + lines - max 1 content.h)
         | None -> 0)
   | Nav.Exact_run_inspector run_id -> (
       let content = ui_card_inner br |> ui_pad_content ~bp in
@@ -10193,14 +10316,17 @@ let dive_max_scroll (m : Model.t) active =
             let inner = { inner with y = inner.y + notices; h = inner.h - notices } in
             if Rect.is_empty inner then 0
             else
-              let content = ops_pad_content inner in
+              let content = ops_pad_content ~bp inner in
               let y = ref inner.y in
               let bot = Rect.bottom inner in
-              if inner.h >= 8 then y := !y + 2 + if inner.h >= 14 then 1 else 0;
+              let has_header_band = inner.h >= 8 in
+              if has_header_band then y := !y + 2;
               let action_h = if bot - !y >= 6 then 1 else 0 in
               let body_bot = bot - action_h in
               let kv_rows =
-                3 + if Option.is_some v.review_observation then 1 else 0
+                (if not has_header_band then 1 else 0)
+                + (if Option.is_some v.review_observation then 1 else 0)
+                + 1
               in
               y := min body_bot (!y + kv_rows);
               let rest =
@@ -10242,7 +10368,7 @@ let dive_max_scroll (m : Model.t) active =
           let json_max =
             if Rect.is_empty json_card_rect then 0
             else
-              json_card_max_scroll ~max_depth:4 json_card_rect
+              json_card_max_scroll ~bp ~max_depth:4 json_card_rect
                 (json_of_verification_store v)
           in
           max main_max json_max)
@@ -10260,6 +10386,28 @@ let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
       ~fallback_count ~delta m.config
   in
   ({ m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; config }, [])
+
+let runtime_pane_max_scroll ~pane_index (m : Model.t) =
+  if pane_index <> 0 then runtime_detail_max_scroll m
+  else
+    match m.runtime.active_tab with
+    | Nav.Runtime_tools_usage -> (
+        match m.runtime.tools_subview with
+        | Runtime_store.Tools_keeper_skills ->
+            runtime_tools_keeper_pane0_max_scroll m
+        | Runtime_store.Tools_quality_gate ->
+            runtime_tools_quality_pane0_max_scroll m
+        | Runtime_store.Tools_usage_calls
+        | Runtime_store.Tools_catalog_tree
+        | Runtime_store.Tools_prompts_presets ->
+            runtime_detail_max_scroll m)
+    | Nav.Runtime_quotas_credits
+    | Nav.Runtime_efficiency_spend
+    | Nav.Runtime_failover_lanes
+    | Nav.Runtime_fusion
+    | Nav.Runtime_connectors
+    | Nav.Runtime_addons_browser ->
+        runtime_detail_max_scroll m
 
 let clamp_for_pane (m : Model.t) =
   let pane_count = Model.focusable_pane_count m in
@@ -10311,13 +10459,7 @@ let clamp_for_pane (m : Model.t) =
               let rt = sync_runtime_companies_if_needed m in
               let eff_pane = if zoomed then 1 else pane_index in
               let max_detail_scroll =
-                if
-                  Nav.equal_runtime_tab rt.active_tab Nav.Runtime_tools_usage
-                  && Runtime_store.equal_tools_subview rt.tools_subview
-                       Runtime_store.Tools_keeper_skills
-                  && eff_pane = 0
-                then runtime_tools_keeper_pane0_max_scroll m
-                else runtime_detail_max_scroll m
+                runtime_pane_max_scroll ~pane_index:eff_pane m
               in
               {
                 m with
@@ -10725,7 +10867,7 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
   let inner = ui_card_inner main_card_rect in
   if Rect.is_empty inner then (0, 0)
   else
-    let content = ops_pad_content inner in
+    let content = ops_pad_content ~bp inner in
     let y = ref inner.y in
     let bot = Rect.bottom inner in
     if inner.h >= 8 then begin
@@ -10864,7 +11006,7 @@ let goal_dive_measure_max_scroll ~goal_id (m : Model.t) =
           let band_h = if has_sub then 2 else 1 in
           y := !y + band_h + if inner.h >= 14 then 1 else 0
         end;
-        let content = ops_pad_content inner in
+        let content = ops_pad_content ~bp inner in
         let action_h = if bot - !y >= 6 then 1 else 0 in
         let body_bot = bot - action_h in
         if !y < body_bot then begin
@@ -12653,13 +12795,14 @@ let apply_move (m : Model.t) dir =
                               match Work_store.selected_task m.work with
                               | None -> 0
                               | Some tk ->
+                                  let bp = ui_bp m in
                                   let _, jr =
-                                    split_dive_with_json_store ~bp:(ui_bp m)
+                                    split_dive_with_json_store ~bp
                                       ~show_raw_json:true (ui_body_rect m)
                                   in
                                   if Rect.is_empty jr then 0
                                   else
-                                    json_card_max_scroll ~max_depth:4 jr
+                                    json_card_max_scroll ~bp ~max_depth:4 jr
                                       (json_of_task_store tk)
                             in
                             let json_scroll_offset =
@@ -12729,7 +12872,7 @@ let apply_move (m : Model.t) dir =
                                 in
                                 if Rect.is_empty detail_r then 0
                                 else
-                                  json_card_max_scroll ~max_depth:4 detail_r
+                                  json_card_max_scroll ~bp ~max_depth:4 detail_r
                                     (json_of_task_store tk)
                           in
                           let json_scroll_offset =
@@ -12785,13 +12928,14 @@ let apply_move (m : Model.t) dir =
                               match Work_store.selected_goal m.work with
                               | None -> 0
                               | Some g ->
+                                  let bp = ui_bp m in
                                   let _, jr =
-                                    split_dive_with_json_store ~bp:(ui_bp m)
+                                    split_dive_with_json_store ~bp
                                       ~show_raw_json:true (ui_body_rect m)
                                   in
                                   if Rect.is_empty jr then 0
                                   else
-                                    json_card_max_scroll ~max_depth:4 jr
+                                    json_card_max_scroll ~bp ~max_depth:4 jr
                                       (json_of_goal_store g)
                             in
                             let json_scroll_offset =
@@ -12863,8 +13007,8 @@ let apply_move (m : Model.t) dir =
                                   in
                                   if Rect.is_empty right_r then 0
                                   else
-                                    json_card_max_scroll ~max_depth:4 right_r
-                                      (json_of_goal_store g)
+                                    json_card_max_scroll ~bp ~max_depth:4
+                                      right_r (json_of_goal_store g)
                             in
                             let json_scroll_offset =
                               Store_scroll.clamp_scroll ~max_scroll
@@ -13166,13 +13310,14 @@ let apply_move (m : Model.t) dir =
                           true
                       | Nav.Runtime_tools_usage, (0 | 1)
                         when Runtime_store.equal_tools_subview rt.tools_subview
-                               Runtime_store.Tools_keeper_skills ->
+                               Runtime_store.Tools_keeper_skills
+                             || Runtime_store.equal_tools_subview
+                                  rt.tools_subview
+                                  Runtime_store.Tools_quality_gate ->
                           true
                       | Nav.Runtime_tools_usage, 1
                         when Runtime_store.equal_tools_subview rt.tools_subview
-                               Runtime_store.Tools_quality_gate
-                             || Runtime_store.equal_tools_subview rt.tools_subview
-                                  Runtime_store.Tools_prompts_presets ->
+                               Runtime_store.Tools_prompts_presets ->
                           true
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
@@ -13189,14 +13334,7 @@ let apply_move (m : Model.t) dir =
                     in
                     let max_detail_scroll =
                       if not is_detail_scroll then None
-                      else if
-                        Nav.equal_runtime_tab rt.active_tab
-                          Nav.Runtime_tools_usage
-                        && Runtime_store.equal_tools_subview rt.tools_subview
-                             Runtime_store.Tools_keeper_skills
-                        && pane_index = 0
-                      then Some (runtime_tools_keeper_pane0_max_scroll m)
-                      else Some (runtime_detail_max_scroll m)
+                      else Some (runtime_pane_max_scroll ~pane_index m)
                     in
                     let eff_viewport_rows =
                       match rt.active_tab, pane_index with
@@ -13446,8 +13584,7 @@ let apply_move (m : Model.t) dir =
                           | Runtime_store.Tools_catalog_tree ->
                               let inner = ui_card_inner body_rect in
                               max 1 (inner.h - 2)
-                          | Runtime_store.Tools_keeper_skills
-                          | Runtime_store.Tools_quality_gate ->
+                          | Runtime_store.Tools_keeper_skills ->
                               let left_rect, right_rect =
                                 Masc_tui_ui.Layout.adaptive_split_2
                                   ~stack_on_compact:true ~left_ratio:0.52
@@ -13460,6 +13597,19 @@ let apply_move (m : Model.t) dir =
                                 ui_card_inner target_r |> ui_pad_content ~bp
                               in
                               max 1 (c.h - 5)
+                          | Runtime_store.Tools_quality_gate ->
+                              let left_rect, right_rect =
+                                Masc_tui_ui.Layout.adaptive_split_2
+                                  ~stack_on_compact:true ~left_ratio:0.52
+                                  ~top_ratio:0.50 bp body_rect
+                              in
+                              let target_r =
+                                if pane = 1 then right_rect else left_rect
+                              in
+                              let c =
+                                ui_card_inner target_r |> ui_pad_content ~bp
+                              in
+                              max 1 c.h
                           | Runtime_store.Tools_prompts_presets ->
                               let left_rect, right_rect =
                                 Masc_tui_ui.Layout.adaptive_split_2
@@ -13481,89 +13631,10 @@ let apply_move (m : Model.t) dir =
                         , _ ) ->
                           viewport_rows
                     in
-                    let eff_max_detail_scroll =
-                      match (rt.active_tab, rt.tools_subview, pane_index) with
-                      | ( Nav.Runtime_tools_usage
-                        , Runtime_store.Tools_quality_gate
-                        , 0 ) ->
-                          None
-                      | ( Nav.Runtime_tools_usage
-                        , Runtime_store.Tools_keeper_skills
-                        , 0 ) -> (
-                          let bp = ui_bp m in
-                          let br = ui_body_rect m in
-                          let body_rect =
-                            match
-                              Masc_tui_ui.Layout.split_v br
-                                [
-                                  Masc_tui_ui.Layout.Fixed 1;
-                                  Masc_tui_ui.Layout.Flex 1;
-                                ]
-                            with
-                            | [ _; b ] -> b
-                            | _ -> br
-                          in
-                          let left_rect, _ =
-                            Masc_tui_ui.Layout.adaptive_split_2
-                              ~stack_on_compact:true ~left_ratio:0.52
-                              ~top_ratio:0.50 bp body_rect
-                          in
-                          let lc =
-                            ui_card_inner left_rect |> ui_pad_content ~bp
-                          in
-                          match Observed.to_option rt.tools_dashboard with
-                          | Some
-                              ({
-                                 effective_keeper_surface =
-                                   Some
-                                     (Wire_runtime.Keeper_surface_available s);
-                                 _;
-                               } as dash) ->
-                              let hdr_rows =
-                                3
-                                + (if s.skills_left_out <> [] then 1 else 0)
-                                + (if s.lane_addon_conflicts <> [] then 1 else 0)
-                                + (if
-                                     Option.is_some dash.volume_gc_summary
-                                     || Option.is_some
-                                          dash.keeper_cleanup_summary
-                                   then 1
-                                   else 0)
-                                + (if lc.h >= 8 then 1 else 0)
-                                + 1
-                              in
-                              let vis = max 1 (lc.h - hdr_rows) in
-                              Some (max 0 (List.length s.tools - vis))
-                          | Some
-                              {
-                                effective_keeper_surface =
-                                  Some
-                                    (Wire_runtime.Keeper_surface_unavailable _)
-                                  | None;
-                                _;
-                              }
-                          | None ->
-                              Some 0)
-                      | ( ( Nav.Runtime_quotas_credits
-                          | Nav.Runtime_efficiency_spend
-                          | Nav.Runtime_failover_lanes
-                          | Nav.Runtime_fusion
-                          | Nav.Runtime_tools_usage
-                          | Nav.Runtime_connectors
-                          | Nav.Runtime_addons_browser )
-                        , ( Runtime_store.Tools_usage_calls
-                          | Runtime_store.Tools_catalog_tree
-                          | Runtime_store.Tools_keeper_skills
-                          | Runtime_store.Tools_quality_gate
-                          | Runtime_store.Tools_prompts_presets )
-                        , _ ) ->
-                          max_detail_scroll
-                    in
                     let next_rt =
                       Runtime_store.move_selection ~pane_index
-                        ~viewport_rows:eff_viewport_rows
-                        ?max_detail_scroll:eff_max_detail_scroll ~delta:eff_delta
-                        rt
+                        ~viewport_rows:eff_viewport_rows ?max_detail_scroll
+                        ~delta:eff_delta rt
                     in
                     let tab_cmds =
                       if

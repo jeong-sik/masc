@@ -181,6 +181,24 @@ describe('workspaces/runtime', () => {
     expect(classifyQuotaScope(scopes[1]!).badge).toBe('$0 Sub')
     expect(classifyQuotaScope(scopes[2]!).badge).toBe('? Unreported')
 
+    // A spent 100% subscription window whose resets_at has already passed is no longer $0 Exhausted
+    const alreadyResetScope: ProviderUsageScope = {
+      scope: 'claude:reset',
+      providers: [{ id: 'anthropic', display_name: 'Claude Reset' }],
+      state: 'reported',
+      windows: [{
+        limit_id: '5h',
+        window: { kind: 'five_hour' },
+        utilization: { unit: 'fraction', value: 1.0 },
+        resets_at: 1_700_000_000,
+        observed_at: 1_699_999_000,
+        source: 'cli',
+        role: 'gates_model_calls',
+      }],
+    }
+    expect(classifyQuotaScope(alreadyResetScope, 1_700_000_500).badge).toBe('$0 Sub')
+    expect(classifyQuotaScope(alreadyResetScope, 1_699_999_500).badge).toBe('$0 Exhausted')
+
     const part = partitionQuotaScopes(scopes)
     expect(part.tier1ExhaustedOrCredits).toHaveLength(1)
     expect(part.tier2ActiveSubscriptions).toHaveLength(1)

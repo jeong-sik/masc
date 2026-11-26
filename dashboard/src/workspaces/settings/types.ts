@@ -32,9 +32,40 @@ export const CANONICAL_SETTINGS_CATEGORIES: readonly { readonly id: string; read
 
 const CANONICAL_CATEGORY_IDS = new Set(CANONICAL_SETTINGS_CATEGORIES.map((c) => c.id))
 
+/**
+ * Closed server category ID map matching `server_dashboard_http_candle_config.ml`
+ * and `wire_config.ml:config_category_of_string`.
+ */
+const SERVER_CATEGORY_ID_MAP: Readonly<Record<string, string>> = {
+  general_ui: 'general',
+  general_server: 'general',
+  observability_ops: 'general',
+  providers_models: 'providers',
+  providers_accounts: 'providers',
+  runtime_providers: 'providers',
+  routing_failover: 'routing',
+  runtime_cascades: 'routing',
+  keepers_companies: 'keepers',
+  keepers_fleet: 'keepers',
+  keepers_autonomy: 'keepers',
+  sandbox_ssh: 'sandbox',
+  sandbox_ssh_microvm: 'sandbox',
+  sandbox_infra: 'sandbox',
+  voice_integrations: 'voice',
+  voice_audio: 'voice',
+  connectors: 'voice',
+  economy_connectors: 'voice',
+  board_memory_candle: 'board_memory_candle',
+  memory_librarian: 'board_memory_candle',
+  board_candle: 'board_memory_candle',
+  memory_knowledge: 'board_memory_candle',
+}
+
 export function matchCanonicalCategoryId(cat: ConfigCategory): string {
   const id = cat.id.trim().toLowerCase()
   if (CANONICAL_CATEGORY_IDS.has(id)) return id
+  const mapped = SERVER_CATEGORY_ID_MAP[id]
+  if (mapped) return mapped
   const title = cat.title.toLowerCase()
   if (id.includes('general') || title.includes('general') || /\bui\b/.test(title)) return 'general'
   if (id.includes('provider') || title.includes('provider') || title.includes('model')) return 'providers'

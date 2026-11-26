@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact'
+import { isWindowCurrentlySpent } from '../../lib/quota-window'
 import type { Result } from '../../lib/result'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
@@ -626,7 +627,10 @@ export type QuotaCostClassification =
   | { readonly kind: 'amount'; readonly amount: number; readonly currency: string; readonly badge: string }
   | { readonly kind: 'unreported'; readonly badge: '? Unreported' }
 
-export function classifyQuotaScope(scope: ProviderUsageScope): QuotaCostClassification {
+export function classifyQuotaScope(
+  scope: ProviderUsageScope,
+  nowSec: number = Date.now() / 1000,
+): QuotaCostClassification {
   if (scope.state !== 'reported' || scope.windows.length === 0) {
     return { kind: 'unreported', badge: '? Unreported' }
   }
@@ -637,27 +641,25 @@ export function classifyQuotaScope(scope: ProviderUsageScope): QuotaCostClassifi
 
   for (const w of scope.windows) {
     const u = w.utilization
+    const currentlySpent = isWindowCurrentlySpent(w, nowSec)
     switch (u.unit) {
       case 'fraction':
-        hasSub = true
-        if (u.value >= 1.0) hasExhausted = true
-        break
       case 'percent':
         hasSub = true
-        if (u.value >= 100) hasExhausted = true
+        if (currentlySpent) hasExhausted = true
         break
       case 'credit_unlimited':
         hasSub = true
         break
       case 'credit_balance':
-        if (u.remaining <= 0) {
+        if (currentlySpent) {
           hasExhausted = true
-        } else {
+        } else if (u.remaining > 0) {
           bestAmount = { amount: u.remaining, currency: u.currency || 'USD' }
         }
         break
       case 'usd':
-        if (u.limit !== null && u.value >= u.limit) {
+        if (currentlySpent) {
           hasExhausted = true
         } else {
           bestAmount = { amount: u.value, currency: 'USD' }
@@ -679,9 +681,13 @@ export function classifyQuotaScope(scope: ProviderUsageScope): QuotaCostClassifi
   return { kind: 'unreported', badge: '? Unreported' }
 }
 
-export function maxUtilizationPct(scope: ProviderUsageScope): number | null {
+export function maxUtilizationPct(
+  scope: ProviderUsageScope,
+  nowSec: number = Date.now() / 1000,
+): number | null {
   let maxPct: number | null = null
   for (const w of scope.windows) {
+    if (w.resets_at !== null && w.resets_at <= nowSec) continue
     const u = w.utilization
     let pct: number | null = null
     if (u.unit === 'fraction') pct = Math.min(100, Math.max(0, u.value * 100))
@@ -715,15 +721,16 @@ export function restingProviderIds(runtimes: readonly RuntimeResolution[]): Read
 export function partitionQuotaScopes(
   scopes: readonly ProviderUsageScope[],
   restingProviders: ReadonlySet<string> = new Set(),
+  nowSec: number = Date.now() / 1000,
 ): PartitionedQuotas {
   const tier1: ProviderUsageScope[] = []
   const tier2: ProviderUsageScope[] = []
   const tier3: ProviderUsageScope[] = []
 
   for (const scope of scopes) {
-    const cls = classifyQuotaScope(scope)
+    const cls = classifyQuotaScope(scope, nowSec)
     const isResting = scope.providers.some((p) => restingProviders.has(p.id))
-    const pct = maxUtilizationPct(scope)
+    const pct = maxUtilizationPct(scope, nowSec)
 
     if (cls.kind === 'exhausted_zero' || cls.kind === 'amount' || isResting || (pct !== null && pct >= 90)) {
       tier1.push(scope)

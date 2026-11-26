@@ -5,26 +5,13 @@
 
 import type { Observed } from '../../core/resource-cache'
 import { formatRelativeUntilSec } from '../../lib/format-time'
+import { isUtilizationSpent } from '../../lib/quota-window'
 import type {
   PulseProviderUsagePoint,
   PulseProviderUsageSnapshot,
   PulseQuotaSummary,
   PulseQuotaWindowStanding,
-  PulseUsageUtilization,
 } from './types'
-
-/** The window's use reached its limit — the same rule as the server's
- *  `window_is_spent` (lib/runtime/runtime_provider_usage_window.ml).
- *  `null` for a USD window without a limit, which is never spent. */
-function isUtilizationSpent(u: PulseUsageUtilization): boolean | null {
-  switch (u.unit) {
-    case 'fraction': return u.value >= 1
-    case 'percent': return u.value >= 100
-    case 'usd': return u.limit === null ? null : u.value >= u.limit
-    case 'credit_balance': return u.remaining <= 0
-    case 'credit_unlimited': return false
-  }
-}
 
 /**
  * Whether one window reading still refuses calls at `nowSec`. A spent reading

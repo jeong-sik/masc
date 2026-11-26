@@ -20,6 +20,7 @@ import {
   acquireViewStream,
   apiGet,
   authSession,
+  extractObserverTopics,
   formatObserved,
   observedAbsent,
   observedUnreported,
@@ -236,28 +237,14 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
   // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE!
   useEffect(() => {
-    const extractTopic = (data: unknown, fallbackEvent: string): string => {
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        const rec = data as Record<string, unknown>
-        if (typeof rec.type === 'string') return rec.type
-        const paramsObj = rec.params
-        if (paramsObj && typeof paramsObj === 'object' && !Array.isArray(paramsObj)) {
-          const p = paramsObj as Record<string, unknown>
-          if (typeof p.type === 'string') return p.type
-          if (typeof p.event_type === 'string') return p.event_type
-        }
-        if (typeof rec.method === 'string') return rec.method
-      }
-      return fallbackEvent
-    }
+    const watchedTopics = new Set([
+      'provider_usage',
+      'tool_metrics',
+      'exact_lane_runs',
+      'dataset_invalidation',
+    ])
     const unsub = subscribeObserverFrames((frame) => {
-      const ev = extractTopic(frame.data, frame.event)
-      if (
-        ev === 'provider_usage'
-        || ev === 'tool_metrics'
-        || ev === 'exact_lane_runs'
-        || ev === 'dataset_invalidation'
-      ) {
+      if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
         if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = setTimeout(() => {
           loadSnapshots('sse')
@@ -268,7 +255,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       unsub()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
-  }, [win])
+  }, [win, epoch])
 
   const effectiveModels = (win === '24h' && sseInstanceId && liveMetrics)
     ? liveMetrics

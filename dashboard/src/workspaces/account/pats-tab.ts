@@ -7,6 +7,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
+import { copyToClipboard } from '../../components/common/copyable-code'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   issuePat,
@@ -156,8 +157,13 @@ export function PatsTab(): VNode {
                 type="button"
                 class="btn-primary"
                 onClick=${() => {
-                  void navigator.clipboard?.writeText(issued.token)
-                  pushShellToast('토큰을 클립보드에 복사했습니다.', 'success')
+                  void copyToClipboard(issued.token).then((copied) => {
+                    if (copied) {
+                      pushShellToast('토큰을 클립보드에 복사했습니다.', 'success')
+                    } else {
+                      pushShellToast('클립보드 복사에 실패했습니다. 토큰을 직접 선택해 복사하세요.', 'error')
+                    }
+                  })
                 }}
               >
                 Copy

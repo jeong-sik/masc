@@ -219,17 +219,39 @@ export function waitingRowDetailLines(detail: unknown): readonly string[] {
 
 const SLOT_COUNTS = ['ok', 'rested', 'failed', 'scheduled', 'reacted', 'chat', 'own', 'unknown'] as const
 
-/** The gate roster's `recent_turns.slots`, summed. Every slot must carry
- *  each count as a non-negative integer and its causes must add up to its
- *  outcomes, as the TUI checks (wire_fleet.ml decode_turn_slot); otherwise
- *  the totals are unknown (`null`) rather than a partial sum. */
-export function decodeRecentTurns(raw: unknown): KeeperTurnBreakdown | null {
+export interface ValidatedTurnSlot {
+  readonly starts_at: number
+  readonly ok: number
+  readonly rested: number
+  readonly failed: number
+  readonly scheduled: number
+  readonly reacted: number
+  readonly chat: number
+  readonly own: number
+  readonly unknown: number
+}
+
+/**
+ * Shared SSOT validator for `recent_turns` (`{ known_since?, slots: [...] }`).
+ * Mirrors `wire_fleet.ml decode_turn_slot`: every slot must carry all 8 counts
+ * as non-negative integers and `outcomes === causes`; otherwise returns `null`
+ * instead of fabricating zero counts or partial sums.
+ */
+export function decodeValidatedTurnSlots(
+  raw: unknown,
+  opts?: { readonly requireStartsAt?: boolean },
+): { readonly known_since: number; readonly slots: ValidatedTurnSlot[] } | null {
   if (!isRecord(raw) || !Array.isArray(raw.slots)) return null
-  const total: Record<(typeof SLOT_COUNTS)[number], number> = {
-    ok: 0, rested: 0, failed: 0, scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0,
-  }
+  const knownSince = typeof raw.known_since === 'number' && Number.isFinite(raw.known_since)
+    ? raw.known_since
+    : 0
+  const slots: ValidatedTurnSlot[] = []
   for (const slot of raw.slots) {
     if (!isRecord(slot)) return null
+    const startsAt = typeof slot.starts_at === 'number' && Number.isFinite(slot.starts_at)
+      ? slot.starts_at
+      : null
+    if (opts?.requireStartsAt && startsAt === null) return null
     const counts: Partial<Record<(typeof SLOT_COUNTS)[number], number>> = {}
     for (const key of SLOT_COUNTS) {
       const value = slot[key]
@@ -240,7 +262,33 @@ export function decodeRecentTurns(raw: unknown): KeeperTurnBreakdown | null {
     const causes = (counts.scheduled ?? 0) + (counts.reacted ?? 0) + (counts.chat ?? 0)
       + (counts.own ?? 0) + (counts.unknown ?? 0)
     if (outcomes !== causes) return null
-    for (const key of SLOT_COUNTS) total[key] += counts[key] ?? 0
+    slots.push({
+      starts_at: startsAt ?? 0,
+      ok: counts.ok!,
+      rested: counts.rested!,
+      failed: counts.failed!,
+      scheduled: counts.scheduled!,
+      reacted: counts.reacted!,
+      chat: counts.chat!,
+      own: counts.own!,
+      unknown: counts.unknown!,
+    })
+  }
+  return { known_since: knownSince, slots }
+}
+
+/** The gate roster's `recent_turns.slots`, summed. Every slot must carry
+ *  each count as a non-negative integer and its causes must add up to its
+ *  outcomes, as the TUI checks (wire_fleet.ml decode_turn_slot); otherwise
+ *  the totals are unknown (`null`) rather than a partial sum. */
+export function decodeRecentTurns(raw: unknown): KeeperTurnBreakdown | null {
+  const validated = decodeValidatedTurnSlots(raw)
+  if (validated === null) return null
+  const total: Record<(typeof SLOT_COUNTS)[number], number> = {
+    ok: 0, rested: 0, failed: 0, scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0,
+  }
+  for (const slot of validated.slots) {
+    for (const key of SLOT_COUNTS) total[key] += slot[key]
   }
   return {
     ok: total.ok,

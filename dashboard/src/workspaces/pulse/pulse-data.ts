@@ -12,10 +12,11 @@
 import { ok, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
-import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
+import { decodeKeeperAsksWire, decodeToolApprovalsWire } from '../../api/hitl-decoders'
 import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/dashboard-goals'
 import { decodeKeeperApprovalQueueState } from '../../lib/gate-observation-state'
 import { decodeKeeperLaneFailures, decodeKeeperPathRest } from '../../api/keeper-diagnostics'
+import { decodeValidatedTurnSlots } from '../keepers/turn-context'
 import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
 import type {
@@ -26,8 +27,6 @@ import type {
   PulseGoalSummary,
   PulseGoalsSnapshot,
   PulseKeeperCostRow,
-  PulseKeeperLaneFailure,
-  PulseKeeperPathRest,
   PulseKeeperRow,
   PulseProviderUsagePoint,
   PulseProviderUsageSnapshot,
@@ -100,34 +99,7 @@ function decodeShell(raw: unknown): PulseShellSnapshot {
 }
 
 function decodeTurnSlots(raw: unknown): { known_since: number; slots: PulseTurnSlot[] } | null {
-  if (!isRecord(raw) || !Array.isArray(raw.slots)) return null
-  const knownSince = asNum(raw.known_since) ?? 0
-  const slots: PulseTurnSlot[] = []
-  for (const s of raw.slots) {
-    if (!isRecord(s)) continue
-    const startsAt = asNum(s.starts_at)
-    if (startsAt === null) continue
-    slots.push({
-      starts_at: startsAt,
-      ok: asNum(s.ok) ?? 0,
-      rested: asNum(s.rested) ?? 0,
-      failed: asNum(s.failed) ?? 0,
-      scheduled: asNum(s.scheduled) ?? 0,
-      reacted: asNum(s.reacted) ?? 0,
-      chat: asNum(s.chat) ?? 0,
-      own: asNum(s.own) ?? 0,
-      unknown: asNum(s.unknown) ?? 0,
-    })
-  }
-  return { known_since: knownSince, slots }
-}
-
-function decodePulsePathRest(raw: unknown): PulseKeeperPathRest | null {
-  return decodeKeeperPathRest(raw)
-}
-
-function decodePulseLaneFailures(raw: unknown): readonly PulseKeeperLaneFailure[] {
-  return decodeKeeperLaneFailures(raw)
+  return decodeValidatedTurnSlots(raw, { requireStartsAt: true })
 }
 
 export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
@@ -172,11 +144,11 @@ export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
       runtime_blocker_summary: asStr(item.runtime_blocker_summary),
       runtime_blocker_signature: asStr(item.runtime_blocker_signature),
       runtime_blocker_class: asStr(item.runtime_blocker_class),
-      runtime_path_rest: decodePulsePathRest(item.runtime_path_rest),
+      runtime_path_rest: decodeKeeperPathRest(item.runtime_path_rest),
       operator_disposition: asStr(item.operator_disposition),
       operator_disposition_reason: asStr(item.operator_disposition_reason),
       failing_since: asNum(item.failing_since),
-      runtime_lane_failures: decodePulseLaneFailures(item.runtime_lane_observation),
+      runtime_lane_failures: decodeKeeperLaneFailures(item.runtime_lane_observation),
       last_failure: lastFailure,
       recent_turns: decodeTurnSlots(item.recent_turns),
       candle_balance_milli: candleVal,
@@ -305,28 +277,15 @@ export function decodeApprovals(raw: unknown): PulseApprovalItem[] {
 }
 
 function decodeAsks(raw: unknown): PulseAskItem[] {
-  const rec = isRecord(raw) ? raw : {}
-  const list = Array.isArray(rec.asks) ? rec.asks : []
-  const out: PulseAskItem[] = []
-  for (const item of list) {
-    if (!isRecord(item)) continue
-    if (!isOpenKeeperAskRow(item)) continue
-    const askId = asStr(item.ask_id) ?? asStr(item.id)
-    const keeper = asStr(item.keeper) ?? asStr(item.keeper_name)
-    if (!askId || !keeper) continue
-    const questions = Array.isArray(item.questions) ? item.questions : []
-    const firstPrompt = questions.length > 0 && isRecord(questions[0])
-      ? asStr(questions[0].prompt) ?? asStr(questions[0].question)
-      : null
-    out.push({
-      ask_id: askId,
-      keeper,
-      summary: asStr(item.summary) ?? asStr(item.title) ?? firstPrompt ?? 'Keeper 응답 대기',
-      created_at: asNum(item.created_at) ?? asNum(item.asked_at),
-      question_count: Math.max(1, questions.length),
-    })
-  }
-  return out
+  const decoded = decodeKeeperAsksWire(raw)
+  if (!decoded.ok) return []
+  return decoded.asks.map((ask) => ({
+    ask_id: ask.askId,
+    keeper: ask.keeper,
+    summary: ask.promptSummary ?? 'Keeper 응답 대기',
+    created_at: ask.askedAt,
+    question_count: ask.questionCount,
+  }))
 }
 
 function decodeGoalNode(g: unknown): PulseGoalSummary | null {
@@ -556,7 +515,7 @@ export async function loadPulseBundle(
       ? Promise.resolve(observedAbsent<readonly PulseAskItem[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseAskItem[]>(
           PULSE_CACHE_KEYS.asks,
-          (signal) => wrapResult(apiGet('/api/v1/keepers/asks', { signal, decode: decodeAsks })),
+          (signal) => wrapResult(apiGet('/api/v1/keepers/asks?include_resolved=false', { signal, decode: decodeAsks })),
           { ttlMs: 10_000, topics: ['keeper_ask', 'keeper_asks_changed', 'ask'], reason },
         ),
     resourceCache.fetch<PulseGoalsSnapshot>(

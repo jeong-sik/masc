@@ -304,6 +304,13 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
     ])
     expect(totals.data).toEqual([[], []])
     expect(totals.compactionTurns).toEqual([])
+
+    // Rows with invalid/zero ts must be excluded instead of plotting absolute_turn onto the Unix time axis
+    const filteredTs = buildContextFillSeries([
+      { ...sampleRecord, absolute_turn: 1, ts: 0, input_tokens: 100_000 },
+      { ...sampleRecord, absolute_turn: 2, ts: 1_700_000_000, input_tokens: 80_000 },
+    ])
+    expect(filteredTs.data).toEqual([[1_700_000_000], [40]])
   })
 
   it('builds Portrait preview URLs (bare item id + 5-key object) and decimal-string Candle values', () => {

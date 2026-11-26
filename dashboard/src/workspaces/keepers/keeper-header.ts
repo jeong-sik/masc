@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { activeWorkspaceId, authSession, sessionEpoch } from '../../core/auth'
+import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconnect } from '../../core/observer'
 import { formatObserved, resourceCache, type Observed } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -77,6 +77,16 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const deleteInputRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeper.name)
+  activeKeeperRef.current = keeper.name
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const closeDeleteModal = () => {
     setDeleteOpen(false)
@@ -181,9 +191,12 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     label: string,
     fn: () => Promise<{ ok: boolean; error?: { message: string } }>,
   ) => {
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     setBusyAction(label)
     setStatusMessage(null)
     const res = await fn()
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     setBusyAction(null)
     if (!res.ok) {
       setStatusMessage({ tone: 'bad', text: `${label} 실패: ${res.error?.message ?? '오류'}` })
@@ -194,10 +207,13 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   }
 
   const handleConfirmDelete = async () => {
-    if (deleteConfirmName.trim() !== keeper.name) return
+    const targetKeeper = keeper.name
+    if (deleteConfirmName.trim() !== targetKeeper) return
+    const startEpoch = currentSessionEpoch()
     setBusyAction('delete')
     setDeleteError(null)
-    const res = await deleteKeeperAction(keeper.name)
+    const res = await deleteKeeperAction(targetKeeper)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     setBusyAction(null)
     if (!res.ok) {
       const msg = `삭제 실패: ${res.error.message}`

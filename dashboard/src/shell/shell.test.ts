@@ -455,7 +455,7 @@ describe('Proposal A+ Shell components', () => {
 
   it('unifies Gate, Goal Confirmation, Verification, and Schedules across inboxPendingCount, FastApprovalStrip, and QueueContextOverlayBody', async () => {
     const gates = parseGateQueuePayload(
-      { approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] },
+      { approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', sequence: 1, phase: 'human_required', waiting_s: 42 }] },
       'default',
     )
     const goals = parseAwaitingGoalsPayload(
@@ -518,7 +518,7 @@ describe('Proposal A+ Shell components', () => {
       }
       if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
       if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
-      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', sequence: 1, phase: 'human_required', waiting_s: 42 }] })
       if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [{ id: 'goal-1', title: 'Release v0.83', phase: 'awaiting_confirmation' }] })
       if (url.includes('/api/v1/verification/requests')) return json({ requests: [{ request_id: 'vr-1', task_id: 't-1', task_title: 'Verify fix', submitted_by: 'dreamer' }] })
       return json({})

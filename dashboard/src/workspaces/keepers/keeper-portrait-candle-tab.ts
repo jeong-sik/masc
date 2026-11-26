@@ -10,7 +10,8 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { EQUIPMENT_IDS, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -51,21 +52,46 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
   const [items, setItems] = useState<KeeperItemsData | null>(null)
   const [previewItemId, setPreviewItemId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeper.name)
+  const loadAbortRef = useRef<AbortController | null>(null)
+  activeKeeperRef.current = keeper.name
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      loadAbortRef.current?.abort()
+    }
+  }, [])
 
   const loadAll = useCallback(async () => {
+    loadAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    loadAbortRef.current = ctrl
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     setLoading(true)
     const [ledRes, itRes] = await Promise.all([
-      fetchKeeperCandleLedgerApi(keeper.name, 100),
-      fetchKeeperItemsApi(keeper.name),
+      fetchKeeperCandleLedgerApi(targetKeeper, 100, ctrl.signal),
+      fetchKeeperItemsApi(targetKeeper, ctrl.signal),
     ])
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) {
+      return
+    }
     setLoading(false)
     if (ledRes.ok) setLedger(ledRes.value)
     if (itRes.ok) setItems(itRes.value)
   }, [keeper.name])
 
   useEffect(() => {
+    setLedger(null)
+    setItems(null)
     setPreviewItemId(null)
     void loadAll()
+    return () => {
+      loadAbortRef.current?.abort()
+    }
   }, [loadAll])
 
   const ownedSet = useMemo(() => {

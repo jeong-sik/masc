@@ -183,7 +183,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
             `
           : html`
               <${KeeperHeader}
-                key=${`hdr:${activeKeeper.name}`}
+                key=${`hdr:${epoch}:${activeKeeper.name}`}
                 keeper=${activeKeeper}
                 turnStatus=${turns.kind}
                 activeTab=${activeTab}
@@ -205,20 +205,20 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                 `}
                 ${activeTab === 'memory' && html`
                   <${KeeperMemoryTab}
-                    key=${`mem:${activeKeeper.name}`}
+                    key=${`mem:${epoch}:${activeKeeper.name}`}
                     keeperName=${activeKeeper.name}
                   />
                 `}
                 ${activeTab === 'portrait-candle' && html`
                   <${KeeperPortraitCandleTab}
-                    key=${`pc:${activeKeeper.name}`}
+                    key=${`pc:${epoch}:${activeKeeper.name}`}
                     keeper=${activeKeeper}
                     onMutated=${() => void refreshRoster('manual')}
                   />
                 `}
                 ${activeTab === 'work-sandbox' && html`
                   <${KeeperWorkSandboxTab}
-                    key=${`ws:${activeKeeper.name}`}
+                    key=${`ws:${epoch}:${activeKeeper.name}`}
                     keeperName=${activeKeeper.name}
                     onNavigate=${props.onNavigate}
                     onInspect=${props.onInspect}
@@ -226,7 +226,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                 `}
                 ${activeTab === 'config' && html`
                   <${KeeperConfigTab}
-                    key=${`cfg:${activeKeeper.name}`}
+                    key=${`cfg:${epoch}:${activeKeeper.name}`}
                     keeperName=${activeKeeper.name}
                     onMutated=${() => void refreshRoster('manual')}
                   />

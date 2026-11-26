@@ -24,7 +24,12 @@ import {
 } from '../../core/observer'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
-import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
+import {
+  decodeGateQueueStrict,
+  decodeKeeperAsksWire,
+  decodeToolApprovalsWire,
+  readGateUnavailableReason,
+} from '../../api/hitl-decoders'
 import { decodeApprovalQueuePhase, normalizeKeeperSummaryAttemptDisposition } from '../../api/board'
 import { decodeGateJudgeLane, normalizeGateDecisionSource } from '../../api/dashboard-gate'
 import { approvalPhaseView, decisionSourceLabel, judgeLaneText } from '../../lib/gate-approval-labels'
@@ -42,15 +47,12 @@ import {
   asFiniteNumber,
   asNonEmptyString,
   asSafeInt,
-  asString,
   decodeGoalConfirmation,
   decodeGoalItem,
   formatRelativeTime,
   isMultiAccountSession,
   isRecord,
   readWorkspacePrecondition,
-  type AskChoiceItem,
-  type AskQuestionItem,
   type GatePendingItem,
   type GateResolvedAuditRow,
   type GoalConfirmationEvidence,
@@ -108,68 +110,33 @@ export function decodeToolApprovals(raw: unknown): ToolApprovalWait[] {
 }
 
 function decodeKeeperAsks(raw: unknown): KeeperAskItem[] {
-  if (!isRecord(raw) || !Array.isArray(raw.asks)) {
-    throw new Error('Keeper 질문 응답에서 질문 목록을 확인할 수 없습니다.')
-  }
+  const decoded = decodeKeeperAsksWire(raw)
+  if (!decoded.ok) throw new Error(decoded.error)
   const out: KeeperAskItem[] = []
-  for (const row of raw.asks) {
-    if (!isRecord(row)) continue
-    if (!isOpenKeeperAskRow(row)) continue
-    const askId = asNonEmptyString(row.ask_id)
-    const keeper = asNonEmptyString(row.keeper)
-    if (!askId || !keeper || !Array.isArray(row.questions)) continue
-    const questions: AskQuestionItem[] = []
-    for (const q of row.questions) {
-      if (!isRecord(q)) continue
-      const qid = asNonEmptyString(q.question_id)
-      const prompt = asNonEmptyString(q.prompt)
-      if (!qid || !prompt) continue
-      const mode = q.mode === 'multi' ? 'multi' : 'single'
-      const ft = isRecord(q.free_text) ? q.free_text : null
-      const choices: AskChoiceItem[] = []
-      if (Array.isArray(q.choices)) {
-        for (const c of q.choices) {
-          if (!isRecord(c)) continue
-          const cid = asNonEmptyString(c.choice_id)
-          const label = asNonEmptyString(c.label)
-          if (!cid || !label) continue
-          choices.push({ choiceId: cid, label, description: asNonEmptyString(c.description) })
-        }
-      }
-      questions.push({
-        questionId: qid,
-        header: asString(q.header, qid),
-        prompt,
-        mode,
-        allowFreeText: ft?.allowed === true,
-        freeTextHint: ft ? asNonEmptyString(ft.hint) : null,
-        choices,
-      })
-    }
-    if (questions.length === 0) continue
-    const askedAt = asFiniteNumber(row.asked_at) ?? 0
+  for (const ask of decoded.asks) {
+    if (ask.questions.length === 0) continue
     out.push({
-      askId,
-      keeper,
-      askedAt,
-      context: asNonEmptyString(row.context),
-      questions,
-      revision: asNonEmptyString(row.revision) ?? `a-${askedAt}`,
+      askId: ask.askId,
+      keeper: ask.keeper,
+      askedAt: ask.askedAt ?? 0,
+      context: ask.context,
+      questions: ask.questions.map((q) => ({
+        questionId: q.questionId,
+        header: q.header,
+        prompt: q.prompt,
+        mode: q.mode,
+        allowFreeText: q.allowFreeText,
+        freeTextHint: q.freeTextHint,
+        choices: q.choices.map((c) => ({
+          choiceId: c.choiceId,
+          label: c.label,
+          description: c.description,
+        })),
+      })),
+      revision: ask.revision,
     })
   }
   return out
-}
-
-function readGateUnavailableReason(stateObj: unknown): string | null {
-  if (!isRecord(stateObj)) return null
-  if (stateObj.state !== 'unavailable') return null
-  return (
-    asNonEmptyString(stateObj.operator_detail)
-    ?? asNonEmptyString(stateObj.detail)
-    ?? asNonEmptyString(stateObj.error)
-    ?? asNonEmptyString(stateObj.title)
-    ?? 'unavailable'
-  )
 }
 
 function decodeDecisionKind(v: unknown): GateResolvedAuditRow['decision'] | null {
@@ -220,49 +187,34 @@ export function decodeGatePayload(raw: unknown): {
   judgeLane: GateJudgeLane | null
 } {
   if (!isRecord(raw)) throw new Error('Channel Gate 응답 형식이 잘못되었습니다.')
-  let queueError = readGateUnavailableReason(raw.approval_queue_state)
-    ?? (Array.isArray(raw.approval_queue) ? null : '응답에서 대기 목록을 확인할 수 없습니다.')
+  const queueDecoded = decodeGateQueueStrict(raw)
+  const queueError = queueDecoded.ok ? null : queueDecoded.error
   let auditError = readGateUnavailableReason(raw.recent_resolved_state)
     ?? (Array.isArray(raw.recent_resolved) ? null : '응답에서 결정 이력을 확인할 수 없습니다.')
-  // The server writes id, keeper_name, tool_name and sequence on every queue
-  // row (keeper_approval_queue_projection.ml) and fails the whole history when
-  // one audit row breaks its contract (audit.ml project_resolved_rows). A row
-  // without them is the same failure here, not a row to skip or fill in.
-  let pending: GatePendingItem[] = []
-  if (queueError === null && Array.isArray(raw.approval_queue)) {
-    for (const row of raw.approval_queue) {
-      const id = isRecord(row) ? asNonEmptyString(row.id) : null
-      const keeper = isRecord(row) ? asNonEmptyString(row.keeper_name) : null
-      const toolName = isRecord(row) ? asNonEmptyString(row.tool_name) : null
-      const sequence = isRecord(row) ? asSafeInt(row.sequence) : null
-      // board.ts normalizeKeeperApprovalQueueItem rejects a sequence <= 0 too:
-      // it is the revision TargetLockedAction locks the decision to.
-      if (!isRecord(row) || !id || !keeper || !toolName || sequence === null || sequence <= 0) {
-        queueError = '대기 목록에 서버 계약과 다른 줄이 있어요(id·keeper_name·tool_name·sequence).'
-        pending = []
-        break
-      }
-      const sumStatus = isRecord(row.summary_status) ? row.summary_status : null
-      const sumObj = sumStatus && isRecord(sumStatus.summary) ? sumStatus.summary : null
-      pending.push({
-        id,
-        keeper,
-        toolName,
-        inputPreview: asNonEmptyString(row.input_preview) ?? (row.input ? JSON.stringify(row.input) : null),
-        waitingSec: asFiniteNumber(row.waiting_s),
-        phase: decodeApprovalQueuePhase(row.phase),
-        disposition: normalizeKeeperSummaryAttemptDisposition(row.summary_attempt_disposition),
-        sequence,
-        taskId: asNonEmptyString(row.task_id),
-        goalId: asNonEmptyString(row.goal_id),
-        summaryText: sumObj ? asNonEmptyString(sumObj.context_summary) : null,
-        rationale: sumObj ? asNonEmptyString(sumObj.rationale) : null,
-        keyQuestions: Array.isArray(sumObj?.key_questions)
-          ? sumObj.key_questions.flatMap((question) => typeof question === 'string' && question.trim() ? [question] : [])
-          : [],
+  const pending: GatePendingItem[] = queueDecoded.ok
+    ? queueDecoded.rows.map((item) => {
+        const row = item.raw
+        const sumStatus = isRecord(row.summary_status) ? row.summary_status : null
+        const sumObj = sumStatus && isRecord(sumStatus.summary) ? sumStatus.summary : null
+        return {
+          id: item.id,
+          keeper: item.keeper,
+          toolName: item.toolName,
+          inputPreview: asNonEmptyString(row.input_preview) ?? (row.input ? JSON.stringify(row.input) : null),
+          waitingSec: item.waitingSec,
+          phase: decodeApprovalQueuePhase(row.phase),
+          disposition: normalizeKeeperSummaryAttemptDisposition(row.summary_attempt_disposition),
+          sequence: item.sequence,
+          taskId: asNonEmptyString(row.task_id),
+          goalId: asNonEmptyString(row.goal_id),
+          summaryText: sumObj ? asNonEmptyString(sumObj.context_summary) : null,
+          rationale: sumObj ? asNonEmptyString(sumObj.rationale) : null,
+          keyQuestions: Array.isArray(sumObj?.key_questions)
+            ? sumObj.key_questions.flatMap((question) => typeof question === 'string' && question.trim() ? [question] : [])
+            : [],
+        }
       })
-    }
-  }
+    : []
   let resolved: GateResolvedAuditRow[] = []
   if (auditError === null && Array.isArray(raw.recent_resolved)) {
     for (const row of raw.recent_resolved) {

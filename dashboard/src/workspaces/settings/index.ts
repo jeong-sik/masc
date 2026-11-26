@@ -60,7 +60,7 @@ interface ConfigPreview {
 
 function provenanceStyle(prov: string) {
   const p = prov.toLowerCase()
-  if (p === 'env') return { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
+  if (p === 'env_override' || p === 'env') return { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
   if (p === 'keeper') return { background: 'var(--brass-soft)', border: '1px solid var(--brass-border)', color: 'var(--brass-1)' }
   if (p === 'project' || p === 'global') return { background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)' }
   return { background: 'var(--idle-soft)', border: '1px solid var(--idle-border)', color: 'var(--fg-3)' }

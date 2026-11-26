@@ -1,6 +1,22 @@
-import { describe, expect, it } from 'vitest'
-import { decodeToolApprovalsWire, isOpenKeeperAskRow } from './hitl-decoders'
-import { parseKeeperAsksPayload, parseToolApprovalsPayload } from '../shell/shell-state'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  decodeGateQueueStrict,
+  decodeKeeperAsksWire,
+  decodeToolApprovalsStrict,
+  decodeToolApprovalsWire,
+  isOpenKeeperAskRow,
+} from './hitl-decoders'
+import {
+  hitlSourceStatus,
+  parseGateQueuePayload,
+  parseKeeperAsksPayload,
+  parseToolApprovalsPayload,
+  pendingApprovals,
+  refreshPendingHitl,
+  resetShellStateForTests,
+  submitFastToolApproval,
+} from '../shell/shell-state'
+import { authSession, resetAuthStateForTests } from '../core/auth'
 
 describe('Shared HITL wire decoders (SSOT)', () => {
   it('decodes tool approvals consistently across string/object args, finite asked_at, and numeric revisions', () => {
@@ -98,5 +114,68 @@ describe('Shared HITL wire decoders (SSOT)', () => {
       'ws-1',
     )
     expect(openShellAsks.map((a) => a.askId)).toEqual(['open-1'])
+  })
+
+  it('enforces strict Channel Gate queue contract across Inbox and Shell and rejects unconfirmed fast approvals', async () => {
+    expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 2 }] }).ok).toBe(true)
+    expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash' }] }).ok).toBe(false)
+    expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 0 }] }).ok).toBe(false)
+    expect(parseGateQueuePayload({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash' }] }, 'default')).toEqual([])
+
+    expect(decodeKeeperAsksWire({ asks: [{ ask_id: 'a1', keeper: 'k1', question: 'ok?' }, { ask_id: 'a2' }] })).toMatchObject({
+      ok: true,
+      asks: [{ askId: 'a1', keeper: 'k1', promptSummary: 'ok?' }],
+    })
+    expect(decodeKeeperAsksWire({ open: [] }).ok).toBe(false)
+    expect(() => decodeToolApprovalsStrict({ pending: [{ keeper: 'k', tool_call_id: 'tc-1' }] })).toThrow()
+
+    resetAuthStateForTests()
+    resetShellStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const malformedGateFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash' }] })
+      if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [] })
+      return json({})
+    })
+    await refreshPendingHitl(malformedGateFetch as unknown as typeof fetch)
+    expect(hitlSourceStatus.value.gate.kind).toBe('failed')
+
+    const item = {
+      approvalId: 'ap-1',
+      keeper: 'sangsu',
+      toolCallId: 'tc-1',
+      tool: 'bash',
+      args: '{}',
+      question: 'Run?',
+      because: 'guard',
+      askedAt: 1700000000,
+      workspaceId: 'default',
+      revision: '1',
+    }
+    pendingApprovals.value = [item]
+    const unconfirmedFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ settled: false, remembered: false }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    const badReceipt = await submitFastToolApproval(item, 'approve', unconfirmedFetch as unknown as typeof fetch)
+    expect(badReceipt.ok).toBe(false)
+    expect(pendingApprovals.value).toHaveLength(1)
+
+    const rememberedFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ settled: false, remembered: true }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    const okReceipt = await submitFastToolApproval(item, 'approve', rememberedFetch as unknown as typeof fetch)
+    expect(okReceipt.ok).toBe(true)
+    expect(pendingApprovals.value).toHaveLength(0)
   })
 })

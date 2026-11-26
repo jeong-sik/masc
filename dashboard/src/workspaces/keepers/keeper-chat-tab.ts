@@ -894,6 +894,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setTurnPreviews([])
       setHistoryError(null)
       setLoadingHistory(true)
+      btwAbortRef.current?.abort()
+      setBtwOpen(false)
+      setBtw({ status: 'idle', prompt: '', reply: '', error: null })
       recover()
     })
     setLoadingHistory(true)
@@ -1047,36 +1050,47 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const runBtwQuery = async (promptText: string) => {
     const trimmed = promptText.trim()
     if (!trimmed) return
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
     btwAbortRef.current?.abort()
     const btwController = new AbortController()
     btwAbortRef.current = btwController
+    const isStillActive = () =>
+      mountedRef.current
+      && activeKeeperRef.current === targetKeeper
+      && isEpochCurrent(startEpoch)
+      && !btwController.signal.aborted
     setBtwOpen(true)
     setBtw({ status: 'streaming', prompt: trimmed, reply: '', error: null })
     const operationId = `btw-${randomUuid()}`
     const outcome = await streamKeeperChat({
-      keeper: keeper.name,
+      keeper: targetKeeper,
       message: trimmed,
       operationId,
       mode: { kind: 'btw' },
       signal: btwController.signal,
       callbacks: {
         onTextDelta: (delta) => {
+          if (!isStillActive()) return
           setBtw((cur) => ({ ...cur, reply: cur.reply + delta }))
         },
         onReplyDetails: (reply) => {
+          if (!isStillActive()) return
           setBtw((cur) => ({ ...cur, reply: reply || cur.reply }))
         },
         onError: (msg) => {
+          if (!isStillActive()) return
           setBtw((cur) => ({ ...cur, status: 'error', error: msg }))
         },
         onFinished: () => {
+          if (!isStillActive()) return
           setBtw((cur) => ({ ...cur, status: cur.status === 'error' ? 'error' : 'done' }))
         },
       },
     })
-    if (!outcome.terminal && !outcome.error && !btwController.signal.aborted) {
-      const rec = await recoverCutReplyFromJournal(keeper.name, operationId)
-      if (rec.ok && !btwController.signal.aborted) {
+    if (!outcome.terminal && !outcome.error && isStillActive()) {
+      const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
+      if (rec.ok && isStillActive()) {
         setBtw((cur) => ({
           ...cur,
           status: rec.value.error ? 'error' : 'done',
@@ -1158,9 +1172,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           }))
           return
         }
+        const accepted = acceptedReplyState(res.state ?? '')
         updateEntryById(userId, (m) => ({
           ...m,
-          deliveryState: res.state === 'Queued' ? 'Queued' : 'Delivered',
+          deliveryState: accepted.delivery,
+          errorDetail: accepted.detail ?? m.errorDetail,
         }))
         refreshChatRef.current('queue', 'waiting')
         props.onMutated()

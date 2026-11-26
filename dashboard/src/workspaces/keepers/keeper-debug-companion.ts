@@ -11,7 +11,8 @@ import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
-import { activeWorkspaceId } from '../../core/auth'
+import { activeWorkspaceId, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
@@ -19,6 +20,7 @@ import type { TurnRecordEntry, TurnRecordsResponse } from '../../api/dashboard-t
 import { turnContextWindow } from '../../lib/turn-context-window'
 import {
   fetchConfigSchemaApi,
+  patchOpForField,
   postConfigPatchApi,
   type ConfigPatchResult,
   type ConfigSchemaData,
@@ -91,7 +93,8 @@ export function buildContextFillSeries(records: readonly TurnRecordEntry[]): {
   let prevPct: number | null = null
 
   for (const r of ordered) {
-    const ts = r.ts > 0 ? r.ts : r.absolute_turn
+    if (!Number.isFinite(r.ts) || r.ts <= 0) continue
+    const ts = r.ts
     // `input_tokens` already includes cached tokens (lib/types/turn_record.mli:52-58);
     // do not double-count `cache_read_input_tokens` + `cache_creation_input_tokens`.
     const fill = turnContextWindow(r).percent
@@ -165,12 +168,25 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const contextSeqRef = useRef(0)
   const memorySeqRef = useRef(0)
   const cfgSeqRef = useRef(0)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeperName)
+  const cfgFieldKeyRef = useRef(cfgFieldKey)
+  activeKeeperRef.current = keeperName
+  cfgFieldKeyRef.current = cfgFieldKey
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     traceSeqRef.current += 1
     contextSeqRef.current += 1
     memorySeqRef.current += 1
     cfgSeqRef.current += 1
+    cfgFieldKeyRef.current = ''
     setTurns(null)
     setToolCalls(null)
     setRawTraces([])
@@ -196,13 +212,14 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   const loadTrace = useCallback(async () => {
     const seq = ++traceSeqRef.current
+    const startEpoch = currentSessionEpoch()
     setTraceError(null)
     const [tr, tc, rt] = await Promise.all([
       fetchKeeperTurnRecordsApi(keeperName, 60),
       fetchKeeperToolCallsApi(keeperName, 50),
       fetchKeeperRawTracesApi(keeperName, 12),
     ])
-    if (seq !== traceSeqRef.current) return
+    if (!mountedRef.current || seq !== traceSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
     if (tr.ok) setTurns(tr.value)
     else errs.push(`턴 기록: ${tr.error.message}`)
@@ -215,6 +232,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   const loadContext = useCallback(async () => {
     const seq = ++contextSeqRef.current
+    const startEpoch = currentSessionEpoch()
     setContextError(null)
     const [tr, lp, cp, os] = await Promise.all([
       fetchKeeperTurnRecordsApi(keeperName, 60),
@@ -222,14 +240,14 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
       fetchKeeperCheckpointsApi(keeperName),
       fetchKeeperMemoryOsInternalsApi(keeperName),
     ])
-    if (seq !== contextSeqRef.current) return
+    if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
     if (tr.ok) {
       setTurns(tr.value)
       const latestTurnRef = tr.value.entries[0]?.record.turn_ref
       if (latestTurnRef) {
         const pi = await fetchKeeperProviderInputApi(keeperName, latestTurnRef)
-        if (seq !== contextSeqRef.current) return
+        if (!mountedRef.current || seq !== contextSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
         if (pi.ok) setProviderInput(pi.value)
         else errs.push(`Provider 입력: ${pi.error.message}`)
       } else {
@@ -249,12 +267,13 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   const loadMemory = useCallback(async () => {
     const seq = ++memorySeqRef.current
+    const startEpoch = currentSessionEpoch()
     setMemError(null)
     const [mf, mj] = await Promise.all([
       fetchKeeperMemoryFactsApi(keeperName),
       fetchKeeperMemoryJournalApi(keeperName, 20),
     ])
-    if (seq !== memorySeqRef.current) return
+    if (!mountedRef.current || seq !== memorySeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     const errs: string[] = []
     if (mf.ok) setMemFacts(mf.value)
     else errs.push(`Memory Facts: ${mf.error.message}`)
@@ -265,21 +284,24 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   const loadConfigSchema = useCallback(async () => {
     const seq = ++cfgSeqRef.current
+    const startEpoch = currentSessionEpoch()
     setCfgError(null)
     const res = await fetchConfigSchemaApi(`keeper:${keeperName}`)
-    if (seq !== cfgSeqRef.current) return
+    if (!mountedRef.current || seq !== cfgSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setCfgError(res.error.message)
       return
     }
     setCfgSchema(res.value)
     const firstWritable = res.value.categories.flatMap((c) => c.fields).find((f) => f.writable && !f.secret)
-    if (firstWritable) {
-      setCfgFieldKey((cur) => {
-        if (cur) return cur
-        setCfgFieldValue(String(firstWritable.current_value ?? ''))
-        return firstWritable.full_key
-      })
+    if (firstWritable && !cfgFieldKeyRef.current) {
+      cfgFieldKeyRef.current = firstWritable.full_key
+      setCfgFieldKey(firstWritable.full_key)
+      setCfgFieldValue(
+        Array.isArray(firstWritable.current_value)
+          ? firstWritable.current_value.join(', ')
+          : String(firstWritable.current_value ?? ''),
+      )
     }
   }, [keeperName])
 
@@ -304,12 +326,15 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const cacheSegs = useMemo(() => computePromptCacheSegments(turnRecords[0] ?? null), [turnRecords])
 
   const handleOpenRawTrace = async (file: string) => {
-    const res = await fetchKeeperRawTracePageApi(keeperName, file, 30)
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
+    const res = await fetchKeeperRawTracePageApi(targetKeeper, file, 30)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (res.ok) {
       setRawTracePage(res.value)
       props.onInspect({
         title: `Raw Trace · ${file}`,
-        subtitle: keeperName,
+        subtitle: targetKeeper,
         kind: 'raw_trace',
         data: res.value,
       })
@@ -317,8 +342,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleClearHistory = async () => {
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setContextStatus('대화 컨텍스트 초기화 중…')
-    const res = await clearKeeperHistoryAction(keeperName, 'operator_debug_companion_clear', true)
+    const res = await clearKeeperHistoryAction(targetKeeper, 'operator_debug_companion_clear', true)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setContextStatus(`Clear 실패: ${res.error.message}`)
       return
@@ -329,8 +357,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleResetKeeper = async () => {
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setContextStatus('Keeper 리셋 중…')
-    const res = await resetKeeperAction(keeperName)
+    const res = await resetKeeperAction(targetKeeper)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setContextStatus(`Reset 실패: ${res.error.message}`)
       return
@@ -341,6 +372,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const handleMemoryAct = async () => {
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setMemActStatus(null)
     let payload: MemoryActPayload
     if (memActKind === 'resume') {
@@ -361,7 +394,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
         },
       }
     }
-    const res = await postKeeperMemoryAct(keeperName, payload)
+    const res = await postKeeperMemoryAct(targetKeeper, payload)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setMemActStatus(`오류: ${res.error.message}`)
       return
@@ -374,18 +408,21 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     if (!cfgSchema || !cfgFieldKey) return
     const field = cfgSchema.categories.flatMap((c) => c.fields).find((f) => f.full_key === cfgFieldKey)
     if (!field) return
+    const change = patchOpForField(field, cfgFieldValue, false, ',')
+    if (!change) {
+      setCfgError(`${field.full_key} (${field.type})에 유효한 값을 입력하세요.`)
+      return
+    }
+    const targetKeeper = keeperName
+    const startEpoch = currentSessionEpoch()
     setCfgError(null)
-    let parsedValue: unknown = cfgFieldValue
-    if (field.type === 'bool' || field.type === 'boolean') parsedValue = cfgFieldValue === 'true'
-    else if (field.type === 'int' || field.type === 'integer') parsedValue = Number.parseInt(cfgFieldValue, 10)
-    else if (field.type === 'float' || field.type === 'number') parsedValue = Number.parseFloat(cfgFieldValue)
-
     const res = await postConfigPatchApi({
-      target: `keeper:${keeperName}`,
+      target: `keeper:${targetKeeper}`,
       expectedSha256: cfgSchema.file_sha256,
       dryRun: true,
-      changes: [{ op: 'set', table: field.table, key: field.key, value: parsedValue }],
+      changes: [change],
     })
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setCfgError(res.error.message)
       return
@@ -758,7 +795,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                   setCfgFieldKey(nextKey)
                   setCfgDiff(null)
                   const f = cfgSchema.categories.flatMap((c) => c.fields).find((x) => x.full_key === nextKey)
-                  setCfgFieldValue(f ? String(f.current_value ?? '') : '')
+                  setCfgFieldValue(
+                    f
+                      ? (Array.isArray(f.current_value) ? f.current_value.join(', ') : String(f.current_value ?? ''))
+                      : '',
+                  )
                 }}
               >
                 ${cfgSchema.categories.flatMap((c) => c.fields).filter((f) => f.writable && !f.secret).map((f) => html`
@@ -779,7 +820,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
             ${cfgDiff && html`
               <div>
                 <span class="kp-pill" data-tone="info">reload: ${cfgDiff.reload_scope}</span>
-                <pre class="kp-diff">${cfgDiff.unified_diff || '(변경 없음)'}</pre>
+                <${UnifiedDiffView} diffText=${cfgDiff.unified_diff || '(변경 없음)'} inline=${true} />
               </div>
             `}
           </div>

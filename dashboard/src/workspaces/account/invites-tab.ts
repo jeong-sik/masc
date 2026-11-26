@@ -6,6 +6,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
+import { copyToClipboard } from '../../components/common/copyable-code'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   issueInvite,
@@ -132,8 +133,13 @@ export function InvitesTab(): VNode {
                 type="button"
                 class="btn-primary"
                 onClick=${() => {
-                  void navigator.clipboard?.writeText(fullInviteUrl)
-                  pushShellToast('초대 링크를 복사했습니다.', 'success')
+                  void copyToClipboard(fullInviteUrl).then((copied) => {
+                    if (copied) {
+                      pushShellToast('초대 링크를 복사했습니다.', 'success')
+                    } else {
+                      pushShellToast('클립보드 복사에 실패했습니다. 링크를 직접 선택해 복사하세요.', 'error')
+                    }
+                  })
                 }}
               >
                 Copy

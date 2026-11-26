@@ -1,5 +1,105 @@
 ## [Unreleased]
 
+## [0.83.4] - 2026-11-26
+
+### Added
+
+- Read verified Discord image attachments in Keeper turns and keep the accepted image when a turn resumes (#54829).
+- TUI theme palettes can be edited in TOML files under <base-path>/.masc/config/themes/ (or --themes-dir); built-in colors remain the fallback (#54830).
+- App-internal mouse drag-select for the TUI: with mouse mode on (bare m), dragging selects exactly the dragged text and copies it; the default stays native terminal drag-select (#54833).
+- TUI Infra › Code Review lists changed files next to the selected file's diff. `<`/`>` pick a file, `{`/`}` jump between hunks, Enter opens the line, and wide terminals show old and new side by side (#54840).
+- RFC: open tools in the turn preview carry their planned cohort and where they reach, so the Keeper chat can show parallel and external calls (#54842).
+- Keeper filesystem tool-call rows record `file_target`: the relative path the tool resolved and the lines it read, wrote or edited (#54843).
+- TUI Keepers › Trace › Tool calls › `o` opens the selected call's target file at the touched line. Enter opens it in Infra › Code; Esc returns to the row (#54846).
+- The turn preview tells which open tools agent core planned as one batch and whether that batch runs at once (#54851).
+- The turn preview tells where each open tool call reaches: MASC state, the sandbox, the network or a model provider (#54856).
+- The Keeper chat draws a running turn's open work one row each, gathers calls that run at once, and marks calls that leave MASC (#54857).
+- The web dashboard chat shows a running turn's open work one row each: reasoning, answer, each tool call with its stage and time, calls that run at once under one header, and calls that reach the network or a model provider (#54869).
+- Operators can declare per-model context thresholds in `[[models.<id>]]`: `context-rollover-threshold` (0-1), `tail-window-atoms` (positive int), and `compaction-keep-ratio` (0-1). Absent keys keep the built-in fallbacks (0.80, 60, 0.25) (#54873).
+
+### Changed
+
+- `/api/v1/git/diff` sends `@@` hunk headers as `hunk` rows and reads each hunk by its line counts, so a deleted `-- comment` line is no longer dropped as a file header. A malformed diff is reported as a failure instead of a shorter diff (#54837).
+- The TUI and the dashboard no longer read `phase`, `tool_in_flight` or `elapsed_ms` from an active turn. The server never sent a usable value for them: the turns answer has none, and the in-turn heartbeat only writes the constant "turn_running" into `phase`. The status line says a turn is running until its preview arrives (#54841).
+- Unified Dashboard and TUI Runtime Quotas paused-runtime (`quota_rest`) terminology to "일시 중지" / "Paused", humanized quota/payment/usage causes consistently, and grouped paused runtimes by provider sorted by soonest release time (#54848).
+- Unify Dashboard Keeper diagnostics, config-patch ops, unified diff, and keyboard helpers; remove unused legacy command-palette and shortcut-manager modules (#54852).
+- Emit structured `last_failure` in turn previews (removing TUI prose scraping), use closed-sum diff ops in memory v2, and unify Retry/Board/broadcast SSOTs (#54854).
+- Deduplicated TUI runtime-assign modal opener, Pele executable path resolution, `music_launch` UTF-8 truncation, and terminal graphics cursor/tmux placement helpers (#54858).
+- Replaced raw wire-string control flow across TUI stores and views with closed sum classifiers in `protocol/`, unified token-bounded sandbox/evidence matching, and replaced detail-renderer prefix sniffing with typed `Update_nav.styled_line` rows (#54859).
+- `admission-timeout-s` on an `acp` provider now also bounds `session/new`, `session/load`, `session/resume`, `session/set_mode`, `session/set_model`, `session/set_config_option` and the default wait of `session/close`; before, it bounded only `initialize` and those calls waited a fixed 30 seconds. The default of the key stays `30.0` (#54862).
+- TUI: render labeled `Card.draw_hairline` section headers left-aligned with an accent caret, bright bold title, and visible trailing rule while preserving `border_subtle` on unlabeled hairlines; add section spacing, 2-column content indentation, non-overlapping ratio bar clipping, clean unreported RAM formatting, and non-duplicated zoomed hints in `6 Infra > Sandboxes`; bind `[e]` (selected Keeper `Settings > Sandbox`) and `[S]` (runtime `Settings > Sandbox` SSH pools) directly on `6 Infra > Sandboxes` (#54871).
+- ACP Keepers show a context gauge from what the session holds after the turn, recorded with the `agent_held_context` input provenance (#54872).
+
+### Removed
+
+- Dead exports with zero live callers (verified by full-repo reference search, no dynamic dispatch): `Runtime_provider_binding.local_runtime_label` and its private chain plus the duplicated `normalize_openai_compat_request_path` in `lib/runtime_model/runtime_provider_binding`; the `.mli` exports `Runtime_acp_client.protocol_version` / `default_timeout_s` (the `let`s stay, they are used internally); the dashboard `telemetry-sources` module, the `parseEnvBool` helper, and the `V2_PRIMARY_SURFACE_IDS` / `isPrimaryDashboardSurface` / `VISIBLE_DASHBOARD_NAV_ITEMS` / `PRIMARY_DASHBOARD_SURFACES` / `PRIMARY_DASHBOARD_NAV_ITEMS` navigation surface (#54903).
+
+### Fixed
+
+- A stored working-context record that no longer decodes no longer keeps every finished source in the snapshot, so the working-context pass stops resending that history. The commit that removes such a record logs its reference and the decoder's error (#54834).
+- The Keeper chat status line no longer opens a response at a tool's return in a turn that MASC's own agent loop runs. Its clock no longer jumps back at the next request (#54836).
+- In a turn that an official client runs (Codex, Claude Code, Antigravity, ACP), a tool call that a gate refused no longer stays "about to run" for the rest of the turn, and the dashboard no longer shows a tool as running because of it (#54836).
+- Two native tool runs of one tool that opened at the same instant now end one by one instead of together (#54836).
+- Let the Keeper chat wrap at the card width instead of 96 columns on wide terminals (#54839).
+- When several tool calls are open, the Keeper chat status line names the one that runs. A call left open without running used to hide it behind "about to run" (#54841).
+- The Keeper chat card in the dive screen stays inside the content rectangle when a split pane is narrower than 16 columns, instead of overwriting neighboring areas (#54839 follow-up, #54845).
+- Keeper roster and pulse heads no longer resize when the stale badge appears, Ctx pills keep a fixed width, and buttons in the same toolbar share one height (#54847).
+- Allow Dashboard Keeper Chat Queue/Steer mid-stream, add Queue Run-Next (`지금 실행`), add lightbox zoom to retained images, open the `/btw` panel on bare `/btw`, and fix shortcut/link/DataTable accessibility parity (#54849).
+- Parse server Keeper chat code fences via Cmarkit (tilde, 4-backtick, info options, math, and pele), propagate retained image MIME type so TUI skips blank Kitty PNG rows for non-PNG media, and unify PNG/media-prefix SSOT (#54853).
+- TUI: align uncached Board jump copy (`[y]`), URL open (`[o]`), vote refetch, delete cleanup, empty-feed `[Enter]` zoom, and fresh-index wiki jumps with the active detail target, surface verification read notices in split and zoomed `Work > Tasks` views when no verification row matches, preserve unrelated overlays (including `Settings` config state) and deduplicate `Get_skills` when closing a deleted `Skill_inspector`, and scope `keeper_detail_scroll_offset` resets on Memory view switches to `Keepers` (#54855).
+- Unified TUI keeper lifecycle targeting on collapsed company rows, `Ctrl+E` external-editor parity between Settings and Command Palette, Queue Drawer `[n]` run-next hint, Help SSOT contextual entries, and `Model.is_zoomed_active` checks (#54858).
+- Make admission and turn timeout budgets and completion-measurement types single-owner instead of duplicated literals (#54862).
+- TUI Keepers split shows the `[W]` Wake and `[D]` Stop hint once, under the roster; the Keeper pane beside it lists only its own keys (#54866).
+- Streamed requests and exact-output executions now report their token usage to the metrics sink, so `masc_llm_provider_input_tokens_total`, `masc_llm_provider_output_tokens_total` and `gen_ai.client.token.usage` count them. Only non-streaming completions were counted before (#54867).
+- Goal confirm entry and detail are clearer: the strip now reads `Inbox`, and Goals detail adds evidence copy actions and a task/verification summary (#54870).
+- The ACP rollover no longer reads a turn's summed `inputTokens` as the session's size when the host sends no `usage_update.used`; with no count it does not roll over (#54872).
+- A native tool of a Mistral Vibe ACP Keeper, such as `search_tool_functions`, no longer stays "running" on the Keeper chat status line until the turn ends while the model is already answering. The ACP adapter now ends a native run when the tool call arrives already finished, and when the client streams its next message (#54874, #54832).
+- The dashboard Quotas tab lists runtimes whose credential was refused, that
+  are 429-limited (with the reset countdown), or whose last attempt failed,
+  and no longer counts a refused or rate-limited runtime as available; the
+  Quotas and Lanes tabs now decode `/api/v1/runtime/resolved` at the boundary
+  (#54875).
+- Dashboard Pulse counts a provider window as exhausted only while its
+  `resets_at` is still ahead, reads only each window's latest reading, counts a
+  USD key at its limit, shows when an exhausted window comes back, and marks a
+  spent window without a reset time as unknown. Pulse shows an unreadable
+  approval queue as unavailable instead of an empty goal list, counts sub-goal
+  approvals, keeps a missing goal phase unknown, and shows why a tool call was
+  held and when it times out (#54876).
+- The dashboard Work workspace now shows each goal's pending approval count and
+  time since last activity, a released task's handoff note (reason, next step,
+  failure mode), when a held tool approval times out, and the Gate row's Auto
+  Judge disposition and judge lane; a missing Gate phase or decision source no
+  longer reads as a human decision (#54877).
+- The web dashboard Keeper chat shows provider retries, the runtime and attempt streaming the reply, stream protocol errors with the quarantined tool, continuation checkpoints, a failed or cancelled operation as failed, and an interrupt that did not land (#54879).
+- The web dashboard Keeper view shows why a turn started and its task, a halted preparation instead of Working, the waiting sentence and real due time instead of an action name, an unreadable waiting inventory, and why a waiting row is blocked (#54880).
+- The web dashboard Keeper header shows what started the last 24 hours of turns (scheduled, reacted, chat, own, unknown) and treats a malformed recent-turns slot as unknown instead of a partial sum (#54884).
+- The web dashboard Inbox reads a Gate queue or audit row that breaks the server contract as an unreadable list instead of inventing revision 1, an empty tool or decision, or a raw timestamp (#54885).
+- `masc runtime-verify` and the fusion panel now read the last assistant message
+  of an ACP turn (the chunks of the last `messageId`) instead of the whole turn
+  text. A model that narrates before it calls a tool, such as `muse-ember-1.0`,
+  was reported as `tool_result_not_consumed` although it had returned the tool
+  result (#54888).
+- The dashboard Runtime Lanes and Efficiency tabs decode
+  `/api/v1/dashboard/exact-lane-runs` at the boundary, including Task and Goal
+  verification rows, and the Lanes table and detail show a completion that
+  failed to persist with its error and the status the run actually ended as;
+  the Quotas tab matches resting runtimes to usage scopes by `provider_id`
+  instead of the provider display name, and Quotas and Efficiency decode
+  `/api/v1/dashboard/provider-usage-history` (#54889).
+- A Muse ACP session's size is its newest model request's counted input plus output, read from the host's journal after each prompt and from the end of that journal when a session is loaded or resumed. Muse's `usage_update.used` is its estimate of that request's prompt, so the rollover, the model input ledger, the context gauge and the compaction check no longer read it, and a Muse prompt whose journal cannot be read carries no session size (#54891).
+- The web dashboard Inbox reads a Gate queue row with a sequence of zero or less, and an audit row with a negative time, a reject without a reason or an approve with one, as an unreadable list (#54892).
+- Dashboard: eliminate vertical layout shift during background SSE/TTL refreshes in `Work > Inbox` and `Work > Tasks` by rendering transient loading/stale statuses in a fixed-height pane header slot (while preserving full `role="alert"` error banners and observation honesty), stabilize filter chip count widths, and mirror the `Inbox` pending badge onto the `Work > Inbox` sub-tab alongside clarified left-rail tooltips (#54893).
+- The Dashboard turn and memory inspectors read a turn's context fill by its input provenance, as the server's context projection does: a measured request or an ACP agent's held context shows a percent, an estimate shows `~NN%`, and a row without provenance shows none (#54894).
+- The four runtime adapters now share one `Runtime_timeout_payload` (`seconds`, optional `stage`, optional `turn_accepted`) instead of three incompatible `Timeout` shapes, with diagnostics mapped losslessly (`None` means untracked, never a defaulted `false`) (#54895).
+- The Keeper debug companion's context fill chart reads turn records with the turn inspector's decoder and draws a turn only when its input is a fill, so turn totals and conversation-cumulative counts are no longer drawn at 100% or read as compactions; with no fill it shows its empty label (#54896).
+- Preserve `Error_domain` retryability and lossless roundtrips for `HardQuota`, `ProviderUnavailable`, non-transient `ServerError`, typed `Network_error` kinds, and retryable `Invalid_request` reasons; fix `Retry` structured `CONTEXT_OVERFLOW`/`QUOTA_EXHAUSTED` signals, `resolve_retry_after`, split-array `classify_embedded_json`, and HTTP 403 handling; harden `Gemini_context_cache` RPC parsing; unify `Secret_redactor.is_sensitive_header_name` and remove `Str` from `Util.string_contains` and `keeper_disk_pressure` (#54898).
+- TUI zoomed Goals/Tasks double-caret (`▸ ▸`) section hairlines, contradictory zoom hints while zoomed, malformed unreported/absent metric suffixes (`? 미보고/2`, `? 미보고/h`, `? 미보고/? 미보고`, `? 미보고 누적 턴`, `— / —`), and narrow ratio bar/right-metric overlaps across Infra, Runtime, Knowledge, Work, Keepers, and Chart (#54902)
+
+### Documentation
+
+- The numeric capability presets (anthropic, kimi, mimo, glm, gemini) stay load-bearing: presets are now documented as intentional and the `None` unification is deferred until catalog coverage is complete, with zero numeric change (#54895).
+
 ## [0.83.3] - 2026-11-26
 
 ### Added

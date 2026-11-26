@@ -9715,14 +9715,16 @@ let infra_detail_max_scroll (m : Model.t) =
                                       entry.state
                                   with
                                   | Wire_infra.Pr_entry_read ->
-                                      let pr_n = List.length entry.pulls in
-                                      let avail =
-                                        max 0 (inner.h - band_h - 1 - git_h - 3)
-                                      in
-                                      if avail <= 0 || pr_n = 0 then 1
-                                      else if pr_n <= min 3 avail then 1 + pr_n
-                                      else if avail = 1 then 2
-                                      else 2 + min 3 (avail - 1)
+                                      if not zoomed then 1
+                                      else
+                                        let pr_n = List.length entry.pulls in
+                                        let avail =
+                                          max 0 (inner.h - band_h - 1 - git_h - 3)
+                                        in
+                                        if avail <= 0 || pr_n = 0 then 1
+                                        else if pr_n <= min 3 avail then 1 + pr_n
+                                        else if avail = 1 then 2
+                                        else 2 + min 3 (avail - 1)
                                   | Wire_infra.Pr_entry_failed -> 1
                                   | Wire_infra.Pr_entry_other _ -> (
                                       match

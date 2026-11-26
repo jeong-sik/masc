@@ -30163,5 +30163,191 @@ let () =
               in
               Alcotest.(check bool) "logical sidebar_focused preserved on blur"
                 true m_side_blur.nav.sidebar_focused);
+          Alcotest.test_case
+            "Model.keeper_hero_height SSOT & Infra_repos_changes split PR scroll parity"
+            `Quick (fun () ->
+              (* 1. Model.keeper_hero_height thresholds & tab matrix *)
+              List.iter
+                (fun tab ->
+                  Alcotest.(check int) "no keeper -> 0 (embedded)" 0
+                    (Model.keeper_hero_height ~embedded:true ~tab
+                       ~has_keeper:false ~inner_h:30);
+                  Alcotest.(check int) "no keeper -> 0 (zoomed)" 0
+                    (Model.keeper_hero_height ~embedded:false ~tab
+                       ~has_keeper:false ~inner_h:30);
+                  Alcotest.(check int) "embedded inner_h=9 -> 0" 0
+                    (Model.keeper_hero_height ~embedded:true ~tab
+                       ~has_keeper:true ~inner_h:9);
+                  Alcotest.(check int) "embedded inner_h=10 -> 1" 1
+                    (Model.keeper_hero_height ~embedded:true ~tab
+                       ~has_keeper:true ~inner_h:10);
+                  let expected_zoomed_22 =
+                    match tab with
+                    | Nav.Keeper_chat | Nav.Keeper_memory -> 0
+                    | Nav.Keeper_trace
+                    | Nav.Keeper_work_sandbox
+                    | Nav.Keeper_config
+                    | Nav.Keeper_identity ->
+                        5
+                  in
+                  Alcotest.(check int) "zoomed inner_h=21 -> 0" 0
+                    (Model.keeper_hero_height ~embedded:false ~tab
+                       ~has_keeper:true ~inner_h:21);
+                  Alcotest.(check int) "zoomed inner_h=22 matches tab"
+                    expected_zoomed_22
+                    (Model.keeper_hero_height ~embedded:false ~tab
+                       ~has_keeper:true ~inner_h:22))
+                Nav.all_keeper_tabs;
+              (* 2. Chat_transcript.keeper_content_rect_size consumes hero SSOT *)
+              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let fleet =
+                m0.fleet
+                |> Fleet_store.apply_keepers ~observed_at:t0
+                     [ sample_keeper "alpha" ]
+                |> Fleet_store.select_keeper "alpha"
+              in
+              let zoomed_h_for tab =
+                let m =
+                  {
+                    m0 with
+                    fleet = Fleet_store.set_keeper_dive_tab tab fleet;
+                    nav = { m0.nav with workspace = Nav.Keepers; zoomed = true };
+                  }
+                in
+                snd (Chat_transcript.keeper_content_rect_size ~embedded:false ~model:m)
+              in
+              let h_chat = zoomed_h_for Nav.Keeper_chat in
+              let h_mem = zoomed_h_for Nav.Keeper_memory in
+              let h_work = zoomed_h_for Nav.Keeper_work_sandbox in
+              let h_trace = zoomed_h_for Nav.Keeper_trace in
+              let h_cfg = zoomed_h_for Nav.Keeper_config in
+              let h_id = zoomed_h_for Nav.Keeper_identity in
+              Alcotest.(check int) "zoomed Keeper_memory matches Keeper_chat height"
+                h_chat h_mem;
+              Alcotest.(check int)
+                "zoomed Keeper_work_sandbox deducts 5-row hero" (h_chat - 5)
+                h_work;
+              Alcotest.(check int) "zoomed Keeper_trace deducts 5-row hero"
+                (h_chat - 5) h_trace;
+              Alcotest.(check int) "zoomed Keeper_config deducts 5-row hero"
+                (h_chat - 5) h_cfg;
+              Alcotest.(check int) "zoomed Keeper_identity deducts 5-row hero"
+                (h_chat - 5) h_id;
+              (* 3. Infra_repos_changes collapsed PR row height in split vs zoomed *)
+              let repo : Wire_infra.repository =
+                {
+                  id = "repo-1";
+                  name = "masc";
+                  codebase = None;
+                  url = "https://example.com/masc";
+                  default_branch = "main";
+                  resolved_local_path = "/tmp/masc";
+                  status = Wire_infra.Repo_active;
+                  auto_sync = true;
+                  keepers = [ "alpha" ];
+                }
+              in
+              let act : Wire_infra.repository_activity =
+                {
+                  window_hours = 24.0;
+                  changes =
+                    [
+                      {
+                        path = "a.ml";
+                        keeper = "alpha";
+                        change =
+                          Wire_infra.Change_write
+                            {
+                              content =
+                                String.concat "\n"
+                                  (List.init 80 (fun i ->
+                                       Printf.sprintf "line %d" i));
+                            };
+                        line_evidence = None;
+                        succeeded = true;
+                      };
+                    ];
+                  incomplete = 0;
+                  unattributed = 0;
+                }
+              in
+              let mk_pr n : Wire_infra.repository_pull_row =
+                {
+                  repo_slug = "jeong-sik/masc";
+                  number = n;
+                  draft = false;
+                  checks = "passing";
+                  review = "approved";
+                  mergeable = "mergeable";
+                  author = Some "jeong-sik";
+                  keeper = None;
+                  title = Some (Printf.sprintf "PR %d" n);
+                  head_review = "reviewed_on_head";
+                }
+              in
+              let mk_pulls_snap prs : Wire_infra.repository_pulls_snapshot =
+                {
+                  reader_state = "ready";
+                  reader_detail = None;
+                  repositories_error = None;
+                  entries =
+                    [
+                      {
+                        repository_id = repo.id;
+                        slug = Some "jeong-sik/masc";
+                        state = "read";
+                        undecodable = 0;
+                        failure_summary = None;
+                        pulls = prs;
+                      };
+                    ];
+                }
+              in
+              let end_diff_offset ~zoomed prs =
+                let m_infra =
+                  {
+                    m0 with
+                    nav =
+                      {
+                        m0.nav with
+                        workspace = Nav.Infra;
+                        pane_index = 2;
+                        zoomed;
+                      };
+                    infra =
+                      m0.infra
+                      |> Infra_store.set_tab Nav.Infra_repos_changes
+                      |> Infra_store.apply_repositories ~observed_at:t0 [ repo ]
+                      |> Infra_store.apply_repo_activity ~repo_id:repo.id
+                           ~observed_at:t0 act
+                      |> Infra_store.apply_repository_pulls ~observed_at:t0
+                           (mk_pulls_snap prs);
+                  }
+                in
+                let m_end, _ =
+                  Update.step ~now:t0 m_infra (Msg.Key_event (key Keymap.Input.End))
+                in
+                m_end.infra.diff_scroll_offset
+              in
+              let split_0 = end_diff_offset ~zoomed:false [] in
+              let split_1 = end_diff_offset ~zoomed:false [ mk_pr 1 ] in
+              let split_4 =
+                end_diff_offset ~zoomed:false
+                  [ mk_pr 1; mk_pr 2; mk_pr 3; mk_pr 4 ]
+              in
+              Alcotest.(check int)
+                "split view collapses 1 PR to 1 row (same End scroll as 0 PRs)"
+                split_0 split_1;
+              Alcotest.(check int)
+                "split view collapses 4 PRs to 1 row (same End scroll as 0 PRs)"
+                split_0 split_4;
+              let zoomed_0 = end_diff_offset ~zoomed:true [] in
+              let zoomed_4 =
+                end_diff_offset ~zoomed:true
+                  [ mk_pr 1; mk_pr 2; mk_pr 3; mk_pr 4 ]
+              in
+              Alcotest.(check int)
+                "zoomed view expands 4 PRs (+4 rows over 0-PR header)"
+                (zoomed_0 + 4) zoomed_4);
         ] );
     ]

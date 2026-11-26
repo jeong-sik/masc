@@ -2686,20 +2686,19 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
   let card_inner_h =
     if target_rect.w >= 2 && target_rect.h >= 2 then target_rect.h - 2 else 0
   in
+  let has_keeper =
+    Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
+  in
+  let hero_h =
+    Model.keeper_hero_height ~embedded ~tab:model.fleet.keeper_dive_tab
+      ~has_keeper ~inner_h:card_inner_h
+  in
+  let after_hero_h = card_inner_h - hero_h in
   let raw_content_h =
-    if not embedded then card_inner_h
-    else
-      let has_keeper =
-        Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
-      in
-      let after_hero_h =
-        if has_keeper && card_inner_h >= 10 then card_inner_h - 1
-        else card_inner_h
-      in
-      if model.nav.pane_index = 0 && after_hero_h >= 3 then
-        let body_h1 = after_hero_h - 1 in
-        if body_h1 >= 6 then body_h1 - 1 else body_h1
-      else after_hero_h
+    if embedded && model.nav.pane_index = 0 && after_hero_h >= 3 then
+      let body_h1 = after_hero_h - 1 in
+      if body_h1 >= 6 then body_h1 - 1 else body_h1
+    else after_hero_h
   in
   let active_name_opt = Model.selected_keeper_name model in
   let banner_h =

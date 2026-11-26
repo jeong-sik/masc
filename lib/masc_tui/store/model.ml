@@ -5066,6 +5066,18 @@ let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
   in
   List.filter_map Fun.id [ line1_opt; line2_opt ]
 
+let keeper_hero_height ~embedded ~tab ~has_keeper ~inner_h =
+  if not has_keeper then 0
+  else if embedded then if inner_h >= 10 then 1 else 0
+  else
+    match tab with
+    | Nav.Keeper_chat | Nav.Keeper_memory -> 0
+    | Nav.Keeper_trace
+    | Nav.Keeper_work_sandbox
+    | Nav.Keeper_config
+    | Nav.Keeper_identity ->
+        if inner_h >= 22 then 5 else 0
+
 let keeper_diagnostic_banner_height ~name ~avail_h (m : t) =
   if avail_h < 6 then 0
   else

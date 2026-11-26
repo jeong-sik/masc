@@ -4292,23 +4292,28 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
     if Rect.is_empty inner then ()
     else
       let after_hero =
-        match embedded, keeper_opt with
-        | true, Some k when inner.h >= 10 ->
-            (* Split preview: default-collapse the 5-row hero into a crisp
-               1-line summary bar so transcript/trace recovers 4 vertical rows. *)
-            let hero_r, rest = Rect.split_v inner ~top_h:1 in
-            draw_compact_preview_bar grid ~rect:hero_r ~theme ~model ~name k;
-            rest
-        | false, Some k
-          when inner.h >= 22
-               && not (Nav.equal_keeper_tab tab Nav.Keeper_chat)
-               && not (Nav.equal_keeper_tab tab Nav.Keeper_memory) ->
-            (* Zoomed keeper inspection (non-Chat/non-Memory): render full
-               multi-row hero + 4-metric telemetry strip. *)
-            let hero_r, rest = Rect.split_v inner ~top_h:5 in
-            draw_embedded_preview_header grid ~rect:hero_r ~theme ~model ~name k;
-            rest
-        | _ -> inner
+        let hero_h =
+          Model.keeper_hero_height ~embedded ~tab
+            ~has_keeper:(Option.is_some keeper_opt) ~inner_h:inner.h
+        in
+        match keeper_opt with
+        | None -> inner
+        | Some k -> (
+            match hero_h with
+            | 1 ->
+                (* Split preview: default-collapse the 5-row hero into a crisp
+                   1-line summary bar so transcript/trace recovers 4 vertical rows. *)
+                let hero_r, rest = Rect.split_v inner ~top_h:1 in
+                draw_compact_preview_bar grid ~rect:hero_r ~theme ~model ~name k;
+                rest
+            | 5 ->
+                (* Zoomed keeper inspection (non-Chat/non-Memory): render full
+                   multi-row hero + 4-metric telemetry strip. *)
+                let hero_r, rest = Rect.split_v inner ~top_h:5 in
+                draw_embedded_preview_header grid ~rect:hero_r ~theme ~model
+                  ~name k;
+                rest
+            | _ -> inner)
       in
       let content_rect =
         if embedded && model.nav.pane_index = 0 && after_hero.h >= 3 then begin

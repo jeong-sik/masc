@@ -18,22 +18,7 @@ let layout_bp (model : Model.t) =
 let pad_x_for ~(model : Model.t) (rect : Rect.t) =
   Layout.card_pad_x_for_width (layout_bp model) rect.w
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
+let contains_ci = Text_util.contains_ci
 
 let put_line ?clip grid ~x ~y ~max_w ~style text =
   if max_w <= 0 then 0
@@ -476,10 +461,18 @@ let turn_lane_label = function
   | Wire_fleet.Lane_maintenance -> Say.make ~ko:"점검" ~en:"maint"
   | Wire_fleet.Lane_internal -> Say.make ~ko:"내부" ~en:"internal"
 
-let keeper_infra_tag (infra : Infra_store.t) name =
+type resolved_sandbox =
+  | Sandbox_vm of Theme.status_token
+  | Sandbox_ssh of Theme.status_token
+  | Sandbox_ssh_unbound of Theme.status_token
+  | Sandbox_docker of Theme.status_token
+  | Sandbox_other of string * Theme.status_token
+  | Sandbox_none
+
+let resolve_infra_sandbox (infra : Infra_store.t) name =
   match Observed.to_option infra.sandboxes with
-  | None -> (Glyph.to_utf8 Glyph.Missing_absent, Theme.Status_historical)
-  | Some snap ->
+  | None -> Sandbox_none
+  | Some snap -> (
       let in_vm =
         List.find_opt
           (fun (g : Wire_infra.microvm_guest) -> String.equal g.keeper name)
@@ -488,15 +481,18 @@ let keeper_infra_tag (infra : Infra_store.t) name =
       match in_vm with
       | Some g ->
           let tone =
-            match g.agent_socket, g.volume with
+            match (g.agent_socket, g.volume) with
             | Wire_infra.Socket_present _, Wire_infra.Volume_declared _ ->
                 Theme.Status_ok
-            | (Wire_infra.Socket_absent _ | Wire_infra.Socket_non_socket _ | Wire_infra.Socket_unreadable _), _
-            | _, Wire_infra.Volume_invalid _ ->
+            | ( ( Wire_infra.Socket_absent _
+                | Wire_infra.Socket_non_socket _
+                | Wire_infra.Socket_unreadable _ )
+              , (Wire_infra.Volume_declared _ | Wire_infra.Volume_invalid _) )
+            | Wire_infra.Socket_present _, Wire_infra.Volume_invalid _ ->
                 Theme.Status_attention
           in
-          ("vm", tone)
-      | None ->
+          Sandbox_vm tone
+      | None -> (
           let in_ssh_pool =
             List.find_opt
               (fun (p : Wire_infra.ssh_pool) ->
@@ -514,42 +510,65 @@ let keeper_infra_tag (infra : Infra_store.t) name =
                 | Wire_infra.Ssh_probe_pending -> Theme.Status_active
                 | Wire_infra.Ssh_unreachable _ -> Theme.Status_critical
               in
-              ("ssh", tone)
+              Sandbox_ssh tone
           | None ->
               if
                 List.exists
                   (fun (u : Wire_infra.ssh_unbound_keeper) ->
                     String.equal u.keeper name)
                   snap.ssh_unbound_keepers
-              then ("ssh!", Theme.Status_attention)
+              then Sandbox_ssh_unbound Theme.Status_attention
               else if
                 List.exists
                   (fun (d : Wire_infra.docker_keeper) ->
                     String.equal d.keeper name)
                   snap.docker_keepers
-              then ("dkr", Theme.Status_active)
-              else (Glyph.to_utf8 Glyph.Missing_absent, Theme.Status_historical)
+              then Sandbox_docker Theme.Status_active
+              else Sandbox_none))
+
+let resolve_keeper_sandbox ~(model : Model.t) name =
+  match resolve_infra_sandbox model.infra name with
+  | ( Sandbox_vm _
+    | Sandbox_ssh _
+    | Sandbox_ssh_unbound _
+    | Sandbox_docker _
+    | Sandbox_other _ ) as found ->
+      found
+  | Sandbox_none -> (
+      match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
+      | Some Wire_fleet.Profile_microvm -> Sandbox_vm Theme.Status_ok
+      | Some Wire_fleet.Profile_remote_ssh -> Sandbox_ssh Theme.Status_ok
+      | Some Wire_fleet.Profile_docker -> Sandbox_docker Theme.Status_active
+      | Some (Wire_fleet.Profile_other s) ->
+          Sandbox_other (s, Theme.Status_historical)
+      | None -> Sandbox_none)
+
+let sandbox_short_tag = function
+  | Sandbox_vm tone -> ("vm", tone)
+  | Sandbox_ssh tone -> ("ssh", tone)
+  | Sandbox_ssh_unbound tone -> ("ssh!", tone)
+  | Sandbox_docker tone -> ("dkr", tone)
+  | Sandbox_other (s, tone) -> (s, tone)
+  | Sandbox_none ->
+      (Glyph.to_utf8 Glyph.Missing_absent, Theme.Status_historical)
+
+let sandbox_long_label = function
+  | Sandbox_vm tone -> ("apple_container", tone)
+  | Sandbox_ssh tone -> ("remote_ssh", tone)
+  | Sandbox_ssh_unbound tone -> ("remote_ssh (unbound)", tone)
+  | Sandbox_docker tone -> ("docker", tone)
+  | Sandbox_other (s, tone) -> (s, tone)
+  | Sandbox_none ->
+      (Glyph.to_utf8 Glyph.Missing_absent, Theme.Status_historical)
+
+let keeper_infra_tag (infra : Infra_store.t) name =
+  sandbox_short_tag (resolve_infra_sandbox infra name)
 
 let keeper_sandbox_tag ~(model : Model.t) name =
-  let tag, tone = keeper_infra_tag model.infra name in
-  let dash = Glyph.to_utf8 Glyph.Missing_absent in
-  if not (String.equal tag dash) then (tag, tone)
-  else
-    match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
-    | Some Wire_fleet.Profile_microvm -> ("vm", Theme.Status_ok)
-    | Some Wire_fleet.Profile_remote_ssh -> ("ssh", Theme.Status_ok)
-    | Some Wire_fleet.Profile_docker -> ("dkr", Theme.Status_active)
-    | Some (Wire_fleet.Profile_other s) -> (s, Theme.Status_historical)
-    | None -> (dash, Theme.Status_historical)
+  sandbox_short_tag (resolve_keeper_sandbox ~model name)
 
 let keeper_sandbox_label ~(model : Model.t) name =
-  let tag, tone = keeper_sandbox_tag ~model name in
-  match tag with
-  | "vm" -> ("apple_container", tone)
-  | "ssh" -> ("remote_ssh", tone)
-  | "ssh!" -> ("remote_ssh (unbound)", tone)
-  | "dkr" -> ("docker", tone)
-  | other -> (other, tone)
+  sandbox_long_label (resolve_keeper_sandbox ~model name)
 
 let human_runtime_label ~(model : Model.t) (k : Wire_fleet.keeper_summary) =
   let runtimes = Runtime_store.runtime_options model.runtime in

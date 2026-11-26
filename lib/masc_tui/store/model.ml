@@ -4895,27 +4895,25 @@ let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
       | Some d when is_runnable -> (
           let actionable_disp =
             match d.operator_disposition with
-            | Some disp -> (
-                match String.lowercase_ascii (String.trim disp) with
-                | "" | "pass" | "skipped" | "user_cancelled" -> None
-                | _ ->
-                    let reason =
-                      match d.operator_disposition_reason with
-                      | Some r -> ": " ^ r
-                      | None -> ""
-                    in
-                    Some (disp ^ reason))
-            | None -> None
+            | Some (Wire_fleet.Disp_pass | Wire_fleet.Disp_skipped | Wire_fleet.Disp_user_cancelled)
+            | None ->
+                None
+            | Some (Wire_fleet.Disp_actionable disp) ->
+                let reason =
+                  match d.operator_disposition_reason with
+                  | Some r -> ": " ^ r
+                  | None -> ""
+                in
+                Some (disp ^ reason)
           in
           match actionable_disp with
           | Some _ as a -> a
           | None -> (
               match d.next_action with
-              | Some act -> (
-                  match String.lowercase_ascii (String.trim act) with
-                  | "" | "direct_message" | "none" -> None
-                  | _ -> Some act)
-              | None -> None))
+              | Some (Wire_fleet.Action_none | Wire_fleet.Action_direct_message)
+              | None ->
+                  None
+              | Some (Wire_fleet.Action_other act) -> Some act))
       | Some _ | None -> None
     in
     let wait_part =

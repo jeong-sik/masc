@@ -6753,6 +6753,13 @@ let extract_embedded_json_store s =
     in
     try_from 0 0
 
+let extract_embedded_json s =
+  match extract_embedded_json_store s with
+  | Some (prefix, json) ->
+      let prefix_opt = if String.equal prefix "" then None else Some prefix in
+      Some (prefix_opt, json)
+  | None -> None
+
 let ops_pad_content (r : Rect.t) =
   let pad_x = if r.w >= 60 then 2 else 1 in
   Masc_tui_ui.Card.pad_inner ~pad_x ~pad_y:0 r
@@ -9732,23 +9739,35 @@ let infra_detail_max_scroll (m : Model.t) =
                                 Infra_store.pulls_entry_for ~repo_id:r.id
                                   m.infra
                               with
-                              | Some entry when String.equal entry.state "read"
-                                ->
-                                  let pr_n = List.length entry.pulls in
-                                  let avail =
-                                    max 0 (inner.h - band_h - 1 - git_h - 3)
-                                  in
-                                  if avail <= 0 || pr_n = 0 then 1
-                                  else if pr_n <= min 3 avail then 1 + pr_n
-                                  else if avail = 1 then 2
-                                  else 2 + min 3 (avail - 1)
-                              | Some entry
-                                when String.equal entry.state "failed" ->
-                                  1
-                              | Some _ | None ->
-                                  if String.equal snap.reader_state "ready" then
-                                    0
-                                  else 1)
+                              | Some entry -> (
+                                  match
+                                    Wire_infra.classify_pr_entry_state
+                                      entry.state
+                                  with
+                                  | Wire_infra.Pr_entry_read ->
+                                      let pr_n = List.length entry.pulls in
+                                      let avail =
+                                        max 0 (inner.h - band_h - 1 - git_h - 3)
+                                      in
+                                      if avail <= 0 || pr_n = 0 then 1
+                                      else if pr_n <= min 3 avail then 1 + pr_n
+                                      else if avail = 1 then 2
+                                      else 2 + min 3 (avail - 1)
+                                  | Wire_infra.Pr_entry_failed -> 1
+                                  | Wire_infra.Pr_entry_other _ -> (
+                                      match
+                                        Wire_infra.classify_pulls_reader_state
+                                          snap.reader_state
+                                      with
+                                      | Wire_infra.Reader_ready -> 0
+                                      | Wire_infra.Reader_other _ -> 1))
+                              | None -> (
+                                  match
+                                    Wire_infra.classify_pulls_reader_state
+                                      snap.reader_state
+                                  with
+                                  | Wire_infra.Reader_ready -> 0
+                                  | Wire_infra.Reader_other _ -> 1))
                         | Observed.Failed _ -> 1
                         | Observed.Loading _ | Observed.Absent
                         | Observed.Unreported ->

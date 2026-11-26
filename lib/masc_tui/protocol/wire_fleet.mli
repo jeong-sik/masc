@@ -136,7 +136,34 @@ type turn_preparation = {
   started_at_unix : float;
 }
 
-type turn_work_context = { task_id : string option; start_reasons : string list }
+type start_reason =
+  | Start_mention_pending
+  | Start_board_event_pending
+  | Start_scope_message_pending
+  | Start_bootstrap_stimulus_pending
+  | Start_never_started
+  | Start_tool_result_ready_pending
+  | Start_connector_attention_pending
+  | Start_ask_answered_pending
+  | Start_hitl_resolved_pending
+  | Start_completion_authority_rejection_pending
+  | Start_task_outcome_pending
+  | Start_task_cancellation_pending
+  | Start_workspace_message_pending
+  | Start_deferred_runtime_lane_pending
+  | Start_scheduled_autonomous_turn
+  | Start_scheduled_automation_due
+  | Start_task_backlog
+  | Start_unknown of string
+
+val start_reason_of_string : string -> start_reason
+val start_reason_to_string : start_reason -> string
+val equal_start_reason : start_reason -> start_reason -> bool
+
+type turn_work_context = {
+  task_id : string option;
+  start_reasons : start_reason list;
+}
 
 type turn_preview = {
   status_text : string;
@@ -343,17 +370,34 @@ type lane_walk_failure = {
   api_candidate_fault : string option;
 }
 
+type operator_disposition =
+  | Disp_pass
+  | Disp_skipped
+  | Disp_user_cancelled
+  | Disp_actionable of string
+
+val operator_disposition_of_string : string -> operator_disposition
+val operator_disposition_to_string : operator_disposition -> string
+
+type next_action_kind =
+  | Action_none
+  | Action_direct_message
+  | Action_other of string
+
+val next_action_of_string : string -> next_action_kind
+val next_action_to_string : next_action_kind -> string
+
 type keeper_diagnostics = {
   phase : string option;
   failing_since_unix : float option;
-  next_action : string option;
+  next_action : next_action_kind option;
   last_failure_cause : string option;
   last_failure_at_unix : float option;
   runtime_blocker_summary : string option;
   runtime_blocker_signature : string option;
   runtime_path_rest : runtime_path_rest option;
   lane_failures : lane_walk_failure list;
-  operator_disposition : string option;
+  operator_disposition : operator_disposition option;
   operator_disposition_reason : string option;
 }
 

@@ -8,25 +8,9 @@ let default_caps = Presenter.default_capabilities
 
 let say (lang : Say.lang) ~ko ~en = Say.resolve lang (Say.make ~ko ~en)
 
-let sanitize_single_line s =
-  let buf = Buffer.create (String.length s) in
-  let prev_space = ref false in
-  String.iter
-    (fun c ->
-      let code = Char.code c in
-      if c = '\n' || c = '\r' || c = '\t' then begin
-        if not !prev_space then Buffer.add_char buf ' ';
-        prev_space := true
-      end
-      else if code >= 32 then begin
-        Buffer.add_char buf c;
-        prev_space := c = ' '
-      end)
-    s;
-  String.trim (Buffer.contents buf)
+let sanitize_single_line = Text_util.sanitize_single_line
 
-let short_hash ?(len = 8) s =
-  if String.length s <= len then s else String.sub s 0 len
+let short_hash = Text_util.short_hash
 
 let format_age ~now_unix ts_unix =
   if

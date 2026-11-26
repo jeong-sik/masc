@@ -1419,20 +1419,10 @@ let equal_activity_row (a : activity_row) (b : activity_row) =
   && Option.equal String.equal a.detail b.detail
 
 let activity_kind_of_wire kind =
-  match String.lowercase_ascii (String.trim kind) with
-  | "tool.called" | "keeper.tool_exec" -> Activity_tool_call
-  | "keeper.turn_completed"
-  | "keeper.turn_input_required"
-  | "keeper.turn_blocked"
-  | "keeper.turn_cancelled"
-  | "keeper.turn_skipped" ->
-      Activity_turn_complete
-  | k when String.starts_with ~prefix:"tool." k -> Activity_tool_call
-  | k
-    when String.starts_with ~prefix:"turn." k
-         || String.starts_with ~prefix:"keeper.turn_" k ->
-      Activity_turn_complete
-  | _ -> Activity_agent_core
+  match Wire_infra.classify_activity_event_kind kind with
+  | Wire_infra.Act_tool_call -> Activity_tool_call
+  | Wire_infra.Act_turn_complete -> Activity_turn_complete
+  | Wire_infra.Act_agent_core -> Activity_agent_core
 
 let apply_activity_events_backfill (items : Wire_infra.activity_event_item list) t =
   let sorted_items =

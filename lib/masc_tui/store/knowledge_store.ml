@@ -168,7 +168,7 @@ type t = {
   board_thread_meta : Wire_knowledge.board_thread_meta option;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
-  board_sort_by : string;
+  board_sort_by : Wire_knowledge.board_sort;
   board_hearth : string option;
   expanded_succession_chains : String_set.t;
   active_thread :
@@ -252,7 +252,7 @@ let empty =
     board_thread_meta = None;
     board_hearths = Observed.unreported;
     board_signal_only = true;
-    board_sort_by = "recent";
+    board_sort_by = Wire_knowledge.Sort_recent;
     board_hearth = None;
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
@@ -795,15 +795,7 @@ let set_board_sort board_sort_by t =
   }
 
 let cycle_board_sort t =
-  let next =
-    match String.lowercase_ascii (String.trim t.board_sort_by) with
-    | "recent" -> "hot"
-    | "hot" -> "trending"
-    | "trending" -> "updated"
-    | "updated" -> "discussed"
-    | _ -> "recent"
-  in
-  set_board_sort next t
+  set_board_sort (Wire_knowledge.next_board_sort t.board_sort_by) t
 
 let set_board_hearth board_hearth t =
   {
@@ -1427,22 +1419,7 @@ let wrap_lines ~max_width text =
 
 let reading_say (lang : Say.lang) ~ko ~en = Say.resolve lang (Say.make ~ko ~en)
 
-let reading_sanitize_single_line s =
-  let buf = Buffer.create (String.length s) in
-  let prev_space = ref false in
-  String.iter
-    (fun c ->
-      let code = Char.code c in
-      if c = '\n' || c = '\r' || c = '\t' then begin
-        if not !prev_space then Buffer.add_char buf ' ';
-        prev_space := true
-      end
-      else if code >= 32 then begin
-        Buffer.add_char buf c;
-        prev_space := c = ' '
-      end)
-    s;
-  String.trim (Buffer.contents buf)
+let reading_sanitize_single_line = Text_util.sanitize_single_line
 
 let memory_change_time ~rev ~at =
   match rev, at with
@@ -2190,23 +2167,6 @@ let artifact_detail_failure_for_entry (a : Wire_knowledge.artifact_entry) t =
   | Observed.Absent
   | Observed.Unreported ->
       None
-
-let artifact_preview_lines (_a : Wire_knowledge.artifact_entry)
-    (detail_opt : Wire_knowledge.published_artifact_detail option) =
-  let raw_opt =
-    match detail_opt with
-    | Some d when not (String.equal d.content "") -> Some d.content
-    | Some _ | None -> None
-  in
-  match raw_opt with
-  | None -> []
-  | Some raw ->
-      String.split_on_char '\n' raw
-      |> List.map (fun line ->
-             let len = String.length line in
-             if len > 0 && Char.equal line.[len - 1] '\r' then
-               String.sub line 0 (len - 1)
-             else line)
 
 let toggle_memory_flow_mode t =
   {

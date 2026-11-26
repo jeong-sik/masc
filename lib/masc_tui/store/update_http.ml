@@ -1611,7 +1611,9 @@ let apply_http_reply ~now (m : Model.t) reply =
               req =
                 Cmd.Get_board_feed
                   {
-                    sort_by = next.knowledge.board_sort_by;
+                    sort_by =
+                      Wire_knowledge.board_sort_to_string
+                        next.knowledge.board_sort_by;
                     hearth = next.knowledge.board_hearth;
                     signal_only = next.knowledge.board_signal_only;
                     limit = Some 50;
@@ -1727,7 +1729,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             req =
               Cmd.Get_board_feed
                 {
-                  sort_by = next.knowledge.board_sort_by;
+                  sort_by =
+                    Wire_knowledge.board_sort_to_string
+                      next.knowledge.board_sort_by;
                   hearth = next.knowledge.board_hearth;
                   signal_only = next.knowledge.board_signal_only;
                   limit = Some 50;
@@ -1874,7 +1878,9 @@ let apply_http_reply ~now (m : Model.t) reply =
               req =
                 Cmd.Get_board_feed
                   {
-                    sort_by = next.knowledge.board_sort_by;
+                    sort_by =
+                      Wire_knowledge.board_sort_to_string
+                        next.knowledge.board_sort_by;
                     hearth = next.knowledge.board_hearth;
                     signal_only = next.knowledge.board_signal_only;
                     limit = Some 50;
@@ -4939,10 +4945,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           | None -> m.theme_preset
       in
       let knowledge =
-        match prefs.board_sort with
-        | Some sort_by when not (String.equal (String.trim sort_by) "") ->
-            Knowledge_store.set_board_sort sort_by m.knowledge
-        | Some _ | None -> m.knowledge
+        match
+          Option.bind prefs.board_sort Wire_knowledge.board_sort_of_string
+        with
+        | Some sort_by -> Knowledge_store.set_board_sort sort_by m.knowledge
+        | None -> m.knowledge
       in
       ({ m with config; lang; theme_preset; knowledge }, [])
   | Msg.Reply_tui_preferences (Error err) ->

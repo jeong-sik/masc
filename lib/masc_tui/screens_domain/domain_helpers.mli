@@ -198,8 +198,6 @@ val format_local_hhmmss : tz_offset_sec:int -> string -> string
 val format_local_datetime : tz_offset_sec:int -> string -> string
 val wrap_lines : max_width:int -> string -> string list
 val short_hash : ?len:int -> string -> string
-val human_account_alias : Wire_runtime.account_usage -> string
 val json_kv_summary : Yojson.Safe.t -> (string * string) list
 val contains_ci : needle:string -> string -> bool
-val extract_embedded_json : string -> (string * Yojson.Safe.t) option
 val redact_secrets_in_text : string -> string

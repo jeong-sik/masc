@@ -137,3 +137,6 @@ val transition_mermaid :
 (** Palette-independent Mermaid fallback with the same single-transition scope
     as {!transition_svg}. Never expands the default focus view to connected
     history. *)
+
+val sanitize_single_line : string -> string
+(** Replace control newlines/tabs with spaces and strip terminal control bytes. *)

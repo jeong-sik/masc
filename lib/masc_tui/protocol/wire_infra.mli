@@ -562,3 +562,57 @@ type repository_observation = {
 
 val decode_repository_observation :
   Yojson.Safe.t -> (repository_observation, string) result
+
+type activity_event_category =
+  | Act_tool_call
+  | Act_turn_complete
+  | Act_agent_core
+
+val classify_activity_event_kind : string -> activity_event_category
+
+type guest_presence =
+  | Presence_running
+  | Presence_unobserved
+  | Presence_other of string
+
+val classify_guest_presence : string -> guest_presence
+
+type pr_entry_state =
+  | Pr_entry_read
+  | Pr_entry_failed
+  | Pr_entry_other of string
+
+val classify_pr_entry_state : string -> pr_entry_state
+
+type pr_checks_state =
+  | Checks_passing
+  | Checks_running
+  | Checks_failing
+  | Checks_other of string
+
+val classify_pr_checks_state : string -> pr_checks_state
+
+type pr_mergeable_state =
+  | Mergeable_conflicting
+  | Mergeable_other of string
+
+val classify_pr_mergeable_state : string -> pr_mergeable_state
+
+type pr_review_state =
+  | Review_approved
+  | Review_changes_requested
+  | Review_other of string
+
+val classify_pr_review_state : string -> pr_review_state
+
+type pr_head_review_state =
+  | Head_not_reviewed
+  | Head_review_other of string
+
+val classify_pr_head_review_state : string -> pr_head_review_state
+
+type pulls_reader_state =
+  | Reader_ready
+  | Reader_other of string
+
+val classify_pulls_reader_state : string -> pulls_reader_state

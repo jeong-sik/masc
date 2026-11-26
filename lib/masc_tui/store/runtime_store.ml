@@ -454,13 +454,20 @@ let set_prompts_presets_section pp_section t =
     detail_scroll_offset = 0;
   }
 
-let cycle_prompts_presets_section t =
+let cycle_prompts_presets_section ?(delta = 1) t =
   let next =
-    match t.pp_section with
-    | Sec_prompts -> Sec_presets
-    | Sec_presets -> Sec_params
-    | Sec_params -> Sec_async_requests
-    | Sec_async_requests -> Sec_prompts
+    if delta >= 0 then
+      match t.pp_section with
+      | Sec_prompts -> Sec_presets
+      | Sec_presets -> Sec_params
+      | Sec_params -> Sec_async_requests
+      | Sec_async_requests -> Sec_prompts
+    else
+      match t.pp_section with
+      | Sec_prompts -> Sec_async_requests
+      | Sec_presets -> Sec_prompts
+      | Sec_params -> Sec_presets
+      | Sec_async_requests -> Sec_params
   in
   set_prompts_presets_section next t
 
@@ -1743,7 +1750,10 @@ let filtered_tool_catalog_entries t =
             List.map
               (fun (s : Wire_runtime.tool_summary) :
                    Wire_runtime.tool_catalog_entry ->
-                let domain, family = Wire_runtime.classify_tool_domain_family s.name in
+                let domain_kind, family =
+                  Wire_runtime.classify_tool_domain_family s.name
+                in
+                let domain = Wire_runtime.tool_domain_to_string domain_kind in
                 {
                   name = s.name;
                   description = s.description;
@@ -1776,14 +1786,8 @@ let filtered_tool_catalog_entries t =
         | None -> false)
       entries
 
-let domain_rank = function
-  | "board" -> 0
-  | "work" -> 1
-  | "run" -> 2
-  | "keeper ops" -> 3
-  | "keeper self" -> 4
-  | "system" -> 5
-  | _ -> 6
+let domain_rank dom =
+  Wire_runtime.tool_domain_rank (Wire_runtime.tool_domain_of_string dom)
 
 let grouped_tools_catalog t : tool_domain_group list =
   let entries = filtered_tool_catalog_entries t in
@@ -1978,7 +1982,7 @@ let selected_live_dos_screen t =
   match selected_addon_instance t with
   | None -> false
   | Some inst ->
-      String.equal inst.addon_id "dos-machine"
+      Wire_runtime.is_dos_machine_addon inst
       && (match inst.runtime_presence, inst.phase with
           | Addon_live, (Addon_attached | Addon_observing) -> true
           | Addon_live, (Addon_detaching | Addon_detached | Addon_failed | Addon_phase_other _)

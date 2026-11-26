@@ -197,7 +197,7 @@ let field_label ~lang (f : Wire_config.schema_field) =
   | _ -> Wire_config.field_leaf_label ~lang f
 
 let valid_board_sort_values =
-  [ "recent"; "hot"; "trending"; "updated"; "discussed" ]
+  List.map Wire_knowledge.board_sort_to_string Wire_knowledge.all_board_sorts
 
 let valid_candle_values = [ "painted"; "dotted" ]
 
@@ -290,11 +290,11 @@ let normalize_tui_schema_field ~(prefs : Wire_config.tui_preferences option)
   | "tui.board_sort" ->
       let value =
         match Option.bind prefs (fun p -> p.board_sort) with
-        | Some s ->
-            let norm = String.lowercase_ascii (String.trim s) in
-            if List.exists (String.equal norm) valid_board_sort_values then
-              Wire_config.Val_string norm
-            else f.value
+        | Some s -> (
+            match Wire_knowledge.board_sort_of_string s with
+            | Some sort ->
+                Wire_config.Val_string (Wire_knowledge.board_sort_to_string sort)
+            | None -> f.value)
         | None -> f.value
       in
       {
@@ -541,54 +541,54 @@ let tree_sections t =
       let classify_field cat (f : Wire_config.schema_field) =
         let from_meta =
           match String_map.find_opt f.full_key t.field_meta with
-          | Some { entity_group = Some eg; entity_title; _ }
-            when not (String.equal (String.trim eg) "") ->
-              let eg = String.trim eg in
-              if String.starts_with ~prefix:"provider:" eg then
-                let pid = String.sub eg 9 (String.length eg - 9) in
-                let title = provider_title ?explicit:entity_title pid in
-                Some
-                  ( eg
-                  , Wire_config.Cat_providers_models
-                  , title
-                  , "providers." ^ pid
-                  , false )
-              else if String.starts_with ~prefix:"model:" eg then
-                let mid = String.sub eg 6 (String.length eg - 6) in
-                let title =
-                  match entity_title with
-                  | Some et when not (String.equal (String.trim et) "") ->
-                      String.trim et
-                  | Some _ | None -> mid
-                in
-                Some
-                  ( eg
-                  , Wire_config.Cat_providers_models
-                  , title
-                  , "models." ^ mid
-                  , true )
-              else if
-                String.starts_with ~prefix:"section:" eg
-                && equal_config_category cat Wire_config.Cat_providers_models
-              then
-                let pid = String.sub eg 8 (String.length eg - 8) in
-                let title = provider_title ?explicit:entity_title pid in
-                let subtitle =
-                  if String.equal (String.trim f.table) "" then eg else f.table
-                in
-                Some (eg, cat, title, subtitle, false)
+          | Some { entity_group = Some eg; entity_title; _ } -> (
+              let eg_str = Wire_config.entity_group_to_string eg in
+              if String.equal (String.trim eg_str) "" then None
               else
-                let title =
-                  match entity_title with
-                  | Some et when not (String.equal (String.trim et) "") ->
-                      String.trim et
-                  | Some _ | None -> title_case_segment eg
-                in
-                let subtitle =
-                  if String.equal (String.trim f.table) "" then eg else f.table
-                in
-                Some (eg, cat, title, subtitle, false)
-          | Some _ | None -> None
+                match eg with
+                | Wire_config.Group_provider pid ->
+                    let title = provider_title ?explicit:entity_title pid in
+                    Some
+                      ( eg_str
+                      , Wire_config.Cat_providers_models
+                      , title
+                      , "providers." ^ pid
+                      , false )
+                | Wire_config.Group_model mid ->
+                    let title =
+                      match entity_title with
+                      | Some et when not (String.equal (String.trim et) "") ->
+                          String.trim et
+                      | Some _ | None -> mid
+                    in
+                    Some
+                      ( eg_str
+                      , Wire_config.Cat_providers_models
+                      , title
+                      , "models." ^ mid
+                      , true )
+                | Wire_config.Group_section pid
+                  when equal_config_category cat
+                         Wire_config.Cat_providers_models ->
+                    let title = provider_title ?explicit:entity_title pid in
+                    let subtitle =
+                      if String.equal (String.trim f.table) "" then eg_str
+                      else f.table
+                    in
+                    Some (eg_str, cat, title, subtitle, false)
+                | Wire_config.Group_section _ | Wire_config.Group_custom _ ->
+                    let title =
+                      match entity_title with
+                      | Some et when not (String.equal (String.trim et) "") ->
+                          String.trim et
+                      | Some _ | None -> title_case_segment eg_str
+                    in
+                    let subtitle =
+                      if String.equal (String.trim f.table) "" then eg_str
+                      else f.table
+                    in
+                    Some (eg_str, cat, title, subtitle, false))
+          | Some { entity_group = None; _ } | None -> None
         in
         match from_meta with
         | Some res -> res
@@ -1037,10 +1037,8 @@ let sync_live_tui_values ?theme_preset ?lang ?board_sort t =
   let lang_str = Option.map Say.lang_code lang in
   let board_sort_str =
     Option.bind board_sort (fun s ->
-        let norm = String.lowercase_ascii (String.trim s) in
-        if List.exists (String.equal norm) valid_board_sort_values then
-          Some norm
-        else None)
+        Option.map Wire_knowledge.board_sort_to_string
+          (Wire_knowledge.board_sort_of_string s))
   in
   let t1 =
     match theme_str with
@@ -1517,11 +1515,12 @@ let apply_tui_pref_op ~observed_at ~full_key op t =
           ( { prefs0 with language = Some lang }
           , Some ("tui.language", Wire_config.Val_string (Say.lang_code lang)) )
         else if String.equal full_key "tui.board_sort" then
-          let norm = String.lowercase_ascii (String.trim value) in
-          if List.exists (String.equal norm) valid_board_sort_values then
-            ( { prefs0 with board_sort = Some norm }
-            , Some ("tui.board_sort", Wire_config.Val_string norm) )
-          else (prefs0, None)
+          match Wire_knowledge.board_sort_of_string value with
+          | Some sort ->
+              let norm = Wire_knowledge.board_sort_to_string sort in
+              ( { prefs0 with board_sort = Some norm }
+              , Some ("tui.board_sort", Wire_config.Val_string norm) )
+          | None -> (prefs0, None)
         else if String.equal full_key "tui.audio_input_device" then
           ({ prefs0 with audio_input_device = Some value }, None)
         else (prefs0, None)

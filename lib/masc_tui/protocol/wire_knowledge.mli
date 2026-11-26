@@ -1197,3 +1197,16 @@ val decode_workspace_memory_context :
   Yojson.Safe.t -> (workspace_memory_context, string) result
 val decode_keeper_memory_journal :
   Yojson.Safe.t -> (keeper_memory_journal, string) result
+
+type board_sort =
+  | Sort_recent
+  | Sort_hot
+  | Sort_trending
+  | Sort_updated
+  | Sort_discussed
+
+val all_board_sorts : board_sort list
+val board_sort_of_string : string -> board_sort option
+val board_sort_to_string : board_sort -> string
+val equal_board_sort : board_sort -> board_sort -> bool
+val next_board_sort : board_sort -> board_sort

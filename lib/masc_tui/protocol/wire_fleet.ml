@@ -251,7 +251,76 @@ type turn_preparation = {
   started_at_unix : float;
 }
 
-type turn_work_context = { task_id : string option; start_reasons : string list }
+type start_reason =
+  | Start_mention_pending
+  | Start_board_event_pending
+  | Start_scope_message_pending
+  | Start_bootstrap_stimulus_pending
+  | Start_never_started
+  | Start_tool_result_ready_pending
+  | Start_connector_attention_pending
+  | Start_ask_answered_pending
+  | Start_hitl_resolved_pending
+  | Start_completion_authority_rejection_pending
+  | Start_task_outcome_pending
+  | Start_task_cancellation_pending
+  | Start_workspace_message_pending
+  | Start_deferred_runtime_lane_pending
+  | Start_scheduled_autonomous_turn
+  | Start_scheduled_automation_due
+  | Start_task_backlog
+  | Start_unknown of string
+
+let start_reason_of_string raw =
+  match String.trim raw with
+  | "mention_pending" -> Start_mention_pending
+  | "board_event_pending" -> Start_board_event_pending
+  | "scope_message_pending" -> Start_scope_message_pending
+  | "bootstrap_stimulus_pending" -> Start_bootstrap_stimulus_pending
+  | "never_started" -> Start_never_started
+  | "tool_result_ready_pending" -> Start_tool_result_ready_pending
+  | "connector_attention_pending" -> Start_connector_attention_pending
+  | "ask_answered_pending" -> Start_ask_answered_pending
+  | "hitl_resolved_pending" -> Start_hitl_resolved_pending
+  | "completion_authority_rejection_pending" ->
+      Start_completion_authority_rejection_pending
+  | "task_outcome_pending" -> Start_task_outcome_pending
+  | "task_cancellation_pending" -> Start_task_cancellation_pending
+  | "workspace_message_pending" -> Start_workspace_message_pending
+  | "deferred_runtime_lane_pending" -> Start_deferred_runtime_lane_pending
+  | "scheduled_autonomous_turn" -> Start_scheduled_autonomous_turn
+  | "scheduled_automation_due" -> Start_scheduled_automation_due
+  | "task_backlog" -> Start_task_backlog
+  | other -> Start_unknown other
+
+let start_reason_to_string = function
+  | Start_mention_pending -> "mention_pending"
+  | Start_board_event_pending -> "board_event_pending"
+  | Start_scope_message_pending -> "scope_message_pending"
+  | Start_bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
+  | Start_never_started -> "never_started"
+  | Start_tool_result_ready_pending -> "tool_result_ready_pending"
+  | Start_connector_attention_pending -> "connector_attention_pending"
+  | Start_ask_answered_pending -> "ask_answered_pending"
+  | Start_hitl_resolved_pending -> "hitl_resolved_pending"
+  | Start_completion_authority_rejection_pending ->
+      "completion_authority_rejection_pending"
+  | Start_task_outcome_pending -> "task_outcome_pending"
+  | Start_task_cancellation_pending -> "task_cancellation_pending"
+  | Start_workspace_message_pending -> "workspace_message_pending"
+  | Start_deferred_runtime_lane_pending -> "deferred_runtime_lane_pending"
+  | Start_scheduled_autonomous_turn -> "scheduled_autonomous_turn"
+  | Start_scheduled_automation_due -> "scheduled_automation_due"
+  | Start_task_backlog -> "task_backlog"
+  | Start_unknown s -> s
+
+let equal_start_reason a b =
+  String.equal (start_reason_to_string a) (start_reason_to_string b)
+
+type turn_work_context = {
+  task_id : string option;
+  start_reasons : start_reason list;
+}
 
 type turn_preview = {
   status_text : string;
@@ -430,17 +499,54 @@ type lane_walk_failure = {
   api_candidate_fault : string option;
 }
 
+type operator_disposition =
+  | Disp_pass
+  | Disp_skipped
+  | Disp_user_cancelled
+  | Disp_actionable of string
+
+let operator_disposition_of_string raw =
+  let trimmed = String.trim raw in
+  match String.lowercase_ascii trimmed with
+  | "" | "pass" -> Disp_pass
+  | "skipped" -> Disp_skipped
+  | "user_cancelled" -> Disp_user_cancelled
+  | _ -> Disp_actionable trimmed
+
+let operator_disposition_to_string = function
+  | Disp_pass -> "pass"
+  | Disp_skipped -> "skipped"
+  | Disp_user_cancelled -> "user_cancelled"
+  | Disp_actionable s -> s
+
+type next_action_kind =
+  | Action_none
+  | Action_direct_message
+  | Action_other of string
+
+let next_action_of_string raw =
+  let trimmed = String.trim raw in
+  match String.lowercase_ascii trimmed with
+  | "" | "none" -> Action_none
+  | "direct_message" -> Action_direct_message
+  | _ -> Action_other trimmed
+
+let next_action_to_string = function
+  | Action_none -> "none"
+  | Action_direct_message -> "direct_message"
+  | Action_other s -> s
+
 type keeper_diagnostics = {
   phase : string option;
   failing_since_unix : float option;
-  next_action : string option;
+  next_action : next_action_kind option;
   last_failure_cause : string option;
   last_failure_at_unix : float option;
   runtime_blocker_summary : string option;
   runtime_blocker_signature : string option;
   runtime_path_rest : runtime_path_rest option;
   lane_failures : lane_walk_failure list;
-  operator_disposition : string option;
+  operator_disposition : operator_disposition option;
   operator_disposition_reason : string option;
 }
 
@@ -720,7 +826,7 @@ let equal_turn_preview (a : turn_preview) (b : turn_preview) =
   && Option.equal
        (fun a b ->
          Option.equal String.equal a.task_id b.task_id
-         && List.equal String.equal a.start_reasons b.start_reasons)
+         && List.equal equal_start_reason a.start_reasons b.start_reasons)
        a.work_context b.work_context
   && Option.equal (List.equal equal_turn_open_activity) a.open_activities b.open_activities
 
@@ -966,8 +1072,9 @@ let decode_turn_work_context json =
   let* reasons = required_list_field json "start_reasons" in
   let* start_reasons =
     decode_list "start_reasons"
-      (function `String reason -> Ok reason
-      | bad -> field_type_error "start_reasons" "a string reason" bad)
+      (function
+        | `String reason -> Ok (start_reason_of_string reason)
+        | bad -> field_type_error "start_reasons" "a string reason" bad)
       reasons
   in
   Ok { task_id; start_reasons }
@@ -1519,14 +1626,16 @@ let extract_keeper_diagnostics obj =
     {
       phase = opt_str obj "phase";
       failing_since_unix = opt_ts obj "failing_since";
-      next_action = opt_str obj "next_action";
+      next_action = Option.map next_action_of_string (opt_str obj "next_action");
       last_failure_cause;
       last_failure_at_unix;
       runtime_blocker_summary = opt_str obj "runtime_blocker_summary";
       runtime_blocker_signature = opt_str obj "runtime_blocker_signature";
       runtime_path_rest = extract_runtime_path_rest_opt obj;
       lane_failures = extract_lane_failures obj;
-      operator_disposition = opt_str obj "operator_disposition";
+      operator_disposition =
+        Option.map operator_disposition_of_string
+          (opt_str obj "operator_disposition");
       operator_disposition_reason = opt_str obj "operator_disposition_reason";
     }
   in

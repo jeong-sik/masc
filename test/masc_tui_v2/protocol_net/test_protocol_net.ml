@@ -7594,6 +7594,151 @@ let test_tool_result_ready_and_trace_tools_dedup () =
   Alcotest.(check bool) "pending + err resolves to Trace_tool_err" true
     ((List.nth settled_tools 1).status = Some Wire_fleet.Trace_tool_err)
 
+let test_r2_pr7_closed_sum_decoders () =
+  (* 1. Wire_fleet start_reason / operator_disposition / next_action *)
+  Alcotest.(check bool) "start_reason known roundtrip" true
+    (Wire_fleet.equal_start_reason
+       (Wire_fleet.start_reason_of_string " scheduled_automation_due ")
+       Wire_fleet.Start_scheduled_automation_due);
+  Alcotest.(check string) "start_reason unknown preserved" "future_reason"
+    (Wire_fleet.start_reason_to_string
+       (Wire_fleet.start_reason_of_string "future_reason"));
+  (match Wire_fleet.operator_disposition_of_string "PASS" with
+  | Wire_fleet.Disp_pass -> ()
+  | Wire_fleet.Disp_skipped
+  | Wire_fleet.Disp_user_cancelled
+  | Wire_fleet.Disp_actionable _ ->
+      Alcotest.fail "expected Disp_pass");
+  (match Wire_fleet.operator_disposition_of_string "operator_action_required" with
+  | Wire_fleet.Disp_actionable "operator_action_required" -> ()
+  | Wire_fleet.Disp_pass
+  | Wire_fleet.Disp_skipped
+  | Wire_fleet.Disp_user_cancelled
+  | Wire_fleet.Disp_actionable _ ->
+      Alcotest.fail "expected Disp_actionable");
+  (match Wire_fleet.next_action_of_string " direct_message " with
+  | Wire_fleet.Action_direct_message -> ()
+  | Wire_fleet.Action_none | Wire_fleet.Action_other _ ->
+      Alcotest.fail "expected Action_direct_message");
+
+  (* 2. Wire_keeper_context turn_flow_status *)
+  (match Wire_keeper_context.turn_flow_status_of_string "Succeeded" with
+  | Wire_keeper_context.Flow_ok "Succeeded" -> ()
+  | Wire_keeper_context.Flow_ok _
+  | Wire_keeper_context.Flow_failed _
+  | Wire_keeper_context.Flow_active _ ->
+      Alcotest.fail "expected Flow_ok");
+  (match Wire_keeper_context.turn_flow_status_of_string "error" with
+  | Wire_keeper_context.Flow_failed "error" -> ()
+  | Wire_keeper_context.Flow_ok _
+  | Wire_keeper_context.Flow_failed _
+  | Wire_keeper_context.Flow_active _ ->
+      Alcotest.fail "expected Flow_failed");
+  Alcotest.(check string) "turn_flow_status preserves original raw text"
+    "running"
+    (Wire_keeper_context.turn_flow_status_to_string
+       (Wire_keeper_context.turn_flow_status_of_string "running"));
+
+  (* 3. Wire_config entity_group *)
+  Alcotest.(check bool) "entity_group provider prefix" true
+    (Wire_config.equal_entity_group
+       (Wire_config.entity_group_of_string "provider:claude_code")
+       (Wire_config.Group_provider "claude_code"));
+  Alcotest.(check bool) "entity_group model prefix" true
+    (Wire_config.equal_entity_group
+       (Wire_config.entity_group_of_string "model:gpt-5.6")
+       (Wire_config.Group_model "gpt-5.6"));
+  Alcotest.(check string) "entity_group section roundtrip" "section:providers"
+    (Wire_config.entity_group_to_string
+       (Wire_config.entity_group_of_string "section:providers"));
+  Alcotest.(check bool) "entity_group custom fallback" true
+    (Wire_config.equal_entity_group
+       (Wire_config.entity_group_of_string "custom_bucket")
+       (Wire_config.Group_custom "custom_bucket"));
+
+  (* 4. Wire_knowledge board_sort SSOT & full cycle *)
+  let cycled =
+    let rec go n cur acc =
+      if n <= 0 then List.rev acc
+      else
+        let nxt = Wire_knowledge.next_board_sort cur in
+        go (n - 1) nxt (Wire_knowledge.board_sort_to_string nxt :: acc)
+    in
+    go 5 Wire_knowledge.Sort_recent []
+  in
+  Alcotest.(check (list string)) "board_sort cycles all 5 canonical values"
+    [ "hot"; "trending"; "updated"; "discussed"; "recent" ] cycled;
+  Alcotest.(check bool) "board_sort rejects unknown string" true
+    (Option.is_none (Wire_knowledge.board_sort_of_string "bogus"));
+
+  (* 5. Wire_runtime closed classifiers *)
+  let dom, fam = Wire_runtime.classify_tool_domain_family "masc_board_post" in
+  Alcotest.(check string) "board tool domain" "board"
+    (Wire_runtime.tool_domain_to_string dom);
+  Alcotest.(check string) "board tool family" "board" fam;
+  Alcotest.(check int) "board rank < system rank" (-1)
+    (Int.compare
+       (Wire_runtime.tool_domain_rank Wire_runtime.Domain_board)
+       (Wire_runtime.tool_domain_rank Wire_runtime.Domain_system));
+  Alcotest.(check bool) "payment_refused predicate" true
+    (Wire_runtime.is_payment_refused_cause " payment_refused ");
+  Alcotest.(check bool) "quota_refused is not payment_refused" false
+    (Wire_runtime.is_payment_refused_cause "provider_quota_refused");
+  (match Wire_runtime.classify_window_provider_label "Weekly" with
+  | Wire_runtime.Window_label_weekly -> ()
+  | Wire_runtime.Window_label_session
+  | Wire_runtime.Window_label_daily
+  | Wire_runtime.Window_label_monthly
+  | Wire_runtime.Window_label_other _ ->
+      Alcotest.fail "expected Window_label_weekly");
+  (match Wire_runtime.classify_setup_support "unsupported" with
+  | Wire_runtime.Setup_unsupported -> ()
+  | Wire_runtime.Setup_supported _ ->
+      Alcotest.fail "expected Setup_unsupported");
+  (match Wire_runtime.classify_skill_surface_kind "composition" with
+  | Wire_runtime.Skill_composition -> ()
+  | Wire_runtime.Skill_instruction | Wire_runtime.Skill_kind_other _ ->
+      Alcotest.fail "expected Skill_composition");
+
+  (* 6. Wire_infra closed classifiers *)
+  (match Wire_infra.classify_activity_event_kind "tool.execute" with
+  | Wire_infra.Act_tool_call -> ()
+  | Wire_infra.Act_turn_complete | Wire_infra.Act_agent_core ->
+      Alcotest.fail "expected Act_tool_call");
+  (match Wire_infra.classify_activity_event_kind "keeper.turn_completed" with
+  | Wire_infra.Act_turn_complete -> ()
+  | Wire_infra.Act_tool_call | Wire_infra.Act_agent_core ->
+      Alcotest.fail "expected Act_turn_complete");
+  (match Wire_infra.classify_guest_presence "running" with
+  | Wire_infra.Presence_running -> ()
+  | Wire_infra.Presence_unobserved | Wire_infra.Presence_other _ ->
+      Alcotest.fail "expected Presence_running");
+  (match Wire_infra.classify_pr_entry_state "read" with
+  | Wire_infra.Pr_entry_read -> ()
+  | Wire_infra.Pr_entry_failed | Wire_infra.Pr_entry_other _ ->
+      Alcotest.fail "expected Pr_entry_read");
+  (match Wire_infra.classify_pr_checks_state "failing" with
+  | Wire_infra.Checks_failing -> ()
+  | Wire_infra.Checks_passing
+  | Wire_infra.Checks_running
+  | Wire_infra.Checks_other _ ->
+      Alcotest.fail "expected Checks_failing");
+  (match Wire_infra.classify_pr_mergeable_state "conflicting" with
+  | Wire_infra.Mergeable_conflicting -> ()
+  | Wire_infra.Mergeable_other _ ->
+      Alcotest.fail "expected Mergeable_conflicting");
+  (match Wire_infra.classify_pr_review_state "approved" with
+  | Wire_infra.Review_approved -> ()
+  | Wire_infra.Review_changes_requested | Wire_infra.Review_other _ ->
+      Alcotest.fail "expected Review_approved");
+  (match Wire_infra.classify_pr_head_review_state "not_reviewed_on_head" with
+  | Wire_infra.Head_not_reviewed -> ()
+  | Wire_infra.Head_review_other _ ->
+      Alcotest.fail "expected Head_not_reviewed");
+  match Wire_infra.classify_pulls_reader_state "ready" with
+  | Wire_infra.Reader_ready -> ()
+  | Wire_infra.Reader_other _ -> Alcotest.fail "expected Reader_ready"
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -7658,6 +7803,8 @@ let () =
             test_wave4_layer4_wire_codecs;
           Alcotest.test_case "Keeper lifecycle wire codecs (paths, directives, 202 partial, replies)" `Quick
             test_keeper_lifecycle_wire_codecs;
+          Alcotest.test_case "R2-PR7 closed sum wire decoders & classifiers" `Quick
+            test_r2_pr7_closed_sum_decoders;
         ] );
       ( "net"
       , [

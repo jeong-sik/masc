@@ -971,25 +971,39 @@ let observed_turn_badges ~model ~keeper (turn : Wire_fleet.active_turn) =
         else (Glyph.Live_idle, Theme.Status_historical, label), last_seen
 
 let start_reason_label = function
-  | "mention_pending" -> Say.make ~ko:"멘션 도착" ~en:"Mention received"
-  | "board_event_pending" -> Say.make ~ko:"보드 이벤트" ~en:"Board event"
-  | "scope_message_pending" -> Say.make ~ko:"범위 메시지" ~en:"Scope message"
-  | "bootstrap_stimulus_pending" | "never_started" ->
+  | Wire_fleet.Start_mention_pending ->
+      Say.make ~ko:"멘션 도착" ~en:"Mention received"
+  | Wire_fleet.Start_board_event_pending ->
+      Say.make ~ko:"보드 이벤트" ~en:"Board event"
+  | Wire_fleet.Start_scope_message_pending ->
+      Say.make ~ko:"범위 메시지" ~en:"Scope message"
+  | Wire_fleet.Start_bootstrap_stimulus_pending | Wire_fleet.Start_never_started ->
       Say.make ~ko:"첫 실행" ~en:"First run"
-  | "tool_result_ready_pending" -> Say.make ~ko:"도구 결과 도착" ~en:"Tool result ready"
-  | "connector_attention_pending" -> Say.make ~ko:"연동 이벤트" ~en:"Connector event"
-  | "ask_answered_pending" -> Say.make ~ko:"질문 답변 도착" ~en:"Answer received"
-  | "hitl_resolved_pending" -> Say.make ~ko:"도구 승인 결정" ~en:"Tool approval decision"
-  | "completion_authority_rejection_pending" ->
+  | Wire_fleet.Start_tool_result_ready_pending ->
+      Say.make ~ko:"도구 결과 도착" ~en:"Tool result ready"
+  | Wire_fleet.Start_connector_attention_pending ->
+      Say.make ~ko:"연동 이벤트" ~en:"Connector event"
+  | Wire_fleet.Start_ask_answered_pending ->
+      Say.make ~ko:"질문 답변 도착" ~en:"Answer received"
+  | Wire_fleet.Start_hitl_resolved_pending ->
+      Say.make ~ko:"도구 승인 결정" ~en:"Tool approval decision"
+  | Wire_fleet.Start_completion_authority_rejection_pending ->
       Say.make ~ko:"완료 증거 반려" ~en:"Completion evidence rejected"
-  | "task_outcome_pending" -> Say.make ~ko:"Task 결과 도착" ~en:"Task outcome received"
-  | "task_cancellation_pending" -> Say.make ~ko:"Task 취소" ~en:"Task cancelled"
-  | "workspace_message_pending" -> Say.make ~ko:"작업공간 메시지" ~en:"Workspace message"
-  | "deferred_runtime_lane_pending" -> Say.make ~ko:"보류한 실행 재개" ~en:"Deferred run resumed"
-  | "scheduled_autonomous_turn" -> Say.make ~ko:"자율 실행 주기" ~en:"Autonomous cadence"
-  | "scheduled_automation_due" -> Say.make ~ko:"예약 작업 도래" ~en:"Scheduled work due"
-  | "task_backlog" -> Say.make ~ko:"대기 중인 Task" ~en:"Task backlog"
-  | reason -> Say.literal reason
+  | Wire_fleet.Start_task_outcome_pending ->
+      Say.make ~ko:"Task 결과 도착" ~en:"Task outcome received"
+  | Wire_fleet.Start_task_cancellation_pending ->
+      Say.make ~ko:"Task 취소" ~en:"Task cancelled"
+  | Wire_fleet.Start_workspace_message_pending ->
+      Say.make ~ko:"작업공간 메시지" ~en:"Workspace message"
+  | Wire_fleet.Start_deferred_runtime_lane_pending ->
+      Say.make ~ko:"보류한 실행 재개" ~en:"Deferred run resumed"
+  | Wire_fleet.Start_scheduled_autonomous_turn ->
+      Say.make ~ko:"자율 실행 주기" ~en:"Autonomous cadence"
+  | Wire_fleet.Start_scheduled_automation_due ->
+      Say.make ~ko:"예약 작업 도래" ~en:"Scheduled work due"
+  | Wire_fleet.Start_task_backlog ->
+      Say.make ~ko:"대기 중인 Task" ~en:"Task backlog"
+  | Wire_fleet.Start_unknown reason -> Say.literal reason
 
 type keeper_work_row =
   | Work_status of (Glyph.t * Theme.status_token * Say.t)

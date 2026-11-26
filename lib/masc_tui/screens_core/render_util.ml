@@ -88,82 +88,7 @@ let voice_state_of_drafts (drafts : Drafts.t) =
       Composer.Voice_recording { levels = Array.of_list levels; elapsed_s }
   | Drafts.Voice_transcribing -> Composer.Voice_transcribing
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let utf8_scalars_lower s =
-  let len = String.length s in
-  let acc = ref [] in
-  let i = ref 0 in
-  while !i < len do
-    let d = String.get_utf_8_uchar s !i in
-    let step = Uchar.utf_decode_length d in
-    let code = Uchar.to_int (Uchar.utf_decode_uchar d) in
-    let folded = if code >= 65 && code <= 90 then code + 32 else code in
-    acc := folded :: !acc;
-    i := !i + Int.max 1 step
-  done;
-  Array.of_list (List.rev !acc)
-
-let fuzzy_score ~query target =
-  let q_raw = String.trim query in
-  if String.equal q_raw "" then Some 100
-  else
-    let q = utf8_scalars_lower q_raw in
-    let t = utf8_scalars_lower target in
-    let q_len = Array.length q in
-    let t_len = Array.length t in
-    if q_len > t_len then None
-    else if
-      Int.equal q_len t_len
-      &&
-      let rec eq i =
-        i >= q_len || (Int.equal q.(i) t.(i) && eq (i + 1))
-      in
-      eq 0
-    then Some 1000
-    else if
-      let rec pref i =
-        i >= q_len || (Int.equal q.(i) t.(i) && pref (i + 1))
-      in
-      pref 0
-    then Some (800 - (t_len - q_len))
-    else if
-      let rec has_sub start =
-        if start + q_len > t_len then false
-        else
-          let rec eq i =
-            i >= q_len || (Int.equal q.(i) t.(start + i) && eq (i + 1))
-          in
-          if eq 0 then true else has_sub (start + 1)
-      in
-      has_sub 0
-    then Some (500 - (t_len - q_len))
-    else
-      let rec match_seq qi ti score consecutive =
-        if qi >= q_len then Some (Int.max 1 score)
-        else if ti >= t_len then None
-        else if Int.equal q.(qi) t.(ti) then
-          let bonus = if consecutive then 12 else 4 in
-          let start_bonus = if ti = 0 then 10 else 0 in
-          match_seq (qi + 1) (ti + 1) (score + bonus + start_bonus) true
-        else match_seq qi (ti + 1) (score - 1) false
-      in
-      match_seq 0 0 100 false
+let contains_ci = Text_util.contains_ci
 
 let popup_of_draft (m : Model.t) (_draft : Drafts.keeper_draft) =
   let to_item (c : Update_nav.popup_candidate) : Composer.popup_item =
@@ -403,45 +328,7 @@ let draw_pill ?clip grid ~x ~y ~fg ~bg ?(bold = false) text =
     let padded = " " ^ text ^ " " in
     Cell_grid.put_text ?clip grid ~x ~y ~style padded
 
-let parse_json_struct_only s =
-  match Yojson.Safe.from_string s with
-  | (`Assoc _ | `List _) as json -> Some json
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
-  | exception Yojson.Json_error _ -> None
-
-let strip_trailing_colon s =
-  let t = String.trim s in
-  let len = String.length t in
-  if len > 0 && Char.equal t.[len - 1] ':' then
-    String.trim (String.sub t 0 (len - 1))
-  else t
-
-let max_embedded_json_bytes = 262_144
-let max_embedded_json_attempts = 8
-
-let extract_embedded_json raw =
-  let trimmed = String.trim raw in
-  let len = String.length trimmed in
-  if len < 2 || len > max_embedded_json_bytes then None
-  else
-    let rec try_from attempts i =
-      if i >= len || attempts >= max_embedded_json_attempts then None
-      else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
-        let candidate = String.sub trimmed i (len - i) in
-        match parse_json_struct_only candidate with
-        | Some json ->
-            let prefix =
-              if i = 0 then ""
-              else strip_trailing_colon (String.sub trimmed 0 i)
-            in
-            let prefix_opt =
-              if String.equal prefix "" then None else Some prefix
-            in
-            Some (prefix_opt, json)
-        | None -> try_from (attempts + 1) (i + 1)
-      else try_from attempts (i + 1)
-    in
-    try_from 0 0
+let extract_embedded_json = Update_nav.extract_embedded_json
 
 let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true

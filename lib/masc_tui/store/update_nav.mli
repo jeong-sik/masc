@@ -342,3 +342,4 @@ val keeper_identity_lines :
 val verification_dive_tab_lines :
   width:int -> Model.t -> Wire_work.verification_request -> styled_line list
 val code_right_pane_line_count : Model.t -> int
+val extract_embedded_json : string -> (string option * Yojson.Safe.t) option

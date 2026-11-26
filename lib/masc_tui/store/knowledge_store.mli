@@ -157,7 +157,7 @@ type t = {
   board_thread_meta : Wire_knowledge.board_thread_meta option;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
-  board_sort_by : string;
+  board_sort_by : Wire_knowledge.board_sort;
   board_hearth : string option;
   expanded_succession_chains : String_set.t;
   active_thread :
@@ -301,7 +301,7 @@ val set_tab : Nav.knowledge_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
 
 val toggle_signal_only : t -> t
-val set_board_sort : string -> t -> t
+val set_board_sort : Wire_knowledge.board_sort -> t -> t
 val cycle_board_sort : t -> t
 val set_board_hearth : string option -> t -> t
 val cycle_board_hearth : t -> t
@@ -626,10 +626,6 @@ val artifact_detail_for_entry :
   Wire_knowledge.published_artifact_detail option
 val artifact_detail_failure_for_entry :
   Wire_knowledge.artifact_entry -> t -> string option
-val artifact_preview_lines :
-  Wire_knowledge.artifact_entry ->
-  Wire_knowledge.published_artifact_detail option ->
-  string list
 val memory_flow_input_of_diff :
   Wire_knowledge.memory_diff ->
   memory_diff_window ->

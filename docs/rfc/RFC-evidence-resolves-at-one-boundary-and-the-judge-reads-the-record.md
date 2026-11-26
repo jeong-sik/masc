@@ -1,6 +1,6 @@
 # RFC evidence-resolves-at-one-boundary: 인용한 증거는 경계 하나에서 풀리고 판정은 그 기록만 읽는다
 
-상태: 제안 (2026-11-26). 측정과 지난 작업의 지도는 이슈 #54918 에 있다. 설계는 새 문맥의 Opus 와 세 턴 반박과 초안 검토를 거쳐 정했다. 구현 PR: #54965(1층의 첫 조각. 합계 상한에 밀린 artifact 를 기록에서 읽는다).
+상태: 제안 (2026-11-26). 측정과 지난 작업의 지도는 이슈 #54918 에 있다. 설계는 새 문맥의 Opus 와 세 턴 반박과 초안 검토를 거쳐 정했다. 구현 PR: #54965(합계 상한에 밀린 artifact 를 기록에서 읽는다), #54981(긴 웹 페이지의 저장본을 리더로 읽고 검색한다).
 
 ## 0. 요약
 
@@ -203,7 +203,7 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 
 | 층 | 더하는 것 | 지우는 것 | 재는 것 |
 |---|---|---|---|
-| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 판정 사건의 `evidence_reads`(기록 읽기와 live 조회). 지금은 도구 관측이 64건만 남는 실행 기록에만 있다 | 「read ranges of the actual file」 문구(`lib/workspace/workspace_verification_snapshot.ml:308-329`) | 읽은 페이지가 판정 사건에 남은 판정의 비율 |
+| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 긴 웹 페이지의 저장본을 리더로 읽고 검색한다. 판정자 표면 자기의 `masc_web_fetch` 가 돌려준 sha256 만 읽는다. 판정 사건의 `evidence_reads`(기록 읽기와 live 조회). 지금은 도구 관측이 64건만 남는 실행 기록에만 있다 | 「read ranges of the actual file」 문구(`lib/workspace/workspace_verification_snapshot.ml:308-329`) | 읽은 페이지가 판정 사건에 남은 판정의 비율 |
 | 2 `truncated` 삭제 | 텍스트 본문을 통째로 blob 으로 두고 리더로 읽는다 | `truncated`, `warn_oversized_evidence`(`lib/verification_protocol.ml:106-124`), posture 절 | 잘림 사유 거절 9건, 잘린 항목을 가진 승인 19건 |
 | 3 sha256 참조 | `artifact:sha256:` 와 export 결과의 참조, `masc_evidence_put`, 기록의 blob 붙잡기 | checkout 접두어 안내 | 경로 사유 거절. #27552 |
 | 4 경계 하나 | resolver 하나, `Unreadable(reason)`, `Submitter` 거절, Harness 보류와 운영자 목록, `gh:`(공개 저장소) | 정책 다섯을 하나로. #38583 의 meta 거절. `evidence_capture` 진단(`lib/task/tool_task.ml:268`). 「note 로 감싸라」 두 곳을 `gh:` 안내로 | 제출에서 거절한 건수(사유별). 운영자 목록에 오른 Harness 멈춤. 문법이 덮지 않은 live 조회 건수 |
@@ -211,6 +211,8 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 | 6 거절 처분 | 판정 행의 처분과 책임자. 세션 미답변 거절의 projection | `still_unroutable` 과 그 종류 | Keeper 아닌 생산자 거절의 응답률 1/9 |
 | 7 Goal | 설계는 별도 결정이다 | — | `evidence_refs` 가 `[]` 인 증명 요청 건수 |
 
+- 판정자의 웹 fetch 는 절반이 넘게 긴 페이지를 만난다. 11-26 12:15Z 실행 기록 사본의 끝난 판정 64건에서 272번 중 142번이 `maxChars` 를 넘어 머리·꼬리 창으로 돌아왔고, 표식이 가리키는 `keeper_artifact_read(sha256, offset)` 는 판정자 표면에 없었다. 판정자는 `maxChars` 를 2천~3만 자로 부른다.
+- 1층의 `evidence_reads` 는 실행 저널에서 투영한다. 실행 기록의 도구 관측은 판정을 돌리는 process 의 메모리에서 온다(`lib/completion_authority_agent.ml` 의 `tools`), 그래서 다른 process 가 이어받은 판정에는 비어 있다. 판정을 세우는 코드는 이미 저널을 읽는다(`lib/keeper/verifier_review_execution.ml` 의 `read_call`). 거절 사건에는 `reason` 만 실리므로 자리를 새로 만들어야 한다.
 - 3층이 4층보다 먼저여야 한다. 아니면 지금 live 조회가 구해 주는 잘못된 경로(승인 제출의 `artifact_unreadable` 6개)가 거절로 바뀐다.
 - 5층은 경로 형태와 영속 모양의 hard cut 이다. 옛 경로 형태의 참조를 내는 제출은 `Invalid_reference` 로 거절된다. 옛 모양의 reader 를 만들지 않는다. 옛 요청 기록의 증거는 `Evidence_unavailable` 로 읽힌다(D1). 배포 전에 판정을 기다리던 요청을 비운다.
 - 4층과 함께 `docs/RELIABLE-CHANGE-ROADMAP.md` 의 경계 suite 문구 셋(`missing-artifact`, `producer-root-missing-mcp`, `producer-artifact-unreadable`)을 D3 대로 고친다.

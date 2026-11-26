@@ -5126,7 +5126,7 @@ let rec execute t = function
                 match response with
                 | Error err -> Error (msg_error_of_http err)
                 | Ok png
-                  when not (String.starts_with ~prefix:"\137PNG\r\n\026\n" png) ->
+                  when not (String.starts_with ~prefix:Graphics.png_signature png) ->
                     Error (Msg.Decode_error "DOS screen response is not PNG")
                 | Ok png ->
                     open_dos_screen ~sw:t.sw ~closed:t.closed ~is_current png

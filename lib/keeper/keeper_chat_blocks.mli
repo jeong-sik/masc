@@ -21,6 +21,7 @@
 type image_block = {
   src : string;
   cap : string option;
+  mime_type : string option;
 }
 
 type link_block = {

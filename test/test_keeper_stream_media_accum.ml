@@ -41,7 +41,7 @@ let test_image_media_persisted_as_block () =
     ];
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
-  | [ Blocks.Image { src; cap = None } ] ->
+  | [ Blocks.Image { src; cap = None; _ } ] ->
     check
       string
       "image block src is the persisted media URL for the concatenated payload"
@@ -158,7 +158,7 @@ let test_open_media_finalized_on_message_stop () =
   A.on_event accum MessageStop;
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
-  | [ Blocks.Image { src; cap = None }; Blocks.Voice { src = Some _; _ } ] ->
+  | [ Blocks.Image { src; cap = None; _ }; Blocks.Voice { src = Some _; _ } ] ->
       check
         string
         "message stop finalizes open media in block-index order"
@@ -271,7 +271,7 @@ let test_metadata_drift_preserves_first_media_block () =
     ];
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
-  | [ Blocks.Image { src; cap = None } ] ->
+  | [ Blocks.Image { src; cap = None; _ } ] ->
       check
         string
         "metadata drift keeps first media block"
@@ -302,7 +302,7 @@ let test_many_media_chunks_join_in_order () =
      @ [ ContentBlockStop { index = 0 } ]);
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
-  | [ Blocks.Image { src; cap = None } ] ->
+  | [ Blocks.Image { src; cap = None; _ } ] ->
       check string "the persisted media is every chunk in arrival order"
         ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
         src
@@ -340,7 +340,7 @@ let test_carrier_change_keeps_first_media_block () =
      @ [ ContentBlockStop { index = 0 } ]);
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
-  | [ Blocks.Image { src; cap = None } ] ->
+  | [ Blocks.Image { src; cap = None; _ } ] ->
       check string "a chunk under another carrier is not joined"
         ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
         src
@@ -538,7 +538,7 @@ let test_failed_request_reloads_completed_media_across_attempts () =
       let blocks = A.to_chat_blocks ~base_dir media in
       let image_sources =
         List.map (function
-          | Blocks.Image { src; cap = None } -> src
+          | Blocks.Image { src; cap = None; _ } -> src
           | _ -> fail "expected completed image blocks without captions")
       in
       let token raw = expected_token ~media_type raw in

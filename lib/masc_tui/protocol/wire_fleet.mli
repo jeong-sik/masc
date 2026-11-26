@@ -627,7 +627,14 @@ type history_thinking =
   | Thinking_redacted
   | Thinking_partial of string
 
-type retained_image = { media_path : string; caption : string option }
+val media_path_prefix : string
+(** Canonical ["/api/v1/media/"] prefix for retained workspace media paths. *)
+
+type retained_image = {
+  media_path : string;
+  caption : string option;
+  mime_type : string option;
+}
 
 type trace_tool_status =
   | Trace_tool_pending

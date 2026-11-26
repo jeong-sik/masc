@@ -6202,7 +6202,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            (Keeper_chat_delivery_identity.Request_id.of_string operation_id_raw |> Result.get_ok) in
          Keeper_chat_store.append_assistant_message_once ~base_dir:base_path
            ~keeper_name:meta.name ~delivery_key ~turn_ref ~content:full_reply
-           ~blocks:[Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None}] ()
+           ~blocks:[Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None;mime_type=None}] ()
          |> Result.get_ok |> ignore;
          Keeper_chat_store.append_request_failure_once ~base_dir:base_path
            ~keeper_name:meta.name ~turn_ref
@@ -6239,7 +6239,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            Yojson.Safe.Util.(List.hd replies |> member "text" |> to_string);
          check bool "persisted media survives completed reply projection" true
            (Yojson.Safe.Util.member "blocks" (List.hd replies) = Keeper_chat_blocks.blocks_to_yojson
-             [Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None}]);
+             [Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None;mime_type=None}]);
          let denied = read "different-agent" in
          check bool "other caller cannot read completed body" false (Tool_result.is_success denied);
          check bool "denial does not expose full reply" false

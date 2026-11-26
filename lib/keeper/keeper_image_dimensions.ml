@@ -13,22 +13,12 @@
 let be16 bytes offset =
   (Char.code bytes.[offset] lsl 8) lor Char.code bytes.[offset + 1]
 
-let be32 bytes offset =
-  (Char.code bytes.[offset] lsl 24)
-  lor (Char.code bytes.[offset + 1] lsl 16)
-  lor (Char.code bytes.[offset + 2] lsl 8)
-  lor Char.code bytes.[offset + 3]
-
 let le16 bytes offset =
   Char.code bytes.[offset] lor (Char.code bytes.[offset + 1] lsl 8)
 
-(* PNG: the signature is the one the caller matched, and the spec puts IHDR
-   first, so width and height are at fixed offsets. A file whose first chunk
-   is not IHDR is not a PNG this function wants to speak about. *)
-let png_dimensions bytes =
-  if String.length bytes >= 24 && String.equal (String.sub bytes 12 4) "IHDR"
-  then Some (be32 bytes 16, be32 bytes 20)
-  else None
+(* PNG: delegates to {!Rgb_png.header_dimensions} so signature, 13-byte IHDR
+   chunk length, and positive-dimension checks stay in one SSOT. *)
+let png_dimensions bytes = Rgb_png.header_dimensions bytes
 
 (* JPEG: markers follow SOI in order, every non-standalone segment carries
    its own length, and every SOF carries the frame size. The walk stops at
@@ -65,7 +55,7 @@ let gif_dimensions bytes =
    confident wrong size, which is worse than printing none. *)
 let image_dimensions bytes =
   let starts prefix = String.starts_with ~prefix bytes in
-  if starts "\x89PNG" then png_dimensions bytes
+  if starts Rgb_png.signature then png_dimensions bytes
   else if starts "\xff\xd8\xff" then jpeg_dimensions bytes
   else if starts "GIF8" then gif_dimensions bytes
   else None

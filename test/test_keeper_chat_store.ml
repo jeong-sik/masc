@@ -647,7 +647,7 @@ let test_structured_only_assistant_row_survives_reload () =
     (fun () ->
       let keeper_name = "keeper-chat-structured-only" in
       K.append_assistant_message ~base_dir ~keeper_name ~content:""
-        ~blocks:[ B.Image { src = "https://example.com/generated.png"; cap = None } ]
+        ~blocks:[ B.Image { src = "https://example.com/generated.png"; cap = None; mime_type = None } ]
         ();
       match K.load ~base_dir ~keeper_name with
       | [ assistant ] ->
@@ -1759,7 +1759,7 @@ let test_failure_completed_output_roundtrip () =
         | Error error -> Alcotest.fail error in
       let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
       let blocks =
-        [ Masc.Keeper_chat_blocks.Image { src = "/api/v1/media/completed"; cap = Some "completed" }
+        [ Masc.Keeper_chat_blocks.Image { src = "/api/v1/media/completed"; cap = Some "completed"; mime_type = None }
         ; Masc.Keeper_chat_blocks.Voice
             { secs = Some 1.; wave = None; via = None; size = None
             ; transcript = Some "completed audio"; src = Some "/api/v1/voice/audio/completed" }

@@ -188,7 +188,7 @@ let mermaid_to_embed ~source =
     }
 
 let rich_embed_of_chat_block = function
-  | Keeper_chat_blocks.Image { src; cap } ->
+  | Keeper_chat_blocks.Image { src; cap; mime_type = _ } ->
       let caption = Option.map Observability_redact.redact_text cap in
       Option.map
         (fun url -> Discord_rest_client.image_embed ~url ~caption)

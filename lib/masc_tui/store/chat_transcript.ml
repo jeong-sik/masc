@@ -609,17 +609,34 @@ let retained_image_height ~(model : Model.t) ~keeper ~width =
   | Some Graphics_supported when fresh && width >= 16 -> 6
   | Some Graphics_supported | Some (Graphics_refused _) | None -> 1
 
+let is_inline_png_retained_image (img : Wire_fleet.retained_image) =
+  match img.mime_type with
+  | None -> true
+  | Some m -> String.equal (String.lowercase_ascii (String.trim m)) "image/png"
+
 let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
   List.concat_map
-    (fun ({ media_path; caption } : Wire_fleet.retained_image) ->
-      let name = Option.value caption ~default:(Say.resolve lang (Say.make ~ko:"생성 이미지" ~en:"Generated image")) in
-      let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) name in
-      let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
-      let count = height - 1 in
-      let rows : Cell_grid.document_image_rows = { source = Retained_png media_path; count } in
-      { Markdown.spans; image_part = None }
-      :: List.init count (fun index ->
-             { Markdown.spans = []; image_part = Some { rows; index; left_inset = 0 } }))
+    (fun (img : Wire_fleet.retained_image) ->
+      let { Wire_fleet.media_path; caption; mime_type } = img in
+      let default_name = Say.resolve lang (Say.make ~ko:"생성 이미지" ~en:"Generated image") in
+      let base_name = Option.value caption ~default:default_name in
+      if is_inline_png_retained_image img then
+        let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) base_name in
+        let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
+        let count = height - 1 in
+        let rows : Cell_grid.document_image_rows = { source = Retained_png media_path; count } in
+        { Markdown.spans; image_part = None }
+        :: List.init count (fun index ->
+               { Markdown.spans = []; image_part = Some { rows; index; left_inset = 0 } })
+      else
+        let label =
+          match mime_type with
+          | Some m -> Printf.sprintf "[%s] %s (%s)" m base_name media_path
+          | None -> Printf.sprintf "%s (%s)" base_name media_path
+        in
+        let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) label in
+        let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
+        [ { Markdown.spans; image_part = None } ])
     images
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
@@ -2764,7 +2781,11 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                     ~prefix:"  " msg.content
                 + cut_reply_r
           in
-          let media_r = retained_height * List.length msg.retained_images in
+          let media_r =
+            List.fold_left
+              (fun sum img -> sum + if is_inline_png_retained_image img then retained_height else 1)
+              0 msg.retained_images
+          in
           (false, acc + spacing + msg_r + media_r))
         (true, 0) (history_tool_groups ~tools_mode hist_msgs)
     in

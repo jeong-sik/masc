@@ -375,7 +375,9 @@ let get_raw_limited ~io ~clock ~max_body_bytes ep ~path =
     | No_addresses | Dns_failure _ | Tcp_failure _ | Establishment_timeout -> retry
   in
   match request_raw ~io ~clock ~timeout_sec:default_raw_timeout_sec
-          ~max_body_bytes ~method_:`GET ep ~path with
+          ~max_body_bytes
+          ~extra_headers:[ ("Accept", "image/png, image/*;q=0.9, */*;q=0.5") ]
+          ~method_:`GET ep ~path with
   | Ok response when is_success_status response.status -> Ok response.body
   | Ok response -> failed_status response.status
   | Error Masc_http_client.Pool_unavailable -> Error Unavailable

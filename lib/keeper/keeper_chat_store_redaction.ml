@@ -167,10 +167,11 @@ let redact_block redaction = function
       ; size_bytes
       ; kind = redact_string_opt redaction kind
       }
-  | Keeper_chat_blocks.Image { src; cap } ->
+  | Keeper_chat_blocks.Image { src; cap; mime_type } ->
     Keeper_chat_blocks.Image
       { src = redact_string redaction src
       ; cap = redact_string_opt redaction cap
+      ; mime_type = redact_string_opt redaction mime_type
       }
   | Keeper_chat_blocks.Link { url; title; meta } ->
     Keeper_chat_blocks.Link

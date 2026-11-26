@@ -290,7 +290,7 @@ let test_external_effect_status_survives_server_projection () =
       fail "typed Gate wait did not remain deliverable for a queued turn"
 
 let test_visible_caption_and_media_persist_as_complete_body () =
-  let media = Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None } in
+  let media = Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None; mime_type = None } in
   let actual = Stream.For_testing.persisted_reply_blocks
       ~reply:"caption" ~turn_outcome:TO.Visible_reply (Some [media]) in
   let expected = Some (Masc.Keeper_chat_blocks.parse_text_to_blocks "caption" @ [media]) in
@@ -1048,7 +1048,7 @@ let test_media_continuation_uses_assistant_delivery_path () =
   (* A continuation with accumulated media still persists one assistant row:
      the typed status block leads and the media blocks survive. *)
   let media =
-    Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None }
+    Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None; mime_type = None }
   in
   match
     Stream.For_testing.persisted_reply_blocks ~reply:""
@@ -1058,7 +1058,7 @@ let test_media_continuation_uses_assistant_delivery_path () =
   | Some
       [ Masc.Keeper_chat_blocks.Status
           { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
-      ; Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None }
+      ; Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None; mime_type = None }
       ] ->
     ()
   | Some _ ->
@@ -1091,7 +1091,7 @@ let test_continuation_status_uses_assistant_delivery_path () =
     [ None
     ; Some
         [ Masc.Keeper_chat_blocks.Image
-            { src = "/media/generated.png"; cap = None }
+            { src = "/media/generated.png"; cap = None; mime_type = None }
         ]
     ]
 

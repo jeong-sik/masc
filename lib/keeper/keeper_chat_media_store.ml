@@ -111,7 +111,7 @@ let media_dir ~base_dir =
 let token_of_payload ~media_type data =
   Agent_core_sha256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
 
-let media_url token = Printf.sprintf "/api/v1/media/%s" token
+let media_url token = Masc_network_defaults.media_path token
 
 let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
 

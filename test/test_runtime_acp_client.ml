@@ -74,6 +74,7 @@ let test_build_environment () =
       ~base_env
       ~driver:Mistral_vibe
       ~extra_strip_env:[ "EXTRA_SECRET" ]
+      ~agent_compaction:None
   in
   check (option string) "vibe strips MISTRAL_API_KEY" None
     (find_env "MISTRAL_API_KEY" vibe_env);
@@ -86,6 +87,7 @@ let test_build_environment () =
       ~base_env
       ~driver:Antigravity
       ~extra_strip_env:[]
+      ~agent_compaction:None
   in
   check (option string) "agy disables auto update" (Some "true")
     (find_env "AGY_CLI_DISABLE_AUTO_UPDATE" agy_env);
@@ -94,6 +96,7 @@ let test_build_environment () =
       ~base_env
       ~driver:Kimi_code
       ~extra_strip_env:[ "EXTRA_SECRET" ]
+      ~agent_compaction:None
   in
   check (option string) "kimi strips extra env" None
     (find_env "EXTRA_SECRET" kimi_env);
@@ -306,6 +309,61 @@ default = "agy_test.m_agy"
   check (option string) "vibe mode" (Some "auto-approve") vibe.mode
 ;;
 
+(* A host that takes no compaction point refuses the key at load, so the
+   operator's point is never left unused. *)
+let test_compaction_point_on_a_host_without_one_drops_the_binding () =
+  let source =
+    {|
+[providers.kimi_test]
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+args = ["acp"]
+is-non-interactive = true
+timeout-s = 120.0
+
+[providers.vibe_test]
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+timeout-s = 120.0
+
+[models.m_kimi]
+api-name = "kimi-code/k3.1-pro"
+max-context = 400000
+agent-compaction-threshold = 0.95
+
+[models.m_vibe]
+api-name = "mistral-medium-3.5"
+max-context = 262144
+agent-compaction-threshold = 0.95
+
+[kimi_test.m_kimi]
+[vibe_test.m_vibe]
+
+[runtime]
+default = "vibe_test.m_vibe"
+|}
+  in
+  let cfg =
+    match Runtime_toml.parse_string source with
+    | Ok cfg -> cfg
+    | Error errs ->
+      failf "parse failed: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  in
+  let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
+  check (list string) "vibe takes the point"
+    [ "vibe_test.m_vibe" ]
+    (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes);
+  check (list string) "kimi is dropped with the reason"
+    [ "model \"m_kimi\" declares agent-compaction-threshold, but the kimi_code host takes \
+       no compaction point" ]
+    (List.map (fun (_, reason) -> Runtime_config_error.string_of_drop_reason reason) dropped)
+;;
+
 (* ── Muse Code (muse acp 1.4.25, live-verified 2026-11-24) ────────────────── *)
 
 let muse_observer_flags =
@@ -397,6 +455,41 @@ let test_muse_refuses_unsupported_config_before_spawn () =
              ~native_posture:Runtime_native_tools.Native_read))))
 ;;
 
+let test_compaction_point_reaches_the_host () =
+  let point = Some { Runtime_acp_client.limit_tokens = 400_000; threshold = 0.95 } in
+  let base_env =
+    [| "PATH=/usr/bin"
+     ; "VIBE_AUTO_COMPACT_THRESHOLD=1000"
+     ; "AGY_CLI_AUTO_COMPACT_OVERRIDE=80%"
+    |]
+  in
+  let env ~agent_compaction driver =
+    Runtime_acp_client.For_testing.build_environment
+      ~base_env
+      ~driver
+      ~extra_strip_env:[]
+      ~agent_compaction
+  in
+  check (option string) "vibe takes the token count over an inherited value" (Some "380000")
+    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:point Mistral_vibe));
+  check (option string) "agy takes the token count over an inherited value" (Some "380000")
+    (find_env "AGY_CLI_AUTO_COMPACT_OVERRIDE" (env ~agent_compaction:point Antigravity));
+  check (option string) "without a point vibe keeps the inherited value" (Some "1000")
+    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:None Mistral_vibe));
+  check (array string) "muse takes the point as settings, not a variable"
+    (env ~agent_compaction:None Runtime_acp_client.Muse_code)
+    (env ~agent_compaction:point Runtime_acp_client.Muse_code);
+  check int "the count is rounded down to stay at or below the point" 380_000
+    (Runtime_acp_client.For_testing.compaction_tokens
+       { Runtime_acp_client.limit_tokens = 400_001; threshold = 0.95 });
+  check bool "kimi takes no compaction point" false
+    (Runtime_acp_client.takes_compaction_point Kimi_code);
+  check bool "muse, vibe and agy take one" true
+    (List.for_all
+       Runtime_acp_client.takes_compaction_point
+       [ Runtime_acp_client.Muse_code; Mistral_vibe; Antigravity ])
+;;
+
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
   let masc =
@@ -452,6 +545,21 @@ let test_muse_argv_and_environment () =
      @ muse_contributor_flags "off"
      @ toolset {|["read_file","search","mcp__masc__*"]|})
     (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc effort_cfg);
+  check (list string) "a compaction point is passed as the limit and its soft and hard fractions"
+    (trusted
+     @ [ "-c"
+       ; "context_compaction.provider_context_limit_tokens=400000"
+       ; "-c"
+       ; "context_compaction.soft_threshold=0.95"
+       ; "-c"
+       ; "context_compaction.hard_threshold=1.0"
+       ]
+     @ toolset {|["mcp__masc__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server:masc
+       { cfg with
+         agent_compaction =
+           Some { Runtime_acp_client.limit_tokens = 400_000; threshold = 0.95 }
+       });
   check (list string) "a declared contributor mode is passed on every start"
     ([ "muse"; "acp"; "--trust-workspace" ]
      @ muse_observer_flags
@@ -464,6 +572,7 @@ let test_muse_argv_and_environment () =
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
       ~driver:Runtime_acp_client.Muse_code
       ~extra_strip_env:[ "META_API_KEY" ]
+      ~agent_compaction:None
   in
   check (option string) "update check stays off over an inherited value" (Some "1")
     (find_env "MUSE_NO_AUTO_UPDATE" env);
@@ -4660,12 +4769,14 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     Keeper_acp_runtime.For_testing.process_config_sha256
       ~native_posture:Runtime_native_tools.Native_none
       ~skills_dirs:[]
+      ~agent_compaction:None
       base_cfg
   in
   let h_same_proc_diff_model =
     Keeper_acp_runtime.For_testing.process_config_sha256
       ~native_posture:Runtime_native_tools.Native_none
       ~skills_dirs:[]
+      ~agent_compaction:None
       { base_cfg with
         model = Runtime_acp_client.model_selection_of_string "claude-opus-5-5-high"
       ; effort = Some Llm_provider.Reasoning_effort.High
@@ -4676,12 +4787,14 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     Keeper_acp_runtime.For_testing.process_config_sha256
       ~native_posture:Runtime_native_tools.Native_none
       ~skills_dirs:[]
+      ~agent_compaction:None
       { base_cfg with oauth_source = Some "/tmp/oauth-b" }
   in
   let h_diff_posture =
     Keeper_acp_runtime.For_testing.process_config_sha256
       ~native_posture:Runtime_native_tools.Native_read
       ~skills_dirs:[]
+      ~agent_compaction:None
       base_cfg
   in
   check string "process_config_sha256 ignores warm-reconfigurable model/effort/mode"
@@ -4690,6 +4803,17 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     (not (String.equal h_base h_diff_oauth));
   check bool "process_config_sha256 changes on native_posture change" true
     (not (String.equal h_base h_diff_posture));
+  let h_compaction threshold =
+    Keeper_acp_runtime.For_testing.process_config_sha256
+      ~native_posture:Runtime_native_tools.Native_none
+      ~skills_dirs:[]
+      ~agent_compaction:(Some { Runtime_acp_client.limit_tokens = 400_000; threshold })
+      base_cfg
+  in
+  check bool "process_config_sha256 changes when a compaction point is declared" true
+    (not (String.equal h_base (h_compaction 0.95)));
+  check bool "process_config_sha256 changes with the compaction point" true
+    (not (String.equal (h_compaction 0.95) (h_compaction 0.9)));
   (* 6. hydrate_start_messages ~prefer_handoff:true preserves appended before_turn nudges *)
   let tmp = Filename.temp_dir ~perms:0o700 "masc-acp-l4-nudge-" "" in
   Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
@@ -5915,7 +6039,13 @@ let () =
         ; test_case "Muse turn effort is refused before session RPC" `Quick
             test_muse_turn_effort_refused_before_session_rpc
         ] )
-    ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
+    ; ( "environment"
+      , [ test_case "env strip and override" `Quick test_build_environment
+        ; test_case
+            "the compaction point reaches the host"
+            `Quick
+            test_compaction_point_reaches_the_host
+        ] )
     ; ( "argv_and_posture"
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
         ; test_case "muse start spawns the host with the posture toolset" `Quick
@@ -6004,6 +6134,10 @@ let () =
         ] )
     ; ( "toml"
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
+        ; test_case
+            "a compaction point on a host without one drops the binding"
+            `Quick
+            test_compaction_point_on_a_host_without_one_drops_the_binding
         ; test_case "muse_code row materializes and refuses effort" `Quick
             test_muse_toml_row_and_effort
         ; test_case "Muse model and binding effort admission" `Quick test_muse_binding_effort_admission

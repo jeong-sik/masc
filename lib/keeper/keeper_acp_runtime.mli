@@ -146,6 +146,7 @@ module For_testing : sig
   val process_config_sha256
     :  native_posture:Runtime_native_tools.posture
     -> skills_dirs:string list
+    -> agent_compaction:Runtime_acp_client.agent_compaction option
     -> Runtime_execution.acp_client
     -> string
 

@@ -452,12 +452,23 @@ let held_context_of_usage (u : Acp.usage) : Runtime_observation.request_context 
 let process_config_sha256
       ~(native_posture : Runtime_native_tools.posture)
       ~(skills_dirs : string list)
+      ~(agent_compaction : Acp.agent_compaction option)
       (config : Runtime_execution.acp_client)
   =
   let strings xs = `List (List.map (fun s -> `String s) xs) in
+  (* A host started with a compaction point is another process. One started
+     without keeps the hash it had before the point could be declared. *)
+  let compaction =
+    match agent_compaction with
+    | None -> []
+    | Some { Acp.limit_tokens; threshold } ->
+      [ ( "agent_compaction"
+        , `Assoc [ "limit_tokens", `Int limit_tokens; "threshold", `Float threshold ] )
+      ]
+  in
   let payload =
     `Assoc
-      [ "driver", `String (Acp.driver_to_string config.driver)
+      ([ "driver", `String (Acp.driver_to_string config.driver)
       ; "cli_path", `String config.cli_path
       ; "args", strings config.args
       ; "strip_env", strings config.strip_env
@@ -467,6 +478,7 @@ let process_config_sha256
       ; "oauth_source", `String (Option.value config.oauth_source ~default:"")
       ; "native_posture", `String (Runtime_native_tools.to_string native_posture)
       ]
+      @ compaction)
     |> Yojson.Safe.to_string
   in
   Agent_core_sha256.(digest_string payload |> to_hex)
@@ -828,6 +840,7 @@ let spawn_persistent_entry
       ~native_posture
       ~skills_dirs
       ~pinned_tool_specs
+      ~agent_compaction
       ~(config : Runtime_execution.acp_client)
   : (pool_entry, Acp.error) result
   =
@@ -878,6 +891,7 @@ let spawn_persistent_entry
                ; oauth_source = config.oauth_source
                ; dangerously_skip_permissions = key.dangerously_skip_permissions
                ; admission_timeout_s = config.admission_timeout_s
+               ; agent_compaction
                }
              in
              match
@@ -951,6 +965,7 @@ let acquire_persistent_entry
       ~native_posture
       ~skills_dirs
       ~pinned_tool_specs
+      ~agent_compaction
       ~(config : Runtime_execution.acp_client)
   : (pool_entry, Acp.error) result
   =
@@ -977,6 +992,7 @@ let acquire_persistent_entry
         ~native_posture
         ~skills_dirs
         ~pinned_tool_specs
+        ~agent_compaction
         ~config
     in
     let winner =
@@ -999,6 +1015,7 @@ let acquire_persistent_entry
         ~native_posture
         ~skills_dirs
         ~pinned_tool_specs
+        ~agent_compaction
         ~config
     in
     let winner =
@@ -2509,11 +2526,20 @@ let run_without_lifecycle
     | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
       discover_skills_dirs ~base_path config
   in
+  (* The point at which the host compacts during a turn, against the same limit
+     the turn-end rollover reads. *)
+  let agent_compaction =
+    Option.map
+      (fun threshold ->
+         { Acp.limit_tokens = Llm_provider.Input_budget.to_int input_limit; threshold })
+      (Runtime.agent_compaction_threshold_of_runtime_id runtime_id)
+  in
   let key : Pool_key.t =
     { keeper_name
     ; runtime_id
     ; tool_surface_sha256
-    ; process_config_sha256 = process_config_sha256 ~native_posture ~skills_dirs config
+    ; process_config_sha256 =
+        process_config_sha256 ~native_posture ~skills_dirs ~agent_compaction config
     ; cwd = base_path
     ; dangerously_skip_permissions =
         (native_posture = Runtime_native_tools.Native_full)
@@ -3073,6 +3099,7 @@ let run_without_lifecycle
           ~key
           ~native_posture
           ~skills_dirs
+          ~agent_compaction
           ~pinned_tool_specs
           ~config
         |> Result.map_error (fun err ->
@@ -3117,6 +3144,7 @@ let run_without_lifecycle
           ; oauth_source = config.oauth_source
           ; dangerously_skip_permissions = key.dangerously_skip_permissions
           ; admission_timeout_s = config.admission_timeout_s
+          ; agent_compaction
           }
         in
         let* client =

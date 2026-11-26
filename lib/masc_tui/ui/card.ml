@@ -379,8 +379,8 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
     let sub_style = Typography.structure ~bg theme in
     let badge_style =
       match spec.badge with
-      | Some { tone = Some tok; _ } -> Typography.status ~bg ~bold:true theme tok
-      | Some { tone = None; _ } | None -> Typography.structure ~bg ~bold:true theme
+      | Some { tone = Some tok; _ } -> Typography.status ~bg ~bold:spec.focused theme tok
+      | Some { tone = None; _ } | None -> Typography.structure ~bg ~bold:spec.focused theme
     in
     let cx = ref (rect.x + 2) in
     let top_clip = Rect.make ~x:(rect.x + 1) ~y:rect.y ~w:(Int.max 0 (rect.w - 2)) ~h:1 in

@@ -307,6 +307,9 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Paste_text text ->
       Update_input.apply_paste ~now (Model.clear_mouse_selection m) text
   | Msg.Mouse_event ev -> Update_input.apply_mouse ~now m ev
+  | Msg.Terminal_focus focused ->
+      if Bool.equal m.terminal_focused focused then (m, [])
+      else ({ m with terminal_focused = focused }, [])
   | Msg.Resize { cols; rows } ->
       apply_resize ~now (Model.clear_mouse_selection m) ~cols ~rows
   | Msg.Tick { wall_unix } ->

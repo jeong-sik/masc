@@ -843,6 +843,7 @@ let test_cmd_executor_dispatch_and_cancellation () =
                  | Msg.Key_event _
                  | Msg.Paste_text _
                  | Msg.Mouse_event _
+                 | Msg.Terminal_focus _
                  | Msg.Resize _
                  | Msg.Tick _
                  | Msg.Server_health_result _
@@ -995,6 +996,7 @@ let test_remote_editor_escape_hatch_blocked () =
                 | Msg.Key_event _
                 | Msg.Paste_text _
                 | Msg.Mouse_event _
+                | Msg.Terminal_focus _
                 | Msg.Resize _
                 | Msg.Tick _
                 | Msg.Server_health_result _
@@ -1744,6 +1746,7 @@ let test_bus_key_hash_and_stream_frames () =
             | Msg.Key_event _
             | Msg.Paste_text _
             | Msg.Mouse_event _
+            | Msg.Terminal_focus _
             | Msg.Resize _
             | Msg.Tick _
             | Msg.Server_health_result _
@@ -1858,6 +1861,7 @@ let test_bus_key_hash_and_stream_frames () =
   | Msg.Key_event _
   | Msg.Paste_text _
   | Msg.Mouse_event _
+  | Msg.Terminal_focus _
   | Msg.Resize _
   | Msg.Tick _
   | Msg.Server_health_result _
@@ -2097,6 +2101,8 @@ let test_app_ctrl_c_and_voice_tick_gate () =
         | Masc_tui_term.Input_decoder.Paste _
         | Masc_tui_term.Input_decoder.Mouse _
         | Masc_tui_term.Input_decoder.Reply _
+        | Masc_tui_term.Input_decoder.Focus_in
+        | Masc_tui_term.Input_decoder.Focus_out
         | Masc_tui_term.Input_decoder.Unknown_escape
         | Masc_tui_term.Input_decoder.Invalid_utf8 ->
             false)

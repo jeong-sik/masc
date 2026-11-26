@@ -229,7 +229,6 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       Typography.status ~bg ~bold:true theme Theme.Status_attention
     in
     Cell_grid.fill_rect ~clip:rect grid ~rect ~style:pri_st ();
-    let pad_x = if Layout.equal_breakpoint bp Layout.Wide then 2 else 1 in
     let compact =
       Layout.equal_breakpoint bp Layout.Compact
       || Layout.equal_breakpoint bp Layout.Micro
@@ -534,8 +533,10 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
            then
              Card.draw_v_hairline ~bg grid ~x:(Rect.right left_k) ~y:rect.y
                ~h:content_h ~theme;
-           let lc = Rect.inset ~left:1 ~right:1 left_k in
-           let rc = Rect.inset ~left:1 ~right:1 right_k in
+           let lpx = Layout.card_pad_x_for_width bp left_k.w in
+           let rpx = Layout.card_pad_x_for_width bp right_k.w in
+           let lc = Rect.inset ~left:lpx ~right:lpx left_k in
+           let rc = Rect.inset ~left:rpx ~right:rpx right_k in
            if content_h >= 1 then begin
              put_left_right grid ~clip:(Rect.make ~x:lc.x ~y:lc.y ~w:lc.w ~h:1)
                ~y:lc.y
@@ -600,7 +601,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
           Card.draw_v_hairline ~bg grid ~x:(cell.x - 1) ~y:cell.y ~h:cell.h
             ~theme;
         let inner =
-          let px = Int.min pad_x ((cell.w - 1) / 4) in
+          let px = Layout.card_pad_x_for_width bp cell.w in
           Rect.inset ~left:px ~right:px cell
         in
         if not (Rect.is_empty inner) then begin
@@ -645,27 +646,26 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ~left_style:anchor_st ~right_text:(Option.value ~default:"" infra_mix)
                   ~right_style:act_st;
               if body_h >= 3 then begin
-                let adv =
-                  Cell_grid.put_text ~clip:r2 grid ~x:r2.x ~y:r2.y
-                    ~style:whisper_st
-                    (Grapheme.truncate_to_width ~max_width:(r2.w / 2) turns_str)
-                in
-                let sx = r2.x + adv + 2 in
-                let sw = Int.min 12 (Rect.right r2 - sx) in
-                if sw >= 4 && Array.length fleet_samples > 0 then
-                  ignore
-                    (Chart.draw_sparkline_run ~clip:r2 grid
-                       ~x:(Rect.right r2 - sw) ~y:r2.y ~width:sw ~theme ~bg
-                       ~unicode:caps.unicode_blocks
-                       ~gradient:Chart.Gradient.Cool_flow fleet_samples)
+                if Array.length fleet_samples > 0 then begin
+                  let adv =
+                    Cell_grid.put_text ~clip:r2 grid ~x:r2.x ~y:r2.y
+                      ~style:whisper_st
+                      (Grapheme.truncate_to_width ~max_width:(r2.w / 2) turns_str)
+                  in
+                  let sx = r2.x + adv + 2 in
+                  let sw = Int.min 12 (Rect.right r2 - sx) in
+                  if sw >= 4 then
+                    ignore
+                      (Chart.draw_sparkline_run ~clip:r2 grid
+                         ~x:(Rect.right r2 - sw) ~y:r2.y ~width:sw ~theme ~bg
+                         ~unicode:caps.unicode_blocks
+                         ~gradient:Chart.Gradient.Cool_flow fleet_samples)
+                end
                 else
-                  match heap_summary model with
-                  | Some h when Rect.right r2 - sx >= 6 ->
-                      let hw = Grapheme.display_width h in
-                      ignore
-                        (Cell_grid.put_text ~clip:r2 grid
-                           ~x:(Rect.right r2 - hw) ~y:r2.y ~style:whisper_st h)
-                  | Some _ | None -> ()
+                  let right_txt = Option.value ~default:"" (heap_summary model) in
+                  put_left_right grid ~clip:r2 ~y:r2.y ~left_text:turns_str
+                    ~left_style:whisper_st ~right_text:right_txt
+                    ~right_style:whisper_st
               end
           | 1 ->
               (* KPI 2: 24h Cache & Spend with explicit provenance *)
@@ -1021,7 +1021,10 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let hint =
         Say.resolve lang (Say.make ~ko:"[2] 작업 수신함" ~en:"[2] Work Inbox")
       in
-      let content = Rect.inset ~left:2 ~right:1 rect in
+      let strip_pad = Layout.card_pad_x_for_width bp rect.w in
+      let content =
+        Rect.inset ~left:(Int.max 2 strip_pad) ~right:strip_pad rect
+      in
       put_left_right grid ~clip:content ~y:rect.y ~left_text:pill_txt
         ~left_style:pill_st ~right_text:hint ~right_style:whisper_st
     end
@@ -1061,7 +1064,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           }
       in
       if not (Rect.is_empty inner) then begin
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = Layout.card_pad_x_for_width bp inner.w in
         let items = Array.of_list model.attention.items in
         let count = Array.length items in
         let sel =
@@ -1077,15 +1080,24 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let e = items.(idx) in
           let py = inner.y + i in
           let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-          let is_sel = pane_focused && Option.equal Int.equal (Some idx) sel in
+          let is_row_selected = Option.equal Int.equal (Some idx) sel in
+          let is_sel = pane_focused && is_row_selected in
           let rbg =
-            Color.of_rgb (if is_sel then theme.selection_bg else theme.surface_2)
+            Color.of_rgb
+              (if is_sel then theme.selection_bg
+               else if is_row_selected then theme.surface_2
+               else theme.surface_2)
           in
           Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
             ~style:(Typography.primary ~bg:rbg theme) ();
           if is_sel then
             Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
               ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+              Glyph.Left_rail
+          else if is_row_selected then
+            Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
+              ~style:
+                (Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg:rbg ())
               Glyph.Left_rail;
           let attn_st =
             Typography.status ~bg:rbg ~bold:true theme Theme.Status_attention
@@ -1352,7 +1364,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     if not (Rect.is_empty inner) then begin
       let bg = Color.of_rgb theme.surface_1 in
       let hdr_bg = Color.of_rgb theme.surface_2 in
-      let pad_x = Layout.card_pad_x bp in
+      let pad_x = Layout.card_pad_x_for_width bp inner.w in
       let whisper_st = Typography.whisper ~bg theme in
       let hdr_st = Typography.structure ~bg:hdr_bg ~bold:true theme in
       let crit_st = Typography.status ~bg ~bold:true theme Theme.Status_critical in
@@ -1445,8 +1457,8 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let infra_w = if show_infra then 9 else 0 in
             let act_w = 5 in
             let buckets_w = if inner.w >= 54 then 12 else 0 in
-            let right_pad = 1 in
-            let left_gutter = 2 in
+            let right_pad = pad_x in
+            let left_gutter = Int.max 2 pad_x in
             let fixed_w =
               left_gutter + right_pad + act_w + 1
               + (if buckets_w > 0 then buckets_w + 2 else 0)
@@ -1560,16 +1572,25 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let g = groups_arr.(idx) in
               let py = start_y + i in
               let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-              let is_sel = pane_focused && Int.equal idx sel_group_idx in
+              let is_row_selected = Int.equal idx sel_group_idx in
+              let is_sel = pane_focused && is_row_selected in
               let rbg =
                 Color.of_rgb
-                  (if is_sel then theme.selection_bg else theme.surface_1)
+                  (if is_sel then theme.selection_bg
+                   else if is_row_selected then theme.surface_2
+                   else theme.surface_1)
               in
               Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
                 ~style:(Typography.primary ~bg:rbg theme) ();
               if is_sel then
                 Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
                   ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                  Glyph.Left_rail
+              else if is_row_selected then
+                Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
+                  ~style:
+                    (Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg:rbg
+                       ())
                   Glyph.Left_rail;
               let x = ref (inner.x + left_gutter) in
               let name_st =
@@ -1766,7 +1787,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
     in
     let title =
       Say.resolve lang
-        (Say.make ~ko:"진행 중인 목표 · 일일 성과" ~en:"Active Goals · 24h Output")
+        (Say.make ~ko:"진행 중인 목표" ~en:"Active Goals")
     in
     let badge =
       if goals <> [] && Option.is_none goals_notice then
@@ -1795,11 +1816,10 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
           focused = pane_focused;
         }
     in
-    let pad_x = Layout.card_pad_x bp in
+    let pad_x = Layout.card_pad_x_for_width bp inner.w in
     let content = Card.pad_inner ~pad_x inner in
     if not (Rect.is_empty content) then begin
       let bg = Color.of_rgb theme.surface_1 in
-      let pri_st = Typography.primary ~bg theme in
       let struct_st = Typography.structure ~bg theme in
       let whisper_st = Typography.whisper ~bg theme in
       let attn_st =
@@ -1807,12 +1827,37 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
       in
       let unlinked = Work_store.unlinked_task_count model.work in
       let unattrib = candle_unattributed_count model in
-      (* Reserve bottom 3..4 rows for 24h Scorecard hairline + summary *)
+      let top_c = top_contributors_summary model in
+      let top_line =
+        if String.equal top_c "" then ""
+        else
+          Say.resolve lang
+            (Say.make ~ko:("상위: " ^ top_c) ~en:("Top: " ^ top_c))
+      in
+      let vel_line =
+        match latest_velocity_pair model with
+        | Some (u, d) ->
+            Printf.sprintf "%s %s %s %s"
+              (Glyph.to_utf8 Glyph.Delta_up)
+              (Format_val.format_value Format_val.Count u)
+              (Glyph.to_utf8 Glyph.Delta_down)
+              (Format_val.format_value Format_val.Count d)
+        | None -> ""
+      in
+      let has_top_vel =
+        (not (String.equal top_line "")) || not (String.equal vel_line "")
+      in
+      let has_warn = unlinked > 0 || unattrib > 0 in
+      (* Reserve only non-redundant footer rows (top contributors / velocity
+         and unlinked/unattributed warnings); 24h KPIs already live in the top
+         Hero KPI Band. *)
       let score_rows =
-        if content.h >= 7 then
-          3 + (if unlinked > 0 || unattrib > 0 then 1 else 0)
-        else if content.h >= 4 then 2
-        else 1
+        let want =
+          (if has_top_vel then 1 else 0) + (if has_warn then 1 else 0)
+        in
+        if content.h >= want + 2 then want
+        else if content.h >= 3 && has_warn then 1
+        else 0
       in
       let goals_budget = Int.max 0 (content.h - score_rows) in
       let y = ref content.y in
@@ -1852,18 +1897,26 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
             if !y < goals_bottom then begin
               let g = arr.(i) in
               let py = !y in
-              let is_sel = pane_focused && Int.equal i sel_goal_idx in
+              let is_row_selected = Int.equal i sel_goal_idx in
+              let is_sel = pane_focused && is_row_selected in
               let rbg =
                 Color.of_rgb
-                  (if is_sel then theme.selection_bg else theme.surface_1)
+                  (if is_sel then theme.selection_bg
+                   else if is_row_selected then theme.surface_2
+                   else theme.surface_1)
               in
               let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-              if is_sel then begin
+              if is_sel || is_row_selected then begin
                 Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
                   ~style:(Typography.primary ~bg:rbg theme) ();
+                let rail_st =
+                  if is_sel then Typography.accent ~bg:rbg ~bold:true theme
+                  else
+                    Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg:rbg
+                      ()
+                in
                 Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
-                  ~style:(Typography.accent ~bg:rbg ~bold:true theme)
-                  Glyph.Left_rail
+                  ~style:rail_st Glyph.Left_rail
               end;
               let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
               let phase_g, phase_st =
@@ -1954,174 +2007,52 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
             end
           done
       end;
-      (* Padded Hairline Divider + 24h Daily Scorecard Summary *)
-      let score_y = Rect.bottom content - score_rows in
-      let sc = Model.effective_scorecard model in
-      let hero = Model.pulse_hero_metrics model in
-      let cy = ref score_y in
-      if score_rows >= 3 && !cy >= content.y then begin
-        Card.draw_hairline ~pad_x ~bg
-          ~label:(Say.resolve lang (Say.make ~ko:"일일 성과 (24h)" ~en:"Daily Output (24h)"))
-          grid ~rect:inner ~y:!cy ~theme;
-        incr cy
-      end;
-      if !cy < Rect.bottom content then begin
-        let r1 = Rect.make ~x:content.x ~y:!cy ~w:content.w ~h:1 in
-        let done_part =
-          match Observed.to_option sc.tasks_done_24h with
-          | Some n ->
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "완료 %d" n)
-                   ~en:(Printf.sprintf "Done %d" n))
-          | None -> (
-              match Observed.to_option sc.tasks_done_total with
-              | Some n ->
-                  Say.resolve lang
-                    (Say.make
-                       ~ko:(Printf.sprintf "누적 %d" n)
-                       ~en:(Printf.sprintf "Total %d" n))
-              | None ->
-                  let m =
-                    Format_val.format_observed Format_val.Count
-                      (Observed.map float_of_int sc.tasks_done_24h)
-                      ~lang
-                  in
-                  Say.resolve lang
-                    (Say.make
-                       ~ko:(Printf.sprintf "완료 %s" m)
-                       ~en:(Printf.sprintf "Done %s" m)))
+      if score_rows > 0 then begin
+        let cy = ref (Rect.bottom content - score_rows) in
+        let show_top_row =
+          has_top_vel && ((not has_warn) || score_rows >= 2)
         in
-        let ver_part =
-          let result =
-            match verification_outcome_counts sc with
-            | Some (passed, rejected) when passed + rejected > 0 ->
-                Printf.sprintf "%.0f%%"
-                  (100.0 *. float_of_int passed /. float_of_int (passed + rejected))
-            | Some _ -> "0"
-            | None -> format_observed_marker ~lang sc.verifications_passed_24h
-          in
-          Say.resolve lang
-            (Say.make ~ko:(Printf.sprintf "검증 %s" result)
-               ~en:(Printf.sprintf "Ver %s" result))
-        in
-        let third_part =
-          match Observed.to_option sc.turns_24h with
-          | Some n ->
-              Some
-                (Say.resolve lang
+        if show_top_row && !cy < Rect.bottom content then begin
+          let r2 = Rect.make ~x:content.x ~y:!cy ~w:content.w ~h:1 in
+          put_left_right grid ~clip:r2 ~y:!cy ~left_text:top_line
+            ~left_style:struct_st ~right_text:vel_line ~right_style:whisper_st;
+          incr cy
+        end;
+        if has_warn && !cy < Rect.bottom content then begin
+          let r3 = Rect.make ~x:content.x ~y:!cy ~w:content.w ~h:1 in
+          Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:content.x
+            ~y:!cy ~h:1 ~theme;
+          let parts =
+            (if unlinked > 0 then
+               [
+                 Say.resolve lang
                    (Say.make
-                      ~ko:(Printf.sprintf "턴 %s"
-                             (Format_val.format_value Format_val.Count
-                                (float_of_int n)))
-                      ~en:(Printf.sprintf "Turns %s"
-                             (Format_val.format_value Format_val.Count
-                                (float_of_int n)))))
-          | None -> (
-              match Observed.to_option sc.board_posts_24h with
-              | Some n ->
-                  Some
-                    (Say.resolve lang
-                       (Say.make
-                          ~ko:(Printf.sprintf "토론 %d" n)
-                          ~en:(Printf.sprintf "Posts %d" n)))
-              | None -> None)
-        in
-        let left_s =
-          [ Some done_part; Some ver_part; third_part ]
-          |> List.filter_map Fun.id
-          |> String.concat Typography.sep_dot
-        in
-        let candle_s, candle_st =
-          if unattrib > 0 && score_rows <= 2 then
-            ( Printf.sprintf "%s%d %s"
-                (Glyph.to_utf8 Glyph.Warning_triangle)
-                unattrib
-                (Say.resolve lang (Say.make ~ko:"미귀속" ~en:"unattributed")),
-              attn_st )
-          else
-            let raw_s, raw_st =
-              candle_hero_display ~lang ~theme ~bg ~model ~hero
-            in
-            if
-              Option.is_none hero.candle_circulating_milli
-              && (not (Observed.is_value model.work.candle_ledger))
-              && Grapheme.display_width left_s + 2 + Grapheme.display_width raw_s
-                 > r1.w
-            then
-              let spark = Glyph.to_utf8 Glyph.Ai_spark in
-              let short_m =
-                match model.work.candle_ledger with
-                | Observed.Loading _ -> Glyph.to_utf8 Glyph.Ellipsis
-                | Observed.Absent -> Glyph.to_utf8 Glyph.Missing_absent
-                | Observed.Unreported -> "?"
-                | Observed.Failed _ -> Glyph.to_utf8 Glyph.Live_failing
-                | Observed.Value _ -> ""
-              in
-              (Printf.sprintf "%s %s" spark short_m, raw_st)
-            else (raw_s, raw_st)
-        in
-        put_left_right grid ~clip:r1 ~y:!cy ~left_text:left_s ~left_style:pri_st
-          ~right_text:candle_s ~right_style:candle_st;
-        incr cy
-      end;
-      if !cy < Rect.bottom content then begin
-        let r2 = Rect.make ~x:content.x ~y:!cy ~w:content.w ~h:1 in
-        let top_c = top_contributors_summary model in
-        let top_line =
-          if String.equal top_c "" then ""
-          else
-            Say.resolve lang
-              (Say.make ~ko:("상위: " ^ top_c) ~en:("Top: " ^ top_c))
-        in
-        let vel_line =
-          match latest_velocity_pair model with
-          | Some (u, d) ->
-              Printf.sprintf "%s %s %s %s"
-                (Glyph.to_utf8 Glyph.Delta_up)
-                (Format_val.format_value Format_val.Count u)
-                (Glyph.to_utf8 Glyph.Delta_down)
-                (Format_val.format_value Format_val.Count d)
-          | None -> ""
-        in
-        put_left_right grid ~clip:r2 ~y:!cy ~left_text:top_line
-          ~left_style:struct_st ~right_text:vel_line ~right_style:whisper_st;
-        incr cy
-      end;
-      if !cy < Rect.bottom content && (unlinked > 0 || unattrib > 0) then begin
-        let r3 = Rect.make ~x:content.x ~y:!cy ~w:content.w ~h:1 in
-        Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:content.x
-          ~y:!cy ~h:1 ~theme;
-        let parts =
-          (if unlinked > 0 then
-             [
-               Say.resolve lang
-                 (Say.make
-                    ~ko:(Printf.sprintf "미연결 작업 %d건" unlinked)
-                    ~en:(Printf.sprintf "%d unlinked tasks" unlinked));
-             ]
-           else [])
-          @
-          if unattrib > 0 then
-            [
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%d 미귀속 캔들" unattrib)
-                   ~en:(Printf.sprintf "%d unattributed candle" unattrib));
-            ]
-          else []
-        in
-        let warn =
-          Glyph.to_utf8 Glyph.Warning_triangle
-          ^ " "
-          ^ String.concat Typography.sep_dot parts
-        in
-        ignore
-          (Cell_grid.put_text ~clip:r3 grid ~x:(content.x + 2) ~y:!cy
-             ~style:attn_st
-             (Grapheme.truncate_to_width
-                ~max_width:(Int.max 0 (content.w - 2))
-                warn))
+                      ~ko:(Printf.sprintf "미연결 작업 %d건" unlinked)
+                      ~en:(Printf.sprintf "%d unlinked tasks" unlinked));
+               ]
+             else [])
+            @
+            if unattrib > 0 then
+              [
+                Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "%d 미귀속 캔들" unattrib)
+                     ~en:(Printf.sprintf "%d unattributed candle" unattrib));
+              ]
+            else []
+          in
+          let warn =
+            Glyph.to_utf8 Glyph.Warning_triangle
+            ^ " "
+            ^ String.concat Typography.sep_dot parts
+          in
+          ignore
+            (Cell_grid.put_text ~clip:r3 grid ~x:(content.x + 2) ~y:!cy
+               ~style:attn_st
+               (Grapheme.truncate_to_width
+                  ~max_width:(Int.max 0 (content.w - 2))
+                  warn))
+        end
       end
     end
 
@@ -2149,14 +2080,9 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let badge : Card.badge =
       let n = List.length threads in
       let badge_say =
-        if rect.w >= 86 then
-          Say.make
-            ~ko:(Printf.sprintf "인기순(댓글×3+점수) · %d" n)
-            ~en:(Printf.sprintf "Hot(cmt×3+score) · %d" n)
-        else
-          Say.make
-            ~ko:(Printf.sprintf "인기순 · %d" n)
-            ~en:(Printf.sprintf "Hot · %d" n)
+        Say.make
+          ~ko:(Printf.sprintf "인기순 · %d" n)
+          ~en:(Printf.sprintf "Hot · %d" n)
       in
       {
         glyph = Some Glyph.Live_healthy;
@@ -2171,24 +2097,16 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~en:"[Enter] Thread · [3] Knowledge"
          else Say.make ~ko:"[3] 지식" ~en:"[3] Knowledge")
     in
-    let footer_hint =
-      if rect.w >= 44 && rect.w < 86 then
-        Some
-          (Say.resolve lang
-             (Say.make ~ko:"인기순(댓글×3+점수)" ~en:"Hot(cmt×3+score)"))
-      else None
-    in
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
           (Card.default_spec ~title) with
           badge = Some badge;
           hotkey = Some hotkey;
-          footer_hint;
           focused = pane_focused;
         }
     in
-    let pad_x = Layout.card_pad_x bp in
+    let pad_x = Layout.card_pad_x_for_width bp inner.w in
     let content = Card.pad_inner ~pad_x inner in
     if not (Rect.is_empty content) then begin
       let bg = Color.of_rgb theme.surface_1 in
@@ -2252,18 +2170,26 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 else begin
                   let p = arr.(i) in
                   let py = !y in
-                  let is_sel = pane_focused && Int.equal i sel_thread_idx in
+                  let is_row_selected = Int.equal i sel_thread_idx in
+                  let is_sel = pane_focused && is_row_selected in
                   let rbg =
                     Color.of_rgb
-                      (if is_sel then theme.selection_bg else theme.surface_1)
+                      (if is_sel then theme.selection_bg
+                       else if is_row_selected then theme.surface_2
+                       else theme.surface_1)
                   in
                   let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-                  if is_sel then begin
+                  if is_sel || is_row_selected then begin
                     Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
                       ~style:(Typography.primary ~bg:rbg theme) ();
+                    let rail_st =
+                      if is_sel then Typography.accent ~bg:rbg ~bold:true theme
+                      else
+                        Style.make ~fg:(Color.of_rgb theme.border_inactive)
+                          ~bg:rbg ()
+                    in
                     Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
-                      ~style:(Typography.accent ~bg:rbg ~bold:true theme)
-                      Glyph.Left_rail
+                      ~style:rail_st Glyph.Left_rail
                   end;
                   let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
                   let x = ref content.x in

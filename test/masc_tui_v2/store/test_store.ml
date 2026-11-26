@@ -28592,6 +28592,8 @@ let () =
               let tall_call = { call_entry with input = big_input } in
               let kc_tall =
                 Keeper_context_store.empty
+                |> Keeper_context_store.set_trace_section ~keeper
+                     Keeper_context_store.Trace_tool_calls
                 |> Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper
                      {
                        keeper;
@@ -28638,16 +28640,19 @@ let () =
                 {
                   m_tall0 with
                   keeper_context =
-                    Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper
-                      {
-                        keeper;
-                        count = 1;
-                        health = None;
-                        stale_reason = None;
-                        coverage_gaps_count = 0;
-                        entries = [ call_2hdr ];
-                      }
-                      Keeper_context_store.empty;
+                    Keeper_context_store.empty
+                    |> Keeper_context_store.set_trace_section ~keeper
+                         Keeper_context_store.Trace_tool_calls
+                    |> Keeper_context_store.apply_tool_calls ~observed_at:t0
+                         ~keeper
+                         {
+                           keeper;
+                           count = 1;
+                           health = None;
+                           stale_reason = None;
+                           coverage_gaps_count = 0;
+                           entries = [ call_2hdr ];
+                         };
                 }
               in
               let m_2hdr_end =
@@ -29944,5 +29949,79 @@ let () =
                  | Wire_config.Target_keeper _
                  | Wire_config.Target_keeper_create ->
                      false));
+          Alcotest.test_case
+            "Terminal_focus blur dims visual focus while preserving logical focus & restores cleanly"
+            `Quick (fun () ->
+              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let m0 =
+                {
+                  m0 with
+                  nav = { m0.nav with workspace = Nav.Work; pane_index = 1 };
+                }
+              in
+              Alcotest.(check bool) "initial terminal_focused is true" true
+                m0.terminal_focused;
+              Alcotest.(check bool) "focused pane 1 active before blur" true
+                (Model.pane_focused m0 1);
+              Alcotest.(check bool) "detail_pane_focused active before blur" true
+                (Model.detail_pane_focused ~detail_index:1 m0);
+              let m_blur, _ =
+                Update.step ~now:t0 m0 (Msg.Terminal_focus false)
+              in
+              Alcotest.(check bool) "terminal_focused becomes false on Focus_out"
+                false m_blur.terminal_focused;
+              Alcotest.(check bool) "body_has_focus false while terminal blurred"
+                false (Model.body_has_focus m_blur);
+              Alcotest.(check bool) "pane_focused false while terminal blurred"
+                false (Model.pane_focused m_blur 1);
+              Alcotest.(check bool)
+                "detail_pane_focused false while terminal blurred" false
+                (Model.detail_pane_focused ~detail_index:1 m_blur);
+              Alcotest.(check int)
+                "logical pane_index preserved during terminal blur" 1
+                m_blur.nav.pane_index;
+              let m_refocus, _ =
+                Update.step ~now:t1 m_blur (Msg.Terminal_focus true)
+              in
+              Alcotest.(check bool) "terminal_focused restored on Focus_in" true
+                m_refocus.terminal_focused;
+              Alcotest.(check bool) "pane_focused restored identically" true
+                (Model.pane_focused m_refocus 1);
+              Alcotest.(check bool) "detail_pane_focused restored identically"
+                true (Model.detail_pane_focused ~detail_index:1 m_refocus);
+              (* Composer & sidebar logical focus survive blur/refocus without losing text *)
+              let m_comp =
+                {
+                  m0 with
+                  drafts =
+                    m0.drafts
+                    |> Drafts.set_focus true
+                    |> Drafts.set_current_text_and_cursor ~text:"keep me"
+                         ~cursor:7;
+                }
+              in
+              let m_comp_blur, _ =
+                Update.step ~now:t0 m_comp (Msg.Terminal_focus false)
+              in
+              Alcotest.(check bool)
+                "logical composer focus preserved during blur" true
+                (Drafts.is_focused m_comp_blur.drafts);
+              Alcotest.(check string) "composer draft text preserved during blur"
+                "keep me" (Drafts.current_draft m_comp_blur.drafts).text;
+              Alcotest.(check int) "composer cursor preserved during blur"
+                7 (Drafts.current_draft m_comp_blur.drafts).cursor;
+              let m_comp_back, _ =
+                Update.step ~now:t1 m_comp_blur (Msg.Terminal_focus true)
+              in
+              Alcotest.(check bool) "composer still focused on refocus" true
+                (Drafts.is_focused m_comp_back.drafts);
+              let m_side =
+                { m0 with nav = { m0.nav with sidebar_focused = true } }
+              in
+              let m_side_blur, _ =
+                Update.step ~now:t0 m_side (Msg.Terminal_focus false)
+              in
+              Alcotest.(check bool) "logical sidebar_focused preserved on blur"
+                true m_side_blur.nav.sidebar_focused);
         ] );
     ]

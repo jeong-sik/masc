@@ -583,10 +583,19 @@ let test_hit_map_probe_clipboard () =
   Alcotest.(check bool) "OSC 52 tmux wrapped" true
     (String.starts_with ~prefix:"\x1bPtmux;" (Clipboard.osc52_sequence ~in_tmux:true "hi"));
 
-  (* Terminal_out leave_screen_seq resets DECSCUSR cursor shape before showing cursor *)
+  (* Terminal_out enter/leave sequences toggle DECSET 1004 focus reporting and
+     reset DECSCUSR cursor shape before showing cursor *)
+  let enter_kitty =
+    Terminal_out.enter_screen_seq ~keyboard:Terminal_out.Kitty ~mouse:false
+      ~bracketed_paste:true
+  in
+  Alcotest.(check bool) "enter enables CSI ?1004h focus reporting" true
+    (string_contains ~needle:"\x1b[?1004h" enter_kitty);
   let leave = Terminal_out.leave_screen_seq ~keyboard:Terminal_out.Kitty in
   Alcotest.(check bool) "leave pops Kitty keyboard" true
     (String.starts_with ~prefix:"\x1b[<u" leave);
+  Alcotest.(check bool) "leave disables CSI ?1004l focus reporting" true
+    (string_contains ~needle:"\x1b[?1004l" leave);
   Alcotest.(check bool) "leave resets DECSCUSR before show-cursor" true
     (string_contains ~needle:"\x1b[0 q\x1b[?25h" leave);
   let keyboard = Terminal_out.Xterm in

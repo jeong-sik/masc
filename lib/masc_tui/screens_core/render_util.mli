@@ -90,15 +90,6 @@ val draw_pill :
   int
 (** Draw a space-padded pill and return total terminal columns advanced. *)
 
-val dim_backdrop :
-  Cell_grid.t ->
-  rect:Rect.t ->
-  theme:Theme.t ->
-  unit
-(** Visually recede underlying canvas cells behind a floating modal using
-    explicit WCAG-compliant colors (never SGR dim) while keeping width-2
-    grapheme partner invariants intact. *)
-
 val extract_embedded_json : string -> (string option * Yojson.Safe.t) option
 (** Extract a JSON object or array from either a raw JSON payload or a prefixed
     error payload (e.g. ["HTTP 500: {\"error\":...}"]). Returns

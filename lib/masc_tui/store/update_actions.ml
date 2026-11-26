@@ -6843,6 +6843,7 @@ and execute_action ~now (m : Model.t) action =
               m with
               drafts;
               work;
+              knowledge = Knowledge_store.clear_armed_vote m.knowledge;
               nav =
                 {
                   m.nav with
@@ -7616,8 +7617,13 @@ and execute_action ~now (m : Model.t) action =
         && Nav.equal_workspace m.nav.workspace Nav.Infra
         && Infra_store.code_review_active m.infra
       then
+        let diff_cols =
+          Code_review_layout.effective_diff_pane_width
+            ~zoomed:(Model.is_zoomed_active m) ~viewport_cols:m.viewport.cols
+            ~sidebar_docked:(Model.sidebar_docked m) ()
+        in
         let infra =
-          Infra_store.step_review_hunk ~cols:m.viewport.cols ~delta m.infra
+          Infra_store.step_review_hunk ~cols:diff_cols ~delta m.infra
         in
         ({ m with infra }, [])
       else step_artifact_revision ~now ~delta m)

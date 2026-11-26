@@ -2511,7 +2511,11 @@ let test_journeys_tab_multipane_dives_safety () =
     (if item1_is_ask then
        Option.equal Nav.equal_overlay m_inb_dive.nav.overlay
          (Some Nav.Ask_answer)
-     else Option.is_some (Model.active_inspector m_inb_dive));
+     else
+       Option.is_some (Model.active_inspector m_inb_dive)
+       || (Nav.equal_workspace m_inb_dive.nav.workspace Nav.Keepers
+           && m_inb_dive.nav.workspace_return_stack <> [])
+       || Model.is_zoomed_active m_inb_dive);
 
   (* J14: Keepers Wide split pane 1 scrolls preview & ']' cycles embedded tab *)
   record_case ();
@@ -4300,6 +4304,15 @@ let test_pillar2_scroll_bounds_all_surfaces () =
             };
         })
   in
+  let first_art_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = List.hd many_artifacts;
+      content = "";
+      revisions = [];
+      shared = false;
+      share_version = 0;
+    }
+  in
   let m_art_tall =
     {
       base with
@@ -4307,6 +4320,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       knowledge =
         base.knowledge
         |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts
+        |> Knowledge_store.apply_artifact_detail ~observed_at:t0 first_art_detail
         |> Knowledge_store.set_tab Nav.Knowledge_artifacts;
     }
   in
@@ -5578,7 +5592,9 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         |> Knowledge_store.apply_thread ~observed_at:t0 (post1, long_comments)
         |> Knowledge_store.set_wiki_page ~slug:long_wiki_toc.slug
              (Observed.value ~observed_at:t0 long_wiki_toc)
-        |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts;
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts
+        |> Knowledge_store.apply_artifact_detail ~observed_at:t0
+             first_art_detail;
       runtime = m_lanes.runtime;
       infra = Infra_store.apply_log_snapshot dive_logs base.infra;
       incidents = dive_inc;

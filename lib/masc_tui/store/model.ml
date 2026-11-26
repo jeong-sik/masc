@@ -255,6 +255,7 @@ type t = {
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
   mouse_selection : mouse_selection_state;
+  terminal_focused : bool;
 }
 
 let equal_cell_pos (a : cell_pos) (b : cell_pos) =
@@ -606,6 +607,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     keeper_lifecycle_seq = 1;
     modal_submission_seq = 1;
     mouse_selection = No_selection;
+    terminal_focused = true;
   }
 
 let active_inspector m = m.nav.inspector
@@ -629,12 +631,22 @@ let drawer_queue ~keeper m =
   queue, remaining
 
 let selected_keeper_name m =
+  let explicit =
+    Option.bind m.fleet.selected_keeper (fun s ->
+        let trimmed = String.trim s in
+        if String.equal trimmed "" then None else Some trimmed)
+  in
+  let filter_empty = String.equal (String.trim m.fleet.filter_query) "" in
   match Fleet_store.selected_keeper_summary m.fleet with
-  | Some k -> Some k.name
-  | None ->
-      Option.bind m.fleet.selected_keeper (fun s ->
-          let trimmed = String.trim s in
-          if String.equal trimmed "" then None else Some trimmed)
+  | Some k -> (
+      match explicit with
+      | Some name
+        when filter_empty
+             && (m.nav.zoomed
+                 || Option.is_some (Fleet_store.find_keeper ~name m.fleet)) ->
+          Some name
+      | Some _ | None -> Some k.name)
+  | None -> if filter_empty then explicit else None
 
 let target_keeper m =
   match m.drafts.active_keeper with
@@ -995,7 +1007,7 @@ let sidebar_rect m =
     Some (Rect.make ~x:margin ~y:top_h ~w:sidebar_width ~h:body_h)
   else if sidebar_drawer_open m && full_w >= 20 then
     let dw = min (sidebar_width + 2) (max 18 (cols - 4)) in
-    let dx = if cols > dw + 2 then 1 else 0 in
+    let dx = margin in
     Some (Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h)
   else None
 
@@ -1688,7 +1700,8 @@ let focus_scope_chain m =
   Keymap.scope_chain_of_focus ~approval_strip_active (active_focus_scope m)
 
 let body_has_focus m =
-  (not (is_too_small_viewport m.viewport))
+  m.terminal_focused
+  && (not (is_too_small_viewport m.viewport))
   && (not (equal_breakpoint m.breakpoint Micro))
   && Option.is_none m.nav.overlay
   && (not m.nav.filter_focused)

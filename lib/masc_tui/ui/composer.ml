@@ -465,29 +465,34 @@ let draw_popup grid ~(anchor : Rect.t) ~(theme : Theme.t) ~lang (popup : popup) 
           done;
           Some pop_rect
 
-let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
-    ~breakpoint (st : state) =
+let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
+    ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~breakpoint (st : state) =
   if Rect.is_empty rect then Presenter.hidden_cursor
   else
     let mode = resolve_mode ~breakpoint st in
+    let vis_focused = st.focused && terminal_focused in
     match mode with
     | Auto_folded_pill -> Presenter.hidden_cursor
     | Collapsed_bar | Expanded_multiline ->
-        let bg_rgb = if st.focused then theme.surface_2 else theme.surface_1 in
+        let bg_rgb = if vis_focused then theme.surface_2 else theme.surface_1 in
         let bg = Color.of_rgb bg_rgb in
         let input_style =
-          if st.focused then
+          if vis_focused then
             Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg ()
           else Typography.primary ~bg theme
         in
         Cell_grid.fill_rect ~clip:rect grid ~rect ~style:input_style ();
-        if st.focused then
+        if vis_focused then
           Card.draw_left_rail ~bg grid ~x:rect.x ~y:rect.y ~h:rect.h ~theme;
-        let left_x = if st.focused then rect.x + 2 else rect.x + 1 in
-        let caret_style = Typography.accent ~bg ~bold:true theme in
+        let left_x = rect.x + 2 in
+        let caret_style =
+          if terminal_focused then Typography.accent ~bg ~bold:true theme
+          else Typography.structure ~bg theme
+        in
         let target_style =
-          if st.focused then Typography.accent ~bg ~bold:true theme
-          else Typography.primary ~bg ~bold:true theme
+          if vis_focused then Typography.accent ~bg ~bold:true theme
+          else if terminal_focused then Typography.primary ~bg ~bold:true theme
+          else Typography.structure ~bg theme
         in
         let placeholder_style = Typography.whisper ~bg theme in
         let header_y = rect.y in
@@ -648,7 +653,7 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
                 (Cell_grid.put_text ~clip:header_r grid ~x:tx ~y:header_y
                    ~style:placeholder_style
                    (Grapheme.truncate_to_width ~max_width:avail placeholder));
-              if st.focused && avail > 0 then
+              if vis_focused && avail > 0 then
                 { Presenter.x = tx; y = header_y; visible = true; shape = Presenter.Bar }
               else Presenter.hidden_cursor
             end
@@ -668,7 +673,7 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
               ignore
                 (Cell_grid.put_text ~clip:header_r grid ~x:tx ~y:header_y
                    ~style:input_style shown);
-              if st.focused && avail > 0 then
+              if vis_focused && avail > 0 then
                 {
                   Presenter.x = Int.min (Rect.right rect - 1) (tx + cursor_dx);
                   y = header_y;
@@ -743,7 +748,7 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
                        ~style:input_style text_to_draw)
                 end
               done;
-            if st.focused then
+            if vis_focused then
               let cx =
                 Int.min (Rect.right rect - 1) (content_x + !active_cursor_dx)
               in

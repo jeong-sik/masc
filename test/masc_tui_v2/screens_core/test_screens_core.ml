@@ -2156,7 +2156,7 @@ let test_v25_pulse_honest_observed_and_no_fabricated_zeros () =
         match lang with Say.Lang_ko -> "누적 730" | Say.Lang_en -> "Total 730"
       in
       let turns_needle =
-        match lang with Say.Lang_ko -> "턴 1.4k" | Say.Lang_en -> "Turns 1.4k"
+        match lang with Say.Lang_ko -> "1.4k 턴" | Say.Lang_en -> "1.4k turns"
       in
       assert_contains ~label:"v25_pulse_total_fallback_labeled" ~needle:tot_needle
         txt_h;
@@ -3393,7 +3393,7 @@ let test_wave2_sidebar_keepers_sync_and_overlays () =
   let all_wide = grid_all_text g_wide in
   assert_contains ~label:"Docked sidebar lists Schedules" ~needle:"Schedules" all_wide;
   assert_contains ~label:"Docked sidebar lists Artifacts" ~needle:"Artifacts" all_wide;
-  assert_contains ~label:"Docked sidebar lists Context & Turns" ~needle:"Context" all_wide;
+  assert_contains ~label:"Docked sidebar lists Trace" ~needle:"Trace" all_wide;
   assert_contains ~label:"Docked sidebar lists Fusion" ~needle:"Fusion" all_wide;
 
   (* 2. Compact 100x30 drawer overlay opens when sidebar_open && sidebar_focused *)
@@ -3410,7 +3410,7 @@ let test_wave2_sidebar_keepers_sync_and_overlays () =
   Alcotest.(check bool) "Compact open+focused sidebar is floating drawer" true
     (Option.is_some l_cmp.sidebar && l_cmp.sidebar_is_drawer);
 
-  (* 3. Keepers Split Sub-Tab Bar Sync: pane_index=0 shows fleet modes; pane_index=1 shows all 7 Keeper tabs *)
+  (* 3. Keepers Split Sub-Tab Bar Sync: pane_index=0 shows fleet modes; pane_index=1 shows all 6 Keeper tabs *)
   let m_kp0 =
     {
       m_wide with
@@ -3424,10 +3424,10 @@ let test_wave2_sidebar_keepers_sync_and_overlays () =
   let m_kp1 = { m_kp0 with nav = { m_kp0.nav with pane_index = 1 } } in
   let g_kp1, _ = render_full ~model:m_kp1 ~cols:140 ~rows:40 in
   let sub1 = grid_row_text g_kp1 1 in
-  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Ctx/Context tab"
-    ~needle:"Ctx" sub1;
-  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Tools tab"
-    ~needle:"Tools" sub1;
+  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Trace tab"
+    ~needle:"Trace" sub1;
+  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Work tab"
+    ~needle:"Work" sub1;
 
   (* 4. Upgraded Drawer_context & Rich HTML Media_viewer render cleanly *)
   let m_ctx_ov =
@@ -4341,6 +4341,53 @@ let test_layer2_pulse_honesty_degradation_and_waiting_verifications () =
     (Option.is_some
        (Runtime_store.standing_for ~runtime_id:"rt-a" m_after_err.runtime))
 
+let test_terminal_blur_and_popup_sidebar_scrim () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let theme = Theme.of_preset base.theme_preset in
+  (* 1. Focused composer exposes hardware cursor; terminal blur hides it while
+        preserving logical focus & draft text. *)
+  let m_comp =
+    {
+      base with
+      drafts =
+        base.drafts
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text_and_cursor ~text:"hello" ~cursor:5;
+    }
+  in
+  let _g_foc, cur_foc = render_full ~model:m_comp ~cols:140 ~rows:40 in
+  Alcotest.(check bool) "focused composer shows hardware cursor" true
+    cur_foc.visible;
+  let m_blur = { m_comp with terminal_focused = false } in
+  let g_blur, cur_blur = render_full ~model:m_blur ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"TerminalBlur/Composer" g_blur;
+  Alcotest.(check bool) "blurred terminal hides hardware cursor" false
+    cur_blur.visible;
+  Alcotest.(check bool) "logical composer focus preserved across blur render"
+    true (Drafts.is_focused m_blur.drafts);
+
+  (* 2. Composer slash popup dims docked sidebar to theme.surface_0 (scrim SSOT) *)
+  let m_slash =
+    {
+      base with
+      drafts =
+        base.drafts
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text_and_cursor ~text:"/" ~cursor:1;
+    }
+  in
+  let layout = Chrome.compute_layout ~model:m_slash ~cols:140 ~rows:40 in
+  let g_slash, _ = render_full ~model:m_slash ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"ComposerPopup/SidebarScrim" g_slash;
+  match layout.sidebar with
+  | None -> Alcotest.fail "expected docked sidebar at 140x40"
+  | Some sb ->
+      let cell = Cell_grid.get g_slash ~x:(sb.x + 1) ~y:(sb.y + 1) in
+      Alcotest.(check bool)
+        "docked sidebar dimmed to surface_0 when composer popup is open" true
+        (Color.equal cell.style.bg (Color.of_rgb theme.surface_0)
+         && Color.equal cell.style.fg (Color.of_rgb theme.border_subtle))
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -4372,6 +4419,8 @@ let () =
             `Quick test_wave2_sidebar_keepers_sync_and_overlays;
           Alcotest.test_case "Settings tui.* enum localization & zero [[ ]] double-bracket guard"
             `Quick test_settings_tui_enum_rendering_and_zero_double_brackets;
+          Alcotest.test_case "OS terminal blur hides hardware cursor & composer popup dims docked sidebar"
+            `Quick test_terminal_blur_and_popup_sidebar_scrim;
         ] );
       ( "pulse",
         [

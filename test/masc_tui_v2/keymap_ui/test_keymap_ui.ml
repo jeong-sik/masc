@@ -284,8 +284,8 @@ let test_keymap_footer_width_budget () =
 
 (* --- 2. Slash Commands Tests --- *)
 
-let test_slash_36_commands () =
-  Alcotest.(check int) "exactly 36 slash commands" 36 (List.length Slash.all);
+let test_slash_37_commands () =
+  Alcotest.(check int) "exactly 37 slash commands" 37 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -301,6 +301,7 @@ let test_slash_36_commands () =
       ("/jump", Slash.Jump);
       ("/voice", Slash.Voice);
       ("/btw what failed?", Slash.Btw "what failed?");
+      ("/discord-reply", Slash.Discord_reply);
       ("/wake", Slash.Wake None);
       ("/wake alpha", Slash.Wake (Some "alpha"));
       ("/up", Slash.Up None);
@@ -2573,8 +2574,8 @@ let () =
         ] );
       ( "slash",
         [
-          Alcotest.test_case "all 36 slash commands (+ /boot alias) parse, reject invalid, filter & complete"
-            `Quick test_slash_36_commands;
+          Alcotest.test_case "all 37 slash commands (+ /boot alias) parse, reject invalid, filter & complete"
+            `Quick test_slash_37_commands;
           Alcotest.test_case "trailing-space argument completion (/theme /lang /tools)"
             `Quick test_slash_trailing_space_completion;
         ] );

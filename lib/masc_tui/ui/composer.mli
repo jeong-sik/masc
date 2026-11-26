@@ -130,6 +130,7 @@ val draw_popup :
 
 val draw :
   ?show_pending_tx:bool ->
+  ?terminal_focused:bool ->
   Cell_grid.t ->
   rect:Rect.t ->
   theme:Theme.t ->
@@ -138,4 +139,6 @@ val draw :
   state ->
   Presenter.cursor
 (** Paint the persistent composer bar/multiline editor onto [Cell_grid.t] and
-    return the exact {!Presenter.cursor} for the terminal presenter. *)
+    return the exact {!Presenter.cursor} for the terminal presenter. When
+    [terminal_focused] is [false], the composer keeps its logical layout while
+    dimming active focus chrome and returning {!Presenter.hidden_cursor}. *)

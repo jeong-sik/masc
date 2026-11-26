@@ -253,7 +253,7 @@ let post_tool_use ~config ~meta ~invocation ~tool_name ~input result =
         ; _meta = None
         }
     | Tool_result.Deferred _ -> Alcotest.fail "tool unexpectedly deferred"
-    | Tool_result.Failed { message; _ } -> Alcotest.failf "tool failed: %s" message
+    | Tool_result.Failed { Tool_result.message; _ } -> Alcotest.failf "tool failed: %s" message
   in
   let hooks =
     Masc.Keeper_hooks_agent_core.make_hooks

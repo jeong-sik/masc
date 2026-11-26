@@ -649,24 +649,25 @@ let is_public_mcp name = String_set.mem name public_mcp_set
 (* ================================================================ *)
 
 let metadata name =
-  match Hashtbl.find_opt metadata_table name with
-  | Some meta -> meta
-  | None ->
-    (* An unclassified tool is never granted a worker-capable permission. The
-       catalog has no evidence for a narrower policy, so the typed fallback
-       is operator-only and registration/authentication still require an
-       explicit catalog entry. *)
-    let fail_closed = default_metadata ~required_permission:Masc_domain.CanAdmin in
-    if is_public_mcp name
-    then fail_closed
-    else
-      (* External MCP discovery remains an explicit public-surface contract.
-         It must not be reused as Keeper authorization or model visibility. *)
-      { fail_closed with
-        visibility = Hidden
-      ; allow_direct_call_when_hidden = true
-      ; reason = Some "Not on the external MCP discovery surface."
-      }
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    match Hashtbl.find_opt metadata_table name with
+    | Some meta -> meta
+    | None ->
+      (* An unclassified tool is never granted a worker-capable permission. The
+         catalog has no evidence for a narrower policy, so the typed fallback
+         is operator-only and registration/authentication still require an
+         explicit catalog entry. *)
+      let fail_closed = default_metadata ~required_permission:Masc_domain.CanAdmin in
+      if is_public_mcp name
+      then fail_closed
+      else
+        (* External MCP discovery remains an explicit public-surface contract.
+           It must not be reused as Keeper authorization or model visibility. *)
+        { fail_closed with
+          visibility = Hidden
+        ; allow_direct_call_when_hidden = true
+        ; reason = Some "Not on the external MCP discovery surface."
+        })
 
 let is_visible ?(include_hidden = false) name =
   let meta = metadata name in

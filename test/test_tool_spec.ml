@@ -270,5 +270,54 @@ let () =
             Tool_spec.register spec;
             check bool "handler registered in Tool_dispatch" true
               (Tool_dispatch.is_registered name));
+          test_case "concurrent Tool_spec.register and Tool_catalog.metadata across domains" `Quick (fun () ->
+            let names =
+              List.init 16 (fun i -> Printf.sprintf "__test_spec_concurrent_meta_%d" i)
+            in
+            List.iter register_test_metadata names;
+            let stop = Atomic.make false in
+            let writer =
+              Domain.spawn (fun () ->
+                for round = 1 to 80 do
+                  let visibility =
+                    if round mod 2 = 0 then Tool_catalog.Default else Tool_catalog.Hidden
+                  in
+                  List.iter
+                    (fun name ->
+                      let spec =
+                        Tool_spec.create
+                          ~name
+                          ~description:"concurrent metadata test"
+                          ~module_tag:Tool_dispatch.Mod_misc
+                          ~input_schema:empty_schema
+                          ~handler_binding:Tag_dispatch
+                          ~visibility
+                          ~is_read_only:(round mod 2 = 0)
+                          ~reason:(Printf.sprintf "round-%d" round)
+                          ()
+                      in
+                      Tool_spec.register spec)
+                    names
+                done;
+                Atomic.set stop true)
+            in
+            let reader =
+              Domain.spawn (fun () ->
+                let reads = ref 0 in
+                while not (Atomic.get stop) || !reads < 200 do
+                  List.iter
+                    (fun name ->
+                      let meta = Tool_catalog.metadata name in
+                      if meta.required_permission <> Masc_domain.CanAdmin then
+                        failwith "unexpected required_permission under concurrent metadata lookup")
+                    names;
+                  let unknown = Tool_catalog.metadata "__test_spec_concurrent_unknown" in
+                  if unknown.visibility <> Tool_catalog.Hidden then
+                    failwith "unexpected fallback visibility under concurrent metadata lookup";
+                  incr reads
+                done)
+            in
+            Domain.join writer;
+            Domain.join reader);
         ] );
     ]

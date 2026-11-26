@@ -252,6 +252,7 @@ type tool_result_commit_policy = Require_commit | Observe_commit
     registry turn observation; it never adopts a currently active turn. *)
 val make_hooks :
   ?preview:Keeper_turn_preview.writer ->
+  ?tool_reach:(string -> Keeper_tool_reach.t option) ->
   ?observation_token:Keeper_turn_observation_token.t ->
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->

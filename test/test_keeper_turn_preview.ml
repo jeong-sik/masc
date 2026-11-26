@@ -55,7 +55,7 @@ let loop_attempt ?(now = 0.) writer runtime_id =
 
 (* The two tool hooks, as the Keeper's agent-core hooks call them. *)
 let started ?(tool_use_id = None) writer now tool_name =
-  Keeper_turn_preview.note_tool_started ~writer ~now ~tool_use_id ~tool_name ~cohort:None
+  Keeper_turn_preview.note_tool_started ~writer ~now ~tool_use_id ~tool_name ~cohort:None ~reach:None
 ;;
 
 let finished ?(tool_use_id = None) writer now tool_name =
@@ -215,9 +215,10 @@ let test_a_running_tool_carries_its_planned_batch () =
     }
   in
   Keeper_turn_preview.note_tool_started ~writer ~now:3. ~tool_use_id:(Some "call-a")
-    ~tool_name:"Execute" ~cohort:(Some batch);
+    ~tool_name:"Execute" ~cohort:(Some batch) ~reach:(Some Keeper_tool_reach.Sandbox);
   Keeper_turn_preview.note_tool_started ~writer ~now:3. ~tool_use_id:(Some "call-b")
-    ~tool_name:"WebFetch" ~cohort:(Some { batch with planned_index = 1 });
+    ~tool_name:"WebFetch" ~cohort:(Some { batch with planned_index = 1 })
+    ~reach:(Some Keeper_tool_reach.Network);
   Alcotest.(check bool) "the started call carries its batch" true
     (cohort_of "call-a" = Some (Some batch));
   Alcotest.(check bool) "its batch peer carries the same batch" true
@@ -234,7 +235,48 @@ let test_a_running_tool_carries_its_planned_batch () =
     [ {|{"batch_index":0,"batch_size":2,"concurrent":true}|}
     ; {|{"batch_index":0,"batch_size":2,"concurrent":true}|}
     ]
-    (List.map Yojson.Safe.to_string wire_cohorts)
+    (List.map Yojson.Safe.to_string wire_cohorts);
+  (* RFC D2. The hook names where each call reaches. *)
+  Alcotest.(check (list string)) "the wire names where each call reaches"
+    [ {|"sandbox"|}; {|"network"|} ]
+    Yojson.Safe.Util.(
+      Keeper_turn_preview.to_json (current ())
+      |> member "open_activities" |> to_list
+      |> List.map (fun item -> Yojson.Safe.to_string (member "reach" item)))
+;;
+
+(* RFC D2/D3. An add-on tool's reach is its MCP openWorldHint; an add-on that
+   leaves the hint out has no reach rather than a guessed one. *)
+let test_an_addon_tool_reaches_where_its_open_world_hint_says () =
+  let reach_of hint =
+    let annotations =
+      Option.map
+        (fun open_world_hint ->
+           { Mcp_protocol.Mcp_types.title = None
+           ; read_only_hint = None
+           ; destructive_hint = None
+           ; idempotent_hint = None
+           ; open_world_hint
+           })
+        hint
+    in
+    let tool = Mcp_protocol.Mcp_types.make_tool ~name:"addon_tool" ?annotations () in
+    let export =
+      Lane_addon_tool_export.create
+        ~owner:(Lane_addon_tool_export.create_owner ~instance_id:"addon-1")
+        ~tool
+    in
+    Keeper_tool_descriptor.reach_of_handler (Keeper_tool_descriptor.Tool_lane_addon export)
+  in
+  let show = Option.map Keeper_tool_reach.to_wire in
+  Alcotest.(check (option string)) "open world reaches the network" (Some "network")
+    (show (reach_of (Some (Some true))));
+  Alcotest.(check (option string)) "closed world stays on the host" (Some "sandbox")
+    (show (reach_of (Some (Some false))));
+  Alcotest.(check (option string)) "no hint is not known" None
+    (show (reach_of (Some None)));
+  Alcotest.(check (option string)) "no annotations is not known" None
+    (show (reach_of None))
 ;;
 
 (* A call that validation rejects never opens, so it is only the last observed
@@ -504,7 +546,7 @@ let test_preparation_scopes_are_visible_owned_and_do_not_dispatch () =
       (List.length (Preview.preparation_spans (current ()).preparation_timeline));
     ignore (scoped Preview.Tool_preparation (fun () ->
       let successor = Some (reset name ~now:5.) in
-      Preview.note_tool_started ~writer:successor ~now:6. ~tool_use_id:None ~tool_name:"actual-tool" ~cohort:None;
+      Preview.note_tool_started ~writer:successor ~now:6. ~tool_use_id:None ~tool_name:"actual-tool" ~cohort:None ~reach:None;
       Ok ()));
     Alcotest.(check (option string)) "old writer cannot replace the successor" (Some "actual-tool")
       (current ()).last_tool;
@@ -745,7 +787,7 @@ let test_a_tool_is_open_from_its_call_to_its_return () =
   let call stage since =
     [ Preview.Tool_open
         { tool_use_id = Some "toolu_a"; tool_name = "Execute"; stage
-        ; started_at = 3.; since; cohort = None } ]
+        ; started_at = 3.; since; cohort = None; reach = None } ]
   in
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "toolu_a") "Execute");
@@ -823,7 +865,7 @@ let test_parallel_tools_stay_open_one_by_one () =
   let call id started_at since =
     Preview.Tool_open
       { tool_use_id = Some id; tool_name = "Read"; stage = Preview.Tool_executing
-      ; started_at; since; cohort = None }
+      ; started_at; since; cohort = None; reach = None }
   in
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "a") "Read");
@@ -851,7 +893,7 @@ let test_a_late_return_ends_only_its_own_call () =
   let call id name since =
     Preview.Tool_open
       { tool_use_id = id; tool_name = name; stage = Preview.Tool_executing
-      ; started_at = since; since; cohort = None }
+      ; started_at = since; since; cohort = None; reach = None }
   in
   started ~tool_use_id:(Some "old") writer 2. "Execute";
   finished ~tool_use_id:(Some "old") writer 3. "Execute";
@@ -929,12 +971,12 @@ let test_the_wire_carries_the_open_work () =
              [ "kind", `String "tool"; "tool_use_id", `String "toolu_a"
              ; "name", `String "Execute"; "stage", `String "executing"
              ; "started_at_unix", `Float 3.; "since_unix", `Float 5.
-             ; "cohort", `Null ]
+             ; "cohort", `Null; "reach", `Null ]
          ; `Assoc
              [ "kind", `String "tool"; "tool_use_id", `Null
              ; "name", `String "Search"; "stage", `String "requested"
              ; "started_at_unix", `Float 4.5; "since_unix", `Float 4.5
-             ; "cohort", `Null ] ]);
+             ; "cohort", `Null; "reach", `Null ] ]);
   Alcotest.(check string) "the status names them in order"
     "tool running: Execute · tool called: Search · last observed tool: Execute"
     (Yojson.Safe.Util.(member "status_text" json |> to_string))
@@ -951,7 +993,7 @@ let test_a_tool_the_stream_never_showed_opens_at_its_hook () =
     ((current ()).open_activities
      = [ Preview.Tool_open
            { tool_use_id = Some "late"; tool_name = "Execute"
-           ; stage = Preview.Tool_executing; started_at = 3.; since = 3.; cohort = None } ]);
+           ; stage = Preview.Tool_executing; started_at = 3.; since = 3.; cohort = None; reach = None } ]);
   Alcotest.(check string) "the turn says the tool runs"
     "tool running: Execute · last observed tool: Execute"
     (Preview.status_text (current ()));
@@ -972,7 +1014,7 @@ let test_in_the_agent_loop_a_tool_block_is_only_the_call () =
   let writer = Some (reset keeper_name ~now:1.) in
   let call stage since =
     Preview.Tool_open
-      { tool_use_id = Some "call_1"; tool_name = "Execute"; stage; started_at = 3.; since; cohort = None }
+      { tool_use_id = Some "call_1"; tool_name = "Execute"; stage; started_at = 3.; since; cohort = None; reach = None }
   in
   let response since =
     Preview.Response_open { channel = Preview.No_content; started_at = since; since }
@@ -1098,7 +1140,7 @@ let test_a_native_block_is_the_clients_own_run () =
   let run id started_at =
     Preview.Tool_open
       { tool_use_id = Some id; tool_name = "bash"; stage = Preview.Tool_executing
-      ; started_at; since = started_at; cohort = None }
+      ; started_at; since = started_at; cohort = None; reach = None }
   in
   client_attempt ~now:1.5 writer "vibe";
   Preview.note_request ~writer ~now:2.;
@@ -1142,7 +1184,7 @@ let test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock () =
   let run started_at =
     Preview.Tool_open
       { tool_use_id = None; tool_name = "view"; stage = Preview.Tool_executing
-      ; started_at; since = started_at; cohort = None }
+      ; started_at; since = started_at; cohort = None; reach = None }
   in
   let waiting since =
     [ Preview.Response_open { channel = Preview.No_content; started_at = since; since } ]
@@ -1202,7 +1244,7 @@ let test_words_that_come_during_a_run_outlive_a_repeated_hook () =
   let call =
     Preview.Tool_open
       { tool_use_id = Some "call"; tool_name = "Execute"; stage = Preview.Tool_executing
-      ; started_at = 2.; since = 2.; cohort = None }
+      ; started_at = 2.; since = 2.; cohort = None; reach = None }
   in
   Alcotest.(check bool) "the call still outranks the words" true
     ((current ()).open_activities = [ words; call ]);
@@ -1225,7 +1267,7 @@ let test_a_turn_that_ends_at_a_tool_boundary_closes_what_is_still_open () =
   let requested since =
     Preview.Tool_open
       { tool_use_id = Some "wait"; tool_name = "wait"; stage = Preview.Tool_requested
-      ; started_at = since; since; cohort = None }
+      ; started_at = since; since; cohort = None; reach = None }
   in
   loop_attempt ~now:1.5 writer "glm";
   Preview.note_request ~writer ~now:2.;
@@ -1256,7 +1298,7 @@ let test_the_turn_over_closes_a_native_run_whose_stop_never_came () =
   let running =
     Preview.Tool_open
       { tool_use_id = Some "call"; tool_name = "Read"; stage = Preview.Tool_executing
-      ; started_at = 10.; since = 10.; cohort = None }
+      ; started_at = 10.; since = 10.; cohort = None; reach = None }
   in
   client_attempt ~now:1.5 writer "claude-code";
   Preview.note_request ~writer ~now:2.;
@@ -1309,6 +1351,8 @@ let () =
             `Quick test_a_rejected_tool_never_runs_and_overlapping_tools_stay_open
         ; Alcotest.test_case "a running tool carries its planned batch"
             `Quick test_a_running_tool_carries_its_planned_batch
+        ; Alcotest.test_case "an add-on tool reaches where its openWorldHint says"
+            `Quick test_an_addon_tool_reaches_where_its_open_world_hint_says
         ; Alcotest.test_case "a tool is open from its call to its return" `Quick
             test_a_tool_is_open_from_its_call_to_its_return
         ; Alcotest.test_case "reasoning and answer are two channels of one response"

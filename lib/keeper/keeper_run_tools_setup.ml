@@ -892,6 +892,18 @@ let prepare_agent_setup
     ; agent_cell
     ; agent_name
     ; all_tool_names
+    ; tool_reach =
+        (* The hook hears the model-facing name, which is the one name the
+           bundle gave the descriptor (Keeper_tool_descriptor.keeper_model_names). *)
+        (let by_name = Hashtbl.create (List.length turn_model_visible_descriptors) in
+         List.iter
+           (fun descriptor ->
+              List.iter
+                (fun name ->
+                   Hashtbl.replace by_name name (Keeper_tool_descriptor.reach descriptor))
+                (Keeper_tool_descriptor.keeper_model_names descriptor))
+           turn_model_visible_descriptors;
+         fun name -> Option.join (Hashtbl.find_opt by_name name))
     ; deferred_tool_names =
         (match keeper_listing with
          | Keeper_tools_agent_core.No_listing -> []

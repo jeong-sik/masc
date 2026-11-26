@@ -361,6 +361,71 @@ let lane_addon_export = function
   | Tool_read_image -> None
 ;;
 
+(* RFC open-tool-carries-cohort-and-reach D2/D3. Each arm names the function
+   that does the call's I/O. A handler whose tools or input reach different
+   places answers [None]: the preview says it does not know rather than pick
+   one. *)
+let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
+  (* An add-on tool says itself, through MCP's openWorldHint, whether it
+     talks to the world outside its worker. *)
+  | Tool_lane_addon export -> (
+      match export.Lane_addon_tool_export.tool.Mcp_protocol.Mcp_types.annotations with
+      | Some { Mcp_protocol.Mcp_types.open_world_hint = Some true; _ } ->
+          Some Keeper_tool_reach.Network
+      | Some { Mcp_protocol.Mcp_types.open_world_hint = Some false; _ } ->
+          Some Keeper_tool_reach.Sandbox
+      | Some { Mcp_protocol.Mcp_types.open_world_hint = None; _ } | None -> None)
+  (* Keeper_tool_execute_runtime, Keeper_workspace_ops,
+     Keeper_tool_filesystem_runtime, Keeper_tool_ide_runtime. *)
+  | Tool_execute | Tool_search_files | Tool_read_file | Tool_edit_file | Tool_write_file
+  | Tool_ide_annotate ->
+      Some Keeper_tool_reach.Sandbox
+  (* keeper_peer_artifact.ml writes the fetched blob into the sandbox. *)
+  | Tool_peer_artifact -> Some Keeper_tool_reach.Sandbox
+  (* keeper_image_read.ml reads the sandbox file. *)
+  | Tool_read_image -> Some Keeper_tool_reach.Sandbox
+  (* A language server bounded to the sandbox root (keeper_tool_code_query.ml). *)
+  | Tool_keeper_code_query_dispatch -> Some Keeper_tool_reach.Sandbox
+  (* Projections of what the process holds, and stores under the base path. *)
+  | Tool_lane_status | Tool_tools_list | Tool_capability_search | Tool_context_status
+  | Tool_artifact_read | Tool_skill_validate | Tool_artifact_draft | Tool_artifact_publish
+  | Tool_skill_publish | Tool_workspace_memory_read | Tool_memory_search | Tool_memory_select
+  | Tool_memory_retract | Tool_memory_write | Tool_constitution_write
+  | Tool_constitution_read | Tool_constitution_remove | Tool_wiki_search | Tool_wiki_read
+  | Tool_task_dispatch | Tool_board_dispatch | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch | Tool_masc_run_dispatch | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch | Tool_keeper_composition_result_dispatch
+  | Tool_receipt_wait | Tool_masc_fusion_status | Tool_masc_fusion_decision
+  | Tool_masc_wiki_dispatch ->
+      Some Keeper_tool_reach.Masc_state
+  (* Web search runs curl through Tool_local_runtime_http; fetch and the
+     browser leave the host. *)
+  | Tool_web_search | Tool_web_fetch | Tool_browser_tabs | Tool_browser_read
+  | Tool_browser_session | Tool_browser_goto | Tool_browser_act | Tool_browser_interact ->
+      Some Keeper_tool_reach.Network
+  (* Upload, delete and list go to the provider's Files API
+     (Llm_provider.Provider_files): storage, not a model call. *)
+  | Tool_masc_file_dispatch -> Some Keeper_tool_reach.Network
+  (* A fusion panel and a vision model. *)
+  | Tool_masc_fusion_dispatch | Tool_analyze_image -> Some Keeper_tool_reach.Model_provider
+  (* The target is in the input: a surface is the local chat store, or
+     Discord, Slack or a webhook. *)
+  | Tool_surface_read | Tool_surface_post -> None
+  (* Tools of one handler that reach different places: voice speak goes to a
+     configured TTS service or the host, voice agent reads config; keeper job
+     start runs a container, job result reads the store; keeper sandbox
+     start/stop drives containers, the other keeper tools stay in MASC; misc
+     garbage-collects host volumes, lane act runs in an add-on, the rest stays
+     in MASC; local runtime verify and probe check a runtime that may be on
+     this host, while decide runs a model on it. *)
+  | Tool_voice_dispatch | Tool_keeper_job_dispatch | Tool_masc_keeper_dispatch
+  | Tool_masc_misc_dispatch | Tool_masc_local_runtime_dispatch ->
+      None
+;;
+
+let reach descriptor = reach_of_handler descriptor.runtime_handler
+
 
 let discovery_example ~label ?cwd ~argv () =
   let input =

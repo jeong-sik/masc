@@ -80,6 +80,10 @@ type ctx =
   ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
   ; all_tool_names : string list
+  ; tool_reach : string -> Keeper_tool_reach.t option
+        (** Where a call of this model-facing tool name reaches, from the
+            descriptor the turn offers under that name. [None] for a name no
+            descriptor offers. *)
   ; deferred_tool_names : string list
         (** Built tools held back from the request until [keeper_tool_search]
             names them. Empty when the turn places no listing. *)
@@ -521,6 +525,7 @@ let assemble_hooks
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
         ?preview
+        ~tool_reach:ctx.tool_reach
         ?observation_token
         ~config
         ~meta_ref
@@ -666,7 +671,8 @@ let assemble_hooks
                   ~tool_use_id:
                     (Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation))
                   ~tool_name
-                  ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation));
+                  ~cohort:(Some (Agent_core.Tool_contract.Invocation.schedule invocation))
+                  ~reach:(ctx.tool_reach tool_name);
                 Agent_core.Hooks.Continue
               | BeforeTurn _
               | BeforeTurnParams _

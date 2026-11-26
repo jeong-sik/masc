@@ -233,6 +233,13 @@ val runtime_handler_to_string : runtime_handler -> string
     and nowhere else. *)
 val lane_addon_export : runtime_handler -> Lane_addon_tool_export.t option
 
+(** Where a call of this handler reaches, for the turn preview. [None] when
+    the handler's tools or input reach different places, or an add-on tool
+    leaves MCP's openWorldHint out. *)
+val reach_of_handler : runtime_handler -> Keeper_tool_reach.t option
+
+val reach : t -> Keeper_tool_reach.t option
+
 val tool_kind_to_string : tool_kind -> string
 
 (** Strict parse of {!tool_kind_to_string} output. Unknown strings are an

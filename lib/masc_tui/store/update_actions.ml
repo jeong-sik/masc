@@ -8887,7 +8887,15 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Open_external_editor -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) -> execute_action ~now m Keymap.Open_external
-      | Some _ -> (m, [])
+      | Some
+          ( Nav.Palette
+          | Nav.Incidents
+          | Nav.Queue_context _
+          | Nav.Inline_action _
+          | Nav.Ask_answer
+          | Nav.Help
+          | Nav.System_gate _ ) ->
+          (m, [])
       | None -> (
           let wiki_slug =
             match Model.active_inspector m with

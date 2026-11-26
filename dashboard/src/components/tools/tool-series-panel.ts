@@ -75,17 +75,22 @@ function formatLongCalls(count: number, ms: number): string {
   return `${formatCount(count)} · ${formatTotalTime(ms)}`
 }
 
-/** Share of failed calls, or null when nothing ran. */
-export function failureRatePercent(callCount: number, failureCount: number): number | null {
-  return callCount === 0 ? null : (failureCount / callCount) * PERCENT
+/** Share of failed settled calls (excluding deferred), or null when nothing settled. */
+export function failureRatePercent(
+  callCount: number,
+  failureCount: number,
+  deferredCount = 0,
+): number | null {
+  const settledCount = Math.max(0, callCount - deferredCount)
+  return settledCount === 0 ? null : (failureCount / settledCount) * PERCENT
 }
 
 function formatPercent(percent: number): string {
   return `${percent.toFixed(1)}%`
 }
 
-function formatFailureRate(callCount: number, failureCount: number): string {
-  const rate = failureRatePercent(callCount, failureCount)
+function formatFailureRate(callCount: number, failureCount: number, deferredCount = 0): string {
+  const rate = failureRatePercent(callCount, failureCount, deferredCount)
   return rate === null ? '-' : formatPercent(rate)
 }
 
@@ -111,7 +116,9 @@ export function failureRateSeries(series: ToolMetricsSeriesResponse): MetricChar
     {
       name: '실패율',
       color: 'var(--color-status-warn)',
-      readings: bucketReadings(series, bucket => failureRatePercent(bucket.call_count, bucket.failure_count)),
+      readings: bucketReadings(series, bucket =>
+        failureRatePercent(bucket.call_count, bucket.failure_count, bucket.deferred_count),
+      ),
     },
   ]
 }
@@ -245,7 +252,7 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
     <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
       <${StatTile} label="호출" value=${formatCount(total.call_count)} status="brass" />
       <${StatTile} label="실패" value=${formatCount(total.failure_count)} status="brass" />
-      <${StatTile} label="실패율" value=${formatFailureRate(total.call_count, total.failure_count)} status="brass" />
+      <${StatTile} label="실패율" value=${formatFailureRate(total.call_count, total.failure_count, total.deferred_count)} status="brass" />
       <${StatTile} label="실행 시간 합계" value=${formatTotalTime(total.total_ms)} status="brass" />
       <${StatTile} label=${longCallLabel(series)} value=${formatCount(total.long_count)} status="brass" />
       <${StatTile} label=${longTimeLabel(series)} value=${formatTotalTime(total.long_total_ms)} status="brass" />

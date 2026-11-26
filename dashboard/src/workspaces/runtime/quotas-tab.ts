@@ -21,10 +21,16 @@ import {
   cancelSetupLogin,
   currentAccountMode,
   currentSessionEpoch,
+  extractObserverTopics,
   isEpochCurrent,
+  markViewSynced,
   resourceCache,
   sendSetupLoginInput,
+  sessionEpoch,
   streamSetupAccountLogin,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
   timeWindow,
   timeWindowProviderDays,
   type Observed,
@@ -235,39 +241,46 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
   }, [])
 
-  const loadAll = (reason: 'mount' | 'manual' = 'mount') => {
-    void resourceCache.fetch<RuntimeResolvedPayload>(
-      'runtime:resolved',
-      loadRuntimeResolved,
-      { ttlMs: 15_000, topics: ['runtime', 'provider_usage', 'config'], reason },
-    )
-    void resourceCache.fetch<ProviderUsageHistoryResponse>(
-      historyKey,
-      (signal) => loadProviderUsageHistory(providerDays, signal),
-      { ttlMs: 30_000, topics: ['provider_usage'], reason },
-    )
+  const epoch = sessionEpoch.value
+  const loadAll = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const startEpoch = currentSessionEpoch()
+    const jobs: Promise<unknown>[] = [
+      resourceCache.fetch<RuntimeResolvedPayload>(
+        'runtime:resolved',
+        loadRuntimeResolved,
+        { ttlMs: 15_000, topics: ['runtime', 'runtime_resolved', 'provider_usage', 'config'], reason },
+      ),
+      resourceCache.fetch<ProviderUsageHistoryResponse>(
+        historyKey,
+        (signal) => loadProviderUsageHistory(providerDays, signal),
+        { ttlMs: 30_000, topics: ['provider_usage'], reason },
+      ),
+    ]
 
     if (accountMode === 'multi_account') {
-      void resourceCache.fetch<MultiAccountProviderAccountsResponse>(
-        'runtime:auth-provider-accounts',
-        (signal) => apiGet<MultiAccountProviderAccountsResponse>('/api/v1/auth/provider-accounts', { signal }),
-        { ttlMs: 20_000, topics: ['provider_accounts'], reason },
-      )
-      void resourceCache.fetch<MultiAccountIntegrationsResponse>(
-        'runtime:auth-integrations',
-        (signal) => apiGet<MultiAccountIntegrationsResponse>('/api/v1/auth/integrations', { signal }),
-        { ttlMs: 30_000, topics: ['provider_accounts', 'config'], reason },
+      jobs.push(
+        resourceCache.fetch<MultiAccountProviderAccountsResponse>(
+          'runtime:auth-provider-accounts',
+          (signal) => apiGet<MultiAccountProviderAccountsResponse>('/api/v1/auth/provider-accounts', { signal }),
+          { ttlMs: 20_000, topics: ['provider_accounts'], reason },
+        ),
+        resourceCache.fetch<MultiAccountIntegrationsResponse>(
+          'runtime:auth-integrations',
+          (signal) => apiGet<MultiAccountIntegrationsResponse>('/api/v1/auth/integrations', { signal }),
+          { ttlMs: 30_000, topics: ['provider_accounts', 'config'], reason },
+        ),
       )
     } else {
-      void resourceCache.fetch<SetupInventoryPayload>(
-        'runtime:setup-inventory',
-        (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', { signal }),
-        { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
+      jobs.push(
+        resourceCache.fetch<SetupInventoryPayload>(
+          'runtime:setup-inventory',
+          (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', { signal }),
+          { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
+        ),
       )
       rawConfigAbortRef.current?.abort()
       const ctrl = new AbortController()
       rawConfigAbortRef.current = ctrl
-      const startEpoch = currentSessionEpoch()
       void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
         if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
         if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
@@ -275,11 +288,62 @@ export function QuotasTab(props: WorkspaceViewProps) {
         }
       })
     }
+
+    void Promise.all(jobs).then(() => {
+      if (mountedRef.current && isEpochCurrent(startEpoch)) markViewSynced()
+    })
   }
 
   useEffect(() => {
+    setSourceRevision('')
+    setCredForm(null)
+    setLoginReceipt(null)
+    setActionBanner(null)
+  }, [epoch])
+
+  useEffect(() => {
     loadAll('mount')
-  }, [providerDays, accountMode])
+  }, [providerDays, accountMode, epoch])
+
+  useEffect(() => {
+    const watchedTopics = new Set([
+      'runtime',
+      'runtime_resolved',
+      'provider_usage',
+      'provider_standing',
+      'quota',
+      'config',
+      'provider_accounts',
+      'setup_inventory',
+      'dataset_invalidation',
+    ])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        if (!mountedRef.current || !isEpochCurrent(epoch)) return
+        loadAll('sse')
+      }, 450)
+    }
+    const unsubFrames = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
+        scheduleRefresh()
+      }
+    })
+    const recover = () => {
+      if (!mountedRef.current || !isEpochCurrent(epoch)) return
+      loadAll('sse')
+    }
+    const unsubReconnect = subscribeObserverReconnect(recover)
+    const unsubResync = subscribeObserverResync(recover)
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+      unsubFrames()
+      unsubReconnect()
+      unsubResync()
+    }
+  }, [providerDays, accountMode, epoch])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   useEffect(() => {

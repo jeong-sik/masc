@@ -35,6 +35,7 @@ export type ResyncListener = (reason: string) => void
 export type ReconnectListener = () => void
 
 export const OBSERVER_SSE_INSTANCE_HEADER = 'x-masc-sse-instance-id'
+export const OBSERVER_IDLE_TIMEOUT_HEADER = 'x-masc-observer-idle-timeout-ms'
 
 const provenanceSignal = signal<ViewProvenance>('SNAPSHOT')
 const connectedSignal = signal<boolean>(false)
@@ -101,6 +102,18 @@ const SERVER_TOPIC_ALIASES: Readonly<Record<string, readonly string[]>> = {
   goals: ['goal', 'goals', 'shell'],
   keepers: ['keeper', 'keeper_lifecycle', 'shell'],
   schedules: ['schedules', 'task', 'tasks'],
+  runtime_resolved: ['runtime', 'provider_usage', 'config'],
+  runtime_probe: ['runtime_probe', 'runtime'],
+  lane_addon_asks_changed: ['lane_addon', 'lane_addon_asks'],
+  lane_addon_exports_changed: ['lane_addon'],
+  gate_connector_changed: ['connectors', 'gate'],
+  ide_presence: ['clients', 'ide_presence'],
+  tool_metrics: ['tool_metrics', 'tools'],
+  model_metrics: ['model_metrics', 'cache_stats', 'keeper_costs', 'keeper_efficiency'],
+  telemetry: ['model_metrics', 'tool_metrics', 'keeper_costs', 'keeper_efficiency'],
+  skill_usage: ['skills', 'tools'],
+  skill_activations: ['skills', 'tools'],
+  async_requests: ['tools'],
 }
 
 sessionEpoch.subscribe((epoch) => {
@@ -299,6 +312,7 @@ export function stopObserverStream(): void {
     activeController = null
   }
   connectedSignal.value = false
+  setObserverSseInstanceId(null)
 }
 
 export interface StartObserverOptions {
@@ -379,6 +393,7 @@ export async function startObserverStream(
     if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
       if (!response.ok || !response.body) {
         connectedSignal.value = false
+        setObserverSseInstanceId(null)
         markStreamGap(`observer_http_${response.status}`)
         // Retry only transient server/network failures (408/429/5xx or empty 200 body); skip permanent 4xx.
         shouldReconnect =
@@ -395,6 +410,14 @@ export async function startObserverStream(
         if (nextSseInstanceId) {
           setObserverSseInstanceId(nextSseInstanceId)
         }
+        const idleHeader = response.headers.get(OBSERVER_IDLE_TIMEOUT_HEADER)?.trim() ?? null
+        const parsedIdleMs = idleHeader !== null && /^[1-9][0-9]*$/.test(idleHeader)
+          ? Number(idleHeader)
+          : NaN
+        const idleTimeoutMs =
+          Number.isSafeInteger(parsedIdleMs) && parsedIdleMs <= 2_147_483_647
+            ? parsedIdleMs
+            : undefined
 
         const wasGapOrReconnect =
           provenanceSignal.peek() === 'STREAM_GAP'
@@ -403,7 +426,10 @@ export async function startObserverStream(
 
         reconnectAttempt = 0
         connectedSignal.value = true
-        provenanceSignal.value = 'LIVE SSE'
+        // Wait for mounted views to complete recovery reads before declaring LIVE SSE
+        // after a STREAM_GAP/reconnect; when no views subscribe, restore LIVE SSE directly.
+        provenanceSignal.value =
+          wasGapOrReconnect && reconnectListeners.size > 0 ? 'SYNCED' : 'LIVE SSE'
 
         if (wasGapOrReconnect) {
           resourceCache.invalidateAll()
@@ -417,8 +443,26 @@ export async function startObserverStream(
         const decoder = new TextDecoder()
         let buffer = ''
 
+        const readChunk = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+          if (idleTimeoutMs === undefined) return reader.read()
+          let timer: ReturnType<typeof setTimeout> | undefined
+          try {
+            return await Promise.race([
+              reader.read(),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => {
+                  void reader.cancel().catch(() => {})
+                  reject(new Error('observer stream idle timeout'))
+                }, idleTimeoutMs)
+              }),
+            ])
+          } finally {
+            if (timer !== undefined) clearTimeout(timer)
+          }
+        }
+
         while (true) {
-          const { value, done } = await reader.read()
+          const { value, done } = await readChunk()
           if (done) break
           if (!isEpochCurrent(startEpoch) || controller.signal.aborted) break
           buffer += decoder.decode(value, { stream: true })
@@ -432,6 +476,7 @@ export async function startObserverStream(
 
         if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
           connectedSignal.value = false
+          setObserverSseInstanceId(null)
           markStreamGap('observer_eof')
           shouldReconnect = true
         }
@@ -440,6 +485,7 @@ export async function startObserverStream(
   } catch {
     if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
       connectedSignal.value = false
+      setObserverSseInstanceId(null)
       markStreamGap('observer_disconnected')
       shouldReconnect = true
     }

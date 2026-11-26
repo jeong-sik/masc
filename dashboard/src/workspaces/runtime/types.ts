@@ -830,7 +830,31 @@ export function snapshotUnavailableReason(obs: Observed<unknown>): string | null
   return null
 }
 
+export function localUtcOffsetMin(): number {
+  const raw = -new Date().getTimezoneOffset()
+  if (!Number.isFinite(raw)) return 0
+  return Math.max(-840, Math.min(840, Math.trunc(raw)))
+}
+
 // ── Single-user view SSE ──
+
+const VIEW_SSE_RECONNECT_BASE_MS = 1_000
+const VIEW_SSE_RECONNECT_MAX_MS = 30_000
+
+function waitAbortable(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false)
+  return new Promise<boolean>((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(!signal.aborted)
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 export function openViewSseStream(
   url: string,
@@ -841,52 +865,77 @@ export function openViewSseStream(
 ): void {
   if (authSession.peek().kind !== 'single_user_local') return
   const startEpoch = currentSessionEpoch()
-  const sseInstanceId = getObserverSseInstanceId()
-  if (!sseInstanceId) {
+  if (!getObserverSseInstanceId()) {
     onStatus?.('closed', 'observer_instance_pending')
     return
   }
   const resolvedUrl = resolveWorkspaceUrl(url)
-  const headers: Record<string, string> = {
-    Accept: 'text/event-stream',
-    [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
-  }
-  const token = getSingleUserToken()
-  if (token) headers.Authorization = `Bearer ${token}`
 
   void (async () => {
-    try {
-      const res = await fetchImpl(resolvedUrl, {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers,
-        signal,
-      })
-      if (signal.aborted || !isEpochCurrent(startEpoch)) return
-      if (!res.ok || !res.body) {
-        onStatus?.('error', `HTTP ${res.status}`)
+    let attempt = 0
+    while (!signal.aborted && isEpochCurrent(startEpoch)) {
+      const sseInstanceId = getObserverSseInstanceId()
+      if (!sseInstanceId) {
+        onStatus?.('closed', 'observer_instance_pending')
         return
       }
-      onStatus?.('open')
-      await readSse(
-        res.body,
-        (event, rawData) => {
-          if (signal.aborted || !isEpochCurrent(startEpoch)) return
-          let data: unknown = rawData
-          try {
-            data = JSON.parse(rawData)
-          } catch {
-            // keep raw text for non-JSON frames
-          }
-          onFrame({ id: null, event, data, raw: rawData })
-        },
-        { signal },
-      )
-      if (!signal.aborted && isEpochCurrent(startEpoch)) onStatus?.('closed')
-    } catch (err) {
-      if (!signal.aborted && isEpochCurrent(startEpoch)) {
-        onStatus?.('error', err instanceof Error ? err.message : String(err))
+      const headers: Record<string, string> = {
+        Accept: 'text/event-stream',
+        [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
       }
+      const token = getSingleUserToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+
+      let shouldReconnect = false
+      try {
+        const res = await fetchImpl(resolvedUrl, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers,
+          signal,
+        })
+        if (signal.aborted || !isEpochCurrent(startEpoch)) return
+        if (!res.ok || !res.body) {
+          onStatus?.('error', `HTTP ${res.status}`)
+          shouldReconnect =
+            res.status === 408
+            || res.status === 429
+            || res.status >= 500
+            || (res.ok && !res.body)
+        } else {
+          attempt = 0
+          onStatus?.('open')
+          await readSse(
+            res.body,
+            (event, rawData) => {
+              if (signal.aborted || !isEpochCurrent(startEpoch)) return
+              let data: unknown = rawData
+              try {
+                data = JSON.parse(rawData)
+              } catch {
+                // keep raw text for non-JSON frames
+              }
+              onFrame({ id: null, event, data, raw: rawData })
+            },
+            { signal },
+          )
+          if (!signal.aborted && isEpochCurrent(startEpoch)) {
+            onStatus?.('closed')
+            shouldReconnect = true
+          }
+        }
+      } catch (err) {
+        if (!signal.aborted && isEpochCurrent(startEpoch)) {
+          onStatus?.('error', err instanceof Error ? err.message : String(err))
+          shouldReconnect = true
+        }
+      }
+
+      if (!shouldReconnect || signal.aborted || !isEpochCurrent(startEpoch)) return
+      const delayMs = Math.min(VIEW_SSE_RECONNECT_MAX_MS, VIEW_SSE_RECONNECT_BASE_MS * (2 ** Math.min(attempt, 5)))
+      attempt += 1
+      const okToRetry = await waitAbortable(delayMs, signal)
+      if (!okToRetry || !isEpochCurrent(startEpoch)) return
     }
   })()
 }

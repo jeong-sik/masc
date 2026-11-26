@@ -309,8 +309,10 @@ describe('failureRatePercent', () => {
     expect(failureRatePercent(4, 1)).toBe(25)
   })
 
-  it('is not a number when nothing ran', () => {
+  it('is not a number when nothing ran or all calls were deferred', () => {
     expect(failureRatePercent(0, 0)).toBeNull()
+    expect(failureRatePercent(5, 0, 5)).toBeNull()
+    expect(failureRatePercent(10, 2, 6)).toBe(50)
   })
 })
 

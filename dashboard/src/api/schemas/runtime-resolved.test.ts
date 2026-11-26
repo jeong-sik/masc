@@ -135,6 +135,7 @@ describe('runtime-resolved schema', () => {
     { unit: 'credit_balance', currency: 'USD', total: 100.5, remaining: 74.75 },
     { unit: 'credit_balance', currency: 'CNY', total: null, remaining: 0 },
     { unit: 'credit_unlimited' },
+    { unit: 'credit_retracted' },
   ])('retains a reported Credit balance without inventing usage: %j', (utilization) => {
     const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime),
       provider_usage_windows: [{ scope: 'account:credit', providers: [{ id: 'provider', display_name: 'Provider' }],
@@ -152,5 +153,38 @@ describe('runtime-resolved schema', () => {
         source: 'provider.credit', role: 'counts_other_use',
       }] }],
     })).toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('keeps the liveness facts the server reports beside quota_rest', () => {
+    const liveness = {
+      credential_refused_at: 1_794_400_000,
+      rate_limited: true,
+      rate_limit_resets_at: 1_794_500_060,
+      failed_attempt: { noted_at: 1_794_499_000, failure: 'provider_timeout', recorded_by: 'leader' },
+    }
+    const parsed = parseRuntimeResolvedResponse(responseWith({ ...validRuntime, ...liveness }))
+    expect(parsed.runtimes[0]).toMatchObject(liveness)
+  })
+
+  it('keeps an absent liveness fact absent instead of inventing a healthy value', () => {
+    const parsed = parseRuntimeResolvedResponse(responseWith(validRuntime))
+    const runtime = parsed.runtimes[0]
+    if (runtime === undefined) throw new Error('expected one runtime')
+    expect('rate_limited' in runtime).toBe(false)
+    expect('credential_refused_at' in runtime).toBe(false)
+    expect('failed_attempt' in runtime).toBe(false)
+  })
+
+  it('rejects a failed attempt whose failure the dashboard does not know', () => {
+    const failed_attempt = { noted_at: 1_794_499_000, failure: 'rate_limited', recorded_by: 'leader' }
+    expect(() => parseRuntimeResolvedResponse(responseWith({ ...validRuntime, failed_attempt })))
+      .toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('keeps the usage scope join key', () => {
+    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime),
+      provider_usage_windows: [{ scope: 'account:1', scope_id: 'scope-abc', providers: [], state: 'not_reported_since_start', windows: [] }],
+    })
+    expect(parsed.provider_usage_windows?.[0]?.scope_id).toBe('scope-abc')
   })
 })

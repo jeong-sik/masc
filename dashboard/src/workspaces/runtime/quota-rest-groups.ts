@@ -1,3 +1,4 @@
+import { runtimeIsAvailable } from './runtime-liveness'
 import type { RuntimeQuotaRest, RuntimeResolution, SetupAccountEmail } from './types'
 
 export type QuotaRestSortKey = 'release' | 'count' | 'name'
@@ -83,6 +84,12 @@ export function quotaRestCauseMeta(cause: string): QuotaRestCauseMeta {
       return { label: text, shortLabel: text, tone: 'warn' }
     }
   }
+}
+
+export function causeBadgeStyle(tone: 'warn' | 'bad') {
+  return tone === 'bad'
+    ? { background: 'var(--err-soft)', border: '1px solid var(--err-border)', color: 'var(--err-fg)' }
+    : { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
 }
 
 function pad2(n: number): string {
@@ -235,7 +242,10 @@ export function groupRestingRuntimes(
   }
 
   const restingCount = allResting.length
-  const availableCount = Math.max(0, totalRegistered - restingCount)
+  // A refused credential or a live rate limit stops a runtime answering as
+  // surely as a quota rest, so it is not counted as available either.
+  const nowUnix = opts.nowUnix ?? Date.now() / 1000
+  const availableCount = allRuntimes.filter((rt) => runtimeIsAvailable(rt, nowUnix)).length
   const groupCount = restingByProvider.size
   const globalSoonest = findSoonest(allResting)
   const hasPaymentRefused = (causeCounts['payment_refused'] ?? 0) > 0

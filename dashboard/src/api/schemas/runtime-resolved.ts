@@ -51,6 +51,23 @@ const RuntimeQuotaRestSchema = object({
   until: number(),
 })
 
+// The last attempt on a runtime that failed without answering
+// (lib/runtime/runtime_candidate_backpressure_state.ml attempt_failure). The
+// lane walk tries this runtime after the candidates that answered; only an
+// answer clears it. `recorded_by` is the Keeper whose attempt failed.
+const RuntimeAttemptFailureSchema = union([
+  literal('server_error'),
+  literal('provider_capacity'),
+  literal('network_transient'),
+  literal('provider_timeout'),
+])
+
+const RuntimeFailedAttemptSchema = object({
+  noted_at: number(),
+  failure: RuntimeAttemptFailureSchema,
+  recorded_by: string(),
+})
+
 const RuntimeResolutionSchema = object({
   id: string(),
   provider: string(),
@@ -61,6 +78,14 @@ const RuntimeResolutionSchema = object({
   is_local: boolean(),
   is_default: boolean(),
   quota_rest: nullable(RuntimeQuotaRestSchema),
+  // Facts kept apart from quota_rest by the server: a refused credential
+  // (since when), this process's own 429 observation (until when, when the
+  // provider stated a wait), and the last failed attempt. An absent field is
+  // an unknown fact and stays absent; it is never read as "healthy".
+  credential_refused_at: optional(nullable(number())),
+  rate_limited: optional(boolean()),
+  rate_limit_resets_at: optional(nullable(number())),
+  failed_attempt: optional(nullable(RuntimeFailedAttemptSchema)),
 })
 
 const RuntimeLaneSchema = object({
@@ -108,6 +133,7 @@ const ProviderUsageWindowSchema = object({
     object({ unit: literal('usd'), value: number(), limit: nullable(number()) }),
     object({ unit: literal('credit_balance'), currency: string(), total: nullable(number()), remaining: number() }),
     object({ unit: literal('credit_unlimited') }),
+    object({ unit: literal('credit_retracted') }),
   ]),
   resets_at: nullable(number()),
   observed_at: number(),
@@ -126,6 +152,8 @@ const ProviderUsageProviderSchema = object({
 
 const ProviderUsageScopeSchema = object({
   scope: string(),
+  // Join key for provider-usage-history rows; `scope` is a response-local label.
+  scope_id: optional(string()),
   providers: array(ProviderUsageProviderSchema),
   state: union([literal('reported'), literal('reported_no_windows'), literal('not_reported_since_start')]),
   observed_at: optional(number()),
@@ -149,6 +177,8 @@ const RuntimeResolvedResponseSchema = object({
 export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
 export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
 export type RuntimeQuotaRest = InferOutput<typeof RuntimeQuotaRestSchema>
+export type RuntimeAttemptFailure = InferOutput<typeof RuntimeAttemptFailureSchema>
+export type RuntimeFailedAttempt = InferOutput<typeof RuntimeFailedAttemptSchema>
 export type RuntimeLaneSnapshot = InferOutput<typeof RuntimeLaneSchema>
 export type ResolvedAssignmentTarget = InferOutput<typeof ResolvedAssignmentTargetSchema>
 export type RuntimeAssignment = InferOutput<typeof RuntimeAssignmentSchema>

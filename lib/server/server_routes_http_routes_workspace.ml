@@ -2174,36 +2174,41 @@ let handle_git_diff_get
            (git_diff_target_key target)
            rel
        in
-       let payload =
-         Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-           (Pool_work.io ~name:__FUNCTION__ (fun () ->
-              match git_run_lines_or_error ~cwd:repo_root
-                      (git_diff_args ~target ~rel)
-              with
-              | Error _ ->
-                observe_workspace_route_failure
-                  ~site:"git_run" ~path:rel
-                  (Failure "git diff failed");
-                `Null
-              | Ok [] ->
-                `Assoc [("unified", `List []); ("has_changes", `Bool false)]
-              | Ok diff_lines ->
-                (match Git_unified_diff.parse diff_lines with
-                 | Error detail ->
-                   observe_workspace_route_failure
-                     ~site:"git_diff_parse" ~path:rel (Failure detail);
-                   `Null
-                 | Ok rows ->
-                   `Assoc
-                     [ ("unified", `List (List.map Git_unified_diff.row_to_json rows))
-                     ; ("has_changes", `Bool true) ])))
+       let exception Git_diff_failed in
+       let result =
+         try
+           Ok
+             (Dashboard_cache.get_or_compute_payload cache_key
+                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                   match git_run_lines_or_error ~cwd:repo_root
+                           (git_diff_args ~target ~rel)
+                   with
+                   | Error _ ->
+                     observe_workspace_route_failure
+                       ~site:"git_run" ~path:rel
+                       (Failure "git diff failed");
+                     raise Git_diff_failed
+                   | Ok [] ->
+                     `Assoc [("unified", `List []); ("has_changes", `Bool false)]
+                   | Ok diff_lines ->
+                     (match Git_unified_diff.parse diff_lines with
+                      | Error detail ->
+                        observe_workspace_route_failure
+                          ~site:"git_diff_parse" ~path:rel (Failure detail);
+                        raise Git_diff_failed
+                      | Ok rows ->
+                        `Assoc
+                          [ ("unified", `List (List.map Git_unified_diff.row_to_json rows))
+                          ; ("has_changes", `Bool true) ]))))
+         with
+         | Git_diff_failed -> Error ()
        in
-       (match payload.json with
-        | `Null ->
+       (match result with
+        | Error () ->
           json_response ~status:`Bad_request request reqd
             (json_error "git diff failed")
-        | _ -> cached_response_with_source ~source request reqd payload)))
+        | Ok payload -> cached_response_with_source ~source request reqd payload)))
 
 let add_routes router =
   router

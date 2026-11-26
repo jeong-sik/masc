@@ -30,18 +30,18 @@ let max_ring_size = 43200
     43200 events at ~1 skip/sec sustained covers 12 hours, matching
     the largest dashboard window (720m). *)
 
-let ring_mu = Eio.Mutex.create ()
+let ring_mu = Stdlib.Mutex.create ()
 
+(* Fixed-capacity circular buffer so every append is O(1) with zero
+   per-event list copying, even at full capacity (43,200 events). *)
 type rejection_ring = {
-  events : rejection_event list;
-  count : int;
+  slots : rejection_event option array;
+  mutable head : int;
+  mutable count : int;
 }
 
-let empty_ring = { events = []; count = 0 }
-
-let ring : rejection_ring ref = ref empty_ring
-(** [events] is most recent first; truncated to [max_ring_size].
-    [count] is the linearized length so appends do not rescan the full ring. *)
+let ring : rejection_ring =
+  { slots = Array.make max_ring_size None; head = 0; count = 0 }
 
 let record_failure_callback_label =
   "dashboard_gate_tool_skipped_record"
@@ -56,15 +56,10 @@ let record_tool_skipped_failure exn =
     (Printexc.to_string exn)
 
 let append_rejection_event event =
-  Eio.Mutex.use_rw ~protect:true ring_mu (fun () ->
-    let current = !ring in
-    if current.count < max_ring_size
-    then ring := { events = event :: current.events; count = current.count + 1 }
-    else
-      ring :=
-        { events = event :: List.take (max_ring_size - 1) current.events
-        ; count = max_ring_size
-        })
+  Stdlib.Mutex.protect ring_mu (fun () ->
+    ring.slots.(ring.head) <- Some event;
+    ring.head <- (ring.head + 1) mod max_ring_size;
+    if ring.count < max_ring_size then ring.count <- ring.count + 1)
 
 let record_tool_skipped_with_append ~append ~tool_name ~reason_code =
   (* NDT-OK: observation boundary. The ring stamps when the skip was seen; no
@@ -85,10 +80,22 @@ let record_tool_skipped ~tool_name ~reason_code =
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
 let reset_for_testing () =
-  Eio.Mutex.use_rw ~protect:true ring_mu (fun () -> ring := empty_ring)
+  Stdlib.Mutex.protect ring_mu (fun () ->
+    Array.fill ring.slots 0 max_ring_size None;
+    ring.head <- 0;
+    ring.count <- 0)
 
 let snapshot_ring () =
-  Eio.Mutex.use_ro ring_mu (fun () -> (!ring).events)
+  Stdlib.Mutex.protect ring_mu (fun () ->
+    let rec collect i acc =
+      if i >= ring.count then List.rev acc
+      else
+        let idx = (ring.head - 1 - i + max_ring_size) mod max_ring_size in
+        match ring.slots.(idx) with
+        | Some ev -> collect (i + 1) (ev :: acc)
+        | None -> collect (i + 1) acc
+    in
+    collect 0 [])
 
 let inject_for_testing ~tool_name ~reason_code ~ts =
   let event = { ts; tool_name; reason_code } in
@@ -97,7 +104,7 @@ let inject_for_testing ~tool_name ~reason_code ~ts =
 let max_ring_size_for_testing = max_ring_size
 
 let ring_size_for_testing () =
-  Eio.Mutex.use_ro ring_mu (fun () -> (!ring).count)
+  Stdlib.Mutex.protect ring_mu (fun () -> ring.count)
 
 let record_tool_skipped_with_append_for_testing ~append ~tool_name ~reason_code =
   record_tool_skipped_with_append

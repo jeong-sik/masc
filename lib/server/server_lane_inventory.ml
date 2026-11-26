@@ -306,8 +306,8 @@ let caches : (string, cache) Hashtbl.t = Hashtbl.create 4
 let caches_lock = Mutex.create ()
 
 let with_workspace_cache base_path f =
-  let cache = Stdlib.Mutex.lock caches_lock;
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock caches_lock) (fun () ->
+  let cache =
+    Stdlib.Mutex.protect caches_lock (fun () ->
       match Hashtbl.find_opt caches base_path with
       | Some cache -> cache
       | None ->

@@ -59,6 +59,7 @@ val read_series :
   masc_root:string ->
   window:Tool_metrics_series.window ->
   ?tool_name:string ->
+  ?max_callers:int option ->
   unit ->
   (Tool_metrics_series.t, string) result
 (** Groups stored calls in [window], optionally filtered by tool. A missing

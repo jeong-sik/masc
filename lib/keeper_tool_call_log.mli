@@ -546,6 +546,15 @@ val read_window :
 (** [read_window ?keeper_name ~window_hours ()] returns entries within the
     trailing [window_hours]. Non-positive windows return [[]]. *)
 
+val read_window_result :
+  ?keeper_name:string ->
+  window_hours:float ->
+  unit ->
+  (Yojson.Safe.t list, index_error) result
+(** Like {!read_window}, returning [Error (Index_unavailable _)] when the
+    backing store is uninitialized or unreadable instead of silently
+    returning [[]]. *)
+
 val read_latest :
   ?keeper_name:string ->
   unit ->

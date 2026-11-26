@@ -574,14 +574,20 @@ let test_by_caller_keeps_the_limit_without_hiding_calls () =
     window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
   in
   let callers = List.init (S.top_caller_limit + 5) (Printf.sprintf "keeper-%02d") in
-  let series =
-    series_of window (List.map (fun caller -> sample ~caller ~ts:utc_midnight ~tool:"a" 1.0) callers)
-  in
+  let samples = List.map (fun caller -> sample ~caller ~ts:utc_midnight ~tool:"a" 1.0) callers in
+  let series = series_of window samples in
   Alcotest.(check int) "keeps the limit" S.top_caller_limit (List.length series.by_caller);
   Alcotest.(check int)
     "a Keeper cut from the list is not a call without a caller"
     0
-    series.caller_unobserved_count
+    series.caller_unobserved_count;
+  let builder = S.builder window in
+  List.iter (add_exn builder) samples;
+  let all_callers = S.finish ~max_callers:None builder in
+  Alcotest.(check int)
+    "max_callers:None retains every caller"
+    (S.top_caller_limit + 5)
+    (List.length all_callers.by_caller)
 ;;
 
 let test_a_class_on_a_call_that_did_not_fail_is_refused () =

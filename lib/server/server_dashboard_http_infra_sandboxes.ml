@@ -109,6 +109,7 @@ let failure_classes_to_json (fc : Tool_metrics_series.failure_class_counts) =
 let stat_to_json (st : Tool_metrics_series.stat) =
   `Assoc
     [ "calls", `Int st.call_count
+    ; "deferred", `Int st.deferred_count
     ; "failures", `Int st.failure_count
     ; "failure_unclassified", `Int st.failure_unclassified_count
     ; "p50_ms", Json_util.float_opt_to_json st.p50_ms
@@ -130,6 +131,7 @@ let empty_failure_classes : Tool_metrics_series.failure_class_counts =
 let empty_stat_json =
   `Assoc
     [ "calls", `Int 0
+    ; "deferred", `Int 0
     ; "failures", `Int 0
     ; "failure_unclassified", `Int 0
     ; "p50_ms", `Null
@@ -141,6 +143,7 @@ let empty_stat_json =
 
 let combine_caller_stats (stats : Tool_metrics_series.stat list) =
   let calls = ref 0 in
+  let deferred = ref 0 in
   let failures = ref 0 in
   let unclassified = ref 0 in
   let dep_unavail = ref 0 in
@@ -148,10 +151,11 @@ let combine_caller_stats (stats : Tool_metrics_series.stat list) =
   let policy_rej = ref 0 in
   let workflow_rej = ref 0 in
   let op_cancel = ref 0 in
-  let max_p95 = ref None in
+  let max_ms = ref None in
   List.iter
     (fun (st : Tool_metrics_series.stat) ->
        calls := !calls + st.call_count;
+       deferred := !deferred + st.deferred_count;
        failures := !failures + st.failure_count;
        unclassified := !unclassified + st.failure_unclassified_count;
        dep_unavail := !dep_unavail + st.failure_classes.dependency_unavailable;
@@ -159,16 +163,27 @@ let combine_caller_stats (stats : Tool_metrics_series.stat list) =
        policy_rej := !policy_rej + st.failure_classes.policy_rejection;
        workflow_rej := !workflow_rej + st.failure_classes.workflow_rejection;
        op_cancel := !op_cancel + st.failure_classes.operator_cancelled;
-       match st.p95_ms, !max_p95 with
-       | Some p, None -> max_p95 := Some p
-       | Some p, Some prev when Float.compare p prev > 0 -> max_p95 := Some p
-       | _ -> ())
+       match st.max_ms, !max_ms with
+       | Some m, None -> max_ms := Some m
+       | Some m, Some prev when Float.compare m prev > 0 -> max_ms := Some m
+       | Some _, Some _ | None, _ -> ())
     stats;
+  (* Percentiles do not compose across independent callers by max/mean: report
+     exact percentiles only for a single caller, and null for multi-caller
+     pools while keeping additive counts and [max_ms] exact. *)
+  let p50_ms, p95_ms =
+    match stats with
+    | [ single ] -> single.p50_ms, single.p95_ms
+    | [] | _ :: _ :: _ -> None, None
+  in
   `Assoc
     [ "calls", `Int !calls
+    ; "deferred", `Int !deferred
     ; "failures", `Int !failures
     ; "failure_unclassified", `Int !unclassified
-    ; "p95_ms", Json_util.float_opt_to_json !max_p95
+    ; "p50_ms", Json_util.float_opt_to_json p50_ms
+    ; "p95_ms", Json_util.float_opt_to_json p95_ms
+    ; "max_ms", Json_util.float_opt_to_json !max_ms
     ; ( "failure_classes"
       , `Assoc
           [ "dependency_unavailable", `Int !dep_unavail
@@ -582,7 +597,19 @@ let clear_cache_for_testing () =
 ;;
 
 let probe_tcp_rtt ~host ~port ~timeout_sec =
-  let started = Unix.gettimeofday () in
+  let started = Mtime_clock.now () in
+  let elapsed_s () =
+    Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
+  in
+  let rec wait_writable fd =
+    let remaining = timeout_sec -. elapsed_s () in
+    if remaining <= 0.0
+    then []
+    else (
+      match Unix.select [] [ fd ] [] remaining with
+      | _, writable, _ -> writable
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_writable fd)
+  in
   let check () =
     match Unix.getaddrinfo host (string_of_int port) [ Unix.AI_SOCKTYPE Unix.SOCK_STREAM ] with
     | [] -> Ssh_unreachable { detail = "host resolution returned no addresses"; measured_at = Unix.gettimeofday () }
@@ -605,12 +632,12 @@ let probe_tcp_rtt ~host ~port ~timeout_sec =
           in
           match connect_started with
           | `Connected ->
-            let rtt_ms = (Unix.gettimeofday () -. started) *. 1000.0 in
+            let rtt_ms = elapsed_s () *. 1000.0 in
             Ssh_reachable { rtt_ms; measured_at = Unix.gettimeofday () }
           | `Failed msg ->
             Ssh_unreachable { detail = msg; measured_at = Unix.gettimeofday () }
           | `Pending ->
-            let _, writable, _ = Unix.select [] [ fd ] [] timeout_sec in
+            let writable = wait_writable fd in
             if writable = []
             then
               Ssh_unreachable
@@ -620,7 +647,7 @@ let probe_tcp_rtt ~host ~port ~timeout_sec =
             else (
               match Unix.getsockopt_error fd with
               | None ->
-                let rtt_ms = (Unix.gettimeofday () -. started) *. 1000.0 in
+                let rtt_ms = elapsed_s () *. 1000.0 in
                 Ssh_reachable { rtt_ms; measured_at = Unix.gettimeofday () }
               | Some err ->
                 Ssh_unreachable
@@ -650,7 +677,7 @@ let read_24h_tool_series ~now ~base_path =
       ~utc_offset_min:0
   with
   | Error msg -> Error msg
-  | Ok window -> Tool_metrics_store.read_series ~masc_root ~window ()
+  | Ok window -> Tool_metrics_store.read_series ~masc_root ~window ~max_callers:None ()
 ;;
 
 let run_background_probe ~base_path =

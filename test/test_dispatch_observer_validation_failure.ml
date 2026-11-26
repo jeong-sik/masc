@@ -77,6 +77,23 @@ let test_policy_rejection_class_survives () =
   | None -> fail "validation failure must carry a failure class"
 ;;
 
+let test_failing_observer_does_not_abort_sibling_observers () =
+  let tool_name = "test_observer_isolation_tool" in
+  Tool_metrics.clear ();
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.register_dispatch_observer (fun _outcome _result ->
+    failwith "boom from broken observer");
+  Tool_metrics.install ();
+  let result = mk_validation_failure ~tool_name in
+  Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result);
+  Tool_dispatch.clear_hooks ();
+  match Tool_metrics.stats_for tool_name with
+  | None -> fail "sibling Tool_metrics observer was aborted by failing observer"
+  | Some stats ->
+    check int "sibling observer still recorded call" 1 stats.call_count;
+    check int "sibling observer recorded failure" 1 stats.failure_count
+;;
+
 let () =
   run
     "dispatch-observer-validation-failure"
@@ -93,6 +110,10 @@ let () =
             "Policy_rejection class survives"
             `Quick
             test_policy_rejection_class_survives
+        ; test_case
+            "failing observer does not abort sibling observers"
+            `Quick
+            test_failing_observer_does_not_abort_sibling_observers
         ] )
     ]
 ;;

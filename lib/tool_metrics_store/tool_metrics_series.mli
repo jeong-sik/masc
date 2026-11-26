@@ -185,7 +185,9 @@ val top_tool_limit : int
 val top_caller_limit : int
 (** How many Keepers [by_caller] keeps. *)
 
-val finish : builder -> t
+val finish : ?max_callers:int option -> builder -> t
+(** Finalize [builder] into an immutable series. [max_callers] defaults to
+    [Some top_caller_limit]; pass [None] to retain every observed caller. *)
 
 val to_json
   :  generated_at:float

@@ -189,21 +189,23 @@ exception Ask_followup_stream_closed
 let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
   let response = ref None in
+  let send_mu = Eio.Mutex.create () in
   let send frame =
-    let output = match !response with
-      | Some output -> output
-      | None ->
-        let output = Server_sse_response.respond ~sw ~clock
-            ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
-            (Httpun.Response.create
-               ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
-        response := Some output;
-        output in
-    let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
-    match Server_sse_response.send output
-        (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
-    | Server_sse_response.Written -> ()
-    | Closed | Stalled -> raise Ask_followup_stream_closed in
+    Eio.Mutex.use_rw ~protect:true send_mu (fun () ->
+      let output = match !response with
+        | Some output -> output
+        | None ->
+          let output = Server_sse_response.respond ~sw ~clock
+              ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+              (Httpun.Response.create
+                 ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
+          response := Some output;
+          output in
+      let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
+      match Server_sse_response.send output
+          (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
+      | Server_sse_response.Written -> ()
+      | Closed | Stalled -> raise Ask_followup_stream_closed) in
   (* A close says the response is complete, so only a stream that ran to its
      end is closed. A [send] that did not go out has closed the response
      itself. Any other exception leaves the response as it is and goes to
@@ -226,6 +228,9 @@ let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~ke
   with
   | () -> close ()
   | exception Ask_followup_stream_closed -> ()
+  | exception Eio.Exn.Multiple exns
+    when exns <> []
+         && List.for_all (function Ask_followup_stream_closed, _ -> true | _ -> false) exns -> ()
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
   | exception exn ->
     (* The request's error handling logs the exception without the Ask. *)

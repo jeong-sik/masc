@@ -183,6 +183,11 @@ let announce_written () =
          | exception _ -> ())) current
 
 let add_sample metrics (sample : sample) =
+  let duration_ms =
+    if Float.is_finite sample.duration_ms && sample.duration_ms >= 0.0
+    then sample.duration_ms
+    else 0.0
+  in
   let acc =
     match StringMap.find_opt sample.tool_name metrics with
     | Some acc -> acc
@@ -202,8 +207,8 @@ let add_sample metrics (sample : sample) =
   in
   let acc =
     { acc with
-      durations = Duration_tree.add sample.duration_ms acc.durations
-    ; duration_sum = acc.duration_sum +. sample.duration_ms
+      durations = Duration_tree.add duration_ms acc.durations
+    ; duration_sum = acc.duration_sum +. duration_ms
     }
   in
   StringMap.add sample.tool_name acc metrics
@@ -254,12 +259,12 @@ let percentile durations p =
     Option.value (Duration_tree.nth idx durations) ~default:0.0
 
 let compute_stats tool_name acc =
-  let n = Duration_tree.cardinality acc.durations in
+  let call_count = acc.successes + acc.deferred + acc.failures in
   let mean =
-    if n = 0 then 0.0 else acc.duration_sum /. Stdlib.Float.of_int n
+    if call_count = 0 then 0.0 else acc.duration_sum /. Stdlib.Float.of_int call_count
   in
   { tool_name
-  ; call_count = acc.successes + acc.deferred + acc.failures
+  ; call_count
   ; success_count = acc.successes
   ; deferred_count = acc.deferred
   ; failure_count = acc.failures

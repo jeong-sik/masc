@@ -252,7 +252,7 @@ type sampling =
 
 let select_sampling ?(n = 5000) ?window_hours () =
   match window_hours with
-  | Some hours when hours > 0.0 -> Window_hours hours
+  | Some hours when Float.is_finite hours && hours > 0.0 -> Window_hours hours
   | Some _ | None -> Recent_n n
 
 let sampling_fields = function
@@ -517,9 +517,9 @@ let summarize ~sampling records : Yojson.Safe.t =
 let aggregate sampling : (Yojson.Safe.t, Keeper_tool_call_log.index_error) result =
   match sampling with
   | Window_hours hours ->
-    Ok
-      (summarize ~sampling:(Window_hours hours)
-         (Keeper_tool_call_log.read_window ~window_hours:hours ()))
+    (match Keeper_tool_call_log.read_window_result ~window_hours:hours () with
+     | Ok records -> Ok (summarize ~sampling:(Window_hours hours) records)
+     | Error (Keeper_tool_call_log.Index_unavailable _ as error) -> Error error)
   | Recent_n n ->
     (match Keeper_tool_call_log.read_recent ~n () with
      | Ok records ->

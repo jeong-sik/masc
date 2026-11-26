@@ -301,7 +301,37 @@ type timeout_circuit = {
 let timeout_circuit_threshold = 3
 let timeout_circuit_open_sec = 30.0
 let timeout_circuit_window_sec = 300.0
+let max_timeout_circuit_entries = 256
 let timeout_circuit_table : timeout_circuit SMap.t Atomic.t = Atomic.make SMap.empty
+
+let evict_timeout_circuit_if_full ~ts ~incoming_key map =
+  if SMap.mem incoming_key map || SMap.cardinal map < max_timeout_circuit_entries
+  then map
+  else (
+    let live =
+      SMap.filter
+        (fun _ state ->
+           state.opened_until > ts
+           || ts -. state.last_timeout_at <= timeout_circuit_window_sec)
+        map
+    in
+    if SMap.cardinal live < max_timeout_circuit_entries
+    then live
+    else (
+      let oldest =
+        SMap.fold
+          (fun k state acc ->
+             match acc with
+             | None -> Some (k, state.last_timeout_at)
+             | Some (_, best_ts) when state.last_timeout_at < best_ts ->
+               Some (k, state.last_timeout_at)
+             | Some _ -> acc)
+          live
+          None
+      in
+      match oldest with
+      | Some (oldest_key, _) -> SMap.remove oldest_key live
+      | None -> live))
 
 let timeout_circuit_is_open key =
   match SMap.find_opt key (Atomic.get timeout_circuit_table) with
@@ -331,10 +361,11 @@ let record_timeout_circuit key =
         else
           0.0
       in
+      let bounded = evict_timeout_circuit_if_full ~ts ~incoming_key:key map in
       ( consecutive_timeouts >= timeout_circuit_threshold && not was_open,
         SMap.add key
           { consecutive_timeouts; opened_until; last_timeout_at = ts }
-          map ))
+          bounded ))
   in
   if opened then
     Log.Dashboard.warn

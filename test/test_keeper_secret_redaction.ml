@@ -1239,6 +1239,74 @@ let test_token_incremental_bounded_unterminated_pem () =
   contains "suffix after PEM survives" joined "\nafter";
   contains "PEM leaves redaction marker" joined "[REDACTED]"
 
+(* #55006 follow-up: a structural token longer than the bounded flush window.
+   The bounded flush released [0, stop) and kept the rest, so the token was
+   masked up to [stop] and its body after [stop] left as copied text
+   ("[REDACTED]" + 4,907 bytes of an [sk-] key 9,000 bytes long). Streaming
+   must equal [redact_text] at every split, and the stream must never hold
+   more than its flush threshold. *)
+let check_long_token_streaming ~label ~forbidden input =
+  let expected = R.redact_text R.empty input in
+  let len = String.length input in
+  let run chunks =
+    let state = R.create_stream_state ~mode:R.Token_incremental R.empty in
+    let fed = ref 0 in
+    let outputs =
+      List.map
+        (fun chunk ->
+           let release = R.redact_stream_chunk_mapped state chunk in
+           fed := !fed + String.length chunk;
+           Alcotest.(check bool)
+             (Printf.sprintf "%s: pending stays bounded at byte %d" label !fed)
+             true (!fed - release.consumed <= 8_192);
+           Secret_patterns.render_pieces release.pieces)
+        chunks
+    in
+    let tail = Secret_patterns.render_pieces (R.redact_stream_finish_mapped state).pieces in
+    let joined = String.concat "" outputs ^ tail in
+    Alcotest.(check string) (label ^ ": equals redact_text") expected joined;
+    not_contains (label ^ ": no token body") joined forbidden
+  in
+  run [ input ];
+  run (List.init len (fun i -> String.make 1 input.[i]));
+  let cuts =
+    [ 1; 3; 4_095; 4_096; 4_097; 4_100; 8_191; 8_192; 8_193; 8_200; 9_000; len - 1 ]
+  in
+  List.iter
+    (fun cut ->
+       if cut > 0 && cut < len then
+         run [ String.sub input 0 cut; String.sub input cut (len - cut) ])
+    cuts;
+  let rec every step offset acc =
+    if offset >= len then List.rev acc
+    else every step (offset + step) (String.sub input offset (min step (len - offset)) :: acc)
+  in
+  run (every 4_096 0 []);
+  run (every 1_000 0 [])
+
+let test_token_incremental_long_token_crossing_bounded_flush () =
+  let body = String.make 9_000 'A' in
+  let forbidden = String.make 32 'A' in
+  check_long_token_streaming ~label:"sk- body 9000 alone" ~forbidden ("sk-" ^ body);
+  check_long_token_streaming ~label:"sk- body 9000 in prose" ~forbidden
+    ("lead text " ^ "sk-" ^ body ^ " tail text");
+  check_long_token_streaming ~label:"sk- body after 5000 bytes of prose" ~forbidden
+    (String.make 5_000 'x' ^ " sk-" ^ body ^ " done");
+  check_long_token_streaming ~label:"stripe live" ~forbidden
+    ("key=" ^ "sk_" ^ "live_" ^ body ^ "!");
+  check_long_token_streaming ~label:"slack xoxb-" ~forbidden
+    ("tok=" ^ "xoxb-" ^ body ^ " end");
+  check_long_token_streaming ~label:"github ghp_" ~forbidden
+    ("tok=" ^ "ghp_" ^ body ^ " end");
+  check_long_token_streaming ~label:"masc mpat_" ~forbidden
+    ("tok=" ^ "mpat_" ^ "id1." ^ body ^ " end");
+  check_long_token_streaming ~label:"Authorization header" ~forbidden
+    ("Authorization: Bearer " ^ body ^ "\nnext line");
+  check_long_token_streaming ~label:"url credential with long password" ~forbidden
+    ("go https://user:" ^ body ^ "@example.com/path rest");
+  check_long_token_streaming ~label:"url credential with long user" ~forbidden
+    ("go https://" ^ body ^ ":pw" ^ "@example.com/path rest")
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -1335,5 +1403,7 @@ let () =
             test_token_incremental_utf8_byte_by_byte;
           Alcotest.test_case "token incremental: bounded unterminated PEM block" `Quick
             test_token_incremental_bounded_unterminated_pem;
+          Alcotest.test_case "token incremental: long token crossing a bounded flush" `Quick
+            test_token_incremental_long_token_crossing_bounded_flush;
         ] )
     ]

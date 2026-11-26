@@ -69,6 +69,27 @@ val safe_stream_prefix_len : prev_ended_word:bool -> string -> int
     extended by future bytes appended after [s], given whether the immediately
     preceding emitted output byte was a word character. *)
 
+type stream_owner =
+  | Sk_token_body  (** [sk-] and Slack token bodies: alnum and [-] *)
+  | Stripe_token_body  (** Stripe key bodies: alnum and [_] *)
+  | Dotted_token_body  (** GitHub and MASC credential bodies: alnum, [_], [-], [.] *)
+  | Url_userinfo  (** a URL credential's userinfo, up to its last [@] *)
+  | Header_value  (** a sensitive header's value, up to the line end *)
+(** The unbounded body a structural pattern continues with. A stream that has
+    released the start of such a pattern as [[REDACTED]] uses it to keep the
+    rest of the body masked. *)
+
+val stream_owner_continues : stream_owner -> char -> bool
+(** Whether the byte can continue a body of this owner. *)
+
+type stream_hold = { start : int; owner : stream_owner option }
+
+val first_stream_hold : prev_ended_word:bool -> string -> stream_hold option
+(** The first byte offset at which a non-PEM structural pattern starts that
+    bytes appended after the string could still complete or extend, and the
+    unbounded body it continues with ([None] for the fixed-length AWS keys).
+    PEM blocks are not reported here. *)
+
 val cut_before_straddling_match : prev_ended_word:bool -> string -> int -> int
 (** Tighten [cut] ([0 <= cut <= String.length s]) when [cut < String.length s]
     so no structural match in [s] straddles [cut] and no [Re.eow]-anchored

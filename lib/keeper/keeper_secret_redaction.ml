@@ -10,6 +10,16 @@ type stream_release_mode =
   | Line_buffered
   | Token_incremental
 
+(* A structural token whose start a bounded flush already released as
+   [[REDACTED]] while its body was still arriving. Every following byte that
+   continues the body belongs to that mask. For a URL credential the bytes
+   after an [@] wait in [pending_line]: a later [@] makes them userinfo, the
+   end of the authority makes them the host. *)
+type owned_token =
+  { owner : Secret_patterns.stream_owner
+  ; mutable seen_at : bool
+  }
+
 type stream_state =
   { redaction : t
   ; mode : stream_release_mode
@@ -18,6 +28,7 @@ type stream_state =
   ; mutable consumed : int
   ; mutable prev_ended_word : bool
   ; mutable in_unterminated_pem : bool
+  ; mutable owned : owned_token option
   }
 
 type stream_release =
@@ -439,6 +450,7 @@ let create_stream_state ?(mode = Line_buffered) redaction =
   ; consumed = 0
   ; prev_ended_word = false
   ; in_unterminated_pem = false
+  ; owned = None
   }
 ;;
 
@@ -811,7 +823,7 @@ let should_hold_across_newline state =
 
 let flush_safe_incremental_prefix state emitted =
   let pending_len = Buffer.length state.pending_line in
-  if pending_len > 0 && not state.in_unterminated_pem then (
+  if pending_len > 0 && (not state.in_unterminated_pem) && Option.is_none state.owned then (
     let pending = Buffer.contents state.pending_line in
     let cut = safe_incremental_cut state pending in
     if cut > 0 then (
@@ -831,6 +843,150 @@ let flush_safe_incremental_prefix state emitted =
         Buffer.add_substring state.pending_line pending cut (pending_len - cut);
       state.next_bounded_flush_at <- stream_flush_threshold state.redaction))
 
+(* Mask the next [source_length] source bytes as part of the token whose
+   [[REDACTED]] was already released. They extend that mask when it is the
+   last piece of this release, and otherwise add no text. *)
+let absorb_into_owned_mask (state : stream_state) emitted ~source_length =
+  if source_length > 0 then (
+    let first_byte = state.consumed in
+    let past_byte = first_byte + source_length in
+    (match !emitted with
+     | Secret_patterns.Masked { source; replacement } :: rest
+       when source.past_byte = first_byte ->
+         emitted :=
+           Secret_patterns.Masked { source = { source with past_byte }; replacement }
+           :: rest
+     | [] | (Secret_patterns.Copied _ | Secret_patterns.Masked _) :: _ ->
+         emitted :=
+           Secret_patterns.Masked { source = { first_byte; past_byte }; replacement = "" }
+           :: !emitted);
+    state.consumed <- past_byte)
+
+(* Token_incremental bounded flush (#55006 follow-up). The plain flush released
+   [0, stop) and kept the rest pending, so a structural token running across
+   [stop] was masked only up to [stop] and its body after [stop] left as
+   copied text. Here the release ends before any structural match that
+   crosses [stop] and before any pattern still in progress. When such a token
+   starts at byte 0 and fills the whole release window, holding it back would
+   leave the pending line unbounded, so the window is released masked and the
+   stream owns the token until its body ends. *)
+let rec token_incremental_char state emitted char =
+  match state.owned with
+  | Some owned -> owned_token_char state emitted owned char
+  | None -> token_incremental_plain_char state emitted char
+
+and token_incremental_plain_char state emitted char =
+  if state.in_unterminated_pem then handle_unterminated_pem_byte state emitted char
+  else (
+    Buffer.add_char state.pending_line char;
+    if (Char.equal char '\n' || Char.equal char '\r')
+       && not (should_hold_across_newline state)
+    then flush_complete_record state emitted
+    else if Buffer.length state.pending_line >= state.next_bounded_flush_at
+    then (
+      emit_token_incremental_bounded state emitted;
+      state.next_bounded_flush_at <- stream_flush_threshold state.redaction))
+
+and owned_token_char state emitted owned char =
+  let continues = Secret_patterns.stream_owner_continues owned.owner char in
+  match owned.owner with
+  | Secret_patterns.Url_userinfo ->
+      if Char.equal char '@' then (
+        absorb_into_owned_mask state emitted
+          ~source_length:(Buffer.length state.pending_line + 1);
+        Buffer.clear state.pending_line;
+        owned.seen_at <- true)
+      else if continues then
+        if owned.seen_at then (
+          Buffer.add_char state.pending_line char;
+          let held = Buffer.length state.pending_line in
+          if held >= stream_flush_threshold state.redaction then (
+            (* Bounded: an authority this long after an [@] stays masked. *)
+            absorb_into_owned_mask state emitted ~source_length:held;
+            Buffer.clear state.pending_line))
+        else absorb_into_owned_mask state emitted ~source_length:1
+      else (
+        (* The authority ended: bytes after its last [@] are the host. *)
+        state.owned <- None;
+        token_incremental_plain_char state emitted char)
+  | Secret_patterns.Sk_token_body
+  | Secret_patterns.Stripe_token_body
+  | Secret_patterns.Dotted_token_body
+  | Secret_patterns.Header_value ->
+      if continues then absorb_into_owned_mask state emitted ~source_length:1
+      else (
+        state.owned <- None;
+        token_incremental_plain_char state emitted char)
+
+and emit_token_incremental_bounded state emitted =
+  let pending = Buffer.contents state.pending_line in
+  let pending_len = String.length pending in
+  let stop = pending_len - stream_overlap_bytes state.redaction in
+  let stop =
+    match String_util.utf8_char_boundary pending stop with
+    | 0 -> stop
+    | boundary -> boundary
+  in
+  let prev_ended_word = state.prev_ended_word in
+  let before_complete =
+    Secret_patterns.cut_before_straddling_match ~prev_ended_word pending stop
+  in
+  let safe_stop =
+    match Secret_patterns.first_stream_hold ~prev_ended_word pending with
+    | Some { start; _ } when start < before_complete -> start
+    | Some _ | None -> before_complete
+  in
+  if safe_stop > 0 then emit_bounded_prefix state emitted safe_stop
+  else own_token_at_window_start state emitted pending stop
+
+and own_token_at_window_start state emitted pending stop =
+  let window = String.sub pending 0 stop in
+  let prev_ended_word = state.prev_ended_word in
+  match Secret_patterns.first_stream_hold ~prev_ended_word window with
+  | Some { start = 0; owner = Some owner } ->
+      let redacted =
+        redact_text_mapped_with_lookbehind ~prev_ended_word state.redaction window
+      in
+      let pieces =
+        match owner, List.rev redacted with
+        | ( ( Secret_patterns.Sk_token_body
+            | Secret_patterns.Stripe_token_body
+            | Secret_patterns.Dotted_token_body
+            | Secret_patterns.Header_value )
+          , Secret_patterns.Masked { source; _ } :: _ )
+          when source.past_byte = stop -> redacted
+        | ( ( Secret_patterns.Sk_token_body
+            | Secret_patterns.Stripe_token_body
+            | Secret_patterns.Dotted_token_body
+            | Secret_patterns.Header_value
+            | Secret_patterns.Url_userinfo )
+          , ([] | (Secret_patterns.Copied _ | Secret_patterns.Masked _) :: _) ) ->
+            (* A URL credential has no match until its [@]; mask the window. *)
+            [ Secret_patterns.Masked
+                { source = { first_byte = 0; past_byte = stop }; replacement = "[REDACTED]" }
+            ]
+      in
+      emit_mapped state emitted ~source_length:stop pieces;
+      state.prev_ended_word <- false;
+      let seen_at =
+        match owner with
+        | Secret_patterns.Url_userinfo -> String.contains window '@'
+        | Secret_patterns.Sk_token_body
+        | Secret_patterns.Stripe_token_body
+        | Secret_patterns.Dotted_token_body
+        | Secret_patterns.Header_value -> false
+      in
+      state.owned <- Some { owner; seen_at };
+      Buffer.clear state.pending_line;
+      state.next_bounded_flush_at <- stream_flush_threshold state.redaction;
+      String.iter
+        (token_incremental_char state emitted)
+        (String.sub pending stop (String.length pending - stop))
+  | Some { start = _; owner = Some _ | None } | None ->
+      (* No unbounded body at byte 0: a PEM block or a complete match. The
+         plain flush masks it and enters PEM ownership itself. *)
+      emit_bounded_prefix state emitted stop
+
 let redact_stream_chunk_mapped state chunk =
   let emitted = ref [] in
   (match state.mode with
@@ -843,23 +999,16 @@ let redact_stream_chunk_mapped state chunk =
             else flush_bounded_prefix_if_needed state emitted)
          chunk
    | Token_incremental ->
-       String.iter
-         (fun char ->
-            if state.in_unterminated_pem then
-              handle_unterminated_pem_byte state emitted char
-            else (
-              Buffer.add_char state.pending_line char;
-              if (Char.equal char '\n' || Char.equal char '\r')
-                 && not (should_hold_across_newline state)
-              then flush_complete_record state emitted
-              else flush_bounded_prefix_if_needed state emitted))
-         chunk;
+       String.iter (token_incremental_char state emitted) chunk;
        flush_safe_incremental_prefix state emitted);
   { pieces = List.rev !emitted; consumed = state.consumed }
 ;;
 
 let redact_stream_finish_mapped state =
   let emitted = ref [] in
+  (* Bytes a URL credential owner still holds after its last [@] are the
+     host: the authority ended with the stream. *)
+  state.owned <- None;
   flush_complete_record state emitted;
   state.prev_ended_word <- false;
   state.in_unterminated_pem <- false;

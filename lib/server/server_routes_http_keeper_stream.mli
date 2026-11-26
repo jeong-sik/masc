@@ -169,11 +169,13 @@ val handle_keeper_chat_stream :
   unit
 (** Drives the [POST /api/keeper/chat-stream] SSE response.
     One fiber forked on [sw] submits the operation while
-    the retry frame waits for the socket, then is the stream's only sender:
-    it writes the acceptance and the reconnect replay, then serves the live
-    events of the turn through
+    the retry frame waits for the socket, then writes the stream's events:
+    the acceptance and the reconnect replay, then the live events of the
+    turn through
     {!Server_sse_pump}. The Keeper turn only puts its events in that
-    stream's queue. The stream ends after the turn's terminal, when the
+    stream's queue. While the stream is quiet the response itself writes
+    the keepalive, or ends the stream once the operation settled
+    ({!For_testing.keeper_chat_idle}). The stream ends after the turn's terminal, when the
     operation settled without one, when the client is gone, when a frame
     has waited 90 seconds for the socket, or when 4,096 events wait in the
     queue. The client then reconnects with [since_seq] and gets the
@@ -340,13 +342,11 @@ module For_testing : sig
       [Settled]. *)
 
   val keeper_chat_idle :
-    client_gone:(unit -> bool) ->
     operation_state:(unit -> Keeper_owner.Chat_operation.state option) ->
-    Server_sse_pump.idle
-  (** What a quiet stream does: ends when the client is gone (without
-      reading the operation), sends a keepalive while the operation is
-      queued or running, ends when it settled, and waits when its record
-      cannot be read ([None]). *)
+    Server_sse_response.idle
+  (** What a quiet stream's response does: sends a keepalive while the
+      operation is queued or running, ends when it settled, and waits when
+      its record cannot be read or is not there ([None]). *)
 
   val serve_accepted_chat :
     send:(string -> Server_sse_response.outcome) ->
@@ -356,9 +356,6 @@ module For_testing : sig
     replay:(unit -> (int * Ag_ui.event) list) ->
     missed_terminal:(replayed:(int, unit) Hashtbl.t -> Ag_ui.event option) ->
     settled:bool ->
-    idle:(unit -> Server_sse_pump.idle) ->
-    clock:_ Eio.Time.clock ->
-    ping_interval_s:float ->
     Server_sse_pump.ending option
   (** The handler after an accepted submit: writes the acceptance and the
       replay, queues the missed terminal and [Settled] (when [settled] or the

@@ -102,7 +102,7 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
        | Ok actor -> String.equal actor name | Error _ -> false in
   let client_id = Sse.fresh_client_id () in
   let id = "play-observation-" ^ string_of_int client_id in
-  let response = Server_sse_response.respond ~clock
+  let response = Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd
       (Httpun.Response.create ~headers:(Httpun.Headers.of_list
@@ -165,24 +165,22 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
       let guard () = current () && sync_presence () in
       let pump () = Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
           ~step:(fun change -> if guard () then Server_sse_pump.Send (frame change) else Send_last unavailable)
-          ~idle:(fun () -> Server_sse_pump.Quiet)
-          ~clock ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
           ~closed:(fun () -> Server_sse_response.await_closed response)
           ~send:(Server_sse_response.send response) |> ignore in
       let transport () =
         if guard () then (
         Server_machine_spectator.start ~sw:connection ~clock ~stop_promise:stopped ~machine ~config;
+        (* The credential and the seat are checked again every keepalive
+           interval, also while changes flow, and the check renews the seat.
+           The response writes the keepalive itself. *)
         Eio.Fiber.fork_daemon ~sw:connection (fun () ->
-          let rec keepalive () =
+          let rec recheck () =
             Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-            if guard () then
-              (match Server_sse_response.send response ": keepalive\n\n" with
-               | Written -> keepalive ()
-               | Closed | Stalled -> Server_sse_response.close response)
+            if guard () then recheck ()
             else (
               ignore (Server_sse_response.send response unavailable);
               Server_sse_response.close response) in
-          keepalive (); `Stop_daemon);
+          recheck (); `Stop_daemon);
         Eio.Fiber.fork_daemon ~sw:connection (fun () ->
           let rec deadlines () =
             match observe_seat_expiry ~base_path:config.base_path with

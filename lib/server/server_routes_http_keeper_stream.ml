@@ -3313,31 +3313,31 @@ let read_operation_state ~base_path ~keeper_name ~operation_id request_id =
     None
 ;;
 
-let keeper_chat_idle ~client_gone ~operation_state : Server_sse_pump.idle =
-  if client_gone ()
-  then Finish
-  else
-    (* A queued operation has no journal events until its Keeper gets the
-       slot. The comment keeps the stream alive during that silence, so a
-       healthy queue does not trip the TUI's per-chunk idle bound. It proves
-       only transport liveness, not model progress. *)
-    match operation_heartbeat_decision (operation_state ()) with
-    | `Send_comment -> Keepalive
-    | `Finish_stream ->
-      (* The operation settled without a wire terminal. Closing lets the TUI
-         settle its exact request from the operation record. The live sink
-         may queue this operation's terminal while the record is read. If the
-         close wins, the client sees a stream that ended after acceptance
-         without a terminal: the same case, settled from the operation
-         record, so the race changes no outcome. *)
-      Finish
-    | `Retain_idle_timeout ->
-      (* The operation record cannot be read. A comment would hold the stream
-         open with nothing able to end it if the operation settled without a
-         wire terminal, so nothing is written and the TUI's idle bound stays
-         in force. Cost: with no write, a departed client goes unnoticed
-         until the record is readable again. *)
-      Quiet
+(* The response asks this once its stream was quiet for an interval. An
+   operation the registry does not hold, as before its submit is accepted,
+   reads as no record and gets [Quiet]. *)
+let keeper_chat_idle ~operation_state : Server_sse_response.idle =
+  (* A queued operation has no journal events until its Keeper gets the
+     slot. The comment keeps the stream alive during that silence, so a
+     healthy queue does not trip the TUI's per-chunk idle bound. It proves
+     only transport liveness, not model progress. *)
+  match operation_heartbeat_decision (operation_state ()) with
+  | `Send_comment -> Keepalive
+  | `Finish_stream ->
+    (* The operation settled without a wire terminal. Closing lets the TUI
+       settle its exact request from the operation record. The live sink
+       may queue this operation's terminal while the record is read. If the
+       close wins, the client sees a stream that ended after acceptance
+       without a terminal: the same case, settled from the operation
+       record, so the race changes no outcome. *)
+    Finish
+  | `Retain_idle_timeout ->
+    (* The operation record cannot be read. A comment would hold the stream
+       open with nothing able to end it if the operation settled without a
+       wire terminal, so nothing is written and the TUI's idle bound stays
+       in force. Cost: with no write, a departed client goes unnoticed
+       until the record is readable again. *)
+    Quiet
 ;;
 
 (* What a Keeper chat stream writes after an accepted submit, in order:
@@ -3346,7 +3346,7 @@ let keeper_chat_idle ~client_gone ~operation_state : Server_sse_pump.idle =
    its marker and [Settled] go behind the live events queued meanwhile.
    [None] when the client was gone before the live part. *)
 let serve_accepted_chat ~send ~closed ~queue ~acceptance_frame ~replay ~missed_terminal
-    ~settled ~idle ~clock ~ping_interval_s =
+    ~settled =
   match (send acceptance_frame : Server_sse_response.outcome) with
   | Closed | Stalled -> None
   | Written ->
@@ -3371,8 +3371,7 @@ let serve_accepted_chat ~send ~closed ~queue ~acceptance_frame ~replay ~missed_t
        if terminal_written || settled then Server_sse_pump.Queue.push queue Settled;
        Some
          (Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
-            ~step:(keeper_chat_step ~replayed) ~idle ~clock
-            ~ping_interval_s ~closed ~send))
+            ~step:(keeper_chat_step ~replayed) ~closed ~send))
 ;;
 
 (* The retry frame goes first: it sets the client's reconnect delay, and the
@@ -3386,17 +3385,22 @@ let send_retry_beside_submit ~send ~retry_frame submit =
 ;;
 
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
+  let operation_id =
+    Keeper_owner.Chat_operation.Operation_id.to_string payload.request_id
+  in
   let response =
     Server_sse_response.respond
+      ~sw
       ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+      ~idle:(fun () ->
+        keeper_chat_idle ~operation_state:(fun () ->
+          read_operation_state ~base_path:(Mcp_server.workspace_config state).base_path
+            ~keeper_name:payload.name ~operation_id payload.request_id))
       reqd
       (Httpun.Response.create ~headers:(keeper_chat_stream_request_headers request) `OK)
   in
   let thread_id = "keeper:" ^ payload.name in
-  let operation_id =
-    Keeper_owner.Chat_operation.Operation_id.to_string payload.request_id
-  in
   let send frame = Server_sse_response.send response frame in
   (* [sw] lives as long as the server, so a failure of this one stream is
      logged here instead of failing it. *)
@@ -3562,14 +3566,6 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                operation_terminal_after_replay ~base_path ~keeper_name:payload.name
                  ~operation ~replayed)
              ~settled:(Keeper_owner.Chat_operation.is_terminal operation.state)
-             ~idle:(fun () ->
-               keeper_chat_idle
-                 ~client_gone:(fun () -> Server_sse_response.is_closed response)
-                 ~operation_state:(fun () ->
-                   read_operation_state ~base_path ~keeper_name:payload.name ~operation_id
-                     payload.request_id))
-             ~clock
-             ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
          with
          (* [Server_sse_response.send] logs a stalled frame with the request path. *)
          | None | Some (Client_gone | Stalled | Finished) -> ()

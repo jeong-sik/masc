@@ -1,5 +1,4 @@
 let max_queued_events = 64
-let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 let stalled_after_s = Server_mcp_transport_http_headers.sse_stalled_after_s
 
 let frame event =
@@ -21,9 +20,9 @@ let response_headers () =
 ;;
 
 let serve ?(scope_is_current = fun () -> true) ?scope_replaced
-    ~sw ~clock ~subscribe ~ping_interval_s ~stalled_after_s ~max_queued_events reqd =
+    ~sw ~clock ~subscribe ~stalled_after_s ~max_queued_events reqd =
   let response =
-    Server_sse_response.respond ~clock ~stalled_after_s ~flush_headers_immediately:true reqd
+    Server_sse_response.respond ~sw ~clock ~stalled_after_s ~flush_headers_immediately:true reqd
       (Httpun.Response.create ~headers:(response_headers ()) `OK)
   in
   let send data : Server_sse_response.outcome =
@@ -50,8 +49,6 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
         let pump () =
           Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
             ~step:(fun event -> Server_sse_pump.Send (frame event))
-            ~idle:(fun () -> Server_sse_pump.Keepalive)
-            ~clock ~ping_interval_s
             ~closed:(fun () -> Server_sse_response.await_closed response)
             ~send
         in
@@ -107,7 +104,6 @@ let add_routes ~sw ~clock router =
             ~sw
             ~clock
             ~subscribe
-            ~ping_interval_s
             ~stalled_after_s
             ~max_queued_events
             reqd)

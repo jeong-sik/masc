@@ -64,6 +64,19 @@
     outline-offset: 2px;
   }
 
+  :where(input, select, textarea):not(.ap-cmdk-input):focus-visible {
+    outline: none;
+    border-color: var(--input-border-focus);
+    background: var(--input-bg-focus);
+    box-shadow: var(--focus-ring);
+  }
+
+  input:is([type="checkbox"], [type="radio"]):focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    background: transparent;
+  }
+
   button, input, select, textarea {
     font: inherit;
     color: inherit;
@@ -111,6 +124,25 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.sr-only:focus-visible {
+  position: fixed;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: var(--z-toast);
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: nowrap;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border: 1px solid var(--focus);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

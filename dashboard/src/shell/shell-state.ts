@@ -454,6 +454,13 @@ export function formatInboxPendingCount(count: number, unchecked: boolean): stri
   return count > 0 ? `${count}건 표시 · 일부 미확인` : '일부 미확인'
 }
 
+export function formatInboxBadge(pending: number, unchecked: boolean): string | null {
+  if (pending > 0) {
+    return unchecked ? `${pending}?` : String(pending)
+  }
+  return unchecked ? '?' : null
+}
+
 export const HITL_POLL_TIMEOUT_MS = 15_000
 
 export const inboxPendingCount = computed<number>(

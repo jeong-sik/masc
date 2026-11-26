@@ -12,7 +12,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { authSession } from '../core/auth'
+import { authSession, isAuthenticated } from '../core/auth'
 import {
   FOOTER_NAV,
   TRUNK_NAV,
@@ -22,7 +22,14 @@ import {
   type WorkspaceNavDef,
 } from '../routes/router'
 import { ShellIcon, type ShellIconName } from './icons'
-import { inboxPendingCount, railExpanded, toggleRail } from './shell-state'
+import {
+  formatInboxBadge,
+  formatInboxPendingCount,
+  inboxPendingCount,
+  inboxUncheckedSources,
+  railExpanded,
+  toggleRail,
+} from './shell-state'
 
 function iconForWorkspace(id: WorkspaceNavDef['id']): ShellIconName {
   return id
@@ -32,18 +39,19 @@ function renderNavItem(
   item: WorkspaceNavDef,
   activeWorkspace: string,
   expanded: boolean,
-  pendingCount: number,
+  badgeText: string | null,
+  badgeLabel: string | null,
   locked: boolean,
 ): VNode {
   const isActive = activeWorkspace === item.id
-  const badge = item.id === 'work' && pendingCount > 0 ? pendingCount : 0
+  const badge = item.id === 'work' ? badgeText : null
   const baseTooltip = locked
     ? `${item.label} (관리자 전용)`
     : item.shortcut
       ? `${item.label} [${item.shortcut}]`
       : item.label
-  const tooltip = !locked && badge > 0
-    ? `${baseTooltip} · Inbox ${badge}건 대기 중`
+  const tooltip = !locked && badge !== null && badgeLabel
+    ? `${baseTooltip} · ${badgeLabel}`
     : baseTooltip
 
   return html`
@@ -73,14 +81,14 @@ function renderNavItem(
           <${ShellIcon} name="lock" size=${12} />
         </span>
       `}
-      ${!locked && badge > 0 && html`
+      ${!locked && badge !== null && html`
         <span
           class="ap-rail-badge tnum"
-          aria-label=${`Inbox ${badge}건 대기 중`}
-          title=${`Inbox ${badge}건 대기 중`}
+          aria-label=${badgeLabel ?? undefined}
+          title=${badgeLabel ?? undefined}
         >${badge}</span>
       `}
-      ${expanded && !locked && badge === 0 && item.shortcut && html`
+      ${expanded && !locked && badge === null && item.shortcut && html`
         <kbd class="ap-rail-kbd">${item.shortcut}</kbd>
       `}
     </a>
@@ -92,6 +100,11 @@ export function NavRail(): VNode {
   const route = currentRoute.value
   const session = authSession.value
   const pending = inboxPendingCount.value
+  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const workBadge = formatInboxBadge(pending, pendingUnchecked)
+  const workBadgeLabel = pendingUnchecked
+    ? `Inbox ${formatInboxPendingCount(pending, true)}`
+    : `Inbox ${pending}건 대기 중`
 
   return html`
     <nav
@@ -131,7 +144,8 @@ export function NavRail(): VNode {
             item,
             route.workspace,
             expanded,
-            pending,
+            workBadge,
+            workBadgeLabel,
             isAdminLockedForSession(item.access, session),
           ),
         )}
@@ -143,7 +157,8 @@ export function NavRail(): VNode {
             item,
             route.workspace,
             expanded,
-            0,
+            null,
+            null,
             isAdminLockedForSession(item.access, session),
           ),
         )}

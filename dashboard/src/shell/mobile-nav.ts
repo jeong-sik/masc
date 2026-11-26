@@ -9,7 +9,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect } from 'preact/hooks'
-import { authSession } from '../core/auth'
+import { authSession, isAuthenticated } from '../core/auth'
 import {
   WORKSPACE_NAV_BY_ID,
   currentRoute,
@@ -19,7 +19,10 @@ import {
 import type { WorkspaceId } from '../workspaces/types'
 import { ShellIcon, type ShellIconName } from './icons'
 import {
+  formatInboxBadge,
+  formatInboxPendingCount,
   inboxPendingCount,
+  inboxUncheckedSources,
   mobileMoreOpen,
   openCommandPalette,
   toggleIncidentsOverlay,
@@ -35,6 +38,11 @@ export function MobileNav(): VNode {
   const session = authSession.value
   const moreOpen = mobileMoreOpen.value
   const pending = inboxPendingCount.value
+  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const workBadge = formatInboxBadge(pending, pendingUnchecked)
+  const workBadgeLabel = pendingUnchecked
+    ? `Inbox ${formatInboxPendingCount(pending, true)}`
+    : `Inbox ${pending}건 대기 중`
   const unreadInc = unreadIncidentCount.value
 
   useEffect(() => {
@@ -145,13 +153,15 @@ export function MobileNav(): VNode {
       ${MOBILE_PRIMARY_TABS.map((id) => {
         const def = WORKSPACE_NAV_BY_ID[id]
         const active = route.workspace === id
-        const badge = id === 'work' && pending > 0 ? pending : 0
+        const badge = id === 'work' ? workBadge : null
         return html`
           <a
             key=${id}
             href=${`#${def.defaultPath}`}
             class=${`ap-mobile-tab ap-touch-target${active ? ' is-active' : ''}`}
             aria-current=${active ? 'page' : undefined}
+            aria-label=${badge !== null ? `${def.label} (${workBadgeLabel})` : undefined}
+            data-mobile-nav-id=${id}
             onClick=${(event: MouseEvent) => {
               if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
               event.preventDefault()
@@ -161,7 +171,9 @@ export function MobileNav(): VNode {
           >
             <${ShellIcon} name=${id as ShellIconName} size=${18} />
             <span>${def.shortLabel}</span>
-            ${badge > 0 && html`<span class="ap-mobile-badge tnum">${badge}</span>`}
+            ${badge !== null && html`
+              <span class="ap-mobile-badge tnum" aria-hidden="true" title=${workBadgeLabel}>${badge}</span>
+            `}
           </a>
         `
       })}

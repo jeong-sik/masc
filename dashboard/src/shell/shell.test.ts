@@ -23,6 +23,7 @@ import { subscribeActiveSchedulesRefresh } from '../components/schedule/schedule
 import { publishDashboardObservationChange } from '../lib/observation-refresh'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { navigate, resetRouterForTests } from '../routes/router'
+import { App } from '../app'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
 import { IncidentsOverlayBody } from './incidents-overlay'
@@ -34,6 +35,7 @@ import {
   commandPaletteOpen,
   currentShellOverlay,
   effectiveHitlSourceStatus,
+  formatInboxBadge,
   historicalIncidents,
   inboxPendingCount,
   installShellObservers,
@@ -992,5 +994,126 @@ describe('Proposal A+ Shell components', () => {
       render(h('div', {}, h(NavRail, {}), h(TopBar, {})), container)
     })
     expect(container.querySelector('[data-testid="subtab-inbox-badge"]')).toBeNull()
+  })
+
+  it('keeps formatInboxBadge parity across TopBar Inbox pill, Work Inbox sub-tab, NavRail Work badge, and MobileNav Work badge', async () => {
+    expect(formatInboxBadge(0, false)).toBeNull()
+    expect(formatInboxBadge(0, true)).toBe('?')
+    expect(formatInboxBadge(2, false)).toBe('2')
+    expect(formatInboxBadge(2, true)).toBe('2?')
+
+    viewportWidth.value = 1440
+    navigate('/work/goals')
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    pendingGoalConfirmations.value = parseAwaitingGoalsPayload(
+      {
+        goals: [
+          { id: 'g-1', title: 'Goal A', phase: 'awaiting_confirmation', updated_at: '2026-11-26T00:00:00Z' },
+          { id: 'g-2', title: 'Goal B', phase: 'awaiting_confirmation', updated_at: '2026-11-26T00:00:00Z' },
+        ],
+      },
+      'default',
+    )
+
+    // Authenticated with unread HITL sources + 2 pending -> ALL 4 badges show "2?"
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {}), h(MobileNav, {})), container)
+    })
+    expect(container.querySelector('[data-testid="inbox-pill"] .ap-pill-count')?.textContent?.trim()).toBe('2?')
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')?.textContent?.trim()).toBe('2?')
+    expect(container.querySelector('[data-nav-id="work"] .ap-rail-badge')?.textContent?.trim()).toBe('2?')
+    expect(container.querySelector('[data-mobile-nav-id="work"] .ap-mobile-badge')?.textContent?.trim()).toBe('2?')
+
+    // Authenticated with unread HITL sources + 0 pending -> ALL 4 badges show "?"
+    pendingGoalConfirmations.value = []
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {}), h(MobileNav, {})), container)
+    })
+    expect(container.querySelector('[data-testid="inbox-pill"] .ap-pill-count')?.textContent?.trim()).toBe('?')
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')?.textContent?.trim()).toBe('?')
+    expect(container.querySelector('[data-nav-id="work"] .ap-rail-badge')?.textContent?.trim()).toBe('?')
+    expect(container.querySelector('[data-mobile-nav-id="work"] .ap-mobile-badge')?.textContent?.trim()).toBe('?')
+
+    // Confirmed clean empty read -> TopBar pill shows "0", sub-tab/rail/mobile badges hide
+    const fetchEmpty: typeof fetch = async (input) => hitlJson(EMPTY_HITL[new URL(String(input), location.href).pathname] ?? {})
+    await act(async () => {
+      await refreshPendingHitl(fetchEmpty)
+    })
+    expect(container.querySelector('[data-testid="inbox-pill"] .ap-pill-count')?.textContent?.trim()).toBe('0')
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')).toBeNull()
+    expect(container.querySelector('[data-nav-id="work"] .ap-rail-badge')).toBeNull()
+    expect(container.querySelector('[data-mobile-nav-id="work"] .ap-mobile-badge')).toBeNull()
+  })
+
+  it('renders scrollable .ap-mobile-subtabs and compact PopoverMenu time-window picker on mobile (<768px)', async () => {
+    viewportWidth.value = 375
+    navigate('/runtime/quotas')
+
+    await act(async () => {
+      render(h(TopBar, {}), container)
+    })
+
+    // Desktop .ap-subtabs hidden; mobile .ap-mobile-subtabs exposes all 5 Runtime L1 sub-tabs
+    expect(container.querySelector('.ap-subtabs')).toBeNull()
+    const mobileBar = container.querySelector('[data-testid="mobile-subtabs"]')
+    expect(mobileBar).not.toBeNull()
+    expect(mobileBar?.classList.contains('ap-mobile-subtabs')).toBe(true)
+    expect(mobileBar?.querySelectorAll('.ap-subtab')).toHaveLength(5)
+    expect(mobileBar?.querySelector('[data-subtab="quotas"]')?.getAttribute('aria-current')).toBe('page')
+
+    // 1-tap navigation to another L1 sub-tab (/runtime/lanes)
+    const lanesLink = mobileBar?.querySelector('[data-subtab="lanes"]') as HTMLAnchorElement
+    await act(async () => {
+      fireEvent.click(lanesLink)
+    })
+    expect(container.querySelector('[data-subtab="lanes"]')?.getAttribute('aria-current')).toBe('page')
+
+    // Mobile time-window selector uses compact PopoverMenu trigger with data-testid="time-window-pill"
+    const winTrigger = container.querySelector('[data-testid="time-window-pill"]') as HTMLButtonElement
+    expect(winTrigger.tagName).toBe('BUTTON')
+    expect(winTrigger.textContent?.trim()).toBe('24h')
+    await act(async () => {
+      fireEvent.click(winTrigger)
+    })
+    const opt30d = container.querySelector('[data-testid="time-window-option-30d"]') as HTMLButtonElement
+    expect(opt30d).not.toBeNull()
+    await act(async () => {
+      fireEvent.click(opt30d)
+    })
+    expect(timeWindow.value).toBe('30d')
+
+    // Routes without L1 sub-tabs (/pulse) omit .ap-mobile-subtabs
+    await act(async () => {
+      navigate('/pulse')
+    })
+    expect(container.querySelector('[data-testid="mobile-subtabs"]')).toBeNull()
+  })
+
+  it('tracks browser window focus/blur via data-window-focused on .ap-shell', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(hitlJson({ version: '0.83.0' }))
+    window.innerWidth = 1440
+    await act(async () => {
+      render(h(App, {}), container)
+    })
+
+    const shell = container.querySelector('.ap-shell') as HTMLElement
+    expect(shell).not.toBeNull()
+    expect(shell.hasAttribute('data-window-focused')).toBe(true)
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(shell.getAttribute('data-window-focused')).toBe('false')
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(shell.getAttribute('data-window-focused')).toBe('true')
   })
 })

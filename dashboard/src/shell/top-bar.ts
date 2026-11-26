@@ -42,10 +42,12 @@ import {
   isAdminLockedForSession,
   navigate,
 } from '../routes/router'
+import { PopoverMenu } from '../components/primitives/popover-menu'
 import { ShellIcon } from './icons'
 import {
   activeOverlay,
   buildConnectionInfo,
+  formatInboxBadge,
   formatInboxPendingCount,
   inboxPendingCount,
   inboxUncheckedSources,
@@ -127,6 +129,7 @@ function AccountWorkspaceSwitcher(): VNode {
   const [bearerDraft, setBearerDraft] = useState('')
   const [signingOut, setSigningOut] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   const session = authSession.value
   const targets = workspaceTargets.value
@@ -147,6 +150,7 @@ function AccountWorkspaceSwitcher(): VNode {
         event.preventDefault()
         event.stopPropagation()
         setOpen(false)
+        triggerRef.current?.focus?.()
       }
     }
     document.addEventListener('mousedown', onOutside)
@@ -188,11 +192,13 @@ function AccountWorkspaceSwitcher(): VNode {
   return html`
     <div class="ap-switcher-wrap" ref=${wrapRef}>
       <button
+        ref=${triggerRef}
         type="button"
         class="ap-switcher-trigger"
         aria-haspopup="menu"
         aria-expanded=${open ? 'true' : 'false'}
         aria-label="계정 및 워크스페이스 전환"
+        title=${`${principal.name} / ${activeWs?.label ?? activeWsId}`}
         data-testid="account-workspace-switcher"
         onClick=${() => setOpen((v) => !v)}
       >
@@ -363,6 +369,7 @@ function AccountWorkspaceSwitcher(): VNode {
 function ProvenancePill(): VNode {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const route = currentRoute.value
   const liveProv = viewProvenance.value
   const connected = observerConnected.value
@@ -388,6 +395,7 @@ function ProvenancePill(): VNode {
         event.preventDefault()
         event.stopPropagation()
         setOpen(false)
+        triggerRef.current?.focus?.()
       }
     }
     document.addEventListener('mousedown', onOutside)
@@ -398,14 +406,18 @@ function ProvenancePill(): VNode {
     }
   }, [open])
 
+  const provLabel = `연결 상태: ${resolved}${buildInfo.mismatched ? ' (빌드 커밋 불일치)' : ''}`
+
   return html`
     <div class="ap-prov-wrap" ref=${wrapRef}>
       <button
+        ref=${triggerRef}
         type="button"
         class=${`ap-pill ap-pill--${meta.tone}`}
         aria-haspopup="dialog"
         aria-expanded=${open ? 'true' : 'false'}
-        aria-label=${`연결 상태: ${resolved}${buildInfo.mismatched ? ' (빌드 커밋 불일치)' : ''}`}
+        aria-label=${provLabel}
+        title=${provLabel}
         data-testid="provenance-pill"
         data-provenance=${resolved}
         onClick=${() => {
@@ -417,7 +429,7 @@ function ProvenancePill(): VNode {
         <span class=${`ap-prov-glyph${meta.tone === 'live' ? ' is-live' : ''}`} aria-hidden="true">
           ${meta.glyph}
         </span>
-        <span>${resolved}</span>
+        <span class="ap-prov-label">${resolved}</span>
         ${buildInfo.mismatched && html`
           <span class="ap-prov-drift-dot" title="서버와 대시보드 빌드 커밋이 다릅니다" aria-hidden="true">•</span>
         `}
@@ -467,7 +479,8 @@ export function TopBar(): VNode {
   const pending = inboxPendingCount.value
   const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
   const pendingLabel = pendingUnchecked ? formatInboxPendingCount(pending, true) : `${pending}건 대기`
-  const pendingBadge = pendingUnchecked ? '?' : pending
+  const formattedBadge = formatInboxBadge(pending, pendingUnchecked)
+  const pendingBadge = formattedBadge ?? '0'
   const unreadInc = unreadIncidentCount.value
   const overlay = activeOverlay.value
   const win = timeWindow.value
@@ -489,6 +502,39 @@ export function TopBar(): VNode {
         locked: isAdminLockedForSession(tab.access, session),
       }))
 
+  const renderSubtabLink = (tab: (typeof subtabs)[number]) => {
+    const subtabBadge = route.workspace === 'work' && tab.id === 'inbox'
+      ? formattedBadge
+      : null
+    return html`
+      <a
+        key=${tab.id}
+        href=${`#${tab.path}`}
+        class=${`ap-subtab${tab.active ? ' is-active' : ''}${tab.locked ? ' is-locked' : ''}`}
+        aria-current=${tab.active ? 'page' : undefined}
+        aria-label=${subtabBadge !== null ? `${tab.label} (${pendingLabel})` : undefined}
+        data-subtab=${tab.id}
+        data-rbac-locked=${tab.locked ? 'true' : undefined}
+        onClick=${(event: MouseEvent) => {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+          event.preventDefault()
+          navigate(tab.path)
+        }}
+      >
+        <span>${tab.label}</span>
+        ${subtabBadge !== null && html`
+          <span
+            class="ap-subtab-badge tnum"
+            data-testid="subtab-inbox-badge"
+            aria-hidden="true"
+            title=${pendingLabel}
+          >${subtabBadge}</span>
+        `}
+        ${tab.locked && html`<${ShellIcon} name="lock" size=${11} />`}
+      </a>
+    `
+  }
+
   return html`
     <header class="ap-topbar" role="banner">
       <div class="ap-topbar-left">
@@ -497,64 +543,51 @@ export function TopBar(): VNode {
 
       ${!mobile && subtabs.length > 0 && html`
         <nav class="ap-subtabs" aria-label=${`${navDef.label} 하위 탭`}>
-          ${subtabs.map((tab) => {
-            const subtabBadge = route.workspace === 'work' && tab.id === 'inbox'
-              ? (pending > 0
-                  ? (pendingUnchecked ? `${pending}?` : String(pending))
-                  : (pendingUnchecked ? '?' : null))
-              : null
-            return html`
-              <a
-                key=${tab.id}
-                href=${`#${tab.path}`}
-                class=${`ap-subtab${tab.active ? ' is-active' : ''}${tab.locked ? ' is-locked' : ''}`}
-                aria-current=${tab.active ? 'page' : undefined}
-                aria-label=${subtabBadge !== null ? `${tab.label} (${pendingLabel})` : undefined}
-                data-subtab=${tab.id}
-                data-rbac-locked=${tab.locked ? 'true' : undefined}
-                onClick=${(event: MouseEvent) => {
-                  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-                  event.preventDefault()
-                  navigate(tab.path)
-                }}
-              >
-                <span>${tab.label}</span>
-                ${subtabBadge !== null && html`
-                  <span
-                    class="ap-subtab-badge tnum"
-                    data-testid="subtab-inbox-badge"
-                    aria-hidden="true"
-                    title=${pendingLabel}
-                  >${subtabBadge}</span>
-                `}
-                ${tab.locked && html`<${ShellIcon} name="lock" size=${11} />`}
-              </a>
-            `
-          })}
+          ${subtabs.map(renderSubtabLink)}
         </nav>
       `}
 
       <div class="ap-topbar-right">
-        ${route.supportsTimeWindow && html`
-          <div class="ap-win-group" role="group" aria-label="시간 창 선택" data-testid="time-window-pill">
-            ${TIME_WINDOWS.map((w) => html`
-              <button
-                key=${w}
-                type="button"
-                class=${`ap-win-btn tnum${win === w ? ' is-active' : ''}`}
-                aria-pressed=${win === w ? 'true' : 'false'}
-                onClick=${() => setTimeWindow(w)}
-              >
-                ${w}
-              </button>
+        ${route.supportsTimeWindow && (mobile
+          ? html`
+              <${PopoverMenu}
+                triggerLabel=${html`<span class="tnum">${win}</span>`}
+                triggerIcon=${html`<${ShellIcon} name="chevron" size=${11} />`}
+                triggerClassName="ap-pill ap-win-compact-trigger"
+                triggerTestId="time-window-pill"
+                popoverTestId="time-window-menu"
+                align="right"
+                ariaLabel=${`시간 창 선택 (${win})`}
+                items=${TIME_WINDOWS.map((w) => ({
+                  id: w,
+                  label: w,
+                  active: win === w,
+                  testId: `time-window-option-${w}`,
+                  onSelect: () => setTimeWindow(w),
+                }))}
+              />
+            `
+          : html`
+              <div class="ap-win-group" role="group" aria-label="시간 창 선택" data-testid="time-window-pill">
+                ${TIME_WINDOWS.map((w) => html`
+                  <button
+                    key=${w}
+                    type="button"
+                    class=${`ap-win-btn tnum${win === w ? ' is-active' : ''}`}
+                    aria-pressed=${win === w ? 'true' : 'false'}
+                    onClick=${() => setTimeWindow(w)}
+                  >
+                    ${w}
+                  </button>
+                `)}
+              </div>
             `)}
-          </div>
-        `}
 
         <button
           type="button"
           class="ap-pill"
           aria-label="명령 팔레트 열기 (⌘K)"
+          title="명령 팔레트 열기 (⌘K)"
           data-testid="cmdk-trigger"
           onClick=${openCommandPalette}
         >
@@ -569,6 +602,7 @@ export function TopBar(): VNode {
             type="button"
             class=${`ap-pill${pending > 0 || pendingUnchecked ? ' ap-pill--warn' : ''}`}
             aria-label=${`Inbox (${pendingLabel})`}
+            title=${`Inbox (${pendingLabel})`}
             data-testid="inbox-pill"
             onClick=${() => navigate('/work/inbox')}
           >
@@ -582,6 +616,7 @@ export function TopBar(): VNode {
             class=${`ap-pill${overlay?.kind === 'queue_context' ? ' is-active' : ''}`}
             aria-pressed=${overlay?.kind === 'queue_context' ? 'true' : 'false'}
             aria-label="Queue & Context 빠른 보기 (⌘T)"
+            title="Queue & Context 빠른 보기 (⌘T)"
             data-testid="queue-ctx-pill"
             onClick=${toggleQueueContextOverlay}
           >
@@ -594,6 +629,7 @@ export function TopBar(): VNode {
             class=${`ap-pill${overlay?.kind === 'incidents' ? ' is-active' : ''}${unreadInc > 0 ? ' ap-pill--err' : ''}`}
             aria-pressed=${overlay?.kind === 'incidents' ? 'true' : 'false'}
             aria-label=${`Incidents 빠른 보기 [I] (읽지 않음 ${unreadInc}건)`}
+            title=${`Incidents 빠른 보기 [I] (읽지 않음 ${unreadInc}건)`}
             data-testid="incidents-pill"
             onClick=${toggleIncidentsOverlay}
           >
@@ -604,5 +640,14 @@ export function TopBar(): VNode {
         `}
       </div>
     </header>
+    ${mobile && subtabs.length > 0 && html`
+      <nav
+        class="ap-mobile-subtabs"
+        aria-label=${`${navDef.label} 하위 탭`}
+        data-testid="mobile-subtabs"
+      >
+        ${subtabs.map(renderSubtabLink)}
+      </nav>
+    `}
   `
 }

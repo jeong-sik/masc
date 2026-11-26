@@ -44,6 +44,7 @@
 (test
  (name test_theme_file)
  (modules test_theme_file)
+ (deps (source_tree %{workspace_root}/config/themes))
  (libraries
   masc_tui_app
   masc_tui_core

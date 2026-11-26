@@ -205,6 +205,25 @@ let test_load_overrides_duplicate_key () =
       | None -> ()
       | Some _ -> Alcotest.fail "a file with a duplicate key must keep the built-in palette")
 
+(* The files in config/themes/ are the editable copies of the built-in
+   palettes. A file that differs from [Theme.builtin_palette] makes the default
+   colors depend on whether the user copied the directory. The test runs in
+   _build/default/test/masc_tui_v2/app, where the [source_tree] dependency of
+   the dune stanza puts the files. *)
+let seed_dir = "../../../config/themes"
+
+let test_seed_files_match_builtin () =
+  List.iter
+    (fun preset ->
+      let path = Filename.concat seed_dir (Theme.preset_name preset ^ ".toml") in
+      let text = In_channel.with_open_bin path In_channel.input_all in
+      match Theme_file.parse_palette_text ~preset ~text with
+      | Error reason -> Alcotest.fail (path ^ ": " ^ reason)
+      | Ok palette ->
+          Alcotest.(check bool) (path ^ " equals the built-in palette") true
+            (Theme.equal_palette palette (Theme.builtin_palette preset)))
+    Theme.all_presets
+
 let () =
   Alcotest.run "theme_file"
     [
@@ -219,5 +238,7 @@ let () =
           Alcotest.test_case "load overrides files" `Quick test_load_overrides_files;
           Alcotest.test_case "load overrides duplicate key" `Quick
             test_load_overrides_duplicate_key;
+          Alcotest.test_case "seed files match built-in" `Quick
+            test_seed_files_match_builtin;
         ] );
     ]

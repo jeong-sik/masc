@@ -8,10 +8,11 @@
 
     Each compaction producer names the atoms of its own list: the Agent Core
     history, an official client's start seed, the ACP list rebuilt from the
-    canonical turn store. The per-turn consumer names the checkpoint history
-    the same way. A name one of them writes is looked up in another list by
-    equality, so finding an anchor's boundary reads metadata only; nothing is
-    serialized or hashed. See RFC compaction-anchor-names-a-turn-atom. *)
+    canonical turn store. A producer carries on only coverage written over the
+    same kind of list ({!frame}). The per-turn consumer names the checkpoint
+    history the same way and looks up the latest boundary of either kind by
+    equality, so finding it reads metadata only; nothing is serialized or
+    hashed. See RFC compaction-anchor-names-a-turn-atom. *)
 
 type name =
   | Leading of int
@@ -32,11 +33,28 @@ val name_to_string : name -> string
 val name_to_json : name -> Yojson.Safe.t
 val name_of_json : Yojson.Safe.t -> (name, string) result
 
+(** The kind of list a producer names. Leading positions and ordinals are
+    counted inside one list, so a producer carries on only coverage written
+    over its own kind (see {!Keeper_compaction.compact_evicted_messages}).
+
+    - [Message_history]: the Keeper's message history as the turn driver and
+      the official clients start from it, including canonical turns hydrated
+      into it.
+    - [Canonical_turns]: the list the ACP runtime rebuilds from the canonical
+      turn store after its watermark: one user and one assistant message per
+      turn. *)
+type frame =
+  | Message_history
+  | Canonical_turns
+
+val frame_to_string : frame -> string
+
 (** How much of the boundary turn an anchor covers. *)
 type extent =
   | Whole_turn
-      (** Every atom of the turn. Written only when the atom after the
-          boundary belongs to another turn and every earlier turn is
+      (** Every atom of the turn. Written only when the turn's atoms run
+          without a gap from its first atom to the boundary, an atom of
+          another turn follows the boundary, and every earlier turn is
           covered too. *)
   | Up_to of
       { ordinal : int

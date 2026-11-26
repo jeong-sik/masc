@@ -3510,6 +3510,7 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
     (match
        Keeper_compaction.compact_evicted_messages ~keepers_dir ~keeper_id:"alpha"
          ~trigger:(Explicit_hard_limit { capacity_bytes = 64000; observed_bytes = 70000 })
+         ~frame:Keeper_compaction_atom.Message_history
          ~messages:evicted_turn
          ~eviction:{ Keeper_compaction_atom.prefix = 2; later = [] }
          ()

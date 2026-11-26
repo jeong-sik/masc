@@ -249,6 +249,7 @@ let test_full_living_memory_circulation () =
         ~keepers_dir
         ~keeper_id:"keeper-alpha"
         ~trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+        ~frame:Masc.Keeper_compaction_atom.Message_history
         ~messages:history
         ~eviction:{ Masc.Keeper_compaction_atom.prefix = 9; later = [] }
         ()
@@ -268,7 +269,9 @@ let test_full_living_memory_circulation () =
             }));
   (* Any provider reads the same anchor and the turns after it. *)
   let live_tail =
-    Compaction.live_history_after_latest_anchor ~keepers_dir ~keeper_id:"keeper-alpha" history
+    match Compaction.live_history_after_latest_anchor ~keepers_dir ~keeper_id:"keeper-alpha" history with
+    | Ok tail -> tail
+    | Error err -> fail (Compaction.store_error_to_string err)
   in
   check bool "the live tail is the kept turn" true (live_tail = List.nth turns 3);
   let compaction_stats =
@@ -787,6 +790,7 @@ let test_stack_c_tool_blob_scope_classification () =
        ~keepers_dir
        ~keeper_id:"keeper-scope"
        ~trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 128_000 })
+       ~frame:Masc.Keeper_compaction_atom.Message_history
        ~messages:(List.concat turns)
        ~eviction:{ Masc.Keeper_compaction_atom.prefix = 6; later = [] }
        ()

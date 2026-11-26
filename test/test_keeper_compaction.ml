@@ -99,11 +99,22 @@ let hard_limit =
   C.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 }
 ;;
 
-let compact ?(trigger = hard_limit) ?(later = []) ~keepers_dir ~keeper_id ~prefix messages =
+(* Most tests compact a message history; a list rebuilt from the canonical
+   turn store passes [~frame:A.Canonical_turns]. *)
+let compact
+      ?(trigger = hard_limit)
+      ?(later = [])
+      ?(frame = A.Message_history)
+      ~keepers_dir
+      ~keeper_id
+      ~prefix
+      messages
+  =
   C.compact_evicted_messages
     ~keepers_dir
     ~keeper_id
     ~trigger
+    ~frame
     ~messages
     ~eviction:{ A.prefix; later }
     ()
@@ -402,6 +413,7 @@ let test_codecs_are_strict () =
       ; beyond = [ turn_name "c#2" 1 ]
       }
     ; { A.through = None; beyond = [ turn_name "c#1" 4 ] }
+    ; { A.through = None; beyond = [] }
     ]
   in
   List.iter
@@ -409,8 +421,12 @@ let test_codecs_are_strict () =
        check bool (A.coverage_to_string coverage ^ " round-trips") true
          (A.coverage_of_json (A.coverage_to_json coverage) = Ok coverage))
     coverages;
-  check bool "a coverage that names no atom is refused" true
-    (Result.is_error (A.coverage_of_json (`Assoc [ "beyond", `List []; "through", `Null ])));
+  check bool "a coverage without beyond is refused" true
+    (Result.is_error (A.coverage_of_json (`Assoc [ "through", `Null ])));
+  check bool "a coverage with an unknown field is refused" true
+    (Result.is_error
+       (A.coverage_of_json
+          (`Assoc [ "beyond", `List []; "frame", `String "canonical_turns"; "through", `Null ])));
   let anchor =
     { C.epoch_id = 2
     ; coverage = List.nth coverages 2
@@ -746,10 +762,10 @@ let test_consumer_cuts_after_the_covered_turn () =
   let turn2 = agent_core_turn ~turn:"u#2" ~prompt:"epoch2 turn 2" ~tool:"svc_live_c" ~answer:"c" () in
   let history = turn0 @ turn1 @ turn2 in
   check int "without an anchor the history is unchanged" (List.length history)
-    (List.length (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+    (List.length (ok_compaction (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history)));
   let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix:6 history) in
   check (list string) "the persisted anchor drops the covered tool rounds" [ "svc_live_c" ]
-    (tool_names (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+    (tool_names (ok_compaction (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history)));
   check (list string) "a covered turn that comes back later stays" [ "svc_live_c"; "svc_old_b" ]
     (tool_names
        (C.messages_after_anchor
@@ -886,22 +902,71 @@ let test_repeated_text_atoms_are_distinct_by_name () =
     (List.map (fun (_, name, _) -> name) (archived_atoms ~keepers_dir ~keeper_id))
 ;;
 
-let test_concurrent_compactions_serialize () =
+(* A turn that comes back after another turn is not one run of atoms, so its
+   boundary is written by ordinal. Written whole, the reader would cover only
+   the first run, keep the rest live and archive it again. *)
+let test_split_turn_is_covered_up_to_the_boundary () =
   with_temp_dir
   @@ fun keepers_dir ->
-  Eio_main.run (fun _env ->
-    let errors = ref [] in
-    Eio.Fiber.all
-      (List.init 6 (fun i () ->
-         let messages =
-           agent_core_turn ~turn:(Printf.sprintf "race#%d" i) ~prompt:"u" ~answer:"a" ()
-           @ agent_core_turn ~turn:(Printf.sprintf "race-next#%d" i) ~prompt:"u" ~answer:"a" ()
-         in
-         match compact ~keepers_dir ~keeper_id:"race" ~prefix:2 messages with
-         | Ok (Some _) -> ()
-         | Ok None -> errors := "unexpected Ok None" :: !errors
-         | Error err -> errors := C.store_error_to_string err :: !errors));
-    check (list string) "no write conflicts under six concurrent compactions" [] !errors);
+  let keeper_id = "split" in
+  let messages =
+    agent_core_turn ~turn:"s#1" ~prompt:"first visit" ~answer:"one" ()
+    @ agent_core_turn ~turn:"s#2" ~prompt:"in between" ~answer:"two" ()
+    @ agent_core_turn ~turn:"s#1" ~prompt:"second visit" ~answer:"three" ()
+    @ agent_core_turn ~turn:"s#3" ~prompt:"live" ~answer:"four" ()
+  in
+  let atoms = A.atoms_of_messages messages in
+  check (list name_t) "s#1 continues its ordinals after s#2"
+    [ turn_name "s#1" 0
+    ; turn_name "s#1" 1
+    ; turn_name "s#2" 0
+    ; turn_name "s#2" 1
+    ; turn_name "s#1" 2
+    ; turn_name "s#1" 3
+    ; turn_name "s#3" 0
+    ; turn_name "s#3" 1
+    ]
+    (names atoms);
+  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix:6 messages) in
+  check bool "the split turn is written up to its ordinal" true
+    (anchor.coverage.through
+     = Some
+         (A.Through_turn
+            { turn = Ids.Turn_id.of_string "s#1"
+            ; extent = A.Up_to { ordinal = 3; settled = None }
+            }));
+  check int "the covered end is the boundary" 5 (A.covered_end anchor.coverage.through atoms);
+  check (option string) "the consumer starts at the live turn" (Some "s#3")
+    (first_turn_of (C.messages_after_anchor ~anchor messages));
+  check bool "the same eviction commits nothing" true
+    (ok_compaction (compact ~keepers_dir ~keeper_id ~prefix:6 messages) = None);
+  let next = committed (compact ~keepers_dir ~keeper_id ~prefix:7 messages) in
+  check (list name_t) "the next eviction archives only the new atom" [ turn_name "s#3" 0 ]
+    (List.filter_map
+       (fun (epoch, name, _) -> if epoch = next.epoch_id then Some name else None)
+       (archived_atoms ~keepers_dir ~keeper_id))
+;;
+
+(* The pool runs the SQLite work on two other domains, so two compactions
+   contend for the write lock for real. Without a pool every call runs inline
+   on this domain, one after another. *)
+let test_concurrent_compactions_serialize () =
+  with_pool
+  @@ fun () ->
+  with_temp_dir
+  @@ fun keepers_dir ->
+  let errors = ref [] in
+  Eio.Fiber.all
+    (List.init 6 (fun i () ->
+       let messages =
+         agent_core_turn ~turn:(Printf.sprintf "race#%d" i) ~prompt:"u" ~answer:"a" ()
+         @ agent_core_turn ~turn:(Printf.sprintf "race-next#%d" i) ~prompt:"u" ~answer:"a" ()
+       in
+       match compact ~keepers_dir ~keeper_id:"race" ~prefix:2 messages with
+       | Ok (Some _) -> ()
+       | Ok None -> errors := "unexpected Ok None" :: !errors
+       | Error err -> errors := C.store_error_to_string err :: !errors));
+  check (list string) "no write conflicts under six concurrent compactions" [] !errors;
   let stats = ok_compaction (C.inspect_stats ~keepers_dir ~keeper_id:"race") in
   check int "six epochs committed" 6 stats.epoch_count;
   check int "twelve atoms archived" 12 stats.archived_atom_count
@@ -1016,8 +1081,8 @@ let test_stores_written_before_the_hard_cut_are_refused () =
   check bool "a commit refuses it too" true (refused (compact ~keepers_dir ~keeper_id ~prefix:2 history));
   check bool "the blob sweep stops on it" true
     (Result.is_error (C.decode_live_blob_references_json compaction_path));
-  check int "the consumer leaves the history whole" (List.length history)
-    (List.length (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
+  check bool "the consumer reports it" true
+    (refused (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history));
   let other = "old-canonical" in
   exec_all
     (Store.db_path ~keepers_dir ~keeper_id:other)
@@ -1096,7 +1161,7 @@ let test_acp_rebuilt_list_cuts_the_checkpoint_history () =
   let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
   let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
   check int "the rollover keeps the last turn" 6 prefix;
-  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix messages) in
+  let anchor = committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages) in
   check bool "the rebuilt list names a whole turn" true
     (anchor.coverage.through
      = Some (A.Through_turn { turn = Ids.Turn_id.of_string "trace-r#3"; extent = A.Whole_turn }));
@@ -1107,7 +1172,7 @@ let test_acp_rebuilt_list_cuts_the_checkpoint_history () =
       (fun turn -> agent_core_turn ~turn ~prompt:turn ~tool:("tool-" ^ turn) ~answer:"done" ())
       [ "trace-r#1"; "trace-r#2"; "trace-r#3"; "trace-r#4" ]
   in
-  let live = C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint in
+  let live = ok_compaction (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint) in
   check (option string) "the checkpoint history starts after the covered turn" (Some "trace-r#4")
     (first_turn_of live);
   check (list string) "only the live turn's tools are carried" [ "tool-trace-r#4" ] (tool_names live)
@@ -1126,7 +1191,7 @@ let test_acp_provisional_turn_id () =
      : Store.canonical_turn);
   let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
   let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
-  let anchor = committed (compact ~keepers_dir ~keeper_id ~prefix messages) in
+  let anchor = committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages) in
   check (option string) "the turn before the provisional one settles" (Some "trace-p#2")
     (Option.map Ids.Turn_id.to_string (A.settled_turn anchor.coverage));
   ok_store
@@ -1145,7 +1210,110 @@ let test_acp_provisional_turn_id () =
       [ "trace-p#1"; "trace-p#2"; "trace-p#3" ]
   in
   check (option string) "the checkpoint history starts at the bound turn" (Some "trace-p#3")
-    (first_turn_of (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint))
+    (first_turn_of
+       (ok_compaction (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id checkpoint)))
+;;
+
+let commit_rows ~keepers_dir ~keeper_id turns =
+  List.iteri
+    (fun i turn ->
+       ignore
+         (commit_row
+            ~keepers_dir
+            ~keeper_id
+            ~turn
+            ~prompt:("ask " ^ turn)
+            ~answer:("answer " ^ turn)
+            (float_of_int i)
+          : Store.canonical_turn))
+    turns
+;;
+
+let atoms_of_epoch ~keepers_dir ~keeper_id epoch_id =
+  List.filter (fun (epoch, _, _) -> epoch = epoch_id) (archived_atoms ~keepers_dir ~keeper_id)
+;;
+
+(* An Agent Core epoch that stops inside a turn counts that turn's atoms in
+   the message history: f#2/1 there is a tool round. In the list the ACP
+   rollover rebuilds from the canonical rows, f#2/1 is the final answer. The
+   rollover reads only coverage over its own kind of list, so it archives the
+   answer before the watermark prunes f#2's row. *)
+let test_acp_rollover_archives_a_turn_the_history_covered_in_part () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "history-then-rollover" in
+  commit_rows ~keepers_dir ~keeper_id [ "f#1"; "f#2"; "f#3"; "f#4" ];
+  let history =
+    agent_core_turn ~turn:"f#1" ~prompt:"ask f#1" ~answer:"answer f#1" ()
+    @ agent_core_turn ~turn:"f#2" ~prompt:"ask f#2" ~tool:"read" ~answer:"answer f#2" ()
+    @ agent_core_turn ~turn:"f#3" ~prompt:"ask f#3" ~answer:"answer f#3" ()
+  in
+  let partial = committed (compact ~keepers_dir ~keeper_id ~prefix:4 history) in
+  check bool "the history epoch stops at f#2's tool round" true
+    (partial.coverage.through
+     = Some
+         (A.Through_turn
+            { turn = Ids.Turn_id.of_string "f#2"
+            ; extent = A.Up_to { ordinal = 1; settled = Some (Ids.Turn_id.of_string "f#1") }
+            }));
+  check (list string) "f#2's row stays" [ "f#2"; "f#3"; "f#4" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
+  let rollover =
+    committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages)
+  in
+  check bool "the rollover covers f#3 whole" true
+    (rollover.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "f#3"; extent = A.Whole_turn }));
+  check (list string) "rows through f#3 are pruned" [ "f#4" ]
+    (row_ids (ok_store (Store.list_turns ~keepers_dir ~keeper_id)));
+  let archived = atoms_of_epoch ~keepers_dir ~keeper_id rollover.epoch_id in
+  check (list name_t) "the rollover archives f#2 from its own list"
+    [ turn_name "f#2" 0; turn_name "f#2" 1; turn_name "f#3" 0; turn_name "f#3" 1 ]
+    (List.map (fun (_, name, _) -> name) archived);
+  check bool "f#2's final answer is archived before its row is pruned" true
+    (List.exists (fun (_, _, json) -> contains ~needle:"answer f#2" json) archived)
+;;
+
+(* The canonical rows hold no tool rounds, so a rollover epoch says nothing
+   about which atoms of the message history are archived. The history
+   producer reads only its own kind's coverage and still archives the tool
+   round of a turn the rollover settled. *)
+let test_history_compaction_archives_what_a_rollover_did_not () =
+  with_pool
+  @@ fun () ->
+  with_keepers_dir
+  @@ fun keepers_dir ->
+  let keeper_id = "rollover-then-history" in
+  commit_rows ~keepers_dir ~keeper_id [ "g#1"; "g#2"; "g#3" ];
+  let rebuilt = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
+  let messages, prefix = Keeper_acp_runtime.For_testing.split_older_for_rollover rebuilt in
+  let rollover =
+    committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix messages)
+  in
+  check bool "the rollover covers g#2 whole" true
+    (rollover.coverage.through
+     = Some (A.Through_turn { turn = Ids.Turn_id.of_string "g#2"; extent = A.Whole_turn }));
+  let history =
+    agent_core_turn ~turn:"g#1" ~prompt:"ask g#1" ~tool:"grep" ~answer:"answer g#1" ()
+    @ agent_core_turn ~turn:"g#2" ~prompt:"ask g#2" ~answer:"answer g#2" ()
+    @ agent_core_turn ~turn:"g#3" ~prompt:"ask g#3" ~answer:"answer g#3" ()
+  in
+  let next = committed (compact ~keepers_dir ~keeper_id ~prefix:5 history) in
+  check int "the history epoch folds onto the rollover epoch" (rollover.epoch_id + 1)
+    next.epoch_id;
+  let archived = atoms_of_epoch ~keepers_dir ~keeper_id next.epoch_id in
+  check (list name_t) "the history epoch archives its own atoms through g#2"
+    [ turn_name "g#1" 0; turn_name "g#1" 1; turn_name "g#1" 2; turn_name "g#2" 0; turn_name "g#2" 1 ]
+    (List.map (fun (_, name, _) -> name) archived);
+  check bool "g#1's tool round is archived" true
+    (List.exists (fun (_, _, json) -> contains ~needle:"call-g#1-grep" json) archived);
+  check (option string) "the consumer starts the history at g#3" (Some "g#3")
+    (first_turn_of
+       (ok_compaction (C.live_history_after_latest_anchor ~keepers_dir ~keeper_id history)))
 ;;
 
 let test_canonical_turn_store_compaction_watermark_and_failover () =
@@ -1350,10 +1518,10 @@ let test_canonical_turn_multi_epoch_watermark_monotonicity () =
   row "trace-me#4" "Live follow-up question" "Live answer" 40.0;
   let rebuilt () = (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).messages in
   let remaining () = row_ids (ok_store (Store.load_handoff_context ~keepers_dir ~keeper_id)).turns_after_anchor in
-  let a1 = committed (compact ~keepers_dir ~keeper_id ~prefix:4 (rebuilt ())) in
+  let a1 = committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix:4 (rebuilt ())) in
   check int "epoch 1" 1 a1.epoch_id;
   check (list string) "after epoch 1 only T3 and T4 remain" [ "trace-me#3"; "trace-me#4" ] (remaining ());
-  let a2 = committed (compact ~keepers_dir ~keeper_id ~prefix:2 (rebuilt ())) in
+  let a2 = committed (compact ~frame:A.Canonical_turns ~keepers_dir ~keeper_id ~prefix:2 (rebuilt ())) in
   check int "epoch 2" 2 a2.epoch_id;
   check (list string) "the repeated prompt in T3 advances the cutoff to T3" [ "trace-me#4" ] (remaining ());
   let a3 =
@@ -1472,6 +1640,8 @@ let () =
             test_bounded_anchor_across_epochs
         ; test_case "repeated text atoms are distinct by name" `Quick
             test_repeated_text_atoms_are_distinct_by_name
+        ; test_case "a split turn is covered up to the boundary" `Quick
+            test_split_turn_is_covered_up_to_the_boundary
         ; test_case "concurrent compactions serialize" `Quick test_concurrent_compactions_serialize
         ; test_case "epoch listener receives the workspace" `Quick
             test_epoch_listener_receives_the_workspace
@@ -1488,6 +1658,10 @@ let () =
         ; test_case "ACP rebuilt list cuts the checkpoint history" `Quick
             test_acp_rebuilt_list_cuts_the_checkpoint_history
         ; test_case "ACP provisional turn id" `Quick test_acp_provisional_turn_id
+        ; test_case "ACP rollover archives a turn the history covered in part" `Quick
+            test_acp_rollover_archives_a_turn_the_history_covered_in_part
+        ; test_case "history compaction archives what a rollover did not" `Quick
+            test_history_compaction_archives_what_a_rollover_did_not
         ; test_case "compaction watermark, cycle guard & failover hydration" `Quick
             test_canonical_turn_store_compaction_watermark_and_failover
         ; test_case "hydration: suppressed terminal effect, multi-block & repeated prompts" `Quick

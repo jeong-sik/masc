@@ -2309,16 +2309,18 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
     Keeper_acp_runtime.For_testing.split_older_for_rollover rollover_input
   in
   check int "the rollover evicts atoms 0 and 1" 2 evicted_atoms;
+  let rollover_atoms = Keeper_compaction_atom.atoms_of_messages rollover_messages in
+  (* Compaction archives atoms only, so the anchor stays out of every
+     eviction when the split keeps it in the list and it counts as no atom. *)
+  check bool "the existing compaction anchor stays in the rollover list" true
+    (List.exists Runtime_model_input_tail_window.is_compaction_anchor rollover_messages);
+  check int "the existing compaction anchor counts as no atom" 4 (Array.length rollover_atoms);
   let evicted =
-    Keeper_compaction_atom.atoms_of_messages rollover_messages
+    rollover_atoms
     |> Array.to_list
     |> List.filteri (fun index _ -> index < evicted_atoms)
     |> List.concat_map (fun (atom : Keeper_compaction_atom.atom) -> atom.messages)
   in
-  check bool "existing compaction anchor is never evicted by split_older_for_rollover" false
-    (List.exists
-       (fun (m : message) -> Runtime_model_input_tail_window.is_compaction_anchor m)
-       evicted);
   let has_tool_use =
     List.exists
       (fun (m : message) ->

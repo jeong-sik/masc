@@ -22,6 +22,15 @@ let name_to_string = function
   | In_turn { turn; ordinal } -> Printf.sprintf "%s/%d" (Turn_id.to_string turn) ordinal
 ;;
 
+type frame =
+  | Message_history
+  | Canonical_turns
+
+let frame_to_string = function
+  | Message_history -> "message_history"
+  | Canonical_turns -> "canonical_turns"
+;;
+
 type extent =
   | Whole_turn
   | Up_to of
@@ -158,9 +167,7 @@ let coverage_of_json = function
          | json -> Result.map Option.some (through_of_json json)
        in
        let* beyond = decode_list name_of_json beyond in
-       (match through, beyond with
-        | None, [] -> Error "coverage names no atom"
-        | Some _, ([] | _ :: _) | None, _ :: _ -> Ok { through; beyond })
+       Ok { through; beyond }
      | _ -> Error "expected beyond and through")
   | _ -> Error "expected a JSON object for coverage"
 ;;
@@ -307,6 +314,13 @@ let through_at atoms ~index ~previous_settled =
       | None -> true
     in
     let first = Option.value ~default:index (first_index_naming atoms turn) in
+    (* [covered_end] reads [Whole_turn] as the turn's first run of atoms, so
+       the turn is written whole only when that run reaches [index]. A turn
+       whose atoms another turn's atom splits is written [Up_to], which
+       [covered_end] reads by ordinal and so lands on [index]. *)
+    let rec runs_to_index position =
+      position > index || (names_turn turn atoms.(position) && runs_to_index (position + 1))
+    in
     let rec settle position settled =
       if position >= first
       then settled, true
@@ -317,7 +331,7 @@ let through_at atoms ~index ~previous_settled =
         | In_turn _ | Leading _ -> settle (position + 1) settled)
     in
     let settled_before, earlier_turns_closed = settle 0 None in
-    if earlier_turns_closed && closed turn && index + 1 < count
+    if earlier_turns_closed && closed turn && runs_to_index first && index + 1 < count
     then Through_turn { turn; extent = Whole_turn }
     else (
       let settled =

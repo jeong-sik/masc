@@ -8,9 +8,12 @@
       ([<keepers_dir>/<keeper_id>.compaction.db]).
     - {b Coverage by name}: an anchor records the front of the conversation it
       covers as a {!Keeper_compaction_atom.coverage}, named by Keeper turn and
-      atom ordinal. Every producer and the per-turn consumer find it in their
-      own message lists by reading message metadata; nothing is serialized or
-      hashed to compare.
+      atom ordinal, and each epoch records the kind of list it was written over
+      ({!Keeper_compaction_atom.frame}). A producer reads the coverage of the
+      latest epoch over its own kind of list; the per-turn consumer reads the
+      latest epoch of either kind. Both find the boundary in their own message
+      lists by reading message metadata; nothing is serialized or hashed to
+      compare.
     - {b Structural triggers only}: compaction triggers strictly from an
       explicit provider hard-context limit or typed [ContextOverflow]
       ({!compaction_trigger}). Cumulative turn, time, token, or cost gates are
@@ -174,12 +177,16 @@ val prefix_eviction_of_window
     latest anchor and commit a new immutable epoch inside a single
     [BEGIN IMMEDIATE] SQLite transaction off-domain.
 
-    Atoms the latest anchor already covers, or already archived past its
-    boundary, are skipped; when no evicted atom is new the call commits
-    nothing and returns [Ok None]. The new atoms are secret-redacted and
-    archived verbatim. The committed anchor is always bounded via
-    {!bound_anchor_to_budget} (falling back to {!default_anchor_max_bytes}
-    when no provider limit is known). *)
+    [frame] is the kind of list [messages] is. Which atoms are already
+    archived comes from the latest epoch committed over the same [frame]:
+    atoms it covers, or archived past its boundary, are skipped. An epoch over
+    the other kind counts its names in a different list, so it skips nothing
+    here. When no evicted atom is new the call commits nothing and returns
+    [Ok None]. The summary folds onto the latest epoch of either kind.
+
+    The new atoms are secret-redacted and archived verbatim. The committed
+    anchor is always bounded via {!bound_anchor_to_budget} (falling back to
+    {!default_anchor_max_bytes} when no provider limit is known). *)
 val compact_evicted_messages
   :  ?redact:Keeper_secret_redaction.t
   -> ?max_anchor_bytes:int
@@ -188,6 +195,7 @@ val compact_evicted_messages
   -> keepers_dir:string
   -> keeper_id:string
   -> trigger:compaction_trigger
+  -> frame:Keeper_compaction_atom.frame
   -> messages:Agent_core.Types.message list
   -> eviction:Keeper_compaction_atom.eviction
   -> unit
@@ -202,11 +210,13 @@ val messages_after_anchor
   -> Agent_core.Types.message list
   -> Agent_core.Types.message list
 
-(** Read {!latest_anchor} for [keeper_id] and return {!messages_after_anchor}
-    when a committed compaction epoch exists; otherwise returns [messages]
-    unchanged (failing open on absent/unreadable store). *)
+(** {!messages_after_anchor} under the latest epoch of either kind, or
+    [messages] unchanged when no epoch is committed. The cut decides only
+    which tools the next turn carries, so an epoch over the canonical turn
+    list may cut the message history too. [Error] when the store cannot be
+    read, for example {!Schema_not_current}. *)
 val live_history_after_latest_anchor
   :  keepers_dir:string
   -> keeper_id:string
   -> Agent_core.Types.message list
-  -> Agent_core.Types.message list
+  -> (Agent_core.Types.message list, store_error) result

@@ -130,6 +130,7 @@ let commit_compaction_anchor_for_messages ~base_path ~keeper_name ~trigger ~pref
         ~keepers_dir
         ~keeper_id:keeper_name
         ~trigger
+        ~frame:Keeper_compaction_atom.Message_history
         ~messages
         ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
         ()

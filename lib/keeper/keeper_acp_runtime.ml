@@ -1810,10 +1810,17 @@ let compact_for_rollover
       ~fallback_messages
       ()
   =
-  let source_messages =
+  let frame, source_messages =
     match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
-    | Ok handoff when handoff.messages <> [] -> handoff.messages
-    | Ok _ | Error _ -> fallback_messages
+    | Ok handoff when handoff.messages <> [] ->
+      Keeper_compaction_atom.Canonical_turns, handoff.messages
+    | Ok _ -> Keeper_compaction_atom.Message_history, fallback_messages
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "ACP rollover compacts the message history; canonical turn store unreadable: %s"
+        (Keeper_canonical_turn_store.store_error_to_string err);
+      Keeper_compaction_atom.Message_history, fallback_messages
   in
   let messages, prefix = split_older_for_rollover ?keep_ratio source_messages in
   if prefix = 0
@@ -1828,6 +1835,7 @@ let compact_for_rollover
         ~keepers_dir
         ~keeper_id
         ~trigger
+        ~frame
         ~messages
         ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
         ()
@@ -3673,6 +3681,7 @@ let compact_once_for_overflow_with
           ~keepers_dir
           ~keeper_id
           ~trigger
+          ~frame:Keeper_compaction_atom.Message_history
           ~messages
           ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
           ()

@@ -576,6 +576,7 @@ let create_schema_in_tx db ~path =
         "create_epochs"
         "CREATE TABLE compaction_epochs (\
          epoch_id INTEGER PRIMARY KEY, \
+         frame TEXT NOT NULL CHECK (frame IN ('message_history', 'canonical_turns')), \
          anchor_json TEXT NOT NULL, \
          trigger_json TEXT NOT NULL, \
          previous_epoch_id INTEGER)"
@@ -956,7 +957,7 @@ let decode_live_blob_references_json path =
               Result.map_error store_error_to_string res)))
 ;;
 
-let insert_epoch_and_atoms_in_tx db ~trigger ~anchor ~(archived : archived_atom list) =
+let insert_epoch_and_atoms_in_tx db ~frame ~trigger ~anchor ~(archived : archived_atom list) =
   let previous_epoch =
     if anchor.epoch_id > 1
     then Sqlite3.Data.INT (Int64.of_int (anchor.epoch_id - 1))
@@ -967,8 +968,8 @@ let insert_epoch_and_atoms_in_tx db ~trigger ~anchor ~(archived : archived_atom 
       db
       "insert_epoch"
       "INSERT INTO compaction_epochs \
-       (epoch_id, anchor_json, trigger_json, previous_epoch_id) \
-       VALUES (?1, ?2, ?3, ?4)"
+       (epoch_id, frame, anchor_json, trigger_json, previous_epoch_id) \
+       VALUES (?1, ?2, ?3, ?4, ?5)"
       (fun stmt ->
          let* () =
            bind_values
@@ -976,6 +977,7 @@ let insert_epoch_and_atoms_in_tx db ~trigger ~anchor ~(archived : archived_atom 
              "bind_epoch"
              stmt
              [ Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
+             ; Sqlite3.Data.TEXT (Keeper_compaction_atom.frame_to_string frame)
              ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (anchor_to_json anchor))
              ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (trigger_to_json trigger))
              ; previous_epoch
@@ -1067,6 +1069,36 @@ let latest_anchor_in_tx db =
   Ok (Option.map fst latest)
 ;;
 
+(* The coverage of the latest epoch committed over the same kind of list.
+   Names are counted inside one list, so coverage written over the other kind
+   would claim atoms this list holds differently or never held. *)
+let latest_coverage_in_frame_in_tx db ~frame =
+  let operation = "latest_coverage_in_frame" in
+  with_stmt
+    db
+    operation
+    "SELECT anchor_json FROM compaction_epochs WHERE frame = ?1 \
+     ORDER BY epoch_id DESC LIMIT 1"
+    (fun stmt ->
+       let* () =
+         bind_values
+           db
+           "bind_frame"
+           stmt
+           [ Sqlite3.Data.TEXT (Keeper_compaction_atom.frame_to_string frame) ]
+       in
+       let rc = Sqlite3.step stmt in
+       if rc = Sqlite3.Rc.ROW
+       then (
+         let* anchor =
+           decode_anchor_string ~context:operation (Sqlite3.column_text stmt 0)
+         in
+         Ok (Some anchor.coverage))
+       else if rc = Sqlite3.Rc.DONE
+       then Ok None
+       else Error (sqlite_err db operation rc))
+;;
+
 let compact_evicted_messages
       ?redact
       ?max_anchor_bytes
@@ -1075,6 +1107,7 @@ let compact_evicted_messages
       ~keepers_dir
       ~keeper_id
       ~trigger
+      ~frame
       ~messages
       ~(eviction : Keeper_compaction_atom.eviction)
       ()
@@ -1095,10 +1128,13 @@ let compact_evicted_messages
           ignore (exec_sql db "rollback_tx" "ROLLBACK;" : (unit, store_error) result)
         in
         let work () =
+          (* The latest epoch of either kind carries the summary on; only an
+             epoch over this kind of list says which atoms are archived. *)
           let* previous = latest_anchor_in_tx db in
+          let* previous_coverage = latest_coverage_in_frame_in_tx db ~frame in
           let* step =
             Keeper_compaction_atom.advance
-              ~previous:(Option.map (fun (a : compaction_anchor) -> a.coverage) previous)
+              ~previous:previous_coverage
               atoms
               eviction
             |> Result.map_error (fun detail -> Invalid_eviction detail)
@@ -1122,7 +1158,7 @@ let compact_evicted_messages
               |> redact_anchor effective_redact
               |> bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes:budget
             in
-            let* () = insert_epoch_and_atoms_in_tx db ~trigger ~anchor ~archived in
+            let* () = insert_epoch_and_atoms_in_tx db ~frame ~trigger ~anchor ~archived in
             let* () = exec_sql db "commit_tx" "COMMIT;" in
             Ok (Some anchor)
         in
@@ -1166,6 +1202,7 @@ let messages_after_anchor ~(anchor : compaction_anchor) messages =
 
 let live_history_after_latest_anchor ~keepers_dir ~keeper_id messages =
   match latest_anchor ~keepers_dir ~keeper_id with
-  | Ok (Some anchor) -> messages_after_anchor ~anchor messages
-  | Ok None | Error _ -> messages
+  | Ok (Some anchor) -> Ok (messages_after_anchor ~anchor messages)
+  | Ok None -> Ok messages
+  | Error err -> Error err
 ;;

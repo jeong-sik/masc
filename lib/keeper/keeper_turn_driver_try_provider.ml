@@ -1036,6 +1036,7 @@ let commit_compaction
          ~keepers_dir
          ~keeper_id:keeper_name
          ~trigger
+         ~frame:Keeper_compaction_atom.Message_history
          ~messages
          ~eviction
          ()

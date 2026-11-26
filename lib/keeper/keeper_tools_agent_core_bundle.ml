@@ -811,10 +811,20 @@ let make_tool_bundle_for_descriptors_with_policy
           let keepers_dir =
             Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
           in
-          Keeper_compaction.live_history_after_latest_anchor
-            ~keepers_dir
-            ~keeper_id:meta.name
-            surface.Keeper_tools_agent_core.history)
+          let history = surface.Keeper_tools_agent_core.history in
+          match
+            Keeper_compaction.live_history_after_latest_anchor
+              ~keepers_dir
+              ~keeper_id:meta.name
+              history
+          with
+          | Ok tail -> tail
+          | Error err ->
+            Log.Keeper.warn
+              ~keeper_name:meta.name
+              "compaction store unreadable; tools carry from the whole history: %s"
+              (Keeper_compaction.store_error_to_string err);
+            history)
       in
       Some (surface, receipts, history_carry_tail)
   in

@@ -104,8 +104,7 @@ let test_palette_registry () =
       | None -> ()
       | Some _ -> Alcotest.fail "other presets stay built-in");
       Alcotest.(check int) "of_preset uses override" 0x010203
-        (Theme.of_preset Theme.Midnight).surface_0)
-    ();
+        (Theme.of_preset Theme.Midnight).surface_0);
   Alcotest.(check int) "clear restores built-in" builtin.surface_0
     (Theme.of_preset Theme.Midnight).surface_0;
   (* of_palette with the built-in palette equals of_preset without overrides. *)
@@ -181,7 +180,6 @@ let test_load_overrides_files () =
       Alcotest.(check string) "default dir"
         "/tmp/ws/.masc/config/themes"
         (Theme_file.default_dir ~base_path:"/tmp/ws"))
-    ();
 
 let () =
   Alcotest.run "theme_file"

@@ -484,7 +484,7 @@ let overrides_mutex = Mutex.create ()
 
 let with_overrides_locked fn =
   Mutex.lock overrides_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock overrides_mutex) fn ()
+  Fun.protect ~finally:(fun () -> Mutex.unlock overrides_mutex) fn
 
 let set_palette_overrides overrides =
   with_overrides_locked (fun () ->

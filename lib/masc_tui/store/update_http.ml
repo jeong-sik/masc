@@ -392,14 +392,16 @@ let finish_fleet_sandboxes infra (m : Model.t) =
 
 (* The File inspector shows this Keeper workspace file. *)
 let file_peek_matches (m : Model.t) ~scope ~path =
-  match Model.active_inspector m, scope with
-  | Some (Nav.File_inspector peek), Wire_infra.Ws_keeper keeper ->
-      String.equal peek.keeper keeper && String.equal peek.path path
-  | ( Some
-        ( Nav.File_inspector _ | Nav.Verification_inspector _ | Nav.Tool_inspector _
-        | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ )
-    | None ),
-    _ ->
+  match Model.active_inspector m with
+  | Some (Nav.File_inspector peek) -> (
+      match scope with
+      | Wire_infra.Ws_keeper keeper ->
+          String.equal peek.keeper keeper && String.equal peek.path path
+      | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> false)
+  | Some
+      ( Nav.Verification_inspector _ | Nav.Tool_inspector _ | Nav.Skill_inspector _
+      | Nav.Exact_run_inspector _ )
+  | None ->
       false
 
 let apply_http_reply ~now (m : Model.t) reply =

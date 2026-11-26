@@ -12,7 +12,7 @@ function trace(decision: unknown, extraRows: Record<string, unknown>[] = []) {
     keeper_turn_id: target.absoluteTurn, event: 'turn_started', status: 'ok', decision }, ...extraRows]
   return parseKeeperRuntimeTrace({
     keeper: target.keeper, trace_id: target.traceId, turn_id: target.absoluteTurn,
-    manifest_total_rows: rows.length, manifest_total_rows_exact: true, manifest_returned_rows: rows.length,
+    manifest_total_rows_exact: true, manifest_returned_rows: rows.length,
     manifest_scan_diagnostics: {
       schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
       unsupported_event_count: 0, unsupported_event_counts: [], unsupported_event_unattributed_count: 0,
@@ -64,7 +64,6 @@ describe('exact turn intake', () => {
 
   it('uses the scan-wide start count when a previous attempt has left the returned page', () => {
     const page = trace({ intake_sources: [source] })
-    page.manifest_total_rows = 700
     page.runtime_lens.axes.lifecycle.turn_started_count = 2
     expect(page.manifest_rows.filter(row => row.event === 'turn_started')).toHaveLength(1)
     expect(decodeTurnFlow(page, target).intake).toEqual({ state: 'ambiguous', starts: 2 })
@@ -78,7 +77,6 @@ describe('exact turn intake', () => {
       expect(decodeTurnFlow(page, target).intake.state).toBe('unavailable')
     }
     const page = trace({ intake_sources: [source] })
-    page.manifest_total_rows = 700
     // A bounded page is sufficient when the complete scan establishes exactly
     // one start and that start is present. Other event rows may be omitted.
     expect(decodeTurnFlow(page, target).intake.state).toBe('observed')

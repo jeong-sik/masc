@@ -3895,9 +3895,9 @@ let render_runtime_trace_section grid ~(rect : Rect.t) ~(theme : Theme.t)
             ignore
               (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
                  ~max_w:content.w ~style:(Typography.structure ~bg theme)
-                 (Printf.sprintf "Turn: %s · Manifest: %d/%d · Receipts: %d%s"
-                    turn_s tr.manifest_returned_rows tr.manifest_total_rows
-                    tr.receipt_returned_rows stale_s));
+                 (Printf.sprintf "Turn: %s · Manifest: %d · Receipts: %d%s"
+                    turn_s tr.manifest_returned_rows tr.receipt_returned_rows
+                    stale_s));
             incr y
           end;
           if !y < bot then begin

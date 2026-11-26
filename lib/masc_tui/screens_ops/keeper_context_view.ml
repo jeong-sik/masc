@@ -769,8 +769,8 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ("  Outcomes unavailable: " ^ reason));
             if flow.events <> [] then begin
               push (Typography.whisper ~bg theme)
-                (Printf.sprintf "  Runtime trace events (%d/%d):"
-                   (List.length flow.events) flow.manifest_total_rows);
+                (Printf.sprintf "  Runtime trace events (%d):"
+                   (List.length flow.events));
               List.iter
                 (fun (ev : Wire_keeper_context.turn_flow_event) ->
                   let rt = Option.value ~default:"—" ev.runtime_id in

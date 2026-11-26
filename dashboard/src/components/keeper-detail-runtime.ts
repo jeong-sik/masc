@@ -30,7 +30,6 @@ import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
-import { formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type {
@@ -1311,7 +1310,6 @@ export function RuntimeLensSection({
           value=${trace.manifest_path_present ? 'present' : 'missing'}
           title=${trace.manifest_path}
         />
-        <${SignalRow} label="manifest rows" value=${formatRatioPair({ numerator: trace.manifest_returned_rows, denominator: trace.manifest_total_rows })} />
         <${SignalRow}
           label="manifest diagnostics"
           value=${runtimeManifestDiagnosticsValue(trace)}

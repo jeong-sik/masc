@@ -304,7 +304,6 @@ describe('RuntimeLensSection', () => {
       turn_id: 7,
       manifest_path: '/tmp/runtime-manifest.jsonl',
       manifest_path_present: true,
-      manifest_total_rows: 6,
       manifest_returned_rows: 6,
       receipt_returned_rows: 1,
       manifest_scan_diagnostics: {
@@ -342,7 +341,6 @@ describe('RuntimeLensSection', () => {
           max_agent_core_turn_count: 3,
           terminal_event_present: true,
           terminal_event: 'turn_finished',
-          manifest_total_rows: 6,
         },
         axes: {
           lifecycle: {
@@ -592,8 +590,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
     expect(screen.getByText('trace id')).toBeInTheDocument()
     expect(screen.getByText('trace-lens')).toBeInTheDocument()
-    expect(screen.getByText('manifest rows')).toBeInTheDocument()
-    expect(screen.getByText('6/6')).toBeInTheDocument()
     expect(screen.getByText('manifest diagnostics')).toBeInTheDocument()
     expect(screen.getByText('clean')).toBeInTheDocument()
     expect(screen.getByText('receipt rows')).toBeInTheDocument()

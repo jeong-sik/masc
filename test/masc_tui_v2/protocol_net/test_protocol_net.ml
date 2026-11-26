@@ -5378,7 +5378,7 @@ let test_wave3_live_wire_codecs () =
   let rtrace =
     expect_ok "decode_runtime_trace"
       (Wire_infra.decode_runtime_trace
-         (parse_json {|{ "keeper": "alpha", "trace_id": "tr-9", "turn_id": 42, "health": "healthy", "manifest_total_rows": 5, "manifest_returned_rows": 5, "receipt_returned_rows": 2 }|}))
+         (parse_json {|{ "keeper": "alpha", "trace_id": "tr-9", "turn_id": 42, "health": "healthy", "manifest_returned_rows": 5, "receipt_returned_rows": 2 }|}))
   in
   Alcotest.(check string) "runtime trace id" "tr-9" rtrace.trace_id;
   Alcotest.(check string) "keeper metrics path has NO ?limit="
@@ -6137,7 +6137,6 @@ let test_wave4_layer1_wire_codecs () =
               "keeper": "alpha",
               "trace_id": "tr-1",
               "turn_id": 4,
-              "manifest_total_rows": 2,
               "manifest_total_rows_exact": true,
               "manifest_scan_diagnostics": {
                 "schema": "keeper.runtime_manifest_scan_diagnostics.v1",

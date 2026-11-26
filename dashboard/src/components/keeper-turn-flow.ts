@@ -290,7 +290,7 @@ export function KeeperTurnFlow({ record, toolEntries, toolCallError, onMessages,
       <section aria-label="런타임 선택과 진행">
         <h4>런타임 선택과 진행</h4>
         ${flowState.data && html`
-          <p class="rt-note">반환 ${flowState.data.trace.manifest_returned_rows}행 / 관측 ${flowState.data.trace.manifest_total_rows}행 · ${flowState.data.trace.health}</p>
+          <p class="rt-note">반환 ${flowState.data.trace.manifest_returned_rows}행 · ${flowState.data.trace.health}</p>
           ${flowState.data.trace.manifest_scan_diagnostics.state === 'unavailable'
             ? html`<p class="rt-note">기록 검사 상태 미확인: ${flowState.data.trace.manifest_scan_diagnostics.error}</p>`
             : html`<p class="rt-note">지원하지 않는 행 ${flowState.data.trace.manifest_scan_diagnostics.unsupported_event_count}개 · 손상 행 ${flowState.data.trace.manifest_scan_diagnostics.invalid_manifest_row_count + flowState.data.trace.manifest_scan_diagnostics.invalid_json_row_count}개</p>`}

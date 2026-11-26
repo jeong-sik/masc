@@ -55,7 +55,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ("terminal_event_present", `Bool terminal_event_present);
             ( "terminal_event",
               if terminal_event_present then `String "turn_finished" else `Null );
-            ("manifest_total_rows", `Int scan.total_rows);
           ] );
       ( "axes",
         `Assoc

@@ -71,7 +71,6 @@ export interface KeeperRuntimeLensTurnClock {
   max_agent_core_turn_count: number | null
   terminal_event_present: boolean
   terminal_event: string | null
-  manifest_total_rows: number
 }
 
 export interface KeeperRuntimeLensLifecycleAxis {
@@ -233,7 +232,6 @@ export interface KeeperRuntimeTraceResponse {
   turn_id: number | null
   manifest_path: string
   manifest_path_present: boolean
-  manifest_total_rows: number
   /** Whether the scan reached the beginning of the retained manifest.
    * Missing/null is unknown, never evidence of a complete scan. */
   manifest_total_rows_exact?: boolean | null
@@ -442,7 +440,6 @@ function parseRuntimeLensTurnClock(raw: unknown, fallbackTraceId: string): Keepe
     max_agent_core_turn_count: nullableNumberField(obj, 'max_agent_core_turn_count'),
     terminal_event_present: obj.terminal_event_present === true,
     terminal_event: nullableStringField(obj, 'terminal_event'),
-    manifest_total_rows: numberField(obj, 'manifest_total_rows'),
   }
 }
 
@@ -664,7 +661,6 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     turn_id: nullableNumberField(raw, 'turn_id'),
     manifest_path: stringField(raw, 'manifest_path'),
     manifest_path_present: raw.manifest_path_present === true,
-    manifest_total_rows: numberField(raw, 'manifest_total_rows'),
     manifest_total_rows_exact: nullableBooleanField(raw, 'manifest_total_rows_exact'),
     manifest_returned_rows: numberField(raw, 'manifest_returned_rows'),
     receipt_returned_rows: numberField(raw, 'receipt_returned_rows'),

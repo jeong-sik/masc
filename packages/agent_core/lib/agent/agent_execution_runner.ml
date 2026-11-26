@@ -305,6 +305,16 @@ let settle_success_after_run ?host_stop scope on_terminal_disposition value =
     abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace
 ;;
 
+let abort_error_after_run ?host_stop scope on_terminal_disposition detailed =
+  match
+    Eio.Cancel.protect (fun () -> abort_error scope on_terminal_disposition detailed)
+  with
+  | result -> result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace
+;;
+
 let with_scope ?on_terminal_disposition ?host_stop ~event_bus scope run =
   let observer=match Execution_context.bus_observer () with
     | Some observer when observer.owns_journal scope -> observer
@@ -315,7 +325,7 @@ let with_scope ?on_terminal_disposition ?host_stop ~event_bus scope run =
     Execution_context.with_agent_scope scope (fun () ->
       match (let result=run () in observer.flush ();result) with
       | Ok value -> settle_success_after_run ?host_stop scope on_terminal_disposition value
-      | Error detailed -> abort_error scope on_terminal_disposition detailed
+      | Error detailed -> abort_error_after_run ?host_stop scope on_terminal_disposition detailed
       | exception exn ->
         let backtrace = Printexc.get_raw_backtrace () in
         abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace))

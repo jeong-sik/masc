@@ -385,23 +385,33 @@ let start_periodic_callbacks ~sw ?clock (cbs : periodic_callback list) =
     let stops =
       List.map
         (fun cb ->
-           let active = ref true in
+           let stop_p, stop_r = Eio.Promise.create () in
            Eio.Fiber.fork ~sw (fun () ->
              let rec tick () =
-               if !active
+               if not (Eio.Promise.is_resolved stop_p)
                then (
-                 Eio.Time.sleep clock cb.interval_sec;
-                 if !active
-                 then (
-                   try cb.callback () with
-                   | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
-                     as ex -> raise ex
-                   | exn ->
-                     Log.warn
-                       _log
-                       "periodic callback raised"
-                       [ Log.S ("error", Printexc.to_string exn) ]);
-                 tick ())
+                 match
+                   Eio.Fiber.first
+                     (fun () ->
+                        Eio.Time.sleep clock cb.interval_sec;
+                        `Tick)
+                     (fun () ->
+                        Eio.Promise.await stop_p;
+                        `Stopped)
+                 with
+                 | `Stopped -> ()
+                 | `Tick ->
+                   if not (Eio.Promise.is_resolved stop_p)
+                   then (
+                     try cb.callback () with
+                     | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
+                       as ex -> raise ex
+                     | exn ->
+                       Log.warn
+                         _log
+                         "periodic callback raised"
+                         [ Log.S ("error", Printexc.to_string exn) ]);
+                   tick ())
              in
              try tick () with
              | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as ex
@@ -411,7 +421,8 @@ let start_periodic_callbacks ~sw ?clock (cbs : periodic_callback list) =
                  _log
                  "periodic tick crashed"
                  [ Log.S ("error", Printexc.to_string exn) ]);
-           fun () -> active := false)
+           fun () ->
+             if not (Eio.Promise.is_resolved stop_p) then Eio.Promise.resolve stop_r ())
         cbs
     in
     fun () -> List.iter (fun stop -> stop ()) stops
@@ -937,6 +948,7 @@ module Advanced = struct
     =
     let yield_enabled = agent.state.config.yield_on_tool in
     let run_start = Unix.gettimeofday () in
+    let tool_rounds = ref 0 in
     let rec loop lease =
       let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
       let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
@@ -972,15 +984,29 @@ module Advanced = struct
             ~stop:(Types.stop_reason_to_string response.stop_reason);
           Ok (Completed { response; provider_turn_ordinal = turn_index })
         | Ok (`ToolsExecuted checkpoint_stage) ->
-          log_turn
+          incr tool_rounds;
+          log_tool_round
             ~run_start
             ~turn_start
             ~turn_index
             ~model:agent.state.config.model
-            ~stop:"tools_executed";
+            ~rounds:!tool_rounds
+            ~ceiling:agent.state.config.max_tool_rounds;
           let boundary = completed_tool_boundary agent checkpoint_stage in
           (match on_tool_boundary boundary with
-           | Continue -> loop (release.after ())
+           | Continue ->
+             (match agent.state.config.max_tool_rounds with
+              | Some limit when !tool_rounds >= limit ->
+                log_tool_round_ceiling_reached
+                  ~turn_index
+                  ~model:agent.state.config.model
+                  ~rounds:!tool_rounds
+                  ~limit;
+                Error
+                  (detailed_error_of_core_error
+                     (Error.Agent
+                        (Error.ToolRoundLimitExceeded { rounds = !tool_rounds; limit })))
+              | Some _ | None -> loop (release.after ()))
            | Yield ->
              let checkpoint = checkpoint agent in
              Ok

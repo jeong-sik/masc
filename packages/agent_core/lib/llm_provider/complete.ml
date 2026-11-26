@@ -11,6 +11,8 @@ open Complete_common
 open Complete_sync
 open Complete_stream
 
+let stream_metrics_owned_by_caller : bool Eio.Fiber.key = Eio.Fiber.create_key ()
+
 type latency_counter = Complete_common.latency_counter
 type prepared_request = Prepared_completion_request.t
 type serialized_request = Prepared_completion_request.serialized
@@ -578,8 +580,7 @@ let complete_prepared_stream
   | Ok admission_window ->
     let on_event = emit_stream_event on_event in
     let request_config = config in
-    let latency_counter = start_latency_counter ?clock () in
-    let metrics_opt = metrics in
+    let latency_counter_ref = ref None in
     let metrics = Option.value metrics ~default:(Metrics.get_global ()) in
     let on_telemetry_with_metrics evt =
       record_streaming_metrics metrics evt;
@@ -587,11 +588,7 @@ let complete_prepared_stream
       | Some f -> f evt
       | None -> ()
     in
-    let transport_on_telemetry =
-      match metrics_opt, on_telemetry with
-      | None, None -> None
-      | Some _, _ | None, Some _ -> Some on_telemetry_with_metrics
-    in
+    let transport_on_telemetry = Some on_telemetry_with_metrics in
     let emit_wire_observer_failure failure =
       let event = Telemetry_event.Wire_observer_failure failure in
       try
@@ -645,12 +642,15 @@ let complete_prepared_stream
        observed; a CLI transport ignores the field and stays silent. *)
     let request = { request with observe_http_status = Some metrics.on_http_status } in
     let dispatch () =
+      let latency_counter = start_latency_counter ?clock () in
+      latency_counter_ref := Some latency_counter;
       match transport with
       | Some t ->
-        t.invoke_stream
-          ?on_telemetry:transport_on_telemetry
-          ~on_event
-          { request with admitted_http_body = admitted_body }
+        Eio.Fiber.with_binding stream_metrics_owned_by_caller true (fun () ->
+          t.invoke_stream
+            ?on_telemetry:transport_on_telemetry
+            ~on_event
+            { request with admitted_http_body = admitted_body })
       | None ->
         complete_stream_http
           ~sw
@@ -722,7 +722,11 @@ let complete_prepared_stream
     Completion_outcome.map_result (fun result ->
     Result.map
       (fun resp ->
-         let latency_ms = latency_ms_int latency_counter in
+         let latency_ms =
+           match !latency_counter_ref with
+           | Some counter -> latency_ms_int counter
+           | None -> None
+         in
          let resp = Pricing.annotate_response_cost ~source:(Provider_config.pricing_source config) resp in
          let existing_telemetry = resp.telemetry in
          let ttfrc_ms = Option.bind existing_telemetry (fun t -> t.ttfrc_ms) in
@@ -902,6 +906,11 @@ let make_http_transport
                { Llm_transport.response; latency_ms }))
   ; invoke_stream =
       (fun ?on_telemetry ~on_event (req : Llm_transport.completion_request) ->
+        let metrics =
+          match Eio.Fiber.get stream_metrics_owned_by_caller with
+          | Some true -> Metrics.noop
+          | Some false | None -> Metrics.get_global ()
+        in
         complete_stream_http
           ~sw
           ~net
@@ -916,6 +925,7 @@ let make_http_transport
           ?admitted_body:(Llm_transport.admitted_http_body_of_request req)
           ?connection_cache
           ?latency_counter
+          ~metrics
           ~config:req.config
           ~messages:req.messages
           ~tools:req.tools

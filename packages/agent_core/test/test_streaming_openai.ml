@@ -2435,6 +2435,67 @@ let test_reported_prelude_is_request_local () =
   Alcotest.(check bool) "terminal sentinel closed the prelude window" true (later=[])
 ;;
 
+let test_responses_stream_failed_reads_nested_response_error () =
+  let state =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  let events, _ =
+    S.responses_sse_to_events
+      state
+      (Some "response.failed")
+      {|{"type":"response.failed","response":{"id":"resp_fail","status":"failed","error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.5"}}}|}
+  in
+  match events with
+  | [ SSEError { message; error_type; _ } ] ->
+    Alcotest.(check string)
+      "nested response.failed error message"
+      "Rate limit reached for gpt-5.5"
+      message;
+    Alcotest.(check (option string))
+      "nested response.failed error code"
+      (Some "rate_limit_exceeded")
+      error_type
+  | _ -> Alcotest.fail "expected SSEError with nested response.error"
+;;
+
+let test_ollama_stop_reason_tracks_prior_chunk_tool_blocks () =
+  let state = S.create_openai_stream_state ~provider:"ollama" ~model:"qwen3" () in
+  let tc : OL.ollama_tool_call_delta =
+    { oll_tc_index = 0
+    ; oll_tc_id = Some "call_1"
+    ; oll_tc_name = Some "lookup"
+    ; oll_tc_arguments = Some (OW.Args_complete {|{"q":"a"}|})
+    }
+  in
+  let chunk1 : OL.ollama_chunk =
+    { oll_model = "qwen3"
+    ; oll_delta_content = None
+    ; oll_delta_thinking = None
+    ; oll_tool_calls = [ tc ]
+    ; oll_is_done = false
+    ; oll_done_reason = None
+    ; oll_usage = None
+    ; oll_timings = None
+    }
+  in
+  let chunk2 : OL.ollama_chunk =
+    { chunk1 with oll_tool_calls = []; oll_is_done = true; oll_done_reason = Some "stop" }
+  in
+  ignore (S.ollama_chunk_to_events state chunk1);
+  let done_events, _ = S.ollama_chunk_to_events state chunk2 in
+  let has_tool_use_stop =
+    List.exists
+      (function
+        | MessageDelta { stop_reason = Some StopToolUse; _ } -> true
+        | _ -> false)
+      done_events
+  in
+  Alcotest.(check bool)
+    "done chunk after prior-chunk tool call emits StopToolUse"
+    true
+    has_tool_use_stop
+;;
+
 (* mistral-large-4 streams the whole answer inside list-shaped
    delta.content: thinking fragments as thinking chunks (some with a
    "closed" marker, one without) and the visible text in the final chunk
@@ -2680,6 +2741,10 @@ let () =
             "uncovered content fails closed"
             `Quick
             test_responses_stream_uncovered_content_fails_closed
+        ; test_case
+            "response.failed reads nested response.error"
+            `Quick
+            test_responses_stream_failed_reads_nested_response_error
         ] )
     ; ( "tool_args_failclosed"
       , [ test_case
@@ -2708,6 +2773,10 @@ let () =
             "id-less complete calls stay distinct across chunks"
             `Quick
             test_ollama_idless_complete_calls_are_distinct_across_chunks
+        ; test_case
+            "done chunk stop_reason sees tool calls from earlier chunk"
+            `Quick
+            test_ollama_stop_reason_tracks_prior_chunk_tool_blocks
         ] )
     ; ( "mistral_chunk_list_stream"
       , [ test_case

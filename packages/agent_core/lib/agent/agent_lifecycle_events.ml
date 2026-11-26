@@ -126,12 +126,13 @@ let with_run_lifecycle_events
        downstream classifier free-form text instead of a variant. The re-raise
        below is unchanged, so this never absorbs a cancellation. *)
     let error = Error.of_raised_exn exn in
-    publish_finished
-      ~event_bus
-      ~agent_name
-      ~started
-      ~current_run_id:(current_run_id ())
-      ~outcome:(Failed error)
-      ~elapsed:(Unix.gettimeofday () -. started_at);
+    Eio.Cancel.protect (fun () ->
+      publish_finished
+        ~event_bus
+        ~agent_name
+        ~started
+        ~current_run_id:(current_run_id ())
+        ~outcome:(Failed error)
+        ~elapsed:(Unix.gettimeofday () -. started_at));
     Printexc.raise_with_backtrace exn backtrace
 ;;

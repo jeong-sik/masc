@@ -436,6 +436,32 @@ let test_periodic_callback_failure_is_structured_log () =
     (has_log_message "periodic callback raised" (get_records ()))
 ;;
 
+let test_run_returns_immediately_without_waiting_periodic_interval () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let calls = Atomic.make 0 in
+  let callback : Agent.periodic_callback =
+    { interval_sec = 30.0; callback = (fun () -> Atomic.incr calls) }
+  in
+  let transport = make_transport ~clock ~sleep_s:0.005 () in
+  let agent =
+    make_agent ~net:(Eio.Stdenv.net env) ~transport ~periodic_callbacks:[ callback ] ()
+  in
+  let started = Unix.gettimeofday () in
+  (match Agent.run ~sw ~clock agent "fast" with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail ("expected success: " ^ Error.to_string err));
+  let elapsed = Unix.gettimeofday () -. started in
+  Alcotest.(check bool)
+    "normal run completion must not sleep for periodic interval_sec"
+    true
+    (elapsed < 2.0);
+  Alcotest.(check int) "long-interval callback never fired" 0 (Atomic.get calls)
+;;
+
 let () =
   Alcotest.run
     "Agent periodic callback cleanup"
@@ -444,6 +470,10 @@ let () =
             "run stops callbacks after success"
             `Quick
             test_run_stops_periodic_callbacks_after_success
+        ; Alcotest.test_case
+            "run returns promptly without waiting periodic interval"
+            `Quick
+            test_run_returns_immediately_without_waiting_periodic_interval
         ; Alcotest.test_case
             "run stops callbacks after cancellation"
             `Quick

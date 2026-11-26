@@ -1204,6 +1204,13 @@ let execute_scheduled_tool
       | None -> ());
     dispatch
   in
+  let started_observed = ref false in
+  let observe_started_once ~tool_name ~input =
+    if not !started_observed
+    then (
+      started_observed := true;
+      observe_before_completion (fun () -> observe_started ~tool_name ~input))
+  in
   let execute_durable durable_invocation =
     let phased =
       try
@@ -1211,7 +1218,7 @@ let execute_scheduled_tool
           durable_invocation
           ~invoke:(fun ~start_child ~tool_name ~input ->
             Execution_context.flush_bus_observations ();
-            observe_before_completion (fun () -> observe_started ~tool_name ~input);
+            observe_started_once ~tool_name ~input;
             Execution_context.with_child_scope_factory start_child (fun () ->
               let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
               ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
@@ -1335,6 +1342,7 @@ let execute_scheduled_tool
        | Ok Execution_agent_scope.Invocation_unattempted ->
          settle_gate ~settle_blocked:(settle_existing_block durable) (fun () ->
            require_preparation ();
+           observe_started_once ~tool_name:name ~input;
            execute_existing ())
        | Ok Execution_agent_scope.Invocation_attempted_or_settled -> execute_existing ())
     | Ok None ->
@@ -1367,6 +1375,7 @@ let execute_scheduled_tool
       in
       settle_gate execute_admitted
   with
+  | Abort_tool_dispatch -> outcome ()
   | Hook_observer_raised (exception_, backtrace) ->
     record_caught_exception exception_ backtrace;
     outcome ()

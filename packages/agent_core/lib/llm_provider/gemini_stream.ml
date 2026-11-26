@@ -275,7 +275,10 @@ let gemini_chunk_to_events_impl
    | Some (Gemini_wire.Gemini_prompt_block_reason _) ->
      emit (MessageDelta { stop_reason = Some Refusal; usage = delta_usage });
      emit MessageStop
-   | None -> ());
+   | None ->
+     Option.iter
+       (fun u -> emit (MessageDelta { stop_reason = None; usage = Some u }))
+       delta_usage);
   List.rev !events, !telemetry_event
 ;;
 

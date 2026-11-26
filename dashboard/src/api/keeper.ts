@@ -141,6 +141,7 @@ export type {
   KeeperRuntimeLensContextAxis,
   KeeperRuntimeLensAxes,
   KeeperRuntimeLensLaneEvent,
+  KeeperRuntimeLensLaneCompletenessReading,
   KeeperRuntimeLensLane,
   KeeperRuntimeLensSwimlanes,
   KeeperRuntimeLensGap,

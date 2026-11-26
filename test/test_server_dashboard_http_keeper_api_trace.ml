@@ -349,6 +349,7 @@ let test_tool_runtime_zero_event_lane_is_not_observed () =
     Runtime_lens_swimlane.runtime_lens_swimlane_json
       scan
       []
+      ~checkpoint_owner:None
       ~lane:"tool_runtime"
       ~label:"Tool Runtime"
       ~events:[]
@@ -443,7 +444,8 @@ let test_history_projection_preserves_context_diagnostics () =
   check int "projection event remains observable" 1
     (Hashtbl.find scan.event_counts "history_projection_observed");
   let projection_only = scan_of_events [Keeper_runtime_manifest.History_projection_observed] in
-  let lane = Runtime_lens_swimlane.runtime_lens_agent_core_swimlane_json projection_only [] in
+  let lane = Runtime_lens_swimlane.runtime_lens_agent_core_swimlane_json projection_only []
+    ~checkpoint_owner:None in
   check int "actual lane includes projection observation" 1
     Yojson.Safe.Util.(lane |> member "event_count" |> to_int);
   check string "projection alone is not an empty lane" "projection_observed"
@@ -459,7 +461,7 @@ let test_runtime_lane_asserts_dispatch_closure () =
     string
     "a dispatch that never terminated is not complete"
     "mandatory_present"
-    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness ~checkpoint_owner:None
        routed_only
        "masc_policy_runtime");
   let closed = scan_of_events [ Runtime_routed; Runtime_completed ] in
@@ -467,7 +469,7 @@ let test_runtime_lane_asserts_dispatch_closure () =
     string
     "a dispatch closed by runtime_completed is complete"
     "complete"
-    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness ~checkpoint_owner:None
        closed
        "masc_policy_runtime");
   let failed = scan_of_events [ Runtime_routed; Runtime_failed ] in
@@ -475,7 +477,7 @@ let test_runtime_lane_asserts_dispatch_closure () =
     string
     "a dispatch closed by runtime_failed is complete"
     "complete"
-    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness
+    (Runtime_lens_swimlane.runtime_lens_swimlane_completeness ~checkpoint_owner:None
        failed
        "masc_policy_runtime")
 ;;
@@ -488,6 +490,197 @@ let test_no_lane_policy_names_a_retired_provider_lane () =
     (List.map
        (fun policy -> policy.Runtime_lens_swimlane.lane)
        Runtime_lens_swimlane.lane_policies)
+;;
+
+(* #33058, folded into #32971: checkpoint_saved has one producer, the
+   AGENT_CORE finalize path. It saves on Masc_agent_core and never on an
+   official client, which keeps its own session. Every finished
+   official-client turn used to report turn_terminal_incomplete on both
+   checkpoint lanes. The save is owed only by a turn AGENT_CORE ran. The
+   other memory obligations stay owed by every turn. *)
+let agent_core_runtime_id = "glm-coding.glm-5.3-flash"
+let official_client_runtime_id = "claude_code_f2458adc.claude-sonnet-5-5_15df9d6b"
+
+(* The events one official-client turn of the live store wrote before
+   turn_finished (2026-11-26), each once. An AGENT_CORE turn writes the same
+   events and adds checkpoint_saved. *)
+let rows_before_save =
+  Keeper_runtime_manifest.
+    [ Turn_started
+    ; Phase_gate_decided
+    ; Runtime_routed
+    ; Runtime_execution_built
+    ; Checkpoint_loaded
+    ; Context_injected
+    ; Runtime_completed
+    ; Receipt_appended
+    ]
+;;
+
+let finished_turn_scan ~runtime_id events =
+  List.fold_left
+    Runtime_lens_scan.update_runtime_manifest_scan
+    (Runtime_lens_scan.make_runtime_manifest_scan
+       ~path:"/tmp/swimlane-fixture.jsonl"
+       ~limit:64
+       ~scan_line_limit:64
+       ~scan_scope:"test")
+    (List.map (fun event -> manifest_row ~event) events
+     @ [ { (manifest_row ~event:Keeper_runtime_manifest.Turn_finished) with
+           Keeper_runtime_manifest.runtime_id = Some runtime_id
+         }
+       ])
+;;
+
+let terminal_incomplete_detail ~checkpoint_owner scan =
+  Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
+    ~terminal_event_present:true
+    ~config_drift:(`Assoc [])
+    ~checkpoint_owner
+    scan
+  |> List.find_map (fun (gap : Runtime_lens_swimlane.runtime_lens_gap) ->
+    if String.equal gap.Runtime_lens_swimlane.code "turn_terminal_incomplete"
+    then Some gap.Runtime_lens_swimlane.detail
+    else None)
+;;
+
+let lane_verdict ~checkpoint_owner scan lane =
+  Runtime_lens_swimlane.runtime_lens_swimlane_completeness ~checkpoint_owner scan lane
+;;
+
+let missing_save_on_both_lanes =
+  Some (Some "agent_core_agent: checkpoint_saved; memory_context: checkpoint_saved")
+;;
+
+let test_agent_core_turn_without_checkpoint_saved_still_warns () =
+  let checkpoint_owner = Some Runtime_execution.Masc_agent_core in
+  let scan = finished_turn_scan ~runtime_id:agent_core_runtime_id rows_before_save in
+  check
+    (option (option string))
+    "the missing save is reported on both lanes"
+    missing_save_on_both_lanes
+    (terminal_incomplete_detail ~checkpoint_owner scan);
+  check string "agent core lane" "incomplete"
+    (lane_verdict ~checkpoint_owner scan "agent_core_agent");
+  check string "memory lane" "incomplete"
+    (lane_verdict ~checkpoint_owner scan "memory_context")
+;;
+
+let test_official_client_turn_does_not_owe_checkpoint_saved () =
+  let checkpoint_owner = Some Runtime_execution.Official_client in
+  let scan = finished_turn_scan ~runtime_id:official_client_runtime_id rows_before_save in
+  check
+    (option (option string))
+    "no terminal-incomplete gap"
+    None
+    (terminal_incomplete_detail ~checkpoint_owner scan);
+  check string "agent core lane is not applicable" "not_applicable"
+    (lane_verdict ~checkpoint_owner scan "agent_core_agent");
+  check string "the rendered agent core lane is not applicable" "not_applicable"
+    (string_member
+       "completeness"
+       (Runtime_lens_swimlane.runtime_lens_agent_core_swimlane_json scan []
+          ~checkpoint_owner));
+  check string "memory lane holds the context and the load it owes" "complete"
+    (lane_verdict ~checkpoint_owner scan "memory_context");
+  let without_load =
+    finished_turn_scan
+      ~runtime_id:official_client_runtime_id
+      Keeper_runtime_manifest.
+        [ Turn_started
+        ; Phase_gate_decided
+        ; Runtime_routed
+        ; Runtime_execution_built
+        ; Context_injected
+        ; Runtime_completed
+        ; Receipt_appended
+        ]
+  in
+  check
+    (option (option string))
+    "a missing load is still reported"
+    (Some (Some "memory_context: checkpoint_loaded"))
+    (terminal_incomplete_detail ~checkpoint_owner without_load);
+  check string "memory lane without the load" "incomplete"
+    (lane_verdict ~checkpoint_owner without_load "memory_context")
+;;
+
+let test_unknown_turn_owner_keeps_checkpoint_saved_owed () =
+  let scan = finished_turn_scan ~runtime_id:official_client_runtime_id rows_before_save in
+  check
+    (option (option string))
+    "an owner the catalog cannot name keeps the save owed"
+    missing_save_on_both_lanes
+    (terminal_incomplete_detail ~checkpoint_owner:None scan);
+  check string "agent core lane" "incomplete"
+    (lane_verdict ~checkpoint_owner:None scan "agent_core_agent")
+;;
+
+let test_agent_core_turn_with_checkpoint_saved_is_complete () =
+  let checkpoint_owner = Some Runtime_execution.Masc_agent_core in
+  let scan =
+    finished_turn_scan
+      ~runtime_id:agent_core_runtime_id
+      (rows_before_save @ [ Keeper_runtime_manifest.Checkpoint_saved ])
+  in
+  check
+    (option (option string))
+    "no terminal-incomplete gap"
+    None
+    (terminal_incomplete_detail ~checkpoint_owner scan);
+  check string "agent core lane" "complete"
+    (lane_verdict ~checkpoint_owner scan "agent_core_agent");
+  check string "memory lane" "complete"
+    (lane_verdict ~checkpoint_owner scan "memory_context")
+;;
+
+let checkpoint_owner_testable =
+  testable
+    (fun ppf owner ->
+       Format.pp_print_string
+         ppf
+         (match owner with
+          | Runtime_execution.Masc_agent_core -> "masc_agent_core"
+          | Runtime_execution.Official_client -> "official_client"))
+    ( = )
+;;
+
+let test_turn_owner_is_read_from_the_finished_row () =
+  let catalog runtime_id =
+    if String.equal runtime_id agent_core_runtime_id
+    then Some Runtime_execution.Masc_agent_core
+    else if String.equal runtime_id official_client_runtime_id
+    then Some Runtime_execution.Official_client
+    else None
+  in
+  let owner scan =
+    Runtime_lens_swimlane.turn_checkpoint_owner
+      ~checkpoint_owner_of_runtime_id:catalog
+      scan
+  in
+  check
+    (option checkpoint_owner_testable)
+    "official-client turn"
+    (Some Runtime_execution.Official_client)
+    (owner (finished_turn_scan ~runtime_id:official_client_runtime_id rows_before_save));
+  check
+    (option checkpoint_owner_testable)
+    "agent core turn"
+    (Some Runtime_execution.Masc_agent_core)
+    (owner (finished_turn_scan ~runtime_id:agent_core_runtime_id rows_before_save));
+  check
+    (option checkpoint_owner_testable)
+    "a turn still running has no owner yet"
+    None
+    (owner (scan_of_events rows_before_save));
+  check
+    (option checkpoint_owner_testable)
+    "an errored turn that names its lane has no catalog owner"
+    None
+    (owner
+       (finished_turn_scan
+          ~runtime_id:"sonnet-medium-then-glm-then-api"
+          rows_before_save))
 ;;
 
 let make_checkpoint_inventory_meta ~name ~trace_id =
@@ -1794,6 +1987,26 @@ let () =
             "no lane policy names the retired provider lane"
             `Quick
             test_no_lane_policy_names_a_retired_provider_lane
+        ; test_case
+            "an agent core turn without checkpoint_saved still warns"
+            `Quick
+            test_agent_core_turn_without_checkpoint_saved_still_warns
+        ; test_case
+            "an official-client turn does not owe checkpoint_saved"
+            `Quick
+            test_official_client_turn_does_not_owe_checkpoint_saved
+        ; test_case
+            "an unknown turn owner keeps checkpoint_saved owed"
+            `Quick
+            test_unknown_turn_owner_keeps_checkpoint_saved_owed
+        ; test_case
+            "an agent core turn with checkpoint_saved is complete"
+            `Quick
+            test_agent_core_turn_with_checkpoint_saved_is_complete
+        ; test_case
+            "the turn owner is read from the finished row"
+            `Quick
+            test_turn_owner_is_read_from_the_finished_row
         ] )
     ; ( "history_projection_context_diagnostics"
       , [ test_case "projection preserves injected context" `Quick

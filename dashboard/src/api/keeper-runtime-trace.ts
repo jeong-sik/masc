@@ -131,12 +131,34 @@ export interface KeeperRuntimeLensLaneEvent {
   count: number
 }
 
+const KEEPER_RUNTIME_LENS_LANE_COMPLETENESS = [
+  'complete',
+  'finished',
+  'mandatory_present',
+  'incomplete',
+  'not_observed',
+  'not_applicable',
+] as const
+
+/** The lane verdict the server computes in
+ *  server_dashboard_http_keeper_runtime_lens_swimlane.ml.
+ *  `not_applicable` means the turn owes none of the lane's events: an
+ *  official-client turn never owes the AGENT_CORE checkpoint save. */
+export type KeeperRuntimeLensLaneCompleteness =
+  typeof KEEPER_RUNTIME_LENS_LANE_COMPLETENESS[number]
+
+/** A value outside the known verdicts is kept as `rejected` with what the
+ *  server sent, never read as one of the known verdicts. */
+export type KeeperRuntimeLensLaneCompletenessReading =
+  | { readonly state: 'reported'; readonly value: KeeperRuntimeLensLaneCompleteness }
+  | { readonly state: 'rejected'; readonly raw: string | null }
+
 export interface KeeperRuntimeLensLane {
   lane: string
   label: string
   event_count: number
   terminal_status: string
-  completeness: string
+  completeness: KeeperRuntimeLensLaneCompletenessReading
   gap_codes: string[]
   gap_badge: string | null
   events: KeeperRuntimeLensLaneEvent[]
@@ -539,6 +561,12 @@ function parseRuntimeLensLaneEvent(raw: unknown): KeeperRuntimeLensLaneEvent {
   }
 }
 
+function parseRuntimeLensLaneCompleteness(raw: unknown): KeeperRuntimeLensLaneCompletenessReading {
+  if (typeof raw !== 'string') return { state: 'rejected', raw: null }
+  const value = KEEPER_RUNTIME_LENS_LANE_COMPLETENESS.find(known => known === raw)
+  return value === undefined ? { state: 'rejected', raw } : { state: 'reported', value }
+}
+
 function parseRuntimeLensLane(raw: unknown, lane: string, label: string): KeeperRuntimeLensLane {
   const obj = isRecord(raw) ? raw : {}
   const events = Array.isArray(obj.events)
@@ -549,7 +577,7 @@ function parseRuntimeLensLane(raw: unknown, lane: string, label: string): Keeper
     label: stringField(obj, 'label') || label,
     event_count: numberField(obj, 'event_count'),
     terminal_status: stringField(obj, 'terminal_status') || 'unknown',
-    completeness: stringField(obj, 'completeness') || 'unknown',
+    completeness: parseRuntimeLensLaneCompleteness(obj.completeness),
     gap_codes: stringListField(obj, 'gap_codes'),
     gap_badge: nullableStringField(obj, 'gap_badge'),
     events,

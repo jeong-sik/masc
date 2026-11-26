@@ -6,6 +6,15 @@ module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
+(* The owner of the runtime's resumable state, from its execution kind in the
+   running catalog. The turn driver reads the same
+   [Runtime_execution.checkpoint_owner] to decide whether to save. *)
+let checkpoint_owner_of_runtime_id runtime_id =
+  Option.map
+    (fun (runtime : Runtime_instance.t) ->
+       Runtime_execution.checkpoint_owner runtime.execution)
+    (Runtime.get_runtime_by_id runtime_id)
+
 let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let lane_decision =
     match scan.latest_provider_lane_decision with
@@ -28,11 +37,18 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       ~config
       ~keeper_name
   in
+  (* Each verdict reads the owner of the turn its own scan finished: the gaps
+     read the trace window, the swimlanes the selected turn. *)
   let gaps =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
       ~terminal_event_present
       ~config_drift
+      ~checkpoint_owner:
+        (turn_checkpoint_owner ~checkpoint_owner_of_runtime_id scan)
       scan
+  in
+  let checkpoint_owner =
+    turn_checkpoint_owner ~checkpoint_owner_of_runtime_id swimlane_scan
   in
   let has_provider_lane =
     runtime_manifest_scan_event_count scan
@@ -129,7 +145,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
         `Assoc
           [
             ( "keeper",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"keeper"
+              runtime_lens_swimlane_json swimlane_scan gaps ~checkpoint_owner ~lane:"keeper"
                 ~label:"Keeper"
                 ~events:
                   [
@@ -146,7 +162,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~synthetic_events:[]
             );
             ( "masc_policy_runtime",
-              runtime_lens_swimlane_json swimlane_scan gaps
+              runtime_lens_swimlane_json swimlane_scan gaps ~checkpoint_owner
                 ~lane:"masc_policy_runtime" ~label:"MASC Runtime"
                 ~events:
                   [
@@ -160,15 +176,16 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~synthetic_events:[]
             );
             ( "agent_core_agent",
-              runtime_lens_agent_core_swimlane_json swimlane_scan gaps );
+              runtime_lens_agent_core_swimlane_json swimlane_scan gaps
+                ~checkpoint_owner );
             ( "tool_runtime",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
+              runtime_lens_swimlane_json swimlane_scan gaps ~checkpoint_owner ~lane:"tool_runtime"
                 ~label:"Tool Runtime"
                 ~events:[]
                 ~synthetic_events:[]
                 ~terminal_status:"not_observed" );
             ( "memory_context",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
+              runtime_lens_swimlane_json swimlane_scan gaps ~checkpoint_owner ~lane:"memory_context"
                 ~label:"Memory/Context/Checkpoint"
                 ~events:
                   [

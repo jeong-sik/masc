@@ -158,24 +158,55 @@ let event_lane = function
 let lane_policy_for_lane lane =
   List.find_opt (fun policy -> String.equal policy.lane lane) lane_policies
 
-let lane_mandatory_events_present scan lane =
-  match lane_policy_for_lane lane with
-  | Some policy ->
-    List.for_all
-      (fun event ->
-         runtime_lens_event_count scan event > 0)
-      policy.mandatory_events
-  | None -> true
+(* Whether one lane event is owed by this turn.
 
-let lane_terminal_event_present scan lane =
-  match lane_policy_for_lane lane with
-  | Some { terminal_events = []; _ } -> false
-  | Some policy ->
-    List.exists
-      (fun event ->
-         runtime_lens_event_count scan event > 0)
-      policy.terminal_events
-  | None -> true
+   [Checkpoint_saved] is the AGENT_CORE checkpoint save. Its one producer,
+   [Keeper_agent_run_finalize_response], saves on
+   [Runtime_execution.Masc_agent_core] and refuses an AGENT_CORE checkpoint
+   from [Official_client] (Codex app-server, Claude Code, Antigravity, ACP):
+   that client keeps its own session. On an official-client turn the save is
+   not missing. Nobody asked for it.
+
+   An owner the projection cannot name keeps the event owed. Not knowing who
+   ran the turn says nothing about whether the save was due. *)
+type obligation =
+  | Owed
+  | Not_owed
+
+let obligation ~checkpoint_owner (event : Keeper_runtime_manifest.event_kind) =
+  let open Keeper_runtime_manifest in
+  match event with
+  | Checkpoint_saved ->
+    (match checkpoint_owner with
+     | Some Runtime_execution.Masc_agent_core -> Owed
+     | Some Runtime_execution.Official_client -> Not_owed
+     | None -> Owed)
+  | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
+  | Runtime_completed | Runtime_failed | Pre_dispatch_blocked
+  | Provider_lane_resolved | Context_injected | History_projection_observed
+  | Skill_preparation_observed | Preparation_observed | Event_bus_correlated
+  | Checkpoint_loaded | Receipt_appended | Turn_finished -> Owed
+
+let owed_events ~checkpoint_owner events =
+  List.filter
+    (fun event ->
+       match obligation ~checkpoint_owner event with
+       | Owed -> true
+       | Not_owed -> false)
+    events
+
+(* The runtime that answered the turn is on its turn_finished row:
+   keeper_agent_run_receipt.ml writes the settled runtime id there. A turn
+   still running, a row with no runtime id, and an id the catalog does not
+   hold leave the owner unknown. An errored turn writes its routed id there,
+   which can be a lane name; lane names are not catalog ids. *)
+let turn_checkpoint_owner ~checkpoint_owner_of_runtime_id scan =
+  match scan.terminal_row with
+  | None -> None
+  | Some row ->
+    (match row.Keeper_runtime_manifest.runtime_id with
+     | None -> None
+     | Some runtime_id -> checkpoint_owner_of_runtime_id runtime_id)
 
 type swimlane_completeness =
   | Completeness_complete
@@ -183,6 +214,7 @@ type swimlane_completeness =
   | Completeness_mandatory_present
   | Completeness_incomplete
   | Completeness_not_observed
+  | Completeness_not_applicable
 
 let swimlane_completeness_to_string = function
   | Completeness_complete -> "complete"
@@ -190,14 +222,16 @@ let swimlane_completeness_to_string = function
   | Completeness_mandatory_present -> "mandatory_present"
   | Completeness_incomplete -> "incomplete"
   | Completeness_not_observed -> "not_observed"
+  | Completeness_not_applicable -> "not_applicable"
 
-let runtime_lens_swimlane_completeness_typed scan lane =
-  let mandatory_present = lane_mandatory_events_present scan lane in
-  let finished = lane_terminal_event_present scan lane in
+let completeness_of_owed_events scan ~mandatory ~terminal =
+  let present event = runtime_lens_event_count scan event > 0 in
+  let mandatory_present = List.for_all present mandatory in
+  let finished = List.exists present terminal in
   let terminal_required =
-    match lane_policy_for_lane lane with
-    | Some { terminal_events = []; _ } -> false
-    | Some _ | None -> true
+    match terminal with
+    | [] -> false
+    | _ :: _ -> true
   in
   let complete = mandatory_present && ((not terminal_required) || finished) in
   if complete then Completeness_complete
@@ -205,19 +239,34 @@ let runtime_lens_swimlane_completeness_typed scan lane =
   else if mandatory_present then Completeness_mandatory_present
   else Completeness_incomplete
 
-let runtime_lens_swimlane_completeness scan lane =
-  swimlane_completeness_to_string
-    (runtime_lens_swimlane_completeness_typed scan lane)
+(* A lane whose declared events are all unowed by this turn has nothing to
+   prove. That is its own verdict: neither complete (nothing was proven) nor
+   incomplete (nothing is missing). *)
+let runtime_lens_swimlane_completeness_typed ~checkpoint_owner scan lane =
+  match lane_policy_for_lane lane with
+  | None -> Completeness_complete
+  | Some policy ->
+    let mandatory = owed_events ~checkpoint_owner policy.mandatory_events in
+    let terminal = owed_events ~checkpoint_owner policy.terminal_events in
+    (match policy.mandatory_events @ policy.terminal_events, mandatory @ terminal with
+     | _ :: _, [] -> Completeness_not_applicable
+     | [], _ | _ :: _, _ :: _ ->
+       completeness_of_owed_events scan ~mandatory ~terminal)
 
-let runtime_lens_swimlane_rendered_completeness scan lane event_count =
+let runtime_lens_swimlane_completeness ~checkpoint_owner scan lane =
+  swimlane_completeness_to_string
+    (runtime_lens_swimlane_completeness_typed ~checkpoint_owner scan lane)
+
+let runtime_lens_swimlane_rendered_completeness ~checkpoint_owner scan lane
+    event_count =
   let completeness =
     if String.equal lane "tool_runtime" && event_count = 0
     then Completeness_not_observed
-    else runtime_lens_swimlane_completeness_typed scan lane
+    else runtime_lens_swimlane_completeness_typed ~checkpoint_owner scan lane
   in
   swimlane_completeness_to_string completeness
 
-let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
+let runtime_lens_swimlane_json scan gaps ~checkpoint_owner ~lane ~label ~events
     ~terminal_status ~synthetic_events =
   let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
   let standard_event_count =
@@ -260,7 +309,8 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
       ("terminal_status", `String terminal_status);
       ( "completeness",
         `String
-          (runtime_lens_swimlane_rendered_completeness scan lane event_count) );
+          (runtime_lens_swimlane_rendered_completeness ~checkpoint_owner scan
+             lane event_count) );
       ("gap_codes", Json_util.json_string_list gap_codes);
       ( "gap_badge",
         match gap_codes with
@@ -270,7 +320,7 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
       ("dag_edges", `List dag_edges_json);
     ]
 
-let runtime_lens_agent_core_swimlane_json scan gaps =
+let runtime_lens_agent_core_swimlane_json scan gaps ~checkpoint_owner =
   let open Keeper_runtime_manifest in
   let observed event = runtime_lens_event_count scan event > 0 in
   let terminal_status =
@@ -279,6 +329,7 @@ let runtime_lens_agent_core_swimlane_json scan gaps =
     else if observed History_projection_observed then "projection_observed"
     else "empty"
   in
-  runtime_lens_swimlane_json scan gaps ~lane:"agent_core_agent" ~label:"AGENT_CORE"
+  runtime_lens_swimlane_json scan gaps ~checkpoint_owner ~lane:"agent_core_agent"
+    ~label:"AGENT_CORE"
     ~events:[Checkpoint_loaded; Checkpoint_saved; History_projection_observed]
     ~terminal_status ~synthetic_events:[]

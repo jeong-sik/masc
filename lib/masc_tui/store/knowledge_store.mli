@@ -535,7 +535,6 @@ val wiki_display_pages : t -> Wire_knowledge.wiki_page_summary list
 (** Flattened visual display order matching {!cluster_wiki_pages}. *)
 
 val filtered_memory_conflicts : t -> Wire_knowledge.memory_conflict list
-val filtered_memory_claims : t -> Wire_knowledge.world_claim list
 val filtered_librarian_writers : t -> Wire_knowledge.librarian_writer_row list
 val memory_left_rows : t -> memory_left_row list
 val selected_memory_left_row : t -> memory_left_row option
@@ -618,8 +617,6 @@ val artifacts_filtered : t -> Wire_knowledge.artifact_entry list
     contains the filter text. *)
 
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
-val find_artifact_by_id_or_sha :
-  string -> t -> Wire_knowledge.artifact_entry option
 val artifact_detail_for_entry :
   Wire_knowledge.artifact_entry ->
   t ->
@@ -663,11 +660,6 @@ val equal_keeper_memory_subview :
   keeper_memory_subview -> keeper_memory_subview -> bool
 val cycle_keeper_memory_subview : t -> t
 val set_keeper_memory_subview : keeper_memory_subview -> t -> t
-val apply_memory_health_fleet :
-  observed_at:Clock.Mono.t ->
-  Wire_knowledge.keeper_memory_health_fleet ->
-  t ->
-  t
 val apply_memory_health_keeper :
   observed_at:Clock.Mono.t ->
   keeper:string ->

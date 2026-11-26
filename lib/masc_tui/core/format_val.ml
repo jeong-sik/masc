@@ -116,3 +116,28 @@ let format_duration_s seconds =
     else
       let d = total / 86400 and h = (total mod 86400) / 3600 in
       if h = 0 then Printf.sprintf "%dd" d else Printf.sprintf "%dd%dh" d h
+
+let format_age_short ~now_unix ts_unix =
+  if
+    (not (Float.is_finite now_unix))
+    || (not (Float.is_finite ts_unix))
+    || now_unix <= 0.0
+    || ts_unix <= 0.0
+  then Glyph.to_utf8 Glyph.Missing_absent
+  else
+    let delta = Float.max 0.0 (now_unix -. ts_unix) in
+    if delta < 5.0 then "now" else format_duration_s delta
+
+let format_hhmm_opt ?(tz_offset_sec = 0) ts =
+  if (not (Float.is_finite ts)) || ts <= 0.0 then None
+  else
+    let secs =
+      Int64.add (Int64.of_float (Float.floor ts)) (Int64.of_int tz_offset_sec)
+    in
+    let day_s =
+      let r = Int64.rem secs 86400L in
+      Int64.to_int (if Int64.compare r 0L < 0 then Int64.add r 86400L else r)
+    in
+    let h = day_s / 3600 in
+    let m = (day_s mod 3600) / 60 in
+    Some (Printf.sprintf "%02d:%02d" h m)

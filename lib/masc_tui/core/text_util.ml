@@ -48,3 +48,42 @@ let short_hash ?(len = 8) s =
   let trimmed = String.trim s in
   let cap = Int.max 0 len in
   if String.length trimmed <= cap then trimmed else String.sub trimmed 0 cap
+
+let is_utf8_cont b = b land 0xC0 = 0x80
+
+let clamp_utf8_cursor s idx =
+  let len = String.length s in
+  let c = Int.max 0 (Int.min len idx) in
+  let rec align i =
+    if i <= 0 || i >= len then i
+    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
+    else i
+  in
+  align c
+
+let prev_utf8_boundary s idx =
+  let i = clamp_utf8_cursor s idx in
+  if i <= 0 then 0
+  else
+    let rec walk p =
+      if p <= 0 then 0
+      else if is_utf8_cont (Char.code s.[p]) then walk (p - 1)
+      else p
+    in
+    walk (i - 1)
+
+let next_utf8_boundary s idx =
+  let len = String.length s in
+  let i = clamp_utf8_cursor s idx in
+  if i >= len then len
+  else
+    let rec walk p =
+      if p >= len then len
+      else if is_utf8_cont (Char.code s.[p]) then walk (p + 1)
+      else p
+    in
+    walk (i + 1)
+
+let drop_last_utf8 s =
+  let len = String.length s in
+  if len <= 0 then "" else String.sub s 0 (prev_utf8_boundary s len)

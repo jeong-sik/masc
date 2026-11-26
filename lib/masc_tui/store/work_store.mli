@@ -283,7 +283,6 @@ val scroll_task_dive_verif : max_scroll:int -> delta:int -> t -> t
 val harness_verdicts_list : t -> Wire_work.harness_verdict_row list
 
 val toggle_verification_view : t -> t
-val toggle_expanded : string -> t -> t
 val mark_stale_all : t -> t
 
 val equal_verification_dive_tab :
@@ -341,5 +340,3 @@ val filtered_gate_resolved : t -> Wire_work.gate_resolved_row list
 val late_approval_attempts_list : t -> Wire_work.late_approval_attempt list
 val retry_meta_for_id : id:string -> t -> Wire_work.gate_retry_meta option
 val hitl_status : t -> Wire_work.hitl_status option
-val tool_approval_mode_for :
-  keeper:string -> t -> Wire_work.keeper_tool_approval_mode

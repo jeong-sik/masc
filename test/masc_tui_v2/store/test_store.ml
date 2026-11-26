@@ -3971,7 +3971,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       request_id = Some "srv-req-42";
       verification_run_id = Some "srv-run-99";
       inspection_operator_id = "op-admin";
-      state = "proof_proven";
+      state = Wire_work.Proof_proven;
     }
   in
   let m_gconf_prefilled, _ =

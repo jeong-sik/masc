@@ -12,16 +12,7 @@ let sanitize_single_line = Text_util.sanitize_single_line
 
 let short_hash = Text_util.short_hash
 
-let format_age ~now_unix ts_unix =
-  if
-    (not (Float.is_finite now_unix))
-    || (not (Float.is_finite ts_unix))
-    || now_unix <= 0.0
-    || ts_unix <= 0.0
-  then Glyph.to_utf8 Glyph.Missing_absent
-  else
-    let delta = Float.max 0.0 (now_unix -. ts_unix) in
-    if delta < 5.0 then "now" else Format_val.format_duration_s delta
+let format_age = Format_val.format_age_short
 
 let wrap_lines = Knowledge_store.wrap_lines
 

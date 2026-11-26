@@ -4,8 +4,6 @@ let create ~sw domain_mgr =
   Eio.Switch.check sw;
   { pool = Domains.start_worker_pool ~sw domain_mgr }
 
-let of_domain_pool pool = { pool }
-
 let domain_count t = Domain_pool.domain_count t.pool
 
 let submit_cpu t ~name work = Domain_pool.submit_cpu ~name t.pool work

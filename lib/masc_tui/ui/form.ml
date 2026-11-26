@@ -843,17 +843,7 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Grapheme.truncate_to_width ~max_width:iw hint))
           end
 
-let is_utf8_cont b = b land 0xC0 = 0x80
-
-let clamp_utf8_cursor s c =
-  let len = String.length s in
-  let c = Int.max 0 (Int.min len c) in
-  let rec align i =
-    if i <= 0 || i >= len then i
-    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
-    else i
-  in
-  align c
+let clamp_utf8_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
 
 (* Compute horizontally scrolled before/after slices keeping the 1-column
    editing cursor inside [max_w] display columns (reserving 1 column for the

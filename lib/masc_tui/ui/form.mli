@@ -125,10 +125,7 @@ val set_filter : string -> state -> state
     onto the first visible field so hidden fields can never remain focused. *)
 
 val set_value : key:string -> field_value -> state -> state
-val move_focus : dir:[ `Prev | `Next ] -> state -> state
-val toggle_bool : state -> state
 val step_enum : dir:[ `Prev | `Next ] -> state -> state
-val toggle_secret_reveal : state -> state
 val handle_key : Input.key_event -> state -> state
 
 val diff_preview : state -> Diff.numbered list

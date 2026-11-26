@@ -742,7 +742,34 @@ let test_text_util () =
   Alcotest.(check string) "short_hash custom len" "abc"
     (Text_util.short_hash ~len:3 "abcdef");
   Alcotest.(check string) "short_hash negative len clamps to 0" ""
-    (Text_util.short_hash ~len:(-4) "abcdef")
+    (Text_util.short_hash ~len:(-4) "abcdef");
+  (* UTF-8 cursor helpers: "a가b" has bytes [0:'a'; 1..3:'가'; 4:'b'] *)
+  let u = "a가b" in
+  Alcotest.(check int) "clamp_utf8_cursor aligns mid-UTF-8 back to char start" 1
+    (Text_util.clamp_utf8_cursor u 2);
+  Alcotest.(check int) "clamp_utf8_cursor aligns 2nd cont byte back to char start" 1
+    (Text_util.clamp_utf8_cursor u 3);
+  Alcotest.(check int) "clamp_utf8_cursor clamps negative to 0" 0
+    (Text_util.clamp_utf8_cursor u (-5));
+  Alcotest.(check int) "clamp_utf8_cursor clamps overflow to len" 5
+    (Text_util.clamp_utf8_cursor u 99);
+  Alcotest.(check int) "prev_utf8_boundary from 'b' lands on '가'" 1
+    (Text_util.prev_utf8_boundary u 4);
+  Alcotest.(check int) "next_utf8_boundary from '가' lands on 'b'" 4
+    (Text_util.next_utf8_boundary u 1);
+  Alcotest.(check string) "drop_last_utf8 removes full multi-byte char" "a"
+    (Text_util.drop_last_utf8 "a가");
+  (* Format_val shared age / hhmm helpers *)
+  Alcotest.(check string) "format_age_short <5s is now" "now"
+    (Format_val.format_age_short ~now_unix:1000.0 997.0);
+  Alcotest.(check string) "format_age_short 125s" "2m5s"
+    (Format_val.format_age_short ~now_unix:1000.0 875.0);
+  Alcotest.(check (option string)) "format_hhmm_opt UTC midnight + 90m"
+    (Some "01:30") (Format_val.format_hhmm_opt 5400.0);
+  Alcotest.(check (option string)) "format_hhmm_opt KST offset"
+    (Some "10:30") (Format_val.format_hhmm_opt ~tz_offset_sec:32400 5400.0);
+  Alcotest.(check (option string)) "format_hhmm_opt invalid <=0"
+    None (Format_val.format_hhmm_opt 0.0)
 
 let () =
   Alcotest.run "masc_tui_v2_core_term"

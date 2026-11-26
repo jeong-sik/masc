@@ -4,9 +4,7 @@ open Masc_tui_ui
 open Masc_tui_protocol
 open Masc_tui_store
 
-let short_sha s =
-  let len = String.length s in
-  if len <= 10 then s else String.sub s 0 10
+let short_sha = Text_util.short_hash ~len:10
 
 let format_bytes n =
   Format_val.format_value Format_val.Bytes (float_of_int (Int.max 0 n))

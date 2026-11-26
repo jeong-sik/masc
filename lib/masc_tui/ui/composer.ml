@@ -245,34 +245,9 @@ let folded_footer_pill ~lang (st : state) =
   let hint = Say.resolve lang (Say.make ~ko:"[i] 입력" ~en:"[i] write") in
   Printf.sprintf "%s @%s %s" (Glyph.to_utf8 Glyph.Prompt_caret) st.target_keeper hint
 
-let clamp_cursor draft pos =
-  let len = String.length draft in
-  let p = Int.max 0 (Int.min len pos) in
-  let rec align i =
-    if i <= 0 || i >= len then i
-    else if (Char.code draft.[i] land 0xC0) = 0x80 then align (i - 1)
-    else i
-  in
-  align p
-
-let prev_utf8_boundary s pos =
-  if pos <= 0 then 0
-  else
-    let i = ref (pos - 1) in
-    while !i > 0 && (Char.code s.[!i] land 0xC0) = 0x80 do
-      decr i
-    done;
-    !i
-
-let next_utf8_boundary s pos =
-  let len = String.length s in
-  if pos >= len then len
-  else
-    let i = ref (pos + 1) in
-    while !i < len && (Char.code s.[!i] land 0xC0) = 0x80 do
-      incr i
-    done;
-    !i
+let clamp_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
+let prev_utf8_boundary = Masc_tui_core.Text_util.prev_utf8_boundary
+let next_utf8_boundary = Masc_tui_core.Text_util.next_utf8_boundary
 
 let insert_text txt (st : state) =
   if String.length txt = 0 then st

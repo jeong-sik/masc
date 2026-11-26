@@ -105,13 +105,23 @@ type goal_confirmation_request = {
   expected_runtime_instance_id : string;
 }
 
+type goal_confirmation_proof_state =
+  | Proof_proven
+  | Human_confirmed
+  | Proof_pending
+  | Proof_no_record
+  | Proof_state_other of string
+
+val goal_confirmation_proof_state_to_string :
+  goal_confirmation_proof_state -> string
+
 type goal_confirmation_proof = {
   goal_id : string;
   criterion_revision : string;
   request_id : string option;
   verification_run_id : string option;
   inspection_operator_id : string;
-  state : string;
+  state : goal_confirmation_proof_state;
 }
 
 val goal_phase_to_string : goal_phase -> string

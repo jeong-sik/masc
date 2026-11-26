@@ -159,7 +159,6 @@ val navigate_menu_target :
 val enter_sidebar_focus : Model.t -> Model.t
 val exit_sidebar_focus : Model.t -> Model.t
 val clear_btw_if_leaving : Model.t -> Drafts.t -> Drafts.t
-val move_sidebar : Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
 val activate_sidebar_cursor : Model.t -> Model.t * Cmd.t list
 val open_overlay : Model.t -> Nav.overlay -> Model.t * Cmd.t list
 val open_global_settings :
@@ -190,8 +189,6 @@ val open_ask_modal :
   Wire_work.ask_row ->
   Model.t * Cmd.t list
 val submit_ask_modal : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
-val skip_all_ask_questions :
-  now:Clock.Mono.t -> Wire_work.ask_row -> Model.t -> Model.t * Cmd.t list
 val open_palette : Model.t -> Model.palette_mode -> Model.t * Cmd.t list
 val open_inspector : Model.t -> Nav.inspector -> Model.t * Cmd.t list
 val close_inspector : ?preserve_overlay:bool -> Model.t -> Model.t * Cmd.t list
@@ -290,7 +287,6 @@ val post_keeper_operator_note :
 val clamp_for_pane : Model.t -> Model.t
 val goal_dive_measure_max_scroll : goal_id:string -> Model.t -> int
 val scroll_goal_dive_measure : delta:int -> goal_id:string -> Model.t -> Model.t
-val reset_knowledge_zoom_transient : Knowledge_store.t -> Knowledge_store.t
 val unzoom_view : Model.t -> Model.t
 val toggle_zoom_view : Model.t -> Model.t * bool * Cmd.t list
 val incidents_detail_max_scroll : Model.t -> int
@@ -345,5 +341,4 @@ val keeper_identity_lines :
   width:int -> name:string -> Model.t -> styled_line list
 val verification_dive_tab_lines :
   width:int -> Model.t -> Wire_work.verification_request -> styled_line list
-val code_right_pane_line_count : Model.t -> int
 val extract_embedded_json : string -> (string option * Yojson.Safe.t) option

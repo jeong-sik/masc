@@ -9,7 +9,6 @@ type t
 val create : sw:Eio.Switch.t -> _ Eio.Domain_manager.t -> t
 (** Create a bounded multi-domain (2..4) Worker pool using {!Domains.start_worker_pool}. *)
 
-val of_domain_pool : Domain_pool.t -> t
 val domain_count : t -> int
 
 val submit_cpu : t -> name:string -> (unit -> 'a) -> 'a

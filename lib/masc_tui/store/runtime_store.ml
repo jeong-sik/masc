@@ -1669,42 +1669,10 @@ let set_fusion_prompt prompt t =
 let set_fusion_keeper keeper t =
   { t with fusion_launch_draft = { t.fusion_launch_draft with keeper } }
 
-let set_fusion_preset preset t =
-  { t with fusion_launch_draft = { t.fusion_launch_draft with preset } }
-
-let set_fusion_topology topology t =
-  { t with fusion_launch_draft = { t.fusion_launch_draft with topology } }
-
-let toggle_fusion_web_tools t =
-  {
-    t with
-    fusion_launch_draft =
-      { t.fusion_launch_draft with web_tools = not t.fusion_launch_draft.web_tools };
-  }
-
 let set_fusion_submitting submitting t =
   { t with fusion_launch_draft = { t.fusion_launch_draft with submitting } }
 
 let clear_fusion_draft t = { t with fusion_launch_draft = empty_fusion_draft }
-
-let to_fusion_launch_request t =
-  let d = t.fusion_launch_draft in
-  let prompt = String.trim d.prompt in
-  if String.equal prompt "" then Error "Fusion prompt must not be empty"
-  else
-    match d.keeper with
-    | None -> Error "Select a target keeper before launching a Fusion run"
-    | Some k when String.equal (String.trim k) "" ->
-        Error "Select a target keeper before launching a Fusion run"
-    | Some keeper ->
-        Ok
-          ( keeper
-          , {
-              Wire_runtime.prompt;
-              preset = d.preset;
-              topology = d.topology;
-              web_tools = d.web_tools;
-            } )
 
 let filtered_lanes t =
   let lanes =
@@ -1916,10 +1884,6 @@ let filtered_mcp_clients t =
             | None -> false)
         || List.exists (contains_ci ~needle:q) c.capabilities)
       items
-
-let selected_mcp_client t =
-  let xs = filtered_mcp_clients t in
-  List.nth_opt xs (clamp_index (List.length xs) t.mcp_client_selected_index)
 
 let filtered_connectors t =
   let cs =

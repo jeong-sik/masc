@@ -9,14 +9,6 @@ let auth_ok = function
   | Ok value -> value
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
-(* The FIFO preflight children end with an alarm and the parent's wait can be
-   interrupted by a caught signal -- SIGCHLD among them -- before the child
-   reports. EINTR is the kernel asking us to wait again, not a failed wait;
-   without the retry the same tree passed or failed by delivery timing. *)
-let rec waitpid_nointr pid =
-  try Unix.waitpid [] pid with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
-
 let with_workspace f =
   let base_path = Filename.temp_dir "token-rotation-transaction-" "" in
   Eio_main.run @@ fun env ->
@@ -555,24 +547,11 @@ let test_extended_redirect_remains_a_current_owner () =
    | _ -> fail "extended redirect must participate in the shared-owner rotation");
   List.iter (check_recoverable base_path) ["aaa"; "bbb"]
 
-(* Each FIFO case runs in a freshly executed copy of this binary, never in a
-   [Unix.fork] copy of the test process. In a full run, earlier cases have
-   already started Eio and its system threads, and the OCaml manual says
-   that after such threads were spawned "the child process might be in a
-   corrupted state" (Unix.fork): the copy keeps only the forking thread and
-   any lock another thread held at that moment. [Unix.create_process] starts
-   a new process image that holds none of that. *)
+(* Each FIFO case runs in a freshly executed copy of this binary
+   ([Masc_test_deps.Fresh_process]), never in a [Unix.fork] copy. *)
 type fifo_preflight_child =
   | Diagnostic_listing
   | Publication_snapshots
-
-let fifo_preflight_children = [ Diagnostic_listing; Publication_snapshots ]
-
-let fifo_preflight_child_argument = function
-  | Diagnostic_listing -> "diagnostic-listing"
-  | Publication_snapshots -> "publication-snapshots"
-
-let fifo_preflight_child_flag = "--fifo-preflight-child"
 
 (* The alarm is a hang watchdog, not a timing oracle: the child must finish
    far inside it on any healthy tree, and only a deadlock on the FIFO should
@@ -610,29 +589,27 @@ let publication_snapshots_refuse_fifo () =
     let _restored = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
     check_recoverable base_path "aaa")) [false; true]
 
-let run_fifo_preflight_child child =
-  Sys.set_signal Sys.sigalrm Sys.Signal_default;
-  let _previous_alarm_seconds = Unix.alarm fifo_watchdog_seconds in
-  let body = match child with
-    | Diagnostic_listing -> diagnostic_listing_refuses_fifo
-    | Publication_snapshots -> publication_snapshots_refuse_fifo in
-  match body () with
-  | () -> exit 0
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn -> prerr_endline (Printexc.to_string exn); exit 2
+let fifo_preflight_cases = {
+  Masc_test_deps.Fresh_process.all = [ Diagnostic_listing; Publication_snapshots ];
+  name = (function
+    | Diagnostic_listing -> "diagnostic-listing"
+    | Publication_snapshots -> "publication-snapshots");
+  run = (fun child ->
+    Sys.set_signal Sys.sigalrm Sys.Signal_default;
+    let _previous_alarm_seconds = Unix.alarm fifo_watchdog_seconds in
+    match child with
+    | Diagnostic_listing -> diagnostic_listing_refuses_fifo ()
+    | Publication_snapshots -> publication_snapshots_refuse_fifo ());
+}
+
+(* The parent's bound sits past the child's own alarm, so a deadlock on the
+   FIFO is reported by the alarm and the parent only ends a child the alarm
+   did not end. *)
+let fifo_parent_bound_s = 90.
 
 let check_fifo_preflight_child child ~contract =
-  let executable = Sys.executable_name in
-  let pid = Unix.create_process executable
-      [| executable; fifo_preflight_child_flag; fifo_preflight_child_argument child |]
-      Unix.stdin Unix.stdout Unix.stderr in
-  let _, status = waitpid_nointr pid in
-  match status with
-  | Unix.WEXITED 0 -> ()
-  | Unix.WSIGNALED signal when Int.equal signal Sys.sigalrm ->
-    failf "watchdog fired: the %s child did not finish within %d s; its output above ends \
-           where it stopped" (fifo_preflight_child_argument child) fifo_watchdog_seconds
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail contract
+  Masc_test_deps.Fresh_process.check fifo_preflight_cases child
+    ~within_s:fifo_parent_bound_s ~contract
 
 let test_fifo_diagnostic_listing_refuses_without_blocking () =
   check_fifo_preflight_child Diagnostic_listing
@@ -826,17 +803,7 @@ let test_minted_bearer_survives_retirement_failure () =
   check bool "cleanup failure remains observable on disk" true (Sys.is_directory target)
 
 let () =
-  match Array.to_list Sys.argv with
-  | _ :: flag :: arguments when String.equal flag fifo_preflight_child_flag ->
-    (match arguments with
-     | [ argument ] ->
-       (match List.find_opt (fun child ->
-            String.equal (fifo_preflight_child_argument child) argument) fifo_preflight_children with
-        | Some child -> run_fifo_preflight_child child
-        | None -> prerr_endline ("unknown FIFO preflight child: " ^ argument); exit 2)
-     | [] | _ :: _ :: _ ->
-       prerr_endline ("expected " ^ fifo_preflight_child_flag ^ " CHILD"); exit 2)
-  | _ ->
+  Masc_test_deps.Fresh_process.run_requested_case fifo_preflight_cases;
   run "auth_token_rotation_transaction"
     [ "rotation",
       [ test_case "Keeper ensure rejects forged foreign UUID before publication" `Quick test_keeper_ensure_refuses_foreign_uuid_before_publication

@@ -984,6 +984,114 @@ let rec waitpid_nointr pid =
   try Unix.waitpid [] pid with
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
 
+(** One test case run in a newly executed copy of the test executable.
+
+    A test process that already ran Eio has system threads, and the log
+    writer is a thread too. [Unix.fork] keeps only the forking thread and any
+    lock another thread held at that moment; the OCaml manual says the child
+    "might be in a corrupted state". [Unix.create_process] starts a new
+    process image that holds none of that. The case travels as its name from
+    the caller's closed sum, so the new process runs exactly one known body.
+
+    The new process gets [TMPDIR] set to a directory the parent creates and
+    removes after the wait, so a case killed by its own alarm or by the
+    parent leaves no temporary files. *)
+module Fresh_process = struct
+  type 'case cases = {
+    all : 'case list;
+    name : 'case -> string;
+    run : 'case -> unit;
+  }
+
+  let case_flag = "--fresh-process-case"
+
+  (** Call first in the test executable's entry point. In a process started
+      for one case, run that case and exit: 0 when it returns, 2 when it
+      raises or the name is unknown. Otherwise return. *)
+  let run_requested_case cases =
+    match Array.to_list Sys.argv with
+    | _ :: flag :: arguments when String.equal flag case_flag ->
+      (match arguments with
+       | [ argument ] ->
+         (match List.find_opt (fun case -> String.equal (cases.name case) argument) cases.all with
+          | Some case ->
+            (match cases.run case with
+             | () -> exit 0
+             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+             | exception exn -> prerr_endline (Printexc.to_string exn); exit 2)
+          | None -> prerr_endline ("unknown fresh-process case: " ^ argument); exit 2)
+       | [] | _ :: _ :: _ -> prerr_endline ("expected " ^ case_flag ^ " CASE"); exit 2)
+    | _ -> ()
+
+  let poll_interval_s = 0.02
+  let reap_after_kill_s = 5.
+
+  let rec waitpid_nohang pid =
+    try Unix.waitpid [ Unix.WNOHANG ] pid with
+    | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nohang pid
+
+  (* Poll instead of blocking in [Unix.waitpid []]. Blocking waits here were
+     the unbounded waits of these suites: a child that never exited held the
+     run until the harness deadline (#8056 and #52859, about 5400 s each). *)
+  let reap_within pid ~seconds =
+    let started = Mtime_clock.counter () in
+    let elapsed_s () = Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1e9 in
+    let rec loop () =
+      match waitpid_nohang pid with
+      | 0, _ ->
+        if elapsed_s () >= seconds then None
+        else (Unix.sleepf poll_interval_s; loop ())
+      | _reaped_pid, status -> Some status
+    in
+    loop ()
+
+  let environment_with_tmpdir dir =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun binding -> not (String.starts_with ~prefix:"TMPDIR=" binding))
+    |> List.cons ("TMPDIR=" ^ dir)
+    |> Array.of_list
+
+  let remove_scratch dir =
+    try Fs_compat.remove_tree dir with
+    | Sys_error reason | Unix.Unix_error (_, _, reason) ->
+      prerr_endline ("could not remove fresh-process scratch " ^ dir ^ ": " ^ reason)
+
+  (** [check cases case ~within_s ~contract] runs [case] in a new process and
+      waits at most [within_s] seconds. A process still running then is
+      killed and the case fails as stuck. A process ended by SIGALRM failed
+      its own alarm. Any other nonzero ending fails with [contract]. *)
+  let check cases case ~within_s ~contract =
+    let name = cases.name case in
+    let scratch = Filename.temp_dir "fresh-process-" "" in
+    let executable = Sys.executable_name in
+    let pid =
+      Unix.create_process_env executable [| executable; case_flag; name |]
+        (environment_with_tmpdir scratch) Unix.stdin Unix.stdout Unix.stderr
+    in
+    (* [reaped] is set before the kill so [finally] never waits on a process
+       it has already given up on. *)
+    let reaped = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !reaped then (
+          reaped := true;
+          (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+          ignore (reap_within pid ~seconds:reap_after_kill_s : Unix.process_status option));
+        remove_scratch scratch)
+      (fun () ->
+        match reap_within pid ~seconds:within_s with
+        | None -> Alcotest.failf "the %s case did not finish within %.0f s; it is stuck" name within_s
+        | Some status ->
+          reaped := true;
+          (match status with
+           | Unix.WEXITED 0 -> ()
+           | Unix.WSIGNALED signal when Int.equal signal Sys.sigalrm ->
+             Alcotest.failf "the %s case ended by its own alarm; its output above ends where it stopped"
+               name
+           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Alcotest.fail contract))
+end
+
 (** The ask of a Memory writer whose table declares no Librarian lane:
     such a writer never asks, so a call fails the case. *)
 let never_asks (_ : Masc.Librarian_ask.input) : Masc.Librarian_read_result.t =

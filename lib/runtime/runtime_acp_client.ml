@@ -158,7 +158,6 @@ type bridge_naming =
    2026-11-26 against Antigravity 1.5.18, Kimi Code 2.7.2, Mistral Vibe 3.1.0
    and Muse Code 1.4.25. *)
 type compaction_point_channel =
-  | Compaction_tokens_env of string
   | Muse_compaction_settings
   | No_compaction_point
 
@@ -218,10 +217,11 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
     ; effort_config_id = Some "thought_level"
-    (* The binary's changelog: the variable applies to all eligible models and
-       takes a token count, a K or M shorthand, or a percentage of the model's
-       window. MASC passes a token count. *)
-    ; compaction_point = Compaction_tokens_env "AGY_CLI_AUTO_COMPACT_OVERRIDE"
+    (* [AGY_CLI_AUTO_COMPACT_OVERRIDE] reaches only the interactive client:
+       with 30000 its /context reads "Auto-compact at 30.0k tokens", while
+       [agy acp] with the same variable let a session grow to 51,026 tokens
+       over two prompts without compacting. *)
+    ; compaction_point = No_compaction_point
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -375,11 +375,13 @@ let profile_of_driver = function
     ; model_config_id = "model"
     ; effort_config_id = None
     (* Its soft fraction must stay below its hard fraction, 0.9 unless set, so
-       MASC sets the hard one to the whole limit. The host then reports the
-       limit it was given as its window ([usage_update.size] 400000 with the
-       setting, 1007997 without, echo provider), so on such a lane a limit
-       above the model's own window shows up as the provider's overflow, not
-       as the start-time window check. *)
+       MASC sets the hard one to the whole limit. On muse-spark-1.3 with a
+       60,000 limit and 0.95 the host compacted during the turn, from about
+       65,000 tokens to 32,000, yet sent three requests of up to 60,330: its
+       own estimate runs a little under the provider's count. The host
+       reports the limit it was given as its window ([usage_update.size]), so
+       a limit above the model's own window shows up as the provider's
+       overflow, not as the start-time window check. *)
     ; compaction_point = Muse_compaction_settings
     }
 ;;
@@ -505,21 +507,8 @@ type agent_compaction =
 
 let takes_compaction_point driver =
   match (profile_of_driver driver).compaction_point with
-  | Compaction_tokens_env _ | Muse_compaction_settings -> true
+  | Muse_compaction_settings -> true
   | No_compaction_point -> false
-;;
-
-(* Rounded down, so the host compacts at or below the operator's point. *)
-let compaction_tokens { limit_tokens; threshold } =
-  Float.to_int (Float.of_int limit_tokens *. threshold)
-;;
-
-let compaction_point_env (profile : driver_profile) agent_compaction =
-  match profile.compaction_point, agent_compaction with
-  | Compaction_tokens_env name, Some point ->
-    [ name, string_of_int (compaction_tokens point) ]
-  | Compaction_tokens_env _, None
-  | (Muse_compaction_settings | No_compaction_point), (Some _ | None) -> []
 ;;
 
 (* [-c] values are JSON. *)
@@ -533,8 +522,7 @@ let compaction_point_args (profile : driver_profile) agent_compaction =
     ; "-c"
     ; "context_compaction.hard_threshold=1.0"
     ]
-  | Muse_compaction_settings, None
-  | (Compaction_tokens_env _ | No_compaction_point), (Some _ | None) -> []
+  | Muse_compaction_settings, None | No_compaction_point, (Some _ | None) -> []
 ;;
 
 type config =
@@ -2067,21 +2055,22 @@ let env_key_of_entry entry =
   | None -> entry
 ;;
 
-let build_environment ~base_env ~driver ~extra_strip_env ~agent_compaction =
+let build_environment ~base_env ~driver ~extra_strip_env =
   let profile = profile_of_driver driver in
   let stripped =
     List.map String.trim (profile.default_strip_env @ extra_strip_env)
     |> List.filter (fun s -> s <> "")
   in
-  let set = profile.env_set @ compaction_point_env profile agent_compaction in
-  let override_keys = List.map fst set in
+  let override_keys = List.map fst profile.env_set in
   let filtered =
     Array.to_list base_env
     |> List.filter (fun entry ->
       let key = env_key_of_entry entry in
       (not (List.mem key stripped)) && not (List.mem key override_keys))
   in
-  let additions = List.map (fun (k, v) -> k ^ "=" ^ v) set in
+  let additions =
+    List.map (fun (k, v) -> k ^ "=" ^ v) profile.env_set
+  in
   Array.of_list (filtered @ additions)
 ;;
 
@@ -3309,7 +3298,6 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
         ~base_env:(Unix.environment ())
         ~driver:config.driver
         ~extra_strip_env:config.strip_env
-        ~agent_compaction:config.agent_compaction
     in
     let usage_journal =
       match profile.usage_channel with
@@ -4412,7 +4400,6 @@ let prompt
 
 module For_testing = struct
   let build_environment = build_environment
-  let compaction_tokens = compaction_tokens
   let build_argv = build_argv
   let utf8_safe_suffix = utf8_safe_suffix
   let redact_stderr_text = redact_stderr_text

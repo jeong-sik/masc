@@ -185,19 +185,17 @@ type bridge_naming =
 (** How a driver's host takes the point at which it compacts its own session
     during a turn (checked 2026-11-26). *)
 type compaction_point_channel =
-  | Compaction_tokens_env of string
-      (** An environment variable that takes a token count for every model the
-          host can compact: [AGY_CLI_AUTO_COMPACT_OVERRIDE] (Antigravity
-          1.5.18). *)
   | Muse_compaction_settings
       (** [-c context_compaction.*] settings (Muse Code 1.4.25): the limit as
           [provider_context_limit_tokens], the point as [soft_threshold], and
           [hard_threshold] at the whole limit, since the soft fraction must
           stay below the hard one (0.9 unless set). *)
   | No_compaction_point
-      (** The host takes none per process for every model: Kimi Code 2.7.2,
-          and Mistral Vibe 3.1.0, whose [VIBE_AUTO_COMPACT_THRESHOLD] fills
-          only a model without a threshold of its own. *)
+      (** The host takes none per process for every model: Kimi Code 2.7.2;
+          Mistral Vibe 3.1.0, whose [VIBE_AUTO_COMPACT_THRESHOLD] fills only a
+          model without a threshold of its own; Antigravity 1.5.18, whose
+          [AGY_CLI_AUTO_COMPACT_OVERRIDE] reaches its interactive client but
+          not [agy acp]. *)
 
 type driver_profile =
   { driver : driver
@@ -804,10 +802,7 @@ module For_testing : sig
     :  base_env:string array
     -> driver:driver
     -> extra_strip_env:string list
-    -> agent_compaction:agent_compaction option
     -> string array
-
-  val compaction_tokens : agent_compaction -> int
 
   val build_argv
     :  ?native_posture:Runtime_native_tools.posture

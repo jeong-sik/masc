@@ -40,6 +40,19 @@ let message_start id = Agent_core.Types.MessageStart { id; model = "m"; usage = 
 
 let block_stop index = Agent_core.Types.ContentBlockStop { index } ;;
 
+(* A new attempt of the turn, run by an official client or by MASC's own agent
+   loop. The loop decides what a tool block's stop means and whether a tool's
+   return opens the next response. *)
+let client_attempt ?(now = 0.) writer runtime_id =
+  Keeper_turn_preview.note_attempt ~writer ~now ~runtime_id
+    ~checkpoint_owner:Runtime_execution.Official_client
+;;
+
+let loop_attempt ?(now = 0.) writer runtime_id =
+  Keeper_turn_preview.note_attempt ~writer ~now ~runtime_id
+    ~checkpoint_owner:Runtime_execution.Masc_agent_core
+;;
+
 (* The two tool hooks, as the Keeper's agent-core hooks call them. *)
 let started ?(tool_use_id = None) writer now tool_name =
   Keeper_turn_preview.note_tool_started ~writer ~now ~tool_use_id ~tool_name
@@ -129,12 +142,12 @@ let test_live_attempt_failover_and_new_turn () =
   let keeper_name = "live-lifecycle" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
   let writer = Some (reset keeper_name ~now:1.) in
-  Keeper_turn_preview.note_attempt ~writer ~now:2. ~runtime_id:"claude";
+  client_attempt ~now:2. writer "claude";
   Alcotest.(check bool) "silent provider wait is visible" true
     (Astring.String.is_infix ~affix:"waiting for provider response"
       (Keeper_turn_preview.status_text (current ())));
   Keeper_turn_preview.note_failure ~writer ~now:3. ~runtime_id:"claude" "401 invalid key";
-  Keeper_turn_preview.note_attempt ~writer ~now:4. ~runtime_id:"glm";
+  loop_attempt ~now:4. writer "glm";
   let switched = Keeper_turn_preview.status_text (current ()) in
   Alcotest.(check bool) "new provider and failure both visible" true
     (Astring.String.is_infix ~affix:"glm" switched && Astring.String.is_infix ~affix:"401" switched);
@@ -160,7 +173,7 @@ let test_a_request_after_a_tool_waits_on_the_provider () =
   let keeper_name = "request-after-tool" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
   let writer = Some (reset keeper_name ~now:1.) in
-  Keeper_turn_preview.note_attempt ~writer ~now:2. ~runtime_id:"glm";
+  loop_attempt ~now:2. writer "glm";
   started writer 3. "Execute";
   finished writer 3.5 "Execute";
   Keeper_turn_preview.note_request ~writer ~now:4.;
@@ -207,7 +220,7 @@ let test_a_rejected_tool_never_runs_and_overlapping_tools_stay_open () =
   Keeper_turn_preview.note_failure ~writer ~now:6. ~runtime_id:"claude" "rejected";
   Alcotest.(check (option string)) "failed attempt drops tool observation" None
     (current ()).last_tool;
-  Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"glm";
+  loop_attempt ~now:7. writer "glm";
   Alcotest.(check (option string)) "next attempt has no prior tool" None
     (current ()).last_tool
 ;;
@@ -303,7 +316,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
     emit_a (text_delta "old unfinished ");
     let b = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:2. ~redaction) in
     let emit_b = callbacks b in
-    Keeper_turn_preview.note_attempt ~writer:b ~now:3. ~runtime_id:"current";
+    loop_attempt ~now:3. b "current";
     emit_b (text_delta "successor-");
     let before = Option.get (Keeper_turn_preview.current ~keeper_name) in
     (* An old stream finishing must neither flush B's held secret nor append
@@ -313,7 +326,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
       { index = 0; content_type = "tool_use"; tool_id = Some "old-tool"
       ; tool_name = Some "Execute" });
     Keeper_turn_preview.note_failure ~writer:a ~now:4. ~runtime_id:"old" "old failure";
-    Keeper_turn_preview.note_attempt ~writer:a ~now:5. ~runtime_id:"old-retry";
+    loop_attempt ~now:5. a "old-retry";
     Keeper_turn_preview.note_text ~writer:a ~now:6. "old final answer";
     started a 7. "old tool";
     Keeper_turn_preview.note_stream ~writer:None ~now:8. (text_delta "unowned\n");
@@ -352,7 +365,7 @@ let test_released_source_position_through_turns_decoder () =
     Alcotest.(check int) "actual wire generation" generation obs_gen;
     Alcotest.(check int) "actual redacted stream byte boundary" total
       (obs_start + String.length obs_tail) in
-  Keeper_turn_preview.note_attempt ~writer ~now:1. ~runtime_id:"first";
+  loop_attempt ~now:1. writer "first";
   let first = String.make 300 'a' ^ "\n" in
   Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
   check_position 1 (String.length first);
@@ -376,7 +389,7 @@ let test_released_source_position_through_turns_decoder () =
       "" Yojson.Safe.Util.(observed |> member "text_tail" |> to_string);
     Alcotest.(check int) "empty replacement restarts released source bytes" 0
       Yojson.Safe.Util.(observed |> member "text_position" |> member "start_byte" |> to_int)) ["";" \t\n"];
-  Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"second";
+  loop_attempt ~now:7. writer "second";
   check_position 6 0;
   Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
   check_position 7 (String.length "replacement");
@@ -431,7 +444,7 @@ let test_preparation_scopes_are_visible_owned_and_do_not_dispatch () =
     Alcotest.(check bool) "the settled scope carries its own measured span" true
       (match Yojson.Safe.Util.member "elapsed_ns" (payload ()) with `String _ -> true | _ -> false);
     ignore (scoped Preview.Tool_preparation (fun () ->
-      Preview.note_attempt ~writer ~now:4. ~runtime_id:"actual-runtime";
+      loop_attempt ~now:4. writer "actual-runtime";
       Ok ()));
     Alcotest.(check bool) "late preparation completion cannot replace actual provider activity" true
       ((current ()).preparation = None && (current ()).activity = Preview.Awaiting_response);
@@ -705,12 +718,15 @@ let test_a_tool_is_open_from_its_call_to_its_return () =
   Alcotest.(check bool) "hearing the hook twice moves nothing" true
     ((current ()).open_activities = call Preview.Tool_executing 6.);
   finished ~tool_use_id:(Some "toolu_a") writer 7. "Execute";
-  Alcotest.(check bool) "the return ends the call and opens the next response, counted from here" true
-    ((current ()).open_activities
-     = [ Preview.Response_open { channel = Preview.No_content; started_at = 7.; since = 7. } ]);
+  Alcotest.(check bool) "the return ends the call. The agent loop opens the next response at its own request" true
+    ((current ()).open_activities = []);
   Alcotest.(check string) "the turn is back to waiting and keeps which tool it ran"
     "waiting for provider response · last observed tool: Execute"
-    (Preview.status_text (current ()))
+    (Preview.status_text (current ()));
+  Preview.note_request ~writer ~now:8.;
+  Alcotest.(check bool) "the request opens the response with the request's clock" true
+    ((current ()).open_activities
+     = [ Preview.Response_open { channel = Preview.No_content; started_at = 8.; since = 8. } ])
 ;;
 
 let test_reasoning_and_answer_are_two_channels_of_one_response () =
@@ -772,9 +788,8 @@ let test_parallel_tools_stay_open_one_by_one () =
   Alcotest.(check bool) "the first returning leaves the second open" true
     ((current ()).open_activities = [ call "b" 4. 6.5 ]);
   finished ~tool_use_id:(Some "b") writer 8. "Read";
-  Alcotest.(check bool) "the second ends on its own return, and then the next response opens" true
-    ((current ()).open_activities
-     = [ Preview.Response_open { channel = Preview.No_content; started_at = 8.; since = 8. } ])
+  Alcotest.(check bool) "the second ends on its own return" true
+    ((current ()).open_activities = [])
 ;;
 
 let test_a_late_return_ends_only_its_own_call () =
@@ -833,7 +848,7 @@ let test_a_new_attempt_a_failure_and_a_new_request_end_open_work () =
     ((current ()).open_activities
      = [ Preview.Response_open { channel = Preview.No_content; started_at = 3.; since = 3. } ]);
   started writer 4. "Execute";
-  Preview.note_attempt ~writer ~now:5. ~runtime_id:"glm";
+  loop_attempt ~now:5. writer "glm";
   Alcotest.(check bool) "a new attempt ends what the old one left open" true
     ((current ()).open_activities = []);
   started writer 6. "Execute";
@@ -890,9 +905,42 @@ let test_a_tool_the_stream_never_showed_opens_at_its_hook () =
   Alcotest.(check bool) "which is the turn's activity" true
     ((current ()).activity = Preview.Tool_observed);
   finished ~tool_use_id:(Some "late") writer 4. "Execute";
-  Alcotest.(check bool) "its return opens the next response, counted from the return" true
-    ((current ()).open_activities
-     = [ Preview.Response_open { channel = Preview.No_content; started_at = 4.; since = 4. } ])
+  Alcotest.(check bool) "its return ends the call" true ((current ()).open_activities = [])
+;;
+
+(* In MASC's own agent loop a request goes out before every model message, and
+   a tool block is only the model's call: the gates before the run, an
+   approval included, come after its stop. So the block's stop ends nothing,
+   and the next response opens at the next request with that request's clock. *)
+let test_in_the_agent_loop_a_tool_block_is_only_the_call () =
+  let module Preview = Keeper_turn_preview in
+  let keeper_name = "loop-tool-block" in
+  let current () = Option.get (Preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  let call stage since =
+    Preview.Tool_open
+      { tool_use_id = Some "call_1"; tool_name = "Execute"; stage; started_at = 3.; since }
+  in
+  let response since =
+    Preview.Response_open { channel = Preview.No_content; started_at = since; since }
+  in
+  loop_attempt ~now:1.5 writer "glm";
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "call_1") "Execute");
+  Preview.note_stream ~writer ~now:4. (block_stop 1);
+  Alcotest.(check string) "the model finished the call, and the gates may still be holding it"
+    "glm · waiting for provider response · tool called: Execute · last observed tool: Execute"
+    (Preview.status_text (current ()));
+  Alcotest.(check bool) "so the block's stop leaves the call open" true
+    ((current ()).open_activities = [ response 2.; call Preview.Tool_requested 3. ]);
+  started ~tool_use_id:(Some "call_1") writer 5. "Execute";
+  Alcotest.(check bool) "the before-tool hook is where it runs, and the message that called it is over" true
+    ((current ()).open_activities = [ call Preview.Tool_executing 5. ]);
+  finished ~tool_use_id:(Some "call_1") writer 6. "Execute";
+  Alcotest.(check bool) "its return opens no response" true ((current ()).open_activities = []);
+  Preview.note_request ~writer ~now:20.;
+  Alcotest.(check bool) "the next request does, with its own clock" true
+    ((current ()).open_activities = [ response 20. ])
 ;;
 
 (* An official client's turn is one message boundary around many model
@@ -908,23 +956,27 @@ let test_an_official_client_turn_waits_on_a_new_response_after_each_tool () =
   let waiting since =
     [ Preview.Response_open { channel = Preview.No_content; started_at = since; since } ]
   in
+  client_attempt ~now:1.5 writer "codex";
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:2.5 (message_start "turn_1");
   Preview.note_stream ~writer ~now:3. (text_delta "checking");
   Preview.note_stream ~writer ~now:130. (tool_block 1 (Some "call_1") "Execute");
-  Preview.note_stream ~writer ~now:130.5 (block_stop 1);
   Alcotest.(check string) "a call the model is still making leaves the answer open"
-    "receiving response · tool called: Execute · last observed tool: Execute"
+    "codex · receiving response · tool called: Execute · last observed tool: Execute"
     (Preview.status_text (current ()));
   started ~tool_use_id:(Some "call_1") writer 131. "Execute";
   Alcotest.(check string) "the words before the call are not an open answer while it runs"
-    "tool running: Execute · last observed tool: Execute"
+    "codex · tool running: Execute · last observed tool: Execute"
     (Preview.status_text (current ()));
   finished ~tool_use_id:(Some "call_1") writer 133.5 "Execute";
   Alcotest.(check bool) "the return opens the next response, empty and counted from here" true
     ((current ()).open_activities = waiting 133.5);
+  (* The client's stream closes the block after the call returned. *)
+  Preview.note_stream ~writer ~now:134. (block_stop 1);
+  Alcotest.(check bool) "the block closing behind the call leaves that response alone" true
+    ((current ()).open_activities = waiting 133.5);
   Alcotest.(check string) "so the turn waits, and does not answer on the strength of old words"
-    "waiting for provider response · last observed tool: Execute"
+    "codex · waiting for provider response · last observed tool: Execute"
     (Preview.status_text (current ()));
   Preview.note_stream ~writer ~now:140. (text_delta "the result says");
   Alcotest.(check bool) "words that arrive give it their channel and clock" true
@@ -933,6 +985,7 @@ let test_an_official_client_turn_waits_on_a_new_response_after_each_tool () =
   Preview.note_stream ~writer ~now:141. (tool_block 2 (Some "call_2") "Execute");
   started ~tool_use_id:(Some "call_2") writer 142. "Execute";
   finished ~tool_use_id:(Some "call_2") writer 145. "Execute";
+  Preview.note_stream ~writer ~now:146. (block_stop 2);
   Alcotest.(check bool) "after the second call the turn waits again, from that return" true
     ((current ()).open_activities = waiting 145.);
   Preview.note_stream ~writer ~now:150. Agent_core.Types.MessageStop;
@@ -940,6 +993,44 @@ let test_an_official_client_turn_waits_on_a_new_response_after_each_tool () =
   Alcotest.(check bool) "the turn's end leaves nothing open" true
     ((current ()).open_activities = []);
   Alcotest.(check string) "and keeps the answer" "final words" (current ()).text_tail
+;;
+
+(* In an official client's attempt a tool block wraps the host's whole call. A
+   gate that refuses the call leaves no after-tool hook, so the block's stop is
+   what ends it. Left open, the call read as a running tool for the rest of
+   the turn: the dashboard reads only [activity]. *)
+let test_an_official_client_tool_block_is_the_whole_call () =
+  let module Preview = Keeper_turn_preview in
+  let keeper_name = "client-tool-block" in
+  let current () = Option.get (Preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  let waiting since =
+    [ Preview.Response_open { channel = Preview.No_content; started_at = since; since } ]
+  in
+  client_attempt ~now:1.5 writer "codex";
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "refused") "Write");
+  Alcotest.(check string) "the model called a tool"
+    "codex · waiting for provider response · tool called: Write · last observed tool: Write"
+    (Preview.status_text (current ()));
+  Preview.note_stream ~writer ~now:5. (block_stop 1);
+  Alcotest.(check bool) "the block stopped and no hook came: the call is over, and the message that made it too" true
+    ((current ()).open_activities = waiting 5.);
+  Alcotest.(check string) "so the turn waits from here, and no tool claims to run"
+    "codex · waiting for provider response · last observed tool: Write"
+    (Preview.status_text (current ()));
+  Preview.note_stream ~writer ~now:10. (tool_block 2 (Some "ran") "Execute");
+  started ~tool_use_id:(Some "ran") writer 11. "Execute";
+  finished ~tool_use_id:(Some "ran") writer 13. "Execute";
+  Alcotest.(check bool) "a call that ran opens the next response at its return" true
+    ((current ()).open_activities = waiting 13.);
+  Preview.note_stream ~writer ~now:14. (block_stop 2);
+  Alcotest.(check bool) "and its block stopping behind it changes nothing" true
+    ((current ()).open_activities = waiting 13.);
+  Preview.note_stream ~writer ~now:20. (tool_block 3 None "Skill");
+  Preview.note_stream ~writer ~now:21. (block_stop 3);
+  Alcotest.(check bool) "a call the stream named without an id ends the same way" true
+    ((current ()).open_activities = waiting 21.)
 ;;
 
 (* A native tool is the official client's own: its stream block is the run. No
@@ -956,22 +1047,23 @@ let test_a_native_block_is_the_clients_own_run () =
       { tool_use_id = Some id; tool_name = "bash"; stage = Preview.Tool_executing
       ; started_at; since = started_at }
   in
+  client_attempt ~now:1.5 writer "vibe";
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:10. (native_tool_block 1 (Some "call_9") "self.sleep");
   Alcotest.(check string) "the client's own tool is running from its block, not waiting to run"
-    "tool running: self.sleep · last observed tool: self.sleep"
+    "vibe · tool running: self.sleep · last observed tool: self.sleep"
     (Preview.status_text (current ()));
   Preview.note_stream ~writer ~now:190.5 (block_stop 1);
   Alcotest.(check bool) "its block stopping ends the run, and the turn waits on the model again" true
     ((current ()).open_activities
      = [ Preview.Response_open { channel = Preview.No_content; started_at = 190.5; since = 190.5 } ]);
   Alcotest.(check string) "no call is left claiming to be waiting to run"
-    "waiting for provider response · last observed tool: self.sleep"
+    "vibe · waiting for provider response · last observed tool: self.sleep"
     (Preview.status_text (current ()));
   Preview.note_stream ~writer ~now:200. (native_tool_block 2 (Some "call_10") "bash");
   Preview.note_stream ~writer ~now:201. (native_tool_block 3 (Some "call_11") "bash");
   Alcotest.(check string) "two blocks of one tool are two runs"
-    "tool running: bash · tool running: bash · last observed tool: bash"
+    "vibe · tool running: bash · tool running: bash · last observed tool: bash"
     (Preview.status_text (current ()));
   Preview.note_stream ~writer ~now:205. (block_stop 3);
   Alcotest.(check bool) "the block that stops is the run that ends, whichever stopped first" true
@@ -988,7 +1080,7 @@ let test_a_native_block_is_the_clients_own_run () =
 
 (* Antigravity names no call id on a native block and announces an active step
    more than once under one index. Two id-less runs of one tool can stop in
-   the other order. *)
+   the other order, and be opened at one instant. *)
 let test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock () =
   let module Preview = Keeper_turn_preview in
   let keeper_name = "open-native-tool-repeats" in
@@ -1002,6 +1094,7 @@ let test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock () =
   let waiting since =
     [ Preview.Response_open { channel = Preview.No_content; started_at = since; since } ]
   in
+  client_attempt ~now:1.5 writer "antigravity";
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:10. (native_tool_block 1 None "view");
   Preview.note_stream ~writer ~now:11. (native_tool_block 1 None "view");
@@ -1016,19 +1109,29 @@ let test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock () =
   Preview.note_stream ~writer ~now:30. (block_stop 2);
   Alcotest.(check bool) "and the last one to end opens the next response" true
     ((current ()).open_activities = waiting 30.);
-  Preview.note_stream ~writer ~now:40. (block_stop 9);
+  Preview.note_stream ~writer ~now:40. (native_tool_block 4 None "view");
+  Preview.note_stream ~writer ~now:40. (native_tool_block 5 None "view");
+  Alcotest.(check bool) "two runs of one name opened at one instant are two runs" true
+    ((current ()).open_activities = [ run 40.; run 40. ]);
+  Preview.note_stream ~writer ~now:45. (block_stop 4);
+  Alcotest.(check bool) "one block stopping ends one of them" true
+    ((current ()).open_activities = [ run 40. ]);
+  Preview.note_stream ~writer ~now:50. (block_stop 5);
+  Alcotest.(check bool) "the other ends on its own block" true
+    ((current ()).open_activities = waiting 50.);
+  Preview.note_stream ~writer ~now:60. (block_stop 9);
   Alcotest.(check bool) "a stop for a block the stream never opened changes nothing" true
-    ((current ()).open_activities = waiting 30.);
-  Preview.note_stream ~writer ~now:50.
+    ((current ()).open_activities = waiting 50.);
+  Preview.note_stream ~writer ~now:70.
     Agent_core.Types.
       (ContentBlockStart
-         { index = 4
+         { index = 6
          ; content_type = Runtime_native_tools.stream_content_type
          ; tool_id = Some "nameless"
          ; tool_name = None
          });
   Alcotest.(check bool) "a native block that names no tool opens no run" true
-    ((current ()).open_activities = waiting 30.)
+    ((current ()).open_activities = waiting 50.)
 ;;
 
 (* Words that arrive while a call runs open a response after it. A before-tool
@@ -1058,25 +1161,61 @@ let test_words_that_come_during_a_run_outlive_a_repeated_hook () =
     ((current ()).open_activities = [ words ])
 ;;
 
-let test_a_turn_that_ends_at_a_tool_boundary_closes_the_last_return () =
+(* A turn of the agent loop can end at a tool boundary. A call its gates
+   refused is still only requested there, and no later request comes to end
+   it. *)
+let test_a_turn_that_ends_at_a_tool_boundary_closes_what_is_still_open () =
   let module Preview = Keeper_turn_preview in
   let keeper_name = "open-turn-over" in
   let current () = Option.get (Preview.current ~keeper_name) in
   let writer = Some (reset keeper_name ~now:1.) in
-  started writer 2. "wait";
-  finished writer 3. "wait";
-  Alcotest.(check bool) "the last return opened the next response" true
+  let requested since =
+    Preview.Tool_open
+      { tool_use_id = Some "wait"; tool_name = "wait"; stage = Preview.Tool_requested
+      ; started_at = since; since }
+  in
+  loop_attempt ~now:1.5 writer "glm";
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "wait") "wait");
+  Preview.note_stream ~writer ~now:4. (block_stop 1);
+  Alcotest.(check bool) "the block is only the model's call, so its stop ends nothing" true
     ((current ()).open_activities
-     = [ Preview.Response_open { channel = Preview.No_content; started_at = 3.; since = 3. } ]);
-  Preview.note_turn_over ~writer ~now:4.;
-  Alcotest.(check bool) "the turn ending here closes it: no response follows" true
+     = [ Preview.Response_open { channel = Preview.No_content; started_at = 2.; since = 2. }
+       ; requested 3. ]);
+  Preview.note_turn_over ~writer ~now:5.;
+  Alcotest.(check bool) "the turn ending here closes what is still open" true
     ((current ()).open_activities = []);
-  Alcotest.(check bool) "and the turn no longer says it waits with a clock" true
+  Alcotest.(check bool) "and the turn no longer says a tool is called" true
     ((current ()).activity = Preview.Awaiting_response);
-  Preview.note_stream ~writer ~now:5. Agent_core.Types.MessageStop;
   finished writer 5.5 "wait";
   Alcotest.(check bool) "a return that ends no call opens no response" true
     ((current ()).open_activities = [])
+;;
+
+(* A client may never send the stop of a native run: Claude Code sends none
+   for a result it cannot tie to its call. Nothing else says when that run
+   ended, so it stays running until the turn's run returns. *)
+let test_the_turn_over_closes_a_native_run_whose_stop_never_came () =
+  let module Preview = Keeper_turn_preview in
+  let keeper_name = "open-native-run-without-stop" in
+  let current () = Option.get (Preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  let running =
+    Preview.Tool_open
+      { tool_use_id = Some "call"; tool_name = "Read"; stage = Preview.Tool_executing
+      ; started_at = 10.; since = 10. }
+  in
+  client_attempt ~now:1.5 writer "claude-code";
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:10. (native_tool_block 1 (Some "call") "Read");
+  Preview.note_stream ~writer ~now:20. Agent_core.Types.MessageStop;
+  Preview.note_text ~writer ~now:21. "done";
+  Alcotest.(check bool) "the turn's text closes the response, and only the client could close the run" true
+    ((current ()).open_activities = [ running ]);
+  Preview.note_turn_over ~writer ~now:22.;
+  Alcotest.(check bool) "the run returning closes it" true ((current ()).open_activities = []);
+  Alcotest.(check bool) "and the turn no longer says a tool runs" true
+    ((current ()).activity = Preview.Awaiting_response)
 ;;
 
 let test_the_turn_text_ends_the_response () =
@@ -1131,6 +1270,10 @@ let () =
             test_the_wire_carries_the_open_work
         ; Alcotest.test_case "a tool the stream never showed opens at its hook" `Quick
             test_a_tool_the_stream_never_showed_opens_at_its_hook
+        ; Alcotest.test_case "in the agent loop a tool block is only the call" `Quick
+            test_in_the_agent_loop_a_tool_block_is_only_the_call
+        ; Alcotest.test_case "an official client tool block is the whole call" `Quick
+            test_an_official_client_tool_block_is_the_whole_call
         ; Alcotest.test_case "an official client turn waits on a new response after each tool" `Quick
             test_an_official_client_turn_waits_on_a_new_response_after_each_tool
         ; Alcotest.test_case "a native block is the client's own run" `Quick
@@ -1139,8 +1282,10 @@ let () =
             test_a_native_start_heard_again_is_one_run_and_each_run_keeps_its_clock
         ; Alcotest.test_case "words that come during a run outlive a repeated hook" `Quick
             test_words_that_come_during_a_run_outlive_a_repeated_hook
-        ; Alcotest.test_case "a turn that ends at a tool boundary closes the last return" `Quick
-            test_a_turn_that_ends_at_a_tool_boundary_closes_the_last_return
+        ; Alcotest.test_case "a turn that ends at a tool boundary closes what is still open" `Quick
+            test_a_turn_that_ends_at_a_tool_boundary_closes_what_is_still_open
+        ; Alcotest.test_case "the turn over closes a native run whose stop never came" `Quick
+            test_the_turn_over_closes_a_native_run_whose_stop_never_came
         ; Alcotest.test_case "the turn text ends the response" `Quick
             test_the_turn_text_ends_the_response
         ; Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick

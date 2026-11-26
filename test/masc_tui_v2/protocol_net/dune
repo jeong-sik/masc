@@ -61,6 +61,8 @@
   masc.masc_tool_surface
   masc.masc_types
   masc.repo_manager
+  ;; The turn preview's attempt note names the loop that runs the attempt.
+  masc.runtime
   masc.server
   masc.tool_schemas
   masc_tui_core

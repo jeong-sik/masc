@@ -3494,24 +3494,30 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
        contains_substr ~needle:priv_id s || contains_substr ~needle:private_edge_secret s);
     (* 2. Per-keeper Memory OS Internals (compaction + canonical turns + digest + librarian molt) *)
     let turn_id = Ids.Turn_id.of_string "turn-001" in
-    let anchor : Keeper_compaction.compaction_anchor =
-      { epoch_id = 1
-      ; covers_through_turn = turn_id
-      ; archived_epochs_through = None
-      ; active_intent = "Verify Memory OS internals"
-      ; observations = [ Assistant_said "Read-only stats available", turn_id ]
-      }
-    in
-    let evicted_turn : Keeper_compaction.canonical_turn =
-      { turn_id; messages = [] }
+    let evicted_turn : Agent_core.Types.message list =
+      [ { (Agent_core.Types.make_message
+             ~role:Agent_core.Types.User
+             [ Agent_core.Types.Text "Verify Memory OS internals" ])
+          with
+          metadata =
+            [ Keeper_turn_ref_metadata.canonical_key, `String (Ids.Turn_id.to_string turn_id) ]
+        }
+      ; Agent_core.Types.make_message
+          ~role:Agent_core.Types.Assistant
+          [ Agent_core.Types.Text "Read-only stats available" ]
+      ]
     in
     (match
-       Keeper_compaction.commit_epoch ~keepers_dir ~keeper_id:"alpha"
+       Keeper_compaction.compact_evicted_messages ~keepers_dir ~keeper_id:"alpha"
          ~trigger:(Explicit_hard_limit { capacity_bytes = 64000; observed_bytes = 70000 })
-         ~anchor ~evicted_turns:[ evicted_turn ]
+         ~messages:evicted_turn
+         ~eviction:{ Keeper_compaction_atom.prefix = 2; later = [] }
+         ()
      with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail ("commit_epoch: " ^ Keeper_compaction.store_error_to_string e));
+     | Ok (Some _) -> ()
+     | Ok None -> Alcotest.fail "compact_evicted_messages committed no epoch"
+     | Error e ->
+       Alcotest.fail ("compact_evicted_messages: " ^ Keeper_compaction.store_error_to_string e));
     (match
        Keeper_canonical_turn_store.commit_turn ~keepers_dir ~keeper_id:"alpha"
          ~turn_id ~runtime_kind:Acp_cli ~runtime_id:"vibe_acp.devstral-2"
@@ -3531,7 +3537,8 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
     let comp = json_member_exn "compaction" internals in
     Alcotest.(check bool) "compaction present" true (json_bool_exn "present" comp);
     Alcotest.(check int) "compaction epoch_count" 1 (json_int_exn "epoch_count" comp);
-    Alcotest.(check int) "compaction archived_turns_count" 1 (json_int_exn "archived_turns_count" comp);
+    Alcotest.(check int) "compaction archived_turns_count counts the input and the reply" 2
+      (json_int_exn "archived_turns_count" comp);
     Alcotest.(check bool) "compaction anchor_bytes > 0" true (json_int_exn "anchor_bytes" comp > 0);
     Alcotest.(check int) "compaction counts attributed observations" 1 (json_int_exn "observations_count" comp);
     let turns = json_member_exn "canonical_turns" internals in

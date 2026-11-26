@@ -76,31 +76,32 @@ let make_msg ~role content : Agent_core.Types.message =
   }
 ;;
 
-let make_turn ~idx ~user_text ~tool_output ~assistant_text : Compaction.canonical_turn =
-  let turn_id = Ids.Turn_id.of_string (Printf.sprintf "turn-%03d" idx) in
+(* One Keeper turn: the input names the turn; the tool round and the reply
+   belong to it as atoms 1 and 2. *)
+let make_turn ~idx ~user_text ~tool_output ~assistant_text : Agent_core.Types.message list =
+  let turn_id = Printf.sprintf "turn-%03d" idx in
   let tool_id = Printf.sprintf "call-%03d" idx in
-  { turn_id
-  ; messages =
-      [ make_msg ~role:User [ Llm_types.Text user_text ]
-      ; make_msg ~role:Assistant
-          [ Llm_types.ToolUse
-              { id = tool_id
-              ; name = "keeper_fs_read"
-              ; input = `Assoc [ "file_path", `String (Printf.sprintf "lib/world_memory/step_%d.ml" idx) ]
-              }
-          ]
-      ; make_msg ~role:Tool
-          [ Llm_types.ToolResult
-              { tool_use_id = tool_id
-              ; content = tool_output
-              ; outcome = Llm_types.Tool_succeeded
-              ; json = None
-              ; content_blocks = None
-              }
-          ]
-      ; make_msg ~role:Assistant [ Llm_types.Text assistant_text ]
+  [ { (make_msg ~role:User [ Llm_types.Text user_text ]) with
+      metadata = [ Masc.Keeper_turn_ref_metadata.canonical_key, `String turn_id ]
+    }
+  ; make_msg ~role:Assistant
+      [ Llm_types.ToolUse
+          { id = tool_id
+          ; name = "keeper_fs_read"
+          ; input = `Assoc [ "file_path", `String (Printf.sprintf "lib/world_memory/step_%d.ml" idx) ]
+          }
       ]
-  }
+  ; make_msg ~role:Tool
+      [ Llm_types.ToolResult
+          { tool_use_id = tool_id
+          ; content = tool_output
+          ; outcome = Llm_types.Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; make_msg ~role:Assistant [ Llm_types.Text assistant_text ]
+  ]
 ;;
 
 let boot_keeper_store ~keepers_dir ~turns_dir ~keeper_id ~at =
@@ -209,7 +210,7 @@ let test_full_living_memory_circulation () =
   let config = Masc.Workspace.default_config root in
   let blob_store = Tool_blob_store.create ~base_path:root in
 
-  (* === STAGE 1: Multi-turn Keeper Log -> Microcompaction + Provider-Neutral Anchored Compaction === *)
+  (* === STAGE 1: Multi-turn Keeper Log -> Provider-Neutral Anchored Compaction === *)
   let big_tool_body =
     "HEAD-START: SQLite WAL architecture verified across 4 domains.\n"
     ^ String.make 12000 'x'
@@ -238,54 +239,44 @@ let test_full_living_memory_circulation () =
   let on_epoch_committed (anchor : Compaction.compaction_anchor) =
     epoch_events := anchor.epoch_id :: !epoch_events
   in
-  let compact_res_400k =
+  let history = List.concat turns in
+  (* The window keeps the last turn; the first three turns (three atoms each) leave it. *)
+  let anchor =
     match
-      Compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:1
-        ~force_trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+      Compaction.compact_evicted_messages
+        ~measure_message_bytes:msg_bytes
         ~on_epoch_committed
         ~keepers_dir
         ~keeper_id:"keeper-alpha"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:1200
-        ~reserved_bytes:0
-        turns
+        ~trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+        ~messages:history
+        ~eviction:{ Masc.Keeper_compaction_atom.prefix = 9; later = [] }
+        ()
     with
-    | Ok r -> r
+    | Ok (Some anchor) -> anchor
+    | Ok None -> fail "anchored compaction committed no epoch"
     | Error err -> fail (Compaction.store_error_to_string err)
   in
-  check bool "anchored compaction created epoch 1" true (Option.is_some compact_res_400k.anchor);
   check int "compaction epoch hook fired once" 1 (List.length !epoch_events);
-  let anchor = Option.get compact_res_400k.anchor in
   check int "epoch_id = 1" 1 anchor.epoch_id;
-  check bool "externalized large tool blob via structured handle" true
-    (compact_res_400k.microcompacted_results >= 1);
-  (* Provider switch 400K -> 128K projects seamlessly from exact same immutable anchor + tail. *)
-  let proj_128k_msgs =
-    match
-      Compaction.project_for_provider
-        ~anchor:(Some anchor)
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:128_000
-        ~reserved_bytes:0
-        [ List.nth turns 3 ]
-    with
-    | Fits_verbatim { messages; _ } | Fits_after_microcompaction { messages; _ } -> messages
-    | Needs_compaction _ -> fail "128K projection unexpectedly needed compaction"
-    | Single_turn_exceeds_capacity _ -> fail "128K projection single turn overflow"
+  check bool "the anchor names the third turn as covered" true
+    (anchor.coverage.through
+     = Some
+         (Masc.Keeper_compaction_atom.Through_turn
+            { turn = Ids.Turn_id.of_string "turn-003"
+            ; extent = Masc.Keeper_compaction_atom.Whole_turn
+            }));
+  (* Any provider reads the same anchor and the turns after it. *)
+  let live_tail =
+    Compaction.live_history_after_latest_anchor ~keepers_dir ~keeper_id:"keeper-alpha" history
   in
-  check bool "provider-neutral projection embeds anchor message" true
-    (List.length proj_128k_msgs >= 2);
-  (* Lossless Turn_id pointer back to canonical archived turn in SQLite WAL. *)
-  let archived_t1 =
-    match Compaction.load_archived_turn ~keepers_dir ~keeper_id:"keeper-alpha" ~turn_id:(Ids.Turn_id.of_string "turn-001") with
-    | Ok (Some t) -> t
-    | Ok None -> fail "archived turn-001 missing"
+  check bool "the live tail is the kept turn" true (live_tail = List.nth turns 3);
+  let compaction_stats =
+    match Compaction.inspect_stats ~keepers_dir ~keeper_id:"keeper-alpha" with
+    | Ok stats -> stats
     | Error err -> fail (Compaction.store_error_to_string err)
   in
-  check string "lossless archived Turn_id pointer round-trips"
-    "turn-001" (Ids.Turn_id.to_string archived_t1.turn_id);
+  check int "the nine evicted atoms are archived verbatim" 9 compaction_stats.archived_atom_count;
 
   (* === STAGE 2: Ship-of-Theseus Librarian (Synthesize [Derived] + Molt + Checkpoint Compaction + Promote_to_world) === *)
   let store_a = boot_keeper_store ~keepers_dir ~turns_dir ~keeper_id:"keeper-alpha" ~at:110.0 in
@@ -746,14 +737,13 @@ let test_full_living_memory_circulation () =
 
   Printf.printf
     "\n=== STACK C LIVING MEMORY CIRCULATION E2E PROOF ===\n\
-     - Stage 1 (Anchored Compaction): epoch=%d, externalized_blobs=%d, provider_400k_to_128k_msgs=%d, lossless_turn_id=%s\n\
+     - Stage 1 (Anchored Compaction): epoch=%d, archived_atoms=%d, live_tail_msgs=%d\n\
      - Stage 2 (Ship-of-Theseus Librarian): compacted_log_lines=%d -> 1 checkpoint, cold_archived=%d, derived_synthesized=1, world_promotions=%d\n\
      - Stage 3 (MVCC World Memory + MCP): active_world_facts=%d, edges=%d, unified_index=%d, concurrent_mvcc_ops=%d, mcp_notifications=%d\n\
      - Stage 4 (Frozen Digest + Persistent FTS5): cache_stable_bytes=%d, digest_sha256=%s, bodies_omitted=false, fts5_hits=%d\n"
     anchor.epoch_id
-    compact_res_400k.microcompacted_results
-    (List.length proj_128k_msgs)
-    (Ids.Turn_id.to_string archived_t1.turn_id)
+    compaction_stats.archived_atom_count
+    (List.length live_tail)
     compacted_lines
     (List.length archived_a.left)
     (List.length plan_a.effects.promotions + List.length plan_b.effects.promotions)
@@ -779,46 +769,31 @@ let test_stack_c_tool_blob_scope_classification () =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.mkdir_p turns_dir;
   let blob_store = Tool_blob_store.create ~base_path:root in
-  (* 1. C1: compaction.db (+ WAL/SHM) + durable microcompacted blob handles *)
+  (* 1. C1: compaction.db (+ WAL/SHM) archiving turns whose tool output is a blob handle *)
   let big_body = "HEAD-SCOPE\n" ^ String.make 10_000 's' ^ "\nTAIL-SCOPE" in
+  let handle =
+    Tool_output.encode_for_agent_core
+      (Tool_blob_store.put blob_store ~bytes:big_body ~mime:"text/plain")
+  in
   let turns =
-    [ make_turn ~idx:1 ~user_text:"Scope check 1" ~tool_output:big_body ~assistant_text:"Checked 1"
-    ; make_turn ~idx:2 ~user_text:"Scope check 2" ~tool_output:big_body ~assistant_text:"Checked 2"
+    [ make_turn ~idx:1 ~user_text:"Scope check 1" ~tool_output:handle ~assistant_text:"Checked 1"
+    ; make_turn ~idx:2 ~user_text:"Scope check 2" ~tool_output:handle ~assistant_text:"Checked 2"
     ; make_turn ~idx:3 ~user_text:"Scope check 3" ~tool_output:"small" ~assistant_text:"Checked 3"
     ]
   in
-  let compact_res =
-    match
-      Compaction.compact_and_project
-        ~blob_store
-        ~keep_recent_turns:1
-        ~keepers_dir
-        ~keeper_id:"keeper-scope"
-        ~measure_message_bytes:msg_bytes
-        ~capacity_bytes:20_000
-        ~reserved_bytes:500
-        turns
-    with
-    | Ok r -> r
-    | Error err -> fail (Compaction.store_error_to_string err)
-  in
-  check bool "C1 microcompacted durable blobs" true (compact_res.microcompacted_results >= 1);
-  (* Also commit an epoch so compaction.db has compaction_epochs + archived_turns + active_microcompacted_handles *)
-  ignore
-    (match
-       Compaction.compact_and_project
-         ~blob_store
-         ~keep_recent_turns:1
-         ~force_trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 128_000 })
-         ~keepers_dir
-         ~keeper_id:"keeper-scope"
-         ~measure_message_bytes:msg_bytes
-         ~capacity_bytes:20_000
-         ~reserved_bytes:500
-         turns
-     with
-     | Ok r -> r
-     | Error err -> fail (Compaction.store_error_to_string err));
+  (match
+     Compaction.compact_evicted_messages
+       ~measure_message_bytes:msg_bytes
+       ~keepers_dir
+       ~keeper_id:"keeper-scope"
+       ~trigger:(Compaction.Provider_context_overflow { provider_limit_tokens = Some 128_000 })
+       ~messages:(List.concat turns)
+       ~eviction:{ Masc.Keeper_compaction_atom.prefix = 6; later = [] }
+       ()
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "C1 compaction committed no epoch"
+   | Error err -> fail (Compaction.store_error_to_string err));
   (* 2. C2: memory-log.jsonl + memory-archive.jsonl + memory-digest.json + memory_fts.db (+ WAL/SHM) *)
   let store = boot_keeper_store ~keepers_dir ~turns_dir ~keeper_id:"keeper-scope" ~at:10.0 in
   let store = remember store "Scope test fact 1" Types.Fact 20.0 in
@@ -856,7 +831,7 @@ let test_stack_c_tool_blob_scope_classification () =
   in
   let obs = run_sweep Tool_blob_maintenance.Observe_only in
   check (list string) "all Stack C (C1+C2+C3) files have zero unclassified entries" [] obs.unclassified;
-  check bool "C1 active microcompacted blobs remain live references" true (obs.live_references >= 1);
+  check bool "C1 archived blob handles remain live references" true (obs.live_references >= 1);
   let del = run_sweep Tool_blob_maintenance.Delete_previous_candidates in
   check (list string) "delete pass has zero unclassified entries" [] del.unclassified
 ;;

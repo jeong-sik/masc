@@ -1732,7 +1732,15 @@ let test_reference_history_places_tools_without_carry_or_receipts () =
 let make_compaction_anchor_msg epoch_id =
   Keeper_compaction.anchor_to_message
     { Keeper_compaction.epoch_id
-    ; covers_through_turn = Ids.Turn_id.of_string (Printf.sprintf "turn-ep-%d" epoch_id)
+    ; coverage =
+        { through =
+            Some
+              (Keeper_compaction_atom.Through_turn
+                 { turn = Ids.Turn_id.of_string (Printf.sprintf "turn-ep-%d" epoch_id)
+                 ; extent = Keeper_compaction_atom.Whole_turn
+                 })
+        ; beyond = []
+        }
     ; archived_epochs_through = None
     ; active_intent = "post-compaction intent"
     ; observations = []

@@ -19,6 +19,7 @@ let reasoning_visibility_of_fields field fields =
 type image_block = {
   src : string;
   cap : string option;
+  mime_type : string option;
 }
 
 type link_block = {
@@ -417,7 +418,7 @@ let line_to_block line : chat_block option =
   else if standalone_url_re trimmed && is_http_url trimmed
   then (
     if is_image_url trimmed
-    then Some (Image { src = trimmed; cap = None })
+    then Some (Image { src = trimmed; cap = None; mime_type = None })
     else
       Some
         (Link
@@ -441,68 +442,94 @@ let push_text_fragment acc fragment =
 
 let md_image_re = Re.Pcre.re "!\\[([^\\]]*)\\]\\(([^)]+)\\)" |> Re.compile
 
-let code_fence_re =
-  Re.Pcre.re
-    "```([A-Za-z0-9_+.#-]*)[ \t]*\r?\n([\\s\\S]*?)\r?\n```[ \t]*(?:\r?\n|$)"
-  |> Re.compile
-
-type next_match =
-  | Image_match of Re.Group.t
-  | Code_match of Re.Group.t
-
-let earlier_match left right =
-  match left, right with
-  | None, None -> None
-  | (Some (Image_match _), None) | (Some (Code_match _), None) -> left
-  | (None, Some (Image_match _)) | (None, Some (Code_match _)) -> right
-  | Some (Image_match image), Some (Code_match code) ->
-    if Re.Group.start code 0 <= Re.Group.start image 0 then right else left
-  | Some (Code_match code), Some (Image_match image) ->
-    if Re.Group.start code 0 <= Re.Group.start image 0 then left else right
-  | (Some (Image_match _), Some _) | (Some (Code_match _), Some _) -> left
-
-let parse_text_to_blocks text : chat_block list =
+let scan_non_code_fragment acc fragment =
+  let len = String.length fragment in
   let rec scan acc last_index =
-    let next_image =
-      Option.map (fun group -> Image_match group) (Re.exec_opt ~pos:last_index md_image_re text)
-    in
-    let next_code =
-      Option.map (fun group -> Code_match group) (Re.exec_opt ~pos:last_index code_fence_re text)
-    in
-    match earlier_match next_image next_code with
+    match Re.exec_opt ~pos:last_index md_image_re fragment with
     | None ->
-      push_text_fragment acc (String.sub text last_index (String.length text - last_index))
-    | Some (Image_match group) ->
+      push_text_fragment acc (String.sub fragment last_index (len - last_index))
+    | Some group ->
       let start = Re.Group.start group 0 in
       let stop = Re.Group.stop group 0 in
-      let before = String.sub text last_index (start - last_index) in
+      let before = String.sub fragment last_index (start - last_index) in
       let alt = Re.Group.get group 1 in
       let url = Re.Group.get group 2 in
       let acc = push_text_fragment acc before in
       if is_http_url url then
         let cap = if String.trim alt = "" then None else Some alt in
-        let acc = Image { src = url; cap } :: acc in
+        let acc = Image { src = url; cap; mime_type = None } :: acc in
         scan acc stop
       else
-        let fallback = String.sub text start (stop - start) in
+        let fallback = String.sub fragment start (stop - start) in
         scan (push_text_fragment acc fallback) stop
-    | Some (Code_match group) ->
-      let start = Re.Group.start group 0 in
-      let stop = Re.Group.stop group 0 in
-      let before = String.sub text last_index (start - last_index) in
-      let lang = Re.Group.get group 1 |> String.trim in
-      let source = Re.Group.get group 2 in
-      let cap = if lang = "" then None else Some (String.lowercase_ascii lang) in
-      let acc = push_text_fragment acc before in
-      let acc =
-        match cap with
-        | Some lang when String.starts_with ~prefix:"mermaid" lang ->
-          Mermaid { source; caption = None } :: acc
-        | _ -> Code { cap; html = escape_html source; source = Some source } :: acc
-      in
-      scan acc stop
   in
-  List.rev (scan [] 0)
+  scan acc 0
+;;
+
+let collect_top_level_fenced_blocks text =
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs:true text in
+  let rec walk acc = function
+    | Cmarkit.Block.Blocks (blocks, _) -> List.fold_left walk acc blocks
+    | Cmarkit.Block.Code_block (code, meta) ->
+      let closed =
+        match Cmarkit.Block.Code_block.layout code with
+        | `Fenced { closing_fence; _ } -> Option.is_some closing_fence
+        | `Indented -> false
+      in
+      let loc = Cmarkit.Meta.textloc meta in
+      if (not closed) || Cmarkit.Textloc.is_none loc || Cmarkit.Textloc.is_empty loc
+      then acc
+      else (
+        let first = Cmarkit.Textloc.first_byte loc in
+        let stop = Int.min (String.length text) (Cmarkit.Textloc.last_byte loc + 1) in
+        let lang =
+          match
+            Option.bind (Cmarkit.Block.Code_block.info_string code) (fun (info, _) ->
+              Cmarkit.Block.Code_block.language_of_info_string info)
+          with
+          | Some (tag, _) ->
+            let trimmed = String.trim tag in
+            if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
+          | None -> None
+        in
+        let source =
+          Cmarkit.Block.Code_block.code code
+          |> List.map Cmarkit.Block_line.to_string
+          |> String.concat "\n"
+        in
+        (first, stop, lang, source) :: acc)
+    | _ -> acc
+  in
+  List.rev (walk [] (Cmarkit.Doc.block doc))
+;;
+
+let parse_text_to_blocks text : chat_block list =
+  let len = String.length text in
+  let fences = collect_top_level_fenced_blocks text in
+  let acc, cursor =
+    List.fold_left
+      (fun (acc, cursor) (first, stop, lang, source) ->
+         if first < cursor || stop < first
+         then acc, cursor
+         else (
+           let before = String.sub text cursor (first - cursor) in
+           let acc = scan_non_code_fragment acc before in
+           let block =
+             match lang with
+             | Some ("mermaid" | "pele") -> Mermaid { source; caption = None }
+             | Some _ | None ->
+               Code { cap = lang; html = escape_html source; source = Some source }
+           in
+           block :: acc, stop))
+      ([], 0)
+      fences
+  in
+  let acc =
+    if cursor < len
+    then scan_non_code_fragment acc (String.sub text cursor (len - cursor))
+    else acc
+  in
+  List.rev acc
 ;;
 
 let block_to_yojson = function
@@ -573,14 +600,11 @@ let block_to_yojson = function
        @ Json_util.string_field_if_present "mimeType" mime_type
        @ opt_int_field "sizeBytes" size_bytes
        @ Json_util.string_field_if_present "kind" kind)
-  | Image { src; cap } ->
-    let fields = [ ("t", `String "image"); ("src", `String src) ] in
-    let fields =
-      match cap with
-      | None -> fields
-      | Some c -> fields @ [ ("cap", `String c) ]
-    in
-    `Assoc fields
+  | Image { src; cap; mime_type } ->
+    `Assoc
+      ([ ("t", `String "image"); ("src", `String src) ]
+       @ Json_util.string_field_if_present "cap" cap
+       @ Json_util.string_field_if_present "mimeType" mime_type)
   | Link { url; title; meta } ->
     `Assoc
       [ ("t", `String "link")
@@ -786,7 +810,8 @@ let block_of_yojson json : chat_block option =
      | Some "image" ->
        Option.bind (get_string "src") (fun src ->
          let cap = get_string "cap" in
-         Some (Image { src; cap }))
+         let mime_type = get_string "mimeType" in
+         Some (Image { src; cap; mime_type }))
      | Some "link" ->
        Option.bind (get_string "url") (fun url ->
          Option.bind (get_string "title") (fun title ->

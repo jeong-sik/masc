@@ -125,7 +125,7 @@ let test_committed_blocks_and_html () = Eio_main.run(fun _ ->
   Keeper_chat_events.publish bus (terminal Keeper_turn_outcome.Visible_reply "");
   Keeper_chat_events.publish bus (Run_finished{run_id="r"});
   let sent=ref [] in
-  let blocks=[Keeper_chat_blocks.Image{src="https://example.com/image?a=1&b=2";cap=Some "<photo>"};
+  let blocks=[Keeper_chat_blocks.Image{src="https://example.com/image?a=1&b=2";cap=Some "<photo>";mime_type=None};
     Heading{html="A &amp; B"};Thinking{content="private reasoning";redacted=false}] in
   let result=Keeper_chat_telegram.deliver ~events:bus ~load_blocks:(fun _ -> Ok(Some blocks))
     ~send:(fun messages -> sent:=messages;Ok ()) in
@@ -135,7 +135,7 @@ let test_committed_blocks_and_html () = Eio_main.run(fun _ ->
   check bool "private-only content is not delivered" true
     (Result.is_error(Keeper_telegram_render.render ~reply:"" ~blocks:(Some [Thinking{content="secret";redacted=false}])));
   check bool "private media reference remains owed" true
-    (Result.is_error(Keeper_telegram_render.render ~reply:"" ~blocks:(Some [Image{src="/api/keeper-media/private";cap=None}]))));
+    (Result.is_error(Keeper_telegram_render.render ~reply:"" ~blocks:(Some [Image{src="/api/keeper-media/private";cap=None;mime_type=None}]))));
   let raw=String.make 5000 '<' in
   let messages=Keeper_telegram_render.render ~reply:"" ~blocks:(Some [Keeper_chat_blocks.Code{cap=None;html="";source=Some raw}]) |> ok in
   let restored=messages |> List.concat_map Markup_document.parse_html |> List.map Markup_document.text_content |> String.concat "" in

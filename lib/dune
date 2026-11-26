@@ -253,6 +253,7 @@
   masc.skill_snapshot
   masc.skill_snapshot_service
   uri
+  cmarkit
   masc.monotonic_deadline
   mtime
   mtime.clock

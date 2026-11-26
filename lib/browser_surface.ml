@@ -230,7 +230,7 @@ let capture_image_from ~binding ~tab_id ~started data =
     let* () = if String.length image > ((max_bytes + 2) / 3) * 4
       then Error "screenshot exceeds Vision image size limit" else Ok () in
     let* bytes = match Base64.decode image with
-      | Ok bytes when String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes -> Ok bytes
+      | Ok bytes when String.starts_with ~prefix:Rgb_png.signature bytes -> Ok bytes
       | Ok _ -> Error "screenshot payload is not PNG"
       | Error (`Msg detail) -> Error ("invalid screenshot base64: " ^ detail) in
     if String.length bytes = 0 then Error "empty screenshot"

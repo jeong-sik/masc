@@ -115,6 +115,37 @@ let test_mermaid_fence_becomes_mermaid_block () =
     ]
     (blocks_to_json_list blocks)
 
+let test_commonmark_fences_and_diagram_tags () =
+  (* Tilde fences, 4-backtick fences, info options, and pele diagram tags *)
+  let blocks =
+    B.parse_text_to_blocks
+      "~~~alphatex rhythm\n:4 C4 D4\n~~~\n\n````md\n```inner```\n````\n\n```pele\ngraph LR\nA-->B\n```"
+  in
+  Alcotest.(check (list yojson_testable))
+    "commonmark fences + pele"
+    [
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String ":4 C4 D4");
+          ("cap", `String "alphatex");
+          ("source", `String ":4 C4 D4");
+        ];
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "```inner```");
+          ("cap", `String "md");
+          ("source", `String "```inner```");
+        ];
+      `Assoc
+        [
+          ("t", `String "mermaid");
+          ("source", `String "graph LR\nA-->B");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
 let test_multiple_images_and_text_lines () =
   let blocks = B.parse_text_to_blocks "intro\n![a](https://x.com/1.jpg)\nhttps://x.com/2.gif\noutro" in
   Alcotest.(check (list yojson_testable))
@@ -738,6 +769,8 @@ let () =
             test_code_fence_preserves_markdown_image_literal;
           Alcotest.test_case "mermaid fence becomes mermaid block" `Quick
             test_mermaid_fence_becomes_mermaid_block;
+          Alcotest.test_case "commonmark tilde, 4-backtick, info options, and pele tags" `Quick
+            test_commonmark_fences_and_diagram_tags;
           Alcotest.test_case "multiple images and text lines" `Quick
             test_multiple_images_and_text_lines;
           Alcotest.test_case "empty lines ignored" `Quick

@@ -159,7 +159,7 @@ let test_empty_carrier_row_does_not_answer_the_delivery () =
       blocks =
         Some
           [ Masc.Keeper_chat_blocks.Image
-              { src = "masc://media/1.png"; cap = None }
+              { src = "masc://media/1.png"; cap = None; mime_type = None }
           ]
     ; delivery_provenance =
         provenance Keeper_chat_delivery_identity.Terminal_result

@@ -177,6 +177,9 @@ val delete_image : image_id:int -> string
 val delete_all : string
 (** Delete every Kitty image placed by this process ([a=d]). *)
 
+val png_signature : string
+(** Canonical 8-byte PNG signature ({!Rgb_png.signature}). *)
+
 val png_dimensions : string -> (int * int) option
 (** Read the positive dimensions from a PNG IHDR. *)
 

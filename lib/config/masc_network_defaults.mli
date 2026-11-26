@@ -144,6 +144,13 @@ val voice_audio_path : string -> string
     {!voice_audio_path_prefix} followed by [token]. Callers that hand out an
     absolute URL prepend their own base. *)
 
+val media_path_prefix : string
+(** ["/api/v1/media/"] — the prefix of the authenticated route serving
+    model-generated retained media by SHA-256 content token. *)
+
+val media_path : string -> string
+(** [media_path token] is {!media_path_prefix} followed by [token]. *)
+
 val normalize_loopback_base_url : string -> string
 (** Strip trailing slashes from [base_url] and put its host through
     {!normalize_advertised_host}. Returns the input untouched when the host

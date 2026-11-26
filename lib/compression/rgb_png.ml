@@ -1,6 +1,23 @@
 (* PNG RGB8 or RGBA8 (straight alpha), non-interlaced, filter None. Compression and checksums belong to
    decompress/checkseum, already used by the transport codecs.
    https://www.w3.org/TR/png-3/ *)
+let signature = "\137PNG\r\n\026\n"
+
+let header_dimensions bytes =
+  if String.length bytes < 29 then None
+  else if not (String.starts_with ~prefix:signature bytes) then None
+  else if not (String.equal (String.sub bytes 12 4) "IHDR") then None
+  else if not (Int32.equal (String.get_int32_be bytes 8) 13l) then None
+  else
+    let w32 = String.get_int32_be bytes 16 in
+    let h32 = String.get_int32_be bytes 20 in
+    if Int32.compare w32 0l > 0 && Int32.compare h32 0l > 0 then
+      Some (Int32.to_int w32, Int32.to_int h32)
+    else None
+
+let dimensions bytes =
+  if String.length bytes < 33 then None else header_dimensions bytes
+
 let add_u32 buffer value =
   let bytes = Bytes.create 4 in
   Bytes.set_int32_be bytes 0 value;
@@ -38,7 +55,7 @@ let has_complete_chunks bytes =
           | "IDAT" -> loop next (seen_data || length > 0)
           | _ -> loop next seen_data
   in
-  String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes && loop 8 false
+  String.starts_with ~prefix:signature bytes && loop 8 false
 
 let compress data =
   let input = De.bigstring_create De.io_buffer_size in
@@ -90,7 +107,7 @@ let encode_layout layout ~width ~height ~pixels =
       Bytes.set header 8 '\008';
       Bytes.set header 9 (colour_type layout);
       let output = Buffer.create 1024 in
-      Buffer.add_string output "\137PNG\r\n\026\n";
+      Buffer.add_string output signature;
       chunk output "IHDR" (Bytes.to_string header);
       chunk output "IDAT" (compress (Bytes.to_string scanlines));
       chunk output "IEND" "";

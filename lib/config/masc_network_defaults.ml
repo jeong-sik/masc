@@ -226,6 +226,10 @@ let voice_audio_path_prefix = "/api/v1/voice/audio/"
 (* The server-relative path a client fetches for the clip named by [token]. *)
 let voice_audio_path token = voice_audio_path_prefix ^ token
 
+let media_path_prefix = "/api/v1/media/"
+
+let media_path token = media_path_prefix ^ token
+
 let normalize_loopback_base_url base_url =
   let trimmed = String.trim base_url |> trim_trailing_slashes in
   let uri = Uri.of_string trimmed in

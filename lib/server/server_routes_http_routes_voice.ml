@@ -253,10 +253,10 @@ let add_routes router =
            | Some token -> serve_clip ~token request reqd)
   (* model-generated media (image/audio/document) fetched by an
      authenticated content locator. Content hashes are not capabilities. *)
-  |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/media/" (fun state request reqd ->
+  |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) Masc_network_defaults.media_path_prefix (fun state request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
-           match extract_path_param ~prefix:"/api/v1/media/" path with
+           match extract_path_param ~prefix:Masc_network_defaults.media_path_prefix path with
            | None ->
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc [ ("error", `String "token path parameter required") ])

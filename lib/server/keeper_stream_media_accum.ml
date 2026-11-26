@@ -138,7 +138,7 @@ let persisted_block ~media_type media_ref =
         size_bytes = None; kind = None } in
   match Keeper_chat_media_store.category_of_media_type media_type with
   | Keeper_chat_media_store.Image ->
-      Keeper_chat_blocks.Image { src = media_ref; cap = None }
+      Keeper_chat_blocks.Image { src = media_ref; cap = None; mime_type = Some media_type }
   | Keeper_chat_media_store.Audio ->
       Keeper_chat_blocks.Voice
         { secs = None;

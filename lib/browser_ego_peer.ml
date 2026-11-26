@@ -627,7 +627,7 @@ let downloads t args =
     | _ -> Error "download publication returned an unreadable row") (Ok []) rows in
   Ok (obj ["tabId",`Int tab;"downloads",`List records;"watchingSince",since])
 
-let png_signature = "\137PNG\r\n\026\n"
+let png_signature = Rgb_png.signature
 let remove path = match Unix.unlink path with
   | () -> Ok ()
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()

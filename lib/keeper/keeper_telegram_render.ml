@@ -32,7 +32,7 @@ let parts = function
   | Attach {name;src;kind;svg;data;dims=_;ph=_;via=_;size=_;mime_type=_;size_bytes=_} ->
     [Bold("Attachment "^optional kind^": "^name)] @ link ~url:(optional src) ~title:(optional src)
     @ [Pre(optional svg)] @ (match data,src with Some _,None -> [Unsupported_media] | None, (None|Some _) | Some _,Some _ -> [])
-  | Image {src;cap} -> [Plain "Image: "] @ link ~url:src ~title:(Option.value ~default:"image" cap)
+  | Image { src; cap; mime_type = _ } -> [Plain "Image: "] @ link ~url:src ~title:(Option.value ~default:"image" cap)
   | Link {url;title;meta} -> link ~url ~title @ [Plain meta]
   | Fusion {board_post_id;run_id} -> [Bold "Fusion result";Plain("board_post_id: "^board_post_id^"\nrun_id: "^run_id)]
   | Status {kind} -> [Plain(Blocks.status_kind_connector_text kind)]

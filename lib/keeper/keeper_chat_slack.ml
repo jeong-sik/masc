@@ -229,7 +229,7 @@ let mention_block_json user_ids =
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
-  | Keeper_chat_blocks.Image { src; cap } ->
+  | Keeper_chat_blocks.Image { src; cap; mime_type = _ } ->
       Option.map
         (fun url -> image_block_json ~url ~caption:cap)
         (redacted_http_url_opt src)

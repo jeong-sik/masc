@@ -23,9 +23,10 @@ type input =
   ; previous : snapshot option
   ; unavailable : string list
   ; withheld : string list
-      (** Readership/policy-withheld sources (e.g. pending Board routing or
-          unauthorized Direct access). Unlike [unavailable] store read
-          failures, withheld sources never stall working-context commits or
+      (** Sources that were read but are not shown: Board policy (pending
+          routing or unauthorized Direct access), or a stored event record
+          that no longer decodes. Unlike [unavailable] store read failures,
+          withheld sources never stall working-context commits or
           empty-context checks. *)
   ; execution_basis : string option
   }
@@ -66,7 +67,9 @@ val commit : ?observed_sources:source list -> ?execution_basis:string -> keepers
   sources:source list -> pocket list -> (snapshot, string) result
 (** Exact generation+revision CAS. Explicit merge targets preserve stable pocket
     identity and their prior sources without replaying raw inputs to the model.
-    Unselected members survive as Needs_reconsideration with no action advice. *)
+    Unselected members survive as Needs_reconsideration with no action advice.
+    After the write, each removed event record that no longer decodes is logged
+    with its reference and the decoder's error. *)
 val retract_sources : keepers_dir:string -> keeper_id:string -> expected_version:version ->
   expected_snapshot_sha256:string ->
   source_references:string list -> (snapshot, retract_sources_error) result

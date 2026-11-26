@@ -28,6 +28,7 @@ type t =
   ; deferred_kind : deferred_kind option
   ; terminal_effect_receipt : terminal_effect_receipt option
   ; file_change_evidence : Keeper_file_change_evidence.t option
+  ; file_target : Keeper_file_target.t option
   }
 
 (* Every payload that leaves here can land in a keeper transcript, where the
@@ -52,6 +53,7 @@ let success raw_output =
   ; deferred_kind = None
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -68,6 +70,7 @@ let success_data ?metadata data =
   ; deferred_kind = None
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -84,6 +87,7 @@ let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?me
   ; deferred_kind = Some Generic_deferred
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -104,6 +108,7 @@ let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_resul
   ; deferred_kind = Some (External_effect_deferred {approval_id})
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -128,6 +133,7 @@ let failure
   ; deferred_kind = None
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -150,6 +156,7 @@ let failure_data
   ; deferred_kind = None
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
+  ; file_target = None
   }
 ;;
 
@@ -210,6 +217,12 @@ let with_file_change_evidence evidence result =
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 
+let with_file_target file_target result =
+  match result.disposition with
+  | Tool_result.Completed () -> { result with file_target = Some file_target }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
 let with_retained_artifacts retained_artifacts result =
   { result with retained_artifacts }
 ;;
@@ -249,6 +262,7 @@ let of_tool_result
     ; deferred_kind = None
     ; terminal_effect_receipt = None
     ; file_change_evidence = None
+    ; file_target = None
     }
   | Tool_result.Deferred { metadata; content_blocks; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
@@ -262,6 +276,7 @@ let of_tool_result
     ; deferred_kind = Some Generic_deferred
     ; terminal_effect_receipt = None
     ; file_change_evidence = None
+    ; file_target = None
     }
   | Tool_result.Failed { class_; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
@@ -275,5 +290,6 @@ let of_tool_result
     ; deferred_kind = None
     ; terminal_effect_receipt = None
     ; file_change_evidence = None
+    ; file_target = None
     }
 ;;

@@ -881,6 +881,7 @@ let make_hooks
         let file_change_evidence =
           Keeper_tool_call_log.peek_file_change_evidence ~invocation ()
         in
+        let file_target = Keeper_tool_call_log.peek_file_target ~invocation () in
         let board_action_evidence =
           match Keeper_tool_call_log.peek_board_action_evidence ~invocation () with
           | Some evidence -> Some evidence
@@ -908,6 +909,10 @@ let make_hooks
                          ~invocation
                          ())
                   | None -> ());
+                 (match file_target with
+                  | Some _ ->
+                    ignore (Keeper_tool_call_log.consume_file_target ~invocation ())
+                  | None -> ());
                  Option.iter
                    (fun notify ->
                       notify
@@ -930,6 +935,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ?file_target
              ?board_action_evidence
              ?execution_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())

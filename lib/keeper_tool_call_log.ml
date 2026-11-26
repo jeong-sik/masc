@@ -166,6 +166,41 @@ let peek_file_change_artifact_refs ~invocation () =
     | None -> [])
 ;;
 
+(** Producer-resolved target file, keyed by the exact physical invocation.
+    It must not be reconstructed from tool names or input keys at the hook
+    boundary. *)
+let pending_file_target : Keeper_file_target.t Invocation_table.t =
+  Invocation_table.create 8
+;;
+
+let pending_file_target_mu = Stdlib.Mutex.create ()
+
+let with_pending_file_target_lock f =
+  Stdlib.Mutex.lock pending_file_target_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_file_target_mu)
+    f
+;;
+
+let set_file_target ~invocation ~target =
+  with_pending_file_target_lock (fun () ->
+    Invocation_table.replace pending_file_target invocation target)
+;;
+
+let consume_file_target ~invocation () =
+  with_pending_file_target_lock (fun () ->
+    match Invocation_table.find_opt pending_file_target invocation with
+    | Some target ->
+      Invocation_table.remove pending_file_target invocation;
+      Some target
+    | None -> None)
+;;
+
+let peek_file_target ~invocation () =
+  with_pending_file_target_lock (fun () ->
+    Invocation_table.find_opt pending_file_target invocation)
+;;
+
 let pending_board_action_evidence :
       (Board_tool_evidence.t, string) result Invocation_table.t =
   Invocation_table.create 8
@@ -520,6 +555,7 @@ let reset_for_testing () =
   with_invocation_execution_ids_lock (fun () -> Invocation_table.reset invocation_execution_ids);
   with_pending_file_change_evidence_lock (fun () ->
     Invocation_table.reset pending_file_change_evidence);
+  with_pending_file_target_lock (fun () -> Invocation_table.reset pending_file_target);
   with_pending_board_action_lock (fun () ->
     Weak.set latest_board_action_invocation 0 None;
     Invocation_table.reset pending_board_action_evidence);
@@ -915,6 +951,7 @@ let log_call
       ?typed_result
       ?disposition
       ?file_change_evidence
+      ?file_target
       ?board_action_evidence
       ?execution_evidence
       ?(artifact_refs = [])
@@ -1177,6 +1214,11 @@ let log_call
             , Keeper_file_change_evidence.to_yojson evidence ) ]
         | None -> []
       in
+      let file_target_field =
+        match file_target with
+        | Some target -> [ "file_target", Keeper_file_target.to_yojson target ]
+        | None -> []
+      in
       (* Secret-bearing keys are masked before anything reads the evidence. It
          is stored with the same per-leaf bound as [input] (a receipt's detail
          can quote the payload's stderr); route evidence reads the masked
@@ -1337,6 +1379,7 @@ let log_call
            @ board_action_evidence_field
            @ artifact_ref_fields
            @ file_change_evidence_field
+           @ file_target_field
            @ execution_evidence_field
            @ composition_fields
            @ skill_reference_field

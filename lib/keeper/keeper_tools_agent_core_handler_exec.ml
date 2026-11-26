@@ -217,7 +217,10 @@ let execute_with_observers_with_authority
                 ~artifact_refs:(match result.data with
                   | Some data -> Tool_output.normalized_artifact_refs_in_json data
                   | None -> []))
-           result.file_change_evidence)
+           result.file_change_evidence;
+         Option.iter
+           (fun target -> Keeper_tool_call_log.set_file_target ~invocation ~target)
+           result.file_target)
       agent_core_invocation;
     let raw_result = result.Keeper_tool_execution.raw_output in
     let producer_data = result.data in

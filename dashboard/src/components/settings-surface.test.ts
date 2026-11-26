@@ -303,23 +303,23 @@ function makeRuntimeResolved(
     config_path: '/cfg/runtime.toml',
     default_route: 'rt-a',
     default_runtime: {
-      id: 'rt-a', provider: 'P', model: 'm1',
+      id: 'rt-a', provider: 'P', provider_id: 'p', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
       max_output_tokens: null, is_local: false, is_default: true, quota_rest: null,
     },
     runtimes: [
       {
-        id: 'rt-a', provider: 'P', model: 'm1',
+        id: 'rt-a', provider: 'P', provider_id: 'p', model: 'm1',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: true, quota_rest: null,
       },
       {
-        id: 'rt-b', provider: 'P', model: 'm2',
+        id: 'rt-b', provider: 'P', provider_id: 'p', model: 'm2',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false, quota_rest: null,
       },
       {
-        id: 'rt-c', provider: 'P', model: 'm3',
+        id: 'rt-c', provider: 'P', provider_id: 'p', model: 'm3',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false, quota_rest: null,
       },

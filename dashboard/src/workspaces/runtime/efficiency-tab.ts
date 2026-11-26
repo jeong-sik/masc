@@ -43,11 +43,12 @@ import {
   formatMs,
   formatPercent,
   formatUsd,
+  loadLaneRunsPage,
+  loadProviderUsageHistory,
   openViewSseStream,
   snapshotUnavailableReason,
   toObservedNumber,
   type CacheStatsPayload,
-  type ExactLaneRunsPayload,
   type KeeperCostsPayload,
   type KeeperEfficiencyPayload,
   type ModelsMetricsPayload,
@@ -55,6 +56,8 @@ import {
   type ToolMetricsSeriesPayload,
   type WorkspaceViewProps,
 } from './types'
+import type { LaneRunsResponse } from '../../api/dashboard-exact-lane-runs'
+import { laneRunPassReading } from './lane-run-view'
 
 function windowToModelsParams(win: TimeWindow): { windowMinutes: number; bucketMinutes: number; sinceHours: number; bucket: 'hour' | 'day' } {
   switch (win) {
@@ -151,7 +154,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const cacheObs = resourceCache.observe<CacheStatsPayload>(cacheStatsKey).value
   const historyObs = resourceCache.observe<ProviderUsageHistoryResponse>(historyKey).value
   const toolSeriesObs = resourceCache.observe<ToolMetricsSeriesPayload>(toolSeriesKey).value
-  const exactObs = resourceCache.observe<ExactLaneRunsPayload>(exactRunsKey).value
+  const exactObs = resourceCache.observe<LaneRunsResponse>(exactRunsKey).value
   const costsObs = resourceCache.observe<KeeperCostsPayload>(costsKey).value
   const effObs = resourceCache.observe<KeeperEfficiencyPayload>(effKey).value
 
@@ -171,10 +174,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     )
     void resourceCache.fetch<ProviderUsageHistoryResponse>(
       historyKey,
-      (signal) => apiGet<ProviderUsageHistoryResponse>(
-        `/api/v1/dashboard/provider-usage-history?days=${providerDays}`,
-        { signal },
-      ),
+      (signal) => loadProviderUsageHistory(providerDays, signal),
       { ttlMs: 30_000, topics: ['provider_usage'], reason },
     )
     void resourceCache.fetch<ToolMetricsSeriesPayload>(
@@ -185,9 +185,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       ),
       { ttlMs: 20_000, topics: ['tool_metrics'], reason },
     )
-    void resourceCache.fetch<ExactLaneRunsPayload>(
+    void resourceCache.fetch<LaneRunsResponse>(
       exactRunsKey,
-      (signal) => apiGet<ExactLaneRunsPayload>('/api/v1/dashboard/exact-lane-runs?limit=50', { signal }),
+      (signal) => loadLaneRunsPage({ limit: 50 }, signal),
       { ttlMs: 20_000, topics: ['exact_lane_runs'], reason },
     )
     // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
@@ -345,8 +345,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     const spendObs: Observed<number> = totalCost !== null ? observedValue(totalCost) : observedUnreported()
 
     const exactRuns = exactObs.kind === 'value' ? exactObs.data.runs : []
-    const terminalExact = exactRuns.filter((r) => r.status !== 'running')
-    const passedExact = terminalExact.filter((r) => r.status === 'succeeded' || r.status === 'approved' || r.status === 'committed')
+    const readings = exactRuns.map(laneRunPassReading)
+    const terminalExact = readings.filter((reading) => reading !== 'running')
+    const passedExact = terminalExact.filter((reading) => reading === 'passed')
     const exactPassObs: Observed<number> = terminalExact.length > 0
       ? observedValue((passedExact.length / terminalExact.length) * 100)
       : observedAbsent()

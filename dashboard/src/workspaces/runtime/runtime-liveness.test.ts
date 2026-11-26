@@ -13,6 +13,7 @@ function runtime(id: string, extra: Partial<RuntimeResolution> = {}): RuntimeRes
   return {
     id,
     provider: 'provider',
+    provider_id: 'provider',
     model: `model-${id}`,
     effective_max_context: 128_000,
     max_context_source: 'capability',

@@ -1,6 +1,8 @@
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 import { parseSlotObservations, type SlotObservationState } from './exact-slot-observations'
+import type { GoalVerificationRunStatus } from './dashboard-goal-verification-runs'
+import type { VerificationRunStatusLabel } from './dashboard-verification-runs'
 
 export const EXACT_LANE_IDS = [
   'librarian_exact',
@@ -83,14 +85,12 @@ export interface ExactLaneRunSummary {
   slotObservations?: SlotObservationState
 }
 
-// One opened run, payloads included.
-export interface ExactLaneRunRecord extends ExactLaneRunSummary {
+// The payload half of an opened run. Exact and Verifier runs share it: the
+// server serves both through the same detail route
+// (lib/server/server_standalone_lane_projection.ml retained_run_detail_json).
+export interface LaneRunPayloads {
   input: ExactLaneRunInput
   output?: unknown
-  // Board attention may be answered before an exact-lane slot runs. Keep the
-  // answer source separate from selectedSlot, which only names an accepted
-  // exact-flow or CLI slot.
-  answerSource?: ExactLaneAnswerSource
   payloadAvailability: {
     input: ExactLanePayloadAvailability
     output: ExactLanePayloadAvailability | null
@@ -98,13 +98,57 @@ export interface ExactLaneRunRecord extends ExactLaneRunSummary {
   skillEvidence: { state: 'no_keeper_skills' }
 }
 
-export interface DashboardExactLaneRunsResponse {
-  runs: ExactLaneRunSummary[]
+// One opened run, payloads included.
+export interface ExactLaneRunRecord extends ExactLaneRunSummary, LaneRunPayloads {
+  // Board attention may be answered before an exact-lane slot runs. Keep the
+  // answer source separate from selectedSlot, which only names an accepted
+  // exact-flow or CLI slot.
+  answerSource?: ExactLaneAnswerSource
+}
+
+// A Verifier review retained in the Task or Goal registry. The listing
+// without a run_kind filter returns these beside exact-output rows. They carry
+// no usage, completion origin or persistence fields: those belong to the
+// exact-output registry only. `subjectId` is the Task or Goal id.
+interface VerifierLaneRunFields {
+  runId: string
+  lane: 'verifier_exact'
+  subjectId: string
+  actor: string
+  startedAt: number
+  // Both are absent while running; a completed review always reports them.
+  elapsedSeconds?: number
+  selectedSlot?: string | null
+}
+
+export interface TaskVerificationLaneRunSummary extends VerifierLaneRunFields {
+  runKind: 'task_verification'
+  status: VerificationRunStatusLabel
+}
+
+export interface GoalVerificationLaneRunSummary extends VerifierLaneRunFields {
+  runKind: 'goal_verification'
+  status: GoalVerificationRunStatus
+}
+
+export type VerifierLaneRunSummary = TaskVerificationLaneRunSummary | GoalVerificationLaneRunSummary
+export type LaneRunSummary = ExactLaneRunSummary | VerifierLaneRunSummary
+export type LaneRunKind = LaneRunSummary['runKind']
+export type LaneRunRecord =
+  | ExactLaneRunRecord
+  | (TaskVerificationLaneRunSummary & LaneRunPayloads)
+  | (GoalVerificationLaneRunSummary & LaneRunPayloads)
+
+export interface LaneRunsResponse<Run extends LaneRunSummary = LaneRunSummary> {
+  runs: Run[]
   count: number
   total: number
   hasMore: boolean
   generatedAt: string
 }
+
+// A page requested with run_kind=exact_output.
+export type DashboardExactLaneRunsResponse = LaneRunsResponse<ExactLaneRunSummary>
 
 const STATUSES: readonly string[] = [
   'running',
@@ -115,6 +159,32 @@ const STATUSES: readonly string[] = [
   'completion_durability_unknown',
 ]
 const INTENDED_STATUSES: readonly string[] = ['succeeded', 'cancelled', 'failed']
+
+// Records keyed by every label, so a label added to the type without a row
+// here fails to compile. Mirrors Verification_run_registry.outcome_label and
+// Goal_verification_run_registry.outcome_label plus "running".
+const TASK_VERIFICATION_STATUSES: Record<VerificationRunStatusLabel, true> = {
+  running: true,
+  approved: true,
+  rejected: true,
+  infrastructure_unavailable: true,
+  not_reviewed: true,
+  execution_pending: true,
+  execution_repair_required: true,
+  commit_failed: true,
+  raised: true,
+  review_cancelled: true,
+  superseded_by: true,
+}
+const GOAL_VERIFICATION_STATUSES: Record<GoalVerificationRunStatus, true> = {
+  running: true,
+  reviewed: true,
+  committed: true,
+  deferred: true,
+  raised: true,
+  superseded: true,
+  review_cancelled: true,
+}
 
 function fail(message: string): never {
   throw new Error(`Invalid exact lane runs response: ${message}`)
@@ -264,20 +334,15 @@ function parseBoardAnswerSource(
   return fail(`${sourceContext}.kind has unknown value ${JSON.stringify(kind)}`)
 }
 
-function parseRun(raw: unknown, index: number, withPayloads: false): ExactLaneRunSummary
-function parseRun(raw: unknown, index: number, withPayloads: true): ExactLaneRunRecord
-function parseRun(
-  raw: unknown,
-  index: number,
+function parseExactRun(
+  raw: Record<string, unknown>,
+  context: string,
   withPayloads: boolean,
 ): ExactLaneRunSummary | ExactLaneRunRecord {
-  const context = withPayloads ? 'root.run' : `runs[${index}]`
-  if (!isRecord(raw)) fail(`${context} must be an object`)
   const status = string(raw.status, `${context}.status`)
   if (!STATUSES.includes(status)) fail(`${context}.status has unknown value ${JSON.stringify(status)}`)
   const lane = string(raw.lane, `${context}.lane`)
   if (!EXACT_LANE_IDS.some(candidate => candidate === lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
-  if (raw.run_kind !== 'exact_output') fail(`${context}.run_kind must be exact_output`)
   const base = ['run_id', 'run_kind', 'lane', 'subject_id', 'actor', 'started_at', 'status']
     .concat(withPayloads ? ['input', 'payload_availability', 'skill_evidence'] : [])
   // `output` rides with the payloads; a summary never carries it.
@@ -368,7 +433,77 @@ function parseRun(
   }
 }
 
-export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRunsResponse {
+function verifierStatus<Status extends string>(
+  table: Record<Status, true>,
+  value: unknown,
+  context: string,
+): Status {
+  const status = string(value, context)
+  if (!Object.hasOwn(table, status)) fail(`${context} has unknown value ${JSON.stringify(status)}`)
+  return status as Status
+}
+
+// The fields both Verifier kinds share
+// (server_standalone_lane_projection.ml task_/goal_verification_summary_fields).
+// A running review has no elapsed_s or selected_slot; a completed one has both,
+// and its opened detail adds the registry record as `output`.
+function parseVerifierFields(
+  raw: Record<string, unknown>,
+  status: string,
+  context: string,
+  withPayloads: boolean,
+): VerifierLaneRunFields & Partial<LaneRunPayloads> {
+  const running = status === 'running'
+  const base = ['run_id', 'run_kind', 'lane', 'subject_id', 'actor', 'started_at', 'status']
+  const completion = running ? [] : ['elapsed_s', 'selected_slot']
+  const payloadFields = withPayloads
+    ? ['input', 'payload_availability', 'skill_evidence', ...(running ? [] : ['output'])]
+    : []
+  exactFields(raw, [...base, ...completion, ...payloadFields], [], context)
+  if (raw.lane !== 'verifier_exact') fail(`${context}.lane must be verifier_exact`)
+  let selectedSlot: string | null | undefined
+  if (!running) {
+    selectedSlot = raw.selected_slot === null ? null : string(raw.selected_slot, `${context}.selected_slot`)
+  }
+  return {
+    runId: string(raw.run_id, `${context}.run_id`),
+    lane: 'verifier_exact',
+    subjectId: string(raw.subject_id, `${context}.subject_id`),
+    actor: string(raw.actor, `${context}.actor`),
+    startedAt: number(raw.started_at, `${context}.started_at`),
+    elapsedSeconds: running ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
+    selectedSlot,
+    ...(withPayloads ? parsePayloads(raw, status, context) : {}),
+  }
+}
+
+function runContext(index: number, withPayloads: boolean): string {
+  return withPayloads ? 'root.run' : `runs[${index}]`
+}
+
+function parseRun(raw: unknown, index: number, withPayloads: false): LaneRunSummary
+function parseRun(raw: unknown, index: number, withPayloads: true): LaneRunRecord
+function parseRun(raw: unknown, index: number, withPayloads: boolean): LaneRunSummary | LaneRunRecord {
+  const context = runContext(index, withPayloads)
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  switch (raw.run_kind) {
+    case 'exact_output':
+      return parseExactRun(raw, context, withPayloads)
+    case 'task_verification': {
+      const status = verifierStatus(TASK_VERIFICATION_STATUSES, raw.status, `${context}.status`)
+      return { ...parseVerifierFields(raw, status, context, withPayloads), runKind: 'task_verification', status }
+    }
+    case 'goal_verification': {
+      const status = verifierStatus(GOAL_VERIFICATION_STATUSES, raw.status, `${context}.status`)
+      return { ...parseVerifierFields(raw, status, context, withPayloads), runKind: 'goal_verification', status }
+    }
+    default:
+      return fail(`${context}.run_kind has unknown value ${JSON.stringify(raw.run_kind)}`)
+  }
+}
+
+// Every retained run kind the listing returns without a run_kind filter.
+export function parseLaneRunsResponse(raw: unknown): LaneRunsResponse {
   if (!isRecord(raw)) fail('root must be an object')
   exactFields(raw, ['runs', 'count', 'total', 'has_more', 'generated_at'], [], 'root')
   if (!Array.isArray(raw.runs)) fail('root.runs must be an array')
@@ -390,10 +525,50 @@ export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRuns
   }
 }
 
-export function parseExactLaneRunResponse(raw: unknown): ExactLaneRunRecord {
+export function parseLaneRunResponse(raw: unknown): LaneRunRecord {
   if (!isRecord(raw)) fail('root must be an object')
   exactFields(raw, ['run', 'generated_at'], [], 'root')
   return parseRun(raw.run, 0, true)
+}
+
+// A page requested with run_kind=exact_output. A Verifier row here means the
+// server ignored the filter, so the page is refused rather than mixed in.
+export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRunsResponse {
+  const page = parseLaneRunsResponse(raw)
+  return {
+    ...page,
+    runs: page.runs.map((run, index) => {
+      if (run.runKind !== 'exact_output') fail(`runs[${index}].run_kind must be exact_output on an exact_output page`)
+      return run
+    }),
+  }
+}
+
+export function parseExactLaneRunResponse(raw: unknown): ExactLaneRunRecord {
+  const run = parseLaneRunResponse(raw)
+  if (run.runKind !== 'exact_output') fail('root.run.run_kind must be exact_output')
+  return run
+}
+
+export interface LaneRunsQuery {
+  runKind?: LaneRunKind
+  lane?: ExactLane
+  limit?: number
+  before?: ExactLaneRunCursor
+}
+
+// The listing query string. The server applies run_kind and lane before it
+// pages, so another busy kind or lane cannot fill the page.
+export function laneRunsQuery(query: LaneRunsQuery): string {
+  const params = new URLSearchParams()
+  if (query.runKind != null) params.set('run_kind', query.runKind)
+  if (query.lane != null) params.set('lane', query.lane)
+  if (query.limit != null) params.set('limit', String(query.limit))
+  if (query.before != null) {
+    params.set('before_started_at', String(query.before.startedAt))
+    params.set('before_run_id', query.before.runId)
+  }
+  return params.toString()
 }
 
 // The cursor is the caller's own last row, not server state: the server keeps
@@ -405,21 +580,11 @@ export type ExactLaneRunCursor = { startedAt: number; runId: string }
 export async function fetchExactLaneRuns(
   opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor; lane?: ExactLane },
 ): Promise<DashboardExactLaneRunsResponse> {
-  const params = new URLSearchParams()
-  // This consumer decodes native exact-output rows; Task verification has
-  // its own monitor source. Keep the filter on every cursor request.
-  params.set('run_kind', 'exact_output')
-  // The server applies the lane filter before it pages, so another busy lane
-  // cannot fill this page and hide the requested lane's runs.
-  if (opts?.lane != null) params.set('lane', opts.lane)
-  if (opts?.limit != null) params.set('limit', String(opts.limit))
-  if (opts?.before != null) {
-    params.set('before_started_at', String(opts.before.startedAt))
-    params.set('before_run_id', opts.before.runId)
-  }
-  const query = params.toString()
+  // This consumer reads native exact-output rows; Task and Goal verification
+  // have their own monitor sources. Keep the filter on every cursor request.
+  const query = laneRunsQuery({ runKind: 'exact_output', lane: opts?.lane, limit: opts?.limit, before: opts?.before })
   const raw = await get<unknown>(
-    `/api/v1/dashboard/exact-lane-runs${query === '' ? '' : `?${query}`}`,
+    `/api/v1/dashboard/exact-lane-runs?${query}`,
     { signal: opts?.signal },
   )
   return parseExactLaneRunsResponse(raw)

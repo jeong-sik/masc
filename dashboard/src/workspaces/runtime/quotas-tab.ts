@@ -42,9 +42,11 @@ import {
   classifyQuotaScope,
   formatResetCountdown,
   formatUnixTime,
+  loadProviderUsageHistory,
   loadRuntimeResolved,
   maxUtilizationPct,
   partitionQuotaScopes,
+  restingProviderIds,
   windowKindLabel,
   type MultiAccountIntegration,
   type MultiAccountIntegrationsResponse,
@@ -79,20 +81,30 @@ export function buildUsageHistoryChartData(
     let pct: number | null = null
     let exhausted = false
 
-    if (pt.unit === 'fraction' && typeof pt.value === 'number') {
-      pct = Math.min(100, Math.max(0, pt.value * 100))
-      if (pt.value >= 0.99) exhausted = true
-    } else if (pt.unit === 'percent' && typeof pt.value === 'number') {
-      pct = Math.min(100, Math.max(0, pt.value))
-      if (pt.value >= 99) exhausted = true
-    } else if (pt.unit === 'usd' && typeof pt.value === 'number' && pt.limit && pt.limit > 0) {
-      pct = Math.min(100, Math.max(0, (pt.value / pt.limit) * 100))
-      if (pt.value >= pt.limit) exhausted = true
-    } else if (pt.unit === 'credit_balance' && typeof pt.remaining === 'number') {
-      if (pt.remaining <= 0) exhausted = true
-      if (pt.total && pt.total > 0) {
-        pct = Math.min(100, Math.max(0, ((pt.total - pt.remaining) / pt.total) * 100))
-      }
+    const u = pt.utilization
+    switch (u.unit) {
+      case 'fraction':
+        pct = Math.min(100, Math.max(0, u.value * 100))
+        if (u.value >= 0.99) exhausted = true
+        break
+      case 'percent':
+        pct = Math.min(100, Math.max(0, u.value))
+        if (u.value >= 99) exhausted = true
+        break
+      case 'usd':
+        if (u.limit !== null && u.limit > 0) {
+          pct = Math.min(100, Math.max(0, (u.value / u.limit) * 100))
+          if (u.value >= u.limit) exhausted = true
+        }
+        break
+      case 'credit_balance':
+        if (u.remaining <= 0) exhausted = true
+        if (u.total !== null && u.total > 0) {
+          pct = Math.min(100, Math.max(0, ((u.total - u.remaining) / u.total) * 100))
+        }
+        break
+      case 'credit_unlimited':
+        break
     }
 
     const cur = byBucket.get(ts) ?? { sumPct: 0, count: 0, maxPct: 0, cooldownCount: 0 }
@@ -211,10 +223,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     )
     void resourceCache.fetch<ProviderUsageHistoryResponse>(
       historyKey,
-      (signal) => apiGet<ProviderUsageHistoryResponse>(
-        `/api/v1/dashboard/provider-usage-history?days=${providerDays}`,
-        { signal },
-      ),
+      (signal) => loadProviderUsageHistory(providerDays, signal),
       { ttlMs: 30_000, topics: ['provider_usage'], reason },
     )
 
@@ -248,15 +257,10 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }, [providerDays, accountMode])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
-  const restingProviders = useMemo(() => {
-    const set = new Set<string>()
-    if (resolvedData) {
-      for (const rt of resolvedData.runtimes) {
-        if (rt.quota_rest !== null) set.add(rt.provider)
-      }
-    }
-    return set
-  }, [resolvedData])
+  const restingProviders = useMemo(
+    () => restingProviderIds(resolvedData?.runtimes ?? []),
+    [resolvedData],
+  )
 
   const partitioned = useMemo(
     () => partitionQuotaScopes(resolvedData?.provider_usage_windows ?? [], restingProviders),
@@ -294,7 +298,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     | { kind: 'loading' }
     | { kind: 'failed'; message: string }
     | { kind: 'unavailable'; reason: string }
-    | { kind: 'ready'; data: uPlot.AlignedData; pointsCount: number; unreadable: number; days: number } => {
+    | { kind: 'ready'; data: uPlot.AlignedData; pointsCount: number; unreadable: number; undecodable: number; days: number } => {
     if (historyObs.kind === 'loading') return { kind: 'loading' }
     if (historyObs.kind === 'failed') return { kind: 'failed', message: historyObs.error.message }
     if (historyObs.kind !== 'value') return { kind: 'unavailable', reason: '히스토리 데이터 없음' }
@@ -307,6 +311,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       data: buildUsageHistoryChartData(raw.points),
       pointsCount: raw.points.length,
       unreadable: raw.unreadable_reports,
+      undecodable: raw.undecodable_points,
       days: raw.days,
     }
   }, [historyObs])
@@ -1224,8 +1229,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <${UPlotChart}
             id="runtime-quotas-history"
             title=${`제공자 사용량 이력 & 일시 중지 추이 (${historyState.days}일 · ${historyState.pointsCount}포인트)`}
-            subtitle=${historyState.unreadable > 0
-              ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>판독 불가 보고서 ${historyState.unreadable}건</span>`
+            subtitle=${historyState.unreadable > 0 || historyState.undecodable > 0
+              ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>${[
+                  historyState.unreadable > 0 ? `판독 불가 보고서 ${historyState.unreadable}건` : null,
+                  historyState.undecodable > 0 ? `읽지 못한 포인트 ${historyState.undecodable}건 (차트에서 빠짐)` : null,
+                ].filter((part) => part !== null).join(' · ')}</span>`
               : html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>days=${providerDays}</span>`}
             data=${historyState.data}
             series=${HISTORY_SERIES}

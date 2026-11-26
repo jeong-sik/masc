@@ -17,6 +17,20 @@ import {
   type Observed,
   type ObserverFrame,
 } from '../../core'
+import {
+  laneRunsQuery,
+  parseLaneRunResponse,
+  parseLaneRunsResponse,
+  type LaneRunRecord,
+  type LaneRunsQuery,
+  type LaneRunsResponse,
+} from '../../api/dashboard-exact-lane-runs'
+import {
+  parseProviderUsageHistoryResponse,
+  type ProviderUsageHistoryResponse,
+} from '../../api/provider-usage-history'
+
+export type { ProviderUsageHistoryPoint, ProviderUsageHistoryResponse } from '../../api/provider-usage-history'
 
 export interface WorkspaceInspectPayload {
   title: string
@@ -108,7 +122,10 @@ export interface RuntimeFailedAttempt {
 
 export interface RuntimeResolution {
   readonly id: string
+  /** Provider display name: prose for people, not a key. */
   readonly provider: string
+  /** The `[providers.<id>]` key; usage scopes name providers by this id. */
+  readonly provider_id: string
   readonly model: string
   readonly effective_max_context: number
   readonly max_context_source: string
@@ -171,32 +188,34 @@ export async function loadRuntimeResolved(
   return apiGet('/api/v1/runtime/resolved', { signal, decode: parseRuntimeResolvedResponse })
 }
 
-export interface ProviderUsageHistoryPoint {
-  readonly scope_id: string
-  readonly source: string
-  readonly kind: string
-  readonly limit_id: string | null
-  readonly observed_at: number
-  readonly resets_at: number | null
-  readonly unit: 'fraction' | 'percent' | 'usd' | 'credit_balance' | 'credit_unlimited'
-  readonly value?: number
-  readonly limit?: number | null
-  readonly currency?: string
-  readonly total?: number | null
-  readonly remaining?: number
+/** GET /api/v1/dashboard/provider-usage-history decoded at the boundary. The
+ *  Quotas and Efficiency tabs share the `runtime:provider-usage-history:<days>`
+ *  cache entry, so both load it through this one function. */
+export function loadProviderUsageHistory(
+  days: number,
+  signal: AbortSignal,
+): Promise<Result<ProviderUsageHistoryResponse, ApiError>> {
+  return apiGet(`/api/v1/dashboard/provider-usage-history?days=${days}`, {
+    signal,
+    decode: parseProviderUsageHistoryResponse,
+  })
 }
 
-export type ProviderUsageHistoryResponse =
-  | { readonly state: 'unavailable'; readonly reason: string }
-  | {
-      readonly state?: 'ready'
-      readonly days: number
-      readonly generated_at: number
-      readonly sampling: string
-      readonly unreadable_reports: number
-      readonly reported_no_windows: readonly { readonly scope_id: string; readonly observed_at: number }[]
-      readonly points: readonly ProviderUsageHistoryPoint[]
-    }
+/** One page of GET /api/v1/dashboard/exact-lane-runs, every run kind decoded. */
+export function loadLaneRunsPage(
+  query: LaneRunsQuery,
+  signal: AbortSignal,
+): Promise<Result<LaneRunsResponse, ApiError>> {
+  return apiGet(`/api/v1/dashboard/exact-lane-runs?${laneRunsQuery(query)}`, { signal, decode: parseLaneRunsResponse })
+}
+
+/** One opened run of GET /api/v1/dashboard/exact-lane-runs/:run_id, payloads included. */
+export function loadLaneRun(
+  runId: string,
+  signal: AbortSignal,
+): Promise<Result<LaneRunRecord, ApiError>> {
+  return apiGet(`/api/v1/dashboard/exact-lane-runs/${encodeURIComponent(runId)}`, { signal, decode: parseLaneRunResponse })
+}
 
 export interface SetupIntegration {
   readonly id: string
@@ -449,48 +468,6 @@ export interface RuntimeProbePayload {
   }
 }
 
-export type ExactRunKind = 'exact_output' | 'task_verification' | 'goal_verification'
-
-export interface ExactLaneRunRow {
-  readonly run_id: string
-  readonly run_kind: ExactRunKind
-  readonly lane: string
-  readonly subject_id: string | null
-  readonly actor: string
-  readonly started_at: number
-  readonly status: string
-  readonly elapsed_s?: number | null
-  readonly selected_slot?: string | null
-  readonly completion_origin?: string
-  readonly slot_observations?: {
-    readonly state: 'unobserved' | 'unavailable' | 'available'
-    readonly detail?: string
-    readonly observations?: unknown
-  }
-  readonly usage?: {
-    readonly input_tokens?: number
-    readonly output_tokens?: number
-    readonly cache_read_input_tokens?: number
-    readonly cost_usd?: number
-  } | null
-  readonly code?: string
-  readonly detail?: string
-  readonly input?: unknown
-  readonly output?: unknown
-  readonly payload_availability?: {
-    readonly input?: { readonly state: string; readonly error?: { readonly code: string; readonly message: string } }
-    readonly output?: { readonly state: string; readonly error?: { readonly code: string; readonly message: string } } | null
-  }
-}
-
-export interface ExactLaneRunsPayload {
-  readonly generated_at: string
-  readonly count: number
-  readonly total: number
-  readonly has_more: boolean
-  readonly runs: readonly ExactLaneRunRow[]
-}
-
 export type FusionTopology =
   | 'simple'
   | 'refine'
@@ -722,6 +699,17 @@ export interface PartitionedQuotas {
   readonly tier1ExhaustedOrCredits: readonly ProviderUsageScope[]
   readonly tier2ActiveSubscriptions: readonly ProviderUsageScope[]
   readonly tier3Unreported: readonly ProviderUsageScope[]
+}
+
+/** Provider ids with at least one runtime resting on quota. Compared with
+ *  `scope.providers[].id`, so it is keyed by `provider_id`, never by the
+ *  display name in `provider`. */
+export function restingProviderIds(runtimes: readonly RuntimeResolution[]): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const rt of runtimes) {
+    if (rt.quota_rest !== null) ids.add(rt.provider_id)
+  }
+  return ids
 }
 
 export function partitionQuotaScopes(

@@ -297,6 +297,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
     ): RuntimeResolvedResponse['runtimes'][number] => ({
       id,
       provider: 'p',
+      provider_id: 'p',
       model: 'm',
       effective_max_context: 1,
       max_context_source: 'capability',

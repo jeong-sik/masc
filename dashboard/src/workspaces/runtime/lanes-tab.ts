@@ -30,6 +30,7 @@ import {
   type ApiError,
 } from '../../core'
 import { parseFusionRunsResponse, type DashboardFusionRunsResponse, type FusionRunRecord } from '../../api/dashboard-fusion'
+import type { LaneRunKind, LaneRunsResponse, LaneRunSummary } from '../../api/dashboard-exact-lane-runs'
 import { DataTable, VirtualList, type DataTableColumn } from '../../components/primitives'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -49,17 +50,17 @@ import {
   FUSION_TOPOLOGIES,
   formatMs,
   formatUnixTime,
+  loadLaneRun,
+  loadLaneRunsPage,
   loadRuntimeResolved,
   toObservedNumber,
-  type ExactLaneRunRow,
-  type ExactLaneRunsPayload,
-  type ExactRunKind,
   type FusionTopology,
   type RuntimeProbePayload,
   type RuntimeProbeProviderRow,
   type RuntimeResolvedPayload,
   type WorkspaceViewProps,
 } from './types'
+import { laneRunCompletionGap, persistenceStateLabel } from './lane-run-view'
 
 type LanesMode = 'failover' | 'exact' | 'fusion'
 
@@ -221,7 +222,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   const [laneCasConflict, setLaneCasConflict] = useState<string | null>(null)
 
   // Exact Output pagination & filter state
-  const [runKindFilter, setRunKindFilter] = useState<'all' | ExactRunKind>('all')
+  const [runKindFilter, setRunKindFilter] = useState<'all' | LaneRunKind>('all')
   const [cursorStack, setCursorStack] = useState<readonly { startedAt: number; runId: string }[]>([])
   const currentCursor = cursorStack[cursorStack.length - 1] ?? null
 
@@ -237,7 +238,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   const probeObs = resourceCache.observe<RuntimeProbePayload>('runtime:probe').value
 
   const exactKey = `runtime:exact-runs:${runKindFilter}:${currentCursor ? `${currentCursor.startedAt}:${currentCursor.runId}` : 'head'}`
-  const exactObs = resourceCache.observe<ExactLaneRunsPayload>(exactKey).value
+  const exactObs = resourceCache.observe<LaneRunsResponse>(exactKey).value
   const fusionObs = resourceCache.observe<DashboardFusionRunsResponse>(FUSION_RUNS_KEY).value
 
   const discardLanePreview = () => {
@@ -296,15 +297,14 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const loadExact = (reason: 'mount' | 'manual' = 'mount') => {
-    const qs = new URLSearchParams({ limit: '50' })
-    if (runKindFilter !== 'all') qs.set('run_kind', runKindFilter)
-    if (currentCursor) {
-      qs.set('before_started_at', String(currentCursor.startedAt))
-      qs.set('before_run_id', currentCursor.runId)
+    const query = {
+      limit: 50,
+      runKind: runKindFilter === 'all' ? undefined : runKindFilter,
+      before: currentCursor ?? undefined,
     }
-    void resourceCache.fetch<ExactLaneRunsPayload>(
+    void resourceCache.fetch<LaneRunsResponse>(
       exactKey,
-      (signal) => apiGet<ExactLaneRunsPayload>(`/api/v1/dashboard/exact-lane-runs?${qs.toString()}`, { signal }),
+      (signal) => loadLaneRunsPage(query, signal),
       { ttlMs: 15_000, topics: ['exact_lane_runs'], reason },
     )
   }
@@ -390,18 +390,18 @@ export function LanesTab(props: WorkspaceViewProps) {
     [probePartition.outside],
   )
 
-  const exactColumns = useMemo<readonly DataTableColumn<ExactLaneRunRow>[]>(() => [
+  const exactColumns = useMemo<readonly DataTableColumn<LaneRunSummary>[]>(() => [
     {
       id: 'run_id',
       header: 'Run ID',
-      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.run_id.slice(0, 14)}</span>`,
+      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.runId.slice(0, 14)}</span>`,
     },
     {
       id: 'kind',
       header: '종류',
       sortable: true,
-      sortValue: (r) => r.run_kind,
-      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--info-fg)' }}>${r.run_kind}</span>`,
+      sortValue: (r) => r.runKind,
+      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--info-fg)' }}>${r.runKind}</span>`,
     },
     {
       id: 'lane',
@@ -420,17 +420,21 @@ export function LanesTab(props: WorkspaceViewProps) {
       header: '상태',
       sortable: true,
       sortValue: (r) => r.status,
-      cell: (r) => html`
-        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
-          ${r.status}
-        </span>
-      `,
+      cell: (r) => {
+        const gap = laneRunCompletionGap(r)
+        return html`
+          <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
+            ${r.status}
+          </span>
+          ${gap && html`<span class="mono" style=${{ marginLeft: 'var(--sp-1)', fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>실제 결과 ${gap.intendedStatus}</span>`}
+        `
+      },
     },
     {
       id: 'elapsed',
       header: '소요(s)',
       numeric: true,
-      observed: (r) => toObservedNumber(r.elapsed_s, true),
+      observed: (r) => toObservedNumber(r.elapsedSeconds, true),
       formatValue: (v) => `${Number(v).toFixed(2)}s`,
     },
     {
@@ -438,8 +442,8 @@ export function LanesTab(props: WorkspaceViewProps) {
       header: '시작 시각',
       numeric: true,
       sortable: true,
-      sortValue: (r) => r.started_at,
-      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTime(r.started_at)}</span>`,
+      sortValue: (r) => r.startedAt,
+      cell: (r) => html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${formatUnixTime(r.startedAt)}</span>`,
     },
   ], [])
 
@@ -701,28 +705,30 @@ export function LanesTab(props: WorkspaceViewProps) {
     loadFailover(false, 'manual')
   }
 
-  const handleInspectExactRun = async (row: ExactLaneRunRow) => {
+  const handleInspectExactRun = async (row: LaneRunSummary) => {
     inspectRequest.current?.abort()
     const ctrl = new AbortController()
     inspectRequest.current = ctrl
     props.onInspect({
       title: `Exact Run · ${row.lane}`,
-      subtitle: `${row.run_id} (${row.status})`,
+      subtitle: `${row.runId} (${row.status})`,
       kind: 'exact_lane_run',
       data: row,
       render: () => html`<div class="dtable-absent">상세 페이로드 불러오는 중…</div>`,
     })
-    const res = await apiGet<{ readonly run?: ExactLaneRunRow } & ExactLaneRunRow>(
-      `/api/v1/dashboard/exact-lane-runs/${encodeURIComponent(row.run_id)}`,
-      { signal: ctrl.signal },
-    )
+    const res = await loadLaneRun(row.runId, ctrl.signal)
     if (ctrl.signal.aborted) return
-    const detail: ExactLaneRunRow = res.ok ? (res.value.run ?? res.value) : row
+    // A failed detail read keeps the listing row: its status and completion
+    // gap are decoded already; only the payloads are missing.
+    const record = res.ok ? res.value : null
+    const detail: LaneRunSummary = record ?? row
     const errMsg = res.ok ? null : res.error.message
+    const gap = laneRunCompletionGap(detail)
+    const exact = detail.runKind === 'exact_output' ? detail : null
 
     props.onInspect({
       title: `Exact Run · ${detail.lane}`,
-      subtitle: `${detail.run_id} · ${detail.run_kind} · ${detail.status}`,
+      subtitle: `${detail.runId} · ${detail.runKind} · ${detail.status}`,
       kind: 'exact_lane_run',
       data: detail,
       render: () => html`
@@ -730,35 +736,50 @@ export function LanesTab(props: WorkspaceViewProps) {
           ${errMsg && html`<div class="ap-error">상세 API 조회 오류: ${errMsg}</div>`}
           <div class="wka-card" style=${{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--sp-2)', fontSize: 'var(--fs-12)' }}>
             <div><span style=${{ color: 'var(--fg-3)' }}>Status:</span> <span class="mono">${detail.status}</span></div>
-            <div><span style=${{ color: 'var(--fg-3)' }}>Slot:</span> <span class="mono">${detail.selected_slot ?? '없음'}</span></div>
-            <div><span style=${{ color: 'var(--fg-3)' }}>Origin:</span> <span class="mono">${detail.completion_origin ?? '없음'}</span></div>
-            <div><span style=${{ color: 'var(--fg-3)' }}>Subject:</span> <span class="mono">${detail.subject_id ?? '없음'}</span></div>
+            <div><span style=${{ color: 'var(--fg-3)' }}>Slot:</span> <span class="mono">${detail.selectedSlot ?? '없음'}</span></div>
+            ${exact && html`<div><span style=${{ color: 'var(--fg-3)' }}>Origin:</span> <span class="mono">${exact.completionOrigin ?? '없음'}</span></div>`}
+            <div><span style=${{ color: 'var(--fg-3)' }}>Subject:</span> <span class="mono">${detail.subjectId ?? '없음'}</span></div>
           </div>
+
+          ${gap && html`
+            <div class="wka-card" role="alert" style=${{ borderColor: 'var(--err-border)' }}>
+              <h4 style=${{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}>${persistenceStateLabel(gap.persistenceState)}</h4>
+              <div style=${{ fontSize: 'var(--fs-12)' }}>
+                <span style=${{ color: 'var(--fg-3)' }}>실제 결과:</span> <span class="mono">${gap.intendedStatus}</span>
+                ${gap.intendedCode !== null && html` · <span class="mono">${gap.intendedCode}</span>: ${gap.intendedDetail ?? ''}`}
+              </div>
+              <div style=${{ marginTop: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                <span style=${{ color: 'var(--fg-3)' }}>저장 실패 이유:</span> <span class="mono">${gap.persistenceError}</span>
+              </div>
+            </div>
+          `}
 
           <div class="wka-card">
             <h4 style=${{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-12)' }}>스키마 / 페이로드 가용성</h4>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
-              Input: ${detail.payload_availability?.input?.state ?? 'unobserved'} ·
-              Output: ${detail.payload_availability?.output?.state ?? (detail.status === 'running' ? 'running (null)' : 'unobserved')}
+              Input: ${record?.payloadAvailability.input.state ?? 'unobserved'} ·
+              Output: ${record === null ? 'unobserved' : (record.payloadAvailability.output?.state ?? 'running (null)')}
             </div>
-            ${detail.code && html`
+            ${exact?.code && html`
               <div style=${{ marginTop: 'var(--sp-1)', color: 'var(--err-fg)', fontSize: 'var(--fs-12)' }}>
-                ${detail.code}: ${detail.detail ?? ''}
+                ${exact.code}: ${exact.detail ?? ''}
               </div>
             `}
           </div>
 
-          <div class="wka-card">
-            <h4 style=${{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-12)' }}>슬롯 관측 (Slot Observations)</h4>
-            <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', background: 'var(--bg-0)', padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)' }}>
-              ${JSON.stringify(detail.slot_observations ?? { state: 'unobserved' }, null, 2)}
-            </pre>
-          </div>
+          ${exact && html`
+            <div class="wka-card">
+              <h4 style=${{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-12)' }}>슬롯 관측 (Slot Observations)</h4>
+              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', background: 'var(--bg-0)', padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)' }}>
+                ${JSON.stringify(exact.slotObservations ?? { state: 'unobserved' }, null, 2)}
+              </pre>
+            </div>
+          `}
 
           <div class="wka-card">
             <h4 style=${{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-12)' }}>Raw Output Payload</h4>
             <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', background: 'var(--bg-0)', padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)' }}>
-              ${detail.output !== undefined ? JSON.stringify(detail.output, null, 2) : '없음'}
+              ${record?.output !== undefined ? JSON.stringify(record.output, null, 2) : '없음'}
             </pre>
           </div>
         </div>
@@ -1473,10 +1494,10 @@ export function LanesTab(props: WorkspaceViewProps) {
               <button
                 type="button"
                 class="btn-ghost"
-                disabled=${!exactData?.has_more || !exactData.runs.length}
+                disabled=${!exactData?.hasMore || !exactData.runs.length}
                 onClick=${() => {
                   const last = exactData?.runs[exactData.runs.length - 1]
-                  if (last) setCursorStack((s) => [...s, { startedAt: last.started_at, runId: last.run_id }])
+                  if (last) setCursorStack((s) => [...s, { startedAt: last.startedAt, runId: last.runId }])
                 }}
               >
                 다음 →
@@ -1497,8 +1518,8 @@ export function LanesTab(props: WorkspaceViewProps) {
           ${exactData && html`<${DataTable}
             data=${exactData.runs}
             columns=${exactColumns}
-            getRowId=${(r: ExactLaneRunRow) => r.run_id}
-            onRowClick=${(r: ExactLaneRunRow) => void handleInspectExactRun(r)}
+            getRowId=${(r: LaneRunSummary) => r.runId}
+            onRowClick=${(r: LaneRunSummary) => void handleInspectExactRun(r)}
             virtualizeThreshold=${25}
             maxHeight=${460}
             caption="Exact Output 실행 이력"

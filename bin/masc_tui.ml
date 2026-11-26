@@ -25,6 +25,8 @@ let render_body ~(model : Model.t) ~cache ~history_rows rect grid =
   | Some (Nav.Exact_run_inspector run_id) ->
       Screen_runtime.render_inspector ~target:(`Exact_run run_id) ~model ~cache
         ~rect grid
+  | Some (Nav.File_inspector peek) ->
+      Screen_file_peek.render ~peek ~model ~cache ~rect grid
   | None -> (
       match model.nav.workspace with
       | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect grid

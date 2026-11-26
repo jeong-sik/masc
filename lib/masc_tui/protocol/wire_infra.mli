@@ -470,9 +470,21 @@ type git_diff_line = {
   text : string;
 }
 
+type git_diff_hunk = {
+  old_start : int;
+  old_count : int;
+  new_start : int;
+  new_count : int;
+  section : string option;
+}
+
+type git_diff_row =
+  | Hunk of git_diff_hunk
+  | Line of git_diff_line
+
 type git_diff_snapshot = {
   has_changes : bool;
-  lines : git_diff_line list;
+  rows : git_diff_row list;
 }
 
 val decode_workspace_children :

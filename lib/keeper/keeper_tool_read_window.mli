@@ -1,7 +1,7 @@
 (** Pure Read coordinate decoding and slicing of bytes acquired by a filesystem backend.
     This module does not resolve paths, read files, or render prompt guidance. *)
 
-type read_line_window =
+type read_line_window = private
   { start_line : int (* 1-based first line to return *)
   ; max_lines : int option (* cap on returned lines; None = to EOF *)
   }
@@ -14,7 +14,8 @@ type argument_error =
   | Not_an_object of Yojson.Safe.t
 
 val of_args : Yojson.Safe.t -> (read_line_window, argument_error) result
-(** Only absent coordinates use defaults. JSON integers, including integer
+(** The only constructor, so [start_line >= 1] holds for every window.
+    Only absent coordinates use defaults. JSON integers, including integer
     literals and integral finite numbers, must fit the native index type.
     Present malformed or out-of-range values are errors, never absence. *)
 

@@ -636,6 +636,14 @@ let fetches_for_inspector ~force (m : Model.t) =
             needs_fetch ~force m.runtime.exact_run_detail
       in
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
+  | Some (Nav.File_inspector peek) ->
+      let read =
+        Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path m.infra
+      in
+      []
+      |> add_if (needs_fetch ~force read && (force || not (Observed.is_loading read)))
+           (Cmd.Get_workspace_file
+              { scope = Wire_infra.Ws_keeper peek.keeper; path = peek.path })
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
    the slot already holds it fresh. A dive covers the tab, and a Wiki dive
@@ -1308,22 +1316,24 @@ let fetches_for_workspace ~force (m : Model.t) =
       | Nav.Infra_code ->
           let sc = m.infra.code.scope in
           let cur_file_opt = Infra_store.active_code_file_path m.infra in
+          let git_status_reqs =
+            let needed =
+              match m.infra.code.git_status with
+              | Observed.Value { data = s, _; stale = false; _ } ->
+                  force || not (Wire_infra.equal_workspace_scope s sc)
+              | Observed.Loading _
+              | Observed.Value { stale = true; _ }
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  needs_fetch ~force m.infra.code.git_status
+            in
+            if not needed then [] else [ Cmd.Get_git_status { scope = sc } ]
+          in
           let mode_reqs =
             match m.infra.code.right_mode with
             | Infra_store.Code_file | Infra_store.Code_search_results -> []
-            | Infra_store.Code_git_status ->
-                let needed =
-                  match m.infra.code.git_status with
-                  | Observed.Value { data = s, _; stale = false; _ } ->
-                      force || not (Wire_infra.equal_workspace_scope s sc)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.infra.code.git_status
-                in
-                if not needed then [] else [ Cmd.Get_git_status { scope = sc } ]
+            | Infra_store.Code_git_status -> git_status_reqs
             | Infra_store.Code_git_branches ->
                 let needed =
                   match m.infra.code.git_branches with
@@ -1391,10 +1401,18 @@ let fetches_for_workspace ~force (m : Model.t) =
                     in
                     if not needed then []
                     else [ Cmd.Get_git_log { scope = sc; path } ])
-            | Infra_store.Code_git_diff -> (
-                match cur_file_opt with
+            | Infra_store.Code_review -> (
+                (* The diff follows the selected change, never the tree. *)
+                let selected =
+                  Option.bind (Infra_store.review_selected_index m.infra)
+                    (fun i ->
+                      List.nth_opt (Infra_store.review_changes m.infra) i)
+                in
+                git_status_reqs
+                @
+                match selected with
                 | None -> []
-                | Some path ->
+                | Some { Wire_infra.path; _ } ->
                     let needed =
                       match m.infra.code.git_diff with
                       | Observed.Value { data = s, p, _; stale = false; _ } ->
@@ -1477,7 +1495,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
       | Some
           ( Nav.Verification_inspector _
           | Nav.Skill_inspector _
-          | Nav.Exact_run_inspector _ ) ->
+          | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
           false
       | None ->
           Nav.equal_workspace m.nav.workspace Nav.Runtime
@@ -1555,7 +1573,7 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     | Some
         ( Nav.Verification_inspector _
         | Nav.Tool_inspector _
-        | Nav.Exact_run_inspector _ )
+        | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
     | None ->
         []
   in

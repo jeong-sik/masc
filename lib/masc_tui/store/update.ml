@@ -561,7 +561,9 @@ let clear_work_reads (work : Work_store.t) =
      frame.
    - Chat stream frames carry the epoch they were sent in, and the guard
      drops them from now on. Each open chat request waits for the history
-     instead, the way a stream that closed without a terminal does. *)
+     instead, the way a stream that closed without a terminal does.
+   - The same Keeper and path can name a file in another workspace, so the
+     File inspector forgets its body and reads again. *)
 let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
   if Epoch.equal before.epoch after.epoch then after
   else
@@ -630,7 +632,9 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
     in
     {
       after with
-      infra = Infra_store.detach_keeper_sandbox_reads infra;
+      infra =
+        Infra_store.detach_keeper_sandbox_reads infra
+        |> Infra_store.drop_file_peek_content;
       fleet =
         Fleet_store.detach_chat_streams
           { after.fleet with worked = Fleet_store.String_map.empty }
@@ -745,6 +749,21 @@ let reserve_workspace_file_read ~now (m : Model.t) cmds =
     { m with infra = { m.infra with code = { code with open_file } } }
   else m
 
+(* The File inspector reads the same route into its own slot. Reserving it
+   shows loading and keeps the planner from sending the read twice. *)
+let reserve_file_peek_read ~now (m : Model.t) cmds =
+  let reserve infra =
+    (function
+      | Cmd.Http_get
+          { epoch; req = Cmd.Get_workspace_file { scope = Wire_infra.Ws_keeper keeper; path } }
+        when Epoch.equal epoch m.epoch ->
+          Infra_store.reserve_file_peek ~since_ns:now ~keeper ~path infra
+      | _ -> infra)
+    [@warning "-4"]
+  in
+  let infra = List.fold_left reserve m.infra (Cmd.flatten cmds) in
+  if infra == m.infra then m else { m with infra }
+
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
@@ -791,4 +810,5 @@ let step ~now m msg =
   let next = reserve_board_view_read ~now next cmds in
   let next = reserve_sandbox_view_reads ~now next cmds in
   let next = reserve_work_reads ~now next cmds in
-  (reserve_workspace_file_read ~now next final_cmds, final_cmds)
+  let next = reserve_workspace_file_read ~now next final_cmds in
+  (reserve_file_peek_read ~now next final_cmds, final_cmds)

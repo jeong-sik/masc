@@ -93,6 +93,26 @@ val peek_file_change_evidence :
 (** Return file change evidence without clearing it. The post-tool hook uses
     this to build a synchronous row and consumes it only after commit. *)
 
+val set_file_target :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  target:Keeper_file_target.t ->
+  unit
+(** Preserve the producer-resolved target file for the exact physical
+    invocation until the post-tool hook constructs its tool-call row. *)
+
+val consume_file_target :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_target.t option
+(** Return and clear the target file for the exact invocation. *)
+
+val peek_file_target :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_target.t option
+(** Return the target file without clearing it; the post-tool hook consumes
+    it only after the row commits. *)
+
 val peek_file_change_artifact_refs :
   invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
 (** Producer-owned snapshot references, retained with line evidence until row commit. *)
@@ -340,6 +360,7 @@ val log_call :
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?file_target:Keeper_file_target.t ->
   ?board_action_evidence:(Board_tool_evidence.t, string) result ->
   ?execution_evidence:Yojson.Safe.t ->
   ?artifact_refs:Tool_output.artifact_ref list ->
@@ -417,6 +438,8 @@ val log_call :
     typed plan executor; readers must not reconstruct them from [tool_use_id]
     or tool-name strings. [file_change_evidence] is producer-owned typed data,
     persisted independently of the truncated opaque [output] preview.
+    [file_target] is the producer-resolved file of a filesystem tool call,
+    persisted as [file_target]; a row without it names no file.
     [execution_evidence] is a completed Execute's audit object from
     {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
     the same secret redaction and per-leaf bound as [input]; route evidence

@@ -1606,7 +1606,7 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
     match insp with
     | Nav.Verification_inspector _ ->
         Work_store.set_verification_dive_tab Work_store.Verif_tab_evidence m.work
-    | Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ ->
+    | Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _ ->
         m.work
   in
   let drafts =
@@ -1614,7 +1614,15 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
   in
   let fleet = m.fleet in
   let config = Config_store.cancel_edit_field m.config in
-  let infra = { m.infra with show_raw_json = false } in
+  let infra =
+    let infra = { m.infra with show_raw_json = false } in
+    match insp with
+    | Nav.File_inspector peek ->
+        Infra_store.open_file_peek ~keeper:peek.keeper ~path:peek.path infra
+    | Nav.Verification_inspector _ | Nav.Tool_inspector _ | Nav.Skill_inspector _
+    | Nav.Exact_run_inspector _ ->
+        infra
+  in
   let knowledge =
     let base0 =
       m.knowledge |> Knowledge_store.clear_armed_vote
@@ -1660,7 +1668,7 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
         in
         { m.runtime with exact_run_detail }
     | Nav.Tool_inspector _ -> { m.runtime with scroll_offset = 0 }
-    | Nav.Verification_inspector _ -> m.runtime
+    | Nav.Verification_inspector _ | Nav.File_inspector _ -> m.runtime
   in
   let ask_modal =
     if Model.has_preserved_ask_return nav then m.ask_modal else None
@@ -4371,7 +4379,32 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop)
           | Nav.Infra_code ->
               let scope = m.infra.code.scope in
-              if
+              let review_jump ~scroll =
+                match m.infra.code.active_file_path with
+                | None -> Enter_noop
+                | Some path ->
+                    let rows =
+                      Infra_store.review_diff_rows ~cols:m.viewport.cols m.infra
+                    in
+                    Enter_code_jump_match
+                      {
+                        scope;
+                        path;
+                        line =
+                          Option.value ~default:1
+                            (Code_review_layout.jump_line ~scroll rows);
+                      }
+              in
+              if Infra_store.code_review_active m.infra then
+                (* The list opens the change at its first hunk; the diff
+                   opens the line at the top of the view. *)
+                review_jump
+                  ~scroll:
+                    (if m.nav.pane_index = 0
+                        && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                     then 0
+                     else m.infra.code.git_scroll_offset)
+              else if
                 m.nav.pane_index = 0
                 && not (m.nav.zoomed && Model.can_zoom_current_view m)
               then
@@ -4401,7 +4434,7 @@ let enter_plan (m : Model.t) : enter_plan =
                 | Infra_store.Code_git_worktrees
                 | Infra_store.Code_git_blame
                 | Infra_store.Code_git_log
-                | Infra_store.Code_git_diff ->
+                | Infra_store.Code_review ->
                     Enter_noop)
           | Nav.Infra_activity_logs ->
               if m.infra.acting_rail_open && m.nav.pane_index = 2 then
@@ -8562,16 +8595,8 @@ let code_right_pane_line_count (m : Model.t) : int =
                 | None -> true) ->
           List.length cs
       | Some _ | None -> 0)
-  | Infra_store.Code_git_diff -> (
-      let expected_path = Infra_store.active_code_file_path m.infra in
-      match Observed.to_option c.git_diff with
-      | Some (sc, path, df)
-        when Wire_infra.equal_workspace_scope sc c.scope
-             && (match expected_path with
-                | Some exp -> String.equal exp path
-                | None -> true) ->
-          List.length df.lines
-      | Some _ | None -> 0)
+  | Infra_store.Code_review ->
+      List.length (Infra_store.review_diff_rows ~cols:m.viewport.cols m.infra)
 
 let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
     (k : Knowledge_store.t) =
@@ -10133,6 +10158,16 @@ let dive_max_scroll (m : Model.t) active =
             in
             max 0 (total - max 1 content.h)
         | None -> 0)
+  | Nav.File_inspector peek -> (
+      let content = ui_card_inner br |> ui_pad_content ~bp in
+      match Infra_store.file_peek_content ~keeper:peek.keeper ~path:peek.path m.infra with
+      | Some c ->
+          (* One header row above the numbered lines. *)
+          max 0
+            (List.length (String.split_on_char '\n' c.content) - max 1 (content.h - 1))
+      (* Nothing to measure until the body arrives. Bounding by the current
+         offset keeps the target line [o] chose. *)
+      | None -> m.nav.inspector_scroll_offset)
   | Nav.Verification_inspector req_id -> (
       match
         List.find_opt
@@ -11122,7 +11157,7 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
     | Some
         ( Nav.Tool_inspector _
         | Nav.Skill_inspector _
-        | Nav.Exact_run_inspector _ ) ->
+        | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
         None
     | None -> (
         match m.nav.workspace, m.work.active_tab with
@@ -12232,7 +12267,7 @@ let apply_move (m : Model.t) dir =
                   in
                   ({ m with nav = { m.nav with inspector_scroll_offset } }, [])
             | Some
-                ((Nav.Skill_inspector _ | Nav.Exact_run_inspector _) as active) ->
+                ((Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
                 let inspector_scroll_offset =

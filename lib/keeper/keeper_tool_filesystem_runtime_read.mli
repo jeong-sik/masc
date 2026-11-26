@@ -46,7 +46,10 @@ val resolve_read_file_cwd :
    or file the caller named is a [Policy_rejection]; a backend or host I/O
    failure is a [Runtime_failure]. *)
 type read_file_attempt =
-  | Read_succeeded of Yojson.Safe.t
+  | Read_succeeded of
+      { payload : Yojson.Safe.t
+      ; returned_lines : int
+      }
   | Read_refused of
       { failure_class : Tool_result.tool_failure_class
       ; payload : string

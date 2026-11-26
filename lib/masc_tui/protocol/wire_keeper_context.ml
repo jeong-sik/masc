@@ -795,6 +795,11 @@ let decode_keeper_tool_stats json =
   let* timeline = decode_list "timeline" decode_hourly_bucket timeline_raw in
   Ok { keeper; window_hours; total_entries; health; stale_reason; tools; timeline }
 
+type tool_file_target = {
+  path : string;  (** Relative to the Keeper's workspace root. *)
+  lines : (int * int) option;  (** Touched lines, 1-based inclusive. *)
+}
+
 type tool_call_entry = {
   ts_unix : float;
   tool : string;
@@ -813,6 +818,9 @@ type tool_call_entry = {
   output : string;
   original_bytes : int option;
   truncated_to : int option;
+  file_target : tool_file_target option;
+      (** The file a filesystem tool resolved when it ran; [None] for other
+          tools. *)
   raw : Yojson.Safe.t;
 }
 
@@ -837,6 +845,22 @@ let classify_tool_call_disposition s =
   | "completed" | "succeeded" -> Disposition_completed
   | "failed" -> Disposition_failed
   | other -> Disposition_other other
+
+let decode_tool_file_target json =
+  let* path = required_nonblank_string json "path" in
+  let* lines =
+    match member "lines" json with
+    | `Null -> Ok None
+    | lines_json ->
+        let* start_line = required_int_field lines_json "start_line" in
+        let* end_line = required_int_field lines_json "end_line" in
+        if start_line >= 1 && end_line >= start_line then Ok (Some (start_line, end_line))
+        else
+          Error
+            (Printf.sprintf "file_target lines %d..%d are not a 1-based range" start_line
+               end_line)
+  in
+  Ok { path; lines }
 
 let decode_tool_call_entry json =
   let* ts_unix =
@@ -897,6 +921,11 @@ let decode_tool_call_entry json =
     | None -> legacy_original_bytes
   in
   let* truncated_to = optional_int_field json "truncated_to" in
+  let* file_target =
+    match member "file_target" json with
+    | `Null -> Ok None
+    | target -> Result.map Option.some (decode_tool_file_target target)
+  in
   Ok
     {
       ts_unix;
@@ -916,6 +945,7 @@ let decode_tool_call_entry json =
       output;
       original_bytes;
       truncated_to;
+      file_target;
       raw = json;
     }
 

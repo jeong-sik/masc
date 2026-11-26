@@ -48,11 +48,15 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
+type file_peek = { keeper : string; path : string; line : int }
+(** A file in a Keeper's workspace, opened at [line] (1-based). *)
+
 type inspector =
   | Verification_inspector of string
   | Tool_inspector of string
   | Skill_inspector of string
   | Exact_run_inspector of string
+  | File_inspector of file_peek
 
 type settings_tab =
   | Settings_general_ui
@@ -506,10 +510,13 @@ let equal_inspector a b =
   | Skill_inspector x, Skill_inspector y
   | Exact_run_inspector x, Exact_run_inspector y ->
       String.equal x y
-  | Verification_inspector _, (Tool_inspector _ | Skill_inspector _ | Exact_run_inspector _)
-  | Tool_inspector _, (Verification_inspector _ | Skill_inspector _ | Exact_run_inspector _)
-  | Skill_inspector _, (Verification_inspector _ | Tool_inspector _ | Exact_run_inspector _)
-  | Exact_run_inspector _, (Verification_inspector _ | Tool_inspector _ | Skill_inspector _) ->
+  | File_inspector x, File_inspector y ->
+      String.equal x.keeper y.keeper && String.equal x.path y.path && Int.equal x.line y.line
+  | Verification_inspector _, (Tool_inspector _ | Skill_inspector _ | Exact_run_inspector _ | File_inspector _)
+  | Tool_inspector _, (Verification_inspector _ | Skill_inspector _ | Exact_run_inspector _ | File_inspector _)
+  | Skill_inspector _, (Verification_inspector _ | Tool_inspector _ | Exact_run_inspector _ | File_inspector _)
+  | Exact_run_inspector _, (Verification_inspector _ | Tool_inspector _ | Skill_inspector _ | File_inspector _)
+  | File_inspector _, (Verification_inspector _ | Tool_inspector _ | Skill_inspector _ | Exact_run_inspector _) ->
       false
 
 let settings_tab_index = function

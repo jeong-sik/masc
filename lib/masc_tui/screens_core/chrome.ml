@@ -840,6 +840,10 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " "
           ^ Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run")
           ^ " " ^ run_id
+      | Nav.File_inspector peek ->
+          Say.resolve lang (Nav.workspace_label Nav.Keepers)
+          ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " " ^ peek.keeper
+          ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " " ^ peek.path
     in
     (match Model.active_inspector model with
      | Some insp ->

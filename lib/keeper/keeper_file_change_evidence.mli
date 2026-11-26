@@ -6,6 +6,13 @@ type line_range = private {
 }
 (** 1-based inclusive file coordinates. *)
 
+val line_range : start_line:int -> end_line:int -> (line_range, string) result
+(** Build a range from producer coordinates. Rejects a start below one and an
+    end before the start; the durable decoder applies the same check. *)
+
+val line_range_to_yojson : line_range -> Yojson.Safe.t
+(** [{"start_line": s, "end_line": e}], the shape every recorded range uses. *)
+
 type edit_occurrence = private {
   old_range : line_range;
   new_range : line_range option;

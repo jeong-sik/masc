@@ -49,6 +49,9 @@ type t = private
   ; file_change_evidence : Keeper_file_change_evidence.t option
       (** Producer-recorded line evidence for a completed filesystem change.
           This is independent of the opaque [raw_output] projection. *)
+  ; file_target : Keeper_file_target.t option
+      (** The file a completed filesystem tool call named, fixed when it
+          executed. [None] for every call that is not a filesystem tool. *)
   }
 
 val success : string -> t
@@ -123,6 +126,9 @@ val merge_receipt_waits
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)
+
+val with_file_target : Keeper_file_target.t -> t -> t
+(** Attach the producer-resolved target file only to a completed execution. *)
 
 val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
 (** Preserve producer-validated artifact roots in the execution carrier,

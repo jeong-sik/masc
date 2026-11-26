@@ -45,7 +45,7 @@ type code_right_mode =
   | Code_git_worktrees
   | Code_git_blame
   | Code_git_log
-  | Code_git_diff
+  | Code_review
 
 type code_state = {
   scope : Wire_infra.workspace_scope;
@@ -116,6 +116,14 @@ type keeper_sandbox_read = {
   invalidated_during_read : bool;
 }
 
+(** The File inspector's read. Loading and failure belong to this file, so
+    one file's state never shows under another file's title. *)
+type file_peek_read = {
+  peek_keeper : string;
+  peek_path : string;
+  peek_content : Wire_infra.workspace_file_content Observed.t;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -140,6 +148,8 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
+  file_peek : file_peek_read option;
+      (** The File inspector's read. [None] until one opens. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -176,6 +186,7 @@ let empty =
     acting_selected_index = 0;
     runtime_trace = Observed.absent;
     code = empty_code_state;
+    file_peek = None;
     show_raw_json = false;
     pending_sandbox_keeper = None;
     selected_index = 0;
@@ -1025,6 +1036,59 @@ let adjust_scroll = Store_scroll.adjust_scroll
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0; diff_scroll_offset = 0 }
 
+let review_changes t =
+  match Observed.to_option t.code.git_status with
+  | Some (sc, (st : Wire_infra.git_status_snapshot))
+    when Wire_infra.equal_workspace_scope sc t.code.scope ->
+      st.changes
+  | Some _ | None -> []
+
+let review_selected_index t =
+  match t.code.active_file_path with
+  | None -> None
+  | Some path ->
+      List.find_index
+        (fun (c : Wire_infra.git_status_change) -> String.equal c.path path)
+        (review_changes t)
+
+let select_review_change ~delta t =
+  let changes = review_changes t in
+  let total = List.length changes in
+  let target =
+    match review_selected_index t with
+    | Some i -> clamp_index total (i + delta)
+    | None -> if delta >= 0 then 0 else total - 1
+  in
+  match List.nth_opt changes target with
+  | Some (c : Wire_infra.git_status_change)
+    when not (Option.equal String.equal t.code.active_file_path (Some c.path)) ->
+      {
+        t with
+        code =
+          {
+            t.code with
+            active_file_path = Some c.path;
+            pending_jump_line = None;
+            git_scroll_offset = 0;
+            (* The slot holds the last file's diff or failure. A
+               non-retryable failure there would stop this file's fetch. *)
+            git_diff = Observed.absent;
+          };
+      }
+  | Some _ | None -> t
+
+(* The review list always shows one selected change once there is one. Both
+   ways of getting there need this: a status reply that arrives in Review, and
+   switching to Review with a status already loaded, which reads nothing. *)
+let keep_a_review_selection t =
+  match t.code.right_mode, review_selected_index t with
+  | Code_review, None -> select_review_change ~delta:0 t
+  | Code_review, Some _
+  | ( ( Code_file | Code_search_results | Code_git_status | Code_git_branches
+      | Code_git_worktrees | Code_git_blame | Code_git_log ),
+      _ ) ->
+      t
+
 let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Infra_sandboxes ->
@@ -1119,7 +1183,16 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             diff_scroll_offset = 0;
           })
   | Nav.Infra_code ->
-      if pane_index = 1 then
+      let reviewing =
+        match t.code.right_mode with
+        | Code_review -> true
+        | Code_file | Code_search_results | Code_git_status | Code_git_branches
+        | Code_git_worktrees | Code_git_blame | Code_git_log ->
+            false
+      in
+      if pane_index <> 1 && reviewing then
+        select_review_change ~delta t
+      else if pane_index = 1 then
         match t.code.right_mode with
         | Code_file ->
             let max_scroll =
@@ -1163,7 +1236,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         | Code_git_worktrees
         | Code_git_blame
         | Code_git_log
-        | Code_git_diff ->
+        | Code_review ->
             let max_scroll =
               match max_detail_scroll with Some ms -> max 0 ms | None -> 0
             in
@@ -1204,7 +1277,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         in
         let active_file_path, git_scroll_offset =
           match t.code.right_mode with
-          | Code_git_blame | Code_git_log | Code_git_diff -> (
+          | Code_git_blame | Code_git_log -> (
               match List.nth_opt nodes tree_selected_index with
               | Some n when not n.has_children ->
                   let changed =
@@ -1219,7 +1292,8 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           | Code_search_results
           | Code_git_status
           | Code_git_branches
-          | Code_git_worktrees ->
+          | Code_git_worktrees
+          | Code_review ->
               (t.code.active_file_path, t.code.git_scroll_offset)
         in
         {
@@ -1302,6 +1376,10 @@ let mark_stale_all t =
     runtime_trace = Observed.mark_stale t.runtime_trace;
     activity_seen_seqs = String_set.empty;
     activity_seen_entries = [];
+    file_peek =
+      Option.map
+        (fun r -> { r with peek_content = Observed.mark_stale r.peek_content })
+        t.file_peek;
     code =
       {
         t.code with
@@ -1479,7 +1557,7 @@ let code_right_mode_rank = function
   | Code_git_worktrees -> 4
   | Code_git_blame -> 5
   | Code_git_log -> 6
-  | Code_git_diff -> 7
+  | Code_review -> 7
 
 let equal_code_right_mode a b =
   Int.equal (code_right_mode_rank a) (code_right_mode_rank b)
@@ -1492,10 +1570,11 @@ let code_right_mode_label = function
   | Code_git_worktrees -> Say.make ~ko:"워크트리" ~en:"Worktrees"
   | Code_git_blame -> Say.make ~ko:"Blame" ~en:"Blame"
   | Code_git_log -> Say.make ~ko:"Git 로그" ~en:"Git Log"
-  | Code_git_diff -> Say.make ~ko:"Git Diff" ~en:"Git Diff"
+  | Code_review -> Say.make ~ko:"변경 검토" ~en:"Review"
 
 let set_code_right_mode right_mode t =
-  { t with code = { t.code with right_mode; git_scroll_offset = 0 } }
+  keep_a_review_selection
+    { t with code = { t.code with right_mode; git_scroll_offset = 0 } }
 
 let cycle_code_git_mode t =
   let next =
@@ -1505,8 +1584,8 @@ let cycle_code_git_mode t =
     | Code_git_branches -> Code_git_worktrees
     | Code_git_worktrees -> Code_git_blame
     | Code_git_blame -> Code_git_log
-    | Code_git_log -> Code_git_diff
-    | Code_git_diff -> Code_file
+    | Code_git_log -> Code_review
+    | Code_review -> Code_file
   in
   set_code_right_mode next t
 
@@ -1644,13 +1723,85 @@ let open_file_for_current t =
       Some content
   | Some _ | None -> None
 
+let review_diff_rows ~cols t =
+  match Observed.to_option t.code.git_diff with
+  | Some (sc, path, (df : Wire_infra.git_diff_snapshot))
+    when Wire_infra.equal_workspace_scope sc t.code.scope
+         && Option.equal String.equal t.code.active_file_path (Some path) ->
+      Code_review_layout.rows
+        ~side_by_side:(Code_review_layout.side_by_side ~cols)
+        df.rows
+  | Some _ | None -> []
+
+let code_review_active t =
+  Nav.equal_infra_tab t.active_tab Nav.Infra_code
+  &&
+  match t.code.right_mode with
+  | Code_review -> true
+  | Code_file | Code_search_results | Code_git_status | Code_git_branches
+  | Code_git_worktrees | Code_git_blame | Code_git_log ->
+      false
+
+let step_review_hunk ~cols ~delta t =
+  match
+    Code_review_layout.step_hunk ~delta ~scroll:t.code.git_scroll_offset
+      (review_diff_rows ~cols t)
+  with
+  | Some git_scroll_offset -> { t with code = { t.code with git_scroll_offset } }
+  | None -> t
+
+let open_file_peek ~keeper ~path t =
+  {
+    t with
+    file_peek =
+      Some { peek_keeper = keeper; peek_path = path; peek_content = Observed.unreported };
+  }
+
+let file_peek_is ~keeper ~path (r : file_peek_read) =
+  String.equal r.peek_keeper keeper && String.equal r.peek_path path
+
+let file_peek_state ~keeper ~path t =
+  match t.file_peek with
+  | Some r when file_peek_is ~keeper ~path r -> r.peek_content
+  | Some _ | None -> Observed.unreported
+
+let file_peek_content ~keeper ~path t =
+  Observed.to_option (file_peek_state ~keeper ~path t)
+
+let update_file_peek ~keeper ~path f t =
+  match t.file_peek with
+  | Some r when file_peek_is ~keeper ~path r ->
+      { t with file_peek = Some { r with peek_content = f r.peek_content } }
+  | Some _ | None -> t
+
+let apply_file_peek ~observed_at ~keeper ~path content t =
+  update_file_peek ~keeper ~path (fun _ -> Observed.value ~observed_at content) t
+
+let fail_file_peek ~keeper ~path ~failure t = update_file_peek ~keeper ~path failure t
+
+let reserve_file_peek ~since_ns ~keeper ~path t =
+  update_file_peek ~keeper ~path
+    (function
+      | (Observed.Value _ | Observed.Loading _) as kept -> kept
+      | Observed.Absent | Observed.Unreported | Observed.Failed _ ->
+          Observed.loading ~since_ns)
+    t
+
+let drop_file_peek_content t =
+  {
+    t with
+    file_peek =
+      Option.map (fun r -> { r with peek_content = Observed.unreported }) t.file_peek;
+  }
+
 let apply_git_status ~observed_at ~scope snap t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
   else
-    {
-      t with
-      code = { t.code with git_status = Observed.value ~observed_at (scope, snap) };
-    }
+    keep_a_review_selection
+      {
+        t with
+        code = { t.code with git_status = Observed.value ~observed_at (scope, snap) };
+      }
 
 let apply_git_branches ~observed_at ~scope branches t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
@@ -1697,11 +1848,12 @@ let apply_git_log ~observed_at ~scope ~path commits t =
         { t.code with git_log = Observed.value ~observed_at (scope, path, commits) };
     }
 
+let git_diff_target_matches ~scope ~path t =
+  Wire_infra.equal_workspace_scope scope t.code.scope
+  && path_matches_active_code ~path t
+
 let apply_git_diff ~observed_at ~scope ~path diff t =
-  if
-    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
-    || not (path_matches_active_code ~path t)
-  then t
+  if not (git_diff_target_matches ~scope ~path t) then t
   else
     {
       t with

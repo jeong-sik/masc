@@ -205,7 +205,7 @@ let verification_evidence_matches_active (m : Model.t) verification_id =
   | Some
       ( Nav.Tool_inspector _
       | Nav.Skill_inspector _
-      | Nav.Exact_run_inspector _ )
+      | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
   | None ->
       true
 
@@ -4334,7 +4334,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             []
       in
@@ -5998,18 +5998,32 @@ let apply_http_reply ~now (m : Model.t) reply =
                    };
                }))
         ~source:Health.Source_client_http ~ko:"코드 검색" ~en:"Code search" err
-  | Msg.Reply_workspace_file { scope; path; result = Ok content }
-    when Option.equal String.equal (Some path) m.infra.code.active_file_path ->
+  | Msg.Reply_workspace_file { scope; path; result = Ok content } ->
       let infra =
-        Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
-          m.infra
+        if Option.equal String.equal (Some path) m.infra.code.active_file_path then
+          Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
+            m.infra
+        else m.infra
+      in
+      (* The File inspector reads Keeper workspaces only; the slot drops a
+         reply for any file other than the one it holds. *)
+      let infra =
+        match scope with
+        | Wire_infra.Ws_keeper keeper ->
+            Infra_store.apply_file_peek ~observed_at:now ~keeper ~path content infra
+        | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> infra
       in
       ({ m with infra }, [])
-  | Msg.Reply_workspace_file { result = Ok _; _ } -> (m, [])
   | Msg.Reply_workspace_file { scope; path; result = Error err } ->
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
+               let x =
+                 match scope with
+                 | Wire_infra.Ws_keeper keeper ->
+                     Infra_store.fail_file_peek ~keeper ~path ~failure:(failed_slot err) x
+                 | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> x
+               in
                if Wire_infra.equal_workspace_scope scope x.code.scope
                   && Option.equal String.equal (Some path) x.code.active_file_path
                then
@@ -6064,12 +6078,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:Health.Source_client_http ~ko:"Git 워크트리 조회"
         ~en:"Git worktrees fetch" err
   | Msg.Reply_git_status { scope; result = Ok snap } ->
-      ( {
-          m with
-          infra =
-            Infra_store.apply_git_status ~observed_at:now ~scope snap m.infra;
-        }
-      , [] )
+      let infra = Infra_store.apply_git_status ~observed_at:now ~scope snap m.infra in
+      let next = { m with infra } in
+      (* The first status in Review picks a change; its diff is the next read. *)
+      if
+        Option.equal String.equal m.infra.code.active_file_path
+          infra.code.active_file_path
+      then (next, [])
+      else (next, View_fetches.fetches_for_current_view next)
   | Msg.Reply_git_status { scope = _; result = Error err } ->
       err_reply
         ~fail:
@@ -6128,15 +6144,17 @@ let apply_http_reply ~now (m : Model.t) reply =
             Infra_store.apply_git_diff ~observed_at:now ~scope ~path diff m.infra;
         }
       , [] )
-  | Msg.Reply_git_diff { scope = _; path = _; result = Error err } ->
+  | Msg.Reply_git_diff { scope; path; result = Error err } ->
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
-               {
-                 x with
-                 code =
-                   { x.code with git_diff = failed_slot err x.code.git_diff };
-               }))
+               if not (Infra_store.git_diff_target_matches ~scope ~path x) then x
+               else
+                 {
+                   x with
+                   code =
+                     { x.code with git_diff = failed_slot err x.code.git_diff };
+                 }))
         ~source:Health.Source_client_http ~ko:"Git diff 조회"
         ~en:"Git diff fetch" err
   | Msg.Reply_memory_health_keeper { keeper; result = Ok row } ->
@@ -7097,7 +7115,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -7116,7 +7134,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -7156,7 +7174,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Exact_run_inspector _ )
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -8249,7 +8267,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Skill_inspector _ )
+            | Nav.Skill_inspector _
+            | Nav.File_inspector _ )
         | None ->
             false
       in
@@ -8270,7 +8289,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Tool_inspector _
-            | Nav.Skill_inspector _ )
+            | Nav.Skill_inspector _
+            | Nav.File_inspector _ )
         | None ->
             false
       in

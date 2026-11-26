@@ -790,6 +790,8 @@
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_git_repo_owner
+  test_git_unified_diff
+  test_keeper_file_target
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
   test_workspace_goal_index
@@ -1147,6 +1149,8 @@
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_git_repo_owner
+  test_git_unified_diff
+  test_keeper_file_target
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
   test_workspace_goal_index

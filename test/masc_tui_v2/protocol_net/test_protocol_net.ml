@@ -4758,7 +4758,8 @@ let test_wave2_live_wire_codecs () =
             "input": { "cmd": "ls" },
             "output": "",
             "result_bytes": 0,
-            "truncated_to": null
+            "truncated_to": null,
+            "file_target": { "path": "lib/a.ml", "lines": { "start_line": 12, "end_line": 40 } }
           }
         ]
       }|}
@@ -4788,6 +4789,29 @@ let test_wave2_live_wire_codecs () =
     None tc_shell.ok;
   Alcotest.(check (option string)) "live disposition='deferred' preserved"
     (Some "deferred") tc_shell.disposition;
+  Alcotest.(check (option (pair string (option (pair int int)))))
+    "file_target decodes path and touched lines"
+    (Some ("lib/a.ml", Some (12, 40)))
+    (Option.map
+       (fun (t : Wire_keeper_context.tool_file_target) -> (t.path, t.lines))
+       tc_shell.file_target);
+  Alcotest.(check bool) "a row without file_target has none" true
+    (Option.is_none tc_post.file_target);
+  let page_with_target target =
+    parse_json
+      (Printf.sprintf
+         {|{"keeper":"alpha","count":1,"coverage_gaps":[],"entries":[{"ts":1.0,"tool":"read_file","input":{},"output":"","file_target":%s}]}|}
+         target)
+  in
+  Alcotest.(check bool) "file_target lines starting at 0 are rejected" true
+    (Result.is_error
+       (Wire_keeper_context.decode_keeper_tool_calls
+          (page_with_target
+             {|{"path":"a.ml","lines":{"start_line":0,"end_line":3}}|})));
+  Alcotest.(check bool) "file_target without a path is rejected" true
+    (Result.is_error
+       (Wire_keeper_context.decode_keeper_tool_calls
+          (page_with_target {|{"lines":{"start_line":1,"end_line":3}}|})));
   Alcotest.(check string) "keeper_tool_calls_path deduplicates execution_ids"
     "/api/v1/keepers/alpha/tool-calls?execution_ids=%5B%22e1%22%2C%22e2%22%5D"
     (Wire_keeper_context.keeper_tool_calls_path
@@ -5446,9 +5470,16 @@ let test_wave3_live_wire_codecs () =
   let g_diff =
     expect_ok "decode_git_diff"
       (Wire_infra.decode_git_diff
-         (parse_json {|{ "has_changes": true, "unified": [{ "kind": "context", "oldLine": 1, "newLine": 1, "text": "let x = 1" }, { "kind": "add", "newLine": 2, "text": "let y = 2" }] }|}))
+         (parse_json {|{ "has_changes": true, "unified": [{ "kind": "hunk", "oldStart": 1, "oldCount": 1, "newStart": 1, "newCount": 2, "section": "let x" }, { "kind": "context", "oldLine": 1, "newLine": 1, "text": "let x = 1" }, { "kind": "add", "newLine": 2, "text": "let y = 2" }] }|}))
   in
-  Alcotest.(check int) "2 git diff lines" 2 (List.length g_diff.lines);
+  Alcotest.(check int) "hunk and 2 git diff lines" 3 (List.length g_diff.rows);
+  (match g_diff.rows with
+   | Wire_infra.Hunk { new_start = 1; new_count = 2; section = Some "let x"; _ } :: _ -> ()
+   | _ -> Alcotest.fail "first row is the hunk header");
+  Alcotest.(check bool) "unknown git diff row kind is rejected" true
+    (Result.is_error
+       (Wire_infra.decode_git_diff
+          (parse_json {|{ "has_changes": true, "unified": [{ "kind": "binary" }] }|})));
 
   (* Surface 4: Memory Health, Ledger, Context, Facts Tree, Journal *)
   let mhf =

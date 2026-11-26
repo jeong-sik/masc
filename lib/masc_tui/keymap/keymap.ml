@@ -851,31 +851,31 @@ let bindings : binding list =
         ~action:(Step_revision Prev) ~key_display:"{"
         ~hint_label:(Say.make ~ko:"이전 섹션/리비전" ~en:"Prev Sec/Rev")
         ~help_desc:
-          (Say.make ~ko:"트레이스 이전 섹션 / 산출물 이전 리비전으로 이동 (< 별칭)"
-             ~en:"Previous Trace section / older artifact revision (alias of <)")
+          (Say.make ~ko:"트레이스 이전 섹션 / 산출물 이전 리비전 / 코드 변경 검토 이전 덩어리"
+             ~en:"Previous Trace section / older artifact revision / previous Code review hunk")
         ~footer_priority:0 (bare_char '{');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_revision Next) ~key_display:"}"
         ~hint_label:(Say.make ~ko:"다음 섹션/리비전" ~en:"Next Sec/Rev")
         ~help_desc:
-          (Say.make ~ko:"트레이스 다음 섹션 / 산출물 다음 리비전으로 이동 (> 별칭)"
-             ~en:"Next Trace section / newer artifact revision (alias of >)")
+          (Say.make ~ko:"트레이스 다음 섹션 / 산출물 다음 리비전 / 코드 변경 검토 다음 덩어리"
+             ~en:"Next Trace section / newer artifact revision / next Code review hunk")
         ~footer_priority:0 (bare_char '}');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Prev) ~key_display:"<"
         ~hint_label:(Say.make ~ko:"이전 항목/이력" ~en:"Prev Item")
         ~help_desc:
           (Say.make
-             ~ko:"이전 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전)"
-             ~en:"Step older/previous item (turn / keeper / section / comment / artifact rev)")
+             ~ko:"이전 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일)"
+             ~en:"Step older/previous item (turn / keeper / section / comment / artifact rev / Code review file)")
         ~footer_priority:0 (bare_char '<');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Next) ~key_display:">"
         ~hint_label:(Say.make ~ko:"다음 항목/이력" ~en:"Next Item")
         ~help_desc:
           (Say.make
-             ~ko:"다음 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전)"
-             ~en:"Step newer/next item (turn / keeper / section / comment / artifact rev)")
+             ~ko:"다음 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일)"
+             ~en:"Step newer/next item (turn / keeper / section / comment / artifact rev / Code review file)")
         ~footer_priority:0 (bare_char '>');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Launch_fusion ~key_display:"f"

@@ -2,6 +2,38 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+(* Lines shown above the target line when the File inspector opens. *)
+let file_peek_context_lines = 3
+
+(* Enter in the File inspector: the same file in Infra > Code, in the Keeper's
+   workspace, at the same line. Esc from there returns to the File inspector,
+   and Esc again to the tool-call row. *)
+let open_file_peek_in_code (m : Model.t) (peek : Nav.file_peek) =
+  let scope = Wire_infra.Ws_keeper peek.keeper in
+  let infra =
+    m.infra |> Infra_store.set_tab Nav.Infra_code |> Infra_store.set_code_scope scope
+  in
+  let code =
+    {
+      infra.code with
+      active_file_path = Some peek.path;
+      right_mode = Infra_store.Code_file;
+      file_scroll_offset = max 0 (peek.line - 1);
+      pending_jump_line = Some (peek.path, peek.line);
+    }
+  in
+  let next, cmds =
+    Update_nav.jump_to_workspace ~pane_index:1 ~return_from:m
+      { m with infra = { infra with code } }
+      Nav.Infra
+  in
+  ( next,
+    cmds
+    @ [
+        Cmd.Http_get
+          { epoch = next.epoch; req = Cmd.Get_workspace_file { scope; path = peek.path } };
+      ] )
+
 let active_memory_reading (m : Model.t) :
     Knowledge_store.memory_reading_entry option =
   let scope_opt =
@@ -4415,10 +4447,17 @@ and execute_action ~now (m : Model.t) action =
                           drafts = Drafts.set_focus false m.drafts;
                         }
                       , [] ))))
-  | Keymap.Dive_selected ->
+  | Keymap.Dive_selected -> (
       if Model.sidebar_has_focus m then
         Update_nav.activate_sidebar_cursor m
-      else Update_nav.dive_selected m
+      else
+        match Model.active_inspector m with
+        | Some (Nav.File_inspector peek) -> open_file_peek_in_code m peek
+        | Some
+            ( Nav.Verification_inspector _ | Nav.Tool_inspector _
+            | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ )
+        | None ->
+            Update_nav.dive_selected m)
   | Keymap.Confirm_selected -> (
       if Model.sidebar_has_focus m then
         Update_nav.activate_sidebar_cursor m
@@ -5435,7 +5474,7 @@ and execute_action ~now (m : Model.t) action =
           | Some
               ( Nav.Tool_inspector _
               | Nav.Skill_inspector _
-              | Nav.Exact_run_inspector _ ) ->
+              | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -5794,7 +5833,7 @@ and execute_action ~now (m : Model.t) action =
           | Some
               ( Nav.Verification_inspector _
               | Nav.Tool_inspector _
-              | Nav.Exact_run_inspector _ ) ->
+              | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -6201,6 +6240,7 @@ and execute_action ~now (m : Model.t) action =
             | Some (Nav.Tool_inspector name) -> Some name
             | Some (Nav.Skill_inspector ref_s) -> Some ref_s
             | Some (Nav.Exact_run_inspector run_id) -> Some run_id
+            | Some (Nav.File_inspector peek) -> Some peek.path
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge -> (
@@ -6670,6 +6710,43 @@ and execute_action ~now (m : Model.t) action =
                          && Board_recovery.shown ~keeper:name
                               m.knowledge.board_recovery ->
                       (m, [])
+                  | Nav.Keeper_trace, Some name
+                    when Keeper_context_store.equal_trace_section
+                           (Keeper_context_store.get_keeper ~keeper:name
+                              m.keeper_context)
+                             .trace_section Keeper_context_store.Trace_tool_calls -> (
+                      let ks =
+                        Keeper_context_store.get_keeper ~keeper:name m.keeper_context
+                      in
+                      match Keeper_context_store.selected_tool_call ks with
+                      | Some { file_target = Some target; _ } ->
+                          let line =
+                            match target.lines with
+                            | Some (start_line, _) -> start_line
+                            | None -> 1
+                          in
+                          let m, cmds =
+                            Update_nav.open_inspector m
+                              (Nav.File_inspector
+                                 { keeper = name; path = target.path; line })
+                          in
+                          (* Open with a few lines of context above the target. *)
+                          ( {
+                              m with
+                              nav =
+                                {
+                                  m.nav with
+                                  inspector_scroll_offset =
+                                    max 0 (line - 1 - file_peek_context_lines);
+                                };
+                            }
+                          , cmds )
+                      | Some { file_target = None; _ } | None ->
+                          ( Model.with_toast ~now ~level:Model.Toast_info
+                              (Say.make ~ko:"이 도구 기록에는 대상 파일이 없어요"
+                                 ~en:"This tool call has no target file")
+                              m
+                          , [] ))
                   | (Nav.Keeper_identity | Nav.Keeper_work_sandbox), None
                   | Nav.Keeper_work_sandbox, Some _
                   | ( ( Nav.Keeper_chat
@@ -6995,7 +7072,7 @@ and execute_action ~now (m : Model.t) action =
         | Some
             ( Nav.Tool_inspector _
             | Nav.Skill_inspector _
-            | Nav.Exact_run_inspector _ ) ->
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -7035,7 +7112,7 @@ and execute_action ~now (m : Model.t) action =
         | Some
             ( Nav.Verification_inspector _
             | Nav.Skill_inspector _
-            | Nav.Exact_run_inspector _ ) ->
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -7115,7 +7192,7 @@ and execute_action ~now (m : Model.t) action =
                 | Some
                     ( Nav.Tool_inspector _
                     | Nav.Skill_inspector _
-                    | Nav.Exact_run_inspector _ ) ->
+                    | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
                     (m, [])
                 | None -> (
                     match m.nav.workspace with
@@ -7532,6 +7609,17 @@ and execute_action ~now (m : Model.t) action =
             let next = { m with keeper_context } |> Update_nav.clamp_for_pane in
             (next, View_fetches.fetches_for_current_view next)
         | None -> (m, [])
+      else if
+        Option.is_none m.nav.overlay
+        && (not (Model.sidebar_has_focus m))
+        && Option.is_none (Model.active_inspector m)
+        && Nav.equal_workspace m.nav.workspace Nav.Infra
+        && Infra_store.code_review_active m.infra
+      then
+        let infra =
+          Infra_store.step_review_hunk ~cols:m.viewport.cols ~delta m.infra
+        in
+        ({ m with infra }, [])
       else step_artifact_revision ~now ~delta m)
   | Keymap.Step_context_item dir -> (
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in
@@ -7619,6 +7707,10 @@ and execute_action ~now (m : Model.t) action =
                         ~delta m.runtime
                     in
                     let next = { m with runtime } in
+                    (next, View_fetches.fetches_for_current_view next)
+                | Nav.Infra when Infra_store.code_review_active m.infra ->
+                    let infra = Infra_store.select_review_change ~delta m.infra in
+                    let next = { m with infra } in
                     (next, View_fetches.fetches_for_current_view next)
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers
                 | Nav.Runtime | Nav.Infra ->
@@ -7815,7 +7907,7 @@ and execute_action ~now (m : Model.t) action =
         | Some
             ( Nav.Tool_inspector _
             | Nav.Skill_inspector _
-            | Nav.Exact_run_inspector _ ) ->
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -7999,7 +8091,7 @@ and execute_action ~now (m : Model.t) action =
                 , [] ))
         | Some (Nav.Skill_inspector ref_s) ->
             execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
-        | Some (Nav.Tool_inspector _ | Nav.Exact_run_inspector _) ->
+        | Some (Nav.Tool_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -8219,7 +8311,7 @@ and execute_action ~now (m : Model.t) action =
                      { tool_name = Some tool_name; args_json = skeleton })
             | Some (Nav.Skill_inspector ref_s) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
-            | Some (Nav.Exact_run_inspector _) -> (m, [])
+            | Some (Nav.Exact_run_inspector _ | Nav.File_inspector _) -> (m, [])
             | Some (Nav.Verification_inspector _) -> (m, [])
             | None ->
                 if
@@ -8612,7 +8704,7 @@ and execute_action ~now (m : Model.t) action =
         | Some
             ( Nav.Tool_inspector _
             | Nav.Skill_inspector _
-            | Nav.Exact_run_inspector _ ) ->
+            | Nav.Exact_run_inspector _ | Nav.File_inspector _ ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with

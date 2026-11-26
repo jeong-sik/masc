@@ -49,7 +49,7 @@ type code_right_mode =
   | Code_git_worktrees
   | Code_git_blame
   | Code_git_log
-  | Code_git_diff
+  | Code_review
 
 type code_state = {
   scope : Wire_infra.workspace_scope;
@@ -98,6 +98,14 @@ type keeper_sandbox_read = {
     dispatch time of the pending read. The invalidation flag carries a newer
     sandbox dataset notification across that read's settlement. *)
 
+(** The File inspector's read. Loading and failure belong to this file, so
+    one file's state never shows under another file's title. *)
+type file_peek_read = {
+  peek_keeper : string;
+  peek_path : string;
+  peek_content : Wire_infra.workspace_file_content Observed.t;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -123,6 +131,8 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
+  file_peek : file_peek_read option;
+      (** The File inspector's read. [None] until one opens. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -305,7 +315,11 @@ val runtime_trace_for :
 val equal_code_right_mode : code_right_mode -> code_right_mode -> bool
 val code_right_mode_label : code_right_mode -> Say.t
 val cycle_code_git_mode : t -> t
+
 val set_code_right_mode : code_right_mode -> t -> t
+(** Show [mode] in the right panel. Entering Review with a loaded status and no
+    selected change selects the first one. *)
+
 val set_code_scope : Wire_infra.workspace_scope -> t -> t
 val visible_code_tree_nodes : t -> Wire_infra.workspace_tree_node list
 val selected_code_tree_node : t -> Wire_infra.workspace_tree_node option
@@ -338,6 +352,70 @@ val apply_workspace_file :
 val set_code_active_file : string option -> t -> t
 val active_code_file_path : t -> string option
 val open_file_for_current : t -> Wire_infra.workspace_file_content option
+val review_changes : t -> Wire_infra.git_status_change list
+(** Changed files of the current scope's git status, in server order. *)
+
+val review_selected_index : t -> int option
+(** Position of the active file in [review_changes]. *)
+
+val select_review_change : delta:int -> t -> t
+(** Move the review selection [delta] changes (clamped) and make that change
+    the active file. With no selection, [delta >= 0] picks the first change and
+    a negative [delta] the last. *)
+
+val review_diff_rows : cols:int -> t -> Code_review_layout.row list
+(** The selected change's diff as Review rows for a [cols]-wide viewport.
+    Empty until that change's diff has arrived. *)
+
+val code_review_active : t -> bool
+(** The Code tab shows Review. *)
+
+val step_review_hunk : cols:int -> delta:int -> t -> t
+(** Scroll the Review diff to the next ([delta > 0]) or previous hunk header.
+    Unchanged when there is none that way. *)
+
+val open_file_peek : keeper:string -> path:string -> t -> t
+(** Start a fresh read for this Keeper and path. Every open reads again, so a
+    file the Keeper changed since the last open is not shown stale. *)
+
+val file_peek_state :
+  keeper:string -> path:string -> t -> Wire_infra.workspace_file_content Observed.t
+(** The read for this Keeper and path, or [Unreported] when the slot holds
+    another file or none. *)
+
+val file_peek_content :
+  keeper:string -> path:string -> t -> Wire_infra.workspace_file_content option
+(** The File inspector's content when it is for this Keeper and path. *)
+
+val apply_file_peek :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  path:string ->
+  Wire_infra.workspace_file_content ->
+  t ->
+  t
+
+val reserve_file_peek :
+  since_ns:Clock.Mono.t -> keeper:string -> path:string -> t -> t
+(** The File inspector's read was sent: [Loading] until the reply. A body
+    already shown stays shown. *)
+
+val drop_file_peek_content : t -> t
+(** Forget the File inspector's body but keep which file it shows. After an
+    epoch change the same Keeper and path can name a file in another
+    workspace. *)
+
+val fail_file_peek :
+  keeper:string ->
+  path:string ->
+  failure:
+    (Wire_infra.workspace_file_content Observed.t ->
+    Wire_infra.workspace_file_content Observed.t) ->
+  t ->
+  t
+(** [apply_file_peek] and [fail_file_peek] change the slot only when it holds
+    this Keeper and path; a late reply for another file is dropped. *)
+
 val apply_git_status :
   observed_at:Clock.Mono.t ->
   scope:Wire_infra.workspace_scope ->
@@ -370,6 +448,11 @@ val apply_git_log :
   Wire_infra.git_log_commit list ->
   t ->
   t
+val git_diff_target_matches :
+  scope:Wire_infra.workspace_scope -> path:string -> t -> bool
+(** [true] when a diff reply for [scope] and [path] belongs to the file the
+    Code tab shows now. A reply for any other file is late and is dropped. *)
+
 val apply_git_diff :
   observed_at:Clock.Mono.t ->
   scope:Wire_infra.workspace_scope ->

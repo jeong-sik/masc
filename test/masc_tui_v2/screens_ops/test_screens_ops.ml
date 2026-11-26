@@ -4431,6 +4431,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
       output = "preview";
       original_bytes = Some 49152;
       truncated_to = Some 1024;
+      file_target = None;
       raw = `Assoc [];
     }
   in

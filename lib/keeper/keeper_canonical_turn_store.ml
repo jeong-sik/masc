@@ -60,12 +60,27 @@ type store_error =
       { context : string
       ; detail : string
       }
+  | Schema_not_current of
+      { path : string
+      ; found : int64
+      }
+
+(* The layout whose watermarks name the settled turn (RFC
+   compaction-anchor-names-a-turn-atom). A store written before it has its
+   tables at user_version 0 and is refused. *)
+let schema_version = 1L
 
 let store_error_to_string = function
   | Sqlite_error { operation; detail } ->
     Printf.sprintf "canonical turn store sqlite error (%s): %s" operation detail
   | Corrupt_record { context; detail } ->
     Printf.sprintf "canonical turn store corrupt record (%s): %s" context detail
+  | Schema_not_current { path; found } ->
+    Printf.sprintf
+      "canonical turn store %s has user_version %Ld; this build reads %Ld only (fresh state required)"
+      path
+      found
+      schema_version
 ;;
 
 let db_suffix = ".canonical-turns.db"
@@ -158,98 +173,78 @@ let table_exists db table_name =
        else Error (sqlite_err db "check_table" rc))
 ;;
 
-let column_exists db ~table ~column =
-  with_stmt
-    db
-    "check_column"
-    (Printf.sprintf "PRAGMA table_info(%s)" table)
-    (fun stmt ->
-       let rec loop () =
-         let rc = Sqlite3.step stmt in
-         if rc = Sqlite3.Rc.ROW
-         then
-           if String.equal (Sqlite3.column_text stmt 1) column
-           then Ok true
-           else loop ()
-         else if rc = Sqlite3.Rc.DONE
-         then Ok false
-         else Error (sqlite_err db "check_column" rc)
-       in
-       loop ())
+let read_user_version db =
+  with_stmt db "read_user_version" "PRAGMA user_version" (fun stmt ->
+    let rc = Sqlite3.step stmt in
+    if rc = Sqlite3.Rc.ROW
+    then Ok (Sqlite3.column_int64 stmt 0)
+    else Error (sqlite_err db "read_user_version" rc))
 ;;
 
-let init_schema db =
-  let* () = exec_sql db "pragma_busy" "PRAGMA busy_timeout=5000;" in
-  let* () = exec_sql db "pragma_fk" "PRAGMA foreign_keys=ON;" in
-  let* () = exec_sql db "pragma_sync" "PRAGMA synchronous=NORMAL;" in
-  let* ready = table_exists db "canonical_turns" in
-  let* () =
-    if ready
-    then Ok ()
-    else (
-      (* Must be set before the first table is created so SQLite persists
-         auto_vacuum=INCREMENTAL (2) in the database header. *)
-      let* () = exec_sql db "pragma_auto_vacuum" "PRAGMA auto_vacuum=INCREMENTAL;" in
-      let* () = exec_sql db "pragma_wal" "PRAGMA journal_mode=WAL;" in
-      let* () =
-        exec_sql
-          db
-          "create_canonical_turns"
-          "CREATE TABLE IF NOT EXISTS canonical_turns (\
-           seq INTEGER PRIMARY KEY AUTOINCREMENT, \
-           turn_id TEXT NOT NULL UNIQUE, \
-           parent_turn_id TEXT, \
-           runtime_kind TEXT NOT NULL, \
-           runtime_id TEXT NOT NULL, \
-           user_input TEXT NOT NULL, \
-           tool_calls_json TEXT NOT NULL, \
-           assistant_output TEXT NOT NULL, \
-           usage_json TEXT NOT NULL, \
-           compaction_epoch_id INTEGER, \
-           created_at REAL NOT NULL)"
-      in
+(* [`Absent] when the file holds no canonical turn tables yet. *)
+let schema_state db ~path =
+  let* present = table_exists db "canonical_turns" in
+  if not present
+  then Ok `Absent
+  else
+    let* found = read_user_version db in
+    if Int64.equal found schema_version
+    then Ok `Current
+    else Error (Schema_not_current { path; found })
+;;
+
+let create_schema_in_tx db ~path =
+  let* state = schema_state db ~path in
+  match state with
+  | `Current -> Ok ()
+  | `Absent ->
+    let* () =
+      exec_sql
+        db
+        "create_canonical_turns"
+        "CREATE TABLE canonical_turns (\
+         seq INTEGER PRIMARY KEY AUTOINCREMENT, \
+         turn_id TEXT NOT NULL UNIQUE, \
+         parent_turn_id TEXT, \
+         runtime_kind TEXT NOT NULL, \
+         runtime_id TEXT NOT NULL, \
+         user_input TEXT NOT NULL, \
+         tool_calls_json TEXT NOT NULL, \
+         assistant_output TEXT NOT NULL, \
+         usage_json TEXT NOT NULL, \
+         compaction_epoch_id INTEGER, \
+         created_at REAL NOT NULL)"
+    in
+    let* () =
       exec_sql
         db
         "create_idx_canonical_turns_seq"
-        "CREATE INDEX IF NOT EXISTS idx_canonical_turns_seq ON canonical_turns(seq)")
-  in
-  let* watermarks_ready = table_exists db "compaction_watermarks" in
-  let* () =
-    if watermarks_ready
-    then (
-      let* has_last_turn_id =
-        column_exists db ~table:"compaction_watermarks" ~column:"last_turn_id"
-      in
-      if has_last_turn_id
-      then Ok ()
-      else
-        exec_sql
-          db
-          "alter_compaction_watermarks_last_turn_id"
-          "ALTER TABLE compaction_watermarks ADD COLUMN last_turn_id TEXT")
-    else
+        "CREATE INDEX idx_canonical_turns_seq ON canonical_turns(seq)"
+    in
+    let* () =
       exec_sql
         db
         "create_compaction_watermarks"
-        "CREATE TABLE IF NOT EXISTS compaction_watermarks (\
+        "CREATE TABLE compaction_watermarks (\
          epoch_id INTEGER PRIMARY KEY, \
-         covers_through_turn TEXT NOT NULL, \
+         settled_turn_id TEXT NOT NULL, \
          cutoff_seq INTEGER NOT NULL, \
-         recorded_at REAL NOT NULL, \
-         last_turn_id TEXT)"
-  in
-  let* resets_ready = table_exists db "history_resets" in
-  if resets_ready
-  then Ok ()
-  else
+         recorded_at REAL NOT NULL)"
+    in
+    let* () =
+      exec_sql
+        db
+        "create_history_resets"
+        "CREATE TABLE history_resets (\
+         id INTEGER PRIMARY KEY CHECK (id = 1), \
+         reset_after_seq INTEGER NOT NULL, \
+         reset_after_anchor_epoch INTEGER NOT NULL, \
+         recorded_at REAL NOT NULL)"
+    in
     exec_sql
       db
-      "create_history_resets"
-      "CREATE TABLE IF NOT EXISTS history_resets (\
-       id INTEGER PRIMARY KEY CHECK (id = 1), \
-       reset_after_seq INTEGER NOT NULL, \
-       reset_after_anchor_epoch INTEGER NOT NULL, \
-       recorded_at REAL NOT NULL)"
+      "set_user_version"
+      (Printf.sprintf "PRAGMA user_version=%Ld;" schema_version)
 ;;
 
 let prune_turns_through_seq_in_tx db ~max_seq =
@@ -318,6 +313,24 @@ let with_transaction db ~begin_sql f =
     raise exn
 ;;
 
+let init_schema db ~path =
+  let* () = exec_sql db "pragma_busy" "PRAGMA busy_timeout=5000;" in
+  let* () = exec_sql db "pragma_fk" "PRAGMA foreign_keys=ON;" in
+  let* () = exec_sql db "pragma_sync" "PRAGMA synchronous=NORMAL;" in
+  let* state = schema_state db ~path in
+  match state with
+  | `Current -> Ok ()
+  | `Absent ->
+    (* auto_vacuum must be set before the first table is created so SQLite
+       persists INCREMENTAL (2) in the header, and journal_mode cannot change
+       inside a transaction. The tables and the version are written under one
+       write lock, so a second process never reads the tables at version 0. *)
+    let* () = exec_sql db "pragma_auto_vacuum" "PRAGMA auto_vacuum=INCREMENTAL;" in
+    let* () = exec_sql db "pragma_wal" "PRAGMA journal_mode=WAL;" in
+    with_transaction db ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
+      create_schema_in_tx db ~path)
+;;
+
 let with_db ~create ~keepers_dir ~keeper_id f =
   let path = db_path ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -340,8 +353,11 @@ let with_db ~create ~keepers_dir ~keeper_id f =
           (fun () ->
              let* () =
                if create
-               then init_schema db
-               else exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;"
+               then init_schema db ~path
+               else
+                 let* () = exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;" in
+                 let* (`Absent | `Current) = schema_state db ~path in
+                 Ok ()
              in
              f db)))
 ;;
@@ -688,7 +704,7 @@ let latest_turn_id_in_tx db ~excluding_turn_id =
   | None ->
     (* When compaction pruned all post-reset turns, preserve parent_turn_id
        continuity across the compaction boundary using the latest post-reset
-       watermark's last canonical turn id (never crossing a history reset). *)
+       watermark's settled turn id (never crossing a history reset). *)
     let* watermarks_ready = table_exists db "compaction_watermarks" in
     if not watermarks_ready
     then Ok None
@@ -696,9 +712,8 @@ let latest_turn_id_in_tx db ~excluding_turn_id =
       with_stmt
         db
         "select_parent_turn_from_watermark"
-        "SELECT last_turn_id FROM compaction_watermarks \
-         WHERE epoch_id > ?1 AND cutoff_seq > ?2 \
-           AND last_turn_id IS NOT NULL AND last_turn_id <> ?3 \
+        "SELECT settled_turn_id FROM compaction_watermarks \
+         WHERE epoch_id > ?1 AND cutoff_seq > ?2 AND settled_turn_id <> ?3 \
          ORDER BY epoch_id DESC LIMIT 1"
         (fun stmt ->
            let* () =
@@ -717,7 +732,7 @@ let latest_turn_id_in_tx db ~excluding_turn_id =
              match Sqlite3.column stmt 0 with
              | Sqlite3.Data.TEXT s when not (String.equal (String.trim s) "") ->
                Ok (Some (Turn_id.of_string s))
-             | Sqlite3.Data.NULL -> Ok None
+             | Sqlite3.Data.NULL
              | Sqlite3.Data.NONE
              | Sqlite3.Data.INT _
              | Sqlite3.Data.FLOAT _
@@ -725,8 +740,8 @@ let latest_turn_id_in_tx db ~excluding_turn_id =
              | Sqlite3.Data.BLOB _ ->
                Error
                  (Corrupt_record
-                    { context = "compaction_watermarks.last_turn_id"
-                    ; detail = "expected NULL or non-blank TEXT for last_turn_id"
+                    { context = "compaction_watermarks.settled_turn_id"
+                    ; detail = "expected non-blank TEXT for settled_turn_id"
                     }))
            else if rc = Sqlite3.Rc.DONE
            then Ok None
@@ -1016,7 +1031,7 @@ let load_turns_after ~keepers_dir ~keeper_id ~after_turn_id =
   Ok (Option.value ~default:[] res)
 ;;
 
-let canonical_turn_id_metadata_key = "canonical_turn_id"
+let canonical_turn_id_metadata_key = Keeper_turn_ref_metadata.canonical_key
 
 let tool_context_summary_of_json = function
   | `List [] | `Null -> None
@@ -1059,8 +1074,6 @@ let messages_of_canonical_turn (turn : canonical_turn) =
   user_msgs @ assistant_msgs
 ;;
 
-let bridged_turn_ref_metadata_key = "masc.bridged_turn_ref"
-
 let joined_text_of_message (msg : Agent_core.Types.message) =
   let parts =
     msg.content
@@ -1090,15 +1103,8 @@ let joined_text_of_message (msg : Agent_core.Types.message) =
   else joined :: singles
 ;;
 
-let canonical_turn_id_of_message (msg : Agent_core.Types.message) =
-  let lookup key =
-    match List.assoc_opt key msg.metadata with
-    | Some (`String s) when not (String.equal (String.trim s) "") -> Some s
-    | Some _ | None -> None
-  in
-  match lookup canonical_turn_id_metadata_key with
-  | Some _ as hit -> hit
-  | None -> lookup bridged_turn_ref_metadata_key
+let canonical_turn_id_of_message msg =
+  Option.map Turn_id.to_string (Keeper_turn_ref_metadata.turn_of_message msg)
 ;;
 
 type indexed_msg =
@@ -1279,134 +1285,100 @@ let list_turns_with_seq_in_tx db =
          loop [])
 ;;
 
-let find_cutoff_seq_for_evicted_turns
-      ~(covers_through_turn : Turn_id.t)
-      ~(evicted_turns : Keeper_compaction.canonical_turn list)
-      (rows : (int64 * canonical_turn) list)
-  =
-  let target_id = Turn_id.to_string covers_through_turn in
-  (* 1. Exact canonical turn_id match against covers_through_turn or evicted turn ids. *)
-  let exact_ids =
-    target_id
-    :: List.map
-         (fun (t : Keeper_compaction.canonical_turn) -> Turn_id.to_string t.turn_id)
-         evicted_turns
-  in
-  let exact_match =
-    List.fold_left
-      (fun best (seq, row) ->
-         if List.exists (String.equal (Turn_id.to_string row.turn_id)) exact_ids
-         then Some seq
-         else best)
-      None
-      rows
-  in
-  match exact_match with
-  | Some _ as hit -> hit
-  | None ->
-    (* 2. Order-aware sequential matching of evicted messages against canonical
-       turns so repeated autonomous prompts/replies never over-advance cutoff_seq. *)
-    let evicted_messages =
-      List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages) evicted_turns
-    in
-    let indexed = index_messages evicted_messages in
-    let _, best_seq =
-      List.fold_left
-        (fun (cursor, best) (seq, row) ->
-           match match_turn_from indexed ~cursor row with
-           | Some next_cursor -> next_cursor, Some seq
-           | None -> cursor, best)
-        (0, None)
-        rows
-    in
-    best_seq
+let lookup_turn_seq_in_tx db turn_id =
+  with_stmt
+    db
+    "select_turn_seq"
+    "SELECT seq FROM canonical_turns WHERE turn_id = ?1 LIMIT 1"
+    (fun stmt ->
+       let* () =
+         bind_values db "bind_turn_seq" stmt [ Sqlite3.Data.TEXT (Turn_id.to_string turn_id) ]
+       in
+       let rc = Sqlite3.step stmt in
+       if rc = Sqlite3.Rc.ROW
+       then (
+         let* seq = decode_int64_column ~context:"canonical_turns.seq" stmt 0 in
+         Ok (Some seq))
+       else if rc = Sqlite3.Rc.DONE
+       then Ok None
+       else Error (sqlite_err db "select_turn_seq" rc))
 ;;
 
+(* Rows through the anchor's settled turn are covered: every atom of that
+   turn and of every turn committed before it is in the anchor. When the
+   anchor names no settled turn, or no row carries it, the cutoff stays. *)
 let record_compaction_watermark
       ~keepers_dir
       ~keeper_id
       ~(anchor : Keeper_compaction.compaction_anchor)
-      ~(evicted_turns : Keeper_compaction.canonical_turn list)
   =
-  let path = db_path ~keepers_dir ~keeper_id in
-  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    if not (Sys.file_exists path)
-    then Ok None
-    else (
-      match Sqlite3.db_open path with
-      | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
-        Error (Sqlite_error { operation = "record_compaction_watermark.db_open"; detail })
-      | db ->
-        Fun.protect
-          ~finally:(fun () ->
-            try ignore (Sqlite3.db_close db : bool) with
-            | Sqlite3.Error _ | Sqlite3.SqliteError _ -> ())
-          (fun () ->
-             let* () = init_schema db in
-             let* cutoff_opt, pruned =
-               with_transaction db ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
-                 let* reset_after_seq, (_ : int) = lookup_history_reset_in_tx db in
-                 let* prior_cutoff =
-                   lookup_prior_watermark_cutoff_seq_in_tx
-                     db
-                     ~before_epoch_id:anchor.epoch_id
-                 in
-                 let floor_seq =
-                   Int64.max reset_after_seq (Option.value ~default:0L prior_cutoff)
-                 in
-                 let* all_rows = list_turns_with_seq_in_tx db in
-                 let rows = List.filter (fun (seq, _) -> seq > floor_seq) all_rows in
-                 match
-                   find_cutoff_seq_for_evicted_turns
-                     ~covers_through_turn:anchor.covers_through_turn
-                     ~evicted_turns
-                     rows
-                 with
-                 | None -> Ok (None, false)
-                 | Some raw_cutoff_seq ->
-                   let cutoff_seq = Int64.max floor_seq raw_cutoff_seq in
-                   let last_turn_id_data =
-                     match
-                       List.find_opt (fun (seq, _) -> Int64.equal seq cutoff_seq) rows
-                     with
-                     | Some (_, row) -> Sqlite3.Data.TEXT (Turn_id.to_string row.turn_id)
-                     | None -> Sqlite3.Data.NULL
-                   in
-                   let* () =
-                     with_stmt
+  match Keeper_compaction_atom.settled_turn anchor.coverage with
+  | None -> Ok None
+  | Some settled ->
+    let path = db_path ~keepers_dir ~keeper_id in
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      if not (Sys.file_exists path)
+      then Ok None
+      else (
+        match Sqlite3.db_open path with
+        | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+          Error (Sqlite_error { operation = "record_compaction_watermark.db_open"; detail })
+        | db ->
+          Fun.protect
+            ~finally:(fun () ->
+              try ignore (Sqlite3.db_close db : bool) with
+              | Sqlite3.Error _ | Sqlite3.SqliteError _ -> ())
+            (fun () ->
+               let* () = init_schema db ~path in
+               let* cutoff_opt, pruned =
+                 with_transaction db ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
+                   let* reset_after_seq, (_ : int) = lookup_history_reset_in_tx db in
+                   let* prior_cutoff =
+                     lookup_prior_watermark_cutoff_seq_in_tx
                        db
-                       "upsert_compaction_watermark"
-                       "INSERT INTO compaction_watermarks \
-                        (epoch_id, covers_through_turn, cutoff_seq, recorded_at, last_turn_id) \
-                        VALUES (?1, ?2, ?3, ?4, ?5) \
-                        ON CONFLICT(epoch_id) DO UPDATE SET \
-                          covers_through_turn = excluded.covers_through_turn, \
-                          cutoff_seq = MAX(compaction_watermarks.cutoff_seq, excluded.cutoff_seq), \
-                          recorded_at = excluded.recorded_at, \
-                          last_turn_id = COALESCE(excluded.last_turn_id, compaction_watermarks.last_turn_id)"
-                       (fun stmt ->
-                          let* () =
-                            bind_values
-                              db
-                              "bind_compaction_watermark"
-                              stmt
-                              [ Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
-                              ; Sqlite3.Data.TEXT (Turn_id.to_string anchor.covers_through_turn)
-                              ; Sqlite3.Data.INT cutoff_seq
-                              ; Sqlite3.Data.FLOAT (Time_compat.now ())
-                              ; last_turn_id_data
-                              ]
-                          in
-                          let rc = Sqlite3.step stmt in
-                          if rc = Sqlite3.Rc.DONE
-                          then Ok ()
-                          else Error (sqlite_err db "upsert_compaction_watermark" rc))
+                       ~before_epoch_id:anchor.epoch_id
                    in
-                   let* pruned = prune_turns_through_seq_in_tx db ~max_seq:cutoff_seq in
-                   Ok (Some cutoff_seq, pruned))
-             in
-             run_incremental_vacuum_if_pruned db ~keeper_id pruned;
-             Ok cutoff_opt)))
+                   let floor_seq =
+                     Int64.max reset_after_seq (Option.value ~default:0L prior_cutoff)
+                   in
+                   let* settled_seq = lookup_turn_seq_in_tx db settled in
+                   match settled_seq with
+                   | None -> Ok (None, false)
+                   | Some seq when seq <= floor_seq -> Ok (None, false)
+                   | Some cutoff_seq ->
+                     let* () =
+                       with_stmt
+                         db
+                         "upsert_compaction_watermark"
+                         "INSERT INTO compaction_watermarks \
+                          (epoch_id, settled_turn_id, cutoff_seq, recorded_at) \
+                          VALUES (?1, ?2, ?3, ?4) \
+                          ON CONFLICT(epoch_id) DO UPDATE SET \
+                            settled_turn_id = excluded.settled_turn_id, \
+                            cutoff_seq = MAX(compaction_watermarks.cutoff_seq, excluded.cutoff_seq), \
+                            recorded_at = excluded.recorded_at"
+                         (fun stmt ->
+                            let* () =
+                              bind_values
+                                db
+                                "bind_compaction_watermark"
+                                stmt
+                                [ Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
+                                ; Sqlite3.Data.TEXT (Turn_id.to_string settled)
+                                ; Sqlite3.Data.INT cutoff_seq
+                                ; Sqlite3.Data.FLOAT (Time_compat.now ())
+                                ]
+                            in
+                            let rc = Sqlite3.step stmt in
+                            if rc = Sqlite3.Rc.DONE
+                            then Ok ()
+                            else Error (sqlite_err db "upsert_compaction_watermark" rc))
+                     in
+                     let* pruned = prune_turns_through_seq_in_tx db ~max_seq:cutoff_seq in
+                     Ok (Some cutoff_seq, pruned))
+               in
+               run_incremental_vacuum_if_pruned db ~keeper_id pruned;
+               Ok cutoff_opt)))
 ;;
 
 let map_compaction_error = function
@@ -1414,7 +1386,8 @@ let map_compaction_error = function
     Sqlite_error { operation = "compaction." ^ operation; detail }
   | Keeper_compaction.Corrupt_record { context; detail } ->
     Corrupt_record { context = "compaction." ^ context; detail }
-  | Keeper_compaction.Capacity_exceeded _ as err ->
+  | Keeper_compaction.Schema_not_current { path; found } -> Schema_not_current { path; found }
+  | Keeper_compaction.Invalid_eviction _ as err ->
     Corrupt_record
       { context = "compaction.latest_anchor"
       ; detail = Keeper_compaction.store_error_to_string err
@@ -1517,7 +1490,7 @@ let bind_turn_ref
               try ignore (Sqlite3.db_close db : bool) with
               | Sqlite3.Error _ | Sqlite3.SqliteError _ -> ())
             (fun () ->
-               let* () = init_schema db in
+               let* () = init_schema db ~path in
                with_transaction db ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
                  let row_exists tid_str =
                    with_stmt
@@ -1607,8 +1580,8 @@ let bind_turn_ref
 let () =
   Keeper_compaction.set_on_canonical_epoch_committed
     (Some
-       (fun ~keepers_dir ~keeper_id ~anchor ~evicted_turns ->
-          match record_compaction_watermark ~keepers_dir ~keeper_id ~anchor ~evicted_turns with
+       (fun ~keepers_dir ~keeper_id anchor ->
+          match record_compaction_watermark ~keepers_dir ~keeper_id ~anchor with
           | Ok _ -> ()
           | Error err ->
             Log.Keeper.warn
@@ -1617,6 +1590,9 @@ let () =
               (store_error_to_string err)))
 ;;
 
+(* The anchor covers the rows through its settled turn. Its own watermark
+   holds that cutoff once those rows are pruned; with neither the row nor the
+   watermark, it covers no row past the earlier cutoffs. *)
 let load_handoff_context ~keepers_dir ~keeper_id =
   let* raw_anchor =
     Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id
@@ -1634,7 +1610,7 @@ let load_handoff_context ~keepers_dir ~keeper_id =
         let* all_rows = list_turns_with_seq_in_tx db in
         let post_reset_rows = List.filter (fun (seq, _) -> seq > reset_after_seq) all_rows in
         match effective_anchor with
-        | None -> Ok (Some (None, `Resolved (List.map snd post_reset_rows)))
+        | None -> Ok (Some (None, List.map snd post_reset_rows))
         | Some a ->
           let* prior_cutoff =
             lookup_prior_watermark_cutoff_seq_in_tx db ~before_epoch_id:a.epoch_id
@@ -1642,64 +1618,30 @@ let load_handoff_context ~keepers_dir ~keeper_id =
           let floor_seq =
             Int64.max reset_after_seq (Option.value ~default:0L prior_cutoff)
           in
-          let rows = List.filter (fun (seq, _) -> seq > floor_seq) post_reset_rows in
-          (match rows with
-           | [] -> Ok (Some (Some a, `Resolved []))
-           | _ :: _ ->
-             let target_id = Turn_id.to_string a.covers_through_turn in
-             let direct_cutoff =
-               List.fold_left
-                 (fun acc (seq, row) ->
-                    if String.equal (Turn_id.to_string row.turn_id) target_id
-                    then Some seq
-                    else acc)
-                 None
-                 post_reset_rows
-             in
-             let* cutoff_opt =
-               match direct_cutoff with
-               | Some _ as hit -> Ok hit
-               | None -> lookup_watermark_cutoff_seq_in_tx db ~epoch_id:a.epoch_id
-             in
-             (match cutoff_opt with
-              | Some cutoff_seq ->
-                let min_seq = Int64.max floor_seq cutoff_seq in
-                let remaining =
-                  rows
-                  |> List.filter_map (fun (seq, row) -> if seq > min_seq then Some row else None)
-                in
-                Ok (Some (Some a, `Resolved remaining))
-              | None -> Ok (Some (Some a, `Needs_archive_fallback (a, floor_seq, rows)))))))
+          let settled_seq =
+            Option.bind (Keeper_compaction_atom.settled_turn a.coverage) (fun settled ->
+              List.find_map
+                (fun (seq, (row : canonical_turn)) ->
+                   if Turn_id.equal row.turn_id settled then Some seq else None)
+                post_reset_rows)
+          in
+          let* own_cutoff =
+            match settled_seq with
+            | Some _ as hit -> Ok hit
+            | None -> lookup_watermark_cutoff_seq_in_tx db ~epoch_id:a.epoch_id
+          in
+          let min_seq = Int64.max floor_seq (Option.value ~default:0L own_cutoff) in
+          let remaining =
+            List.filter_map
+              (fun (seq, row) -> if seq > min_seq then Some row else None)
+              post_reset_rows
+          in
+          Ok (Some (Some a, remaining))))
   in
   let anchor, turns_after_anchor =
     match db_snapshot with
     | None -> raw_anchor, []
-    | Some (anchor, `Resolved turns) -> anchor, turns
-    | Some (anchor, `Needs_archive_fallback (a, floor_seq, rows)) ->
-      let archived =
-        match
-          Keeper_compaction.load_archived_turns_for_epoch
-            ~keepers_dir
-            ~keeper_id
-            ~epoch_id:a.epoch_id
-        with
-        | Ok turns -> turns
-        | Error _ -> []
-      in
-      let turns =
-        match
-          find_cutoff_seq_for_evicted_turns
-            ~covers_through_turn:a.covers_through_turn
-            ~evicted_turns:archived
-            rows
-        with
-        | Some cutoff_seq ->
-          let min_seq = Int64.max floor_seq cutoff_seq in
-          rows
-          |> List.filter_map (fun (seq, row) -> if seq > min_seq then Some row else None)
-        | None -> List.map snd rows
-      in
-      anchor, turns
+    | Some (anchor, turns) -> anchor, turns
   in
   let anchor_messages =
     match anchor with

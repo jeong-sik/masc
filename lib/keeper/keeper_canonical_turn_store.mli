@@ -24,8 +24,12 @@
       during Keeper purge.
     - {b Provider-neutral handoff}: {!load_handoff_context} combines the latest
       immutable {!Keeper_compaction.compaction_anchor} with all verbatim
-      canonical turns strictly after [anchor.covers_through_turn], preserving
-      unbroken dialogue and tool context across HTTP <-> ACP/CLI failover. *)
+      canonical turns after the anchor's settled turn
+      ({!Keeper_compaction_atom.settled_turn}), preserving unbroken dialogue
+      and tool context across HTTP <-> ACP/CLI failover.
+    - {b Hard-cut layout}: the database carries [PRAGMA user_version]. A file
+      whose tables were written under another version is refused with
+      {!Schema_not_current}; nothing converts it. *)
 
 module Turn_id := Ids.Turn_id
 
@@ -53,7 +57,7 @@ type canonical_turn =
   }
 
 (** Provider-neutral handoff projection combining the latest compaction anchor
-    with verbatim canonical turns committed after [anchor.covers_through_turn]. *)
+    with verbatim canonical turns committed after the anchor's settled turn. *)
 type handoff_context =
   { anchor : Keeper_compaction.compaction_anchor option
   ; turns_after_anchor : canonical_turn list
@@ -69,6 +73,14 @@ type store_error =
       { context : string
       ; detail : string
       }
+  | Schema_not_current of
+      { path : string
+      ; found : int64
+      }
+      (** The database holds tables under a [user_version] this build does
+          not read: a store written before the settled-turn watermark. Stop
+          the server and delete the file with its [-wal]/[-shm]/[-journal]
+          companions. *)
 
 val store_error_to_string : store_error -> string
 
@@ -103,8 +115,8 @@ val decode_live_blob_references_json : string -> (Yojson.Safe.t option, string) 
     [<keepers_dir>/<keeper_id>.canonical-turns.db] inside a [BEGIN IMMEDIATE]
     WAL transaction off-domain. When [parent_turn_id] is omitted, resolves the
     current latest committed [turn_id] atomically inside the same transaction
-    (falling back to the latest post-reset compaction watermark's last turn id
-    after compaction pruning) so the parent chain remains unbroken across
+    (falling back to the latest post-reset compaction watermark's settled
+    turn after compaction pruning) so the parent chain remains unbroken across
     runtime failover and compaction. Enforces [max_retained_turns] (default
     {!max_retained_turns} = [2000]) and runs [PRAGMA incremental_vacuum(64)]
     post-commit whenever older rows are pruned. *)
@@ -170,8 +182,8 @@ val load_turns_after
   -> (canonical_turn list, store_error) result
 
 (** Metadata key stamped on messages projected by {!messages_of_canonical_turn}
-    so deduplication and compaction watermark matching recognize canonical turns
-    structurally without string heuristics. *)
+    ({!Keeper_turn_ref_metadata.canonical_key}), so deduplication and
+    compaction atom naming recognize canonical turns structurally. *)
 val canonical_turn_id_metadata_key : string
 
 (** Project a single canonical turn into provider-neutral
@@ -179,15 +191,16 @@ val canonical_turn_id_metadata_key : string
     invocations, and assistant output. *)
 val messages_of_canonical_turn : canonical_turn -> Agent_core.Types.message list
 
-(** Record the exact canonical-turn sequence watermark covered by a committed
-    compaction [anchor] and its [evicted_turns] into
-    [<keepers_dir>/<keeper_id>.canonical-turns.db]. Registered automatically
-    with {!Keeper_compaction.set_on_canonical_epoch_committed}. *)
+(** Record the sequence of the row whose [turn_id] is the committed
+    [anchor]'s settled turn ({!Keeper_compaction_atom.settled_turn}) as its
+    watermark in [<keepers_dir>/<keeper_id>.canonical-turns.db], and prune the
+    rows through it. [Ok None] and no change when the anchor names no settled
+    turn or no row carries it. Registered automatically with
+    {!Keeper_compaction.set_on_canonical_epoch_committed}. *)
 val record_compaction_watermark
   :  keepers_dir:string
   -> keeper_id:string
   -> anchor:Keeper_compaction.compaction_anchor
-  -> evicted_turns:Keeper_compaction.canonical_turn list
   -> (int64 option, store_error) result
 
 (** Record an operator history-clear boundary ([reset_after_seq],
@@ -215,9 +228,10 @@ val bind_turn_ref
   -> (unit, store_error) result
 
 (** Load the latest {!Keeper_compaction.latest_anchor} together with all
-    verbatim canonical turns committed after [anchor.covers_through_turn]
-    and after any recorded history-reset boundary, projected into
-    provider-neutral messages for HTTP <-> ACP/CLI handoff. *)
+    verbatim canonical turns committed after the anchor's settled turn (or its
+    recorded watermark once that row is pruned) and after any recorded
+    history-reset boundary, projected into provider-neutral messages for
+    HTTP <-> ACP/CLI handoff. *)
 val load_handoff_context
   :  keepers_dir:string
   -> keeper_id:string

@@ -4,6 +4,8 @@ import {
   openActivityLeavesMasc,
   openActivityPhrase,
   openActivityReachLabel,
+  openWorkLead,
+  openWorkLeadPhrase,
   openWorkPieces,
 } from './turn-open-work'
 import { parseKeeperLiveObserverEvent } from './keepers-api'
@@ -88,5 +90,47 @@ describe('turn open work', () => {
     if (event?.kind === 'turn_preview') {
       expect(event.preview.open_activities).toEqual([thinking])
     }
+  })
+})
+
+describe('the one line the open-work rows expand', () => {
+  const called = (name: string) => ({ ...tool(name, name, null), stage: 'requested' })
+  const lead = (...raw: readonly unknown[]) => openWorkLead(decodeOpenActivities(raw) ?? [])
+  const line = (...raw: readonly unknown[]) => {
+    const found = lead(...raw)
+    return found === null ? null : openWorkLeadPhrase(found)
+  }
+
+  it('has nothing to name when nothing is open', () => {
+    expect(lead()).toBeNull()
+  })
+
+  it('is the open response when no tool is open', () => {
+    expect(line(thinking)).toBe('추론 중')
+    expect(line({ ...thinking, channel: 'text' })).toBe('답변 쓰는 중')
+    expect(line({ ...thinking, channel: 'none' })).toBe('모델 응답 기다리는 중')
+  })
+
+  it('names a tool call before the response that asked for it, in the words of its row', () => {
+    const activities = decodeOpenActivities([thinking, tool('a', 'Execute', null)]) ?? []
+    const found = openWorkLead(activities)
+    expect(found).toEqual({ lead: activities[1], otherCalls: 0 })
+    expect(found && openWorkLeadPhrase(found)).toBe(activities[1] && openActivityPhrase(activities[1]))
+  })
+
+  it('names the call that runs, not the call listed first, and counts the other calls', () => {
+    const found = lead(thinking, called('Read'), { ...tool('b', 'Execute', null), since_unix: 44 }, called('Grep'))
+    expect(found?.lead).toMatchObject({ name: 'Execute', since_unix: 44 })
+    expect(found?.otherCalls).toBe(2)
+    expect(found && openWorkLeadPhrase(found)).toBe('Execute 외 2건 · 실행 중')
+  })
+
+  it('names the first call when none has started', () => {
+    expect(line(called('Read'), called('Grep'))).toBe('Read 외 1건 · 호출 준비')
+    expect(line(called('Read'))).toBe('Read · 호출 준비')
+  })
+
+  it('counts two open calls that look the same as two', () => {
+    expect(line(tool('a', 'Read', null), tool('a', 'Read', null))).toBe('Read 외 1건 · 실행 중')
   })
 })

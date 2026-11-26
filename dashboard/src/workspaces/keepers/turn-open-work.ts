@@ -161,6 +161,16 @@ export function openWorkPieces(activities: readonly TurnOpenActivity[]): readonl
   return pieces
 }
 
+/** Where a tool call stands. */
+export function openToolStageLabel(stage: ToolActivity['stage']): string {
+  switch (stage) {
+    case 'requested':
+      return '호출 준비'
+    case 'executing':
+      return '실행 중'
+  }
+}
+
 /** What the row says the work is doing. */
 export function openActivityPhrase(activity: TurnOpenActivity): string {
   if (activity.kind === 'response') {
@@ -173,12 +183,39 @@ export function openActivityPhrase(activity: TurnOpenActivity): string {
         return '모델 응답 기다리는 중'
     }
   }
-  switch (activity.stage) {
-    case 'requested':
-      return `${activity.name} · 호출 준비`
-    case 'executing':
-      return `${activity.name} · 실행 중`
-  }
+  return `${activity.name} · ${openToolStageLabel(activity.stage)}`
+}
+
+/** The piece of open work one line names, and how many more tool calls are
+ *  open behind it. */
+export interface OpenWorkLead {
+  readonly lead: TurnOpenActivity
+  readonly otherCalls: number
+}
+
+/** RFC open-tool-carries-cohort-and-reach D4: the one-line summary the rows
+ *  expand. A tool call says more than the response that asked for it, and of
+ *  the open calls the one that runs is named: a call that never started sits
+ *  first in the server's list and must not hide it. The TUI picks the same
+ *  piece (`lib/masc_tui/store/fleet_store.ml` `open_work_of_preview`).
+ *  `null` when nothing is open. */
+export function openWorkLead(activities: readonly TurnOpenActivity[]): OpenWorkLead | null {
+  const calls = activities.filter((activity): activity is ToolActivity => activity.kind === 'tool')
+  const lead = calls.find((call) => call.stage === 'executing') ?? calls[0] ?? activities[0]
+  if (lead === undefined) return null
+  return { lead, otherCalls: lead.kind === 'tool' ? calls.length - 1 : 0 }
+}
+
+/** How many more calls are open behind the one a line names. */
+export function otherCallsLabel(count: number): string {
+  return `외 ${count}건`
+}
+
+/** The lead in the row's words: for a tool, its name with the count of the
+ *  other calls, then where the named call stands. */
+export function openWorkLeadPhrase({ lead, otherCalls }: OpenWorkLead): string {
+  if (lead.kind === 'response' || otherCalls === 0) return openActivityPhrase(lead)
+  return `${lead.name} ${otherCallsLabel(otherCalls)} · ${openToolStageLabel(lead.stage)}`
 }
 
 /** The label for a call that leaves MASC or runs in the sandbox. MASC's own

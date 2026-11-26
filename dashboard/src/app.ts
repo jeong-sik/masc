@@ -20,6 +20,7 @@ import {
 } from './core/auth'
 import { startObserverStream, stopObserverStream } from './core/observer'
 import { releaseAllViewStreams } from './core/view-stream-slot'
+import { isEditableTarget, isImeComposing } from './lib/keyboard'
 import { QuickPeekDrawer } from './components/primitives/quick-peek-drawer'
 import {
   TRUNK_NAV,
@@ -59,18 +60,6 @@ import {
 const LazyCommandPalette = lazy(async () => ({
   default: (await import('./shell/command-palette')).CommandPalette,
 }))
-
-function isImeComposing(
-  event: Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode'>>,
-): boolean {
-  return event.isComposing === true || event.keyCode === 229
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
-}
 
 /**
  * Pure predicate guarding the first `⌘K` / `Ctrl+K` Command Palette bootstrap shortcut
@@ -121,7 +110,7 @@ class WorkspaceErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   override render() {
     if (this.state.error) {
       const loadFailed = this.state.error instanceof WorkspaceLoadError
-        || /dynamically imported module|Loading chunk|Failed to fetch/i.test(this.state.error.message)
+        || /dynamically imported module|Loading chunk/i.test(this.state.error.message)
       return html`
         <section class="ap-gate" role="alert">
           <div class="ap-card">

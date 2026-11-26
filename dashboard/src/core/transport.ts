@@ -101,7 +101,7 @@ function classifyHttpError(status: number, body: unknown): ApiError {
     return { kind: 'unauthorized', status, code, message, retryable: false, field }
   }
   if (status === 403) {
-    const isCsrf = code === 'csrf_invalid' || code === 'csrf_missing' || /csrf/i.test(message)
+    const isCsrf = code === 'csrf_invalid' || code === 'csrf_missing' || /\bcsrf\b/i.test(message)
     return { kind: isCsrf ? 'csrf_rejected' : 'forbidden', status, code, message, retryable: false, field }
   }
   if (status === 404) {

@@ -11,6 +11,7 @@
  */
 
 import { html } from 'htm/preact'
+import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   formatObserved,
@@ -171,9 +172,8 @@ function goalPhaseTone(phase: string): 'ok' | 'warn' | 'bad' | 'info' | 'brass' 
 
 function keeperCtxTone(obs: Observed<number>): 'ok' | 'warn' | 'bad' | 'default' {
   if (obs.kind !== 'value') return 'default'
-  if (obs.data >= 85) return 'bad'
-  if (obs.data >= 65) return 'warn'
-  return 'ok'
+  const tone = contextSeverityTone(obs.data)
+  return tone === 'absent' ? 'default' : tone
 }
 
 export function PulseWorkspace(props: WorkspaceViewProps) {

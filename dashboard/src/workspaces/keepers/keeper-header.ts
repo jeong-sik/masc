@@ -3,6 +3,7 @@
  */
 
 import { html } from 'htm/preact'
+import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, authSession, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconnect } from '../../core/observer'
@@ -133,11 +134,15 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
   const resting = isKeeperPathResting(keeper)
   const turnPreview = keeper.active_turn?.preview
+  const statusMentionsTool = (statusText: string, toolName: string): boolean => {
+    const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}($|[^A-Za-z0-9_-])`).test(statusText)
+  }
   const turnDetail =
     (turnPreview
       ? [
           turnPreview.status_text || null,
-          turnPreview.last_tool && !turnPreview.status_text.includes(turnPreview.last_tool) ? turnPreview.last_tool : null,
+          turnPreview.last_tool && !statusMentionsTool(turnPreview.status_text, turnPreview.last_tool) ? turnPreview.last_tool : null,
           turnPreview.text_tail && turnPreview.text_tail !== turnPreview.status_text ? turnPreview.text_tail : null,
         ]
           .filter((p): p is string => Boolean(p))
@@ -228,7 +233,10 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               <span
                 class="kp-pill"
                 data-ctx="true"
-                data-tone=${ctxObs.kind === 'value' && ctxObs.data >= 80 ? 'warn' : 'brass'}
+                data-tone=${(() => {
+                  const tone = ctxObs.kind === 'value' ? contextSeverityTone(ctxObs.data) : 'absent'
+                  return tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'brass'
+                })()}
                 title=${ctxDetail.tooltip}
               >
                 Ctx ${ctxText}

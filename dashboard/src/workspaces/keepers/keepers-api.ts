@@ -11,6 +11,12 @@
  */
 
 import { decodeDiscordReplyOrigin } from './discord-reply'
+import {
+  decodeKeeperLaneFailures,
+  decodeKeeperPathRest,
+  formatMilliCandleObserved,
+  isKeeperHealthFailing,
+} from '../../api/keeper-diagnostics'
 import { err, ok, type Result } from '../../lib/result'
 import {
   authSession,
@@ -127,17 +133,7 @@ function wrap<T>(p: Promise<Result<T, ApiError>>): Promise<Result<T | null, ApiE
 // ── Shared Formatters ────────────────────────────────────────────────────
 
 export function formatCandleMilli(raw: string | number | null | undefined): Observed<string> {
-  if (raw === null || raw === undefined) return observedAbsent()
-  const text = typeof raw === 'number'
-    ? (Number.isFinite(raw) ? String(Math.trunc(raw)) : '')
-    : raw.trim()
-  if (!/^-?\d+$/.test(text)) return observedAbsent('invalid_milli')
-  const neg = text.startsWith('-')
-  const digits = neg ? text.slice(1) : text
-  const padded = digits.padStart(4, '0')
-  const whole = padded.slice(0, padded.length - 3).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  const frac = padded.slice(padded.length - 3)
-  return observedValue(`${neg ? '-' : ''}${whole}.${frac}`)
+  return formatMilliCandleObserved(raw)
 }
 
 export function observeRosterContextPct(item: KeeperRosterItem): Observed<number> {
@@ -280,58 +276,11 @@ function decodeWaitingSummary(raw: unknown): KeeperWaitingSummary | null {
 }
 
 function decodePathRest(raw: unknown): KeeperPathRest | null {
-  if (!isRecord(raw)) return null
-  const st = asStr(raw.status)?.toLowerCase()
-  if (st !== 'serving' && st !== 'resting') return null
-  return {
-    status: st,
-    runtime_id: asStr(raw.runtime_id),
-    release_at: formatUnixOrIso(raw.release_at) ?? formatUnixOrIso(raw.release_at_unix),
-    release_basis: asStr(raw.release_basis),
-  }
-}
-
-function decodeSingleLaneFailure(row: unknown): KeeperLaneFailure | null {
-  if (!isRecord(row)) return null
-  const summary = asStr(row.summary)
-    ?? (isRecord(row.failure) && isRecord(row.failure.cause) ? asStr(row.failure.cause.detail) : null)
-    ?? asStr(row.detail)
-  if (!summary) return null
-  const faultKind = isRecord(row.api_candidate_fault)
-    ? asStr(row.api_candidate_fault.fact) ?? asStr(row.api_candidate_fault.kind)
-    : isRecord(row.failure) && isRecord(row.failure.cause)
-      ? asStr(row.failure.cause.kind)
-      : null
-  const failureCause = isRecord(row.failure) && isRecord(row.failure.cause) ? row.failure.cause : null
-  return {
-    runtime_id: asStr(row.runtime_id),
-    summary,
-    fault_kind: faultKind,
-    attempt: typeof row.attempt === 'number' && Number.isFinite(row.attempt) ? Math.trunc(row.attempt) : null,
-    dispatch: asStr(row.dispatch),
-    failure_kind: failureCause ? asStr(failureCause.kind) : null,
-    failure_detail: failureCause ? asStr(failureCause.detail) : null,
-    provider: failureCause ? asStr(failureCause.provider) : null,
-    network_kind: failureCause ? asStr(failureCause.network_kind) : null,
-  }
+  return decodeKeeperPathRest(raw)
 }
 
 function decodeLaneFailures(raw: unknown): readonly KeeperLaneFailure[] {
-  if (!isRecord(raw)) return []
-  const evidence = isRecord(raw.evidence) ? raw.evidence : raw
-  const failuresRaw = Array.isArray(evidence.failures) ? evidence.failures : []
-  const out: KeeperLaneFailure[] = []
-  for (const row of failuresRaw) {
-    const parsed = decodeSingleLaneFailure(row)
-    if (parsed) out.push(parsed)
-  }
-  if (isRecord(evidence.terminal) && asStr(evidence.terminal.kind) === 'candidate') {
-    const term = decodeSingleLaneFailure(evidence.terminal)
-    if (term && !out.some((f) => f.runtime_id === term.runtime_id && f.summary === term.summary)) {
-      out.push(term)
-    }
-  }
-  return out
+  return decodeKeeperLaneFailures(raw)
 }
 
 function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
@@ -480,9 +429,7 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
 }
 
 export function needsRosterAttention(k: KeeperRosterItem): boolean {
-  if (k.directory_issue || k.runtime_blocker_summary) return true
-  const h = k.health.toLowerCase()
-  return h === 'failing' || h === 'failed' || h === 'degraded' || h === 'error' || h === 'crashed'
+  return isKeeperHealthFailing(k)
 }
 
 export function filterAndSortRoster(

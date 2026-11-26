@@ -9,6 +9,7 @@
 
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   disconnectKeeperOAuth,
@@ -20,8 +21,8 @@ import {
 } from '../../core/keeper-oauth-flow'
 import {
   fetchConfigSchemaApi,
+  patchOpForField,
   postConfigPatchApi,
-  type ConfigFieldSpec,
   type ConfigPatchChange,
   type ConfigPatchResult,
   type ConfigSchemaData,
@@ -45,22 +46,6 @@ function serializeValue(val: unknown): string {
   if (val === null || val === undefined) return ''
   if (Array.isArray(val)) return val.join(', ')
   return String(val)
-}
-
-function parseFieldInput(field: ConfigFieldSpec, raw: string): unknown {
-  if (field.type === 'bool' || field.type === 'boolean') return raw === 'true'
-  if (field.type === 'int' || field.type === 'integer') {
-    const n = Number.parseInt(raw, 10)
-    return Number.isNaN(n) ? raw : n
-  }
-  if (field.type === 'float' || field.type === 'number') {
-    const n = Number.parseFloat(raw)
-    return Number.isFinite(n) ? n : raw
-  }
-  if (field.type.includes('array') || field.type.includes('list')) {
-    return raw.split(',').map((s) => s.trim()).filter(Boolean)
-  }
-  return raw
 }
 
 export function KeeperConfigTab(props: KeeperConfigTabProps) {
@@ -145,12 +130,8 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
       const edited = drafts[field.full_key]
       if (edited === undefined) continue
       if (edited === serializeValue(field.current_value)) continue
-      out.push({
-        op: 'set',
-        table: field.table,
-        key: field.key,
-        value: parseFieldInput(field, edited),
-      })
+      const change = patchOpForField(field, edited, false, ',')
+      if (change) out.push(change)
     }
     return out
   }, [allFields, drafts])
@@ -213,19 +194,8 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     setSecretStatus(res.ok ? `${secretScope}:${name} 삭제 완료` : `삭제 실패: ${res.error.message}`)
   }
 
-  const renderDiffLines = (diffText: string) => {
-    if (!diffText) return html`<span class="kp-diff-line">(변경 사항 없음)</span>`
-    return diffText.split('\n').map((line, i) => {
-      const kind = line.startsWith('+') && !line.startsWith('+++')
-        ? 'add'
-        : line.startsWith('-') && !line.startsWith('---')
-          ? 'del'
-          : line.startsWith('@@')
-            ? 'hunk'
-            : 'ctx'
-      return html`<span key=${i} class="kp-diff-line" data-kind=${kind}>${line}</span>`
-    })
-  }
+  const renderDiffLines = (diffText: string) =>
+    html`<${UnifiedDiffView} diffText=${diffText} inline=${true} />`
 
   return html`
     <div class="kp-scroll-pane" data-keeper-tab="config">

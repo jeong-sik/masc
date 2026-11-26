@@ -14,6 +14,7 @@
  */
 
 import { html } from 'htm/preact'
+import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   apiGet,
@@ -74,37 +75,7 @@ function formatFieldDisplayValue(field: ConfigField): string {
 }
 
 function renderUnifiedDiff(diffText: string) {
-  const lines = diffText.split('\n')
-  return html`
-    <pre
-      class="mono"
-      data-testid="settings-unified-diff"
-      style=${{
-        margin: 0,
-        padding: 'var(--sp-3)',
-        background: 'var(--bg-0)',
-        border: '1px solid var(--line-1)',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: 'var(--fs-11)',
-        overflowX: 'auto',
-        lineHeight: 1.45,
-      }}
-    >
-      ${lines.map((line, idx) => {
-        const isAdd = line.startsWith('+') && !line.startsWith('+++')
-        const isDel = line.startsWith('-') && !line.startsWith('---')
-        const isHunk = line.startsWith('@@')
-        const style = isAdd
-          ? { display: 'block', background: 'var(--ok-soft)', color: 'var(--ok-fg)' }
-          : isDel
-            ? { display: 'block', background: 'var(--err-soft)', color: 'var(--err-fg)' }
-            : isHunk
-              ? { display: 'block', color: 'var(--info-fg)' }
-              : { display: 'block', color: 'var(--fg-2)' }
-        return html`<span key=${idx} style=${style}>${line}</span>`
-      })}
-    </pre>
-  `
+  return html`<${UnifiedDiffView} diffText=${diffText} testId="settings-unified-diff" />`
 }
 
 function mapSectionToCategoryId(rawSection: string | undefined): string | null {

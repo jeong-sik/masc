@@ -2,7 +2,9 @@
 
     Subscribes to a [Keeper_chat_events] stream, accumulates assistant
     text deltas and rich Block Kit blocks, and incrementally edits one Slack
-    reply before committing the final content when the run finishes. When the reply
+    reply before committing the final content when the run finishes. Text
+    from each provider message starts its own paragraph
+    ({!Keeper_chat_reply_text}). When the reply
     belongs to a thread, the production adapter projects active work through
     Slack's native assistant thread status.
 

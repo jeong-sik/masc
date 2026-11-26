@@ -39,7 +39,8 @@ val adapter_loop :
     - [Text_delta] (first stable segment): POST creates the message,
       stores its id.
     - [Text_delta] (subsequent): PATCH edits the message content, at most
-      once per [min_edit_interval_s].
+      once per [min_edit_interval_s]. Text from each provider message starts
+      its own paragraph ({!Keeper_chat_reply_text}).
     - [Text_message_end]: force PATCH if content changed since last edit.
     - [Run_finished]: force final PATCH with complete text.
       Standalone links, images, code, and Mermaid blocks in the final text

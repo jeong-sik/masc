@@ -1441,9 +1441,11 @@ let test_candle_observation_roundtrip () =
 (* GET /api/v1/keepers/<keeper>/chat/events. The journal rows are written by
    the server's own encoder and served through the route's own query parsing,
    at the paths the TUI builds; the TUI decodes the pages and folds them with
-   Cut_reply. The text has to equal the reply the channel connectors keep
+   Cut_reply. The text has to hold the bytes the channel connectors keep
    from the same events (Keeper_chat_discord, Keeper_chat_slack), folded here
-   with the server's own Keeper_chat_response_ownership. *)
+   with the server's own Keeper_chat_response_ownership. The connectors also
+   start a paragraph at each provider message (Keeper_chat_reply_text); the
+   TUI joins the same bytes without that break, so this fold leaves it out. *)
 module Chat_events = Masc.Keeper_chat_events
 module Chat_event_log = Masc.Keeper_chat_event_log
 module Response_ownership = Masc.Keeper_chat_response_ownership
@@ -1451,9 +1453,9 @@ module Chat_operations_http = Server_dashboard_http_keeper_chat_operations
 module Wire_chat_journal = Masc_tui_protocol.Wire_chat_journal
 module Cut_reply = Masc_tui_store.Cut_reply
 
-(* The connectors' fold: Run_started starts over with fresh ownership, an
-   attempt boundary retires the owner and starts over, a Stale delta is
-   dropped, and Run_finished or Event_error ends the reply. *)
+(* The connectors' ownership fold: Run_started starts over with fresh
+   ownership, an attempt boundary retires the owner and starts over, a Stale
+   delta is dropped, and Run_finished or Event_error ends the reply. *)
 let connector_reply events =
   let rec fold ~text ~ownership = function
     | [] -> text

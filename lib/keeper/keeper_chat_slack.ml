@@ -603,8 +603,10 @@ let adapter_loop_with_transport
         (match Keeper_chat_response_ownership.admit ownership response with
          | Keeper_chat_response_ownership.Stale -> continue ~ownership ()
          | Admitted ownership | Preserved_unobserved ownership ->
-        let acc_text = acc_text ^ text in
-        let patch_content = stream_content acc_text in
+        let acc_text = Keeper_chat_reply_text.append acc_text ~response text in
+        let patch_content =
+          stream_content (Keeper_chat_reply_text.to_string acc_text)
+        in
         (match streaming_transport, message_id with
          | None, _ -> continue ~ownership ~acc_text ()
          | Some _, None when patch_content = "" ->
@@ -652,7 +654,9 @@ let adapter_loop_with_transport
                    honest bound. *)
                 continue ~ownership ~acc_text ~last_edit_time:(now ()) ())))
     | Text_message_end ->
-        let final_content = final_stream_content acc_text in
+        let final_content =
+          final_stream_content (Keeper_chat_reply_text.to_string acc_text)
+        in
         (match streaming_transport, message_id with
          | Some { edit_stream; _ }, Some message_id
            when final_content <> last_edited_text ->
@@ -672,7 +676,10 @@ let adapter_loop_with_transport
         if !external_effect_completed
         then on_send_result !external_effect_cleanup_result
         else begin
-          let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
+          let delivered_text =
+            Keeper_chat_tool_trail.append_to !tool_trail
+              ~text:(Keeper_chat_reply_text.to_string acc_text)
+          in
           let blocks =
             final_message_blocks ~content:delivered_text
               ~event_blocks:(List.rev acc_blocks)
@@ -748,13 +755,15 @@ let adapter_loop_with_transport
         (* A new run's work is its own; the previous run's trail went out with
            the previous run's reply. *)
         tool_trail := Keeper_chat_tool_trail.create ();
-        loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
+        loop ~acc_text:Keeper_chat_reply_text.empty ~acc_blocks:[]
+          ~run_id_opt:(Some run_id)
           ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
           ~post_attempts_left:2
           ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
         let ownership = Keeper_chat_response_ownership.retire_attempt ownership in
-        continue ~ownership ~acc_text:"" ~acc_blocks:[] ()
+        continue ~ownership ~acc_text:Keeper_chat_reply_text.empty
+          ~acc_blocks:[] ()
     | Provider_retry_observed _ -> continue ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()
@@ -823,7 +832,8 @@ let adapter_loop_with_transport
            (* The turn's partial text is deliberately replaced by the
               pending-approval status; External_effect_completed later deletes
               the streaming message. *)
-           continue ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ()
+           continue ~acc_text:Keeper_chat_reply_text.empty
+             ~acc_blocks:(add_block acc_blocks block) ()
          | Keeper_chat_blocks.Continuation_checkpoint ->
            (* A mid-turn checkpoint must not shrink the posted message: the
               accumulated text is what Text_message_end and Run_finished
@@ -835,7 +845,8 @@ let adapter_loop_with_transport
     | Tool_context_block _ ->
         continue ()
   in
-  loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None ~message_id:None
+  loop ~acc_text:Keeper_chat_reply_text.empty ~acc_blocks:[] ~run_id_opt:None
+    ~message_id:None
     ~last_edit_time:0.0 ~last_edited_text:"" ~post_attempts_left:2
     ~ownership:(Keeper_chat_response_ownership.create ())
 

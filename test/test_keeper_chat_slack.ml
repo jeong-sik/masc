@@ -443,7 +443,10 @@ let test_response_owner_survives_stream_and_retry () =
       ~send_plain:(fun ~content:_ -> fail "terminal reply uses block delivery")
       ~send_blocks:(fun ~content ~blocks:_ -> finals := content :: !finals; Ok ()) in
   check bool "buffered delivery settles successfully" true (outcomes = [Ok ()]);
-  check (list string) "buffered delivery rejects older response scopes" ["ABUC"]
+  check (list string)
+    "buffered delivery rejects older response scopes; each admitted response \
+     is a paragraph"
+    ["A\n\nB\n\nU\n\nC"]
     (List.rev !finals)
 
 let test_protocol_diagnostic_cannot_mask_final_failure () =
@@ -1026,6 +1029,123 @@ let test_unknown_outcome_post_retries_once_then_degrades () =
   check (list string) "the reply still arrives as one final message"
     [ "a b c " ] (List.rev !finals)
 
+(* #29494: a tool loop answers in several provider messages inside one run.
+   These are the events the stream bridge publishes for them: each message is
+   its own stream scope, the way the tool loop opens one provider call after
+   another. One event list per message. *)
+let provider_messages texts =
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let message stream_scope text =
+    let open Agent_core.Types in
+    [ MessageStart
+        { id = Printf.sprintf "provider-message-%d" stream_scope
+        ; model = "model"
+        ; usage = None
+        }
+    ; ContentBlockStart
+        { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 0; delta = TextDelta text }
+    ; ContentBlockStop { index = 0 }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageStop
+    ]
+  in
+  let translate stream_scope (state, published) event =
+    let translated =
+      Bridge.translate ~redact_text:Fun.id
+        ~base_dir:(Filename.get_temp_dir_name ()) ~stream_scope state event
+    in
+    (translated.bridge_state, published @ translated.chat_events)
+  in
+  let _, messages =
+    List.fold_left
+      (fun (state, messages) (stream_scope, text) ->
+        let state, published =
+          List.fold_left (translate stream_scope) (state, [])
+            (message stream_scope text)
+        in
+        (state, messages @ [ published ]))
+      (Bridge.empty_state (), [])
+      (List.mapi (fun stream_scope text -> (stream_scope, text)) texts)
+  in
+  messages
+
+let paragraph_run_started =
+  Masc.Keeper_chat_events.Run_started
+    { run_id = "run-paragraphs"; thread_id = "thread-paragraphs" }
+
+let test_provider_messages_become_paragraphs_with_one_trail () =
+  let tool =
+    Masc.Keeper_chat_events.Tool_call_start
+      { occurrence =
+          { stream_scope = 0; provider_message_id = None; block_index = 1 }
+      ; tool_call_id = Some "call-read"
+      ; tool_call_name = "Read"
+      }
+  in
+  let paragraphs = "파일을 읽어 볼게요.\n\n파일에는 hello 가 있어요." in
+  let expected =
+    let trail = Masc.Keeper_chat_tool_trail.create () in
+    Masc.Keeper_chat_tool_trail.on_event trail tool;
+    Masc.Keeper_chat_tool_trail.append_to trail ~text:paragraphs
+  in
+  match
+    provider_messages [ "파일을 읽어 볼게요."; ""; "파일에는 hello 가 있어요." ]
+  with
+  | [ before_tool; empty; after_tool ] ->
+      let sends = ref [] in
+      let outcomes =
+        run_adapter
+          ((paragraph_run_started :: before_tool)
+           @ (tool :: empty) @ after_tool
+           @ [ Masc.Keeper_chat_events.Text_message_end
+             ; Masc.Keeper_chat_events.Run_finished { run_id = "run-paragraphs" }
+             ])
+          ~send_plain:(fun ~content:_ -> fail "terminal reply uses block delivery")
+          ~send_blocks:(fun ~content ~blocks:_ ->
+            sends := content :: !sends;
+            Ok ())
+      in
+      check bool "the run settles successfully" true (outcomes = [ Ok () ]);
+      check bool "the trail differs from the bare text" false
+        (String.equal expected paragraphs);
+      check (list string)
+        "each provider message is a paragraph and the trail follows the last"
+        [ expected ] (List.rev !sends)
+  | messages ->
+      failf "expected three provider messages, got %d" (List.length messages)
+
+let test_error_after_provider_messages_replaces_the_reply () =
+  let edits = ref [] in
+  let outcomes =
+    run_adapter ~now:(fun () -> 0.) ~sleep:(fun _ -> ())
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "paragraph-reply")
+        ; edit_stream =
+            (fun ~message_id:_ ~content ->
+              edits := content :: !edits;
+              Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content:_ ~blocks:_ ->
+              fail "a failed run must not use the success finalizer")
+        ; delete_stream =
+            (fun ~message_id:_ -> fail "a failed run must not delete its reply")
+        }
+      ((paragraph_run_started
+        :: List.concat (provider_messages [ "first step"; "second step" ]))
+       @ [ Masc.Keeper_chat_events.Text_message_end
+         ; Masc.Keeper_chat_events.Event_error { message = "Prompt is too long" }
+         ])
+      ~send_plain:(fun ~content:_ -> fail "the streamed reply must be edited")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "a failed run must not send a second reply")
+  in
+  check bool "the error settles once" true (outcomes = [ Ok () ]);
+  check (list string)
+    "the streamed text keeps its paragraphs and the error stands alone"
+    [ "first step\n\nsecond step"; "Keeper error: The Keeper turn failed." ]
+    (List.rev !edits)
+
 let () =
   run "keeper_chat_slack"
     [
@@ -1121,6 +1241,12 @@ let () =
             test_publisher_is_not_wedged_behind_the_settled_adapter
         ; test_case "a bus closed without a terminal settles once" `Quick
             test_adapter_settles_when_the_bus_closes_without_a_terminal
+        ] )
+    ; ( "provider-message-paragraphs"
+      , [ test_case "each provider message is a paragraph, one trail" `Quick
+            test_provider_messages_become_paragraphs_with_one_trail
+        ; test_case "an error replaces the reply on its own" `Quick
+            test_error_after_provider_messages_replaces_the_reply
         ] )
     ; ( "thread-routing"
       , [ test_case "deferred reply keeps thread_ts" `Quick

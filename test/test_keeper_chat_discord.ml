@@ -818,6 +818,112 @@ let test_answered_retry_writes_its_text_over_the_returned_message () =
       failf "a bus closed without a terminal settles once with an error, got %d"
         (List.length outcomes)
 
+(* #29494: a tool loop answers in several provider messages inside one run.
+   These are the events the stream bridge publishes for them: each message is
+   its own stream scope, the way the tool loop opens one provider call after
+   another. *)
+let provider_messages texts =
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let message stream_scope text =
+    let open Agent_core.Types in
+    [ MessageStart
+        { id = Printf.sprintf "provider-message-%d" stream_scope
+        ; model = "model"
+        ; usage = None
+        }
+    ; ContentBlockStart
+        { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 0; delta = TextDelta text }
+    ; ContentBlockStop { index = 0 }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageStop
+    ]
+  in
+  let translate stream_scope (state, published) event =
+    let translated =
+      Bridge.translate ~redact_text:Fun.id
+        ~base_dir:(Filename.get_temp_dir_name ()) ~stream_scope state event
+    in
+    (translated.bridge_state, published @ translated.chat_events)
+  in
+  let _, events =
+    List.fold_left
+      (fun (state, events) (stream_scope, text) ->
+        List.fold_left (translate stream_scope) (state, events)
+          (message stream_scope text))
+      (Bridge.empty_state (), [])
+      (List.mapi (fun stream_scope text -> (stream_scope, text)) texts)
+  in
+  events
+
+let paragraph_run_started =
+  Masc.Keeper_chat_events.Run_started
+    { run_id = "run-paragraphs"; thread_id = "thread-paragraphs" }
+
+(* The one reply message the channel holds after the run, and every message
+   sent on its own. *)
+let deliver_run events =
+  let held = ref None in
+  let sent = ref [] in
+  let outcomes =
+    run_adapter ~now:(fun () -> 0.)
+      (paragraph_run_started :: events)
+      ~post_message:(fun ~nonce:_ ~content ->
+        held := Some content;
+        Ok "paragraph-reply")
+      ~edit_message:(fun ~message_id:_ ~content ->
+        held := Some content;
+        Ok ())
+      ~send_message:(fun ~content ->
+        sent := content :: !sent;
+        Ok ())
+  in
+  check_single_ok "the run settles once" outcomes;
+  (!held, List.rev !sent)
+
+let reply_of_provider_messages texts =
+  match
+    deliver_run
+      (provider_messages texts
+       @ [ Masc.Keeper_chat_events.Text_message_end
+         ; Masc.Keeper_chat_events.Run_finished { run_id = "run-paragraphs" }
+         ])
+  with
+  | Some content, [] | None, [ content ] -> content
+  | held, sent ->
+      failf "expected one reply message, got %d streamed and %d sent"
+        (Option.fold ~none:0 ~some:(fun _ -> 1) held)
+        (List.length sent)
+
+let test_provider_messages_become_paragraphs () =
+  check string "each provider message is its own paragraph"
+    "상수역이네.\n\n상수역이네. 노선을 볼게.\n\n2호선이야."
+    (reply_of_provider_messages
+       [ "상수역이네."; "상수역이네. 노선을 볼게."; "2호선이야." ])
+
+let test_empty_provider_messages_add_no_break () =
+  check string "messages without visible text add no break" "a\n\nb"
+    (reply_of_provider_messages [ ""; "a"; ""; "\n"; "b"; "" ]);
+  check string "a message's own trailing newline counts toward the break"
+    "a\n\nb"
+    (reply_of_provider_messages [ "a\n"; "b" ]);
+  check string "a message that already ends in a blank line gets no more"
+    "a\n\nb"
+    (reply_of_provider_messages [ "a\n\n"; "b" ])
+
+let test_error_after_provider_messages_goes_out_alone () =
+  let held, sent =
+    deliver_run
+      (provider_messages [ "first step"; "second step" ]
+       @ [ Masc.Keeper_chat_events.Text_message_end
+         ; Masc.Keeper_chat_events.Event_error { message = "Prompt is too long" }
+         ])
+  in
+  check (option string) "the reply holds only the provider messages"
+    (Some "first step\n\nsecond step") held;
+  check (list string) "the error is a message of its own"
+    [ "Keeper error: The Keeper turn failed." ] sent
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -875,6 +981,14 @@ let () =
             test_publisher_is_not_wedged_behind_the_settled_adapter
         ; test_case "a bus closed without a terminal settles once" `Quick
             test_adapter_settles_when_the_bus_closes_without_a_terminal
+        ] )
+    ; ( "provider-message-paragraphs"
+      , [ test_case "each provider message is a paragraph" `Quick
+            test_provider_messages_become_paragraphs
+        ; test_case "empty messages add no break" `Quick
+            test_empty_provider_messages_add_no_break
+        ; test_case "an error goes out on its own" `Quick
+            test_error_after_provider_messages_goes_out_alone
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick

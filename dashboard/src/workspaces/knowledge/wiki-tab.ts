@@ -24,7 +24,6 @@ import {
   expectOptionalArrayField,
   expectOptionalRecordField,
   expectWireRecord,
-  isJsonRecord,
 } from '../../lib/wire-decode'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
@@ -109,10 +108,9 @@ function decodeWikiSearchData(raw: unknown): WikiSearchData {
   const rec = expectWireRecord(raw, ctx)
   const results = expectOptionalArrayField<WikiSearchResultItem>(rec, 'results', ctx)
   for (const item of results) {
-    if (isJsonRecord(item)) {
-      expectOptionalArrayField(item, 'snippets', `${ctx} result`)
-      expectOptionalArrayField(item, 'tags', `${ctx} result`)
-    }
+    const itemRec = expectWireRecord(item, `${ctx} result`)
+    expectOptionalArrayField(itemRec, 'snippets', `${ctx} result`)
+    expectOptionalArrayField(itemRec, 'tags', `${ctx} result`)
   }
   return {
     ...(rec as unknown as WikiSearchData),
@@ -305,6 +303,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     })
     if (!mountedRef.current || signal?.aborted || !isEpochCurrent(startEpoch)) return null
     if (!res.ok) {
+      if (res.error.kind === 'decode') setPageDetail(null)
       setPageError(res.error.message)
       return null
     }

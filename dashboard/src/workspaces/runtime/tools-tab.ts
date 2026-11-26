@@ -254,6 +254,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const [search, setSearch] = useState('')
   const [liveSeries, setLiveSeries] = useState<ToolMetricsSeriesPayload | null>(null)
   const [streamLive, setStreamLive] = useState(false)
+  const [streamDecodeError, setStreamDecodeError] = useState<string | null>(null)
   const [banner, setBanner] = useState<{ kind: 'err'; text: string } | null>(null)
 
   // Skills editor state
@@ -391,6 +392,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
   useEffect(() => {
+    setStreamDecodeError(null)
     if (win !== '24h' || !sseInstanceId) {
       setStreamLive(false)
       return
@@ -408,8 +410,14 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
               return
             }
             if ('buckets' in payload) {
-              setLiveSeries(frame.data as ToolMetricsSeriesPayload)
-              setStreamLive(true)
+              try {
+                const decoded = decodeToolMetricsSeriesPayload(frame.data)
+                setLiveSeries(decoded)
+                setStreamDecodeError(null)
+                setStreamLive(true)
+              } catch (error) {
+                setStreamDecodeError(error instanceof Error ? error.message : String(error))
+              }
             }
           }
         },
@@ -905,6 +913,11 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       ${banner && html`
         <div role="alert" class="ap-error">
           ${banner.text}
+        </div>
+      `}
+      ${streamDecodeError && html`
+        <div role="alert" class="ap-error">
+          실시간 도구 시계열 디코드 오류: ${streamDecodeError}
         </div>
       `}
 

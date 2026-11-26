@@ -1090,7 +1090,11 @@ candidates = ["safe.model"]
       b.textContent?.includes('Keeper OAuth'),
     ) as HTMLButtonElement
     oauthTab.click()
-    await flushUi(50)
+    await vi.waitFor(() => {
+      const sel = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement | null
+      expect(sel).not.toBeNull()
+      expect(sel?.value).toBe('sangsu')
+    })
 
     // Real keeper selector populated via /api/v1/gate/keepers with 'sangsu' (NEVER hardcoded 'default'!)
     const keeperSelect = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement

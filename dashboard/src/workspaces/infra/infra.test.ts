@@ -896,17 +896,19 @@ describe('workspaces/infra', () => {
     }) as typeof fetch
 
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(40)
-    expect(container.textContent).toContain('변경 이력 조회 실패')
-    expect(container.textContent).toContain('changes')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('변경 이력 조회 실패')
+      expect(container.textContent).toContain('changes')
+    })
     expect(container.textContent).not.toContain('변경 0건')
 
     render(null, container)
     resourceCache.clearAll()
     render(html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(40)
-    expect(container.textContent).toContain('샌드박스 조회 실패')
-    expect(container.textContent).toContain('microvm_guests')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('샌드박스 조회 실패')
+      expect(container.textContent).toContain('microvm_guests')
+    })
     expect(container.textContent).not.toContain('선언된 MicroVM 게스트 없음')
   })
 })

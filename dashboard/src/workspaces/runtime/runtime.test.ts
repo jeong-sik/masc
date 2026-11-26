@@ -19,6 +19,7 @@ import {
   setTimeWindow,
   startObserverStream,
 } from '../../core'
+import * as observer from '../../core/observer'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
 import {
   formatLocalReleaseTime,
@@ -1852,34 +1853,171 @@ describe('workspaces/runtime', () => {
     }) as typeof fetch
 
     render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
-    expect(container.textContent).toContain('Lane-Addons 조회 실패')
-    expect(container.textContent).toContain('instances')
-    expect(container.textContent).toContain('Browser Lane 조회 실패')
-    expect(container.textContent).toContain('clients')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Lane-Addons 조회 실패')
+      expect(container.textContent).toContain('instances')
+      expect(container.textContent).toContain('Browser Lane 조회 실패')
+      expect(container.textContent).toContain('clients')
+    })
 
     render(null, container)
     resourceCache.clearAll()
     render(html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
-    expect(container.textContent).toContain('모델 지표 조회 실패')
-    expect(container.textContent).toContain('Keeper 비용 조회 실패')
-    expect(container.textContent).toContain('도구 시계열 조회 실패')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('모델 지표 조회 실패')
+      expect(container.textContent).toContain('Keeper 비용 조회 실패')
+      expect(container.textContent).toContain('도구 시계열 조회 실패')
+    })
 
     render(null, container)
     resourceCache.clearAll()
     render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
-    expect(container.textContent).toContain('런타임 프로브 조회 실패')
-    expect(container.textContent).toContain('providers')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('런타임 프로브 조회 실패')
+      expect(container.textContent).toContain('providers')
+    })
 
     render(null, container)
     resourceCache.clearAll()
     render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(30)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="provider-inventory-toggle"]')).not.toBeNull()
+    })
     container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!.click()
-    await flushUi(15)
-    expect(container.textContent).toContain('제공자 자격 증명 조회 실패')
-    expect(container.textContent).toContain('integrations')
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('제공자 자격 증명 조회 실패')
+      expect(container.textContent).toContain('integrations')
+    })
+  })
+
+  it('stops EfficiencyTab observer refreshes from fetching exact-lane-runs after in-place Admin demotion', async () => {
+    vi.useFakeTimers()
+    try {
+      const observerListeners = new Set<(frame: observer.ObserverFrame) => void>()
+      const spy = vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+        observerListeners.add(listener)
+        return () => {
+          observerListeners.delete(listener)
+        }
+      })
+      const emitObserverFrame = (frame: observer.ObserverFrame) => {
+        for (const listener of observerListeners) listener(frame)
+      }
+
+      authSession.value = {
+        kind: 'multi_account_signed_in',
+        mode: 'multi_account',
+        accountId: 'acct-demoted',
+        email: 'ops@example.com',
+        displayName: 'Ops',
+        role: 'admin',
+        csrfToken: 'csrf-admin',
+        workspaceId: 'default',
+        authMethods: { google: true, github: false, dev_token: false },
+      }
+
+      const exactRunCalls: string[] = []
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.startsWith('/api/v1/dashboard/exact-lane-runs')) {
+          exactRunCalls.push(url)
+          return jsonResponse({ runs: [], has_more: false, next_cursor: null })
+        }
+        if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+          return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+        }
+        if (url.startsWith('/api/v1/models/metrics')) {
+          return jsonResponse({ models: [] })
+        }
+        if (url.startsWith('/api/v1/tool-metrics/series')) {
+          return jsonResponse({ buckets: [] })
+        }
+        if (url.startsWith('/api/v1/dashboard/keeper-costs')) {
+          return jsonResponse({ keepers: [] })
+        }
+        if (url.startsWith('/api/v1/keeper-efficiency')) {
+          return jsonResponse({ keepers: [] })
+        }
+        return jsonResponse({})
+      }) as typeof fetch
+
+      render(html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await vi.advanceTimersByTimeAsync(150)
+      expect(exactRunCalls).toHaveLength(1)
+
+      // Schedule a pending debounce timer while still admin, then demote in-place without epoch bump
+      emitObserverFrame({ id: '1', event: 'exact_lane_runs', data: { topic: 'exact_lane_runs' }, raw: '{}' })
+      authSession.value = {
+        kind: 'multi_account_signed_in',
+        mode: 'multi_account',
+        accountId: 'acct-demoted',
+        email: 'ops@example.com',
+        displayName: 'Ops',
+        role: 'worker',
+        csrfToken: 'csrf-worker',
+        workspaceId: 'default',
+        authMethods: { google: true, github: false, dev_token: false },
+      }
+      await vi.advanceTimersByTimeAsync(700)
+      expect(exactRunCalls).toHaveLength(1)
+
+      // Fire another observer frame after demotion and verify zero exact-lane-runs fetch
+      emitObserverFrame({ id: '2', event: 'exact_lane_runs', data: { topic: 'exact_lane_runs' }, raw: '{}' })
+      await vi.advanceTimersByTimeAsync(700)
+      expect(exactRunCalls).toHaveLength(1)
+      expect(container.querySelector('[data-testid="efficiency-exact-pass-kpi"]')?.textContent).toContain('관리자 전용')
+
+      spy.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('surfaces inline decode alert when multi-account /api/v1/auth/integrations payload is malformed', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acct-worker-bad-integ',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-w',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/auth/provider-accounts') {
+        return jsonResponse({ accounts: [] })
+      }
+      if (url === '/api/v1/auth/integrations') {
+        return jsonResponse({ integrations: 'not-an-array' })
+      }
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: null,
+          default_runtime: null,
+          runtimes: [],
+          lanes: [],
+          assignments: [],
+          provider_usage_windows: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'disabled' })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="provider-inventory-toggle"]')).not.toBeNull()
+    })
+    container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!.click()
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('제공자 연동 목록 조회 실패')
+      expect(container.textContent).toContain('integrations')
+    })
   })
 })

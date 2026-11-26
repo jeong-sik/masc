@@ -290,7 +290,13 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     const startEpoch = currentSessionEpoch()
     setCfgError(null)
     const res = await fetchConfigSchemaApi(`keeper:${keeperName}`)
-    if (!mountedRef.current || seq !== cfgSeqRef.current || activeKeeperRef.current !== keeperName || !isEpochCurrent(startEpoch)) return
+    if (
+      !mountedRef.current
+      || seq !== cfgSeqRef.current
+      || activeKeeperRef.current !== keeperName
+      || !isEpochCurrent(startEpoch)
+      || isAdminLockedForSession('admin', authSession.peek())
+    ) return
     if (!res.ok) {
       setCfgError(res.error.message)
       return
@@ -318,6 +324,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
   useEffect(() => {
     if (adminLocked) {
+      cfgSeqRef.current += 1
       setCfgSchema(null)
       setCfgDiff(null)
       setCfgError(null)

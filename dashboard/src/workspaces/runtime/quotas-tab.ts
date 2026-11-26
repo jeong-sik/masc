@@ -612,7 +612,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     setCopiedDeviceCode(false)
     setSourceRevision('')
     setActionBusy(null)
-  }, [epoch, canManageProviders])
+  }, [epoch, session.kind])
 
   const handleStartOAuthLogin = async (integrationId: string) => {
     const curSession = authSession.peek()
@@ -1491,7 +1491,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       </section>
 
       <!-- Inline Credential Form & CLI OAuth Receipt -->
-      ${credForm && html`
+      ${canManageProviders && credForm && html`
         <form class="wka-card" onSubmit=${handleSaveCredential} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', borderColor: 'var(--line-2)' }}>
           <div class="wka-h">
             <h3>제공자 API 키 등록 / 갱신 (${isMultiAccountSignedIn ? '개인 계정' : '워크스페이스'})</h3>
@@ -1543,7 +1543,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${loginReceipt && html`
+      ${canManageProviders && loginReceipt && html`
         <section
           class="wka-card"
           data-testid="setup-login-panel"
@@ -1693,6 +1693,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <div class="ap-disclosure-body" data-testid="provider-inventory-body">
             ${inventoryObs.kind === 'failed' && html`
               <div class="ap-error" role="alert">제공자 자격 증명 조회 실패: ${inventoryObs.error.message}</div>
+            `}
+            ${isMultiAccountSignedIn && personIntegObs.kind === 'failed' && html`
+              <div class="ap-error" role="alert">제공자 연동 목록 조회 실패: ${personIntegObs.error.message}</div>
             `}
             ${isMultiAccountSignedIn && html`
               <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>

@@ -155,6 +155,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const [liveMetrics, setLiveMetrics] = useState<ModelsMetricsPayload | null>(null)
   const [streamLive, setStreamLive] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
+  const [streamDecodeError, setStreamDecodeError] = useState<string | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const utcOffsetMin = localUtcOffsetMin()
 
@@ -203,7 +204,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         ),
         { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
       ),
-      ...(!adminLocked
+      ...(!isAdminLockedForSession('admin', authSession.peek())
         ? [
             resourceCache.fetch<LaneRunsResponse>(
               exactRunsKey,
@@ -244,6 +245,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
   useEffect(() => {
+    setStreamDecodeError(null)
     if (win !== '24h' || !sseInstanceId) {
       setStreamLive(false)
       return
@@ -261,9 +263,15 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
               return
             }
             if ('models' in payload) {
-              setLiveMetrics(frame.data as ModelsMetricsPayload)
-              setStreamError(null)
-              setStreamLive(true)
+              try {
+                const decoded = decodeModelsMetricsPayload(frame.data)
+                setLiveMetrics(decoded)
+                setStreamError(null)
+                setStreamDecodeError(null)
+                setStreamLive(true)
+              } catch (error) {
+                setStreamDecodeError(error instanceof Error ? error.message : String(error))
+              }
             }
           }
         },
@@ -278,7 +286,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
   }, [win, sseInstanceId, epoch])
 
-  // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE!
+  // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE
   useEffect(() => {
     const watchedTopics = new Set([
       'provider_usage',
@@ -310,7 +318,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       unsubResync()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
-  }, [win, epoch])
+  }, [win, epoch, adminLocked])
 
   const effectiveModels = (win === '24h' && sseInstanceId && liveMetrics)
     ? liveMetrics
@@ -554,6 +562,10 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           <button type="button" class="btn-ghost" onClick=${() => loadSnapshots('manual')}>새로고침</button>
         </div>
       </header>
+
+      ${streamDecodeError && html`
+        <div class="ap-error" role="alert">실시간 모델 지표 디코드 오류: ${streamDecodeError}</div>
+      `}
 
       <section class="ov-kpis" aria-label="효율성 핵심 지표">
         <div class="ov-kpi">

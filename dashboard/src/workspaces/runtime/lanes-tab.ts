@@ -351,6 +351,7 @@ export function LanesTab(props: WorkspaceViewProps) {
     previewRequest.current?.abort()
     inspectRequest.current?.abort()
     discardLanePreview()
+    setRawConfig(null)
     setSourceRevision(null)
     setLaneEditor(null)
     setLaneDeleteConfirm(null)

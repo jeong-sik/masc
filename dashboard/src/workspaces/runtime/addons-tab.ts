@@ -27,7 +27,7 @@ import {
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { expectOptionalArrayField, expectWireRecord, isJsonRecord } from '../../lib/wire-decode'
+import { expectOptionalArrayField, expectWireRecord } from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
@@ -93,8 +93,9 @@ function decodeBrowserClientsPayload(raw: unknown): BrowserClientsPayload {
 function decodeBrowserTabsResponse(raw: unknown): readonly BrowserTabRow[] {
   const ctx = 'POST /api/v1/dashboard/browser-lane/read'
   const rec = expectWireRecord(raw, ctx)
-  if (isJsonRecord(rec.data) && 'tabs' in rec.data) {
-    return expectOptionalArrayField<BrowserTabRow>(rec.data, 'tabs', ctx)
+  if ('data' in rec && rec.data !== undefined) {
+    const dataRec = expectWireRecord(rec.data, `${ctx} data`)
+    return expectOptionalArrayField<BrowserTabRow>(dataRec, 'tabs', ctx)
   }
   return expectOptionalArrayField<BrowserTabRow>(rec, 'tabs', ctx)
 }

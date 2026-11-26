@@ -5987,21 +5987,26 @@ let apply_http_reply ~now (m : Model.t) reply =
                    };
                }))
         ~source:Health.Source_client_http ~ko:"코드 검색" ~en:"Code search" err
-  | Msg.Reply_workspace_file { scope; path; result = Ok content } ->
+  | Msg.Reply_workspace_file { scope; path; result = Ok content }
+    when Option.equal String.equal (Some path) m.infra.code.active_file_path ->
       let infra =
         Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
           m.infra
       in
       ({ m with infra }, [])
-  | Msg.Reply_workspace_file { scope = _; path = _; result = Error err } ->
+  | Msg.Reply_workspace_file { result = Ok _; _ } -> (m, [])
+  | Msg.Reply_workspace_file { scope; path; result = Error err } ->
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
-               {
-                 x with
-                 code =
-                   { x.code with open_file = failed_slot err x.code.open_file };
-               }))
+               if Wire_infra.equal_workspace_scope scope x.code.scope
+                  && Option.equal String.equal (Some path) x.code.active_file_path
+               then
+                 { x with
+                   code =
+                     { x.code with open_file = failed_slot err x.code.open_file }
+                 }
+               else x))
         ~source:Health.Source_client_http ~ko:"파일 내용 조회" ~en:"File read"
         err
   | Msg.Reply_git_branches { scope; result = Ok branches } ->

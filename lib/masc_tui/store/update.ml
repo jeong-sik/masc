@@ -616,12 +616,18 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       |> Knowledge_store.clear_pending_wiki_edit
       |> Knowledge_store.clear_pending_artifact_revision
     in
+    let infra = Infra_store.forget_log_cursor after.infra in
+    let code = infra.code in
+    let infra =
+      if Observed.is_loading code.open_file then
+        { infra with
+          code = { code with open_file = Observed.unreported; pending_jump_line = None }
+        }
+      else infra
+    in
     {
       after with
-      infra =
-        after.infra
-        |> Infra_store.forget_log_cursor
-        |> Infra_store.detach_keeper_sandbox_reads;
+      infra = Infra_store.detach_keeper_sandbox_reads infra;
       fleet =
         Fleet_store.detach_chat_streams
           { after.fleet with worked = Fleet_store.String_map.empty }
@@ -716,6 +722,26 @@ let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
       let infra = reserve m.infra workspace_keeper in
       if infra == m.infra then m else { m with infra }
 
+let reserve_workspace_file_read ~now (m : Model.t) cmds =
+  let code = m.infra.code in
+  let matches =
+    (function
+      | Cmd.Http_get { epoch; req = Cmd.Get_workspace_file { scope; path } } ->
+          Epoch.equal epoch m.epoch
+          && Wire_infra.equal_workspace_scope scope code.scope
+          && Option.equal String.equal (Some path) code.active_file_path
+      | _ -> false)
+    [@warning "-4"]
+  in
+  if List.exists matches (Cmd.flatten cmds) then
+    let open_file =
+      match Infra_store.open_file_for_current m.infra with
+      | Some _ -> Observed.mark_stale code.open_file
+      | None -> Observed.loading ~since_ns:now
+    in
+    { m with infra = { m.infra with code = { code with open_file } } }
+  else m
+
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
@@ -761,4 +787,5 @@ let step ~now m msg =
   in
   let next = reserve_board_view_read ~now next cmds in
   let next = reserve_sandbox_view_reads ~now next cmds in
-  (reserve_work_reads ~now next cmds, final_cmds)
+  let next = reserve_work_reads ~now next cmds in
+  (reserve_workspace_file_read ~now next final_cmds, final_cmds)

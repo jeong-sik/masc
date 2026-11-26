@@ -2969,33 +2969,77 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Infra_store.Code_file -> (
         match Infra_store.open_file_for_current inf with
         | None ->
+            let status, style =
+              match code.active_file_path, code.open_file with
+              | Some path, Observed.Loading { since_ns } ->
+                  let elapsed =
+                    Float.max 0.
+                      (Clock.Mono.seconds_since model.freshness.last_mono
+                         ~since:since_ns)
+                  in
+                  let spinner =
+                    if Chat_transcript.reduce_motion model then Glyph.Live_working
+                    else
+                      let fps = Chat_transcript.animation_frames_per_second in
+                      Glyph.Live_working_frame
+                        (Int.of_float (mod_float elapsed 1. *. float fps))
+                  in
+                  let label =
+                    Say.resolve lang (Say.make ~ko:"파일 읽는 중" ~en:"Reading file")
+                  in
+                  ( Printf.sprintf "%s %s · %ds · %s" (Glyph.to_utf8 spinner)
+                      label (Int.of_float elapsed) path
+                  , H.status_style ~theme ~attrs:Attr.bold Theme.Status_active )
+              | Some path, Observed.Failed _ ->
+                  let label =
+                    Say.resolve lang
+                      (Say.make ~ko:"파일 읽기 실패" ~en:"File read failed")
+                  in
+                  ( label ^ " · " ^ path
+                  , H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical )
+              | Some path, (Observed.Value _ | Observed.Absent | Observed.Unreported) ->
+                  let label =
+                    Say.resolve lang
+                      (Say.make ~ko:"파일 읽기 미확인" ~en:"File read unconfirmed")
+                  in
+                  (label ^ " · " ^ path, H.whisper_style ~theme ())
+              | None, _ ->
+                  ( Say.resolve lang (Say.make ~ko:"파일 미선택" ~en:"No file open")
+                  , H.whisper_style ~theme () )
+            in
             ignore
               (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
-                 ~max_w:hdr_rect.w ~style:(H.whisper_style ~theme ())
-                 (Say.resolve lang
-                    (Say.make ~ko:"파일 미선택" ~en:"No file open")));
-            (match code.open_file with
-            | (Observed.Loading _ | Observed.Failed _) as obs ->
+                 ~max_w:hdr_rect.w ~style status);
+            (match code.active_file_path, code.open_file with
+            | Some _, (Observed.Failed _ as obs) ->
                 H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang obs
-            | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+            | None, _ ->
                 H.draw_empty_notice ~grid ~rect:vis_rect ~theme
                   (Say.resolve lang
                      (Say.make
                         ~ko:"왼쪽 트리에서 파일을 선택하거나 [p]로 검색하세요"
-                        ~en:"Select a file from the tree or press [p] to fuzzy-find")))
+                        ~en:"Select a file from the tree or press [p] to fuzzy-find"))
+            | Some _, (Observed.Loading _ | Observed.Value _ | Observed.Absent | Observed.Unreported) ->
+                ())
         | Some f ->
             let rows =
               cached_rows_of_source ~path:f.path ~revision:f.revision
                 ~content:f.content
             in
             let total = List.length rows in
+            let freshness, style =
+              if Observed.is_stale code.open_file then
+                ( Say.resolve lang (Say.make ~ko:"마지막 조회 · " ~en:"Last read · ")
+                , H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention )
+              else ("", H.accent_style ~theme ~attrs:Attr.bold ())
+            in
             let hdr_txt =
-              Printf.sprintf "%s · %d lines · rev %s" f.path total
+              Printf.sprintf "%s%s · %d lines · rev %s" freshness f.path total
                 (H.short_hash ~len:10 f.revision)
             in
             ignore
               (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
-                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 ~max_w:hdr_rect.w ~style
                  hdr_txt);
             if not (Rect.is_empty vis_rect) then begin
               let gutter_w =

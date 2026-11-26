@@ -9,9 +9,9 @@ type render_frame =
 
 let drain_budget_ns = 3_000_000L
 let voice_tick_interval_ns = 100_000_000L
-let keeper_progress_interval_ns =
+let progress_animation_interval_ns =
   Int64.div 1_000_000_000L (Int64.of_int Chat_transcript.animation_frames_per_second)
-let keeper_elapsed_interval_ns = 1_000_000_000L
+let progress_elapsed_interval_ns = 1_000_000_000L
 let probe_timeout_s = 0.15
 let probe_grace_s = 2.0
 
@@ -582,7 +582,11 @@ let next_minute_tick ~now_ns ~wall_unix ~last_minute =
   in
   (minute_due, cur_min, next_deadline_ns)
 
-let visible_progress_interval (m : Model.t) =
+let progress_refresh_interval m =
+  if Chat_transcript.reduce_motion m then progress_elapsed_interval_ns
+  else progress_animation_interval_ns
+
+let visible_harness_or_keeper_progress_interval (m : Model.t) =
   if Model.is_too_small_viewport m.viewport || Model.equal_breakpoint m.breakpoint Model.Micro
   then None
   else if
@@ -591,7 +595,7 @@ let visible_progress_interval (m : Model.t) =
         modal.submitting || Option.is_some modal.note_prefill_id
     | _ -> false) [@warning "-4"]
   then
-    if Chat_transcript.reduce_motion m then None else Some keeper_progress_interval_ns
+    if Chat_transcript.reduce_motion m then None else Some progress_animation_interval_ns
   else
     let harness_reading =
       Option.is_none m.nav.overlay
@@ -621,11 +625,21 @@ let visible_progress_interval (m : Model.t) =
       | Some (Glyph.Live_working_frame _, _, _) -> true
       | Some _ | None -> false) [@warning "-4"]
     in
-    if harness_reading || keeper_working then
-      Some
-        (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
-         else keeper_progress_interval_ns)
+    if harness_reading || keeper_working then Some (progress_refresh_interval m)
     else None
+
+let visible_progress_interval (m : Model.t) =
+  if
+    Nav.equal_workspace m.nav.workspace Nav.Infra
+    && Option.is_none m.nav.overlay
+    && Option.is_none (Model.active_inspector m)
+    && (not (Model.is_too_small_viewport m.viewport))
+    && (not (Model.equal_breakpoint m.breakpoint Model.Micro))
+    && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+    && Infra_store.equal_code_right_mode m.infra.code.right_mode Infra_store.Code_file
+    && Observed.is_loading m.infra.code.open_file
+  then Some (progress_refresh_interval m)
+  else visible_harness_or_keeper_progress_interval m
 
 let set_fd_nonblock fd enabled =
   match
@@ -1296,7 +1310,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         let last_resize_gen = ref (Signals.resize_generation signals) in
         let last_voice_tick_ns = ref 0L in
         let last_clock_minute = ref (clock_minute_of_unix init_wall_unix) in
-        let keeper_progress_deadline = ref None in
+        let progress_deadline = ref None in
 
         (* Boot sequence: GET /health + Voice probe; healthy reply triggers
            workspace guard, declarative Sync_streams, and bootstrap fetches. *)
@@ -1513,20 +1527,20 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (earliest_opt extra (Some minute_deadline))
                       interrupt_deadline
                 in
-                (* A visible active turn or read uses a presentation clock
-                   without requesting additional server observations. *)
+                (* Visible progress needs a presentation clock. It does
+                   not emit a model tick or request more server observations. *)
                 let progress_interval = visible_progress_interval !model in
-                (match progress_interval, !keeper_progress_deadline with
-                 | None, _ -> keeper_progress_deadline := None
+                (match progress_interval, !progress_deadline with
+                 | None, _ -> progress_deadline := None
                  | Some _, Some due when Int64.compare now_after_ns due < 0 -> ()
                  | Some interval, _ ->
-                     keeper_progress_deadline := Some (Int64.add now_after_ns interval);
+                     progress_deadline := Some (Int64.add now_after_ns interval);
                      scheduler :=
                        Frame_scheduler.mark_dirty
                          ~pace:Frame_scheduler.Pace_animation !scheduler);
                 scheduler :=
                   Frame_scheduler.set_extra_deadline
-                    (earliest_opt extra_after !keeper_progress_deadline)
+                    (earliest_opt extra_after !progress_deadline)
                     !scheduler;
 
                 (* 5. Frame pacing & differential CSI 2026 presentation. *)

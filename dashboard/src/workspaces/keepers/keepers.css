@@ -443,6 +443,7 @@
 .kp-notice[data-tone="bad"] { background: var(--err-soft); border-color: var(--err-border); color: var(--err-fg); }
 
 .kp-lifecycle-bar {
+  --btn-h: 28px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -455,6 +456,8 @@
 .kp-lifecycle-bar > .pm-wrap > .pm-trigger {
   min-height: var(--btn-h, 32px);
   height: var(--btn-h, 32px);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-12);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1063,14 +1066,55 @@
   min-width: 0;
 }
 
-.kp-waiting-row {
+/* An opened strip scrolls inside itself; the transcript and composer stay put. */
+.kp-waiting-groups {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
-  padding: var(--sp-2);
+  margin-top: var(--sp-2);
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+}
+
+.kp-waiting-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-1);
   background: var(--bg-2);
+  min-width: 0;
+}
+
+.kp-waiting-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kp-waiting-count {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.kp-waiting-age {
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.kp-waiting-members {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-11);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
 }
 
 .kp-waiting-what {
@@ -1776,4 +1820,38 @@ details[open] > .kp-sub-summary::before {
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Memory fact tables keep the card's width: fixed columns, and a claim with a
+   long path, URL or code wraps inside its cell instead of widening the table. */
+.kp-mem-facts .dtable {
+  table-layout: fixed;
+}
+
+.kp-mem-facts .dtable td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.kp-mem-facts .dtable td pre,
+.kp-mem-facts .dtable td code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kp-mem-facts-ordinary .dtable th:nth-child(1) { width: 18%; }
+.kp-mem-facts-ordinary .dtable th:nth-child(3) { width: 8em; }
+.kp-mem-facts-ordinary .dtable th:nth-child(4) { width: 10em; }
+.kp-mem-facts-source .dtable th:nth-child(1) { width: 30%; }
+.kp-mem-facts-source .dtable th:nth-child(3) { width: 10em; }
+
+.kp-mem-facts .dtable td button {
+  white-space: nowrap;
+}
+
+.kp-mem-id {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
 }

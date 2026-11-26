@@ -830,6 +830,63 @@ describe('workspaces/work', () => {
     expect(container.textContent).not.toContain('처리가 필요한 항목이 없습니다.')
   })
 
+  it('Inbox 24h Decisions opens newest first and sorts its 시각 column by the time, not by the words shown', async () => {
+    const nowUnix = Math.floor(Date.now() / 1000)
+    // Shown as "3분 전", "12분 전" and "2시간 전". Sorted as words they come
+    // out "12분 전", "2시간 전", "3분 전": neither order of time.
+    const decided: readonly { id: string; resolvedAt: number }[] = [
+      { id: 'res-new', resolvedAt: nowUnix - (3 * 60 + 5) },
+      { id: 'res-mid', resolvedAt: nowUnix - (12 * 60 + 5) },
+      { id: 'res-old', resolvedAt: nowUnix - (2 * 3600 + 30) },
+    ]
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) return jsonResponse({ pending: [] })
+      if (url.startsWith('/api/v1/keepers/asks')) return jsonResponse({ asks: [] })
+      if (url.startsWith('/api/v1/dashboard/planning')) return jsonResponse({ goals: [] })
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return jsonResponse({
+          approval_queue_state: { state: 'ready' },
+          approval_queue: [],
+          recent_resolved_state: { state: 'ready' },
+          // The server sends the newest decision first.
+          recent_resolved: decided.map((row) => ({
+            id: row.id,
+            keeper_name: 'fixture-keeper',
+            tool_name: `tool-of-${row.id}`,
+            decision_kind: 'approve',
+            decision_source: 'human_operator',
+            decision_reason: null,
+            actor: 'op-1',
+            resolved_at: row.resolvedAt,
+          })),
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    render(
+      html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi()
+    const chip = [...container.querySelectorAll<HTMLButtonElement>('.wk-chip')]
+      .find((element) => element.textContent?.trim().startsWith('24h Decisions'))!
+    chip.click()
+    await flushUi()
+
+    const timeHeader = () => [...container.querySelectorAll<HTMLElement>('th')]
+      .find((element) => element.textContent?.includes('시각'))!
+    const shownTimes = () => [...container.querySelectorAll('tbody tr')]
+      .map((row) => row.querySelector('td')?.textContent?.trim())
+    expect(shownTimes()).toEqual(['3분 전', '12분 전', '2시간 전'])
+    expect(timeHeader().getAttribute('aria-sort')).toBe('descending')
+
+    timeHeader().querySelector<HTMLButtonElement>('button')!.click()
+    await flushUi()
+    expect(timeHeader().getAttribute('aria-sort')).toBe('ascending')
+    expect(shownTimes()).toEqual(['2시간 전', '12분 전', '3분 전'])
+  })
+
   it('Unified Inbox wraps decisions in TargetLockedAction, drops earlier-epoch evidence, and allows clearing Keeper Ask drafts', async () => {
     const postCalls: { url: string; body: unknown }[] = []
     let waitForNewEpoch = false

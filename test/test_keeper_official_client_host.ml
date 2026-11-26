@@ -730,6 +730,95 @@ let test_image_result_reaches_a_model_that_accepts_images () =
     check (option string) "the receipt is untouched" (Some "screenshot receipt") !handoff)
 ;;
 
+let png_pixels =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+let test_image_result_stores_an_artifact_handle_for_a_text_only_model () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let base_path = Filename.temp_dir "official-image-store-" "" in
+    Fun.protect
+      ~finally:(fun () ->
+        let rec rm path =
+          match Unix.lstat path with
+          | { Unix.st_kind = Unix.S_DIR; _ } ->
+            Sys.readdir path
+            |> Array.iter (fun name -> rm (Filename.concat path name));
+            Unix.rmdir path
+          | _ -> Sys.remove path
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+        in
+        rm base_path)
+      (fun () ->
+        let handoff = ref None in
+        let tool, _terminal_error = one_dynamic_tool
+          ~accepts_image_input:false
+          ~base_path
+          ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+          ~active
+          (image_result ~receipt:"screenshot receipt" ~media_type:"image/png" ~data:png_pixels)
+        in
+        let result = tool.call ~call_id:"vision-stored" (`Assoc []) in
+        check bool "a stored image keeps the applied tool effect a success" true result.success;
+        check (option string) "the producer receipt is handed off untouched"
+          (Some "screenshot receipt") !handoff;
+        match result.content_blocks with
+        | Some [ Llm_provider.Types.Text placeholder ] ->
+          let prefix = "[image artifact:" in
+          check bool "the placeholder names an artifact handle"
+            (String.length placeholder > String.length prefix
+             && String.sub placeholder 0 (String.length prefix) = prefix)
+            true;
+          let start = String.length prefix in
+          let stop =
+            match String.index_from_opt placeholder start ' ' with
+            | Some stop -> stop
+            | None -> fail "the placeholder has no handle terminator"
+          in
+          let handle = String.sub placeholder start (stop - start) in
+          check int "the artifact handle is 64 characters" 64 (String.length handle);
+          let dir =
+            Filename.concat
+              (Keeper_vision_tool.vision_keepers_dir ~base_path ())
+              ("keeper-raw-authority" ^ ".vision")
+          in
+          (match
+             Keeper_vision_tool.load_artifact ~dir
+               (Multimodal.Vision_artifact_store.of_string handle)
+           with
+           | Error error ->
+             fail
+               ("the stored artifact does not load: "
+                ^ Multimodal.Vision_artifact_store.load_error_to_string error)
+           | Ok bytes ->
+             check string "the stored pixels are the delivered image"
+               (Base64.decode_exn png_pixels) bytes)
+        | _ -> fail "the image block was not replaced by an artifact placeholder"))
+;;
+
+let test_a_url_image_result_is_still_refused_for_a_text_only_model () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let handoff = ref None in
+    let tool, _terminal_error = one_dynamic_tool
+      ~accepts_image_input:false
+      ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+      ~active
+      (fun _ ->
+        Ok { Agent_core.Types.content = "url receipt"
+           ; content_blocks =
+               Some [ Llm_provider.Types.Image
+                        { media_type = "image/png"
+                        ; source = Llm_provider.Types.Url "https://fixture.invalid/x.png" } ]
+           ; _meta = None })
+    in
+    let result = tool.call ~call_id:"vision-url" (`Assoc []) in
+    check bool "a url image a text-only model cannot read is not a success" false result.success;
+    check (option string) "the refusal names the cause and keeps the receipt"
+      (Some
+         ("official-client tool result cannot deliver image content to a runtime \
+           whose model does not accept image input\nurl receipt"))
+      !handoff)
+;;
+
 let test_dispatched_image_capability_survives_runtime_replacement () =
   List.iter (fun enabled -> with_active_raw_trace (fun ~path:_ ~active ->
     let saved = Runtime.For_testing.snapshot () in
@@ -4290,6 +4379,10 @@ let () =
             test_image_result_is_refused_when_the_model_takes_no_image
         ; test_case "image result reaches a model that accepts images" `Quick
             test_image_result_reaches_a_model_that_accepts_images
+        ; test_case "image result stores an artifact handle for a text-only model" `Quick
+            test_image_result_stores_an_artifact_handle_for_a_text_only_model
+        ; test_case "a url image result is still refused for a text-only model" `Quick
+            test_a_url_image_result_is_still_refused_for_a_text_only_model
         ; test_case "dispatched image capability survives same-ID runtime replacement" `Quick
             test_dispatched_image_capability_survives_runtime_replacement
         ; test_case "codex tool-result image media type checked before settling" `Quick

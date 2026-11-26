@@ -384,6 +384,71 @@ let evict_message ?base_path ~media_store ~mode ~delegate ~keeper_name (message 
   else message
 ;;
 
+(* Third ingestion site (masc Board p-67dd816b): an official-client tool
+   result whose answering model cannot take images. Inline [Base64] pixels are
+   stored in the per-Keeper Vision Artifact Store and replaced by the same
+   unread placeholder the checkpoint write uses, so the model receives a
+   64-hex [artifact] handle and [keeper_analyze_image] reads the pixels
+   instead of the whole result failing delivery after the tool's effect has
+   already applied. Url and file-id carriers pass through unchanged — the
+   artifact-only analyze_image tool cannot fetch them, so the caller's
+   capability gate still refuses those fail-closed. Store failures surface the
+   visible placeholder rather than re-admitting pixels, and both outcomes
+   count in the same eviction metrics as the other two sites. *)
+let evict_tool_result_images ?base_path ~keeper_name blocks =
+  List.map
+    (fun (block : Llm_provider.Types.content_block) ->
+       match block with
+       | Llm_provider.Types.Image { media_type; source = Llm_provider.Types.Base64 data } ->
+         let refused reason =
+           Llm_provider.Types.Text (image_store_failed_placeholder ~reason)
+         in
+         (match Base64.decode data with
+          | Error _ ->
+            record_error_eviction ?base_path ~keeper_name ~mode:Store_only
+              ~reason:Media_unavailable ();
+            refused "image bytes unavailable"
+          | Ok bytes ->
+            (match Keeper_vision_tool.validate_image_size bytes with
+             | Error _ ->
+               record_error_eviction ?base_path ~keeper_name ~mode:Store_only
+                 ~reason:Image_too_large ();
+               refused "image too large"
+             | Ok () ->
+               (match Keeper_vision_tool.validate_media_type media_type with
+                | Error _ ->
+                  record_error_eviction ?base_path ~keeper_name ~mode:Store_only
+                    ~reason:Invalid_media_type ();
+                  refused "unsupported image media type"
+                | Ok media_type ->
+                  (match Keeper_vision_tool.store_kept ?base_path ~keeper_name bytes with
+                   | Error _ ->
+                     record_error_eviction ?base_path ~keeper_name ~mode:Store_only
+                       ~reason:Store_failed ();
+                     refused "artifact store failed"
+                   | Ok handle ->
+                     record_ok_eviction ?base_path ~keeper_name ~mode:Store_only
+                       ~reason:Stored ();
+                     Llm_provider.Types.Text
+                       (image_unread_placeholder ~handle ~media_type ~reason:"not read")))))
+       (* Url and file-id carriers are references, not payloads: they pass
+          through unchanged and the caller's capability gate refuses them
+          fail-closed (the artifact-only analyze_image tool cannot fetch
+          them). *)
+       | Llm_provider.Types.Image { source = Llm_provider.Types.Url _; _ } -> block
+       | Llm_provider.Types.Image { source = Llm_provider.Types.File_id _; _ } -> block
+       | ( Llm_provider.Types.Text _
+         | Llm_provider.Types.Thinking _
+         | Llm_provider.Types.ReasoningDetails _
+         | Llm_provider.Types.RedactedThinking _
+         | Llm_provider.Types.ToolUse _
+         | Llm_provider.Types.ToolReference _
+         | Llm_provider.Types.ToolResult _
+         | Llm_provider.Types.Document _
+         | Llm_provider.Types.Audio _ ) -> block)
+    blocks
+;;
+
 type image_projection =
   { blocks : Agent_core.Types.content_block list
   ; delegated_images : int

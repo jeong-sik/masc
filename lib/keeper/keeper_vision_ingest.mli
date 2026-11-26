@@ -2,7 +2,7 @@
 
     Replaces an [Agent_core.Types.Image] content block with a text placeholder
     whose handle keys the raw bytes in the per-keeper
-    {!Multimodal.Vision_artifact_store}. Enforced at BOTH ingestion entry sites
+    {!Multimodal.Vision_artifact_store}. Enforced at all THREE ingestion entry sites
     for lanes that cannot carry inline images:
 
     - Site 1 (fresh input, [Eager]): the turn caller validates and stores every
@@ -11,6 +11,10 @@
     - Site 2 (checkpoint write, [Store_only]): the persistence boundary evicts
       with a handle-only placeholder (no provider call on the turn fiber); also
       migrates images already persisted in pre-existing checkpoints.
+    - Site 3 (tool result delivery, [Store_only]): an official-client result
+      bound for a runtime whose model cannot take images keeps its evidence by
+      storing every inline [Base64] image under a handle and delivering the
+      unread placeholder instead of failing delivery.
 
     Gated by {!delegates_media} on the assigned lane, not by a stored setting:
     a lane with a candidate that takes provider content blocks and declares
@@ -75,6 +79,22 @@ val evict_message
 (** Site 2. Same transform applied to a message's content blocks at the
     checkpoint write boundary. Use [Store_only] here — checkpoint writes must
     not block the turn fiber on a provider call. *)
+
+val evict_tool_result_images
+  :  ?base_path:string
+  -> keeper_name:string
+  -> Llm_provider.Types.content_block list
+  -> Llm_provider.Types.content_block list
+(** Site 3 (official-client tool result, [Store_only]). A result bound for a
+    runtime whose model cannot take images keeps its evidence: every inline
+    [Base64] image is stored in the per-Keeper {!Multimodal.Vision_artifact_store}
+    and the block is replaced by the same unread placeholder the checkpoint
+    write emits, so the model receives a 64-hex [artifact] handle that
+    [keeper_analyze_image] reads. Url and file-id carriers pass through
+    unchanged — the artifact-only tool cannot fetch them, so the caller's
+    capability gate still refuses those fail-closed. Store failures surface
+    the store-failed placeholder instead of re-admitting pixels, and both
+    outcomes count in the same eviction metrics as the other two sites. *)
 
 type image_projection =
   { blocks : Agent_core.Types.content_block list

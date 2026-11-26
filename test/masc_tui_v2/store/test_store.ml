@@ -29948,7 +29948,88 @@ let () =
                  | Wire_config.Target_runtime -> true
                  | Wire_config.Target_keeper _
                  | Wire_config.Target_keeper_create ->
-                     false));
+                     false);
+              let m_sb_filtered =
+                {
+                  m_sb with
+                  fleet = { m_sb.fleet with filter_query = "unrelated-filter" };
+                }
+              in
+              let m_o, _ = step_k m_sb_filtered (char_key "o") in
+              Alcotest.(check bool)
+                "[o] on Infra_sandboxes uses jump_to_keeper (clears conflicting filter, syncs drafts, opens Work & Sandbox)"
+                true
+                (Nav.equal_workspace m_o.nav.workspace Nav.Keepers
+                 && Nav.equal_keeper_tab m_o.fleet.keeper_dive_tab
+                      Nav.Keeper_work_sandbox
+                 && String.equal m_o.fleet.filter_query ""
+                 && Option.equal String.equal m_o.fleet.selected_keeper
+                      (Some "alpha")
+                 && Option.equal String.equal m_o.drafts.active_keeper
+                      (Some "alpha"));
+              let m_kws =
+                {
+                  m_o with
+                  config = Config_store.set_search_query "old" m_o.config;
+                }
+              in
+              let m_kws_e, _ = step_k m_kws (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on Keepers > Work & Sandbox opens Settings_sandbox_ssh for selected keeper"
+                true
+                (Option.equal Nav.equal_overlay m_kws_e.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_sandbox_ssh))
+                 && String.equal m_kws_e.config.search_query ""
+                 &&
+                 match m_kws_e.config.target with
+                 | Wire_config.Target_keeper "alpha" -> true
+                 | Wire_config.Target_keeper _
+                 | Wire_config.Target_runtime
+                 | Wire_config.Target_keeper_create ->
+                     false);
+              let m_rt_q =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+                  runtime =
+                    Runtime_store.set_tab Nav.Runtime_quotas_credits base.runtime;
+                  config = Config_store.set_search_query "stale" base.config;
+                }
+              in
+              let m_rt_qe, _ = step_k m_rt_q (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on Runtime > Quotas (no active login) opens Settings_providers_models"
+                true
+                (Option.equal Nav.equal_overlay m_rt_qe.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_providers_models))
+                 && String.equal m_rt_qe.config.search_query "");
+              let m_rt_c =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+                  runtime =
+                    Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
+                }
+              in
+              let m_rt_ce, _ = step_k m_rt_c (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on Runtime > Connectors opens Settings_voice_integrations"
+                true
+                (Option.equal Nav.equal_overlay m_rt_ce.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_voice_integrations)));
+              let m_wk_c =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Work; pane_index = 0 };
+                  work = Work_store.set_tab Nav.Work_candle_scorecard base.work;
+                }
+              in
+              let m_wk_ce, _ = step_k m_wk_c (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on Work > Candle Scorecard opens Settings_board_memory_candle"
+                true
+                (Option.equal Nav.equal_overlay m_wk_ce.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_board_memory_candle))));
           Alcotest.test_case
             "Terminal_focus blur dims visual focus while preserving logical focus & restores cleanly"
             `Quick (fun () ->

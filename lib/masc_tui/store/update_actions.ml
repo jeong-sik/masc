@@ -6623,7 +6623,12 @@ and execute_action ~now (m : Model.t) action =
                       match Infra_store.selected_repository m.infra with
                       | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
                       | None -> open_url_or_notice None)
-                  | Nav.Infra_sandboxes
+                  | Nav.Infra_sandboxes -> (
+                      match Infra_store.selected_sandbox_keeper m.infra with
+                      | Some name ->
+                          Update_nav.jump_to_keeper ~preserve_return:true
+                            ~tab:Nav.Keeper_work_sandbox m name
+                      | None -> (m, []))
                   | Nav.Infra_code
                   | Nav.Infra_activity_logs ->
                       (m, []))
@@ -8332,6 +8337,27 @@ and execute_action ~now (m : Model.t) action =
                   Nav.equal_workspace m.nav.workspace Nav.Keepers
                   && (m.nav.pane_index >= 1 || m.nav.zoomed)
                   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                       Nav.Keeper_work_sandbox
+                then (
+                  match Model.selected_keeper_name m with
+                  | Some name
+                    when not
+                           (Board_recovery.shown ~keeper:name
+                              m.knowledge.board_recovery) ->
+                      let config =
+                        m.config
+                        |> Config_store.set_search_query ""
+                        |> Config_store.set_target
+                             (Wire_config.Target_keeper name)
+                        |> Config_store.set_tab Nav.Settings_sandbox_ssh
+                      in
+                      Update_nav.open_overlay { m with config }
+                        (Nav.Settings Nav.Settings_sandbox_ssh)
+                  | Some _ | None -> (m, []))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Keepers
+                  && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                  && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_config
                 then (
                   match Model.selected_keeper_name m with
@@ -8519,12 +8545,40 @@ and execute_action ~now (m : Model.t) action =
                       Update_nav.open_inline_modal m
                         (Nav.Setup_login_input_form { login_id })
                   | None ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:"진행 중인 CLI 로그인이 없습니다 ([l]로 시작)"
-                             ~en:"No active CLI login session (press [l] to start)")
-                          m
-                      , [] ))
+                      let config =
+                        m.config
+                        |> Config_store.set_search_query ""
+                        |> Config_store.set_target Wire_config.Target_runtime
+                        |> Config_store.set_tab Nav.Settings_providers_models
+                      in
+                      Update_nav.open_overlay { m with config }
+                        (Nav.Settings Nav.Settings_providers_models))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_connectors
+                then
+                  let config =
+                    m.config
+                    |> Config_store.set_search_query ""
+                    |> Config_store.set_target Wire_config.Target_runtime
+                    |> Config_store.set_tab Nav.Settings_voice_integrations
+                  in
+                  Update_nav.open_overlay { m with config }
+                    (Nav.Settings Nav.Settings_voice_integrations)
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Work
+                  && Nav.equal_work_tab m.work.active_tab
+                       Nav.Work_candle_scorecard
+                then
+                  let config =
+                    m.config
+                    |> Config_store.set_search_query ""
+                    |> Config_store.set_target Wire_config.Target_runtime
+                    |> Config_store.set_tab Nav.Settings_board_memory_candle
+                  in
+                  Update_nav.open_overlay { m with config }
+                    (Nav.Settings Nav.Settings_board_memory_candle)
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Infra
                   && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_sandboxes

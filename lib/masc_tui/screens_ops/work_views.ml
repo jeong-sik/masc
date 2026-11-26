@@ -5510,6 +5510,9 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                  (Ops_common.say model ~ko:"일간 · 7일 조직 · 키퍼 성과"
                     ~en:"Daily / 7d Achievement Board"))
             with
+            hotkey =
+              Some
+                (Ops_common.say model ~ko:"[e] 캔들 설정" ~en:"[e] Candle Settings");
             footer_hint =
               (if Rect.is_empty kpi_rect then
                  Some
@@ -5632,6 +5635,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               ~keeper_costs_24h:costs_assoc unfiltered_fleet
           in
           let grp_cnt = List.length groups in
+          if !y > content.y && !y + 2 < bot then incr y;
           if !y < bot then begin
             let lb_label =
               if grp_cnt > 0 then
@@ -5685,14 +5689,16 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   Printf.sprintf "%dt · %d/%d" done_n grp.running_count
                     (List.length grp.keepers)
                 in
+                let row_x = if content.w >= 32 then content.x + 2 else content.x in
+                let row_w = Rect.right content - row_x in
                 let meta_w = Grapheme.display_width meta in
                 let bar_w =
-                  if content.w >= 48 && content.w - meta_w - 11 >= 10 then 8
+                  if row_w >= 46 && row_w - meta_w - 11 >= 10 then 8
                   else 0
                 in
                 let name_w =
                   Int.max 0
-                    (content.w - meta_w - (if bar_w > 0 then bar_w + 3 else 2))
+                    (row_w - meta_w - (if bar_w > 0 then bar_w + 3 else 2))
                 in
                 let name_st =
                   if idx = 0 then Typography.anchor ~bg:r_bg theme
@@ -5700,7 +5706,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 in
                 if name_w > 0 then
                   ignore
-                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                    (Ops_common.put_line ~clip:content grid ~x:row_x ~y:!y
                        ~max_w:name_w ~style:name_st rank_name);
                 if bar_w > 0 then begin
                   let score = Int.max done_n grp.running_count in
@@ -5710,7 +5716,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                          (Float.of_int score /. Float.of_int max_g_score))
                   in
                   let bx = Rect.right content - meta_w - bar_w - 2 in
-                  if bx >= content.x + name_w + 1 then
+                  if bx >= row_x + name_w + 1 then
                     ignore
                       (Chart.draw_ratio_bar_run ~clip:content grid ~x:bx ~y:!y
                          ~width:bar_w ~theme ~bg:r_bg ~unicode:true
@@ -5718,7 +5724,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 end;
                 let meta_x =
                   Int.max
-                    (if name_w > 0 then content.x + name_w + 1 else content.x)
+                    (if name_w > 0 then row_x + name_w + 1 else row_x)
                     (Rect.right content - meta_w)
                 in
                 let avail_meta_w = Int.max 0 (Rect.right content - meta_x) in
@@ -5732,6 +5738,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               end)
             (List.take 5 sorted_groups);
           (* 3. Top Contributing Keepers *)
+          if !y + 2 < bot then incr y;
           if !y < bot then begin
             Card.draw_hairline ~pad_x:0 ~bg:r_bg
               ~label:
@@ -5785,24 +5792,26 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 in
                 let left_s = Printf.sprintf "%d. %s" (idx + 1) k.name in
                 let stats_s = Printf.sprintf "%dt · %d turns" d_n t_n in
+                let row_x = if content.w >= 32 then content.x + 2 else content.x in
+                let row_w = Rect.right content - row_x in
                 let c_w = Grapheme.display_width c_str in
                 let st_w = Grapheme.display_width stats_s in
-                let name_max = Int.max 8 (content.w - st_w - c_w - 2) in
+                let name_max = Int.max 8 (row_w - st_w - c_w - 2) in
                 let name_st =
                   if idx = 0 then Typography.anchor ~bg:r_bg theme
                   else Typography.primary ~bg:r_bg theme
                 in
                 ignore
-                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                  (Ops_common.put_line ~clip:content grid ~x:row_x ~y:!y
                      ~max_w:name_max ~style:name_st left_s);
                 let rx = ref (Rect.right content) in
-                if c_w > 0 && !rx - c_w > content.x + 10 then begin
+                if c_w > 0 && !rx - c_w > row_x + 10 then begin
                   rx := !rx - c_w;
                   ignore
                     (Ops_common.put_line ~clip:content grid ~x:!rx ~y:!y
                        ~max_w:c_w ~style:(Typography.ai ~bg:r_bg theme) c_str)
                 end;
-                if !rx - st_w > content.x + 10 then begin
+                if !rx - st_w > row_x + 10 then begin
                   rx := !rx - st_w;
                   ignore
                     (Ops_common.put_line ~clip:content grid ~x:!rx ~y:!y

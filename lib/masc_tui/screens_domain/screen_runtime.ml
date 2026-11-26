@@ -1376,7 +1376,15 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[u] 미보고" ~en:"[u] Unreported"))
+         ~hotkey:
+           (Say.resolve lang
+              (match Runtime_store.active_setup_login_id rt with
+              | Some _ ->
+                  Say.make ~ko:"[u] 미보고 · [e] 로그인 입력"
+                    ~en:"[u] Unreported · [e] Login Input"
+              | None ->
+                  Say.make ~ko:"[u] 미보고 · [e] 설정"
+                    ~en:"[u] Unreported · [e] Settings"))
          ~footer_hint:
            (Say.resolve lang
               (Say.make ~ko:"$0 구독 ≠ $0 소진 ≠ ? 미보고"
@@ -3499,6 +3507,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~show_title:false g_spec);
             incr y
           end;
+          if body_area.h >= 6 && !y < bot then incr y;
           if !y < bot then begin
             H.draw_divider ~grid ~rect:body_area ~y:!y ~theme
               ~label:(Say.resolve lang (Say.make ~ko:"슬롯 프로브" ~en:"Slot Probes"))
@@ -3578,9 +3587,11 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                 in
                 let right_s = Printf.sprintf "%s · %s" transport_s st_val in
                 let rw = Grapheme.display_width right_s in
-                let lw = Int.max 8 (body_area.w - rw - 2) in
+                let sx = if body_area.w >= 28 then body_area.x + 2 else body_area.x in
+                let sw = Rect.right body_area - sx in
+                let lw = Int.max 8 (sw - rw - 2) in
                 ignore
-                  (H.put_clipped ~grid ~clip:body_area ~x:body_area.x ~y:!y
+                  (H.put_clipped ~grid ~clip:body_area ~x:sx ~y:!y
                      ~max_w:lw ~style:(H.text_style ~theme ())
                      (Printf.sprintf "%d %s %s" (idx + 1) (Glyph.to_utf8 st_g) lbl));
                 ignore
@@ -4810,6 +4821,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               | Some g, None when !y < bot -> put_kv "Volume GC" g
               | None, Some c when !y < bot -> put_kv "Cleanup" c
               | _ -> ());
+             if lc.h >= 8 && !y < bot then incr y;
              if !y < bot then begin
                H.draw_divider ~grid ~rect:lc ~y:!y ~theme
                  ~label:(Printf.sprintf "Effective Tools (%d)" (List.length tools))
@@ -4821,13 +4833,15 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  (Int.max 0 (List.length tools - Int.max 1 (bot - !y)))
                  (Int.max 0 rt.scroll_offset)
              in
+             let tx = if lc.w >= 28 then lc.x + 2 else lc.x in
+             let tw = Rect.right lc - tx in
              List.iter
                (fun (et : Wire_runtime.effective_keeper_tool_entry) ->
                  if !y < bot then begin
                    let ow = Grapheme.display_width et.origin in
                    ignore
-                     (H.put_clipped ~grid ~clip:lc ~x:lc.x ~y:!y
-                        ~max_w:(Int.max 8 (lc.w - ow - 2))
+                     (H.put_clipped ~grid ~clip:lc ~x:tx ~y:!y
+                        ~max_w:(Int.max 8 (tw - ow - 2))
                         ~style:(H.text_style ~theme ()) et.name);
                    ignore
                      (H.put_right ~grid ~clip:lc ~right_x:(Rect.right lc) ~y:!y
@@ -4889,6 +4903,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ("Shadowed: " ^ String.concat ", " (H.safe_take 4 sk.shadows)));
           incr y
         end;
+        if rc.h >= 8 && !y < bot then incr y;
         if !y < bot then begin
           H.draw_divider ~grid ~rect:rc ~y:!y ~theme
             ~label:(Say.resolve lang (Say.make ~ko:"스킬 목록" ~en:"Skill Surfaces"))
@@ -5116,18 +5131,21 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
             in
             let bg = Color.of_rgb theme.surface_1 in
             let st_primary = Typography.primary ~bg theme in
-            let st_accent = Typography.accent ~bg ~bold:true theme in
             List.iteri
               (fun idx line ->
                 if idx >= skip && idx - skip < lc.h then
-                  let style =
-                    if String.starts_with ~prefix:"──" line then st_accent
-                    else st_primary
-                  in
-                  ignore
-                    (Cell_grid.put_text ~clip:lc grid ~x:lc.x
-                       ~y:(lc.y + idx - skip) ~style
-                       (Grapheme.truncate_to_width ~max_width:lc.w line)))
+                  let py = lc.y + idx - skip in
+                  if String.starts_with ~prefix:"──" line then
+                    let lbl =
+                      String.sub line 6 (String.length line - 6) |> String.trim
+                    in
+                    Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:lc
+                      ~y:py ~theme
+                  else
+                    ignore
+                      (Cell_grid.put_text ~clip:lc grid ~x:lc.x ~y:py
+                         ~style:st_primary
+                         (Grapheme.truncate_to_width ~max_width:lc.w line)))
               lines
       end;
       let keeper_names =
@@ -5291,18 +5309,21 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         let bg = Color.of_rgb theme.surface_1 in
         let st_primary = Typography.primary ~bg theme in
-        let st_accent = Typography.accent ~bg ~bold:true theme in
         List.iteri
           (fun idx line ->
             if idx >= skip && idx - skip < rc.h then
-              let style =
-                if String.starts_with ~prefix:"──" line then st_accent
-                else st_primary
-              in
-              ignore
-                (Cell_grid.put_text ~clip:rc grid ~x:rc.x
-                   ~y:(rc.y + idx - skip) ~style
-                   (Grapheme.truncate_to_width ~max_width:rc.w line)))
+              let py = rc.y + idx - skip in
+              if String.starts_with ~prefix:"──" line then
+                let lbl =
+                  String.sub line 6 (String.length line - 6) |> String.trim
+                in
+                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
+                  ~y:py ~theme
+              else
+                ignore
+                  (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                     ~style:st_primary
+                     (Grapheme.truncate_to_width ~max_width:rc.w line)))
           all_lines
       end
   | Runtime_store.Tools_prompts_presets ->
@@ -5736,18 +5757,21 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         let bg = Color.of_rgb theme.surface_1 in
         let st_primary = Typography.primary ~bg theme in
-        let st_accent = Typography.accent ~bg ~bold:true theme in
         List.iteri
           (fun idx line ->
             if idx >= skip && idx - skip < rc.h then
-              let style =
-                if String.starts_with ~prefix:"──" line then st_accent
-                else st_primary
-              in
-              ignore
-                (Cell_grid.put_text ~clip:rc grid ~x:rc.x
-                   ~y:(rc.y + idx - skip) ~style
-                   (Grapheme.truncate_to_width ~max_width:rc.w line)))
+              let py = rc.y + idx - skip in
+              if String.starts_with ~prefix:"──" line then
+                let lbl =
+                  String.sub line 6 (String.length line - 6) |> String.trim
+                in
+                Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:rc
+                  ~y:py ~theme
+              else
+                ignore
+                  (Cell_grid.put_text ~clip:rc grid ~x:rc.x ~y:py
+                     ~style:st_primary
+                     (Grapheme.truncate_to_width ~max_width:rc.w line)))
           detail_lines
       end
 
@@ -5806,8 +5830,9 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ?subtitle:sel_conn_names_sub ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[n] 바인드 ([←→] 이름) · [U] 언바인드 · [r] 새로고침"
-                 ~en:"[n] Bind ([←→] names) · [U] Unbind · [r] Refresh"))
+              (Say.make
+                 ~ko:"[n] 바인드 ([←→] 이름) · [U] 언바인드 · [e] 설정 · [r] 새로고침"
+                 ~en:"[n] Bind ([←→] names) · [U] Unbind · [e] Settings · [r] Refresh"))
          (Say.resolve lang
             (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors")))
   in
@@ -7354,19 +7379,26 @@ let render_inspector
                      model.nav.inspector_scroll_offset)
               in
               let y = ref content.y and bot = Rect.bottom content in
+              let bg = Color.of_rgb theme.surface_1 in
               List.iter
                 (fun ln ->
                   if !y < bot then begin
-                    let st =
-                      if String.starts_with ~prefix:"──" ln then
-                        H.accent_style ~theme ~attrs:Attr.bold ()
-                      else if String.starts_with ~prefix:"  [DIAG]" ln then
-                        H.status_style ~theme Theme.Status_attention
-                      else H.text_style ~theme ()
-                    in
-                    ignore
-                      (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                         ~max_w:content.w ~style:st ln);
+                    if String.starts_with ~prefix:"──" ln then
+                      let lbl =
+                        String.sub ln 6 (String.length ln - 6) |> String.trim
+                      in
+                      Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                        ~rect:content ~y:!y ~theme
+                    else begin
+                      let st =
+                        if String.starts_with ~prefix:"  [DIAG]" ln then
+                          H.status_style ~theme Theme.Status_attention
+                        else H.text_style ~theme ()
+                      in
+                      ignore
+                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                           ~max_w:content.w ~style:st ln)
+                    end;
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)
@@ -7442,17 +7474,20 @@ let render_inspector
                      model.nav.inspector_scroll_offset)
               in
               let y = ref content.y and bot = Rect.bottom content in
+              let bg = Color.of_rgb theme.surface_1 in
               List.iter
                 (fun ln ->
                   if !y < bot then begin
-                    let st =
-                      if String.starts_with ~prefix:"──" ln then
-                        H.accent_style ~theme ~attrs:Attr.bold ()
-                      else H.text_style ~theme ()
-                    in
-                    ignore
-                      (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                         ~max_w:content.w ~style:st ln);
+                    if String.starts_with ~prefix:"──" ln then
+                      let lbl =
+                        String.sub ln 6 (String.length ln - 6) |> String.trim
+                      in
+                      Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                        ~rect:content ~y:!y ~theme
+                    else
+                      ignore
+                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                           ~max_w:content.w ~style:(H.text_style ~theme ()) ln);
                     incr y
                   end)
                 (Store_scroll.drop skip all_lines)

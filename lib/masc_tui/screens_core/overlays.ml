@@ -2738,12 +2738,10 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   if !y < bot then begin
                     let lbl =
                       Say.resolve lang
-                        (Say.make ~ko:"── 연관 로그 ──" ~en:"── Related Logs ──")
+                        (Say.make ~ko:"연관 로그" ~en:"Related Logs")
                     in
-                    ignore
-                      (Cell_grid.put_text ~clip:payload_r grid ~x:payload_r.x
-                         ~y:!y ~style:struct_st
-                         (Grapheme.truncate_to_width ~max_width:payload_r.w lbl));
+                    Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                      ~rect:payload_r ~y:!y ~theme;
                     incr y;
                     let log_area =
                       Rect.make ~x:payload_r.x ~y:!y ~w:payload_r.w

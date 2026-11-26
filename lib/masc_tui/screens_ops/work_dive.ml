@@ -224,9 +224,11 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           | Work_store.Verif_tab_tlc ->
               draw_tab_lines ~rect:rest tab_lines
           | Work_store.Verif_tab_evidence ->
+              let split_gap = if rest.h >= 10 then 1 else 0 in
               let chk_r, diff_r =
                 match
-                  Layout.split_v ~gap:0 rest [ Layout.Ratio 0.56; Layout.Flex 1 ]
+                  Layout.split_v ~gap:split_gap rest
+                    [ Layout.Ratio 0.56; Layout.Flex 1 ]
                 with
                 | [ a; b ] -> (a, b)
                 | _ -> (rest, Rect.empty)

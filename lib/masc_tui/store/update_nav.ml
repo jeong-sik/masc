@@ -9413,7 +9413,7 @@ let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
             Some (Wire_runtime.Keeper_surface_available s);
           _;
         } ->
-        max 0 (List.length s.tools + 8 - max 1 lc.h)
+        max 0 (List.length s.tools + 8 + (if lc.h >= 8 then 1 else 0) - max 1 lc.h)
     | Some
         {
           effective_keeper_surface =
@@ -9503,8 +9503,9 @@ let runtime_detail_max_scroll (m : Model.t) =
             in
             if Rect.is_empty body_area then 0
             else
-              (* gauge (1) + divider (1) = 2 rows before slot probes *)
-              let avail_slot_rows = max 1 (body_area.h - 2) in
+              (* gauge (1) + optional spacer (0|1) + divider (1) before slot probes *)
+              let spacer = if body_area.h >= 6 then 1 else 0 in
+              let avail_slot_rows = max 1 (body_area.h - 2 - spacer) in
               max 0 (List.length lane.runtime_ids - avail_slot_rows))
   | Nav.Runtime_tools_usage -> (
       match m.runtime.tools_subview with
@@ -9522,6 +9523,7 @@ let runtime_detail_max_scroll (m : Model.t) =
                   1
                   + (if sk.rejections <> [] then 1 else 0)
                   + (if sk.shadows <> [] then 1 else 0)
+                  + (if rc.h >= 8 then 1 else 0)
                   + 1
                 in
                 let vis = max 1 (rc.h - hdr_rows) in
@@ -9833,7 +9835,7 @@ let infra_detail_max_scroll (m : Model.t) =
                       ~redact_secrets:true e.details
                   in
                   let total =
-                    List.length msg_lines + 1 + List.length tree_lines
+                    List.length msg_lines + 2 + List.length tree_lines
                   in
                   max 0 (total - max 1 content.h)
               | Infra_store.Entry_event ev ->
@@ -9851,7 +9853,7 @@ let infra_detail_max_scroll (m : Model.t) =
                       ev.summary
                   in
                   let total =
-                    List.length sum_lines + 3 + List.length detail_lines
+                    List.length sum_lines + 4 + List.length detail_lines
                   in
                   max 0 (total - max 1 content.h)))
 
@@ -10004,11 +10006,12 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
                (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
                (Knowledge_store.filtered_posts m.knowledge))
         in
-        (* Fixed rows besides the cadence block: the Board recovery hint line and
-           the three section hairlines (tasks, schedules, posts). *)
+        (* Fixed rows besides the cadence block: the Board recovery hint line,
+           three section hairlines (tasks, schedules, posts), and three blank
+           spacers separating them. *)
         let total_rows =
           Keeper_cadence.block_rows (Fleet_store.turn_pulse m.fleet name)
-          + 4 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts
+          + 7 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts
         in
         max 0 (total_rows - max 1 left_h)
     | Nav.Keeper_chat
@@ -10223,9 +10226,10 @@ let dive_max_scroll (m : Model.t) active =
               | Work_store.Verif_tab_tlc ->
                   tab_max
               | Work_store.Verif_tab_evidence ->
+                  let split_gap = if rest.h >= 10 then 1 else 0 in
                   let chk_r, diff_r =
                     match
-                      Masc_tui_ui.Layout.split_v ~gap:0 rest
+                      Masc_tui_ui.Layout.split_v ~gap:split_gap rest
                         [ Masc_tui_ui.Layout.Ratio 0.56; Masc_tui_ui.Layout.Flex 1 ]
                     with
                     | [ a; b ] -> (a, b)
@@ -13535,6 +13539,7 @@ let apply_move (m : Model.t) dir =
                                           dash.keeper_cleanup_summary
                                    then 1
                                    else 0)
+                                + (if lc.h >= 8 then 1 else 0)
                                 + 1
                               in
                               let vis = max 1 (lc.h - hdr_rows) in

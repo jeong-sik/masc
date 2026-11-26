@@ -2318,8 +2318,8 @@ let render_sandbox_summary grid ~(rect : Rect.t) ~(theme : Theme.t)
     Card.draw_hairline ~pad_x:0 ~bg
       ~label:
         (Ops_common.say model
-           ~ko:"샌드박스 · [p] 프로브 · [o] Infra"
-           ~en:"Sandbox · [p] Probe · [o] Infra")
+           ~ko:"샌드박스 · [e] 설정 · [p] 프로브 · [o] Infra"
+           ~en:"Sandbox · [e] Settings · [p] Probe · [o] Infra")
       grid ~rect ~y:!y ~theme;
     incr y;
     let read = Infra_store.keeper_sandbox_read_for ~keeper:name model.infra in
@@ -2604,7 +2604,9 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     push_line ~fg:theme.text_primary ~attrs:Attr.none
       (Printf.sprintf "%s · %s" (say ~ko:"다음 예약" ~en:"Next due") next_due_text);
+    let push_blank () = rows_acc := `Blank :: !rows_acc in
     let total_tasks = List.length keeper_tasks in
+    push_blank ();
     push_hairline
       (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"할당 작업" ~en:"Assigned Tasks")
@@ -2627,6 +2629,7 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Printf.sprintf "%s %s %s %s" (Glyph.to_utf8 g) tk.id tk.title gl))
         keeper_tasks;
     let total_scheds = List.length keeper_scheds in
+    push_blank ();
     push_hairline
       (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"예약 일정" ~en:"Schedules")
@@ -2656,6 +2659,7 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Printf.sprintf "%s%s · %s%s" sc.recurrence_summary due wake_txt summary))
         keeper_scheds;
     let total_posts = List.length keeper_posts in
+    push_blank ();
     push_hairline
       (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"최근 보드 글" ~en:"Recent Board Posts")
@@ -2681,8 +2685,12 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let skip = Int.min max_skip (Int.max 0 model.nav.keeper_detail_scroll_offset) in
     let y = ref l_content.y in
     let bottom = Rect.bottom l_content in
+    let body_x = if l_content.w >= 28 then l_content.x + 2 else l_content.x in
+    let body_w = Int.max 0 (Rect.right l_content - body_x) in
     List.iter
       (function
+        | `Blank ->
+            if !y < bottom then incr y
         | `Hairline label ->
             if !y < bottom then begin
               Card.draw_hairline ~pad_x:0 ~bg ~label grid ~rect:l_content ~y:!y
@@ -2693,8 +2701,8 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             if !y < bottom then begin
               let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
               ignore
-                (Ops_common.put_line ~clip:l_content grid ~x:l_content.x ~y:!y
-                   ~max_w:l_content.w ~style:st line);
+                (Ops_common.put_line ~clip:l_content grid ~x:body_x ~y:!y
+                   ~max_w:body_w ~style:st line);
               incr y
             end)
       (Store_scroll.drop skip rows);
@@ -4059,8 +4067,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
           Some
             (Ops_common.say model
-               ~ko:"[v] 격리 복구 · [z] 확대"
-               ~en:"[v] Quarantine · [z] Zoom")
+               ~ko:"[e] 샌드박스 설정 · [v] 격리 복구 · [z] 확대"
+               ~en:"[e] Sandbox Cfg · [v] Quarantine · [z] Zoom")
         else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
           Some
             (Ops_common.say model
@@ -4102,8 +4110,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
       else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
         Some
           (Ops_common.say model
-             ~ko:"[v] 격리 복구 · [Esc] 목록"
-             ~en:"[v] Quarantine · [Esc] Fleet")
+             ~ko:"[e] 샌드박스 설정 · [v] 격리 복구 · [Esc] 목록"
+             ~en:"[e] Sandbox Cfg · [v] Quarantine · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model

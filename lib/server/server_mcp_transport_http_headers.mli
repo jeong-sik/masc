@@ -189,12 +189,11 @@ val sse_comment_with_retry : comment:string -> string
     from {!sse_retry_ms} instead of an inlined literal. *)
 
 val sse_ping_interval_s : float
-(** Pinned at [30.0] seconds.  Ping fibers use this interval to
-    write the SSE comment frame [": ping\n\n"] so middleboxes do
-    not idle out the connection.  The SSE routes that send a keepalive
-    take their interval from here, apart from the execute-output stream
-    ({!Server_routes_http_routes_dashboard}), which keeps a shorter
-    heartbeat of its own. *)
+(** Pinned at [30.0] seconds.  An SSE response that wrote no frame for
+    this long writes {!Server_sse_response.keepalive_frame}
+    ({!Server_sse_response.respond}), so middleboxes do not idle out the
+    connection and an HTTP/1.1 response learns that its client left.
+    Every SSE route keeps alive this way. *)
 
 val sse_stalled_after_s : float
 (** Three {!sse_ping_interval_s}. The HTTP/2 listeners give each stream's

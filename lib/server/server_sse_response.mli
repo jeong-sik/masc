@@ -40,20 +40,52 @@ type outcome =
       runs, is cancelled with it, and a [send] from any other fiber ends
       [Closed]. *)
 
+type idle =
+  | Keepalive  (** {!keepalive_frame} is written. *)
+  | Quiet
+  (** Nothing is written. The response asks again one interval later, unless
+      a frame was written by then. *)
+  | Finish  (** Nothing is written and the response is closed. *)
+(** What a response does when no frame was written for
+    {!Server_mcp_transport_http_headers.sse_ping_interval_s}. *)
+
+val keepalive_frame : string
+(** The SSE comment written for [Keepalive]. A reader that sees it knows a
+    quiet stream from a dead connection, and the SSE decoder yields no event
+    for it. *)
+
 val respond :
+  sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   stalled_after_s:float ->
   ?flush_headers_immediately:bool ->
+  ?idle:(unit -> idle) ->
   Http_reqd.t ->
   Httpun.Response.t ->
   t
-(** [respond ~clock ~stalled_after_s reqd response] starts the streaming
+(** [respond ~sw ~clock ~stalled_after_s reqd response] starts the streaming
     response. [stalled_after_s] by [clock] bounds an HTTP/1.1 frame; an
     HTTP/2 response takes its stream's bound instead. Production routes pass
     {!Server_mcp_transport_http_headers.sse_stalled_after_s}, the bound the
     HTTP/2 listeners give their streams.
     [flush_headers_immediately] is httpun's: the head is written before the
-    first frame, for a stream whose first frame can wait. *)
+    first frame, for a stream whose first frame can wait.
+
+    The response keeps itself alive until it is closed. Once no frame was
+    written for {!Server_mcp_transport_http_headers.sse_ping_interval_s} by
+    [clock], it asks [idle] and does what that answers; without [idle] it
+    writes {!keepalive_frame}. The time counts from the last frame any fiber
+    wrote, so a stream that carries frames is not asked. The keepalive is
+    what tells an HTTP/1.1 response that its quiet client left: a keepalive
+    that is not taken closes the response like any [send].
+
+    The keepalive runs in a daemon fiber of [sw], which ends with the
+    response: at {!close}, at a [send] that did not end [Written], and on
+    HTTP/2 when the stream ends under the response. [sw] is a switch of the
+    domain that calls [respond] and lives at least as long as the response
+    is used. When [sw] ends first the keepalive ends with it. When [idle]
+    raises, the response is cut as a producer that raises is ({!serve}), and
+    [sw] does not fail. *)
 
 val send : t -> string -> outcome
 (** [send t frame] writes the whole [frame] and waits for it. Several fibers

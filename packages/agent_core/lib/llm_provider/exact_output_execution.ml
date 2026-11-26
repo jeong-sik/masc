@@ -228,6 +228,16 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
           (Provider_error provider_error)
       | Ok (response, responses_lifecycle) ->
         let raw_response = { raw_response with responses_lifecycle } in
+        (* Before normalization: the provider spent these tokens even when the
+           answer is then rejected. The provider label is the kind's name, as
+           [Provider_registry.provider_name_of_config] gives it elsewhere. *)
+        Complete_common.emit_token_usage_metrics
+          (Metrics.get_global ())
+          ~provider:
+            (Provider_config.string_of_provider_kind
+               (Exact_output_plan.provider_kind plan))
+          ~model_id:(Exact_output_plan.binding_observation plan).Exact_output_plan.model_id
+          response;
         (match Exact_output_plan.normalize plan response with
          | Error normalization_error ->
            error

@@ -332,6 +332,22 @@ let emit_tool_call_metrics (metrics : Metrics.t) ~provider ~model_id resp =
   | count -> metrics.on_tool_calls ~provider ~model_id ~count
 ;;
 
+let emit_token_usage_metrics
+      (metrics : Metrics.t)
+      ~provider
+      ~model_id
+      (resp : Types.api_response)
+  =
+  match resp.Types.usage with
+  | None -> ()
+  | Some (usage : Types.api_usage) ->
+    metrics.on_token_usage
+      ~provider
+      ~model_id
+      ~input_tokens:usage.Types.input_tokens
+      ~output_tokens:usage.Types.output_tokens
+;;
+
 (* The provider-kind sum currently contains only HTTP-backed transports. Keep
    this exhaustive boundary predicate until the transport type itself carries
    a non-HTTP variant; adding a provider kind then becomes a compiler-visible

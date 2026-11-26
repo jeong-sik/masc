@@ -389,14 +389,11 @@ let complete_prepared_sync
             ~provider:(Provider_registry.provider_name_of_config config)
             ~model_id
             resp;
-          (match resp.usage with
-           | Some u ->
-             m.on_token_usage
-               ~provider:(Provider_registry.provider_name_of_config config)
-               ~model_id
-               ~input_tokens:u.input_tokens
-               ~output_tokens:u.output_tokens
-           | None -> ());
+          emit_token_usage_metrics
+            m
+            ~provider:(Provider_registry.provider_name_of_config config)
+            ~model_id
+            resp;
           (* Cache store — reuse pre-computed key *)
           (match cache, cache_key with
            | Some c, Some key ->
@@ -742,6 +739,11 @@ let complete_prepared_stream
            patch_telemetry resp ~config ~ttfrc_ms ~prefill_ms ~reasoning_prefix latency_ms
          in
          emit_tool_call_metrics
+           metrics
+           ~provider:(Provider_registry.provider_name_of_config config)
+           ~model_id:config.model_id
+           resp;
+         emit_token_usage_metrics
            metrics
            ~provider:(Provider_registry.provider_name_of_config config)
            ~model_id:config.model_id

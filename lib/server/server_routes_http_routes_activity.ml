@@ -226,8 +226,9 @@ let handle_schedule_write_request
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    respond_json_value_with_cors ~status:`Bad_request request reqd
-      (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+    Log.Server.error "activity schedule mutation failed: %s" (Printexc.to_string exn);
+    respond_json_value_with_cors ~status:`Internal_server_error request reqd
+      (activity_result_json ~ok:false ~message:Http_error_body.internal_server_error)
 ;;
 
 type keeper_cadence_wakeup_summary =
@@ -1403,8 +1404,9 @@ let add_routes ~sw ~clock router =
                (activity_result_json_with_data ~ok ~message:msg
                   ~data:(Tool_result.data result))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+             Log.Server.error "activity schedule cancel failed: %s" (Printexc.to_string exn);
+             respond_json_value_with_cors ~status:`Internal_server_error request reqd
+               (activity_result_json ~ok:false ~message:Http_error_body.internal_server_error)
          )
        )
 

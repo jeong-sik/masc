@@ -926,17 +926,22 @@ let exchange_authorization_code
     ~resource
     ~code_verifier
   =
-  if not (valid_pkce_value code_verifier)
-  then Error Invalid_grant
-  else
-    let hash = token_hash code in
-    let claimed_grant =
-      Stdlib.Mutex.protect pending_mutex (fun () ->
-          let current = now () in
-          cleanup_expired_codes_locked current;
-          match Hashtbl.find_opt pending_codes hash with
-          | None -> Error Invalid_grant
-          | Some grant ->
+  let hash = token_hash code in
+  let claimed_grant =
+    Stdlib.Mutex.protect pending_mutex (fun () ->
+        let current = now () in
+        cleanup_expired_codes_locked current;
+        match Hashtbl.find_opt pending_codes hash with
+        | None -> Error Invalid_grant
+        | Some grant ->
+          (* RFC 6749 §4.1.2 / RFC 7636 §4.6: authorization codes are single-use.
+             Remove the pending code immediately upon presentation before
+             validating PKCE or binding fields so a failed attempt cannot be
+             retried or probed. *)
+          Hashtbl.remove pending_codes hash;
+          if not (valid_pkce_value code_verifier)
+          then Error Invalid_grant
+          else
             let resource =
               match resource with
               | Some resource -> resource
@@ -953,11 +958,9 @@ let exchange_authorization_code
                       grant.request.code_challenge
                       (pkce_s256 code_verifier))
             then Error Invalid_grant
-            else (
-              Hashtbl.remove pending_codes hash;
-              Ok grant))
-    in
-    let* grant = claimed_grant in
+            else Ok grant)
+  in
+  let* grant = claimed_grant in
     let family_id = "mof_" ^ Auth_credential_base.generate_token () in
     with_store_io ~base_path (fun () ->
       let* live_bootstrap =

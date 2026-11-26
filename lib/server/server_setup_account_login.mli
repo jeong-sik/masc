@@ -28,8 +28,8 @@ type owner =
 (** The CORS headers of the event stream that {!start} answers. A person's
     stream has none: the page of the account server reads it from the same
     origin, and no other origin is allowed to read it with the person's
-    credentials. The operator's stream allows the [Origin] of the request,
-    as the single-user server does ({!Server_auth.cors_headers}). *)
+    credentials. The operator's stream reflects only origins admitted by the
+    current request authority ({!Server_auth.admitted_cors_headers}). *)
 val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
 
 (** What the sign-in child of [owner] is handed for the browser it would

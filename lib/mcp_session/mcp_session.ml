@@ -1,40 +1,21 @@
-(** MCP HTTP Session ID management
-    MCP Spec 2025-03-26: Session IDs must be visible ASCII (0x21-0x7E) *)
+(** MCP HTTP Session ID management.
+    Session IDs are restricted to URL-, header-, and cookie-safe ASCII tokens
+    within the MCP Spec 2025-03-26 visible ASCII subset (0x21-0x7E), bounded
+    to prevent header/cookie attribute injection and oversized header echoing. *)
 
-(* Fiber-safe random state for session ID generation *)
-let session_rng = Random.State.make_self_init ()
+let max_length = 128
 
-(** Base62 character set for compact, ASCII-safe IDs *)
-let base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+let is_allowed_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | ':' | '-' -> true
+  | _ -> false
 
-(** Encode integer to base62 string *)
-let encode_base62 n =
-  let rec aux acc n =
-    if n = 0 then acc
-    else aux (base62_chars.[n mod 62] :: acc) (n / 62)
-  in
-  if n = 0 then "0"
-  else
-    let chars = aux [] n |> Array.of_list in
-    String.init (Array.length chars) (fun i -> chars.(i))
-
-(** Validate session ID per MCP spec: visible ASCII only (0x21-0x7E) *)
+(** Validate session ID: non-empty, <= 128 chars, strictly [A-Za-z0-9._:-]. *)
 let is_valid id =
-  String.length id > 0 &&
-  String.for_all (fun c ->
-    let code = Char.code c in
-    code >= 0x21 && code <= 0x7E
-  ) id
+  let len = String.length id in
+  len > 0 && len <= max_length && String.for_all is_allowed_char id
 
-(** Generate unique session ID (MCP spec format: visible ASCII 0x21-0x7E) *)
-let generate () =
-  let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-  let pid = Unix.getpid () in
-  let random = Random.State.int session_rng 1000000 in
-  Printf.sprintf "mcp_%s_%s_%s"
-    (encode_base62 timestamp)
-    (encode_base62 pid)
-    (encode_base62 random)
+(** Generate cryptographically random session ID (128 bits of entropy). *)
+let generate () = Random_id.prefixed ~prefix:"mcp_" ~bytes:16
 
 (** Get or generate a valid session ID from optional header value *)
 let get_or_generate = function

@@ -131,7 +131,11 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
            then Ok file_size
            else (
              let detail =
-               try read_file output_file with
+               try
+                 read_file output_file
+                 |> Secret_patterns.redact_text
+                 |> String_util.utf8_prefix ~max_bytes:200
+               with
                | Sys_error _ -> "response too small"
              in
              Error
@@ -142,7 +146,11 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
                   detail)))
          else (
            let detail =
-             try read_file output_file with
+             try
+               read_file output_file
+               |> Secret_patterns.redact_text
+               |> String_util.utf8_prefix ~max_bytes:200
+             with
              | Sys_error _ -> "request failed"
            in
            Error (Printf.sprintf "HTTP %d: %s" http_code detail))
@@ -356,7 +364,7 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
     Error
       (Printf.sprintf
          "STT HTTP error: %s"
-         (if String.length body > 200 then String.sub body 0 200 else body))
+         (body |> Secret_patterns.redact_text |> String_util.utf8_prefix ~max_bytes:200))
   | Unix.WEXITED 28 -> Error "STT request timed out"
   | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
   (* See sibling TTS dispatch above (line ~121) for rationale: closed-sum
@@ -395,7 +403,7 @@ let run_voice_listing_request ~timeout_sec (req : Voice_runtime_overlay.voice_li
     Error
       (Printf.sprintf
          "voice listing HTTP error: %s"
-         (if String.length body > 200 then String.sub body 0 200 else body))
+         (body |> Secret_patterns.redact_text |> String_util.utf8_prefix ~max_bytes:200))
   | Unix.WEXITED 28 -> Error "voice listing request timed out"
   | Unix.WEXITED code -> Error (Printf.sprintf "voice listing curl exit %d" code)
   (* Named for the same reason the two dispatches above are: a wildcard here

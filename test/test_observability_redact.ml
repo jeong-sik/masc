@@ -645,7 +645,22 @@ let test_extended_secret_patterns_and_headers () =
     ; "X-Auth-Token: tok-val-456", "X-Auth-Token: [REDACTED]"
     ; "Cookie: session=abc123", "Cookie: [REDACTED]"
     ; "Set-Cookie: session=abc123; HttpOnly", "Set-Cookie: [REDACTED]"
-    ]
+    ];
+  (* MASC PAT / Service credential prefixes *)
+  Alcotest.(check string) "mpat token redacted" "[REDACTED]"
+    (Observability_redact.redact_text ("mpat_pat-1." ^ String.make 64 'a'));
+  Alcotest.(check string) "msvc token redacted" "[REDACTED]"
+    (Observability_redact.redact_text ("msvc_svc-1." ^ String.make 64 'b'));
+  (* redact_preview must redact before truncating so a secret straddling max_len
+     cannot lose its closing delimiter/length and leak a raw prefix. *)
+  let boundary_secret = "prefix-" ^ "https://user:supersecret@example.com/api" in
+  let preview = Observability_redact.redact_preview ~max_len:24 boundary_secret in
+  Alcotest.(check bool) "boundary url credential never leaks raw password" false
+    (String_util.contains_substring preview "supersecret");
+  let boundary_akia = String.make 15 'x' ^ " " ^ "AKIA" ^ "IOSFODNN7EXAMPLE" in
+  let preview_akia = Observability_redact.redact_preview ~max_len:24 boundary_akia in
+  Alcotest.(check bool) "boundary AKIA never leaks raw prefix" false
+    (String_util.contains_substring preview_akia ("AKIA" ^ "IOSF"))
 
 let () =
   Alcotest.run "observability_redact"

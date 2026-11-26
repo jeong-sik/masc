@@ -7,7 +7,7 @@ updated: 2026-11-17
 author: claude
 supersedes: []
 superseded_by: null
-related: ["claude-code-context-overflow-bounded-restart", "official-client-conversation-in-masc", "context-overflow-semantic-recovery", "0473"]
+related: ["official-client-conversation-in-masc", "context-overflow-semantic-recovery", "0473"]
 ---
 
 # RFC: 남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다

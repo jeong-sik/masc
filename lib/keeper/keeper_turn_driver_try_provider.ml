@@ -4374,9 +4374,7 @@ let turn_boundary_resend_sequence
    fewer bytes, [demote] makes the compositions demote them and [resend] runs once on the
    same candidate; its result is returned as it is. The range is not
    narrowed. Nothing to demote, or any other failure, returns the failure at
-   once, to rule 8. A failed turn writes no boundary line, so without this
-   step the next turn composes the same range and the same results and is
-   refused again. *)
+   once, to rule 8. *)
 let current_turn_demotion_sequence
       ~same_run_retry_authorized
       ~demotable
@@ -4398,10 +4396,10 @@ let current_turn_demotion_sequence
 ;;
 
 (* Rule 8 of RFC librarian-lifecycle §4.10: the last rung, after
-   [current_turn_demotion_sequence]. A turn that saved atoms and failed
-   leaves no end line, so the turn boundary stays before those atoms, and a
-   range opened at that boundary carries them again on every later turn.
-   When [first] ends with a refusal [is_size_refusal] names,
+   [current_turn_demotion_sequence]. The messages between the turn boundary
+   and this turn's start were closed between two turns (a [Closed] line's
+   [unattributed]): rule 1 keeps them and rule 6 turns their results into
+   markers. When [first] ends with a refusal [is_size_refusal] names,
    [same_run_retry_authorized] holds, and [this_turn_front] names where this
    turn began strictly after [refused_first_atom], that front is given to
    [hold_front], [on_this_turn_start] is told, and [attempt] runs once more

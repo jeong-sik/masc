@@ -643,8 +643,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   (* The Librarian lane is the server's and outlives the Keeper, so a unit for
      this Keeper may still be running whichever operation asks for the purge
      (dashboard purge completion, configuration removal). It is cancelled and
-     waited for before any file goes, or it could write the progress file back
-     after the purge deleted it (RFC librarian-lifecycle section 8).
+     waited for before any file goes, or it could append to the Memory commit
+     log after the purge deleted it (RFC librarian-lifecycle section 8).
      [request_cancel] only accepts a request from the lane's owner domain. *)
   let remove_artifacts () =
     Keeper_request_start.forget ~config ~keeper_name;

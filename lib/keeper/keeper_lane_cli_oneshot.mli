@@ -118,7 +118,7 @@ val output_schema_for_api_format
   -> Yojson.Safe.t option
 (** Return [Some output_schema] when the transport has an output-schema channel
     ([Holds_output_schema]) and [None] when it carries structured output via
-    prompt instructions alone ([No_output_schema_channel], e.g. [Muse_serve]). *)
+    prompt instructions alone ([No_output_schema_channel], e.g. [Acp_runtime]). *)
 
 val output_schema_for_runtime
   :  Runtime_instance.t

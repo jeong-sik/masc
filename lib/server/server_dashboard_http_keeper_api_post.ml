@@ -551,7 +551,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ( "turn_id", Json_util.int_opt_to_json turn_id );
               ("manifest_path", `String manifest_scan.path);
               ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
-              ("manifest_total_rows", `Int manifest_scan.total_rows);
               ( "manifest_total_rows_exact",
                 `Bool (manifest_scan.scanned_lines < manifest_scan.scan_line_limit) );
               ( "manifest_scan_diagnostics"

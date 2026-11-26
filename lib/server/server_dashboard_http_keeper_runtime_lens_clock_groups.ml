@@ -287,9 +287,9 @@ let runtime_lens_clock_gaps scan =
            ~lane:"keeper"
            ~detail:
              (Printf.sprintf
-                "clock_edges contains the latest %d of %d manifest rows; \
+                "clock_edges contains only the latest %d manifest rows; \
                  increase the runtime-trace limit to inspect the full clock"
-                returned_row_count scan.total_rows)
+                returned_row_count)
            gaps
        else gaps)
   |> (fun gaps ->

@@ -30716,7 +30716,10 @@ let () =
               let t0 = Clock.Mono.of_ns 1_000_000L in
               let keeper = "alpha" in
               let m0 =
-                let m = Model.initial ~cols:140 ~rows:40 () in
+                let m =
+                  Model.initial ~auth_session:Rbac.single_user_local_admin
+                    ~cols:140 ~rows:40 ()
+                in
                 let fleet =
                   m.fleet
                   |> Fleet_store.apply_keepers ~observed_at:t0
@@ -31021,7 +31024,10 @@ let () =
               let t0 = Clock.Mono.of_ns 2_000_000L in
               let keeper = "alpha" in
               let m0 =
-                let m = Model.initial ~cols:140 ~rows:40 () in
+                let m =
+                  Model.initial ~auth_session:Rbac.single_user_local_admin
+                    ~cols:140 ~rows:40 ()
+                in
                 let fleet =
                   m.fleet
                   |> Fleet_store.apply_keepers ~observed_at:t0

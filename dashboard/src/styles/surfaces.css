@@ -329,6 +329,12 @@
   min-width: 640px;
 }
 
+/* Inset ring: the region is a bordered card, so draw focus inside its edge. */
+.v2-failover-probes-scroll:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 /* Settings surface */
 .set-shell {
   display: grid;

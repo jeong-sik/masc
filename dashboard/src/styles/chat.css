@@ -1,32 +1,10 @@
 /* MASC Dashboard — Keeper Conversation & Workspace Chat */
 
-.kw-shell {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-@media (max-width: 767px) {
-  .kw-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .kw-roster {
   border-right: 1px solid var(--line-1);
   background: var(--bg-1);
   overflow-y: auto;
   min-width: 0;
-}
-
-.kw-stage {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg-0);
 }
 
 .chat-transcript {
@@ -47,24 +25,10 @@
   min-width: 0;
 }
 
-.chat-bubble[data-role="user"] {
-  align-self: flex-end;
-  background: var(--bg-3);
-  border-color: var(--line-2);
-}
-
 .chat-block-code {
   border: 1px solid var(--line-1);
   border-radius: var(--radius-sm);
   background: var(--bg-0);
   overflow: hidden;
   margin: var(--sp-2) 0;
-}
-
-.chat-composer {
-  display: flex;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--line-1);
-  background: var(--bg-1);
 }

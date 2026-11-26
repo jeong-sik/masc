@@ -1474,9 +1474,15 @@ export function LanesTab(props: WorkspaceViewProps) {
               </span>
             </div>
 
+            <!-- The track below keeps a 640px minimum, so narrow screens scroll it
+                 sideways. A focusable named region lets keyboard users scroll
+                 to the right-hand columns; its rows hold no focusable controls. -->
             <div
-              class="wka-card"
+              class="wka-card v2-failover-probes-scroll"
               data-testid="failover-probes-list"
+              tabIndex=${0}
+              role="region"
+              aria-label="런타임 프로브 표"
               style=${{ padding: 0, overflowX: 'auto', minWidth: 0 }}
             >
               <div class="v2-failover-probes-track">

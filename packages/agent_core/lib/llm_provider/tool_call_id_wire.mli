@@ -24,12 +24,6 @@ val wire_id_for_openai : string -> string
     IDs. *)
 val wire_id_for_anthropic : string -> string
 
-(** Dispatch wire-ID normalization for a declared {!Provider_kind.t}:
-    - [OpenAI_compat] / [Glm]: {!wire_id_for_openai}
-    - [Anthropic] / [Kimi]: {!wire_id_for_anthropic}
-    - [Gemini] / [Ollama]: identity *)
-val wire_id_for_provider_kind : Provider_kind.t -> string -> string
-
 (** Pure bidirectional correlation table built from known canonical tool-call
     identities, enabling round-trip lookup between canonical and wire IDs. *)
 type correlation

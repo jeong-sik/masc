@@ -139,23 +139,6 @@ let test_ci_literal_metacharacters () =
     (Util.contains_substring_ci ~haystack:"abc" ~needle:".*")
 ;;
 
-(* ── regex_match ──────────────────────────────────────── *)
-
-let test_regex_match_hit () =
-  let re = Str.regexp "[0-9]+" in
-  check bool "digits found" true (Util.regex_match re "abc 42 def")
-;;
-
-let test_regex_match_miss () =
-  let re = Str.regexp "[0-9]+" in
-  check bool "digits absent" false (Util.regex_match re "no numbers here")
-;;
-
-let test_regex_match_anchor () =
-  let re = Str.regexp "^foo" in
-  check bool "matches at anchor" true (Util.regex_match re "foobar")
-;;
-
 (* ── error constructors (smoke tests) ─────────────────── *)
 
 let test_json_parse_error_shape () =
@@ -201,11 +184,6 @@ let () =
         ; test_case "empty needle" `Quick test_ci_empty_needle
         ; test_case "needle longer" `Quick test_ci_needle_longer
         ; test_case "literal metacharacters" `Quick test_ci_literal_metacharacters
-        ] )
-    ; ( "regex_match"
-      , [ test_case "hit" `Quick test_regex_match_hit
-        ; test_case "miss" `Quick test_regex_match_miss
-        ; test_case "anchor" `Quick test_regex_match_anchor
         ] )
     ; ( "error constructors"
       , [ test_case "json_parse_error" `Quick test_json_parse_error_shape

@@ -185,7 +185,7 @@ let () =
    | Error _ -> assert false);
   (* The real crunched tree declares no duplicate, so the shell surface
      answers normally: the typed refusal is absent. *)
-  assert (Lazy.force K.declaration_error = None)
+  assert (K.declaration_error = None)
 
 (* The duplicate is caught on the real load path, not only on a hand-built
    list: two actual [tools/*.toml] definitions that declare the same

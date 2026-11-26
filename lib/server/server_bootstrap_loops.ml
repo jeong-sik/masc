@@ -85,7 +85,9 @@ let board_sse_event_params event =
     `Assoc [ "type", `String "board_changed"; "event_type", `String "board.changed" ]
   | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
     let preview =
-      if String.length content > 200 then String.sub content 0 200 else content
+      if String.length content > 200
+      then String_util.utf8_prefix ~max_bytes:200 content
+      else content
     in
     let base =
       [ "type", `String "post_created"

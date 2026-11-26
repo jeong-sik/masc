@@ -179,7 +179,7 @@ let group_keeper_volumes volumes =
 let bounded_output limit text =
   if String.length text <= limit
   then text
-  else String.sub text 0 limit ^ "…"
+  else String_util.utf8_prefix ~max_bytes:limit text ^ "…"
 ;;
 
 let work_volume_claimants ~run ~timeout_sec ~keeper_name ~volume_name ~image =

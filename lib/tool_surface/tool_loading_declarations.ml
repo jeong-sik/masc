@@ -11,26 +11,24 @@ let loading_of_declaration ~path ~name ~contents =
 
 module String_map = Map.Make (String)
 
-(* One parse of the embedded tool tree, on first ask. The files are constant
-   for the life of the process -- they are crunched into the binary -- so a
-   second parse would read the same bytes to the same answer. *)
-let table : Tool_definition_toml.loading String_map.t Lazy.t =
-  lazy
-    (List.fold_left
-       (fun table path ->
-          match Filename.dirname path, Filename.extension path with
-          | "tools", ".toml" ->
-            let name = Filename.remove_extension (Filename.basename path) in
-            (match Embedded_config.read path with
-             | None -> table
-             | Some contents ->
-               String_map.add name (loading_of_declaration ~path ~name ~contents) table)
-          | _, _ -> table)
-       String_map.empty
-       Embedded_config.file_list)
+(* Parsed eagerly at module init from the constant crunched embedded tree so
+   concurrent OCaml 5 domains never race [Stdlib.Lazy.force]. *)
+let table : Tool_definition_toml.loading String_map.t =
+  List.fold_left
+    (fun table path ->
+       match Filename.dirname path, Filename.extension path with
+       | "tools", ".toml" ->
+         let name = Filename.remove_extension (Filename.basename path) in
+         (match Embedded_config.read path with
+          | None -> table
+          | Some contents ->
+            String_map.add name (loading_of_declaration ~path ~name ~contents) table)
+       | _, _ -> table)
+    String_map.empty
+    Embedded_config.file_list
 ;;
 
-let declared name = String_map.find_opt name (Lazy.force table)
+let declared name = String_map.find_opt name table
 
 let required name =
   match declared name with

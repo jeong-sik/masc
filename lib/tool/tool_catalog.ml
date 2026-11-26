@@ -591,6 +591,7 @@ let explicit_metadata : (string * metadata) list =
 (* Runtime metadata table (O(1) lookup, seeded from explicit list)  *)
 (* ================================================================ *)
 
+let metadata_mutex = Stdlib.Mutex.create ()
 let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
 let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
 
@@ -600,29 +601,33 @@ let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_m
    admission for tools whose schemas live outside Config's front door, and a
    corpus built from those lists never visits them. *)
 let known_names () =
-  Hashtbl.fold (fun name _ acc -> name :: acc) metadata_table []
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    Hashtbl.fold (fun name _ acc -> name :: acc) metadata_table [])
   |> List.sort_uniq String.compare
 ;;
 
 let register_metadata_for_testing name (meta : metadata) =
-  Hashtbl.replace metadata_table name meta
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    Hashtbl.replace metadata_table name meta)
 
 let register_runtime_metadata name (meta : metadata) =
-  match Hashtbl.find_opt metadata_table name with
-  | None ->
-    Error
-      (Printf.sprintf
-         "tool %s has no catalog-owned required permission"
-         name)
-  | Some authority ->
-    Hashtbl.replace
-      metadata_table
-      name
-      { meta with required_permission = authority.required_permission };
-    Ok ()
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    match Hashtbl.find_opt metadata_table name with
+    | None ->
+      Error
+        (Printf.sprintf
+           "tool %s has no catalog-owned required permission"
+           name)
+    | Some authority ->
+      Hashtbl.replace
+        metadata_table
+        name
+        { meta with required_permission = authority.required_permission };
+      Ok ())
 
 let registered_metadata name =
-  Hashtbl.find_opt metadata_table name
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    Hashtbl.find_opt metadata_table name)
 
 module For_testing = struct
   let register_metadata = register_metadata_for_testing
@@ -644,24 +649,25 @@ let is_public_mcp name = String_set.mem name public_mcp_set
 (* ================================================================ *)
 
 let metadata name =
-  match Hashtbl.find_opt metadata_table name with
-  | Some meta -> meta
-  | None ->
-    (* An unclassified tool is never granted a worker-capable permission. The
-       catalog has no evidence for a narrower policy, so the typed fallback
-       is operator-only and registration/authentication still require an
-       explicit catalog entry. *)
-    let fail_closed = default_metadata ~required_permission:Masc_domain.CanAdmin in
-    if is_public_mcp name
-    then fail_closed
-    else
-      (* External MCP discovery remains an explicit public-surface contract.
-         It must not be reused as Keeper authorization or model visibility. *)
-      { fail_closed with
-        visibility = Hidden
-      ; allow_direct_call_when_hidden = true
-      ; reason = Some "Not on the external MCP discovery surface."
-      }
+  Stdlib.Mutex.protect metadata_mutex (fun () ->
+    match Hashtbl.find_opt metadata_table name with
+    | Some meta -> meta
+    | None ->
+      (* An unclassified tool is never granted a worker-capable permission. The
+         catalog has no evidence for a narrower policy, so the typed fallback
+         is operator-only and registration/authentication still require an
+         explicit catalog entry. *)
+      let fail_closed = default_metadata ~required_permission:Masc_domain.CanAdmin in
+      if is_public_mcp name
+      then fail_closed
+      else
+        (* External MCP discovery remains an explicit public-surface contract.
+           It must not be reused as Keeper authorization or model visibility. *)
+        { fail_closed with
+          visibility = Hidden
+        ; allow_direct_call_when_hidden = true
+        ; reason = Some "Not on the external MCP discovery surface."
+        })
 
 let is_visible ?(include_hidden = false) name =
   let meta = metadata name in

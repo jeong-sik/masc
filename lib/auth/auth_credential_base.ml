@@ -57,7 +57,6 @@ let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
-let write_text_file path content = Fs_compat.save_file path content
 let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
 let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
 let remove_file path = run_blocking_io (fun () -> Sys.remove path)
@@ -137,19 +136,18 @@ let ensure_auth_dirs config =
   Fs_compat.mkdir_p agents
 ;;
 
+let save_private_text_file path content =
+  match Fs_compat.save_file_atomic_strict path content with
+  | Ok () -> chmod path 0o600
+  | Error reason -> raise (Sys_error reason)
+;;
+
 (** Write the initial admin agent name (bootstrap grace).
     The agent who enables auth is always granted full permission. *)
 let write_initial_admin config agent_name =
   ensure_auth_dirs config;
   let file = initial_admin_file config in
-  write_text_file file (String.trim agent_name);
-  chmod file 0o600
-;;
-
-let save_private_text_file path content =
-  match Fs_compat.save_file_atomic_strict path content with
-  | Ok () -> chmod path 0o600
-  | Error reason -> raise (Sys_error reason)
+  save_private_text_file file (String.trim agent_name)
 ;;
 
 let load_internal_keeper_token_hash config =

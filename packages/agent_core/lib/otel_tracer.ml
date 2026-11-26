@@ -280,6 +280,20 @@ let inst_start_span inst (attrs : Tracing.span_attrs) : span =
     s
 ;;
 
+let max_completed_spans = 4096
+let max_buffered_metrics = 4096
+
+let rec take_first n acc = function
+  | _ when n <= 0 -> List.rev acc
+  | [] -> List.rev acc
+  | x :: xs -> take_first (n - 1) (x :: acc) xs
+;;
+
+let push_bounded ~limit item items =
+  let updated = item :: items in
+  if List.length updated <= limit then updated else take_first limit [] updated
+;;
+
 let inst_end_span inst (s : span) ~ok =
   let target_opt =
     match get_fiber_stack inst with
@@ -322,7 +336,8 @@ let inst_end_span inst (s : span) ~ok =
   match target_opt with
   | Some completed ->
     inst_with_lock inst (fun () ->
-      inst.completed_spans <- completed :: inst.completed_spans)
+      inst.completed_spans
+      <- push_bounded ~limit:max_completed_spans completed inst.completed_spans)
   | None -> ()
 ;;
 
@@ -425,7 +440,11 @@ let inst_trace_context_headers ?sampled ?tracestate inst =
 let inst_record_metric inst ~name ~value ~metric_type =
   inst_with_lock inst
   @@ fun () ->
-  inst.metrics <- { m_name = name; m_value = value; m_type = metric_type } :: inst.metrics
+  inst.metrics
+  <- push_bounded
+       ~limit:max_buffered_metrics
+       { m_name = name; m_value = value; m_type = metric_type }
+       inst.metrics
 ;;
 
 let entropy_failure_metric = "otel.id_entropy_failures"
@@ -555,8 +574,17 @@ let metric_entry_to_json (m : metric_entry) : Yojson.Safe.t =
       ]
     | Gauge -> [ "gauge", `Assoc [ "dataPoints", `List [ data_point ] ] ]
     | Histogram ->
+      let hist_point =
+        `Assoc
+          [ "timeUnixNano", `String (Int64.to_string ts)
+          ; "count", `String "1"
+          ; "sum", `Float m.m_value
+          ; "bucketCounts", `List [ `String "1" ]
+          ; "explicitBounds", `List []
+          ]
+      in
       [ ( "histogram"
-        , `Assoc [ "dataPoints", `List [ data_point ]; "aggregationTemporality", `Int 2 ]
+        , `Assoc [ "dataPoints", `List [ hist_point ]; "aggregationTemporality", `Int 2 ]
         )
       ]
   in

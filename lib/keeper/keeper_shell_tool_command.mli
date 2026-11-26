@@ -26,7 +26,7 @@ val declarations_of
     so a test can drive the same load path with its own TOML bytes; the
     embedded tree is read through {!entries}. *)
 
-val declaration_error : string option Lazy.t
+val declaration_error : string option
 (** The duplicate refusal of the embedded declaration table, or [None] when
     it is well formed.  {!rewrite} answers this as a typed error before any
     lookup, so every shell line gets the same named refusal. *)

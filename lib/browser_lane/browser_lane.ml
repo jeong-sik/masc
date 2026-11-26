@@ -771,9 +771,11 @@ let settle_activity client id outcome = match Hashtbl.find_opt client.interactio
 type target = Live_client of client
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
-(* Retain only IDs after disconnect; queues and page payloads must be reclaimed. *)
+(* Retain only IDs after disconnect, bounded FIFO so long-lived servers do not
+   leak retired client keys forever. *)
+let max_retired_clients = 4096
 let retired_clients : (string, unit) Hashtbl.t = Hashtbl.create 4
-let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
+let retired_client_order : string Queue.t = Queue.create ()
 let lane_connected_window_sec = 120.
 (* A delivered executor-owned request is still using this connection while its
    SDK owns the wait. Queued requests do not prove a client is executing them;
@@ -798,7 +800,14 @@ let same_info left right = left.browser = right.browser
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   Hashtbl.remove clients key;
-  Hashtbl.replace retired_clients key ();
+  if not (Hashtbl.mem retired_clients key) then (
+    while Hashtbl.length retired_clients >= max_retired_clients do
+      match Queue.take_opt retired_client_order with
+      | Some oldest -> Hashtbl.remove retired_clients oldest
+      | None -> Hashtbl.clear retired_clients
+    done;
+    Hashtbl.replace retired_clients key ();
+    Queue.add key retired_client_order);
   Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
     client.closed <- true;
     Hashtbl.iter (fun _ waiter ->
@@ -1124,7 +1133,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
   else
     Ok (Eio.Switch.run (fun sw ->
       let policy = live_reply_policy client.info.transport verb in
-      let id = Uuidm.to_string (command_uuid ()) in
+      let id = Random_id.uuid_v7 () in
       let promise, resolver = Eio.Promise.create () in
       let interrupted, interrupt = Eio.Promise.create () in
       let deadline = match policy with

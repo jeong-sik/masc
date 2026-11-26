@@ -134,16 +134,25 @@ let replace_suffix s ~suffix ~replacement =
   else s
 ;;
 
+let strip_trailing_slashes s =
+  let rec last_non_slash i =
+    if i >= 0 && Char.equal s.[i] '/' then last_non_slash (i - 1) else i
+  in
+  let last = last_non_slash (String.length s - 1) in
+  if last < 0 then "" else String.sub s 0 (last + 1)
+;;
+
 let endpoint_for_signal endpoint signal_path =
   let uri = Uri.of_string endpoint in
-  let path = Uri.path uri in
+  let path = strip_trailing_slashes (Uri.path uri) in
   let path =
-    match path with
-    | "" | "/" -> signal_path
-    | _ ->
-      path
-      |> replace_suffix ~suffix:"/v1/traces" ~replacement:signal_path
-      |> replace_suffix ~suffix:"/v1/metrics" ~replacement:signal_path
+    if String.equal path ""
+    then signal_path
+    else if String.ends_with ~suffix:"/v1/traces" path
+    then replace_suffix path ~suffix:"/v1/traces" ~replacement:signal_path
+    else if String.ends_with ~suffix:"/v1/metrics" path
+    then replace_suffix path ~suffix:"/v1/metrics" ~replacement:signal_path
+    else path ^ signal_path
   in
   Uri.to_string (Uri.with_path uri path)
 ;;
@@ -282,24 +291,34 @@ let flush_to_collector ~sw ~clock ~net ~config instance =
 type t =
   { config : export_config
   ; instance : Otel_tracer.instance
-  ; mutable total_exported : int
+  ; total_exported : int Atomic.t
   }
 
 let start_daemon ~sw ~clock ~net ~config ?on_export instance =
-  let state = { config; instance; total_exported = 0 } in
+  let state = { config; instance; total_exported = Atomic.make 0 } in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
       Eio.Time.sleep clock config.flush_interval_sec;
-      let result = flush_to_collector ~sw ~clock ~net ~config instance in
-      (match result with
-       | Exported { span_count; metric_count } ->
-         state.total_exported <- state.total_exported + span_count + metric_count
-       | Partial_failure { exported; metric_exported; _ } ->
-         state.total_exported <- state.total_exported + exported + metric_exported
-       | Failed _ -> ());
-      match on_export with
-      | Some cb -> cb result
-      | None -> ()
+      try
+        let result = flush_to_collector ~sw ~clock ~net ~config instance in
+        (match result with
+         | Exported { span_count; metric_count } ->
+           ignore
+             (Atomic.fetch_and_add state.total_exported (span_count + metric_count) : int)
+         | Partial_failure { exported; metric_exported; _ } ->
+           ignore
+             (Atomic.fetch_and_add state.total_exported (exported + metric_exported) : int)
+         | Failed _ -> ());
+        match on_export with
+        | Some cb -> cb result
+        | None -> ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.warn
+          _log
+          "otel export daemon tick failed"
+          [ Log.S ("error", Printexc.to_string exn) ]
     done;
     `Stop_daemon);
   state
@@ -309,11 +328,11 @@ let force_flush ~sw ~clock ~net t =
   let result = flush_to_collector ~sw ~clock ~net ~config:t.config t.instance in
   (match result with
    | Exported { span_count; metric_count } ->
-     t.total_exported <- t.total_exported + span_count + metric_count
+     ignore (Atomic.fetch_and_add t.total_exported (span_count + metric_count) : int)
    | Partial_failure { exported; metric_exported; _ } ->
-     t.total_exported <- t.total_exported + exported + metric_exported
+     ignore (Atomic.fetch_and_add t.total_exported (exported + metric_exported) : int)
    | Failed _ -> ());
   result
 ;;
 
-let total_exported t = t.total_exported
+let total_exported t = Atomic.get t.total_exported

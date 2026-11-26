@@ -59,7 +59,6 @@
   uri
   unix
   re
-  str
   uucp
   uunf
   mcp_protocol_bundle)

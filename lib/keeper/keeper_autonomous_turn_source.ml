@@ -345,8 +345,22 @@ let reading_of_records ~include_trace ~keeper_name (run_ref : Turn_record.raw_tr
 
    The history read that uses them runs on the domain pool, so every table
    here is read and written under [run_tables_mutex]. *)
+let max_rejected_run_entries = 4096
 let version_rejected_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
+let version_rejected_order : string Queue.t = Queue.create ()
 let missing_trace_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
+let missing_trace_order : string Queue.t = Queue.create ()
+
+let remember_bounded_key tbl order key =
+  if not (Hashtbl.mem tbl key) then (
+    while Hashtbl.length tbl >= max_rejected_run_entries do
+      match Queue.take_opt order with
+      | Some oldest -> Hashtbl.remove tbl oldest
+      | None -> Hashtbl.clear tbl
+    done;
+    Hashtbl.replace tbl key ();
+    Queue.add key order)
+;;
 
 (* What a run said, by its reference, for as long as its file keeps the
    identity it had when read. A retained keeper holds hundreds of runs, and
@@ -436,7 +450,7 @@ let turn_of_record ~include_trace ~config ~keeper_name ~execution_rows ~previous
             if Hashtbl.mem missing_trace_runs cache_key
             then false
             else (
-              Hashtbl.replace missing_trace_runs cache_key ();
+              remember_bounded_key missing_trace_runs missing_trace_order cache_key;
               true))
         in
         if first_miss
@@ -473,7 +487,7 @@ let turn_of_record ~include_trace ~config ~keeper_name ~execution_rows ~previous
                | Error (Agent_core.Error.Serialization
                           (Agent_core.Error.VersionMismatch _) as err) ->
                  with_run_tables (fun () ->
-                   Hashtbl.replace version_rejected_runs cache_key ());
+                   remember_bounded_key version_rejected_runs version_rejected_order cache_key);
                  Log.Keeper.warn ~keeper_name
                    "autonomous turn source: cannot read exact run %s: %s"
                    run_ref.worker_run_id

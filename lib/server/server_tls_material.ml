@@ -164,17 +164,13 @@ let rec ensure_dir ~mode dir =
 ;;
 
 let write_file ~mode path contents =
-  let tmp = path ^ ".tmp" in
-  match
-    Out_channel.with_open_gen
-      [ Open_wronly; Open_creat; Open_trunc; Open_binary ]
-      mode
-      tmp
-      (fun oc -> Out_channel.output_string oc contents);
-    Sys.rename tmp path
-  with
-  | () -> Ok ()
-  | exception Sys_error reason -> Error (Not_writable { path; reason })
+  match Fs_compat.save_file_atomic_strict path contents with
+  | Error reason -> Error (Not_writable { path; reason })
+  | Ok () ->
+    (match Unix.chmod path mode with
+     | () -> Ok ()
+     | exception Unix.Unix_error (err, _, _) ->
+       Error (Not_writable { path; reason = Unix.error_message err }))
 ;;
 
 type decision =

@@ -80,7 +80,7 @@ let parse_state_line line =
        | Some level, Some ts ->
          let reason =
            let r = Printf.sprintf "sysmon kinds=%s %s" kinds summary in
-           if String.length r > 200 then String.sub r 0 200 else r
+           if String.length r > 200 then String_util.utf8_prefix ~max_bytes:200 r else r
          in
          Some { level; ts; reason }
        | _ -> None

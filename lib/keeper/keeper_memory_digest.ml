@@ -196,10 +196,15 @@ let load_cached_sync path =
 let save_cached_sync path (d : digest) =
   match Fs_compat.mkdir_p (Filename.dirname path) with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception (_ : exn) -> ()
+  | exception exn ->
+    Log.Keeper.warn "keeper_memory_digest mkdir failed path=%s: %s"
+      path (Printexc.to_string exn)
   | () ->
     let bytes = Yojson.Safe.to_string (to_json d) ^ "\n" in
-    ignore (Fs_compat.save_file_atomic_strict path bytes : (unit, string) result)
+    (match Fs_compat.save_file_atomic_strict path bytes with
+     | Ok () -> ()
+     | Error msg ->
+       Log.Keeper.warn "keeper_memory_digest save failed path=%s: %s" path msg)
 ;;
 
 let load_or_compile ~keepers_dir ~keeper_id ~revision ~facts =

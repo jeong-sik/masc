@@ -56,12 +56,6 @@ let wire_id_for_anthropic id =
   else remap_with_digest ~max_len:anthropic_max_length id
 ;;
 
-let wire_id_for_provider_kind = function
-  | Provider_kind.OpenAI_compat | Provider_kind.Glm -> wire_id_for_openai
-  | Provider_kind.Anthropic | Provider_kind.Kimi -> wire_id_for_anthropic
-  | Provider_kind.Gemini | Provider_kind.Ollama -> Fun.id
-;;
-
 type correlation =
   { map_fn : string -> string
   ; to_wire_map : string String_map.t

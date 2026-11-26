@@ -54,7 +54,6 @@
   eio_main
   threads
   unix
-  str
   cohttp-eio
   cohttp
   http

@@ -611,7 +611,7 @@ let extract_snippets ~query body =
         then
           let clipped =
             if String.length trimmed > 200
-            then String.sub trimmed 0 200 ^ "..."
+            then String_util.utf8_prefix ~max_bytes:200 trimmed ^ "..."
             else trimmed
           in
           `Assoc [ "line", `Int idx; "text", `String clipped ] :: acc

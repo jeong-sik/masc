@@ -84,14 +84,13 @@ let write_batch ~last_reported_drops batch =
   end
 
 let take_batch_blocking () =
-  Mutex.lock mu;
-  while Queue.is_empty queue do
-    Condition.wait cond mu
-  done;
-  let batch = Queue.create () in
-  Queue.transfer queue batch;
-  Mutex.unlock mu;
-  batch
+  Mutex.protect mu (fun () ->
+    while Queue.is_empty queue do
+      Condition.wait cond mu
+    done;
+    let batch = Queue.create () in
+    Queue.transfer queue batch;
+    batch)
 
 let writer_loop () =
   let last_reported_drops = ref 0 in
@@ -108,10 +107,7 @@ let start () =
 let dropped_count () = Atomic.get dropped
 
 let queue_depth () =
-  Mutex.lock mu;
-  let n = Queue.length queue in
-  Mutex.unlock mu;
-  n
+  Mutex.protect mu (fun () -> Queue.length queue)
 
 (* A console line is read on a terminal, and in production from the file
    stderr goes to (masc-server.log, a browser host's host.log). Messages carry
@@ -176,14 +172,16 @@ let write line =
       ()
   end
   else begin
-    Mutex.lock mu;
-    let full = Queue.length queue >= capacity in
-    if not full
-    then begin
-      Queue.add line queue;
-      Condition.signal cond
-    end;
-    Mutex.unlock mu;
+    let full =
+      Mutex.protect mu (fun () ->
+        let is_full = Queue.length queue >= capacity in
+        if not is_full
+        then begin
+          Queue.add line queue;
+          Condition.signal cond
+        end;
+        is_full)
+    in
     if full then ignore (Atomic.fetch_and_add dropped 1 : int)
   end
 

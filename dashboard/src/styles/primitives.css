@@ -292,10 +292,76 @@
   box-shadow: inset 0 2px 0 0 color-mix(in oklch, var(--focus) 45%, transparent);
 }
 
+/* The pane switch belongs to the narrow layout; the wide one shows both panes. */
+.md-switch {
+  display: none;
+}
+
+/* A button carries the name of its pane, cut when the two do not fit. */
+.md-switch-btn {
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.md-switch-btn[aria-pressed="true"] {
+  background: var(--bg-4);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.md-switch-btn:disabled {
+  color: var(--fg-4);
+  cursor: default;
+}
+
+/* A pane takes the focus when the other one gets hidden, and the switch sits
+   in a box that clips. Their focus rings are drawn inside, where no ancestor
+   cuts a side off. */
+.md-master:focus-visible,
+.md-detail:focus-visible,
+.md-switch-btn:focus-visible {
+  outline-offset: -2px;
+}
+
+/* One pane at a time. Stacked, the master pane had a share of the height, and
+   its own header could take all of it and leave the list no rows. Both panes
+   sit in one cell, so the pane not shown keeps its box and its scroll
+   position. It is sized as if empty: where the height comes from the content,
+   the cell is as tall as the pane shown and not as the taller of the two. */
 @container master-detail (max-width: 767px) {
   .md-split {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(220px, 42%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+
+  .md-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 1px solid var(--line-1);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+
+  .md-master,
+  .md-detail {
+    grid-area: 2 / 1;
+  }
+
+  .md-split[data-pane="master"] > .md-detail,
+  .md-split[data-pane="detail"] > .md-master {
+    visibility: hidden;
+    contain: size;
   }
 }
 

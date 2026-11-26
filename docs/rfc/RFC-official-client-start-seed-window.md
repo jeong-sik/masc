@@ -45,9 +45,9 @@ Claude Code 구독 Keeper 가 토큰을 많이 썼다. 원인은 둘이었다.
 
 ## 3. 지금 코드
 
-- `Keeper_turn_driver_try_provider.input_limit_of_runtime`(1135행)은 Agent Core 에만 입력 상한을 준다. `Codex_app_server`, `Antigravity_cli`, `Claude_code`, `Muse_serve`, `Vibe_cli` 는 `None` 이다.
-- `past_max_context`(1152행)는 `input_limit` 이 `None` 이면 바로 `None` 이다. 시작점이 움직이지 않고, seed 는 carried range 전체다.
-- `past_max_context` 는 `Keeper_model_input_ledger` 의 `next_turn_peak` 이나 `last_input_tokens` 로 창을 넘었는지 본다. 이 원장을 쓰는 곳은 Agent Core `AfterTurn` hook 안의 `Table.observe` 하나다(2895~2903행). 공식 클라이언트 턴은 그 hook 을 지나지 않는다. 그래서 상한만 주면 원장이 비어 있어 판정은 여전히 `None` 이다.
+- `Keeper_turn_driver_try_provider.input_limit_of_runtime` 은 Agent Core 와 ACP(`Acp _`)에 입력 상한을 준다. ACP 의 상한은 운영자가 선언한 창이다. `Codex_app_server`, `Antigravity_cli`, `Claude_code` 는 `None` 이다.
+- `past_max_context` 는 `input_limit` 이 `None` 이면 바로 `None` 이다. 시작점이 움직이지 않고, seed 는 carried range 전체다.
+- `past_max_context` 는 `Keeper_model_input_ledger` 의 `next_turn_peak` 이나 `last_input_tokens` 로 창을 넘었는지 본다. 이 원장을 쓰는 곳은 둘이다. Agent Core `AfterTurn` hook 안의 `Table.observe`(`keeper_turn_driver_try_provider.ml`)와, 새 세션에서 보낸 범위와 사용량이 둘 다 있을 때 적는 ACP 런타임의 `Table.observe`(`keeper_acp_runtime.ml`)다. Claude Code·Codex·Antigravity 턴은 둘 다 지나지 않는다. 그래서 이 셋은 상한만 주면 원장이 비어 있어 판정은 여전히 `None` 이다.
 - 공식 클라이언트가 이어 쓰는 세션의 창은 클라이언트가 세고 압축한다(창 RFC §4.1 의 4·5·6, 운영자 결정 2026-10-06). 이 RFC 는 그 결정을 바꾸지 않는다. 새 세션의 첫 메시지는 masc 가 고르므로 masc 몫이다.
 
 ## 4. 왜 지금 숫자 상한을 넣지 않나

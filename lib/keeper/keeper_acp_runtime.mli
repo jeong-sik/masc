@@ -35,7 +35,6 @@ val run :
   runtime_id:string ->
   host:Runtime_account_access.host_account ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
-  turn_timeout_s:float option ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -176,6 +175,11 @@ module For_testing : sig
     :  planned_fresh_rollover:bool
     -> force_fresh_retry:bool
     -> bool
+
+  val start_unless_stopped
+    :  stop:unit Eio.Promise.t
+    -> (unit -> (Runtime_acp_client.t, Runtime_acp_client.error) result)
+    -> (Runtime_acp_client.t, Runtime_acp_client.error) result
 
   val hydrate_start_messages
     :  ?appended_nudges:Agent_core.Types.message list

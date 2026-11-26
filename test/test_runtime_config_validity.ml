@@ -6935,69 +6935,36 @@ let acp_runtime_toml ?(options = "") () =
     options
 ;;
 
-(* [admission-timeout-s] is the ACP admission budget: the wait for
-   [initialize], [session/new], [session/load], [session/resume],
-   [session/set_mode], [session/set_model], [session/set_config_option] and the
-   default wait of [session/close]. Absent it keeps
-   [Runtime_acp_client.default_admission_timeout_s] (30.0), so an existing
-   config behaves exactly as before. *)
-let test_acp_admission_timeout_defaults_to_init_timeout () =
+(* An ACP provider has no silence deadline: none of its requests ends on
+   quiet. A config written before carries [timeout-s] or
+   [admission-timeout-s]; it fails to load and names the key, so the operator
+   deletes it rather than believing it still bounds anything. *)
+let test_acp_loads_without_timeout_keys () =
   with_temp_runtime_toml (acp_runtime_toml ()) (fun path ->
     without_an_installed_client @@ fun () ->
     match load_list_text ~config_path:path with
     | Error error -> failf "acp runtime should load: %s" error
     | Ok (_, default, _, _, _) ->
       (match default.execution with
-       | Runtime_execution.Acp config ->
-         check (float 0.0) "prompt budget keeps its default" 180.0 config.timeout_s;
-         check (float 0.0) "admission budget keeps the init default"
-           Runtime_acp_client.default_admission_timeout_s config.admission_timeout_s
+       | Runtime_execution.Acp _ -> ()
        | Runtime_execution.Agent_core _
        | Runtime_execution.Claude_code _
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Antigravity_cli _ ->
          fail "acp was materialized through the wrong execution owner"));;
 
-let test_acp_admission_timeout_from_config () =
-  with_temp_runtime_toml (acp_runtime_toml ~options:"admission-timeout-s = 45.0" ()) (fun path ->
-    without_an_installed_client @@ fun () ->
-    match load_list_text ~config_path:path with
-    | Error error -> failf "acp runtime should load: %s" error
-    | Ok (_, default, _, _, _) ->
-      (match default.execution with
-       | Runtime_execution.Acp config ->
-         check (float 0.0) "admission budget reaches the execution config" 45.0
-           config.admission_timeout_s
-       | Runtime_execution.Agent_core _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Antigravity_cli _ ->
-         fail "acp was materialized through the wrong execution owner"));;
-
-let test_acp_admission_timeout_rejects_nonpositive () =
+let test_acp_refuses_timeout_keys () =
   List.iter
-    (fun value ->
+    (fun key ->
        with_temp_runtime_toml
-         (acp_runtime_toml ~options:(Printf.sprintf "admission-timeout-s = %s" value) ())
+         (acp_runtime_toml ~options:(Printf.sprintf "%s = 180.0" key) ())
          (fun path ->
             match load_list_text ~config_path:path with
-            | Ok _ -> failf "admission-timeout-s = %s must be rejected" value
+            | Ok _ -> failf "an ACP provider with %s must not load" key
             | Error error ->
-              check bool "diagnostic names the key" true
-                (String_util.contains_substring error "admission-timeout-s")))
-    [ "0.0"; "-5.0" ];;
-
-let test_acp_admission_timeout_is_protocol_scoped () =
-  with_temp_runtime_toml
-    (codex_app_server_runtime_toml ~options:"admission-timeout-s = 45.0" ())
-    (fun path ->
-       match load_list_text ~config_path:path with
-       | Ok _ -> fail "codex-app-server silently admitted an ACP option"
-       | Error error ->
-         check bool "diagnostic names scoped option" true
-           (String_util.contains_substring
-              error
-              "admission-timeout-s is valid only for protocol acp"));;
+              check bool (key ^ " is named in the refusal") true
+                (String_util.contains_substring error ("vibe_acp." ^ key))))
+    [ "timeout-s"; "admission-timeout-s" ];;
 
 (* [lsp.servers] names the command that starts a language's server. The
    language is a closed sum in the client, so a key that names none is a
@@ -8123,14 +8090,9 @@ let () =
             test_antigravity_options_are_protocol_scoped;
           test_case "antigravity authority fields are rejected" `Quick
             test_antigravity_authority_fields_are_rejected;
-          test_case "acp admission timeout defaults to the init budget" `Quick
-            test_acp_admission_timeout_defaults_to_init_timeout;
-          test_case "acp admission timeout from config" `Quick
-            test_acp_admission_timeout_from_config;
-          test_case "acp admission timeout rejects nonpositive" `Quick
-            test_acp_admission_timeout_rejects_nonpositive;
-          test_case "acp admission timeout is protocol-scoped" `Quick
-            test_acp_admission_timeout_is_protocol_scoped;
+          test_case "acp loads without timeout keys" `Quick
+            test_acp_loads_without_timeout_keys;
+          test_case "acp refuses timeout keys" `Quick test_acp_refuses_timeout_keys;
           test_case "deployment AGENT_CORE catalog covers live RunPod MTP runtime" `Quick
             test_deployment_agent_core_model_catalog_covers_live_runpod_mtp;
           test_case

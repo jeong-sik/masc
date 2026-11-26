@@ -257,10 +257,6 @@ val resolve_mode_for_posture
     - [Native_full] accepts any non-empty [configured_mode], defaulting to
       [mode_for_native_full]. *)
 
-(** {1 Named protocol bounds} *)
-
-val default_admission_timeout_s : float
-
 (** {1 Configuration & wire types} *)
 
 type mcp_http_server =
@@ -305,13 +301,6 @@ type config =
           the user's existing [~/.gemini/antigravity-cli] directory is linked
           into the managed [--gemini-dir] without mutating Keychains. *)
   ; dangerously_skip_permissions : bool
-  ; admission_timeout_s : float
-      (** Seconds the client waits for [initialize], [session/new],
-          [session/load] (seconds without activity), [session/resume],
-          [session/set_mode], [session/set_model] and
-          [session/set_config_option], and the default wait of [session/close].
-          Provider TOML key [admission-timeout-s]; [default_admission_timeout_s]
-          when the key is absent. *)
   ; agent_compaction : agent_compaction option
       (** Passed to the host through its {!compaction_point_channel} when it
           starts. [None] leaves the host's own default. {!start} refuses
@@ -585,6 +574,42 @@ type prompt_result =
   ; wall_duration_s : float
   }
 
+(** What was last seen on an ACP client: the last frame the agent sent, the
+    last request MASC sent it, or the last MASC tool call it waited on. *)
+type agent_activity =
+  | Request_sent of string
+      (** MASC sent this request (method name) and has heard nothing since. *)
+  | Agent_message
+  | Agent_thought
+  | Agent_tool_call_started of
+      { title : string
+      ; status : tool_call_status
+      }
+      (** The agent reported a tool call of its own ([tool_call]). *)
+  | Agent_tool_call_updated of
+      { title : string option
+      ; status : tool_call_status option
+      }
+  | Agent_usage
+  | Agent_mode of string
+  | Agent_config_options
+  | Agent_session_update of string option
+      (** A [session/update] MASC turns into no event, by its [sessionUpdate]. *)
+  | Agent_permission_request of string option
+  | Masc_tool_started
+  | Masc_tool_finished
+
+type activity_trace =
+  { last : agent_activity
+  ; age_s : float  (** Seconds between [last] and the moment the trace was read. *)
+  ; masc_tools_in_flight : int
+      (** MASC tool calls bracketed by {!with_external_activity} still running. *)
+  }
+
+val tool_call_status_to_string : tool_call_status -> string
+val agent_activity_to_string : agent_activity -> string
+val activity_trace_to_string : activity_trace -> string
+
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -603,6 +628,10 @@ type error =
   | Process_exited of
       { detail : string
       ; stderr_tail : string
+      ; last_activity : activity_trace option
+          (** Set when a request ended this way: what the agent last did and
+              how long before the end. [detail] starts with the request's
+              method name. [None] for a failure outside a request. *)
       }
   | Client_closed
 
@@ -726,8 +755,8 @@ val load_session
   -> ?effort:Llm_provider.Reasoning_effort.t
   -> unit
   -> (session_info, error) result
-(** Load an existing ACP session with activity-based idle liveness across
-    replayed [session/update] notifications, capturing replayed context usage,
+(** Load an existing ACP session, capturing the replayed [session/update]
+    notifications' replayed context usage,
     mode, and config options into the returned {!session_info}. *)
 
 val resume_session
@@ -753,11 +782,10 @@ val reconfigure_session
 (** Idempotently apply [mode], [model], and [effort] deltas to an already-open
     session. Sends zero RPCs when the desired values already match [session_info]. *)
 
-val close_session : ?timeout_s:float -> t -> session_id:string -> (unit, error) result
-(** Invoke ACP [session/close] to release server-side state for [session_id].
-    Defaults to [config.admission_timeout_s] (30 seconds unless the provider
-    sets [admission-timeout-s]); pass a smaller [timeout_s] on ephemeral
-    one-shot clients so teardown does not wait that long. *)
+val close_session : timeout_s:float -> t -> session_id:string -> (unit, error) result
+(** Invoke ACP [session/close] to release server-side state for [session_id],
+    waiting at most [timeout_s] for the agent to confirm: a close is best
+    effort on a session the caller is leaving. *)
 
 val set_mode : t -> session_id:string -> mode_id:string -> (unit, error) result
 
@@ -772,19 +800,17 @@ val set_config_option
   -> value:string
   -> (config_option list, error) result
 
-val note_activity : t -> unit
-(** Refresh the client's monotonic activity timestamp for idle-liveness checks. *)
-
 val with_external_activity : t -> (unit -> 'a) -> 'a
 (** Bracket caller-owned work (such as executing a loopback MASC MCP tool call)
-    so an active {!prompt} suspends its idle-silence deadline while the ACP
-    child is waiting on MASC, and refreshes liveness upon completion. *)
+    so the client's activity trace records that the agent is waiting on MASC. *)
+
+val last_activity : t -> activity_trace
+(** What was last seen on this client and how long ago. *)
 
 val prompt
   :  t
   -> session_id:string
   -> blocks:prompt_block list
-  -> ?timeout_s:float option
   -> ?permission_policy:permission_policy
   -> ?on_event:(stream_event -> unit)
   -> ?prior_context_used:int
@@ -793,10 +819,13 @@ val prompt
 (** Execute one [session/prompt] turn on an existing ACP session, streaming
     [session/update] notifications to [on_event] and answering server-initiated
     [session/request_permission] requests according to [permission_policy].
-    [timeout_s] bounds inactivity (time with no session-matched ACP frames and
-    no in-flight {!with_external_activity} work) rather than cutting off
-    actively progressing multi-tool turns. Cancelling the calling fiber or
-    hitting the idle deadline sends [session/cancel]. [prior_context_used] is
+    The prompt has no silence deadline: an agent that is thinking, running its
+    own tool or waiting on its provider may send nothing for a long time. It
+    ends when the agent answers, when the agent's stdout closes
+    ([Process_exited] carrying the {!activity_trace} at that moment), or when
+    the calling fiber is cancelled, which sends [session/cancel]. No other
+    request ([initialize], [session/new], [session/load], [session/resume],
+    [session/set_*]) has a silence deadline either. [prior_context_used] is
     the session's last counted occupancy before this prompt; it decides
     [context_compacted] for the prompt's first count. *)
 

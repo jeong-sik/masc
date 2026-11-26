@@ -178,7 +178,6 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
         , Json_util.string_opt_to_json
             (Option.map Llm_provider.Reasoning_effort.to_string effective_effort) )
       ; "mode", Json_util.string_opt_to_json config.mode
-      ; "timeout_s", `Float config.timeout_s
       ; "verified", `Bool false
       ]
   | Runtime_execution.Agent_core sealed ->

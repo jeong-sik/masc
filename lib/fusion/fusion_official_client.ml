@@ -797,12 +797,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun refusal ->
         Setup_failure (Runtime_account_access.refusal_to_string refusal))
     in
-    let effective_timeout_s =
-      resolved_timeout_s
-        ~turn_timeout_s:runtime.model.turn_timeout_s
-        ~override_s:timeout_s
-        ~default_timeout_s:execution.timeout_s
-    in
     let profile = Runtime_acp_client.profile_of_driver execution.driver in
     let effective_effort =
       Runtime_acp_client.resolve_effective_effort
@@ -810,6 +804,22 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ?provider_effort:execution.effort
         ()
     in
+    (* No ACP request has a silence window of its own, so the preset's
+       declared deadline bounds the whole run, from spawn to answer.
+       Cancelling it sends session/cancel and closes the client. *)
+    let within_preset_deadline run =
+      match timeout_s with
+      | None -> run ()
+      | Some secs ->
+        (match Eio.Time.with_timeout clock secs (fun () -> Ok (run ())) with
+         | Ok result -> result
+         | Error `Timeout ->
+           acp_failed
+             (Runtime_acp_client.Timeout
+                (Runtime_timeout_payload.of_acp ~stage:"fusion panelist" ~timeout_s:secs)))
+    in
+    within_preset_deadline
+    @@ fun () ->
     Eio.Switch.run
     @@ fun sw ->
     (match Runtime_acp_client.create_isolated_workspace ~sw ~prefix:"fusion" () with
@@ -825,7 +835,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ; cwd = isolated_cwd
          ; oauth_source = execution.oauth_source
          ; dangerously_skip_permissions = false
-         ; admission_timeout_s = execution.admission_timeout_s
          ; agent_compaction = None
          }
        in
@@ -897,7 +906,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                         client
                         ~session_id:session.session_id
                         ~blocks
-                        ~timeout_s:effective_timeout_s
                         ~permission_policy:Runtime_acp_client.Deny_all
                         ()
                     with

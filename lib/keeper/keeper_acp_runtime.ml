@@ -222,15 +222,12 @@ let acp_error_to_core_error = function
          { message = Printf.sprintf "ACP timeout after %.1fs" seconds
          ; phase = None
          })
-  | Acp.Process_exited { detail; stderr_tail } ->
-    let tail = String.trim stderr_tail in
-    let detail =
-      if tail = ""
-      then "ACP process exited: " ^ detail
-      else Printf.sprintf "ACP process exited: %s (stderr: %s)" detail tail
-    in
+  | Acp.Process_exited _ as exited ->
+    (* The rendering carries the agent's last activity, so the blocker summary
+       and the turn record say where the agent stopped. *)
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "acp"; detail = Acp.error_to_string exited })
   | Acp.Client_closed ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -823,6 +820,21 @@ let discover_skills_dirs ~base_path (config : Runtime_execution.acp_client) =
   |> List.sort_uniq String.compare
 ;;
 
+(* [Acp.start] waits for the agent's [initialize] answer with no deadline, so
+   a stop request must be able to end that wait. Racing the start against
+   [stop] cancels it when the stop comes first, and [Acp.start] closes the
+   half-started client and reaps its process when it is cancelled. When both
+   finish together the started client wins; the caller sees the stop through
+   its own flag and closes that client. *)
+let start_unless_stopped ~(stop : unit Eio.Promise.t) start =
+  Eio.Fiber.first
+    ~combine:(fun _stopped started -> started)
+    (fun () ->
+      Eio.Promise.await stop;
+      Error Acp.Client_closed)
+    start
+;;
+
 let spawn_persistent_entry
       ~root_sw
       ~env
@@ -882,20 +894,20 @@ let spawn_persistent_entry
                ; cwd = acp_cwd
                ; oauth_source = config.oauth_source
                ; dangerously_skip_permissions = key.dangerously_skip_permissions
-               ; admission_timeout_s = config.admission_timeout_s
                ; agent_compaction
                }
              in
              match
-               Acp.start
-                 ~sw:keeper_sw
-                 ~proc_mgr
-                 ~clock
-                 ~fs:(Eio.Stdenv.fs env)
-                 ~config:acp_config
-                 ~mcp_server
-                 ~native_posture
-                 ()
+               start_unless_stopped ~stop:shutdown_promise (fun () ->
+                 Acp.start
+                   ~sw:keeper_sw
+                   ~proc_mgr
+                   ~clock
+                   ~fs:(Eio.Stdenv.fs env)
+                   ~config:acp_config
+                   ~mcp_server
+                   ~native_posture
+                   ())
              with
              | Error err -> Eio.Promise.resolve resolve_ready (Error err)
              | Ok client ->
@@ -2021,7 +2033,6 @@ let run_without_lifecycle
       ~runtime_id
       ~host:_
       ~configured_reasoning_effort
-      ~turn_timeout_s
       ~keeper_name
       ~on_model_input_window_observation
       ~carried_front_seed
@@ -2413,12 +2424,6 @@ let run_without_lifecycle
           prepared.messages
       in
       None, held)
-  in
-  let effective_timeout_s =
-    match turn_timeout_s with
-    | None -> Some config.timeout_s
-    | Some secs when secs <= 0.0 -> None
-    | Some secs -> Some secs
   in
   let effective_effort =
     Acp.resolve_effective_effort
@@ -2945,7 +2950,6 @@ let run_without_lifecycle
                     entry.client
                     ~session_id
                     ~blocks:prompt_blocks
-                    ~timeout_s:effective_timeout_s
                     ~permission_policy
                     ~on_event:(fun ev ->
                       if Option.is_none !host_stop_ref then stream.on_acp_event ev)
@@ -3170,7 +3174,6 @@ let run_without_lifecycle
           ; cwd = acp_cwd
           ; oauth_source = config.oauth_source
           ; dangerously_skip_permissions = key.dangerously_skip_permissions
-          ; admission_timeout_s = config.admission_timeout_s
           ; agent_compaction
           }
         in
@@ -3667,7 +3670,6 @@ let run
       ~runtime_id
       ~host
       ~configured_reasoning_effort
-      ~turn_timeout_s
       ~keeper_name
       ~pre_tool_rejects
       ~base_path
@@ -3801,7 +3803,6 @@ let run
              ~runtime_id
              ~host
              ~configured_reasoning_effort
-             ~turn_timeout_s
              ~keeper_name
              ~on_model_input_window_observation
              ~carried_front_seed
@@ -3866,6 +3867,7 @@ module For_testing = struct
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
   let prefer_handoff_for_start = prefer_handoff_for_start
+  let start_unless_stopped = start_unless_stopped
   let hydrate_start_messages = hydrate_start_messages
   let compact_once_for_overflow = compact_once_for_overflow
   let overflow_trigger = overflow_trigger

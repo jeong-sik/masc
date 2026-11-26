@@ -106,10 +106,12 @@ module For_testing : sig
 
   val usage_is_nonzero : Agent_core.Types.api_usage -> bool
 
-  val effective_context_used
+  val effective_context_used : Runtime_acp_client.usage -> int option
+
+  val held_context_of_usage
     :  driver:Runtime_acp_client.driver
     -> Runtime_acp_client.usage
-    -> int option
+    -> Runtime_observation.request_context option
 
   val stop_reason_of_acp_stop_reason
     :  Runtime_acp_client.stop_reason

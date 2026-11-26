@@ -170,6 +170,7 @@ let test_driver_aware_usage_normalization () =
     ; total_tokens = 27086
     ; context_used = Some 9322
     ; context_size = Some 400000
+    ; last_request_input_tokens = None
     }
   in
   let vibe_api =
@@ -188,6 +189,7 @@ let test_driver_aware_usage_normalization () =
     ; total_tokens = 21888
     ; context_used = Some 11093
     ; context_size = Some 1048576
+    ; last_request_input_tokens = None
     }
   in
   let agy_api =
@@ -4613,20 +4615,44 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
        (Keeper_acp_runtime.For_testing.api_usage_of_acp_usage
           ~driver:Antigravity
           agy_usage_no_ctx));
-  check (option int) "effective_context_used falls back to normalized inclusive input_tokens"
-    (Some 50000)
-    (Keeper_acp_runtime.For_testing.effective_context_used
-       ~driver:Antigravity
-       agy_usage_no_ctx);
-  check (option int) "effective_context_used prefers explicit positive context_used"
+  check (option int) "the turn's summed input is no size for the rollover" None
+    (Keeper_acp_runtime.For_testing.effective_context_used agy_usage_no_ctx);
+  check (option int) "effective_context_used reads usage_update.used"
     (Some 77777)
     (Keeper_acp_runtime.For_testing.effective_context_used
-       ~driver:Antigravity
        { agy_usage_no_ctx with context_used = Some 77777 });
   check (option int) "effective_context_used returns None when all counts are 0" None
     (Keeper_acp_runtime.For_testing.effective_context_used
-       ~driver:Antigravity
        Runtime_acp_client.empty_usage);
+  (* The gauge's number and its label: the host's [used] labelled by what the
+     driver's host puts there, else the last counted request input. The
+     turn's summed inputTokens never stands in. *)
+  let held ~driver usage =
+    Option.map
+      (fun (c : Runtime_observation.request_context) ->
+         c.input_tokens, c.output_tokens, c.provenance)
+      (Keeper_acp_runtime.For_testing.held_context_of_usage ~driver usage)
+  in
+  check bool "turn-summed input without usage_update holds no context" true
+    (held ~driver:Antigravity agy_usage_no_ctx = None);
+  List.iter
+    (fun driver ->
+       check bool
+         (Runtime_acp_client.driver_to_string driver
+          ^ ": usage_update.used is the newest request's count")
+         true
+         (held ~driver { agy_usage_no_ctx with context_used = Some 77777 }
+          = Some (77777, None, Turn_input_provenance.Agent_held_context)))
+    [ Antigravity; Kimi_code; Mistral_vibe ];
+  check bool "muse: usage_update.used is the host's estimate" true
+    (held ~driver:Muse_code { agy_usage_no_ctx with context_used = Some 77777 }
+     = Some (77777, None, Turn_input_provenance.Context_estimate));
+  check bool "muse without used: the journal's last request input is a request" true
+    (held ~driver:Muse_code
+       { agy_usage_no_ctx with last_request_input_tokens = Some 23429 }
+     = Some (23429, None, Turn_input_provenance.Measured_request));
+  check bool "a zero usage_update.used holds no context" true
+    (held ~driver:Kimi_code { agy_usage_no_ctx with context_used = Some 0 } = None);
   (* 5. process_config_sha256 tracks spawn-time config but stays stable on model/effort/mode *)
   let base_cfg : Runtime_execution.acp_client =
     { driver = Runtime_acp_client.Antigravity
@@ -5757,6 +5783,8 @@ let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
     usage.Runtime_acp_client.total_tokens;
   check (option int) "the occupancy the host sent over ACP" (Some 23500)
     usage.Runtime_acp_client.context_used;
+  check (option int) "the last request's input rides apart" (Some 23429)
+    usage.Runtime_acp_client.last_request_input_tokens;
   check (option int) "the window the host sent over ACP" (Some 262144)
     usage.Runtime_acp_client.context_size;
   (match result.Runtime_acp_client.usage_source with
@@ -5779,8 +5807,12 @@ let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
 let test_muse_prompt_without_occupancy_takes_the_last_request_input () =
   let result, _ = run_muse_prompt ~writes_journal:true ~sends_occupancy:false in
   let usage = result.Runtime_acp_client.usage in
+  check (option int) "no occupancy was sent" None
+    usage.Runtime_acp_client.context_used;
   check (option int) "the last request's input, not the input of the whole prompt"
-    (Some 23429) usage.Runtime_acp_client.context_used;
+    (Some 23429) usage.Runtime_acp_client.last_request_input_tokens;
+  check (option int) "the rollover reads the last request's input" (Some 23429)
+    (Keeper_acp_runtime.For_testing.effective_context_used usage);
   check (option int) "no window was sent" None usage.Runtime_acp_client.context_size
 ;;
 

@@ -1624,6 +1624,7 @@ type turn_usage_scope =
 type turn_input_provenance =
   | Input_measured_request
   | Input_context_estimate
+  | Input_agent_held_context
 
 type turn_record_row = {
   absolute_turn : int;
@@ -1659,6 +1660,7 @@ let turn_usage_scope_of_string = function
 let turn_input_provenance_of_string = function
   | "measured_request" -> Some Input_measured_request
   | "context_estimate" -> Some Input_context_estimate
+  | "agent_held_context" -> Some Input_agent_held_context
   | _ -> None
 
 (* One [entries] item is [{record: Turn_record.to_json, diff_vs_prev}]. Only
@@ -1697,17 +1699,22 @@ let decode_keeper_turn_records json =
   Ok { keeper; skipped_rows; rows }
 
 (* The same rule Keeper_context_observation_projection applies to the newest
-   record: a fill is measured only for per-request usage whose input counts a
-   dispatched request, against the provider window (else the configured one),
+   record: a fill is measured only for per-request usage whose input is a
+   count (a dispatched request, or the context an ACP agent counts its
+   session holding), against the provider window (else the configured one),
    and never above that window. *)
 let turn_record_context_fill (r : turn_record_row) =
   let measured_tokens =
     match r.usage_scope, r.input_provenance with
-    | Usage_per_request, Some Input_measured_request -> r.input_tokens
+    | Usage_per_request, Some (Input_measured_request | Input_agent_held_context)
+      -> r.input_tokens
     | Usage_per_request, (Some Input_context_estimate | None)
     | ( ( Usage_turn_total | Usage_conversation_cumulative
         | Usage_scope_unavailable )
-      , (Some (Input_measured_request | Input_context_estimate) | None) ) ->
+      , ( Some
+            ( Input_measured_request | Input_context_estimate
+            | Input_agent_held_context )
+        | None ) ) ->
         None
   in
   let window =

@@ -373,6 +373,26 @@ let test_cumulative_usage_is_diagnostic_not_occupancy () =
       ~context_window:(Some 128_000))
 ;;
 
+(* An ACP agent's count of the context its session holds is occupancy: the
+   gauge shows it against the configured window like a dispatched request. *)
+let test_agent_held_context_projects () =
+  with_temp_workspace (fun config ->
+    append_record config
+      (sample_record
+         ~input_provenance:(Some Turn_input_provenance.Agent_held_context) ());
+    let fields =
+      Projection.context_fields ~config ~keeper_name:"beta"
+        ~current_trace_id:sample_trace
+    in
+    check bool "unavailable is null" true
+      (field fields "context_metrics_unavailable" = `Null);
+    match field fields "context_ratio" with
+    | `Float ratio ->
+      check bool "ratio matches held/window" true
+        (Float.abs (ratio -. (18_000.0 /. 131_072.0)) < 1e-9)
+    | _ -> fail "context_ratio is not a float")
+;;
+
 let test_client_turn_total_is_diagnostic_not_occupancy () =
   with_temp_workspace (fun config ->
     append_record config
@@ -458,7 +478,10 @@ let test_newest_unmeasured_input_stays_diagnostic () =
               let reason = match provenance with
                 | Some Turn_input_provenance.Context_estimate -> "context_input_estimate"
                 | None -> "input_provenance_unavailable"
-                | Some Turn_input_provenance.Measured_request -> fail "fixture must be unmeasured" in
+                | Some
+                    ( Turn_input_provenance.Measured_request
+                    | Turn_input_provenance.Agent_held_context ) ->
+                  fail "fixture must be unmeasured" in
               check_not_observed fields ~reason;
               check_unavailable_diagnostics fields
                 ~expected_reason:reason
@@ -587,6 +610,8 @@ let () =
             test_cumulative_usage_is_diagnostic_not_occupancy
         ; test_case "client-turn total is diagnostic, not occupancy" `Quick
             test_client_turn_total_is_diagnostic_not_occupancy
+        ; test_case "ACP agent-held context is occupancy" `Quick
+            test_agent_held_context_projects
         ; test_case "provider window occupancy" `Quick
             test_provider_window_is_used_for_occupancy
         ; test_case "per-request overflow is unavailable, not clamped" `Quick

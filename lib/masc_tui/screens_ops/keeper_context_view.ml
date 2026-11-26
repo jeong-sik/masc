@@ -282,6 +282,8 @@ let draw_composition_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 Some (Say.make ~ko:"추정치" ~en:"estimate")
             | Some Turn_input_provenance.Measured_request ->
                 Some (Say.make ~ko:"실측 요청" ~en:"dispatched")
+            | Some Turn_input_provenance.Agent_held_context ->
+                Some (Say.make ~ko:"에이전트 집계" ~en:"agent count")
             | None -> None
           in
           let spec : Chart.Spec.t =
@@ -680,7 +682,10 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
           let measured_input =
             match r.usage.input_provenance with
             | Some Turn_input_provenance.Measured_request -> true
-            | Some Turn_input_provenance.Context_estimate | None -> false
+            | Some
+                ( Turn_input_provenance.Context_estimate
+                | Turn_input_provenance.Agent_held_context )
+            | None -> false
           in
           match (r.price_input_per_million, r.price_output_per_million) with
           | Some pin, Some pout -> (

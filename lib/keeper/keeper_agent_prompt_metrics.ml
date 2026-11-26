@@ -513,7 +513,10 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
   let actual_input_tokens =
     match metrics.input_provenance with
     | Some Turn_input_provenance.Measured_request -> metrics.input_tokens
-    | Some Turn_input_provenance.Context_estimate | None -> None
+    | Some
+        ( Turn_input_provenance.Context_estimate
+        | Turn_input_provenance.Agent_held_context )
+    | None -> None
   in
   `Assoc
     [

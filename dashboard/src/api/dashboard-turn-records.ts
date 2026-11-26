@@ -98,7 +98,7 @@ export type TurnRawTraceRunRef = {
 export const TURN_USAGE_SCOPES = ['per_request', 'turn_total', 'conversation_cumulative', 'unavailable'] as const
 
 // Wire tokens owned by Turn_input_provenance.to_string.
-export const TURN_INPUT_PROVENANCES = ['measured_request', 'context_estimate'] as const
+export const TURN_INPUT_PROVENANCES = ['measured_request', 'context_estimate', 'agent_held_context'] as const
 
 export type TurnInputProvenance = (typeof TURN_INPUT_PROVENANCES)[number]
 

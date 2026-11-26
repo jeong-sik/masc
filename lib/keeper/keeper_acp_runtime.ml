@@ -414,12 +414,47 @@ let log_usage_source ~keeper_name ~turn_id (source : Acp.usage_source) =
       (Muse_log.error_to_string err)
 ;;
 
-let effective_context_used ~driver (u : Acp.usage) =
-  match u.context_used with
-  | Some n when n > 0 -> Some n
-  | Some _ | None ->
-    let normalized = Acp.normalize_usage driver u in
-    if normalized.input_tokens > 0 then Some normalized.input_tokens else None
+(* The context the session holds after the turn, as the host reported it
+   ([usage_update.used]), labelled by what the driver's host puts there; else
+   the input of the last request the host's journal counted (Muse). The
+   turn's [inputTokens] is a sum over every model request (and, on Muse,
+   reviews and observers), so it never stands in for either. The window stays
+   the configured one: [usage_update.size] is the agent's model window, which
+   can be larger than the limit the operator declared for this lane. *)
+let held_context_of_usage ~driver (u : Acp.usage)
+  : Runtime_observation.request_context option
+  =
+  match u.context_used, u.last_request_input_tokens with
+  | Some used, _ when used > 0 ->
+    let provenance =
+      match (Acp.profile_of_driver driver).window_used_accounting with
+      | Acp.Newest_request_count -> Turn_input_provenance.Agent_held_context
+      | Acp.Host_prompt_estimate -> Turn_input_provenance.Context_estimate
+    in
+    Some
+      { Runtime_observation.input_tokens = used
+      ; cache = None
+      ; output_tokens = None
+      ; provenance
+      }
+  | (Some _ | None), Some input when input > 0 ->
+    Some
+      { Runtime_observation.input_tokens = input
+      ; cache = None
+      ; output_tokens = None
+      ; provenance = Turn_input_provenance.Measured_request
+      }
+  | (Some _ | None), (Some _ | None) -> None
+;;
+
+(* The size the rollover rule compares with the lane's limit: the host's
+   [usage_update.used], else the last request's counted input. No count, no
+   rollover: the turn's summed [inputTokens] is no size any request had. *)
+let effective_context_used (u : Acp.usage) =
+  match u.context_used, u.last_request_input_tokens with
+  | Some used, _ when used > 0 -> Some used
+  | (Some _ | None), Some input when input > 0 -> Some input
+  | (Some _ | None), (Some _ | None) -> None
 ;;
 
 let process_config_sha256
@@ -2917,7 +2952,7 @@ let run_without_lifecycle
           ~stop_reason:(stop_reason_of_acp_stop_reason prompt_res.stop_reason)
           ~usage:stream_usage;
         let prev_used = entry.last_context_used in
-        let cur_used = effective_context_used ~driver:config.driver prompt_res.usage in
+        let cur_used = effective_context_used prompt_res.usage in
         (match cur_used with
          | Some _ -> entry.last_context_used <- cur_used
          | None -> ());
@@ -3424,6 +3459,8 @@ let run_without_lifecycle
             ~attempt_details_source:("acp_" ^ Acp.driver_to_string config.driver)
             ~agent_core_internal_runtime_allowed:false
             ~usage_scope:Runtime_usage_scope.Turn_total
+            ?request_context:
+              (held_context_of_usage ~driver:config.driver prompt_res.usage)
             ()
         in
         Ok
@@ -3754,6 +3791,7 @@ module For_testing = struct
   let api_usage_of_acp_usage = api_usage_of_acp_usage
   let usage_is_nonzero = usage_is_nonzero
   let effective_context_used = effective_context_used
+  let held_context_of_usage = held_context_of_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
   let effective_context_limit_tokens = effective_context_limit_tokens

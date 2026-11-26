@@ -140,6 +140,17 @@ type usage_channel =
   | Usage_over_acp
   | Usage_in_muse_session_journal
 
+type window_used_accounting =
+  | Newest_request_count
+      (** [usage_update.used] is the newest model request's input plus its
+          output, as the provider counted them (Antigravity, Kimi Code,
+          Mistral Vibe; checked against each host's request log on
+          2026-11-26). *)
+  | Host_prompt_estimate
+      (** [usage_update.used] is the host's own estimate of the next prompt
+          (Muse writes it as [estimated_prompt_tokens] beside the counted
+          request in its session journal). *)
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
   | Mcp_paren_wrapper
@@ -167,6 +178,7 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
+  ; window_used_accounting : window_used_accounting
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -203,6 +215,7 @@ let profile_of_driver = function
     ; input_accounting = Exclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "default"
@@ -227,6 +240,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = true
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "plan"
@@ -260,6 +274,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; window_used_accounting = Newest_request_count
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "ask"
     ; mode_for_native_read = "ask"
@@ -342,6 +357,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_in_muse_session_journal
+    ; window_used_accounting = Host_prompt_estimate
     ; supports_skills_dir_flag = false
     (* Modes advertised by session/new: allowAll, promptUnmatched, onRequest
        (default), denyUnmatched. Pinning "onRequest" on every session keeps a
@@ -535,6 +551,7 @@ type usage =
   ; total_tokens : int
   ; context_used : int option
   ; context_size : int option
+  ; last_request_input_tokens : int option
   }
 
 let empty_usage =
@@ -546,6 +563,7 @@ let empty_usage =
   ; total_tokens = 0
   ; context_used = None
   ; context_size = None
+  ; last_request_input_tokens = None
   }
 ;;
 
@@ -1864,6 +1882,7 @@ let parse_prompt_usage result_json =
     ; total_tokens
     ; context_used = None
     ; context_size = None
+    ; last_request_input_tokens = None
     }
 ;;
 
@@ -4095,9 +4114,10 @@ let resume_session
 (* The tokens of a prompt whose host reports none over ACP: its model requests,
    its approval reviews and its observers' requests, read from the host's
    journals. [acp_usage] keeps
-   the context window the host does report. When the host gave no occupancy,
-   the input of the last request stands in for it: the input of the whole
-   prompt adds up the context of every request and is no occupancy. *)
+   the context window and occupancy the host does report. The input of the
+   last request rides beside them as its own count: it is one dispatched
+   request, not the host's figure, and the input of the whole prompt adds up
+   the context of every request and is no occupancy. *)
 let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn) : usage =
   let total = Runtime_muse_session_log.total turn in
   let input_tokens = total.Runtime_muse_session_log.input_tokens in
@@ -4108,11 +4128,9 @@ let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn
   ; cached_write_tokens = Runtime_muse_session_log.total_cache_write_tokens turn
   ; thought_tokens = total.Runtime_muse_session_log.reasoning_tokens
   ; total_tokens = input_tokens + output_tokens
-  ; context_used =
-      (match acp_usage.context_used with
-       | Some used when used > 0 -> acp_usage.context_used
-       | Some _ | None -> turn.Runtime_muse_session_log.last_request_input_tokens)
+  ; context_used = acp_usage.context_used
   ; context_size = acp_usage.context_size
+  ; last_request_input_tokens = turn.Runtime_muse_session_log.last_request_input_tokens
   }
 ;;
 
@@ -4169,6 +4187,7 @@ let prompt
          ; total_tokens = Option.value total_tokens ~default:prev.total_tokens
          ; context_used = !last_context_used
          ; context_size = !last_context_size
+         ; last_request_input_tokens = None
          });
     on_event event
   in

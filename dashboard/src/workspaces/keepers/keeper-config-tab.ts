@@ -29,6 +29,7 @@ import {
   type ConfigPatchResult,
   type ConfigSchemaData,
 } from '../../api/config-schema'
+import { currentRoute } from '../../routes/router'
 import {
   fetchKeeperOAuthAttachedToolsApi,
   mutateKeeperSecretApi,
@@ -42,6 +43,27 @@ import type {
 export interface KeeperConfigTabProps {
   readonly keeperName: string
   readonly onMutated: () => void
+}
+
+function resolveSectionCategoryId(
+  categories: readonly { readonly id: string; readonly title: string }[],
+  sectionQuery: string | undefined,
+): string | null {
+  const raw = sectionQuery?.trim().toLowerCase()
+  if (!raw) return null
+  const exact = categories.find((c) => c.id.toLowerCase() === raw)
+  if (exact) return exact.id
+  if (raw === 'sandbox' || raw === 'ssh' || raw === 'docker') {
+    const match = categories.find((c) => {
+      const hay = `${c.id} ${c.title}`.toLowerCase()
+      return hay.includes('sandbox') || hay.includes('ssh') || hay.includes('docker')
+    })
+    if (match) return match.id
+  }
+  const partial = categories.find((c) =>
+    c.id.toLowerCase().includes(raw) || c.title.toLowerCase().includes(raw),
+  )
+  return partial?.id ?? null
 }
 
 function serializeValue(val: unknown): string {
@@ -82,6 +104,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const activeKeeperRef = useRef(keeperName)
   const schemaAbortRef = useRef<AbortController | null>(null)
   const providersAbortRef = useRef<AbortController | null>(null)
+  const lastAppliedSectionRef = useRef<string | undefined>(undefined)
   activeKeeperRef.current = keeperName
 
   useEffect(() => {
@@ -117,9 +140,32 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     if (!preservePatchResult) {
       setPatchResult(null)
     }
+    const routeSection = currentRoute.peek().query.section
+    const requestedCat = resolveSectionCategoryId(schemaRes.value.categories, routeSection)
     const firstCat = schemaRes.value.categories[0]?.id ?? ''
-    setActiveCategoryId((cur) => cur || firstCat)
+    setActiveCategoryId((cur) => {
+      if (cur && schemaRes.value.categories.some((c) => c.id === cur)) {
+        return cur
+      }
+      if (requestedCat) {
+        lastAppliedSectionRef.current = routeSection
+        return requestedCat
+      }
+      return firstCat
+    })
   }, [keeperName])
+
+  const routeSection = currentRoute.value.query.section
+  useEffect(() => {
+    if (!routeSection) {
+      lastAppliedSectionRef.current = undefined
+      return
+    }
+    if (!schema || routeSection === lastAppliedSectionRef.current) return
+    const matched = resolveSectionCategoryId(schema.categories, routeSection)
+    lastAppliedSectionRef.current = routeSection
+    if (matched) setActiveCategoryId(matched)
+  }, [schema, routeSection])
 
   const loadProviders = useCallback(async () => {
     providersAbortRef.current?.abort()
@@ -155,6 +201,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
     setOauthStatus(null)
     setActiveOAuthFlow(null)
     setClientDrawer(null)
+    lastAppliedSectionRef.current = undefined
     void Promise.all([loadSchema(), loadProviders()])
     return () => {
       schemaAbortRef.current?.abort()

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { isAdminLockedForSession } from '../../routes/router'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
@@ -72,6 +73,7 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
   const scope = tasks?.workspaceScope
   const sampled = scope != null && scope.shown < scope.total
   const limited = sampled || tasks?.retained != null
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
 
   return html`
     <div class="kp-scroll-pane" data-keeper-tab="work-sandbox">
@@ -107,9 +109,26 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
         <section class="kp-card" aria-label="Keeper 샌드박스 상태">
           <div class="kp-card-head">
             <h3>Sandbox Status</h3>
-            <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/infra/sandboxes')}>
-              Infra →
-            </button>
+            ${!adminLocked && html`
+              <div class="kp-pill-row">
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  data-testid="keeper-sandbox-config-btn"
+                  onClick=${() => props.onNavigate(`/keepers/${encodeURIComponent(keeperName)}/config?section=sandbox`)}
+                >
+                  샌드박스 설정 →
+                </button>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  data-testid="keeper-sandbox-infra-btn"
+                  onClick=${() => props.onNavigate('/infra/sandboxes')}
+                >
+                  Infra →
+                </button>
+              </div>
+            `}
           </div>
           <${KeeperReadNotice} label="샌드박스" read=${sandboxRead} />
           ${sandbox

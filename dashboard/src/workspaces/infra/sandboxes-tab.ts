@@ -8,7 +8,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   apiGetV2,
   apiMutate,
@@ -19,6 +19,7 @@ import {
 } from '../../core'
 import { DataTable, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   formatUnixTs,
   type InfraDockerKeeper,
@@ -26,6 +27,7 @@ import {
   type InfraSandboxesData,
   type InfraShimParity,
   type InfraSshPool,
+  type InfraSshUnboundKeeper,
   type WorkspaceViewProps,
 } from './types'
 
@@ -133,23 +135,36 @@ function formatMicroVmSpec(r: InfraMicroVmGuest): string | null {
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function normalizeKeeperName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function dedupeKeepers(values: readonly unknown[]): readonly string[] {
+  const seen = new Set<string>()
+  for (const raw of values) {
+    const name = normalizeKeeperName(raw)
+    if (name) seen.add(name)
+  }
+  return [...seen]
+}
+
 function resolveSshPoolKeepers(r: InfraSshPool): readonly string[] | null {
   if (Array.isArray(r.keeper_sessions)) {
-    return r.keeper_sessions.map((s) => s.keeper).filter(Boolean)
+    return dedupeKeepers(r.keeper_sessions.map((s) => s?.keeper))
   }
   if (Array.isArray(r.accounts)) {
-    const names: string[] = []
+    const names: unknown[] = []
     for (const acc of r.accounts) {
-      if (Array.isArray(acc.keepers)) {
-        for (const k of acc.keepers) {
-          if (typeof k === 'string' && k) names.push(k)
-        }
+      if (Array.isArray(acc?.keepers)) {
+        names.push(...acc.keepers)
       }
     }
-    return names
+    return dedupeKeepers(names)
   }
   if (Array.isArray(r.keepers)) {
-    return r.keepers
+    return dedupeKeepers(r.keepers)
   }
   return null
 }
@@ -191,7 +206,12 @@ function probeStateStyle(kind: InfraSandboxesData['probe_state']['kind']) {
 export function SandboxesTab(props: WorkspaceViewProps) {
   const obs = resourceCache.observe<InfraSandboxesData>('infra:sandboxes').value
   const [probing, setProbing] = useState(false)
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const openKeeperSandboxConfig = useCallback((keeper: string) => {
+    const normalized = normalizeKeeperName(keeper)
+    if (!normalized) return
+    props.onNavigate(`/keepers/${encodeURIComponent(normalized)}/config?section=sandbox`)
+  }, [props.onNavigate])
 
   const loadSandboxes = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<InfraSandboxesData>(
@@ -207,14 +227,14 @@ export function SandboxesTab(props: WorkspaceViewProps) {
 
   const handleTriggerProbe = async () => {
     setProbing(true)
-    setBanner(null)
+    setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/infra/sandboxes/probe', {})
     setProbing(false)
     if (!res.ok) {
-      setBanner({ kind: 'err', text: `샌드박스 프로브 실행 실패: ${res.error.message}` })
+      setErrorBanner(`샌드박스 프로브 실행 실패: ${res.error.message}`)
       return
     }
-    setBanner({ kind: 'ok', text: '샌드박스 프로브 요청이 접수되었습니다.' })
+    pushShellToast('샌드박스 프로브 요청이 접수되었습니다.', 'success')
     loadSandboxes('manual')
   }
 
@@ -223,10 +243,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
       id: 'name',
       header: '게스트 / Keeper',
       sortable: true,
-      sortValue: (r) => r.keeper ?? r.guest_name ?? r.name ?? r.id ?? '',
-      cell: (r) => r.keeper
-        ? html`<span title=${r.guest_name ?? r.keeper}><${KeeperBadge} id=${r.keeper} size="sm" /></span>`
-        : html`<span class="mono">${r.guest_name ?? r.name ?? r.id ?? '없음'}</span>`,
+      sortValue: (r) => normalizeKeeperName(r.keeper) ?? r.guest_name ?? r.name ?? r.id ?? '',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper
+          ? html`<span title=${r.guest_name ?? keeper}><${KeeperBadge} id=${keeper} size="sm" /></span>`
+          : html`<span class="mono">${r.guest_name ?? r.name ?? r.id ?? '없음'}</span>`
+      },
     },
     {
       id: 'presence',
@@ -289,7 +312,25 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           : html`<span class="dtable-absent">미보고</span>`
       },
     },
-  ], [])
+    {
+      id: 'actions',
+      header: '설정',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper
+          ? html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => openKeeperSandboxConfig(keeper)}
+              >
+                설정 →
+              </button>
+            `
+          : html`<span class="dtable-absent">—</span>`
+      },
+    },
+  ], [openKeeperSandboxConfig])
 
   const sshPoolColumns = useMemo<readonly DataTableColumn<InfraSshPool>[]>(() => [
     {
@@ -351,29 +392,85 @@ export function SandboxesTab(props: WorkspaceViewProps) {
     },
     {
       id: 'keepers',
-      header: '연결 Keeper 수',
-      numeric: true,
+      header: '연결 Keepers',
       sortable: true,
       sortValue: (r) => resolveSshPoolKeepers(r)?.length ?? -1,
       cell: (r) => {
         const keepers = resolveSshPoolKeepers(r)
         if (!keepers) return html`<span class="dtable-absent">미보고</span>`
+        if (keepers.length === 0) return html`<span class="mono tnum">0</span>`
         return html`
-          <span class="mono tnum" title=${keepers.length > 0 ? keepers.join(', ') : undefined}>
-            ${keepers.length}
-          </span>
+          <div class="v2-sandbox-keeper-links" title=${keepers.join(', ')}>
+            <span class="mono tnum">${keepers.length}</span>
+            ${keepers.slice(0, 4).map((keeper) => html`
+              <button
+                key=${keeper}
+                type="button"
+                class="btn-ghost v2-sandbox-keeper-chip"
+                title=${`${keeper} 샌드박스 설정 열기`}
+                onClick=${() => openKeeperSandboxConfig(keeper)}
+              >
+                ${keeper}
+              </button>
+            `)}
+            ${keepers.length > 4 && html`<span class="mono tnum">+${keepers.length - 4}</span>`}
+          </div>
         `
       },
     },
-  ], [])
+  ], [openKeeperSandboxConfig])
+
+  const unboundColumns = useMemo<readonly DataTableColumn<InfraSshUnboundKeeper>[]>(() => [
+    {
+      id: 'keeper',
+      header: 'Keeper',
+      sortable: true,
+      sortValue: (r) => normalizeKeeperName(r.keeper) ?? '',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper ? html`<${KeeperBadge} id=${keeper} size="sm" />` : html`<span class="dtable-absent">없음</span>`
+      },
+    },
+    {
+      id: 'binding_state',
+      header: '바인딩 상태',
+      accessor: (r) => r.binding_state?.trim() || 'unbound',
+    },
+    {
+      id: 'remote_endpoint',
+      header: '지정 엔드포인트',
+      accessor: (r) => r.remote_endpoint?.trim() || '미지정',
+    },
+    {
+      id: 'actions',
+      header: '설정',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper
+          ? html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => openKeeperSandboxConfig(keeper)}
+              >
+                키퍼 설정 →
+              </button>
+            `
+          : html`<span class="dtable-absent">—</span>`
+      },
+    },
+  ], [openKeeperSandboxConfig])
 
   const dockerColumns = useMemo<readonly DataTableColumn<InfraDockerKeeper>[]>(() => [
     {
       id: 'keeper',
       header: 'Keeper',
       sortable: true,
-      sortValue: (r) => r.keeper ?? '',
-      cell: (r) => r.keeper ? html`<${KeeperBadge} id=${r.keeper} size="sm" />` : html`<span class="dtable-absent">없음</span>`,
+      sortValue: (r) => normalizeKeeperName(r.keeper) ?? '',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper ? html`<${KeeperBadge} id=${keeper} size="sm" />` : html`<span class="dtable-absent">없음</span>`
+      },
     },
     {
       id: 'container',
@@ -386,9 +483,33 @@ export function SandboxesTab(props: WorkspaceViewProps) {
       cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.image ?? r.network_mode ?? '없음'}</span>`,
     },
     { id: 'status', header: '상태', accessor: (r) => r.status ?? (r.backend ? 'declared' : null) },
-  ], [])
+    {
+      id: 'actions',
+      header: '설정',
+      cell: (r) => {
+        const keeper = normalizeKeeperName(r.keeper)
+        return keeper
+          ? html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => openKeeperSandboxConfig(keeper)}
+              >
+                설정 →
+              </button>
+            `
+          : html`<span class="dtable-absent">—</span>`
+      },
+    },
+  ], [openKeeperSandboxConfig])
 
   const data = obs.kind === 'value' ? obs.data : null
+  const unboundKeepers = useMemo(
+    () => Array.isArray(data?.ssh_unbound_keepers)
+      ? data.ssh_unbound_keepers.filter((r): r is InfraSshUnboundKeeper => Boolean(r && typeof r === 'object'))
+      : [],
+    [data?.ssh_unbound_keepers],
+  )
   const activeSshObs = data
     ? (data.summary.ssh_active_sessions === null ? observedUnreported() : observedValue(data.summary.ssh_active_sessions))
     : observedUnreported()
@@ -413,20 +534,24 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               probe: ${data.probe_state.kind}
             </span>
           `}
-          <button type="button" class="btn-primary" disabled=${probing} onClick=${handleTriggerProbe}>
+          <button
+            type="button"
+            class="btn-ghost"
+            data-testid="sandbox-settings-btn"
+            onClick=${() => props.onNavigate('/settings?section=sandbox')}
+          >
+            Sandbox & SSH 설정 →
+          </button>
+          <button type="button" class="btn-primary v2-probe-btn" disabled=${probing} onClick=${handleTriggerProbe}>
             ${probing ? '프로브 실행 중…' : '지금 프로브 실행'}
           </button>
           <button type="button" class="btn-ghost" onClick=${() => loadSandboxes('manual')}>새로고침</button>
         </div>
       </header>
 
-      ${banner && html`
-        <div
-          role="status"
-          class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
-        >
-          ${banner.text}
+      ${errorBanner && html`
+        <div role="alert" class="ap-error">
+          ${errorBanner}
         </div>
       `}
 
@@ -458,9 +583,9 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               </div>
             </div>
             <div class="ov-kpi">
-              <div class="ov-kpi-k">SSH 풀 / 활성 세션</div>
-              <div class="ov-kpi-v">
-                ${data.summary.ssh_pools} (${formatObserved(activeSshObs)} / ${data.summary.ssh_max_sessions})
+              <div class="ov-kpi-k">SSH 풀 · Keepers / 세션</div>
+              <div class="ov-kpi-v tnum">
+                ${data.summary.ssh_pools} 풀 · ${data.summary.ssh_keepers}명 (${formatObserved(activeSshObs)} / ${data.summary.ssh_max_sessions})
               </div>
             </div>
             <div class="ov-kpi">
@@ -521,6 +646,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
             <div class="wka-h">
               <h3>SSH 풀 (${data.ssh_pools.length}) · 미바인딩 Keeper ${data.summary.ssh_unbound_keepers}명</h3>
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => props.onNavigate('/settings?section=sandbox')}
+              >
+                SSH 풀 설정 →
+              </button>
             </div>
             <${DataTable}
               data=${data.ssh_pools}
@@ -531,6 +663,23 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               emptyLabel="등록된 SSH 풀 없음"
             />
           </section>
+
+          ${unboundKeepers.length > 0 && html`
+            <section class="v2-sandbox-section" data-testid="sandbox-ssh-unbound">
+              <div class="wka-h">
+                <h3>미바인딩 SSH Keepers (${unboundKeepers.length})</h3>
+                <span class="v2-sync-pill v2-sync-pill--warn">엔드포인트 연결 필요</span>
+              </div>
+              <${DataTable}
+                data=${unboundKeepers}
+                columns=${unboundColumns}
+                getRowId=${(r: InfraSshUnboundKeeper, i: number) => normalizeKeeperName(r.keeper) ?? `unbound-${i}`}
+                virtualizeThreshold=${30}
+                maxHeight=${240}
+                emptyLabel="미바인딩 SSH Keeper 없음"
+              />
+            </section>
+          `}
 
           <!-- Docker Keepers -->
           <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>

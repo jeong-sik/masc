@@ -1116,4 +1116,37 @@ describe('Proposal A+ Shell components', () => {
     })
     expect(shell.getAttribute('data-window-focused')).toBe('true')
   })
+
+  it('exposes admin-only accessibility labels on locked sub-tabs, wraps TopBar in a VNode Fragment, and hides decorative mobile More badge from SR', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: AUTH_METHODS,
+    }
+    navigate('/account/profile')
+    viewportWidth.value = 375
+    recordIncident({ source: 'system', severity: 'warn', summary: 'Test incident' })
+
+    await act(async () => {
+      render(h('div', {}, h(TopBar, {}), h(MobileNav, {})), container)
+    })
+
+    const lockedMembers = container.querySelector('[data-subtab="members"]') as HTMLAnchorElement
+    expect(lockedMembers).not.toBeNull()
+    expect(lockedMembers.getAttribute('data-rbac-locked')).toBe('true')
+    expect(lockedMembers.getAttribute('aria-label')).toContain('(관리자 전용)')
+    expect(lockedMembers.getAttribute('title')).toContain('(관리자 전용)')
+
+    const moreBtn = container.querySelector('[data-testid="mobile-more-trigger"]') as HTMLButtonElement
+    expect(moreBtn.getAttribute('aria-label')).toContain('읽지 않은 장애 1건')
+    const moreBadge = moreBtn.querySelector('.ap-mobile-badge')
+    expect(moreBadge?.getAttribute('aria-hidden')).toBe('true')
+    expect(moreBadge?.textContent?.trim()).toBe('1')
+  })
 })

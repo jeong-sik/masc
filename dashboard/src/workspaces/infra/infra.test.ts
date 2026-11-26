@@ -14,6 +14,7 @@ import {
   setObserverSseInstanceId,
 } from '../../core'
 import { OBSERVER_IDLE_TIMEOUT_HEADER } from '../../lib/observer-protocol'
+import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import { InfraWorkspace, type WorkspaceInspectPayload } from './index'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -64,6 +65,7 @@ describe('workspaces/infra', () => {
     })
     resetAuthStateForTests()
     resetObserverStateForTests()
+    resetShellStateForTests()
     releaseAllViewStreams()
     resourceCache.clearAll()
     container = document.createElement('div')
@@ -146,6 +148,7 @@ describe('workspaces/infra', () => {
     await flushUi(30)
 
     expect(calls.some((c) => c.url === '/api/v1/infra/sandboxes/probe' && c.method === 'POST')).toBe(true)
+    expect(shellToasts.value.some((t) => t.tone === 'success' && t.message.includes('샌드박스 프로브'))).toBe(true)
   })
 
   it('renders authoritative OCaml sandboxes wire objects without [object Object] for microvm_guests, ssh_pools, and docker_keepers', async () => {
@@ -261,6 +264,204 @@ describe('workspaces/infra', () => {
     // Docker OCaml wire fields rendered cleanly
     expect(text).toContain('dock-bot')
     expect(text).toContain('bridge')
+  })
+
+  it('renders ssh_unbound_keepers and wires sandbox/keeper settings deep links', async () => {
+    const navCalls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/infra/sandboxes') {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-3',
+          generated_at_unix: 1_700_000_200,
+          data: {
+            probe_state: { kind: 'fresh', measured_at_unix: 1_700_000_200 },
+            summary: {
+              microvm_declared: 1,
+              microvm_running: 1,
+              microvm_sockets_present: 1,
+              microvm_shim_mismatch: 0,
+              ssh_pools: 1,
+              ssh_keepers: 1,
+              ssh_unbound_keepers: 1,
+              ssh_active_sessions: null,
+              ssh_max_sessions: 4,
+              docker_keepers: 0,
+            },
+            shim_parity: { status: 'matched' },
+            microvm_guests: [{ keeper: 'vm-bot', backend: 'apple_container', presence: 'present' }],
+            ssh_pools: [{
+              pool_name: 'apple-wkbl',
+              host: '127.0.0.1',
+              port: 22267,
+              unix_user: 'masc-ssh',
+              max_sessions: 4,
+              active_sessions: null,
+              keeper_sessions: [{ keeper: 'wkbl-front', last_dispatch: null }],
+            }],
+            ssh_unbound_keepers: [{
+              keeper: 'orphan-ssh',
+              backend: 'remote_ssh',
+              binding_state: 'unbound',
+              remote_endpoint: null,
+            }],
+            docker_keepers: [],
+            volume_gc_report: null,
+            host_storage: null,
+            unobserved_reasons: [],
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${(p: string) => navCalls.push(p)} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const unboundSec = container.querySelector('[data-testid="sandbox-ssh-unbound"]')
+    expect(unboundSec).not.toBeNull()
+    expect(unboundSec?.textContent).toContain('orphan-ssh')
+
+    const settingsBtn = container.querySelector<HTMLButtonElement>('[data-testid="sandbox-settings-btn"]')!
+    settingsBtn.click()
+    const unboundCfgBtn = [...unboundSec!.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('키퍼 설정'))!
+    unboundCfgBtn.click()
+    const poolChip = container.querySelector<HTMLButtonElement>('.v2-sandbox-keeper-chip')!
+    poolChip.click()
+
+    expect(navCalls).toEqual([
+      '/settings?section=sandbox',
+      '/keepers/orphan-ssh/config?section=sandbox',
+      '/keepers/wkbl-front/config?section=sandbox',
+    ])
+  })
+
+  it('handles absent and malformed/whitespace ssh_unbound_keepers rows safely without crashing or emitting broken routes', async () => {
+    const navCalls: string[] = []
+    let payloadMode: 'absent' | 'malformed' = 'absent'
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/infra/sandboxes') {
+        const base = {
+          probe_state: { kind: 'fresh', measured_at_unix: 1_700_000_250 },
+          summary: {
+            microvm_declared: 0,
+            microvm_running: 0,
+            microvm_sockets_present: 0,
+            microvm_shim_mismatch: 0,
+            ssh_pools: 1,
+            ssh_keepers: 1,
+            ssh_unbound_keepers: payloadMode === 'absent' ? 0 : 2,
+            ssh_active_sessions: null,
+            ssh_max_sessions: 4,
+            docker_keepers: 0,
+          },
+          shim_parity: { status: 'matched' },
+          microvm_guests: [{ keeper: '   ', guest_name: 'vm-blank', presence: 'present' }],
+          ssh_pools: [{
+            pool_name: 'pool-dedupe',
+            host: '127.0.0.1',
+            max_sessions: 4,
+            active_sessions: null,
+            keepers: [' dup-keeper ', 'dup-keeper', '   '],
+          }],
+          docker_keepers: [],
+          volume_gc_report: null,
+          host_storage: null,
+          unobserved_reasons: [],
+        }
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-4',
+          generated_at_unix: 1_700_000_250,
+          data: payloadMode === 'absent'
+            ? base
+            : {
+                ...base,
+                ssh_unbound_keepers: [
+                  { keeper: '   ', binding_state: '', remote_endpoint: '' },
+                  { keeper: ' valid-ssh ', binding_state: 'unbound', remote_endpoint: '' },
+                ],
+              },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${(p: string) => navCalls.push(p)} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+    expect(container.querySelector('[data-testid="sandbox-ssh-unbound"]')).toBeNull()
+    // Duplicate / whitespace keepers in pool deduped to single chip
+    const chips = container.querySelectorAll('.v2-sandbox-keeper-chip')
+    expect(chips).toHaveLength(1)
+    expect(chips[0]?.textContent?.trim()).toBe('dup-keeper')
+
+    // Reload with malformed unbound rows -> blank row has no broken action button; trimmed valid row navigates cleanly
+    payloadMode = 'malformed'
+    resourceCache.clearAll()
+    render(null, container)
+    render(
+      html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${(p: string) => navCalls.push(p)} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const unboundSec = container.querySelector('[data-testid="sandbox-ssh-unbound"]')!
+    expect(unboundSec).not.toBeNull()
+    expect(unboundSec.textContent).toContain('없음')
+    expect(unboundSec.textContent).toContain('미지정')
+    const cfgBtns = [...unboundSec.querySelectorAll<HTMLButtonElement>('button')].filter((b) =>
+      b.textContent?.includes('키퍼 설정'),
+    )
+    expect(cfgBtns).toHaveLength(1)
+    cfgBtns[0]!.click()
+    expect(navCalls).toEqual(['/keepers/valid-ssh/config?section=sandbox'])
+  })
+
+  it('pushes success shell toast on repository sync without inline banner jump', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/repositories') {
+        return jsonResponse({
+          repositories: [{
+            id: 'repo-masc',
+            name: 'masc',
+            url: 'https://github.com/jeong-sik/masc',
+            local_path: '/workspace/masc',
+            default_branch: 'main',
+            status: 'active',
+            auto_sync: true,
+            sync_interval: 300,
+          }],
+        })
+      }
+      if (url === '/api/v1/repositories/repo-masc/sync' && init?.method === 'POST') {
+        return jsonResponse({ ok: true })
+      }
+      if (url.startsWith('/api/v1/ide/repository-activity')) {
+        return jsonResponse({ ok: true, data: { repo_id: 'repo-masc', window_hours: 24, incomplete: 0, unattributed: 0, changes: [] } })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(40)
+
+    const syncBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('동기화'),
+    )!
+    syncBtn.click()
+    await flushUi(30)
+
+    expect(shellToasts.value.some((t) => t.tone === 'success' && t.message.includes('repo-masc 동기화 완료'))).toBe(true)
   })
 
   it('reports repository access failure instead of an empty registration list', async () => {

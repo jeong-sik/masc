@@ -344,7 +344,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
           <span class="ov-eyebrow">6 INFRA · ACTIVITY & LOGS</span>
           <h1>통합 활동 · 로그 타임라인 (LOG + EVT)</h1>
         </div>
-        <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+        <div class="v2-logs-head-actions">
           <span
             class="mono"
             data-testid="logs-stream-status"
@@ -366,6 +366,21 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
               </time>
             `}
           </span>
+          ${disconnected && !pausedByVisibility && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              data-testid="logs-reconnect-btn"
+              aria-label="실시간 로그 스트림 연결이 끊겼습니다. 다시 연결"
+              title="실시간 로그 스트림 연결이 끊겼습니다. 클릭하여 다시 연결합니다."
+              onClick=${() => {
+                setStreamStatus('connecting')
+                setStreamAttempt(attempt => attempt + 1)
+              }}
+            >
+              다시 연결
+            </button>
+          `}
           <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
             ${filtered.length} / ${entries.length}
           </span>
@@ -373,17 +388,6 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
       </header>
 
       ${snapshotError && html`<div class="ap-error" role="alert">로그 조회 실패: ${snapshotError}</div>`}
-      ${disconnected && !pausedByVisibility && html`
-        <div class="ap-muted">
-          <span role="status">실시간 로그 연결이 끊겼습니다.</span>
-          <button type="button" class="btn-ghost" onClick=${() => {
-            setStreamStatus('connecting')
-            setStreamAttempt(attempt => attempt + 1)
-          }}>
-            다시 연결
-          </button>
-        </div>
-      `}
 
       <section class="v2-logs-panel">
         <div class="v2-logs-toolbar">

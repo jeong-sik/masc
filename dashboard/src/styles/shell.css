@@ -208,7 +208,7 @@
 }
 
 .ap-mobile-subtabs .ap-subtab {
-  height: var(--btn-h);
+  min-height: var(--mobile-touch-target-min);
   padding: 0 var(--sp-3);
   border-radius: var(--radius-pill);
 }
@@ -255,6 +255,8 @@
 }
 
 .ap-subtab-badge {
+  min-width: 18px;
+  text-align: center;
   padding: 0 var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--warn-soft);
@@ -384,6 +386,8 @@
 }
 
 .ap-pill-count {
+  min-width: 18px;
+  text-align: center;
   padding: 0 var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--bg-1);
@@ -872,6 +876,8 @@
 }
 
 .ap-rail-badge {
+  min-width: 18px;
+  text-align: center;
   padding: 0 var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--warn-soft);
@@ -954,6 +960,8 @@
   position: absolute;
   top: var(--sp-1);
   right: var(--sp-2);
+  min-width: 18px;
+  text-align: center;
   padding: 0 var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--warn-soft);

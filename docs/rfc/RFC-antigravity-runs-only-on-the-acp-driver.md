@@ -107,20 +107,33 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
 | 범위 이동 | ACP: 바이트 한도로 자른다 | `input_limit_of_runtime` 이 `Acp` 에도 운영자 한도를 돌려준다. 다음 seed 의 시작은 `past_max_context` 가 정한다. Agent Core 와 같은 함수다. |
 
 - 세션이 이어지는 동안: 에이전트가 자기 세션 기록을 쌓는다. 다음 세션으로 넘기는 판단은 지금처럼 `usage_update.used` 와 운영자 한도를 비교한다. 한도만 4.2 표의 선언값으로 바뀐다.
-- 턴 도중 넘침: 다음 세션으로 넘기는 판단은 턴이 끝날 때만 한다. 한 턴 안에서 세션이 커지는 것은 masc 가 막지 못한다.
+- 턴 도중 넘침: 다음 세션으로 넘기는 판단은 턴이 끝날 때만 한다. 한 턴 안에서 세션이 커지는 것은 masc 가 막지 못한다. 턴 안에서 세션을 줄이는 것은 호스트의 압축뿐이다.
   - 측정(2026-11-26, Kimi Code 2.7.2, 운영자 한도 400,000):
     - father 세션은 턴이 끝날 때 625,669 와 447,181 이었다. `.masc/config/keepers/code-reviewer-father.compaction.db` 의 `compaction_epochs.trigger_json`(epoch 5·6)에 남아 있다.
     - uncle 세션에서 가장 큰 요청 입력은 432,196 이었다. Kimi Code 세션의 `wire.jsonl` 에 있는 `step.end` usage 로 셌다.
-  - 프로세스마다 한도를 넘길 길을 찾지 못했다(2026-11-26 확인).
-    - Kimi Code: `KIMI_MODEL_MAX_CONTEXT_SIZE` 는 `KIMI_MODEL_NAME` 이 있을 때만 읽는다. 그러면 로그인한 OAuth provider 대신 환경 변수 provider 를 쓴다. 압축 시점은 설정 파일의 창으로 정한다. 창이 1,048,576 이면 약 891K 에서 압축한다.
-    - Mistral Vibe: `auto_compact_threshold` 는 `VIBE_HOME` 의 `config.toml` 에만 있다. ACP 설정 항목은 mode·model·thinking 뿐이다.
-    - Antigravity: 설정에 컨텍스트 키가 없다.
-    - Muse Code: `-c KEY=VALUE` 를 받지만 컨텍스트 키는 찾지 못했다(확인 필요).
-    - Codex 는 ACP driver 가 아니지만 `-c model_context_window=<tokens>` 를 받는다(`runtime_codex_app_server.ml` 의 `client_argv`).
+  - 호스트 넷 중 둘은 프로세스마다 모든 모델의 압축 시점을 받는다(2026-11-26 확인).
+
+    | 호스트 | 받는 길 | 값의 뜻 | 확인한 방법 |
+    |---|---|---|---|
+    | Muse Code 1.4.25 | `-c context_compaction.provider_context_limit_tokens=<토큰>` | 실효 한도. 압축은 이 한도의 `soft_threshold`(기본 0.75)와 `hard_threshold`(기본 0.9)에서 한다. 두 비율도 `-c` 로 받는다 | 기본값은 거부 메시지에서 읽었다(`muse exec --provider echo`, 모르는 키와 hard 이상인 soft 는 exit 2). `muse acp --provider echo` 에 한도·soft·hard 세 설정을 주면 initialize·session/new·prompt 에 응답하고, `usage_update.size` 가 준 한도로 바뀐다(설정 없음 1,007,997 → 400,000). hard 없이 soft 0.95 만 주면 exit 3 이다. 그 비율에서의 실제 압축은 보지 못했고, journal 의 압축 기록 trigger 이름(`soft_threshold_async`·`hard_threshold_blocking`)만 확인했다 |
+    | Antigravity 1.5.18 | 환경 변수 `AGY_CLI_AUTO_COMPACT_OVERRIDE=<토큰, K·M 약식, %>` | 대화를 압축하는 시점. 바이너리 changelog 는 모든 eligible model 에 적용된다고 적는다 | 바이너리 안의 문구로만 확인했다. 실제 압축은 보지 못했다 |
+    | Mistral Vibe 3.1.0 | 모든 모델에는 없다 | `VIBE_AUTO_COMPACT_THRESHOLD` 는 자기 값이 없는 모델만 채운다 | vibe 자신의 설정 loader 로 실제 값을 읽었다. 모델 catalog 가 mistral-large-4-0-3 에 자기 값 400,000 을 준다. 변수를 380000 으로 주면 이 모델은 400000 그대로이고, 자기 값이 없는 mistral-medium-3.5 만 380000 이 된다. 모델별 값(`VIBE_MODELS__<모델>__AUTO_COMPACT_THRESHOLD`)은 environment 층이 읽지 못한다며 버린다 |
+    | Kimi Code 2.7.2 | 프로세스마다는 없다. 운영자의 kimi 설정 파일 `[models."<alias>".overrides]` 의 `max_input_size` | 압축 한도. 압축은 `0.85 × (max_input_size, 없으면 max_context_size)` 에서 하고 `창 − 50,000` 을 넘지 않는다. 창이 1,048,576 이면 891,289 다 | 설치된 2.7.2 바이너리에서 읽었다: 압축 한도 `maxInputSize ?? maxContextSize`, `DEFAULT_COMPACTION_CONFIG` 의 triggerRatio·blockRatio 0.85 와 reservedContextSize 50,000. managed 모델을 새로 받을 때도 `overrides` 를 남긴다(`mergeRefreshedModelAlias`). 별칭 단위라 그 kimi home 의 모든 프로세스에 걸린다. 플래그와 환경 변수는 없다. `KIMI_MODEL_MAX_CONTEXT_SIZE` 는 `KIMI_MODEL_NAME` 의 환경 변수 provider 일 때만 읽는다. 실제 압축은 보지 못했다 |
+
+  - Codex 는 ACP driver 가 아니지만 `-c model_context_window=<tokens>` 를 받는다(`runtime_codex_app_server.ml` 의 `client_argv`).
   - 운영자가 쓸 수 있는 값은 모델별 `context-rollover-threshold`(#54873)다. 낮추면 한 턴이 커질 자리가 생긴다. 한 턴이 커지는 양을 막지는 못한다.
   - 넘친 세션은 숨지 않는다. 서버 projection 이 `context_tokens_exceed_window` 로 내보낸다. TUI 는 「창 초과」, Dashboard 는 warning(「보고된 입력 토큰이 창 크기를 초과함」)으로 보여 준다.
   - 턴 도중에 `session/cancel` 로 끊지 않는다. 넘침은 durable truth 를 망가뜨리지 않는다. 끊으면 하던 턴의 일을 버린다.
-  - 호스트가 프로세스마다 한도를 받게 되면 운영자 한도를 그 값으로 넘기고 이 항목을 고친다.
+  - 결정(운영자, 2026-11-26): 모델 키 `agent-compaction-threshold`(열린 구간 (0, 1))를 둔다. 세션을 띄울 때 `agent-compaction-threshold × max-context` 를 호스트에 넘긴다(#54915).
+    - 턴 끝 롤오버(`context-rollover-threshold`)와 따로 정한다. 예: 롤오버 0.80, 호스트 압축 0.95.
+    - 키가 없으면 호스트 기본값 그대로다.
+    - driver profile 의 `compaction_point` 가 호스트마다 받는 길을 가진다. Antigravity 는 토큰 수(내림)를 받는다. Muse Code 는 `provider_context_limit_tokens` 에 한도, `soft_threshold` 에 비율, `hard_threshold` 에 1.0 을 받는다. soft 는 hard(설정하지 않으면 0.9)보다 반드시 작아야 해서 hard 를 같이 넘긴다.
+    - Kimi Code 와 Mistral Vibe 는 masc 가 프로세스마다 모든 모델에 넘길 길이 없다. 이 키를 적으면 그 binding 을 load 에서 이유와 함께 뺀다. 넘겨도 말없이 무시될 수 있기 때문이다.
+    - Kimi Code 의 압축 시점은 운영자가 kimi 설정 파일의 `max_input_size` 로 정할 수 있다. 그 kimi home 을 쓰는 모든 프로세스에 걸린다. 레인마다 따로 두려면 레인별 `KIMI_CODE_HOME` 과 재로그인이 들고, 운영자는 그대로 두기로 했다(2026-11-26).
+  - 턴 도중 압축 감지(#54911): ACP client 가 prompt 결과에 `context_compacted` 를 돌려준다.
+    - Muse Code 는 journal 의 `context_compaction_installed` 기록으로 판단한다.
+    - 다른 호스트는 prompt 도중 `usage_update.used` 가 바로 앞 값보다 작아진 것으로 판단한다. 첫 값은 세션의 마지막 값과 비교한다.
+    - 그 전에는 턴 끝 값끼리만 비교해서 턴 안에서 압축한 뒤 다시 커지면 놓쳤다. 로컬 Muse journal 의 압축 83건 중 `mid_turn` 이 25건, `pre_turn` 이 19건이다.
 - 에이전트 창과 운영자 한도: 세션을 열 때 에이전트가 알리는 `usage_update.size` 보다 운영자 한도가 크면 typed 설정 오류로 그 후보를 쓰지 않는다. 운영자 한도가 에이전트 창 안에 있으면, 3.3 의 말없이 잘라 읽기는 masc 가 보낸 범위에서는 생기지 않는다.
 - ledger 가 없을 때(새 Keeper history, 또는 재기동 뒤 ledger 가 비었을 때): 저장된 마지막 응답 범위(`Keeper_carried_front.read_seed`)에서 시작한다. 그것도 없으면 마지막 완료 턴의 끝(`turn_start`)에서 시작한다. Agent Core 가 ledger 없이 시작하는 자리와 같다(RFC keeper-context-window-in-tokens §13.4).
 - typed 넘침: `Retry.classify_structured_json` 이 이미 하는 일이다. 새 분류를 더하지 않는다. 거절 문장은 읽지 않는다.

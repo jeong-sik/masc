@@ -11,6 +11,7 @@ import { observerConnected, resetObserverStateForTests, startObserverStream } fr
 import { setStoredToken } from '../../lib/dashboard-bearer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import { navigate, resetRouterForTests } from '../../routes/router'
+import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import {
   buildChatStreamRequestBody,
   buildPortraitPreviewUrl,
@@ -47,6 +48,8 @@ import { toolResultMarkdownPreview } from './chat-blocks'
 import { KeeperHeader, isKeeperBooted } from './keeper-header'
 import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
+import { KeeperReadNotice } from './keeper-read'
+import { KeeperRoster } from './keeper-roster'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
@@ -353,6 +356,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     resetAuthStateForTests()
     resetObserverStateForTests()
     resetPortraitCacheForTests()
+    resetShellStateForTests()
     resourceCache.clearAll()
     authSession.value = {
       kind: 'single_user_local',
@@ -367,6 +371,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     cleanup()
     releaseAllViewStreams()
     resetPortraitCacheForTests()
+    resetShellStateForTests()
     vi.restoreAllMocks()
   })
 
@@ -1506,7 +1511,10 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(cfg.container.textContent).toContain('변경 1건')
 
     fireEvent.click(cfg.getByRole('button', { name: '끄기' }))
-    await waitFor(() => expect(cfg.container.textContent).toContain('GitHub 비활성화'))
+    await waitFor(() =>
+      expect(shellToasts.value.some((t) => t.tone === 'success' && t.message.includes('GitHub 비활성화'))).toBe(true),
+    )
+    expect(cfg.container.querySelector('[role="alert"]')).toBeNull()
     // Draft change must still be preserved!
     expect(cfg.container.textContent).toContain('변경 1건')
 
@@ -1662,7 +1670,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await act(async () => {
       resolveSave(json({ ok: true, keeper, pending: true, note: { text: 'Save this draft' } }))
     })
-    await view.findByText('운영자 노트 저장 완료')
+    await waitFor(() =>
+      expect(shellToasts.value.some((t) => t.tone === 'success' && t.message === '운영자 노트 저장 완료')).toBe(true),
+    )
     expect(saves).toEqual([{ text: 'Save this draft' }])
     expect(note.value).toBe('Keep editing during the save')
     expect(view.getByText('저장되지 않은 초안')).toBeTruthy()
@@ -1842,8 +1852,10 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         retractions: [{ memory_id: 'fact-A', outcome: 'not_current' }],
       }))
     })
-    await view.findByText('현재 메모리에 없는 항목 · fact-A')
-    expect(view.queryByText('철회 완료 · fact-A')).toBeNull()
+    await waitFor(() =>
+      expect(shellToasts.value.some((t) => t.tone === 'info' && t.message === '현재 메모리에 없는 항목 · fact-A')).toBe(true),
+    )
+    expect(shellToasts.value.some((t) => t.message === '철회 완료 · fact-A')).toBe(false)
   })
 
   it('auto-scrolls Chat on load/send, shows jump-to-bottom pill when scrolled up, preserves anchor on prepend, updates user badge to Delivered, and guards /btw IME Enter', async () => {
@@ -3177,5 +3189,68 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
 
     releaseMain()
     chat.unmount()
+  })
+
+  it('gates Keeper config schema, roster create, and companion config-diff for non-admin workers and renders compact retained refresh pill', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-worker',
+      email: 'worker@example.com',
+      displayName: 'Worker',
+      role: 'worker',
+      csrfToken: 'csrf-worker',
+      workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    const seenUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.includes('/api/v1/keepers/oauth/attached-tools')) {
+        return new Response(JSON.stringify({ providers: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ entries: [], turns: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    // 1. KeeperConfigTab skips /api/v1/config/schema and /oauth/attached-tools and renders admin-locked state for all 3 cards
+    const cfg = render(html`<${KeeperConfigTab} keeperName="code-reviewer-sister" onMutated=${vi.fn()} />`)
+    expect(cfg.getByTestId('keeper-config-admin-locked')).toBeTruthy()
+    expect(cfg.getByTestId('keeper-secrets-admin-locked')).toBeTruthy()
+    expect(cfg.getByTestId('keeper-oauth-admin-locked')).toBeTruthy()
+    expect(cfg.queryByRole('button', { name: '시크릿 저장' })).toBeNull()
+    expect(cfg.queryByRole('button', { name: '시크릿 삭제' })).toBeNull()
+    expect(cfg.queryByRole('button', { name: '연결' })).toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/config/schema'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/api/v1/keepers/oauth/attached-tools'))).toBe(false)
+    cfg.unmount()
+
+    // 2. KeeperRoster hides + Create Keeper button for non-admin worker
+    const rosterView = render(
+      html`<${KeeperRoster} roster=${observedValue([makeRosterKeeper()])} selectedKeeper="code-reviewer-sister" onSelectKeeper=${vi.fn()} onCreatedKeeper=${vi.fn()} />`,
+    )
+    expect(rosterView.queryByRole('button', { name: /\+ Create Keeper|새 키퍼/ })).toBeNull()
+    rosterView.unmount()
+
+    // 3. KeeperDebugCompanion skips /api/v1/config/schema on Config Diff tab and renders admin-locked state
+    const cmp = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    fireEvent.click(cmp.getByRole('tab', { name: 'Config Diff' }))
+    expect(cmp.getByTestId('companion-config-diff-admin-locked')).toBeTruthy()
+    expect(seenUrls.some((u) => u.includes('/api/v1/config/schema'))).toBe(false)
+    cmp.unmount()
+
+    // 4. KeeperReadNotice uses compact .kp-pill for retained background refresh vs .kp-empty for cold load
+    const retainedView = render(
+      html`<${KeeperReadNotice} label="상태" read=${{ data: { ok: true }, received: true, loading: true, error: null, refresh: async () => {} }} />`,
+    )
+    expect(retainedView.container.querySelector('.kp-pill[data-tone="info"]')).not.toBeNull()
+    expect(retainedView.container.querySelector('.kp-empty')).toBeNull()
+    retainedView.unmount()
+
+    const coldView = render(
+      html`<${KeeperReadNotice} label="상태" read=${{ data: null, received: false, loading: true, error: null, refresh: async () => {} }} />`,
+    )
+    expect(coldView.container.querySelector('.kp-empty')).not.toBeNull()
+    coldView.unmount()
   })
 })

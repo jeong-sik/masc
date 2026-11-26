@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
   apiMutate,
+  authSession,
   currentSessionEpoch,
   extractObserverTopics,
   formatObserved,
@@ -38,7 +39,8 @@ import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { formatDuration } from '../../lib/format-time'
 import type { Result } from '../../lib/result'
-import { currentRoute } from '../../routes/router'
+import { currentRoute, isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   buildLaneUnifiedDiff,
   deleteLaneFromToml,
@@ -50,6 +52,7 @@ import {
 } from './lane-toml-editor'
 import {
   FUSION_TOPOLOGIES,
+  decodeRuntimeProbePayload,
   formatMs,
   formatUnixTime,
   loadLaneRun,
@@ -137,13 +140,13 @@ export function partitionProbeRows(
   const activeRuntimeIds = new Set<string>()
   if (resolved) {
     if (resolved.default_runtime) activeRuntimeIds.add(resolved.default_runtime.id)
-    for (const lane of resolved.lanes) {
-      for (const id of lane.runtime_ids) activeRuntimeIds.add(id)
+    for (const lane of resolved.lanes ?? []) {
+      for (const id of lane.runtime_ids ?? []) activeRuntimeIds.add(id)
     }
   }
   const active: ProbePartitionRow[] = []
   const outside: ProbePartitionRow[] = []
-  for (const row of probe?.probe.providers ?? []) {
+  for (const row of probe?.probe?.providers ?? []) {
     const band = activeRuntimeIds.has(row.runtime_id) ? 'active_lane' : 'outside_lane'
     const tagged: ProbePartitionRow = { ...row, scopeBand: band }
     if (band === 'active_lane') active.push(tagged)
@@ -179,11 +182,12 @@ function statusPillStyle(status: string) {
 }
 
 export function LanesTab(props: WorkspaceViewProps) {
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const [mode, setMode] = useState<LanesMode>(() => resolveInitialMode(props.entityTab))
   const [probeFilter, setProbeFilter] = useState<'all' | 'active_lane' | 'outside_lane'>('all')
   const [laneConfigOpen, setLaneConfigOpen] = useState(false)
   const [nowUnix, setNowUnix] = useState(() => Date.now() / 1000)
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err' | 'lane-source-error'; text: string } | null>(null)
+  const [banner, setBanner] = useState<{ kind: 'err' | 'lane-source-error'; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   // Failover inline routing/assignment form state
@@ -267,7 +271,7 @@ export function LanesTab(props: WorkspaceViewProps) {
         'runtime:probe',
         (signal) => apiGet<RuntimeProbePayload>(
           `/api/v1/dashboard/runtime-probe${forceProbe ? '?force=true' : ''}`,
-          { signal },
+          { signal, decode: decodeRuntimeProbePayload },
         ),
         { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
       ),
@@ -275,12 +279,16 @@ export function LanesTab(props: WorkspaceViewProps) {
       if (isEpochCurrent(startEpoch)) markViewSynced()
     })
     sourceRead.current?.abort()
-    const read = new AbortController()
-    sourceRead.current = read
-    const readEpoch = currentSessionEpoch()
     discardLanePreview()
     setRawConfig(null)
     setBusy((action) => action === 'lane-apply' ? null : action)
+    if (adminLocked) {
+      setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
+      return
+    }
+    const read = new AbortController()
+    sourceRead.current = read
+    const readEpoch = currentSessionEpoch()
     void apiGet<{
       readonly source_revision?: string
       readonly source_text?: string
@@ -310,6 +318,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const loadExact = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    if (adminLocked) return
     const startEpoch = currentSessionEpoch()
     const query = {
       limit: 50,
@@ -337,9 +346,22 @@ export function LanesTab(props: WorkspaceViewProps) {
   }, [epoch])
 
   useEffect(() => {
+    if (!adminLocked) return
+    sourceRead.current?.abort()
+    previewRequest.current?.abort()
+    inspectRequest.current?.abort()
+    discardLanePreview()
+    setRawConfig(null)
+    setSourceRevision(null)
+    setLaneEditor(null)
+    setLaneDeleteConfirm(null)
+    setLaneCasConflict(null)
+  }, [adminLocked])
+
+  useEffect(() => {
     if (mode === 'failover') loadFailover(false, 'mount')
     else if (mode === 'exact') loadExact('mount')
-  }, [mode, runKindFilter, currentCursor, epoch])
+  }, [mode, runKindFilter, currentCursor, epoch, adminLocked])
 
   useEffect(() => {
     if (mode === 'fusion') return
@@ -420,10 +442,10 @@ export function LanesTab(props: WorkspaceViewProps) {
       if (!defaultRouteInput && resolvedData.default_route) {
         setDefaultRouteInput(resolvedData.default_route)
       }
-      if (!assignKeeper && resolvedData.assignments[0]) {
+      if (!assignKeeper && resolvedData.assignments?.[0]) {
         setAssignKeeper(resolvedData.assignments[0].keeper)
       }
-      if (!fusionKeeper && resolvedData.assignments[0]) {
+      if (!fusionKeeper && resolvedData.assignments?.[0]) {
         setFusionKeeper(resolvedData.assignments[0].keeper)
       }
     }
@@ -584,10 +606,10 @@ export function LanesTab(props: WorkspaceViewProps) {
   const declaredTomlLanes = useMemo<readonly ParsedTomlLane[]>(() => {
     if (rawConfig) return parseLanesFromToml(rawConfig.sourceText)
     if (!resolvedData) return []
-    return resolvedData.lanes.map((lane) => ({
+    return (resolvedData.lanes ?? []).map((lane) => ({
       kind: 'failover' as const,
       id: lane.id,
-      candidates: lane.runtime_ids,
+      candidates: lane.runtime_ids ?? [],
     }))
   }, [rawConfig, resolvedData])
 
@@ -596,7 +618,7 @@ export function LanesTab(props: WorkspaceViewProps) {
     for (const rt of resolvedData?.runtimes ?? []) {
       if (rt.id) ids.add(rt.id)
     }
-    for (const p of probeData?.probe.providers ?? []) {
+    for (const p of probeData?.probe?.providers ?? []) {
       if (p.runtime_id) ids.add(p.runtime_id)
     }
     return [...ids]
@@ -702,7 +724,7 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleApplyLanePreview = async () => {
-    if (!lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
+    if (adminLocked || !lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
     setBusy('lane-apply')
     setBanner(null)
     setLaneCasConflict(null)
@@ -721,7 +743,8 @@ export function LanesTab(props: WorkspaceViewProps) {
       }
       return
     }
-    setBanner({ kind: 'ok', text: `레인 변경(${lanePreview.label})이 runtime.toml에 CAS 저장되었습니다.` })
+    setBanner(null)
+    pushShellToast(`레인 변경(${lanePreview.label})이 runtime.toml에 CAS 저장되었습니다.`, 'success')
     discardLanePreview()
     setLaneEditor(null)
     setLaneDeleteConfirm(null)
@@ -730,7 +753,7 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const handleSaveDefaultRoute = async (ev: Event) => {
     ev.preventDefault()
-    if (!defaultRouteInput.trim()) return
+    if (adminLocked || !defaultRouteInput.trim()) return
     setBusy('routing')
     setBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/routing', {
@@ -742,16 +765,17 @@ export function LanesTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `기본 라우트 변경 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `기본 라우트가 ${defaultRouteInput.trim()} 로 갱신되었습니다.` })
+    setBanner(null)
+    pushShellToast(`기본 라우트가 ${defaultRouteInput.trim()} 로 갱신되었습니다.`, 'success')
     loadFailover(false, 'manual')
   }
 
   const handleSaveAssignment = async (ev: Event) => {
     ev.preventDefault()
-    if (!assignKeeper.trim()) return
+    if (adminLocked || !assignKeeper.trim()) return
     setBusy('assignment')
     setBanner(null)
-    const prev = resolvedData?.assignments.find((a) => a.keeper === assignKeeper.trim())
+    const prev = resolvedData?.assignments?.find((a) => a.keeper === assignKeeper.trim())
     const prevRuntimeId = prev && prev.assignment_source === 'explicit' ? prev.resolved.id : null
     const expected_assignment_revision = sourceRevision
       ? {
@@ -773,11 +797,13 @@ export function LanesTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `Keeper 할당 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${assignKeeper.trim()} 런타임 할당이 반영되었습니다.` })
+    setBanner(null)
+    pushShellToast(`${assignKeeper.trim()} 런타임 할당이 반영되었습니다.`, 'success')
     loadFailover(false, 'manual')
   }
 
   const handleInspectExactRun = async (row: LaneRunSummary) => {
+    if (adminLocked) return
     inspectRequest.current?.abort()
     const ctrl = new AbortController()
     inspectRequest.current = ctrl
@@ -789,7 +815,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       render: () => html`<div class="dtable-absent">상세 페이로드 불러오는 중…</div>`,
     })
     const res = await loadLaneRun(row.runId, ctrl.signal)
-    if (ctrl.signal.aborted) return
+    if (ctrl.signal.aborted || isAdminLockedForSession('admin', authSession.peek())) return
     // A failed detail read keeps the listing row: its status and completion
     // gap are decoded already; only the payloads are missing.
     const record = res.ok ? res.value : null
@@ -889,13 +915,14 @@ export function LanesTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `Fusion 실행 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${fusionKeeper.trim()} Fusion (${fusionTopology}) 실행을 요청했습니다.` })
+    setBanner(null)
+    pushShellToast(`${fusionKeeper.trim()} Fusion (${fusionTopology}) 실행을 요청했습니다.`, 'success')
     setFusionModalOpen(false)
     setFusionPrompt('')
     loadFusion('manual')
   }
 
-  const exactData = exactObs.kind === 'value' ? exactObs.data : null
+  const exactData = !adminLocked && exactObs.kind === 'value' ? exactObs.data : null
   const fusionData = fusionObs.kind === 'value' ? fusionObs.data : null
   const effectiveLaneConfigOpen = laneConfigOpen
     || laneEditor !== null
@@ -977,11 +1004,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       </header>
 
       ${banner && html`
-        <div
-          role="status"
-          class=${banner.kind === 'ok' ? 'wka-card' : 'ap-error'}
-          style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
-        >
+        <div role="alert" class="ap-error">
           ${banner.text}
         </div>
       `}
@@ -1007,7 +1030,7 @@ export function LanesTab(props: WorkspaceViewProps) {
             </div>
             <div class="ov-kpi">
               <div class="ov-kpi-k">선언된 페일오버 레인</div>
-              <div class="ov-kpi-v">${resolvedData?.lanes.length ?? 0}</div>
+              <div class="ov-kpi-v">${resolvedData?.lanes?.length ?? 0}</div>
             </div>
           </section>
 
@@ -1022,14 +1045,22 @@ export function LanesTab(props: WorkspaceViewProps) {
             >
               <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                 <span>라우팅 · 레인 설정 (기본: ${resolvedData?.default_route ?? '없음'} · 레인 ${declaredTomlLanes.length}개)</span>
-                ${laneCasConflict && html`
+                ${!adminLocked && laneCasConflict && html`
                   <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}>CAS 충돌</span>
                 `}
               </span>
               <span aria-hidden="true">${effectiveLaneConfigOpen ? '▾' : '▸'}</span>
             </button>
 
-            ${effectiveLaneConfigOpen && html`
+            ${effectiveLaneConfigOpen && adminLocked && html`
+              <div class="ap-disclosure-body" data-testid="lane-config-body">
+                <div class="dtable-absent" data-testid="lane-config-admin-locked" role="status">
+                  라우팅 및 레인 설정 편집은 관리자 전용입니다.
+                </div>
+              </div>
+            `}
+
+            ${effectiveLaneConfigOpen && !adminLocked && html`
               <div class="ap-disclosure-body" data-testid="lane-config-body">
                 <datalist id="lane-runtime-candidates">
                   ${availableRuntimeIds.map((rid) => {
@@ -1560,9 +1591,13 @@ export function LanesTab(props: WorkspaceViewProps) {
                 ariaLabel="런타임 프로브 목록"
                 getItemKey=${(r: ProbePartitionRow) => `${r.scopeBand}:${r.runtime_id}`}
                 empty=${html`
-                  <div class="dtable-absent" style=${{ padding: 'var(--sp-4)' }}>
-                    ${probeObs.kind === 'loading' ? '프로브 불러오는 중…' : '표시할 런타임 프로브가 없습니다.'}
-                  </div>
+                  ${probeObs.kind === 'failed'
+                    ? html`<div class="ap-error" role="alert" style=${{ margin: 'var(--sp-3)' }}>런타임 프로브 조회 실패: ${probeObs.error.message}</div>`
+                    : html`
+                        <div class="dtable-absent" style=${{ padding: 'var(--sp-4)' }}>
+                          ${probeObs.kind === 'loading' ? '프로브 불러오는 중…' : '표시할 런타임 프로브가 없습니다.'}
+                        </div>
+                      `}
                 `}
                 renderItem=${(r: ProbePartitionRow) => {
                   const rt = runtimeById.get(r.runtime_id)
@@ -1649,68 +1684,76 @@ export function LanesTab(props: WorkspaceViewProps) {
 
       ${mode === 'exact' && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
-          <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-            <div class="ap-viewseg" role="group" aria-label="Exact 실행 종류 필터">
-              ${(['all', 'exact_output', 'task_verification', 'goal_verification'] as const).map((k) => html`
-                <button
-                  key=${k}
-                  type="button"
-                  class=${`ap-viewbtn ${runKindFilter === k ? 'on' : ''}`}
-                  onClick=${() => {
-                    setRunKindFilter(k)
-                    setCursorStack([])
-                  }}
-                >
-                  ${k === 'all' ? '전체' : k}
-                </button>
-              `)}
-            </div>
-            <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                총 ${formatObserved(exactObs, (d) => `${d.total}건`)} · 행 클릭으로 [⤢] 상세 열기
-              </span>
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${cursorStack.length === 0}
-                onClick=${() => setCursorStack((s) => s.slice(0, -1))}
-              >
-                ← 이전
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${!exactData?.hasMore || !exactData.runs.length}
-                onClick=${() => {
-                  const last = exactData?.runs[exactData.runs.length - 1]
-                  if (last) setCursorStack((s) => [...s, { startedAt: last.startedAt, runId: last.runId }])
-                }}
-              >
-                다음 →
-              </button>
-            </div>
-          </div>
+          ${adminLocked
+            ? html`
+                <div class="wka-card" data-testid="exact-runs-admin-locked" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+                  Exact Output 실행 이력(<span class="mono">/api/v1/dashboard/exact-lane-runs</span>)은 관리자 전용입니다.
+                </div>
+              `
+            : html`
+                <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                  <div class="ap-viewseg" role="group" aria-label="Exact 실행 종류 필터">
+                    ${(['all', 'exact_output', 'task_verification', 'goal_verification'] as const).map((k) => html`
+                      <button
+                        key=${k}
+                        type="button"
+                        class=${`ap-viewbtn ${runKindFilter === k ? 'on' : ''}`}
+                        onClick=${() => {
+                          setRunKindFilter(k)
+                          setCursorStack([])
+                        }}
+                      >
+                        ${k === 'all' ? '전체' : k}
+                      </button>
+                    `)}
+                  </div>
+                  <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                      총 ${formatObserved(exactObs, (d) => `${d.total}건`)} · 행 클릭으로 [⤢] 상세 열기
+                    </span>
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      disabled=${cursorStack.length === 0}
+                      onClick=${() => setCursorStack((s) => s.slice(0, -1))}
+                    >
+                      ← 이전
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      disabled=${!exactData?.hasMore || !exactData.runs.length}
+                      onClick=${() => {
+                        const last = exactData?.runs[exactData.runs.length - 1]
+                        if (last) setCursorStack((s) => [...s, { startedAt: last.startedAt, runId: last.runId }])
+                      }}
+                    >
+                      다음 →
+                    </button>
+                  </div>
+                </div>
 
-          ${exactObs.kind === 'failed' && html`
-            <div class="ap-error" role="alert">Exact Output 실행 이력 조회 실패. ${exactObs.error.message}</div>
-            <button type="button" class="btn-ghost self-start" onClick=${() => loadExact('manual')}>다시 조회</button>
-          `}
-          ${exactObs.kind === 'loading' && html`
-            <p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />Exact Output 실행 이력 불러오는 중…</p>
-          `}
-          ${(exactObs.kind === 'absent' || exactObs.kind === 'unreported') && html`
-            <p role="status">서버에서 Exact Output 실행 이력을 확인할 수 없습니다.</p>
-          `}
-          ${exactData && html`<${DataTable}
-            data=${exactData.runs}
-            columns=${exactColumns}
-            getRowId=${(r: LaneRunSummary) => r.runId}
-            onRowClick=${(r: LaneRunSummary) => void handleInspectExactRun(r)}
-            virtualizeThreshold=${25}
-            maxHeight=${460}
-            caption="Exact Output 실행 이력"
-            emptyLabel="Exact Output 실행 기록이 없습니다."
-          />`}
+                ${exactObs.kind === 'failed' && html`
+                  <div class="ap-error" role="alert">Exact Output 실행 이력 조회 실패. ${exactObs.error.message}</div>
+                  <button type="button" class="btn-ghost self-start" onClick=${() => loadExact('manual')}>다시 조회</button>
+                `}
+                ${exactObs.kind === 'loading' && html`
+                  <p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />Exact Output 실행 이력 불러오는 중…</p>
+                `}
+                ${(exactObs.kind === 'absent' || exactObs.kind === 'unreported') && html`
+                  <p role="status">서버에서 Exact Output 실행 이력을 확인할 수 없습니다.</p>
+                `}
+                ${exactData && html`<${DataTable}
+                  data=${exactData.runs}
+                  columns=${exactColumns}
+                  getRowId=${(r: LaneRunSummary) => r.runId}
+                  onRowClick=${(r: LaneRunSummary) => void handleInspectExactRun(r)}
+                  virtualizeThreshold=${25}
+                  maxHeight=${460}
+                  caption="Exact Output 실행 이력"
+                  emptyLabel="Exact Output 실행 기록이 없습니다."
+                />`}
+              `}
         </div>
       `}
 

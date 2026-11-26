@@ -1239,18 +1239,22 @@ export function InboxTab(props: WorkspaceViewProps) {
                 <span class="wk-badge wk-badge--warn">Goal Confirmation</span>
                 <h2 class="wk-heading">${selectedEntry.goal.title}</h2>
               </div>
+              ${!multiAccount && html`
+                <div class="wk-pane-status-slot" data-testid="goal-conf-evidence-slot">
+                  ${goalConfEvidence && selectedGoalRead?.kind === 'loading' && html`
+                    <span class="wk-status-pill wk-status-pill--info" role="status" title="확인 근거 확인 중…">
+                      <${InlineSpinner} size="xs" />
+                      <span class="wk-status-pill-text">증거 확인 중…</span>
+                    </span>
+                  `}
+                  ${goalConfEvidence && selectedGoalRead?.kind !== 'loading' && !goalConfCurrent && html`
+                    <span class="wk-status-pill wk-status-pill--warn" role="status" title="확인 근거 · 마지막 조회">
+                      <span class="wk-status-pill-text">증거 · 마지막 조회</span>
+                    </span>
+                  `}
+                </div>
+              `}
               <div class="wk-actions">
-                ${!multiAccount && goalConfEvidence && selectedGoalRead?.kind === 'loading' && html`
-                  <span class="wk-status-pill wk-status-pill--info" role="status" title="확인 근거 확인 중…">
-                    <${InlineSpinner} size="xs" />
-                    <span class="wk-status-pill-text">증거 확인 중…</span>
-                  </span>
-                `}
-                ${!multiAccount && goalConfEvidence && selectedGoalRead?.kind !== 'loading' && !goalConfCurrent && html`
-                  <span class="wk-status-pill wk-status-pill--warn" role="status" title="확인 근거 · 마지막 조회">
-                    <span class="wk-status-pill-text">증거 · 마지막 조회</span>
-                  </span>
-                `}
                 <button
                   type="button"
                   class="btn-ghost"

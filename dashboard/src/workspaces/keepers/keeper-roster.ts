@@ -7,9 +7,11 @@ import { isWaitingUnavailable } from './turn-context'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
+import { authSession } from '../../core/auth'
 import { formatObserved, type Observed } from '../../core/resource-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
+import { isAdminLockedForSession } from '../../routes/router'
 import {
   fetchConfigSchemaApi,
   patchOpForField,
@@ -53,9 +55,14 @@ function healthDotTone(k: KeeperRosterItem): 'ok' | 'warn' | 'bad' | 'brass' | '
 }
 
 export function KeeperRoster(props: KeeperRosterProps) {
+  const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const [mode, setMode] = useState<RosterMode>('companies')
   const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+
+  useEffect(() => {
+    if (adminLocked && createOpen) setCreateOpen(false)
+  }, [adminLocked, createOpen])
 
   const items: readonly KeeperRosterItem[] = props.roster.kind === 'value' ? props.roster.data : []
 
@@ -76,13 +83,15 @@ export function KeeperRoster(props: KeeperRosterProps) {
               <span class="kp-pill" data-tone="warn">지연됨</span>
             `}
           </h2>
-          <button
-            type="button"
-            class="btn-primary"
-            onClick=${() => setCreateOpen(true)}
-          >
-            + Create Keeper
-          </button>
+          ${!adminLocked && html`
+            <button
+              type="button"
+              class="btn-primary"
+              onClick=${() => setCreateOpen(true)}
+            >
+              + Create Keeper
+            </button>
+          `}
         </div>
 
         <input
@@ -208,7 +217,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
               />
             `}
 
-      ${createOpen && html`
+      ${!adminLocked && createOpen && html`
         <${CreateKeeperModal}
           onClose=${() => setCreateOpen(false)}
           onCreated=${(name: string) => {

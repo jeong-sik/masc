@@ -19,6 +19,13 @@ import {
 } from '../../core'
 import { DataTable, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import {
+  expectOptionalArrayField,
+  expectRecordElements,
+  expectRequiredRecordField,
+  expectWireRecord,
+  isJsonRecord,
+} from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   formatUnixTs,
@@ -238,6 +245,47 @@ export function summarizeJsonMetrics(raw: Record<string, unknown> | null): strin
   return pairs.length > 3 ? `${head} (+${pairs.length - 3})` : head
 }
 
+function decodeInfraSandboxesData(raw: unknown): InfraSandboxesData {
+  const ctx = 'GET /api/v1/infra/sandboxes'
+  const rec = expectWireRecord(raw, ctx)
+  expectRequiredRecordField(rec, 'probe_state', ctx)
+  expectRequiredRecordField(rec, 'summary', ctx)
+  expectRequiredRecordField(rec, 'shim_parity', ctx)
+  const unobserved_reasons = expectRecordElements<{ readonly scope: string; readonly reason: string }>(
+    expectOptionalArrayField<unknown>(rec, 'unobserved_reasons', ctx),
+    'unobserved_reasons',
+    ctx,
+  )
+  const microvm_guests = expectRecordElements<InfraMicroVmGuest>(
+    expectOptionalArrayField<unknown>(rec, 'microvm_guests', ctx),
+    'microvm_guests',
+    ctx,
+  )
+  const ssh_pools = expectRecordElements<InfraSshPool>(
+    expectOptionalArrayField<unknown>(rec, 'ssh_pools', ctx),
+    'ssh_pools',
+    ctx,
+  )
+  const docker_keepers = expectRecordElements<InfraDockerKeeper>(
+    expectOptionalArrayField<unknown>(rec, 'docker_keepers', ctx),
+    'docker_keepers',
+    ctx,
+  )
+  const ssh_unbound_keepers = expectRecordElements<InfraSshUnboundKeeper>(
+    expectOptionalArrayField<unknown>(rec, 'ssh_unbound_keepers', ctx),
+    'ssh_unbound_keepers',
+    ctx,
+  )
+  return {
+    ...(rec as unknown as InfraSandboxesData),
+    unobserved_reasons,
+    microvm_guests,
+    ssh_pools,
+    docker_keepers,
+    ssh_unbound_keepers,
+  }
+}
+
 export function SandboxesTab(props: WorkspaceViewProps) {
   const obs = resourceCache.observe<InfraSandboxesData>('infra:sandboxes').value
   const [probing, setProbing] = useState(false)
@@ -254,7 +302,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   const loadSandboxes = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<InfraSandboxesData>(
       'infra:sandboxes',
-      (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', { signal }),
+      (signal) => apiGetV2<InfraSandboxesData>('/api/v1/infra/sandboxes', {
+        signal,
+        decode: decodeInfraSandboxesData,
+      }),
       { ttlMs: 15_000, topics: ['infra_sandboxes', 'sandboxes'], reason },
     )
   }
@@ -542,10 +593,12 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   ], [openKeeperSandboxConfig])
 
   const data = obs.kind === 'value' ? obs.data : null
+  const unobservedReasons = data ? data.unobserved_reasons : []
+  const microvmGuests = data ? data.microvm_guests : []
+  const sshPools = data ? data.ssh_pools : []
+  const dockerKeepers = data ? data.docker_keepers : []
   const unboundKeepers = useMemo(
-    () => Array.isArray(data?.ssh_unbound_keepers)
-      ? data.ssh_unbound_keepers.filter((r): r is InfraSshUnboundKeeper => Boolean(r && typeof r === 'object'))
-      : [],
+    () => (data?.ssh_unbound_keepers ?? []).filter((r): r is InfraSshUnboundKeeper => isJsonRecord(r)),
     [data?.ssh_unbound_keepers],
   )
   const activeSshObs = data
@@ -668,11 +721,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           </section>
 
           <!-- Unobserved Reasons (Honesty contract) -->
-          ${data.unobserved_reasons.length > 0 && html`
+          ${unobservedReasons.length > 0 && html`
             <section class="ap-error sev-warn" data-testid="sandbox-unobserved-reasons">
-              <strong>미관측 사유 (${data.unobserved_reasons.length}건):</strong>
+              <strong>미관측 사유 (<span class="tnum">${unobservedReasons.length}</span>건):</strong>
               <ul style=${{ margin: 'var(--sp-1) 0 0', paddingLeft: 'var(--sp-4)', fontSize: 'var(--fs-12)' }}>
-                ${data.unobserved_reasons.map((item, idx) => html`
+                ${unobservedReasons.map((item, idx) => html`
                   <li key=${`${item.scope}-${idx}`}>
                     <span class="mono">${item.scope}</span>: ${item.reason}
                   </li>
@@ -684,10 +737,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <!-- MicroVM Guests -->
           <section class="v2-sandbox-section">
             <div class="wka-h">
-              <h3>MicroVM 게스트 (${data.microvm_guests.length})</h3>
+              <h3>MicroVM 게스트 (<span class="tnum">${microvmGuests.length}</span>)</h3>
             </div>
             <${DataTable}
-              data=${data.microvm_guests}
+              data=${microvmGuests}
               columns=${microVmColumns}
               getRowId=${(r: InfraMicroVmGuest, i: number) => r.guest_name ?? r.id ?? r.keeper ?? r.name ?? `vm-${i}`}
               virtualizeThreshold=${30}
@@ -700,11 +753,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <section class="v2-sandbox-section">
             <div class="wka-h">
               <h3>
-                SSH 풀 (${data.ssh_pools.length})${unboundKeepers.length === 0 && data.summary.ssh_unbound_keepers > 0 ? ` · 미바인딩 Keeper ${data.summary.ssh_unbound_keepers}명` : ''}
+                SSH 풀 (<span class="tnum">${sshPools.length}</span>)${unboundKeepers.length === 0 && data.summary.ssh_unbound_keepers > 0 ? html` · 미바인딩 Keeper <span class="tnum">${data.summary.ssh_unbound_keepers}</span>명` : ''}
               </h3>
             </div>
             <${DataTable}
-              data=${data.ssh_pools}
+              data=${sshPools}
               columns=${sshPoolColumns}
               getRowId=${(r: InfraSshPool, i: number) => r.pool_name ?? r.id ?? r.name ?? `ssh-${i}`}
               virtualizeThreshold=${30}
@@ -716,7 +769,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ${unboundKeepers.length > 0 && html`
             <section class="v2-sandbox-section" data-testid="sandbox-ssh-unbound">
               <div class="wka-h">
-                <h3>미바인딩 SSH Keepers (${unboundKeepers.length})</h3>
+                <h3>미바인딩 SSH Keepers (<span class="tnum">${unboundKeepers.length}</span>)</h3>
                 <span class="v2-sync-pill v2-sync-pill--warn">엔드포인트 연결 필요</span>
               </div>
               <${DataTable}
@@ -733,10 +786,10 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           <!-- Docker Keepers -->
           <section class="v2-sandbox-section">
             <div class="wka-h">
-              <h3>Docker Keepers (${data.docker_keepers.length})</h3>
+              <h3>Docker Keepers (<span class="tnum">${dockerKeepers.length}</span>)</h3>
             </div>
             <${DataTable}
-              data=${data.docker_keepers}
+              data=${dockerKeepers}
               columns=${dockerColumns}
               getRowId=${(r: InfraDockerKeeper, i: number) => r.container_id ?? r.keeper ?? `dk-${i}`}
               virtualizeThreshold=${30}

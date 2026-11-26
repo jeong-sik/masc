@@ -143,7 +143,7 @@ export function MobileNav(): VNode {
             }}
           >
             <${ShellIcon} name="bell" size=${16} />
-            <span>Incidents ${unreadInc > 0 ? `(${unreadInc})` : ''}</span>
+            <span>Incidents ${unreadInc > 0 ? html`(<span class="tnum">${unreadInc}</span>)` : ''}</span>
           </button>
           <button
             type="button"

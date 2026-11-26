@@ -18,8 +18,8 @@ import type uPlot from 'uplot'
 import {
   apiGet,
   apiMutate,
+  authSession,
   cancelSetupLogin,
-  currentAccountMode,
   currentSessionEpoch,
   extractObserverTopics,
   isEpochCurrent,
@@ -37,6 +37,8 @@ import {
 } from '../../core'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { isUtilizationSpent } from '../../lib/quota-window'
+import { isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   PopoverMenu,
   UPlotChart,
@@ -56,6 +58,9 @@ import {
 import { RuntimeLivenessPanel } from './runtime-liveness-panel'
 import {
   classifyQuotaScope,
+  decodeMultiAccountIntegrations,
+  decodeMultiAccountProviderAccounts,
+  decodeSetupInventoryPayload,
   formatResetCountdown,
   formatUnixTime,
   loadProviderUsageHistory,
@@ -204,12 +209,17 @@ const KNOWN_CAUSE_FILTERS: readonly RuntimeQuotaRest['cause'][] = [
 export function QuotasTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
   const providerDays = timeWindowProviderDays(win)
-  const accountMode = currentAccountMode.value
+  const session = authSession.value
+  const epoch = sessionEpoch.value
+  const isMultiAccountSignedIn = session.kind === 'multi_account_signed_in'
+  const isSingleUserLocal = session.kind === 'single_user_local'
+  const canManageProviders = isSingleUserLocal || isMultiAccountSignedIn
+  const adminLocked = isAdminLockedForSession('admin', session)
 
   const resolvedObs = resourceCache.observe<RuntimeResolvedPayload>('runtime:resolved').value
   const historyKey = `runtime:provider-usage-history:${providerDays}`
   const historyObs = resourceCache.observe<ProviderUsageHistoryResponse>(historyKey).value
-  const inventoryKey = accountMode === 'multi_account' ? 'runtime:auth-provider-accounts' : 'runtime:setup-inventory'
+  const inventoryKey = isMultiAccountSignedIn ? 'runtime:auth-provider-accounts' : 'runtime:setup-inventory'
   const inventoryObs = resourceCache.observe<SetupInventoryPayload | MultiAccountProviderAccountsResponse>(inventoryKey).value
   const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
@@ -224,7 +234,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const [verifyModelInput, setVerifyModelInput] = useState<string>('')
   const [loginReceipt, setLoginReceipt] = useState<LoginReceiptState | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
-  const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [actionBanner, setActionBanner] = useState<{ kind: 'err'; text: string } | null>(null)
   const [sourceRevision, setSourceRevision] = useState<string>('')
   const mountedRef = useRef(true)
   const rawConfigAbortRef = useRef<AbortController | null>(null)
@@ -241,8 +251,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
   }, [])
 
-  const epoch = sessionEpoch.value
   const loadAll = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
+    const curSession = authSession.peek()
+    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
+    const singleLocal = curSession.kind === 'single_user_local'
+    if (!multiSignedIn && !singleLocal) {
+      rawConfigAbortRef.current?.abort()
+      return
+    }
     const startEpoch = currentSessionEpoch()
     const jobs: Promise<unknown>[] = [
       resourceCache.fetch<RuntimeResolvedPayload>(
@@ -257,36 +273,48 @@ export function QuotasTab(props: WorkspaceViewProps) {
       ),
     ]
 
-    if (accountMode === 'multi_account') {
+    if (multiSignedIn) {
+      rawConfigAbortRef.current?.abort()
       jobs.push(
         resourceCache.fetch<MultiAccountProviderAccountsResponse>(
           'runtime:auth-provider-accounts',
-          (signal) => apiGet<MultiAccountProviderAccountsResponse>('/api/v1/auth/provider-accounts', { signal }),
+          (signal) => apiGet<MultiAccountProviderAccountsResponse>('/api/v1/auth/provider-accounts', {
+            signal,
+            decode: decodeMultiAccountProviderAccounts,
+          }),
           { ttlMs: 20_000, topics: ['provider_accounts'], reason },
         ),
         resourceCache.fetch<MultiAccountIntegrationsResponse>(
           'runtime:auth-integrations',
-          (signal) => apiGet<MultiAccountIntegrationsResponse>('/api/v1/auth/integrations', { signal }),
+          (signal) => apiGet<MultiAccountIntegrationsResponse>('/api/v1/auth/integrations', {
+            signal,
+            decode: decodeMultiAccountIntegrations,
+          }),
           { ttlMs: 30_000, topics: ['provider_accounts', 'config'], reason },
         ),
       )
-    } else {
+    } else if (singleLocal) {
       jobs.push(
         resourceCache.fetch<SetupInventoryPayload>(
           'runtime:setup-inventory',
-          (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', { signal }),
+          (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', {
+            signal,
+            decode: decodeSetupInventoryPayload,
+          }),
           { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
         ),
       )
       rawConfigAbortRef.current?.abort()
-      const ctrl = new AbortController()
-      rawConfigAbortRef.current = ctrl
-      void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
-        if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
-        if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
-          setSourceRevision(res.value.source_revision.trim())
-        }
-      })
+      if (!isAdminLockedForSession('admin', curSession)) {
+        const ctrl = new AbortController()
+        rawConfigAbortRef.current = ctrl
+        void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw', { signal: ctrl.signal }).then((res) => {
+          if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
+          if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
+            setSourceRevision(res.value.source_revision.trim())
+          }
+        })
+      }
     }
 
     void Promise.all(jobs).then(() => {
@@ -303,7 +331,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     loadAll('mount')
-  }, [providerDays, accountMode, epoch])
+  }, [providerDays, session.kind, epoch, adminLocked])
 
   useEffect(() => {
     const watchedTopics = new Set([
@@ -343,7 +371,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       unsubReconnect()
       unsubResync()
     }
-  }, [providerDays, accountMode, epoch])
+  }, [providerDays, session.kind, epoch, adminLocked])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   useEffect(() => {
@@ -485,38 +513,48 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const manual = verifyModelInput.trim()
     if (manual) return manual
     const integ = personIntegrations.find((i) => i.integration_id === integrationId)
-    if (integ && integ.models[0]) return integ.models[0]
-    const rt = resolvedData?.runtimes.find((r) => r.provider === integrationId && r.model)
+    if (integ && integ.models?.[0]) return integ.models[0]
+    const rt = (resolvedData?.runtimes ?? []).find((r) => r.provider === integrationId && r.model)
     return rt?.model ?? ''
   }
 
   const handleSaveCredential = async (ev: Event) => {
     ev.preventDefault()
+    const curSession = authSession.peek()
+    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
+    const singleLocal = curSession.kind === 'single_user_local'
+    if (!multiSignedIn && !singleLocal) return
     if (!credForm || !credForm.providerId.trim() || !credForm.secret.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const providerId = credForm.providerId.trim()
+    const secret = credForm.secret.trim()
     setActionBusy('save-cred')
     setActionBanner(null)
 
-    if (accountMode === 'multi_account') {
+    if (multiSignedIn) {
       // Exact wire shape: lib/server/server_key_account.ml:133-137 requires { integration_id, key }
       const res = await apiMutate<unknown>('POST', '/api/v1/setup/accounts/key', {
-        integration_id: credForm.providerId.trim(),
-        key: credForm.secret.trim(),
+        integration_id: providerId,
+        key: secret,
       })
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
       setActionBusy(null)
       if (!res.ok) {
         setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
         return
       }
-      setActionBanner({ kind: 'ok', text: `${credForm.providerId} 개인 API 키가 등록되었습니다.` })
+      setActionBanner(null)
+      pushShellToast(`${providerId} 개인 API 키가 등록되었습니다.`, 'success')
       setCredForm(null)
       loadAll('manual')
       return
     }
 
-    // Single-user CAS precondition: require real source_revision from /api/v1/runtime/config/raw (never 'latest'!)
+    // Single-user CAS precondition: require real source_revision from /api/v1/runtime/config/raw (never 'latest')
     let rev = sourceRevision.trim()
     if (!rev) {
       const rawRes = await apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw')
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
       if (rawRes.ok && typeof rawRes.value.source_revision === 'string') {
         rev = rawRes.value.source_revision.trim()
         if (rev) setSourceRevision(rev)
@@ -532,16 +570,18 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
 
     const res = await apiMutate<unknown>('POST', '/api/v1/setup/credential', {
-      provider_id: credForm.providerId.trim(),
-      secret: credForm.secret.trim(),
+      provider_id: providerId,
+      secret,
       source_revision: rev,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${credForm.providerId} 자격 증명이 저장되었습니다.` })
+    setActionBanner(null)
+    pushShellToast(`${providerId} 자격 증명이 저장되었습니다.`, 'success')
     setCredForm(null)
     loadAll('manual')
   }
@@ -555,7 +595,31 @@ export function QuotasTab(props: WorkspaceViewProps) {
     loginAbortRef.current?.abort('unmount')
   }, [])
 
+  // Abort active CLI OAuth streams and wipe transient credential state whenever
+  // the session epoch advances (sign-out, account switch, workspace change) or
+  // authentication is lost. Note: in multi_account mode, Worker sessions retain
+  // Manage_own_provider on /api/v1/setup/accounts/login* (server_login_http.ml:592).
+  useEffect(() => {
+    loginAbortRef.current?.abort('session_changed')
+    loginAbortRef.current = null
+    rawConfigAbortRef.current?.abort('session_changed')
+    rawConfigAbortRef.current = null
+    openedLoginUrlRef.current = null
+    setLoginReceipt(null)
+    setCredForm(null)
+    setLoginInputText('')
+    setCopiedDeviceCode(false)
+    setSourceRevision('')
+    setActionBusy(null)
+  }, [epoch, session.kind])
+
   const handleStartOAuthLogin = async (integrationId: string) => {
+    const curSession = authSession.peek()
+    const multiSignedIn = curSession.kind === 'multi_account_signed_in'
+    const singleLocal = curSession.kind === 'single_user_local'
+    if (!multiSignedIn && !singleLocal) return
+
+    const startEpoch = currentSessionEpoch()
     loginAbortRef.current?.abort('superseded')
     const ctrl = new AbortController()
     loginAbortRef.current = ctrl
@@ -564,6 +628,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
     setCopiedDeviceCode(false)
     setActionBusy(`login:${integrationId}`)
     setActionBanner(null)
+
+    const isStreamActive = () =>
+      mountedRef.current && isEpochCurrent(startEpoch) && !ctrl.signal.aborted && loginAbortRef.current === ctrl
 
     setLoginReceipt({
       loginId: '',
@@ -584,6 +651,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       signal: ctrl.signal,
       callbacks: {
         onStarted: (receipt) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => ({
             ...(cur ?? { loginId: receipt.loginId, integrationId }),
             loginId: receipt.loginId || cur?.loginId || '',
@@ -595,12 +663,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
           }))
         },
         onOutput: (_stream, text) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => (cur ? { ...cur, outputTail: `${cur.outputTail ?? ''}${text}`.slice(-2000) } : cur))
         },
         onScreen: (text) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => (cur ? { ...cur, outputTail: text.slice(-2000) } : cur))
         },
         onAuthUrl: (url) => {
+          if (!isStreamActive()) return
           let popupBlocked = false
           if (openedLoginUrlRef.current !== url) {
             openedLoginUrlRef.current = url
@@ -616,12 +687,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
           setLoginReceipt((cur) => (cur ? { ...cur, authUrl: url, popupBlocked } : cur))
         },
         onDeviceCode: (code) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => (cur ? { ...cur, deviceCode: code } : cur))
         },
         onInputReady: () => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => (cur ? { ...cur, inputReady: true } : cur))
         },
         onComplete: (receipt) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => ({
             ...(cur ?? { loginId: receipt.loginId, integrationId }),
             loginId: receipt.loginId || cur?.loginId || '',
@@ -632,15 +706,17 @@ export function QuotasTab(props: WorkspaceViewProps) {
             inputReady: false,
             streaming: false,
           }))
-          setActionBanner({ kind: 'ok', text: `${integrationId} CLI OAuth 로그인이 완료되었습니다.` })
+          setActionBanner(null)
+          pushShellToast(`${integrationId} CLI OAuth 로그인이 완료되었습니다.`, 'success')
           loadAll('manual')
           const ref = receipt.accountRef
           // POST /api/v1/setup/accounts/verify is only mounted in multi_account mode (server_login_http.mli:79)
-          if (accountMode === 'multi_account' && ref && resolveModelForIntegration(integrationId)) {
+          if (multiSignedIn && ref && resolveModelForIntegration(integrationId)) {
             void handleVerifyAccount(integrationId, ref)
           }
         },
         onError: (message, receipt) => {
+          if (!isStreamActive()) return
           setLoginReceipt((cur) => (cur
             ? {
                 ...cur,
@@ -657,7 +733,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       },
     })
 
-    if (loginAbortRef.current === ctrl) {
+    if (isStreamActive()) {
       setActionBusy((cur) => (cur === `login:${integrationId}` ? null : cur))
       setLoginReceipt((cur) => (cur ? { ...cur, streaming: false } : cur))
     }
@@ -665,10 +741,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
   const handleSubmitLoginInput = async (ev: Event) => {
     ev.preventDefault()
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
     if (!loginReceipt?.loginId || !loginInputText.trim()) return
+    const startEpoch = currentSessionEpoch()
     const text = loginInputText.trim()
     setActionBusy('login-input')
     const res = await sendSetupLoginInput(loginReceipt.loginId, { kind: 'text', text })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `CLI 입력 전송 실패: ${res.error.message}` })
@@ -679,9 +759,13 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleSendLoginEnterKey = async () => {
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
     if (!loginReceipt?.loginId) return
+    const startEpoch = currentSessionEpoch()
     setActionBusy('login-input')
     const res = await sendSetupLoginInput(loginReceipt.loginId, { kind: 'key', key: 'enter' })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `Enter 키 전송 실패: ${res.error.message}` })
@@ -691,16 +775,21 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleCancelSetupLogin = async () => {
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
+    const startEpoch = currentSessionEpoch()
     const owner = loginAbortRef.current
     if (loginReceipt?.loginId) {
       await cancelSetupLogin(loginReceipt.loginId)
     }
-    if (loginAbortRef.current !== owner) return
+    if (!mountedRef.current || !isEpochCurrent(startEpoch) || loginAbortRef.current !== owner) return
     owner?.abort('cancelled')
     setLoginReceipt((cur) => (cur ? { ...cur, status: 'cancelled', streaming: false, inputReady: false } : cur))
   }
 
   const handleRefreshLoginReceipt = async () => {
+    const curSession = authSession.peek()
+    if (curSession.kind !== 'single_user_local' && curSession.kind !== 'multi_account_signed_in') return
     const loginId = loginReceipt?.loginId?.trim()
     if (!loginId) return
     const startEpoch = currentSessionEpoch()
@@ -727,7 +816,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleVerifyAccount = async (providerId: string, providerAccountId?: string) => {
-    if (accountMode !== 'multi_account') {
+    if (authSession.peek().kind !== 'multi_account_signed_in') {
       setActionBanner({
         kind: 'err',
         text: '계정 검증(/api/v1/setup/accounts/verify)은 multi_account 모드에서만 지원됩니다.',
@@ -743,6 +832,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       })
       return
     }
+    const startEpoch = currentSessionEpoch()
     setActionBusy(`verify:${acctId}`)
     setActionBanner(null)
     // Exact wire shape: lib/server/server_setup_account_login.ml:424-432 requires { provider_account_id, model }
@@ -750,25 +840,31 @@ export function QuotasTab(props: WorkspaceViewProps) {
       provider_account_id: acctId,
       model,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `검증 실패 (${acctId}): ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${acctId} (${model}) 계정 검증 완료.` })
+    setActionBanner(null)
+    pushShellToast(`${acctId} (${model}) 계정 검증 완료.`, 'success')
     loadAll('manual')
   }
 
   const handleRemoveKey = async (id: string) => {
+    if (authSession.peek().kind !== 'multi_account_signed_in') return
+    const startEpoch = currentSessionEpoch()
     setActionBusy(`remove:${id}`)
     setActionBanner(null)
     const res = await apiMutate<unknown>('DELETE', `/api/v1/setup/accounts/key/${encodeURIComponent(id)}`)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `삭제 실패 (${id}): ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${id} 자격 증명을 제거했습니다.` })
+    setActionBanner(null)
+    pushShellToast(`${id} 자격 증명을 제거했습니다.`, 'success')
     loadAll('manual')
   }
 
@@ -864,20 +960,24 @@ export function QuotasTab(props: WorkspaceViewProps) {
             최대 사용률: ${pct !== null ? `${pct.toFixed(1)}%` : '미보고'}
           </span>
           <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-            <button
-              type="button"
-              class="btn-ghost"
-              onClick=${() => setCredForm({ providerId: pid, secret: '', mode: 'api_key' })}
-            >
-              Re-auth
-            </button>
-            <button
-              type="button"
-              class="btn-ghost"
-              onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(pid)}`)}
-            >
-              Open Config Key
-            </button>
+            ${canManageProviders && html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => setCredForm({ providerId: pid, secret: '', mode: 'api_key' })}
+              >
+                Re-auth
+              </button>
+            `}
+            ${canManageProviders && !adminLocked && html`
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(pid)}`)}
+              >
+                Open Config Key
+              </button>
+            `}
           </div>
         </div>
       </article>
@@ -980,17 +1080,19 @@ export function QuotasTab(props: WorkspaceViewProps) {
           </p>
         </div>
         <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            class="btn-primary"
-            onClick=${() => setCredForm({
-              providerId: personIntegrations[0]?.integration_id ?? integrations[0]?.id ?? 'openai',
-              secret: '',
-              mode: 'api_key',
-            })}
-          >
-            + API 키 등록
-          </button>
+          ${canManageProviders && html`
+            <button
+              type="button"
+              class="btn-primary"
+              onClick=${() => setCredForm({
+                providerId: personIntegrations[0]?.integration_id ?? integrations[0]?.id ?? 'openai',
+                secret: '',
+                mode: 'api_key',
+              })}
+            >
+              + API 키 등록
+            </button>
+          `}
           <button type="button" class="btn-ghost" onClick=${() => loadAll('manual')}>
             새로고침
           </button>
@@ -998,13 +1100,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       </header>
 
       ${actionBanner && html`
-        <div
-          role="status"
-          class=${actionBanner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${actionBanner.kind === 'ok'
-            ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' }
-            : undefined}
-        >
+        <div role="alert" class="ap-error">
           ${actionBanner.text}
         </div>
       `}
@@ -1260,15 +1356,17 @@ export function QuotasTab(props: WorkspaceViewProps) {
                         })}
 
                         <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', paddingTop: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            class="btn-ghost"
-                            style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
-                            onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(group.provider)}`)}
-                          >
-                            설정 열기
-                          </button>
-                          ${hasPayment && html`
+                          ${canManageProviders && !adminLocked && html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+                              onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(group.provider)}`)}
+                            >
+                              설정 열기
+                            </button>
+                          `}
+                          ${canManageProviders && hasPayment && html`
                             <button
                               type="button"
                               class="btn-primary"
@@ -1392,10 +1490,10 @@ export function QuotasTab(props: WorkspaceViewProps) {
       </section>
 
       <!-- Inline Credential Form & CLI OAuth Receipt -->
-      ${credForm && html`
+      ${canManageProviders && credForm && html`
         <form class="wka-card" onSubmit=${handleSaveCredential} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', borderColor: 'var(--line-2)' }}>
           <div class="wka-h">
-            <h3>제공자 API 키 등록 / 갱신 (${accountMode === 'multi_account' ? '개인 계정' : '워크스페이스'})</h3>
+            <h3>제공자 API 키 등록 / 갱신 (${isMultiAccountSignedIn ? '개인 계정' : '워크스페이스'})</h3>
             <button type="button" class="btn-ghost" onClick=${() => setCredForm(null)}>닫기</button>
           </div>
           <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-2)' }}>
@@ -1444,7 +1542,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${loginReceipt && html`
+      ${canManageProviders && loginReceipt && html`
         <section
           class="wka-card"
           data-testid="setup-login-panel"
@@ -1560,7 +1658,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                 영수증 상태 새로고침
               </button>
             `}
-            ${accountMode === 'multi_account' && loginReceipt.accountRef && html`
+            ${isMultiAccountSignedIn && loginReceipt.accountRef && html`
               <button
                 type="button"
                 class="btn-primary"
@@ -1583,7 +1681,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           onClick=${() => setInventoryOpen((v) => !v)}
         >
           <span>
-            ${accountMode === 'multi_account'
+            ${isMultiAccountSignedIn
               ? `내 제공자 계정 (${multiAccounts.length}개 계정)`
               : `제공자 연동 & 자격 증명 (${integrations.length}개 제공자 · 활성 ${enabledIntegrationsCount})`}
           </span>
@@ -1592,7 +1690,13 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
         ${inventoryOpen && html`
           <div class="ap-disclosure-body" data-testid="provider-inventory-body">
-            ${accountMode === 'multi_account' && html`
+            ${inventoryObs.kind === 'failed' && html`
+              <div class="ap-error" role="alert">제공자 자격 증명 조회 실패: ${inventoryObs.error.message}</div>
+            `}
+            ${isMultiAccountSignedIn && personIntegObs.kind === 'failed' && html`
+              <div class="ap-error" role="alert">제공자 연동 목록 조회 실패: ${personIntegObs.error.message}</div>
+            `}
+            ${isMultiAccountSignedIn && html`
               <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
                 <label style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>검증용 모델 (선택 시 우선 적용):</label>
                 <input
@@ -1607,9 +1711,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            ${accountMode === 'multi_account'
+            ${isMultiAccountSignedIn
               ? (multiAccounts.length === 0
-                ? html`<div class="dtable-absent">연결된 개인 제공자 계정이 없습니다.</div>`
+                ? (inventoryObs.kind === 'failed'
+                  ? null
+                  : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '연결된 개인 제공자 계정이 없습니다.'}</div>`)
                 : html`
                     <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                       ${multiAccounts.map((acc, i) => {
@@ -1640,43 +1746,49 @@ export function QuotasTab(props: WorkspaceViewProps) {
                       })}
                     </div>
                   `)
-              : (integrations.length === 0
-                ? html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '등록된 제공자 인벤토리가 없습니다.'}</div>`
-                : html`
-                    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 'var(--sp-2)' }}>
-                      ${integrations.map((integ) => html`
-                        <div key=${integ.id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
-                          <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)' }}>
-                            <div>
-                              <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${integ.display_name}</div>
-                              <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                                ${integ.id} · ${integ.credential_kind ?? integ.protocol ?? '없음'}
-                              </div>
-                              ${accountLine(accountEmails.get(integ.id)) !== null && html`
-                                <div data-testid="provider-account-line" class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
-                                  ${accountLine(accountEmails.get(integ.id))}
+              : isSingleUserLocal
+                ? (integrations.length === 0
+                  ? (inventoryObs.kind === 'failed'
+                    ? null
+                    : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '등록된 제공자 인벤토리가 없습니다.'}</div>`)
+                  : html`
+                      <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 'var(--sp-2)' }}>
+                        ${integrations.map((integ) => html`
+                          <div key=${integ.id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                            <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)' }}>
+                              <div>
+                                <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)' }}>${integ.display_name}</div>
+                                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                  ${integ.id} · ${integ.credential_kind ?? integ.protocol ?? '없음'}
                                 </div>
+                                ${accountLine(accountEmails.get(integ.id)) !== null && html`
+                                  <div data-testid="provider-account-line" class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                                    ${accountLine(accountEmails.get(integ.id))}
+                                  </div>
+                                `}
+                              </div>
+                              <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
+                                ${integ.enabled === false ? '비활성' : '활성'}
+                              </span>
+                            </div>
+                            <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                              <button type="button" class="btn-ghost" onClick=${() => setCredForm({ providerId: integ.id, secret: '', mode: 'api_key' })}>
+                                API 키
+                              </button>
+                              <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
+                                CLI OAuth
+                              </button>
+                              ${!adminLocked && html`
+                                <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
+                                  Open Config Key
+                                </button>
                               `}
                             </div>
-                            <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
-                              ${integ.enabled === false ? '비활성' : '활성'}
-                            </span>
                           </div>
-                          <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-                            <button type="button" class="btn-ghost" onClick=${() => setCredForm({ providerId: integ.id, secret: '', mode: 'api_key' })}>
-                              API 키
-                            </button>
-                            <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
-                              CLI OAuth
-                            </button>
-                            <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
-                              Open Config Key
-                            </button>
-                          </div>
-                        </div>
-                      `)}
-                    </div>
-                  `)}
+                        `)}
+                      </div>
+                    `)
+                : html`<div class="dtable-absent">로그인된 세션에서만 제공자 자격 증명을 관리할 수 있습니다.</div>`}
           </div>
         `}
       </section>

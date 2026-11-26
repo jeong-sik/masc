@@ -30,6 +30,7 @@ import {
   type DataTableColumn,
   type UPlotSeriesSpec,
 } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   buildMemoryFlowSeries,
   buildMemoryRecoveryPayload,
@@ -144,7 +145,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
   const [actAt, setActAt] = useState('0')
   const [actOffset, setActOffset] = useState('0')
   const [actBusy, setActBusy] = useState<string | null>(null)
-  const [actFeedback, setActFeedback] = useState<{ kind: 'ok' | 'err' | 'warn'; message: string } | null>(null)
+  const [actFeedback, setActFeedback] = useState<{ kind: 'err' | 'warn'; message: string } | null>(null)
 
   useEffect(() => {
     void loadWorld('mount')
@@ -199,10 +200,8 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       return
     }
     const summary = typeof res.value === 'string' ? res.value : JSON.stringify(res.value)
-    setActFeedback({
-      kind: 'ok',
-      message: `${keeper} → ${kind}: ${summary}`,
-    })
+    setActFeedback(null)
+    pushShellToast(`${keeper} → ${kind}: ${summary}`, 'success')
     resourceCache.invalidateTopic('memory')
     await refresh()
   }
@@ -601,7 +600,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             </div>
 
             ${actFeedback && html`
-              <div class=${`kn-notice kn-notice--${actFeedback.kind}`} role="status">${actFeedback.message}</div>
+              <div class=${`kn-notice kn-notice--${actFeedback.kind}`} role="alert">${actFeedback.message}</div>
             `}
 
             <${DataTable}

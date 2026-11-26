@@ -27,6 +27,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, VirtualList } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
   asSafeInt,
@@ -270,7 +271,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [replyText, setReplyText] = useState('')
   const [replyParentId, setReplyParentId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const [feedback, setFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
   const focusedCommentRef = useRef<HTMLDivElement>(null)
@@ -784,7 +785,8 @@ export function BoardTab(props: WorkspaceViewProps) {
     setNewTitle('')
     setNewBody('')
     setShowCreate(false)
-    setFeedback({ kind: 'ok', message: '게시글을 작성했습니다.' })
+    setFeedback(null)
+    pushShellToast('게시글을 작성했습니다.', 'success')
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
   }
@@ -812,7 +814,8 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     setReplyText('')
     setReplyParentId(null)
-    setFeedback({ kind: 'ok', message: '댓글이 등록되었습니다.' })
+    setFeedback(null)
+    pushShellToast('댓글이 등록되었습니다.', 'success')
     view.commentId = postedCommentId(res.value, activePost.id)
     view.scroll = true
     await refreshActiveDetail(activePost.id)
@@ -891,7 +894,8 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `고정 변경 실패: ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: post.pinned ? '고정이 해제되었습니다.' : '게시글이 고정되었습니다.' })
+    setFeedback(null)
+    pushShellToast(post.pinned ? '고정이 해제되었습니다.' : '게시글이 고정되었습니다.', 'success')
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
@@ -908,7 +912,8 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `게시글 삭제 실패: ${res.error.message}` })
       return
     }
-    setFeedback({ kind: 'ok', message: `게시글 ${postId} 삭제 완료` })
+    setFeedback(null)
+    pushShellToast(`게시글 ${postId} 삭제 완료`, 'success')
     setSelectedPostId((cur) => (cur === postId ? null : cur))
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
@@ -1139,7 +1144,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   const detailPane = activePost
     ? html`
         <div class="kn-detail-pad">
-          ${feedback && html`<div class=${`kn-notice kn-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
+          ${feedback && html`<div class="kn-notice kn-notice--err" role="alert">${feedback.message}</div>`}
           ${detailError && html`<div class="kn-notice kn-notice--err" role="alert">${detailError}</div>`}
           ${isMultiAccount && html`
             <div class="kn-notice kn-notice--info" role="note">

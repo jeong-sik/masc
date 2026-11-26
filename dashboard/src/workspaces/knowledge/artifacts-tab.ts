@@ -17,6 +17,7 @@ import { apiGet } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
   asSafeInt,
@@ -49,9 +50,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   // A selected artifact with no document and no error is one being read: from
   // the first render, before the effect that reads it has run.
   const docLoading = selectedId !== null && doc === null && docError === null
-  const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const docAbortRef = useRef<AbortController | null>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -59,10 +58,6 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     return () => {
       mountedRef.current = false
       docAbortRef.current?.abort()
-      if (copyTimerRef.current !== null) {
-        clearTimeout(copyTimerRef.current)
-        copyTimerRef.current = null
-      }
     }
   }, [])
 
@@ -161,7 +156,6 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     docAbortRef.current?.abort()
-    setCopyNotice(null)
     setDoc(null)
     if (!selectedId) return
     const ctrl = new AbortController()
@@ -186,12 +180,11 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   const copyText = async (text: string, label: string) => {
     const copied = await copyToClipboard(text)
     if (!mountedRef.current) return
-    setCopyNotice(copied ? `${label} 복사됨` : '클립보드 복사를 지원하지 않는 환경입니다.')
-    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-    copyTimerRef.current = setTimeout(() => {
-      copyTimerRef.current = null
-      if (mountedRef.current) setCopyNotice(null)
-    }, 2000)
+    if (copied) {
+      pushShellToast(`${label} 복사됨`, 'success')
+    } else {
+      pushShellToast('클립보드 복사를 지원하지 않는 환경입니다.', 'warning')
+    }
   }
 
   const downloadArtifact = (current: ArtifactDocumentData) => {
@@ -334,8 +327,6 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
               />
             </div>
           </div>
-
-          ${copyNotice && html`<div class="kn-notice kn-notice--ok" role="status">${copyNotice}</div>`}
 
           <div class="kn-row-meta">
             <${KeeperBadge} id=${doc.artifact.author} size="sm" />

@@ -526,7 +526,21 @@ export function QueueContextOverlayBody(): VNode {
 
             <section class="ap-qpeek-section">
               <header class="ap-qpeek-section-head">
-                <h3>Upcoming Schedules (${scheduleCount})</h3>
+                <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
+                  <h3>Upcoming Schedules (<span class="tnum">${scheduleCount}</span>)</h3>
+                  ${schedulesLoading && schedules && html`
+                    <span class="ap-muted" role="status" style=${{ fontSize: 'var(--fs-11)', display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+                      <${InlineSpinner} size="xs" /> 예약 갱신 중…
+                    </span>
+                  `}
+                  ${!schedulesLoading && schedules && lastSchedules && html`
+                    <span class="ap-muted tnum" style=${{ fontSize: 'var(--fs-11)' }}>
+                      마지막 확인 · <time dateTime=${new Date(schedules.observedAt).toISOString()}>
+                        ${formatTimestampKo(schedules.observedAt / 1000)}
+                      </time>
+                    </span>
+                  `}
+                </div>
                 <button
                   type="button"
                   class="btn-ghost"
@@ -535,19 +549,14 @@ export function QueueContextOverlayBody(): VNode {
                   Open Schedules →
                 </button>
               </header>
-              ${schedulesLoading && html`
+              ${schedulesLoading && !schedules && html`
                 <p class="ap-muted" role="status">
-                  <${InlineSpinner} /> ${schedules ? '예약 갱신 중…' : '예약 불러오는 중…'}
+                  <${InlineSpinner} /> 예약 불러오는 중…
                 </p>
               `}
               ${schedulesError && html`<p class="ap-error" role="alert">예약 조회 실패 · ${schedulesError}</p>`}
               ${!schedules && !schedulesLoading && !schedulesError && html`
                 <p class="ap-muted">예약 조회 대기 중</p>
-              `}
-              ${schedules && lastSchedules && html`
-                <p class="ap-muted">마지막 확인 · <time dateTime=${new Date(schedules.observedAt).toISOString()}>
-                  ${formatTimestampKo(schedules.observedAt / 1000)}
-                </time></p>
               `}
               ${schedules && schedules.totalCount === 0 && html`
                 <p class="ap-muted">${lastSchedules ? '마지막 조회에 활성 예약이 없었습니다.' : '활성 예약 자동화가 없습니다.'}</p>

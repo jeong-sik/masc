@@ -377,7 +377,7 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
         `}
 
         ${resultState?.status === 'error' && html`
-          <div class="kp-tool-result-error" role="status">
+          <div class="kp-tool-result-error" role="alert">
             <span>원본 결과 조회 실패 (${resultState.detail ?? 'error'})</span>
             <button
               type="button"
@@ -430,7 +430,7 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
         `}
 
         ${hydratedLoaded && resultState.loadMoreError && html`
-          <div class="kp-tool-result-error" role="status" data-testid="tool-call-inspector-load-more-error">
+          <div class="kp-tool-result-error" role="alert" data-testid="tool-call-inspector-load-more-error">
             <span>${resultState.loadMoreError}</span>
             <div class="kp-block-subactions">
               ${resultState.loadMoreConflict

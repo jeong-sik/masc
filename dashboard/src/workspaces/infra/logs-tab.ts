@@ -433,9 +433,10 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
 
           <button
             type="button"
-            class="btn-ghost"
+            class="btn-ghost tnum"
             data-testid="logs-pause-toggle"
             aria-pressed=${pausedByUser ? 'true' : 'false'}
+            style=${{ minWidth: '124px', justifyContent: 'center' }}
             onClick=${toggleUserPause}
           >
             ${pausedByUser ? `▶ 재개${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}` : '⏸ 일시정지'}

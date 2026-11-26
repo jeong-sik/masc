@@ -39,7 +39,9 @@ import {
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { pushShellToast } from '../../shell/shell-state'
 import {
+  decodeToolMetricsSeriesPayload,
   formatCompactNumber,
   formatIsoTime,
   formatMs,
@@ -252,7 +254,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const [search, setSearch] = useState('')
   const [liveSeries, setLiveSeries] = useState<ToolMetricsSeriesPayload | null>(null)
   const [streamLive, setStreamLive] = useState(false)
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [streamDecodeError, setStreamDecodeError] = useState<string | null>(null)
+  const [banner, setBanner] = useState<{ kind: 'err'; text: string } | null>(null)
 
   // Skills editor state
   const [selectedSkill, setSelectedSkill] = useState<SkillSummaryItem | null>(null)
@@ -344,7 +347,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       seriesKey,
       (signal) => apiGet<ToolMetricsSeriesPayload>(
         `/api/v1/tool-metrics/series?since_hours=${sinceHours}&bucket=${bucket}&utc_offset_min=${utcOffsetMin}`,
-        { signal },
+        { signal, decode: decodeToolMetricsSeriesPayload },
       ),
       { ttlMs: 15_000, topics: ['tool_metrics', 'tools'], reason },
     )
@@ -389,6 +392,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
   useEffect(() => {
+    setStreamDecodeError(null)
     if (win !== '24h' || !sseInstanceId) {
       setStreamLive(false)
       return
@@ -406,8 +410,14 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
               return
             }
             if ('buckets' in payload) {
-              setLiveSeries(frame.data as ToolMetricsSeriesPayload)
-              setStreamLive(true)
+              try {
+                const decoded = decodeToolMetricsSeriesPayload(frame.data)
+                setLiveSeries(decoded)
+                setStreamDecodeError(null)
+                setStreamLive(true)
+              } catch (error) {
+                setStreamDecodeError(error instanceof Error ? error.message : String(error))
+              }
             }
           }
         },
@@ -572,10 +582,11 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const chartData = useMemo<uPlot.AlignedData>(() => {
     if (!activeSeries) return [[], [], []]
+    const buckets = activeSeries.buckets ?? []
     return [
-      activeSeries.buckets.map((b) => b.start),
-      activeSeries.buckets.map((b) => b.call_count),
-      activeSeries.buckets.map((b) => b.failure_count),
+      buckets.map((b) => b.start),
+      buckets.map((b) => b.call_count),
+      buckets.map((b) => b.failure_count),
     ]
   }, [activeSeries])
 
@@ -736,7 +747,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       })
       return
     }
-    setBanner({ kind: 'ok', text: `SKILL.md 저장 완료 (${res.value.status ?? 'saved'}).` })
+    setBanner(null)
+    pushShellToast(`SKILL.md 저장 완료 (${res.value.status ?? 'saved'}).`, 'success')
     const refreshed = await resourceCache.fetch<SkillsApiPayload>(
       'runtime:skills',
       (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
@@ -744,7 +756,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     )
     if (!mountedRef.current || sessionEpoch.peek() !== startEpoch) return
     if (refreshed.kind === 'value') {
-      const updated = refreshed.data.snapshot?.skills.find((item) => skillKey(item) === savedKey)
+      const updated = refreshed.data.snapshot?.skills?.find((item) => skillKey(item) === savedKey)
       if (updated) {
         setSelectedSkill((cur) => (skillKey(cur) === savedKey ? updated : cur))
       }
@@ -764,7 +776,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `커넥터 바인딩 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${bindTarget.connectorId} 바인딩 완료.` })
+    setBanner(null)
+    pushShellToast(`${bindTarget.connectorId} 바인딩 완료.`, 'success')
     setBindTarget(null)
     void resourceCache.fetch<{ readonly connectors?: readonly GateConnectorRow[] }>(
       'runtime:gate-connectors',
@@ -783,7 +796,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `바인딩 해제 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${connectorId} 채널 ${channelId} 해제됨.` })
+    setBanner(null)
+    pushShellToast(`${connectorId} 채널 ${channelId} 해제됨.`, 'success')
     void resourceCache.fetch<{ readonly connectors?: readonly GateConnectorRow[] }>(
       'runtime:gate-connectors',
       (signal) => apiGet('/api/v1/gate/connectors', { signal }),
@@ -835,7 +849,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `OAuth 앱 등록 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${clientDrawer.providerLabel} OAuth 앱이 등록되었습니다. 이제 바로 연결할 수 있습니다.` })
+    setBanner(null)
+    pushShellToast(`${clientDrawer.providerLabel} OAuth 앱이 등록되었습니다. 이제 바로 연결할 수 있습니다.`, 'success')
     setClientDrawer(null)
     if (oauthKeeper.trim()) void loadKeeperOAuth(oauthKeeper)
   }
@@ -863,7 +878,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `OAuth 연결 해제 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${oauthKeeper} · ${providerId} 연결이 해제되었습니다.` })
+    setBanner(null)
+    pushShellToast(`${oauthKeeper} · ${providerId} 연결이 해제되었습니다.`, 'success')
     void loadKeeperOAuth(oauthKeeper)
   }
 
@@ -895,12 +911,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       </header>
 
       ${banner && html`
-        <div
-          role="status"
-          class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
-        >
+        <div role="alert" class="ap-error">
           ${banner.text}
+        </div>
+      `}
+      ${streamDecodeError && html`
+        <div role="alert" class="ap-error">
+          실시간 도구 시계열 디코드 오류: ${streamDecodeError}
         </div>
       `}
 

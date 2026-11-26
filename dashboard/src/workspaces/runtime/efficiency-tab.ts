@@ -40,10 +40,15 @@ import {
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { isAdminLockedForSession } from '../../routes/router'
 import {
   buildUsageHistoryChartData,
 } from './quotas-tab'
 import {
+  decodeKeeperCostsPayload,
+  decodeKeeperEfficiencyPayload,
+  decodeModelsMetricsPayload,
+  decodeToolMetricsSeriesPayload,
   formatCompactNumber,
   formatMs,
   formatPercent,
@@ -140,7 +145,9 @@ interface JoinedKeeperSpendRow {
 
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
-  const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const session = authSession.value
+  const adminLocked = isAdminLockedForSession('admin', session)
+  const sseInstanceId = session.kind === 'single_user_local' ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
   const params = windowToModelsParams(win)
   const providerDays = timeWindowProviderDays(win)
@@ -148,6 +155,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const [liveMetrics, setLiveMetrics] = useState<ModelsMetricsPayload | null>(null)
   const [streamLive, setStreamLive] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
+  const [streamDecodeError, setStreamDecodeError] = useState<string | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const utcOffsetMin = localUtcOffsetMin()
 
@@ -179,7 +187,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         modelsKey,
         (signal) => apiGet<ModelsMetricsPayload>(
           `/api/v1/models/metrics?window=${params.windowMinutes}&bucket_min=${params.bucketMinutes}`,
-          { signal },
+          { signal, decode: decodeModelsMetricsPayload },
         ),
         { ttlMs: 20_000, topics: ['model_metrics', 'telemetry'], reason },
       ),
@@ -192,24 +200,34 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         toolSeriesKey,
         (signal) => apiGet<ToolMetricsSeriesPayload>(
           `/api/v1/tool-metrics/series?since_hours=${params.sinceHours}&bucket=${params.bucket}&utc_offset_min=${utcOffsetMin}`,
-          { signal },
+          { signal, decode: decodeToolMetricsSeriesPayload },
         ),
         { ttlMs: 20_000, topics: ['tool_metrics', 'telemetry'], reason },
       ),
-      resourceCache.fetch<LaneRunsResponse>(
-        exactRunsKey,
-        (signal) => loadLaneRunsPage({ limit: 50 }, signal),
-        { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
-      ),
+      ...(!isAdminLockedForSession('admin', authSession.peek())
+        ? [
+            resourceCache.fetch<LaneRunsResponse>(
+              exactRunsKey,
+              (signal) => loadLaneRunsPage({ limit: 50 }, signal),
+              { ttlMs: 20_000, topics: ['exact_lane_runs', 'verification_requests'], reason },
+            ),
+          ]
+        : []),
       // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
       resourceCache.fetch<KeeperCostsPayload>(
         costsKey,
-        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', { signal }),
+        (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', {
+          signal,
+          decode: decodeKeeperCostsPayload,
+        }),
         { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
       ),
       resourceCache.fetch<KeeperEfficiencyPayload>(
         effKey,
-        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', { signal }),
+        (signal) => apiGet<KeeperEfficiencyPayload>('/api/v1/keeper-efficiency', {
+          signal,
+          decode: decodeKeeperEfficiencyPayload,
+        }),
         { ttlMs: 60_000, topics: ['keeper_efficiency', 'model_metrics', 'keeper_turn_complete', 'cost'], reason },
       ),
     ]).then(() => {
@@ -222,11 +240,12 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     setLiveMetrics(null)
     setStreamError(null)
     loadSnapshots('mount')
-  }, [win, epoch])
+  }, [win, epoch, adminLocked])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
   useEffect(() => {
+    setStreamDecodeError(null)
     if (win !== '24h' || !sseInstanceId) {
       setStreamLive(false)
       return
@@ -244,9 +263,15 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
               return
             }
             if ('models' in payload) {
-              setLiveMetrics(frame.data as ModelsMetricsPayload)
-              setStreamError(null)
-              setStreamLive(true)
+              try {
+                const decoded = decodeModelsMetricsPayload(frame.data)
+                setLiveMetrics(decoded)
+                setStreamError(null)
+                setStreamDecodeError(null)
+                setStreamLive(true)
+              } catch (error) {
+                setStreamDecodeError(error instanceof Error ? error.message : String(error))
+              }
             }
           }
         },
@@ -261,7 +286,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
   }, [win, sseInstanceId, epoch])
 
-  // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE!
+  // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE
   useEffect(() => {
     const watchedTopics = new Set([
       'provider_usage',
@@ -293,7 +318,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       unsubResync()
       if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
     }
-  }, [win, epoch])
+  }, [win, epoch, adminLocked])
 
   const effectiveModels = (win === '24h' && sseInstanceId && liveMetrics)
     ? liveMetrics
@@ -338,7 +363,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     const ts: number[] = []
     const errRate: (number | null)[] = []
     const callsScaled: number[] = []
-    for (const b of toolSeriesObs.data.buckets) {
+    for (const b of toolSeriesObs.data.buckets ?? []) {
       ts.push(b.start)
       const settled = Math.max(0, b.call_count - (b.deferred_count ?? 0))
       const rate = settled > 0 ? Number(((b.failure_count / settled) * 100).toFixed(1)) : null
@@ -354,7 +379,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     let totalCacheRead = 0
     let totalCost: number | null = null
     if (effectiveModels) {
-      for (const m of effectiveModels.models) {
+      for (const m of effectiveModels.models ?? []) {
         if (m.cached_input) {
           totalIn += m.cached_input.input_tokens
           totalCacheRead += m.cached_input.cache_read_tokens
@@ -372,7 +397,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       : observedUnreported()
     const spendObs: Observed<number> = totalCost !== null ? observedValue(totalCost) : observedUnreported()
 
-    const exactRuns = exactObs.kind === 'value' ? exactObs.data.runs : []
+    const exactRuns = !adminLocked && exactObs.kind === 'value' ? (exactObs.data.runs ?? []) : []
     const readings = exactRuns.map(laneRunPassReading)
     const terminalExact = readings.filter((reading) => reading !== 'running')
     const passedExact = terminalExact.filter((reading) => reading === 'passed')
@@ -389,13 +414,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         : observedAbsent()
 
     return { cacheHitObs, spendObs, exactPassObs, toolErrObs }
-  }, [effectiveModels, exactObs, toolSeriesObs])
+  }, [effectiveModels, exactObs, toolSeriesObs, adminLocked])
 
   const joinedKeepers = useMemo<readonly JoinedKeeperSpendRow[]>(() => {
     const map = new Map<string, JoinedKeeperSpendRow>()
     const effByName = new Map<string, KeeperEfficiencyPayload['keepers'][number]>()
     if (effObs.kind === 'value') {
-      for (const row of effObs.data.keepers) effByName.set(row.keeper, row)
+      for (const row of effObs.data.keepers ?? []) effByName.set(row.keeper, row)
     }
 
     const resolveEffCacheHitPct = (
@@ -415,7 +440,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
 
     if (costsObs.kind === 'value') {
-      for (const c of costsObs.data.keepers) {
+      for (const c of costsObs.data.keepers ?? []) {
         const eff = effByName.get(c.keeper_name)
         map.set(c.keeper_name, {
           keeper: c.keeper_name,
@@ -435,7 +460,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
 
     if (effObs.kind === 'value') {
-      for (const eff of effObs.data.keepers) {
+      for (const eff of effObs.data.keepers ?? []) {
         if (map.has(eff.keeper)) continue
         // Keep 24h spend/token/p95 columns strictly scoped to the 24h cost ledger
         // instead of mixing MTD totals or fabricating $0.00 for unreported subscription spend.
@@ -538,6 +563,10 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         </div>
       </header>
 
+      ${streamDecodeError && html`
+        <div class="ap-error" role="alert">실시간 모델 지표 디코드 오류: ${streamDecodeError}</div>
+      `}
+
       <section class="ov-kpis" aria-label="효율성 핵심 지표">
         <div class="ov-kpi">
           <div class="ov-kpi-k">플리트 프롬프트 캐시 적중률</div>
@@ -555,7 +584,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         </div>
         <div class="ov-kpi">
           <div class="ov-kpi-k">Exact-Output 통과율</div>
-          <div class="ov-kpi-v ok">${formatObserved(kpis.exactPassObs, (v) => formatPercent(v))}</div>
+          <div class=${`ov-kpi-v ${adminLocked ? '' : 'ok'}`} data-testid="efficiency-exact-pass-kpi">
+            ${adminLocked ? '관리자 전용' : formatObserved(kpis.exactPassObs, (v) => formatPercent(v))}
+          </div>
         </div>
       </section>
 
@@ -634,7 +665,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           series=${TOOL_EXACT_SERIES}
           height=${190}
           syncCrosshair=${true}
-          emptyLabel="도구 오류 시계열 없음"
+          emptyLabel=${toolSeriesObs.kind === 'failed'
+            ? `도구 시계열 조회 실패: ${toolSeriesObs.error.message}`
+            : '도구 오류 시계열 없음'}
         />
       </section>
 
@@ -646,6 +679,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             비용은 24h 상한 창 · 미보고 구독 비용은 0이 아닌 "미보고"로 표기
           </span>
         </div>
+        ${(costsObs.kind === 'failed' || effObs.kind === 'failed') && html`
+          <div class="ap-error" role="alert">
+            ${costsObs.kind === 'failed' ? `Keeper 비용 조회 실패: ${costsObs.error.message}` : ''}
+            ${costsObs.kind === 'failed' && effObs.kind === 'failed' ? ' · ' : ''}
+            ${effObs.kind === 'failed' ? `Keeper 효율 조회 실패: ${effObs.error.message}` : ''}
+          </div>
+        `}
         <${DataTable}
           data=${joinedKeepers}
           columns=${keeperColumns}

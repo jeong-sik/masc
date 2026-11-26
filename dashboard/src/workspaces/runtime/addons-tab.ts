@@ -27,6 +27,12 @@ import {
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import {
+  expectOptionalArrayField,
+  expectOptionalRecordArrayField,
+  expectWireRecord,
+} from '../../lib/wire-decode'
+import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
   BrowserClientsPayload,
@@ -37,6 +43,66 @@ import type {
   LaneAddonsPayload,
   WorkspaceViewProps,
 } from './types'
+
+function decodeLaneAddonsPayload(raw: unknown): LaneAddonsPayload {
+  const ctx = 'GET /api/v1/lane-addons'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as LaneAddonsPayload),
+    instances: expectOptionalRecordArrayField<LaneAddonInstanceRow>(rec, 'instances', ctx),
+    rows: expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'rows', ctx),
+    coverage: expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'coverage', ctx),
+  }
+}
+
+function decodeLaneAddonAsksResponse(raw: unknown): LaneAddonAsksResponse {
+  const ctx = 'GET /api/v1/lane-addons/asks'
+  const rec = expectWireRecord(raw, ctx)
+  const rawAsks = expectOptionalArrayField<unknown>(rec, 'asks', ctx)
+  const asks = rawAsks.map((ask, idx) => {
+    const askRec = expectWireRecord(ask, `${ctx} asks[${idx}]`)
+    const questions = expectOptionalRecordArrayField<LaneAddonAskRow['questions'][number]>(
+      askRec,
+      'questions',
+      `${ctx} asks[${idx}]`,
+    )
+    return { ...(askRec as unknown as LaneAddonAskRow), questions }
+  })
+  return { ...(rec as unknown as LaneAddonAsksResponse), asks }
+}
+
+function decodePackageCatalogPayload(raw: unknown): PackageCatalogPayload {
+  const ctx = 'GET /api/v1/lane-addons/package-catalog'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as PackageCatalogPayload),
+    entries: expectOptionalRecordArrayField<PackageCatalogPayload['entries'][number]>(rec, 'entries', ctx),
+  }
+}
+
+function decodeBrowserClientsPayload(raw: unknown): BrowserClientsPayload {
+  const ctx = 'GET /api/v1/dashboard/browser-lane/clients'
+  const rec = expectWireRecord(raw, ctx)
+  return {
+    ...(rec as unknown as BrowserClientsPayload),
+    clients: expectOptionalRecordArrayField<BrowserClientRow>(rec, 'clients', ctx),
+    inventoryIssues: expectOptionalRecordArrayField<BrowserClientsPayload['inventoryIssues'][number]>(
+      rec,
+      'inventoryIssues',
+      ctx,
+    ),
+  }
+}
+
+function decodeBrowserTabsResponse(raw: unknown): readonly BrowserTabRow[] {
+  const ctx = 'POST /api/v1/dashboard/browser-lane/read'
+  const rec = expectWireRecord(raw, ctx)
+  if ('data' in rec && rec.data !== undefined) {
+    const dataRec = expectWireRecord(rec.data, `${ctx} data`)
+    return expectOptionalRecordArrayField<BrowserTabRow>(dataRec, 'tabs', ctx)
+  }
+  return expectOptionalRecordArrayField<BrowserTabRow>(rec, 'tabs', ctx)
+}
 
 interface PackageCatalogPayload {
   readonly directory: string
@@ -71,7 +137,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const [actionJson, setActionJson] = useState('{}')
   const askPromptId = useId()
   const [askAnswersByKey, setAskAnswersByKey] = useState<Readonly<Record<string, string>>>({})
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [banner, setBanner] = useState<{ kind: 'err'; text: string } | null>(null)
 
   const [browserState, setBrowserState] = useState<BrowserLaneState>({ kind: 'loading' })
   const [tabsByClient, setTabsByClient] = useState<Readonly<Record<string, readonly BrowserTabRow[]>>>({})
@@ -86,12 +152,18 @@ export function AddonsTab(props: WorkspaceViewProps) {
     void Promise.all([
       resourceCache.fetch<LaneAddonsPayload>(
         'runtime:lane-addons',
-        (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', { signal }),
+        (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', {
+          signal,
+          decode: decodeLaneAddonsPayload,
+        }),
         { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_exports_changed'], reason },
       ),
       resourceCache.fetch<LaneAddonAsksResponse>(
         'runtime:lane-addons-asks',
-        (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', { signal }),
+        (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', {
+          signal,
+          decode: decodeLaneAddonAsksResponse,
+        }),
         { ttlMs: 15_000, topics: ['lane_addon', 'lane_addon_asks_changed'], reason },
       ),
     ]).then(() => {
@@ -109,6 +181,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       method: 'GET',
       path: '/api/v1/dashboard/browser-lane/clients',
       envelope: 'ok_data',
+      decode: decodeBrowserClientsPayload,
       signal: ctrl.signal,
     })
     if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
@@ -133,7 +206,10 @@ export function AddonsTab(props: WorkspaceViewProps) {
     catalogAbortRef.current = ctrl
     const startEpoch = currentSessionEpoch()
     const query = directory ? `?directory=${encodeURIComponent(directory)}` : ''
-    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`, { signal: ctrl.signal })
+    const res = await apiGet<PackageCatalogPayload>(`/api/v1/lane-addons/package-catalog${query}`, {
+      signal: ctrl.signal,
+      decode: decodePackageCatalogPayload,
+    })
     if (!mountedRef.current || !isEpochCurrent(startEpoch) || ctrl.signal.aborted) return
     if (res.ok) setCatalog(res.value)
     else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
@@ -230,7 +306,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `애드온 Attach 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `애드온 연결됨 (${manifestPath}).` })
+    setBanner(null)
+    pushShellToast(`애드온 연결됨 (${manifestPath}).`, 'success')
     setPreview(null)
     loadAddons('manual')
     void loadBrowserLane()
@@ -244,7 +321,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `Detach 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `${instanceId} 연결 해제 요청 완료.` })
+    setBanner(null)
+    pushShellToast(`${instanceId} 연결 해제 요청 완료.`, 'success')
     loadAddons('manual')
   }
 
@@ -282,7 +360,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `액션 호출 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `액션 요청 접수됨 (${requestId}).` })
+    setBanner(null)
+    pushShellToast(`액션 요청 접수됨 (${requestId}).`, 'success')
     props.onInspect({
       title: `Addon Action Receipt · ${inst.title}`,
       subtitle: requestId,
@@ -299,7 +378,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   // Exact OCaml contract (lib/server/server_routes_http_routes_lane_addons.ml:692-713,808):
   // POST /api/v1/lane-addons/ask-answer with { declaration_id, ask_id, answers }
   const handleAnswerAddonAsk = async (ask: LaneAddonAskRow) => {
-    const submissions = ask.questions.map((q, idx) => {
+    const submissions = (ask.questions ?? []).map((q, idx) => {
       const qid = q.id ?? q.question_id ?? `q-${idx}`
       const key = `${ask.ask_id}:${qid}`
       const text = (askAnswersByKey[key] ?? '').trim()
@@ -325,28 +404,25 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `애드온 질문 응답 실패: ${res.error.message}` })
       return
     }
-    setBanner({ kind: 'ok', text: `애드온 질문 ${ask.ask_id} 응답이 기록되었습니다.` })
+    setBanner(null)
+    pushShellToast(`애드온 질문 ${ask.ask_id} 응답이 기록되었습니다.`, 'success')
     loadAddons('manual')
   }
 
   const handleReadOpenTabs = async (client: BrowserClientRow) => {
     const startEpoch = currentSessionEpoch()
     setReadingClient(client.clientId)
-    const res = await apiMutate<{
-      readonly ok?: boolean
-      readonly data?: { readonly tabs?: readonly BrowserTabRow[] }
-      readonly tabs?: readonly BrowserTabRow[]
-    }>('POST', '/api/v1/dashboard/browser-lane/read', {
+    const res = await apiMutate<readonly BrowserTabRow[]>('POST', '/api/v1/dashboard/browser-lane/read', {
       lane: 'live',
       clientId: client.clientId,
-    })
+    }, { decode: decodeBrowserTabsResponse })
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setReadingClient((cur) => (cur === client.clientId ? null : cur))
     if (!res.ok) {
       setBanner({ kind: 'err', text: `탭 읽기 실패 (${client.clientId}): ${res.error.message}` })
       return
     }
-    const tabs = res.value.data?.tabs ?? res.value.tabs ?? []
+    const tabs = res.value
     setTabsByClient((prev) => ({ ...prev, [client.clientId]: tabs }))
     props.onInspect({
       title: `Browser Tabs · ${client.clientId}`,
@@ -378,9 +454,11 @@ export function AddonsTab(props: WorkspaceViewProps) {
         </div>
       </div>
 
-      ${instances.length === 0
-        ? html`<div class="dtable-absent">${addonsObs.kind === 'loading' ? '불러오는 중…' : '연결된 Lane-Addon 인스턴스가 없습니다.'}</div>`
-        : html`
+      ${addonsObs.kind === 'failed'
+        ? html`<div class="ap-error" role="alert">Lane-Addons 조회 실패: ${addonsObs.error.message}</div>`
+        : instances.length === 0
+          ? html`<div class="dtable-absent">${addonsObs.kind === 'loading' ? '불러오는 중…' : '연결된 Lane-Addon 인스턴스가 없습니다.'}</div>`
+          : html`
             <${VirtualList}
               items=${instances}
               estimateSize=${64}
@@ -413,7 +491,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
                       </div>
                     </div>
                     <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: inst.runtime_presence === 'live' ? 'var(--ok-fg)' : 'var(--fg-3)' }}>
-                      ${inst.runtime_presence ?? 'retained'} / ${inst.phase.kind}
+                      ${inst.runtime_presence ?? 'retained'} / ${inst.phase?.kind ?? 'unknown'}
                     </span>
                   </button>
                 `
@@ -451,12 +529,16 @@ export function AddonsTab(props: WorkspaceViewProps) {
               </div>
               ${selectedInstance.host_requests!.waiting!.map((w) => html`
                 <div key=${w.request_id} class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
-                  ${w.request_id} · ${String(w.reason.reason ?? 'waiting')}
+                  ${w.request_id} · ${String(w.reason?.reason ?? 'waiting')}
                 </div>
               `)}
             </div>
           `}
         </div>
+      `}
+
+      ${asksObs.kind === 'failed' && html`
+        <div class="ap-error" role="alert">Lane-Addon 질문 조회 실패: ${asksObs.error.message}</div>
       `}
 
       ${asksObs.kind === 'value' && (asksObs.data.asks?.length ?? 0) > 0 && html`
@@ -470,7 +552,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
               <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
                 declaration=${ask.declaration_id} · ask=${ask.ask_id}
               </div>
-              ${ask.questions.map((q, qIdx) => {
+              ${(ask.questions ?? []).map((q, qIdx) => {
                 const qid = q.id ?? q.question_id ?? `q-${qIdx}`
                 const key = `${ask.ask_id}:${qid}`
                 const promptId = `${askPromptId}-${askIndex}-${qIdx}`
@@ -512,7 +594,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
             `}
           </div>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            ${catalog.entries.map((entry, idx) => {
+            ${(catalog.entries ?? []).map((entry, idx) => {
               if (entry.kind === 'folder') {
                 return html`
                   <button key=${`f-${idx}`} type="button" class="btn-ghost" style=${{ justifyContent: 'flex-start' }} onClick=${() => void loadCatalog(entry.path)}>
@@ -586,15 +668,18 @@ export function AddonsTab(props: WorkspaceViewProps) {
         <div class="ap-error" role="alert">Browser Lane 조회 실패: ${browserState.message}</div>
       `}
 
-      ${browserState.kind === 'ready' && html`
+      ${browserState.kind === 'ready' && (() => {
+        const browserClients = browserState.data.clients
+        const inventoryIssues = browserState.data.inventoryIssues
+        return html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-          <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            클라이언트 ${browserState.data.clients.length}개 · 인벤토리 ${browserState.data.inventoryComplete ? '완전' : '불완전'}
+          <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+            클라이언트 ${browserClients.length}개 · 인벤토리 ${browserState.data.inventoryComplete ? '완전' : '불완전'}
           </div>
 
-          ${browserState.data.inventoryIssues.length > 0 && html`
-            <div class="ap-error sev-warn">
-              ${browserState.data.inventoryIssues.map((iss, i) => html`
+          ${inventoryIssues.length > 0 && html`
+            <div class="ap-error sev-warn" role="alert">
+              ${inventoryIssues.map((iss, i) => html`
                 <div key=${i} class="mono" style=${{ fontSize: 'var(--fs-11)' }}>
                   [${iss.kind}] ${iss.message ?? iss.instanceId ?? ''}
                 </div>
@@ -602,9 +687,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
             </div>
           `}
 
-          ${browserState.data.clients.length === 0
+          ${browserClients.length === 0
             ? html`<div class="dtable-absent">연결된 브라우저 클라이언트가 없습니다.</div>`
-            : browserState.data.clients.map((client) => {
+            : browserClients.map((client) => {
                 const tabs = tabsByClient[client.clientId]
                 return html`
                   <article key=${client.clientId} class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', background: 'var(--bg-2)' }}>
@@ -618,6 +703,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
                       <button
                         type="button"
                         class="btn-primary"
+                        style=${{ minWidth: '116px' }}
                         disabled=${readingClient === client.clientId}
                         onClick=${() => void handleReadOpenTabs(client)}
                       >
@@ -640,7 +726,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
                 `
               })}
         </div>
-      `}
+      `
+      })()}
     </div>
   `
 
@@ -655,12 +742,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
 
       ${banner && html`
         <div
-          role="status"
-          class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
-          style=${{
-            flexShrink: 0,
-            ...(banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : {}),
-          }}
+          role="alert"
+          class="ap-error"
+          style=${{ flexShrink: 0 }}
         >
           ${banner.text}
         </div>

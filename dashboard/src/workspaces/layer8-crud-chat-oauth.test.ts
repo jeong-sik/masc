@@ -750,7 +750,14 @@ candidates = ["safe.model"]
       return jsonResponse({})
     }) as typeof fetch
 
-    // 1) Single-user mode: NO "검증" button & NO /api/v1/setup/accounts/verify 404 on complete!
+    // 1) Single-user mode: NO "검증" button & NO /api/v1/setup/accounts/verify 404 on complete
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     render(
       html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
@@ -970,6 +977,13 @@ candidates = ["safe.model"]
       return jsonResponse({})
     }) as typeof fetch
 
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     render(
       html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
@@ -1076,7 +1090,11 @@ candidates = ["safe.model"]
       b.textContent?.includes('Keeper OAuth'),
     ) as HTMLButtonElement
     oauthTab.click()
-    await flushUi(50)
+    await vi.waitFor(() => {
+      const sel = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement | null
+      expect(sel).not.toBeNull()
+      expect(sel?.value).toBe('sangsu')
+    })
 
     // Real keeper selector populated via /api/v1/gate/keepers with 'sangsu' (NEVER hardcoded 'default'!)
     const keeperSelect = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement

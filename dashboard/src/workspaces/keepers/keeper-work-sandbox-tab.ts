@@ -15,6 +15,7 @@ import { InlineSpinner } from '../../components/common/inline-spinner'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
+import { pushShellToast } from '../../shell/shell-state'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
@@ -195,7 +196,7 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
   const [editedNote, setEditedNote] = useState<string | null>(null)
   const noteDraft = editedNote ?? note?.text ?? ''
   const [noteSaving, setNoteSaving] = useState(false)
-  const [noteFeedback, setNoteFeedback] = useState<{ kind: 'saved' | 'failed'; text: string } | null>(null)
+  const [noteFeedback, setNoteFeedback] = useState<{ kind: 'failed'; text: string } | null>(null)
   const saving = useRef<AbortController | null>(null)
   useEffect(() => () => saving.current?.abort(), [])
 
@@ -216,7 +217,8 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
     }
     noteRead.accept(result.value)
     setEditedNote(current => current === noteDraft ? null : current)
-    setNoteFeedback({ kind: 'saved', text: '운영자 노트 저장 완료' })
+    setNoteFeedback(null)
+    pushShellToast('운영자 노트 저장 완료', 'success')
   }
 
   const toolCallColumns = useMemo<readonly DataTableColumn<KeeperToolCallEntry>[]>(() => [
@@ -287,7 +289,6 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
             ${noteSaving ? html`<${InlineSpinner} size="xs" /> 저장 중…` : '운영자 노트 저장'}
           </button>
           ${noteSaving && html`<span class="sr-only" role="status">운영자 노트 저장 중…</span>`}
-          ${noteFeedback?.kind === 'saved' && html`<span class="kp-pill" data-tone="ok" role="status">${noteFeedback.text}</span>`}
           ${noteFeedback?.kind === 'failed' && html`<span class="ap-error" role="alert">저장 실패 · ${noteFeedback.text}</span>`}
         </div>
       </section>

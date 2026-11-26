@@ -28,6 +28,7 @@ import {
   currentRoute,
   evaluateRouteAccess,
   initAPlusRouter,
+  isAdminLockedForSession,
   navigate,
 } from './routes/router'
 import { getWorkspaceComponent, WorkspaceLoadError } from './workspaces/registry'
@@ -48,9 +49,12 @@ import {
   installViewportListener,
   isMobileViewport,
   openInspectDrawer,
+  pauseShellToastTimer,
   probeBuildConnectionInfo,
+  pushShellToast,
   recordIncident,
   refreshPendingHitl,
+  resumeShellToastTimer,
   shellToasts,
   toggleCommandPalette,
   toggleIncidentsOverlay,
@@ -159,13 +163,27 @@ function SkipLink(): VNode {
   `
 }
 
-function ShellToastHost(): VNode | null {
+export function ShellToastHost(): VNode | null {
   const items = shellToasts.value
   if (items.length === 0) return null
   return html`
     <div class="ap-toast-host" aria-live="polite" aria-atomic="true">
       ${items.map((toast) => html`
-        <div key=${toast.id} role=${toast.tone === 'error' ? 'alert' : 'status'} class=${`ap-toast ap-toast--${toast.tone}`}>
+        <div
+          key=${toast.id}
+          role=${toast.tone === 'error' ? 'alert' : 'status'}
+          class=${`ap-toast ap-toast--${toast.tone}`}
+          data-toast-id=${toast.id}
+          onMouseEnter=${() => pauseShellToastTimer(toast.id, 'hover')}
+          onMouseLeave=${() => resumeShellToastTimer(toast.id, 'hover')}
+          onFocusIn=${() => pauseShellToastTimer(toast.id, 'focus')}
+          onFocusOut=${(event: FocusEvent) => {
+            const host = event.currentTarget as HTMLElement | null
+            const nextTarget = event.relatedTarget as Node | null
+            if (host && nextTarget && host.contains(nextTarget)) return
+            resumeShellToastTimer(toast.id, 'focus')
+          }}
+        >
           <span>${toast.message}</span>
           <button
             type="button"
@@ -441,6 +459,10 @@ export function App(): VNode {
       }
       if (event.key === ',') {
         event.preventDefault()
+        if (isAdminLockedForSession('admin', authSession.peek())) {
+          pushShellToast('설정은 관리자 전용입니다.', 'info')
+          return
+        }
         navigate('/settings')
         return
       }
@@ -448,6 +470,10 @@ export function App(): VNode {
         const trunk = TRUNK_NAV[Number(event.key) - 1]
         if (trunk) {
           event.preventDefault()
+          if (isAdminLockedForSession(trunk.access, authSession.peek())) {
+            pushShellToast(`${trunk.label} 워크스페이스는 관리자 전용입니다.`, 'info')
+            return
+          }
           navigate(trunk.defaultPath)
         }
       }

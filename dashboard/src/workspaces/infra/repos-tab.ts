@@ -24,6 +24,15 @@ import {
 import { MasterDetail } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
+  describeWireType,
+  expectOptionalArrayField,
+  expectOptionalRecordArrayField,
+  expectRecordElements,
+  expectRequiredStringField,
+  expectWireRecord,
+  isJsonRecord,
+} from '../../lib/wire-decode'
+import {
   extractChangeBeforeAfter,
   extractChangePath,
   formatUnixTs,
@@ -33,19 +42,35 @@ import {
   type WorkspaceViewProps,
 } from './types'
 
-function normalizeRepoList(raw: unknown): readonly InfraRepository[] {
-  let rows: unknown[] = []
-  if (Array.isArray(raw)) rows = raw
-  else if (raw && typeof raw === 'object') {
-    const rec = raw as Record<string, unknown>
-    if (Array.isArray(rec.repositories)) rows = rec.repositories
-    else if (rec.ok === true && Array.isArray(rec.data)) rows = rec.data
+function decodeRepoList(raw: unknown): readonly InfraRepository[] {
+  const ctx = 'GET /api/v1/repositories'
+  let rows: readonly unknown[]
+  let field = 'repositories'
+  if (Array.isArray(raw)) {
+    rows = raw
+  } else if (isJsonRecord(raw)) {
+    if ('repositories' in raw && raw.repositories !== undefined) {
+      rows = expectOptionalArrayField<unknown>(raw, 'repositories', ctx)
+    } else if (raw.ok === true && 'data' in raw && raw.data !== undefined) {
+      field = 'data'
+      rows = expectOptionalArrayField<unknown>(raw, 'data', ctx)
+    } else {
+      rows = []
+    }
+  } else {
+    throw new Error(`${ctx}: 배열 또는 객체 응답이 필요합니다 (${describeWireType(raw)} 수신).`)
   }
-  return rows
-    .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null)
-    .map((r) => ({
-      id: typeof r.id === 'string' ? r.id : '',
-      name: typeof r.name === 'string' ? r.name : '',
+  const records = expectRecordElements<Record<string, unknown>>(rows, field, ctx)
+  return records.map((r, idx) => {
+    const rowCtx = `${ctx} ${field}[${idx}]`
+    const id = expectRequiredStringField(r, 'id', rowCtx).trim()
+    const name = expectRequiredStringField(r, 'name', rowCtx).trim()
+    if (id === '' || name === '') {
+      throw new Error(`${rowCtx}: "id"와 "name" 필드는 비어 있을 수 없습니다.`)
+    }
+    return {
+      id,
+      name,
       url: typeof r.url === 'string' ? r.url : '',
       codebase: typeof r.codebase === 'string' ? r.codebase : null,
       local_path: typeof r.local_path === 'string' ? r.local_path : '',
@@ -53,8 +78,22 @@ function normalizeRepoList(raw: unknown): readonly InfraRepository[] {
       status: typeof r.status === 'string' ? r.status : 'unknown',
       auto_sync: r.auto_sync === true,
       sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
-    }))
-    .filter((r) => r.id !== '' && r.name !== '')
+    }
+  })
+}
+
+function decodeRepoActivityData(raw: unknown): RepoActivityData {
+  const ctx = 'GET /api/v1/ide/repository-activity'
+  const rec = expectWireRecord(raw, ctx)
+  const changes = expectOptionalRecordArrayField<RepoActivityChange>(rec, 'changes', ctx)
+  return {
+    ...(rec as unknown as RepoActivityData),
+    repo_id: typeof rec.repo_id === 'string' ? rec.repo_id : '',
+    window_hours: typeof rec.window_hours === 'number' ? rec.window_hours : 24,
+    incomplete: typeof rec.incomplete === 'number' ? rec.incomplete : 0,
+    unattributed: typeof rec.unattributed === 'number' ? rec.unattributed : 0,
+    changes,
+  }
 }
 
 export function buildUnifiedChangeDiff(change: RepoActivityChange): string {
@@ -89,10 +128,7 @@ export function ReposTab(props: WorkspaceViewProps) {
   const loadRepos = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<readonly InfraRepository[]>(
       'infra:repositories',
-      async (signal) => {
-        const res = await apiGet<unknown>('/api/v1/repositories', { signal })
-        return res.ok ? { ok: true, value: normalizeRepoList(res.value) } : res
-      },
+      (signal) => apiGet<readonly InfraRepository[]>('/api/v1/repositories', { signal, decode: decodeRepoList }),
       { ttlMs: 20_000, topics: ['repositories'], reason },
     )
   }
@@ -104,6 +140,7 @@ export function ReposTab(props: WorkspaceViewProps) {
         method: 'GET',
         path: `/api/v1/ide/repository-activity?repo_id=${encodeURIComponent(repoId)}&window_hours=24`,
         envelope: 'ok_data',
+        decode: decodeRepoActivityData,
         signal,
       }),
       { ttlMs: 20_000, topics: ['repository_activity'], reason },
@@ -194,12 +231,13 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const activityData = activityObs.kind === 'value' ? activityObs.data : null
+  const activityChanges = activityData ? activityData.changes : []
   const selectedRepo = repos.find((r) => r.id === effectiveRepoId) ?? null
 
   const masterPane = html`
     <div style=${{ padding: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
       <div class="wka-h">
-        <h3>등록된 저장소 (${repos.length})</h3>
+        <h3>등록된 저장소 (<span class="tnum">${repos.length}</span>)</h3>
         <button type="button" class="btn-primary" onClick=${() => setShowAddForm((v) => !v)}>
           ${showAddForm ? '취소' : '+ 저장소 추가'}
         </button>
@@ -306,12 +344,12 @@ export function ReposTab(props: WorkspaceViewProps) {
       ${selectedRepo && activityData && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            변경 ${activityData.changes.length}건 · 미완결 ${activityData.incomplete} · 미귀속 ${activityData.unattributed} (window=${activityData.window_hours}h)
+            변경 ${activityChanges.length}건 · 미완결 ${activityData.incomplete ?? 0} · 미귀속 ${activityData.unattributed ?? 0} (window=${activityData.window_hours ?? 24}h)
           </div>
 
-          ${activityData.changes.length === 0
+          ${activityChanges.length === 0
             ? html`<div class="dtable-absent">최근 24시간 동안 기록된 Keeper 파일 쓰기가 없습니다.</div>`
-            : activityData.changes.slice(0, 40).map((ch, idx) => {
+            : activityChanges.slice(0, 40).map((ch, idx) => {
                 const filePath = extractChangePath(ch.location)
                 const patch = buildUnifiedChangeDiff(ch)
                 return html`

@@ -315,7 +315,11 @@ val runtime_trace_for :
 val equal_code_right_mode : code_right_mode -> code_right_mode -> bool
 val code_right_mode_label : code_right_mode -> Say.t
 val cycle_code_git_mode : t -> t
+
 val set_code_right_mode : code_right_mode -> t -> t
+(** Show [mode] in the right panel. Entering Review with a loaded status and no
+    selected change selects the first one. *)
+
 val set_code_scope : Wire_infra.workspace_scope -> t -> t
 val visible_code_tree_nodes : t -> Wire_infra.workspace_tree_node list
 val selected_code_tree_node : t -> Wire_infra.workspace_tree_node option

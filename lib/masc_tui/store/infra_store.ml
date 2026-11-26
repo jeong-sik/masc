@@ -1077,6 +1077,18 @@ let select_review_change ~delta t =
       }
   | Some _ | None -> t
 
+(* The review list always shows one selected change once there is one. Both
+   ways of getting there need this: a status reply that arrives in Review, and
+   switching to Review with a status already loaded, which reads nothing. *)
+let keep_a_review_selection t =
+  match t.code.right_mode, review_selected_index t with
+  | Code_review, None -> select_review_change ~delta:0 t
+  | Code_review, Some _
+  | ( ( Code_file | Code_search_results | Code_git_status | Code_git_branches
+      | Code_git_worktrees | Code_git_blame | Code_git_log ),
+      _ ) ->
+      t
+
 let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Infra_sandboxes ->
@@ -1561,7 +1573,8 @@ let code_right_mode_label = function
   | Code_review -> Say.make ~ko:"변경 검토" ~en:"Review"
 
 let set_code_right_mode right_mode t =
-  { t with code = { t.code with right_mode; git_scroll_offset = 0 } }
+  keep_a_review_selection
+    { t with code = { t.code with right_mode; git_scroll_offset = 0 } }
 
 let cycle_code_git_mode t =
   let next =
@@ -1784,20 +1797,11 @@ let drop_file_peek_content t =
 let apply_git_status ~observed_at ~scope snap t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
   else
-    let t =
+    keep_a_review_selection
       {
         t with
         code = { t.code with git_status = Observed.value ~observed_at (scope, snap) };
       }
-    in
-    (* The review list always shows one selected change once there is one. *)
-    match t.code.right_mode, review_selected_index t with
-    | Code_review, None -> select_review_change ~delta:0 t
-    | Code_review, Some _
-    | ( ( Code_file | Code_search_results | Code_git_status | Code_git_branches
-        | Code_git_worktrees | Code_git_blame | Code_git_log ),
-        _ ) ->
-        t
 
 let apply_git_branches ~observed_at ~scope branches t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t

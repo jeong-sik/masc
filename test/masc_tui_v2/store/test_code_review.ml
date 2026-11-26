@@ -112,6 +112,27 @@ let test_status_selects_the_first_change_and_reads_its_diff () =
     m.infra.code.active_file_path;
   Alcotest.(check (list string)) "its diff is read" [ "a.ml" ] (diff_reads cmds)
 
+(* A fresh status is not read again on entry, so [v] has to select. *)
+let test_v_into_review_selects_from_a_loaded_status () =
+  let m = reviewing_model () in
+  let m =
+    { m with
+      infra = Infra_store.set_code_right_mode Infra_store.Code_git_log m.infra }
+  in
+  let m, _ =
+    reply m
+      (Msg.Reply_git_status
+         { scope = Wire_infra.Ws_project; result = Ok (status [ "a.ml"; "b.ml" ]) })
+  in
+  Alcotest.(check (option string)) "nothing selected outside review" None
+    m.infra.code.active_file_path;
+  let m, cmds = Update.step ~now:t0 m (Msg.Key_event (char_key "v")) in
+  Alcotest.(check bool) "in review" true
+    (Infra_store.equal_code_right_mode m.infra.code.right_mode Infra_store.Code_review);
+  Alcotest.(check (option string)) "first change selected" (Some "a.ml")
+    m.infra.code.active_file_path;
+  Alcotest.(check (list string)) "its diff is read" [ "a.ml" ] (diff_reads cmds)
+
 let selected_with_diff () =
   let m, _ =
     reply (reviewing_model ())
@@ -193,6 +214,8 @@ let () =
       ( "store",
         [ Alcotest.test_case "status selects the first change" `Quick
             test_status_selects_the_first_change_and_reads_its_diff;
+          Alcotest.test_case "v into review selects from a loaded status" `Quick
+            test_v_into_review_selects_from_a_loaded_status;
           Alcotest.test_case "next change reads its diff" `Quick
             test_next_change_reads_its_diff;
           Alcotest.test_case "hunk key scrolls" `Quick

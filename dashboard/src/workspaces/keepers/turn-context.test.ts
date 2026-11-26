@@ -8,6 +8,7 @@ import {
   isWaitingUnavailable,
   preparationHalted,
   preparationHaltedLabel,
+  preparationPhaseLabel,
   startReasonLabel,
   waitingRowDetailLines,
 } from './turn-context'
@@ -20,12 +21,28 @@ const head = (extra: Record<string, unknown> = {}) => ({
 describe('keeper turn context', () => {
   it('reads a halted preparation as not working', () => {
     const rejected = decodeTurnPreparation({ phase: 'context', state: 'rejected', turn_ref: null })
-    expect(rejected).toEqual({ phase: 'context', state: 'rejected' })
+    expect(rejected).toEqual({ phase: 'context', state: 'rejected', started_at_unix: null })
     expect(preparationHalted(rejected)).toBe(true)
-    expect(preparationHaltedLabel({ phase: 'context', state: 'rejected' })).toBe('컨텍스트 준비 거절')
+    expect(preparationHaltedLabel({ phase: 'context', state: 'rejected', started_at_unix: null })).toBe('컨텍스트 준비 거절')
     expect(preparationHalted(decodeTurnPreparation({ phase: 'tools', state: 'active' }))).toBe(false)
     expect(preparationHalted(decodeTurnPreparation({ phase: 'tools', state: 'prepared' }))).toBe(false)
     expect(decodeTurnPreparation({ phase: 'tools', state: 'exploded' })).toBeNull()
+  })
+
+  it('reads since when a preparation step has run, and no time from a frame that does not say', () => {
+    const step = { phase: 'workspace_memory', turn_ref: null, state: 'active', finished_at_unix: null, elapsed_ns: null }
+    expect(decodeTurnPreparation({ ...step, started_at_unix: 40.5 })).toEqual({
+      phase: 'workspace_memory', state: 'active', started_at_unix: 40.5,
+    })
+    expect(decodeTurnPreparation(step)?.started_at_unix).toBeNull()
+    expect(decodeTurnPreparation({ ...step, started_at_unix: '40' })?.started_at_unix).toBeNull()
+    expect(decodeTurnPreparation({ ...step, started_at_unix: Number.POSITIVE_INFINITY })?.started_at_unix).toBeNull()
+  })
+
+  it('says a preparation phase in its word, and one it has no word for as the server wrote it', () => {
+    expect(preparationPhaseLabel('workspace_memory')).toBe('작업공간 메모리')
+    expect(preparationPhaseLabel('wiki')).toBe('위키')
+    expect(preparationPhaseLabel('phase_from_a_newer_server')).toBe('phase_from_a_newer_server')
   })
 
   it('reads why a turn started and its task', () => {

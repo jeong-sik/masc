@@ -1566,7 +1566,8 @@ let read_window_result ?keeper_name ~(window_hours : float) () :
     | None -> Error (Index_unavailable "keeper tool-call log store is not initialized")
     | Some store ->
       (match Dated_jsonl.month_dir_paths_newest_first_result store with
-       | Error detail -> Error (Index_unavailable detail)
+       | Error detail ->
+         Error (Index_unavailable (Dated_jsonl.read_error_to_string detail))
        | Ok _ ->
          let now = Time_compat.now () in
          let since_ts = now -. (window_hours *. Masc_time_constants.hour) in

@@ -110,7 +110,7 @@ let metric_context_of_json json =
   in
   (channel, field "channel_workspace_id", field "keeper_name")
 
-let record_validation_error_metric ~duration_ms ?json message =
+let record_validation_error_metric_of_json ~duration_ms ?json message =
   match json with
   | None ->
     Channel_gate_metrics.record_attempt
@@ -127,6 +127,13 @@ let record_validation_error_metric ~duration_ms ?json message =
       ~keeper
       ~duration_ms
       (Channel_gate_metrics.Validation_error message)
+
+let record_validation_error_metric ~duration_ms body_str message =
+  let json =
+    try Some (Yojson.Safe.from_string body_str)
+    with Yojson.Json_error _ -> None
+  in
+  record_validation_error_metric_of_json ~duration_ms ?json message
 
 let record_internal_error_metric ~duration_ms ?msg exn =
   match msg with
@@ -163,7 +170,7 @@ let handle_gate_message ~clock state request reqd =
         match Channel_gate.inbound_of_json json with
         | Error e ->
             let duration_ms = request_elapsed_ms request_started in
-            record_validation_error_metric ~duration_ms ~json e;
+            record_validation_error_metric_of_json ~duration_ms ~json e;
             Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
             parsed_msg := Some msg;
@@ -174,7 +181,7 @@ let handle_gate_message ~clock state request reqd =
       with
       | Yojson.Json_error _e ->
           let duration_ms = request_elapsed_ms request_started in
-          record_validation_error_metric ~duration_ms "invalid json";
+          record_validation_error_metric_of_json ~duration_ms "invalid json";
           Error (Channel_gate.Validation Channel_gate.Empty_content, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->

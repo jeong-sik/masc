@@ -74,7 +74,6 @@ let test_build_environment () =
       ~base_env
       ~driver:Mistral_vibe
       ~extra_strip_env:[ "EXTRA_SECRET" ]
-      ~agent_compaction:None
   in
   check (option string) "vibe strips MISTRAL_API_KEY" None
     (find_env "MISTRAL_API_KEY" vibe_env);
@@ -87,7 +86,6 @@ let test_build_environment () =
       ~base_env
       ~driver:Antigravity
       ~extra_strip_env:[]
-      ~agent_compaction:None
   in
   check (option string) "agy disables auto update" (Some "true")
     (find_env "AGY_CLI_DISABLE_AUTO_UPDATE" agy_env);
@@ -96,7 +94,6 @@ let test_build_environment () =
       ~base_env
       ~driver:Kimi_code
       ~extra_strip_env:[ "EXTRA_SECRET" ]
-      ~agent_compaction:None
   in
   check (option string) "kimi strips extra env" None
     (find_env "EXTRA_SECRET" kimi_env);
@@ -337,6 +334,14 @@ args = ["acp"]
 is-non-interactive = true
 timeout-s = 120.0
 
+[providers.muse_test]
+protocol = "acp"
+driver = "muse_code"
+command = "muse"
+args = ["acp"]
+is-non-interactive = true
+timeout-s = 120.0
+
 [models.m_kimi]
 api-name = "kimi-code/k3.1-pro"
 max-context = 400000
@@ -352,12 +357,18 @@ api-name = "gemini-4-neon-high"
 max-context = 400000
 agent-compaction-threshold = 0.95
 
+[models.m_muse]
+api-name = "muse-spark-1.3"
+max-context = 400000
+agent-compaction-threshold = 0.95
+
 [kimi_test.m_kimi]
 [vibe_test.m_vibe]
 [agy_test.m_agy]
+[muse_test.m_muse]
 
 [runtime]
-default = "agy_test.m_agy"
+default = "muse_test.m_muse"
 |}
   in
   let cfg =
@@ -369,11 +380,13 @@ default = "agy_test.m_agy"
            (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
   in
   let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
-  check (list string) "agy takes the point"
-    [ "agy_test.m_agy" ]
+  check (list string) "muse takes the point"
+    [ "muse_test.m_muse" ]
     (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes);
-  check (list string) "kimi and vibe are dropped with the reason"
-    [ "model \"m_kimi\" declares agent-compaction-threshold, but the kimi_code host takes \
+  check (list string) "agy, kimi and vibe are dropped with the reason"
+    [ "model \"m_agy\" declares agent-compaction-threshold, but the antigravity host takes \
+       no compaction point"
+    ; "model \"m_kimi\" declares agent-compaction-threshold, but the kimi_code host takes \
        no compaction point"
     ; "model \"m_vibe\" declares agent-compaction-threshold, but the mistral_vibe host takes \
        no compaction point"
@@ -474,39 +487,13 @@ let test_muse_refuses_unsupported_config_before_spawn () =
              ~native_posture:Runtime_native_tools.Native_read))))
 ;;
 
-let test_compaction_point_reaches_the_host () =
-  let point = Some { Runtime_acp_client.limit_tokens = 400_000; threshold = 0.95 } in
-  let base_env =
-    [| "PATH=/usr/bin"
-     ; "VIBE_AUTO_COMPACT_THRESHOLD=1000"
-     ; "AGY_CLI_AUTO_COMPACT_OVERRIDE=80%"
-    |]
-  in
-  let env ~agent_compaction driver =
-    Runtime_acp_client.For_testing.build_environment
-      ~base_env
-      ~driver
-      ~extra_strip_env:[]
-      ~agent_compaction
-  in
-  check (option string) "agy takes the token count over an inherited value" (Some "380000")
-    (find_env "AGY_CLI_AUTO_COMPACT_OVERRIDE" (env ~agent_compaction:point Antigravity));
-  check (option string) "without a point agy keeps the inherited value" (Some "80%")
-    (find_env "AGY_CLI_AUTO_COMPACT_OVERRIDE" (env ~agent_compaction:None Antigravity));
-  check (option string) "vibe is never given its global threshold" (Some "1000")
-    (find_env "VIBE_AUTO_COMPACT_THRESHOLD" (env ~agent_compaction:point Mistral_vibe));
-  check (array string) "muse takes the point as settings, not a variable"
-    (env ~agent_compaction:None Runtime_acp_client.Muse_code)
-    (env ~agent_compaction:point Runtime_acp_client.Muse_code);
-  check int "the count is rounded down to stay at or below the point" 380_000
-    (Runtime_acp_client.For_testing.compaction_tokens
-       { Runtime_acp_client.limit_tokens = 400_001; threshold = 0.95 });
-  check bool "kimi and vibe take no compaction point" false
-    (List.exists Runtime_acp_client.takes_compaction_point [ Kimi_code; Mistral_vibe ]);
-  check bool "muse and agy take one" true
-    (List.for_all
+let test_only_muse_takes_a_compaction_point () =
+  check bool "muse takes one" true
+    (Runtime_acp_client.takes_compaction_point Runtime_acp_client.Muse_code);
+  check bool "kimi, vibe and agy take none" false
+    (List.exists
        Runtime_acp_client.takes_compaction_point
-       [ Runtime_acp_client.Muse_code; Antigravity ])
+       [ Kimi_code; Mistral_vibe; Antigravity ])
 ;;
 
 let test_muse_argv_and_environment () =
@@ -591,7 +578,6 @@ let test_muse_argv_and_environment () =
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
       ~driver:Runtime_acp_client.Muse_code
       ~extra_strip_env:[ "META_API_KEY" ]
-      ~agent_compaction:None
   in
   check (option string) "update check stays off over an inherited value" (Some "1")
     (find_env "MUSE_NO_AUTO_UPDATE" env);
@@ -6061,9 +6047,9 @@ let () =
     ; ( "environment"
       , [ test_case "env strip and override" `Quick test_build_environment
         ; test_case
-            "the compaction point reaches the host"
+            "only muse takes a compaction point"
             `Quick
-            test_compaction_point_reaches_the_host
+            test_only_muse_takes_a_compaction_point
         ] )
     ; ( "argv_and_posture"
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment

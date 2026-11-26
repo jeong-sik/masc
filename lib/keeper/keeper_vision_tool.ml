@@ -581,8 +581,9 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Subscription_required _ | Spawn_refused _
      | Reasoning_effort_admission_failed _
      | Account_read_failed _
-     | Timeout { turn_accepted = false; _ }
-     (* A client that died during initialize, account/read or thread/start
+     | Timeout { turn_accepted = (Some false | None); _ }
+     (* [None] is unreachable for Codex producers and maps like [Some false].
+        A client that died during initialize, account/read or thread/start
         submitted no turn, so it owes the walk nothing and the declared media
         fallback may still be tried. An exit after acceptance is the opposite:
         the turn may have committed effects upstream. *)
@@ -593,7 +594,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
      | Turn_interrupted | Runtime_shutting_down
      | Process_exited { turn_accepted = true; _ }
-     | Timeout { turn_accepted = true; _ } -> false)
+     | Timeout { turn_accepted = Some true; _ } -> false)
   | Claude_failure error ->
     (match error with
      | Subscription_required _ | Spawn_refused _
@@ -634,7 +635,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_refused _
       | Reasoning_effort_admission_failed _
       | Account_read_failed _
-      | Timeout { turn_accepted = false; _ }
+      | Timeout { turn_accepted = (Some false | None); _ }
       | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
   | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_refused _
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
@@ -653,7 +654,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       ( Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
       | Unsupported_server_request _ | Turn_failed _ | Stopped_by_host _
       | Turn_interrupted | Runtime_shutting_down | Process_exited _
-      | Timeout { turn_accepted = true; _ }
+      | Timeout { turn_accepted = Some true; _ }
       | Context_window_exceeded { tool_effect_attempted = true; _ })
   | Claude_failure
       ( Protocol_error _ | Unsupported_control_request _ | Turn_transport_interrupted _

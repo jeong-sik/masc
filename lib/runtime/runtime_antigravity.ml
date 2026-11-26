@@ -321,7 +321,7 @@ type error = Protocol.error =
       { count : int option
       ; ceiling : int
       }
-  | Timeout of float
+  | Timeout of Runtime_timeout_payload.t
 
 exception Runtime_error of error
 
@@ -362,7 +362,7 @@ let error_to_string = function
     Printf.sprintf
       "Antigravity CLI file usage was unobservable under system fd pressure; the turn was failed at the %d-file ceiling rather than risk ENFILE (#43259)"
       ceiling
-  | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
+  | Timeout { seconds; _ } -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -1111,7 +1111,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
        process_settled := true;
        raise exn
      | Idle_timeout seconds ->
-       abort_with_runtime_error (Timeout seconds)
+       abort_with_runtime_error (Timeout (Runtime_timeout_payload.of_seconds seconds))
      | Eio.Time.Timeout as exn -> raise exn
      | Runtime_error _ as exn -> raise exn
      | exn ->
@@ -1168,7 +1168,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
              ~on_conversation_ready
              ~on_stream_event ~on_terminal_received))
     with
-    | Idle_timeout seconds -> Error (Timeout seconds)
+    | Idle_timeout seconds -> Error (Timeout (Runtime_timeout_payload.of_seconds seconds))
     | Runtime_cli_spawn_gate.Slot_timeout { waited_s; limit_s } ->
       (* The gate was full for the whole budget: pressure that passes, not a
          refusal of this argv. *)

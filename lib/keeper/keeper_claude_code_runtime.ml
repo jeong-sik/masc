@@ -579,7 +579,7 @@ let claude_error_to_core_error ?account = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })
-  | Runtime_claude_code.Timeout seconds ->
+  | Runtime_claude_code.Timeout { seconds; _ } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
          { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds

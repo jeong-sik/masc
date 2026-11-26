@@ -871,7 +871,9 @@ let codex_error_to_core_error = function
      stays purely descriptive of what the provider reported. *)
   | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } as error ->
     Agent_core.Error.Provider (turn_failure_to_provider_error error ~detail codex_error_info)
-  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = (Some false | None); _ } ->
+    (* Codex producers always set [Some]; [None] is unreachable here and maps
+       like [Some false] to keep the match total. *)
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
          { message =
@@ -883,7 +885,7 @@ let codex_error_to_core_error = function
   (* Keep timeout evidence available to candidate backpressure for the next
      turn. [observe_failed_dispatch] records the ambiguous dispatch separately,
      so the driver's effect fence still forbids replay within this turn. *)
-  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = true } ->
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = Some true; _ } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
          { message =
@@ -946,8 +948,11 @@ let recovery_failure_of_client_error = function
       { tool_effect_attempted; _ } ->
     (* Same admission rule as the Claude Code runtime: an input the provider
        proved over capacity must not be auto-replayed next cycle. The Codex
-       error carries only the tool-effect axis, so an observed tool effect
-       fences and everything else is a floor-exhausted rejection. *)
+       error carries [response_emitted] for parity but the fence deliberately
+       reads only the tool-effect axis, so an observed tool effect fences and
+       everything else is a floor-exhausted rejection. Adopting the second
+       axis here would widen the fence; that is left as an explicit decision,
+       not a silent default. *)
     Keeper_official_client_session_store.Input_rejected
       (if tool_effect_attempted
        then Keeper_official_client_session_store.Effect_fenced
@@ -1032,10 +1037,10 @@ let native_posture_note = function
    provider evidence. Setup failures submitted no turn and remain rotatable. *)
 let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Turn_input_write_failed _
-  | Runtime_codex_app_server.Timeout { turn_accepted = true; _ }
+  | Runtime_codex_app_server.Timeout { turn_accepted = Some true; _ }
   | Runtime_codex_app_server.Process_exited { turn_accepted = true; _ } ->
     observe_transport_uncertain ()
-  | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Timeout { turn_accepted = (Some false | None); _ }
   | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Account_read_failed _

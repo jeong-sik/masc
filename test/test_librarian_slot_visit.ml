@@ -349,16 +349,16 @@ let samples =
   ; at codex "Subscription_required" (Codex.Subscription_required "")
   ; at codex "Unsupported_server_request" (Codex.Unsupported_server_request "")
   ; at codex "Context_window_exceeded" ~case:"tool_effect_attempted = false"
-      (Codex.Context_window_exceeded { message = ""; tool_effect_attempted = false })
+      (Codex.Context_window_exceeded { message = ""; tool_effect_attempted = false; response_emitted = false })
   ; at codex "Context_window_exceeded" ~case:"tool_effect_attempted = true"
-      (Codex.Context_window_exceeded { message = ""; tool_effect_attempted = true })
+      (Codex.Context_window_exceeded { message = ""; tool_effect_attempted = true; response_emitted = false })
   ; at codex "Turn_failed" ~case:"codex_error_info = None"
       (Codex.Turn_failed { detail = ""; codex_error_info = None })
   ; at codex "Stopped_by_host" (Codex.Stopped_by_host host_stop)
   ; at codex "Turn_interrupted" Codex.Turn_interrupted
   ; at codex "Runtime_shutting_down" Codex.Runtime_shutting_down
   ; at codex "Process_exited" (Codex.Process_exited { detail = ""; turn_accepted = false })
-  ; at codex "Timeout" (Codex.Timeout { seconds = 0.; turn_accepted = false })
+  ; at codex "Timeout" (Codex.Timeout (Runtime_timeout_payload.of_codex ~seconds:0. ~turn_accepted:false))
   ; at codex_info "Session_budget_exceeded" Info.Session_budget_exceeded
   ; at codex_info "Usage_limit_exceeded" Info.Usage_limit_exceeded
   ; at codex_info "Rate_limit_exceeded" Info.Rate_limit_exceeded
@@ -405,7 +405,7 @@ let samples =
          { api_error_status = None; block = Rate_throttled; tool_effect_attempted = false; response_emitted = false })
   ; at claude "Process_exited" (Claude.Process_exited { detail = ""; turn_admitted = false })
   ; at claude "Unhandled_exception" (Claude.Unhandled_exception "")
-  ; at claude "Timeout" (Claude.Timeout 0.)
+  ; at claude "Timeout" (Claude.Timeout (Runtime_timeout_payload.of_seconds 0.))
   ; at antigravity "Invalid_config" (Antigravity.Invalid_config "")
   ; at antigravity "Spawn_refused" (Antigravity.Spawn_refused Process_eio.Empty_argv)
   ; at antigravity "Spawn_capacity_busy" (Antigravity.Spawn_capacity_busy { waited_s = 0.; limit_s = 0. })
@@ -448,7 +448,7 @@ let samples =
   ; at antigravity "Process_exited" (Antigravity.Process_exited "")
   ; at antigravity "Unhandled_exception" (Antigravity.Unhandled_exception "")
   ; at antigravity "Child_fd_ceiling_exceeded" (Antigravity.Child_fd_ceiling_exceeded { count = None; ceiling = 0 })
-  ; at antigravity "Timeout" (Antigravity.Timeout 0.)
+  ; at antigravity "Timeout" (Antigravity.Timeout (Runtime_timeout_payload.of_seconds 0.))
   ; plain "the ask's own fold" "a declared slot with no visit" (Visit.Unanswered Not_visited)
   ; plain "Exact_lane_walk.walk" "an HTTP slot passed as Held" (Visit.Unanswered (Http Held))
   ; plain "Exact_lane_walk.walk" "a CLI slot passed as Seats_full" (Visit.Unanswered (Cli Cli_seats_full))

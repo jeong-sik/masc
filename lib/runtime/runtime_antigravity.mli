@@ -260,7 +260,7 @@ type error =
           workspace needs operator action, not retries). [None] means the
           sample itself hit EMFILE/ENFILE on a live child: system pressure,
           refused closed rather than risk ENFILE. *)
-  | Timeout of float
+  | Timeout of Runtime_timeout_payload.t
 
 val error_to_string : error -> string
 

@@ -481,7 +481,7 @@ type error =
       ; turn_admitted : bool
       }
   | Unhandled_exception of string
-  | Timeout of float
+  | Timeout of Runtime_timeout_payload.t
 
 exception Runtime_error of error
 
@@ -537,7 +537,7 @@ let error_to_string = function
     Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
       turn_admitted detail
   | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
-  | Timeout seconds ->
+  | Timeout { seconds; _ } ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
 
@@ -3317,7 +3317,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
              { detail = (if detail = "" then "stdout closed" else detail)
              ; turn_admitted = !turn_admitted
              })
-      | Idle_timeout seconds -> Error (Timeout seconds)
+      | Idle_timeout seconds -> Error (Timeout (Runtime_timeout_payload.of_seconds seconds))
       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
@@ -3351,7 +3351,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
           ~on_input_observation
           ~turn_admitted)))
   with
-  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Idle_timeout seconds -> Error (Timeout (Runtime_timeout_payload.of_seconds seconds))
   | Eio.Time.Timeout as exn -> raise exn
 ;;
 
@@ -3435,7 +3435,7 @@ let probe_subscription ~mgr ~clock ~cwd ~account config =
       read_subscription ~mgr ~cwd ~account config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Idle_timeout seconds -> Error (Timeout (Runtime_timeout_payload.of_seconds seconds))
   | Eio.Time.Timeout as exn -> raise exn
 ;;
 
@@ -3613,7 +3613,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     with
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Idle_timeout seconds -> Error (Timeout seconds)
+    | Idle_timeout seconds -> Error (Timeout (Runtime_timeout_payload.of_seconds seconds))
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->

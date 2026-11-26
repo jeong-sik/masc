@@ -110,7 +110,7 @@ type error =
       { count : int option
       ; ceiling : int
       }
-  | Timeout of float
+  | Timeout of Runtime_timeout_payload.t
 
 type wire_event =
   | Init of

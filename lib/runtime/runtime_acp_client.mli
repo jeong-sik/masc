@@ -568,10 +568,7 @@ type error =
       ; data : Yojson.Safe.t option
       ; refusal : Llm_provider.Retry.signal_refusal option
       }
-  | Timeout of
-      { stage : string
-      ; timeout_s : float
-      }
+  | Timeout of Runtime_timeout_payload.t
   | Process_exited of
       { detail : string
       ; stderr_tail : string

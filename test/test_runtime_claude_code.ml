@@ -508,7 +508,7 @@ let test_progress_resets_stream_idle_timeout () =
 let test_stream_idle_timeout_is_typed () =
   with_fixture [ Pause 0.2; Emit assistant; Emit result ] (fun path ->
     match run_fixture ~timeout_s:0.05 path with
-    | Error (Runtime_claude_code.Timeout seconds) ->
+    | Error (Runtime_claude_code.Timeout { seconds; _ }) ->
       check (float 0.001) "exact idle timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "silent Claude stream ignored its idle timeout")
@@ -555,7 +555,7 @@ let test_no_deadline_keeps_initialize_bounded () =
            ~no_turn_deadline:true
            path
        with
-       | Error (Runtime_claude_code.Timeout seconds) ->
+       | Error (Runtime_claude_code.Timeout { seconds; _ }) ->
          check (float 0.001) "admission timeout" 0.05 seconds
        | Error error -> fail (Runtime_claude_code.error_to_string error)
        | Ok _ -> fail "an unbounded turn disabled Claude initialization bounds")
@@ -677,7 +677,7 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
         ~on_turn_started_delay_s:0.2
         path
     with
-    | Error (Runtime_claude_code.Timeout seconds) ->
+    | Error (Runtime_claude_code.Timeout { seconds; _ }) ->
       check (float 0.001) "host callback timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "no-deadline turn made the host state callback unbounded")
@@ -691,7 +691,7 @@ let test_state_callback_timeout_is_typed () =
         ~on_session_ready_delay_s:0.2
         path
     with
-    | Error (Runtime_claude_code.Timeout seconds) ->
+    | Error (Runtime_claude_code.Timeout { seconds; _ }) ->
       check (float 0.001) "exact callback timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "blocking Claude callback ignored its timeout")

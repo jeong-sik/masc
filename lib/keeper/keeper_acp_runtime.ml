@@ -218,10 +218,16 @@ let acp_error_to_core_error = function
             ; error_type = Some (Printf.sprintf "rpc_%d" code)
             ; detail
             }))
-  | Acp.Timeout { stage; timeout_s } ->
+  | Acp.Timeout { seconds; stage = Some stage; _ } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
-         { message = Printf.sprintf "ACP timeout in %s after %.1fs" stage timeout_s
+         { message = Printf.sprintf "ACP timeout in %s after %.1fs" stage seconds
+         ; phase = None
+         })
+  | Acp.Timeout { seconds; _ } ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message = Printf.sprintf "ACP timeout after %.1fs" seconds
          ; phase = None
          })
   | Acp.Process_exited { detail; stderr_tail } ->

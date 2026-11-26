@@ -378,6 +378,7 @@ type error =
   | Context_window_exceeded of
       { message : string
       ; tool_effect_attempted : bool
+      ; response_emitted : bool
       }
   | Turn_failed of
       { detail : string
@@ -390,10 +391,7 @@ type error =
       { detail : string
       ; turn_accepted : bool
       }
-  | Timeout of
-      { seconds : float
-      ; turn_accepted : bool
-      }
+  | Timeout of Runtime_timeout_payload.t
 
 (* These are named permissions profile ids, which the app-server keeps in a
    different value space from sandbox modes. [ThreadStartParams] carries both
@@ -486,7 +484,9 @@ let error_to_string = function
     "Codex authentication required: " ^ detail
   | Unsupported_server_request method_ ->
     "Codex app-server requested unsupported host action: " ^ method_
-  | Context_window_exceeded { message; tool_effect_attempted } ->
+  | Context_window_exceeded { message; tool_effect_attempted; _ } ->
+    (* The [response_emitted] axis is carried in the typed value for parity
+       with the other adapters but is not rendered here, as before. *)
     Printf.sprintf
       "Codex app-server context window exceeded (tool_effect_attempted=%b): %s"
       tool_effect_attempted
@@ -501,13 +501,11 @@ let error_to_string = function
   | Process_exited { detail; turn_accepted } ->
     Printf.sprintf "Codex app-server exited before completion (turn_accepted=%b): %s"
       turn_accepted detail
-  | Timeout { seconds; turn_accepted } ->
-    if turn_accepted
-    then
-      Printf.sprintf
-        "Codex app-server stream was idle for %.3fs after turn/start was accepted"
-        seconds
-    else Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
+  | Timeout { seconds; turn_accepted = Some true; _ } ->
+    Printf.sprintf
+      "Codex app-server stream was idle for %.3fs after turn/start was accepted"
+      seconds
+  | Timeout { seconds; _ } -> Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
 ;;
 
 (* Every constructor is listed so a new [codexErrorInfo] value or a new
@@ -1440,20 +1438,20 @@ let codex_error_info_of_json ~message json =
     unrecognized
 ;;
 
-let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
+let turn_error_of_fields ~tool_effect_attempted ~response_emitted ~message error_fields =
   let detail = turn_error_detail ~message error_fields in
   match List.assoc_opt "codexErrorInfo" error_fields with
   | None | Some `Null ->
     if wrapped_context_window_error message
-    then Context_window_exceeded { message; tool_effect_attempted }
+    then Context_window_exceeded { message; tool_effect_attempted; response_emitted }
     else Turn_failed { detail; codex_error_info = None }
   | Some json ->
     (match codex_error_info_of_json ~message json with
-     | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
+     | Context_window -> Context_window_exceeded { message; tool_effect_attempted; response_emitted }
      | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
 ;;
 
-let turn_error ~tool_effect_attempted fields =
+let turn_error ~tool_effect_attempted ~response_emitted fields =
   match List.assoc_opt "error" fields with
   | Some (`Assoc error_fields) ->
     let message =
@@ -1462,7 +1460,7 @@ let turn_error ~tool_effect_attempted fields =
         String.trim message
       | _ -> "turn failed without a typed error message"
     in
-    turn_error_of_fields ~tool_effect_attempted ~message error_fields
+    turn_error_of_fields ~tool_effect_attempted ~response_emitted ~message error_fields
   | Some _ | None ->
     Turn_failed
       { detail = "turn failed without an error object"; codex_error_info = None }
@@ -1504,6 +1502,18 @@ let unfinished_message_text streamed_texts key =
     Option.map Buffer.contents (Hashtbl.find_opt streamed_texts.buffers key)
 ;;
 
+(* The [response_emitted] axis for [Context_window_exceeded], derived from
+   state already observed on this turn: a non-blank final text, any streamed
+   visible text, or a completed assistant message. Not a new guess. *)
+let response_emitted_of ~seen_final streamed_texts =
+  (match seen_final with
+   | Some text when String.trim text <> "" -> true
+   | Some _ | None -> false)
+  || streamed_texts.assistant_message_completed
+  || (Hashtbl.to_seq_values streamed_texts.buffers
+      |> Seq.exists (fun buffer -> String.trim (Buffer.contents buffer) <> ""))
+;;
+
 (* The reply. A final answer comes first: the terminal list's newest, then
    [seen_final], the newest [item/completed] one. Otherwise the newest message
    that is not commentary and not blank is the reply, completed or not:
@@ -1536,7 +1546,12 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_tex
     else
       let* status = required_string stage "status" turn_fields in
       match status with
-      | "failed" -> Error (turn_error ~tool_effect_attempted turn_fields)
+      | "failed" ->
+        Error
+          (turn_error
+             ~tool_effect_attempted
+             ~response_emitted:(response_emitted_of ~seen_final streamed_texts)
+             turn_fields)
       | "interrupted" -> Error Turn_interrupted
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
@@ -1918,7 +1933,10 @@ let with_turn_dispatch io ~terminal_tools_closed
               | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
               | Idle_timeout seconds ->
                 close_delivery ();
-                stopped := Some (Timeout {seconds; turn_accepted = true});
+                stopped :=
+                  Some
+                    (Timeout
+                       (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:true));
                 retain ()
               | exn ->
                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
@@ -2392,6 +2410,7 @@ let rec await_turn_terminal io ~terminal_tools_closed ~tools ~tool_call_count ~t
       Error
         (turn_error_of_fields
            ~tool_effect_attempted:!tool_effect_attempted
+           ~response_emitted:(response_emitted_of ~seen_final streamed_texts)
            ~message
            error_fields)
   | Notification { method_ = "turn/completed"; params } ->
@@ -2562,7 +2581,10 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
   let* permissions_profile = permissions_profile_of_posture config.native in
   let requested = reasoning_effort in
   let admission ~model f =
-    (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
+    (try
+       f ()
+     with Idle_timeout seconds ->
+       Error (Timeout (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:false)))
     |> Result.map_error (function
       | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
       | (Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Account_read_failed _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
@@ -2720,11 +2742,11 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
   io.set_receive_phase Model_turn;
   let* turn =
     match await_response io ~id:turn_request_id ~method_:"turn/start" with
-    | Error (Timeout { seconds; turn_accepted = _ }) ->
+    | Error (Timeout { seconds; _ }) ->
       (* The request has been written. A missing response cannot prove that
          the app-server rejected it, so rotating here could duplicate a turn
          that is already executing upstream. *)
-      Error (Timeout { seconds; turn_accepted = true })
+      Error (Timeout (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:true))
     | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_refused _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Account_read_failed _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _)))))))))))))) | Ok _) as response -> response
   in
   let* turn_id = parse_turn_start turn in
@@ -3023,7 +3045,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
       | Idle_timeout seconds ->
         (* The transport cannot know whether turn/start was already accepted;
            the entry points rewrap with the observed turn state. *)
-        Error (Timeout { seconds; turn_accepted = false })
+        Error (Timeout (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:false))
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
@@ -3182,7 +3204,7 @@ let probe_metadata ~label ~mgr ~clock ~cwd ~account config protocol =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds ->
       (* The probe never starts a turn. *)
-      Error (Timeout { seconds; turn_accepted = false })
+      Error (Timeout (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:false))
     | Eio.Time.Timeout as exn -> raise exn
     (* A refusal before the child exists returns [Spawn_refused] from
        [with_spawned_client]; what reaches here came from a running client. *)
@@ -3293,7 +3315,9 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
           | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Idle_timeout seconds ->
-            Error (Timeout { seconds; turn_accepted = !turn_accepted })
+            Error
+              (Timeout
+                 (Runtime_timeout_payload.of_codex ~seconds ~turn_accepted:!turn_accepted))
           | Eio.Time.Timeout as exn -> raise exn
           | exn ->
             Llm_provider.Reserved_exn.reraise_if_reserved exn;
@@ -3302,12 +3326,14 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
                possibly after turn/start was accepted (#28072). *)
             Error (Protocol_error { stage = "runtime boundary"; detail = Printexc.to_string exn }))
        with
-       | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
+       | Error (Timeout { seconds; turn_accepted = maybe_ambiguous; _ }) ->
+         (* Codex producers always set [Some]; [None] is unreachable and
+            maps to [false] to keep the match total. *)
          Error
            (Timeout
-              { seconds
-              ; turn_accepted = dispatch_ambiguous || !turn_accepted
-              })
+              (Runtime_timeout_payload.of_codex
+                 ~seconds
+                 ~turn_accepted:(Option.value ~default:false maybe_ambiguous || !turn_accepted)))
        (* A client that dies during initialize, account/read or thread/start
           submitted no turn, so the next candidate may still be tried. Only
           the entry point knows which of the two happened. *)

@@ -791,10 +791,7 @@ type error =
       ; data : Yojson.Safe.t option
       ; refusal : Llm_provider.Retry.signal_refusal option
       }
-  | Timeout of
-      { stage : string
-      ; timeout_s : float
-      }
+  | Timeout of Runtime_timeout_payload.t
   | Process_exited of
       { detail : string
       ; stderr_tail : string
@@ -849,8 +846,9 @@ let error_to_string = function
          code
          message
          (bounded_redacted_json_summary json))
-  | Timeout { stage; timeout_s } ->
-    Printf.sprintf "ACP timeout in %s after %.1fs" stage timeout_s
+  | Timeout { seconds; stage = Some stage; _ } ->
+    Printf.sprintf "ACP timeout in %s after %.1fs" stage seconds
+  | Timeout { seconds; _ } -> Printf.sprintf "ACP timeout after %.1fs" seconds
   | Process_exited { detail; stderr_tail } ->
     let tail = String.trim stderr_tail in
     if tail = ""
@@ -2880,7 +2878,7 @@ let await_promise_with_idle_timeout
       then (
         match Eio.Promise.peek promise with
         | Some resp -> Ok resp
-        | None -> Error (Timeout { stage; timeout_s = idle_timeout_s }))
+        | None -> Error (Timeout (Runtime_timeout_payload.of_acp ~stage ~timeout_s:idle_timeout_s)))
       else (
         let slice = Float.max 0.001 remaining in
         match
@@ -2894,7 +2892,7 @@ let await_promise_with_idle_timeout
              if Atomic.get in_flight_work > 0
              then wait ()
              else if elapsed_since_last_activity_s () >= idle_timeout_s
-             then Error (Timeout { stage; timeout_s = idle_timeout_s })
+             then Error (Timeout (Runtime_timeout_payload.of_acp ~stage ~timeout_s:idle_timeout_s))
              else wait ()))
   in
   wait ()
@@ -2966,7 +2964,7 @@ let rpc_call_decoded
        | Error `Timeout ->
          (match Eio.Promise.peek promise with
           | Some resp -> Ok resp
-          | None -> Error (Timeout { stage = method_name; timeout_s = secs }))))
+          | None -> Error (Timeout (Runtime_timeout_payload.of_acp ~stage:method_name ~timeout_s:secs)))))
 ;;
 
 let send_json_bounded t ~timeout_s json =
@@ -3001,7 +2999,7 @@ let send_json_bounded t ~timeout_s json =
   | Ok res -> res
   | Error `Timeout ->
     close_internal ~await_reap:false t;
-    Error (Timeout { stage = "stdin_write"; timeout_s })
+    Error (Timeout (Runtime_timeout_payload.of_acp ~stage:"stdin_write" ~timeout_s))
 ;;
 
 (* Send [session/cancel] synchronously under [write_mutex] with a strict write

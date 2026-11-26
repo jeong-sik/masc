@@ -1355,7 +1355,7 @@ let test_stored_web_page_is_read_only_through_its_own_fetch () =
           let other =
             match VAT.create ~config ~producer ~submitted_evidence:[] with
             | Error reason -> Alcotest.failf "second surface creation failed: %s" reason
-            | other -> other
+            | Ok other -> other
           in
           let fetches_so_far = !http_calls in
           refused_on other (`Assoc [ "sha256", `String sha256 ])

@@ -95,6 +95,7 @@ import {
   streamNoticePrefix,
 } from './chat-stream-notices'
 import {
+  hasOpenToolCall,
   openActivityLeavesMasc,
   openActivityPhrase,
   openActivityReachLabel,
@@ -2559,6 +2560,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const liveToolName = activeTool ?? effectivePreview?.last_tool ?? null
   const isLiveToolInFlight = turnAnimating && activeTool !== null
     && (snapshotLive || matchedPreview?.preview.activity === 'tool')
+  // The last tool the turn observed is a call the model started, a call that
+  // runs, or one that returned. With the list of open work its rows say which
+  // call runs and where each stands, so the pill names only a tool no row
+  // names: the one that returned. A server from before the list has the pill alone.
+  const lastToolPill = liveToolName === null
+    ? null
+    : openWork === null
+      ? `${isLiveToolInFlight ? '실행 중' : '최근 도구'} · ${liveToolName}`
+      : hasOpenToolCall(openWork, liveToolName) ? null : `최근 도구 · ${liveToolName}`
   const workedAt = lastWorked ? new Date(lastWorked.atUnix * 1000) : null
 
   const renderToolPreSection = (
@@ -3351,11 +3361,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   </div>
                 </div>
                 <div class="kp-hierarchy-rail">
-                  ${liveToolName && html`
+                  ${lastToolPill && html`
                     <div class="kp-pill-row">
-                      <span class="kp-pill" data-tone="info">
-                        ${isLiveToolInFlight ? '실행 중' : '최근 도구'} · ${liveToolName}
-                      </span>
+                      <span class="kp-pill" data-tone="info">${lastToolPill}</span>
                     </div>
                   `}
                   ${effectivePreview?.status_text && html`

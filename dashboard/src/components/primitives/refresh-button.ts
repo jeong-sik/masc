@@ -26,6 +26,9 @@ export interface RefreshButtonProps {
   readonly onRefresh: () => Promise<unknown>
   /** Names what is read again when "새로고침" alone would be ambiguous. */
   readonly label?: string
+  /** A read the screen started itself, on mount or after a change, is out.
+   *  The button says so as it does for a press, and holds as still. */
+  readonly reading?: boolean
 }
 
 const DEFAULT_LABEL = '새로고침'
@@ -48,6 +51,7 @@ export function RefreshButton(props: RefreshButtonProps) {
   const lastPress = useRef(0)
 
   const label = props.label ?? DEFAULT_LABEL
+  const shownBusy = busy || props.reading === true
 
   const press = async () => {
     lastPress.current += 1
@@ -71,13 +75,13 @@ export function RefreshButton(props: RefreshButtonProps) {
     <button
       type="button"
       class="btn-ghost refresh-btn"
-      aria-busy=${busy}
-      title=${busy ? REFRESH_AGAIN_HINT : undefined}
+      aria-busy=${shownBusy}
+      title=${shownBusy ? REFRESH_AGAIN_HINT : undefined}
       data-label=${label}
       data-busy-label=${REFRESH_BUSY_LABEL}
       onClick=${() => void press()}
     >
-      ${busy ? REFRESH_BUSY_LABEL : label}
+      ${shownBusy ? REFRESH_BUSY_LABEL : label}
     </button>
   `
 }

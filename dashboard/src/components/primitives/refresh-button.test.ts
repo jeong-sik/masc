@@ -205,6 +205,22 @@ describe('components/primitives RefreshButton', () => {
     expect(shownLabel()).toBe('새로고침')
   })
 
+  it('says a read the screen started itself is in flight, and stops when the screen says it ended', async () => {
+    const show = async (reading: boolean): Promise<void> => {
+      await act(() => {
+        render(html`<${RefreshButton} onRefresh=${() => Promise.resolve()} reading=${reading} />`, container)
+      })
+    }
+
+    await show(true)
+    expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
+    expect(button().getAttribute('aria-busy')).toBe('true')
+
+    await show(false)
+    expect(shownLabel()).toBe('새로고침')
+    expect(button().getAttribute('aria-busy')).toBe('false')
+  })
+
   it('hands both labels to CSS so the button is as wide as the wider one', async () => {
     await mount(() => Promise.resolve(), '스키마 새로고침')
     expect(shownLabel()).toBe('스키마 새로고침')

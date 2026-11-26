@@ -518,13 +518,30 @@ type active_turn_binding =
   ; on_tool_finished : call_id:string -> unit
   }
 
+(* The folder a Keeper's host runs in, decided once per turn
+   ({!native_cwd_of_posture}). The pool key carries it, so every spawn site
+   reads the same answer and none has to look at the posture again. *)
+type host_cwd =
+  | Isolated_per_spawn
+  (* [Native_none]: the host gets a new empty folder each time it spawns. *)
+  | Keeper_folder of string
+  (* [Native_read] and [Native_full]: the Keeper's own folder
+     ({!Keeper_native_cwd.resolve}). *)
+
+let equal_host_cwd a b =
+  match a, b with
+  | Isolated_per_spawn, Isolated_per_spawn -> true
+  | Keeper_folder a, Keeper_folder b -> String.equal a b
+  | Isolated_per_spawn, Keeper_folder _ | Keeper_folder _, Isolated_per_spawn -> false
+;;
+
 module Pool_key = struct
   type t =
     { keeper_name : string
     ; runtime_id : string
     ; tool_surface_sha256 : string
     ; process_config_sha256 : string
-    ; cwd : string
+    ; cwd : host_cwd
     ; dangerously_skip_permissions : bool
     }
 
@@ -533,7 +550,7 @@ module Pool_key = struct
     && String.equal a.runtime_id b.runtime_id
     && String.equal a.tool_surface_sha256 b.tool_surface_sha256
     && String.equal a.process_config_sha256 b.process_config_sha256
-    && String.equal a.cwd b.cwd
+    && equal_host_cwd a.cwd b.cwd
     && Bool.equal a.dangerously_skip_permissions b.dangerously_skip_permissions
   ;;
 
@@ -812,14 +829,15 @@ let start_mcp_bridge ~driver ~keeper_name ~sw ~env ~pinned_tool_specs ~turn_slot
     ()
 ;;
 
-let discover_skills_dirs ~base_path (config : Runtime_execution.acp_client) =
-  let candidates =
-    config.skills_dirs
-    @ [ Filename.concat base_path ".masc/skills"
-      ; Filename.concat base_path ".agents/skills"
-      ]
-  in
-  List.filter (fun dir -> String.trim dir <> "" && Sys.file_exists dir) candidates
+(* The folders a [Native_read] or [Native_full] host gets beside its cwd: the
+   ones the operator declared in [skills-dirs]. Vibe takes them as workspace
+   roots, so it reads them and, at [Native_full], writes in them without
+   asking (RFC-vibe-holds-the-native-posture-with-its-own-tool-allowlist);
+   Kimi takes them as [--skills-dir]. base_path holds the operator's own
+   skills, so it adds no folder here, as on the Codex path (#39444). Keepers
+   get MASC's skill catalog through [keeper_skill] at every posture. *)
+let declared_skills_dirs (config : Runtime_execution.acp_client) =
+  List.filter (fun dir -> String.trim dir <> "" && Sys.file_exists dir) config.skills_dirs
   |> List.sort_uniq String.compare
 ;;
 
@@ -852,11 +870,10 @@ let spawn_persistent_entry
          then Eio.Promise.resolve resolve_ready (Error Acp.Client_closed)
          else (
            let acp_cwd_res =
-             match native_posture with
-             | Runtime_native_tools.Native_none ->
+             match key.cwd with
+             | Isolated_per_spawn ->
                Acp.create_isolated_workspace ~sw:keeper_sw ~prefix:("keeper-" ^ key.keeper_name) ()
-             | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
-               Ok key.cwd
+             | Keeper_folder dir -> Ok dir
            in
            match acp_cwd_res with
            | Error err -> Eio.Promise.resolve resolve_ready (Error err)
@@ -1999,14 +2016,14 @@ let seed_past_max_context
         | Some _ | None -> { read with Keeper_carried_front.seed = Some moved_to })
 ;;
 
-(* The cwd a [Native_read] or [Native_full] host runs in, by the rule Codex
-   follows ({!Keeper_native_cwd}): never base_path. A [Native_none] host runs
-   in an empty folder made when it spawns, and its pool key keeps base_path.
-   A posture the caller required has no Keeper file to read a sandbox from,
-   as on the Codex path. *)
+(* Where a Keeper's host runs. A [Native_none] host gets an empty folder each
+   time it spawns. A [Native_read] or [Native_full] host runs in the Keeper's
+   own folder, by the rule Codex follows ({!Keeper_native_cwd}): never
+   base_path. A posture the caller required has no Keeper file to read a
+   sandbox from, as on the Codex path. *)
 let native_cwd_of_posture ~base_path ~keeper_name ~required_native_posture native_posture =
   match (native_posture : Runtime_native_tools.posture) with
-  | Native_none -> Ok base_path
+  | Native_none -> Ok Isolated_per_spawn
   | Native_read | Native_full ->
     let* sandbox_profile =
       match (required_native_posture : Runtime_native_tools.posture option) with
@@ -2022,6 +2039,7 @@ let native_cwd_of_posture ~base_path ~keeper_name ~required_native_posture nativ
         Ok defaults.sandbox_profile
     in
     Keeper_native_cwd.resolve ~base_path ~keeper_name ~sandbox_profile Keeper_native_cwd.Acp
+    |> Result.map (fun dir -> Keeper_folder dir)
     |> Result.map_error (config_error ~field:"acp.native_workspace")
 ;;
 
@@ -2581,7 +2599,7 @@ let run_without_lifecycle
     match native_posture with
     | Runtime_native_tools.Native_none -> []
     | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
-      discover_skills_dirs ~base_path config
+      declared_skills_dirs config
   in
   (* The point at which the host compacts during a turn, against the same limit
      the turn-end rollover reads. *)
@@ -3168,11 +3186,10 @@ let run_without_lifecycle
       (* Standalone test / non-owner domain fallback: turn-scoped switch. *)
       Eio.Switch.run (fun sw ->
         let* acp_cwd =
-          (match native_posture with
-           | Runtime_native_tools.Native_none ->
+          (match key.cwd with
+           | Isolated_per_spawn ->
              Acp.create_isolated_workspace ~sw ~prefix:("keeper-" ^ keeper_name) ()
-           | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
-             Ok key.cwd)
+           | Keeper_folder dir -> Ok dir)
           |> Result.map_error (fun err ->
             recovery_failure := recovery_failure_of_acp_error err;
             acp_error_to_core_error err)
@@ -3965,12 +3982,16 @@ module For_testing = struct
     start_mcp_bridge ~driver ~keeper_name ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
   ;;
 
+  type nonrec host_cwd = host_cwd =
+    | Isolated_per_spawn
+    | Keeper_folder of string
+
   type pool_key = Pool_key.t =
     { keeper_name : string
     ; runtime_id : string
     ; tool_surface_sha256 : string
     ; process_config_sha256 : string
-    ; cwd : string
+    ; cwd : host_cwd
     ; dangerously_skip_permissions : bool
     }
 

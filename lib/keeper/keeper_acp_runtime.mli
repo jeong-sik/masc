@@ -89,16 +89,19 @@ module For_testing : sig
   val acp_error_to_core_error : Runtime_acp_client.error -> Agent_core.Error.t
   val should_evict_persistent_child_on_error : Runtime_acp_client.error -> bool
 
+  (** The folder a Keeper's host runs in, as its pool key holds it. *)
+  type host_cwd =
+    | Isolated_per_spawn  (** A new empty folder each time the host spawns. *)
+    | Keeper_folder of string  (** The Keeper's own folder. *)
+
   val native_cwd_of_posture
     :  base_path:string
     -> keeper_name:string
     -> required_native_posture:Runtime_native_tools.posture option
     -> Runtime_native_tools.posture
-    -> (string, Agent_core.Error.t) result
-  (** The cwd a Keeper's host runs in at each posture: [base_path] stands in
-      for [Native_none], whose host makes an empty folder when it spawns; a
-      [Native_read] or [Native_full] host gets {!Keeper_native_cwd.resolve}
-      with [Acp]. *)
+    -> (host_cwd, Agent_core.Error.t) result
+  (** [Native_none] is [Isolated_per_spawn]. [Native_read] and [Native_full]
+      are the [Keeper_folder] {!Keeper_native_cwd.resolve} gives for [Acp]. *)
 
   val recovery_failure_of_acp_error
     :  Runtime_acp_client.error
@@ -269,7 +272,7 @@ module For_testing : sig
     ; runtime_id : string
     ; tool_surface_sha256 : string
     ; process_config_sha256 : string
-    ; cwd : string
+    ; cwd : host_cwd
     ; dangerously_skip_permissions : bool
     }
 

@@ -734,18 +734,25 @@ for line in sys.stdin:
 
 (* base_path is the operator's checkout, so an ACP host at read or full runs
    in the Keeper's private folder, the rule Codex follows (#39444). At none
-   the pool key keeps base_path: that host makes an empty folder when it
-   spawns. *)
+   the host gets a new empty folder each time it spawns. *)
 let test_acp_read_and_full_run_in_the_keepers_private_folder () =
+  let module Acp = Keeper_acp_runtime.For_testing in
+  let host_cwd =
+    testable
+      (fun fmt -> function
+         | Acp.Isolated_per_spawn -> Format.pp_print_string fmt "Isolated_per_spawn"
+         | Acp.Keeper_folder dir -> Format.fprintf fmt "Keeper_folder %S" dir)
+      ( = )
+  in
   let base_path = Filename.temp_dir "acp-native-cwd-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     let keeper_name = "keeper-a" in
     let cwd posture =
       match
-        Keeper_acp_runtime.For_testing.native_cwd_of_posture ~base_path ~keeper_name
+        Acp.native_cwd_of_posture ~base_path ~keeper_name
           ~required_native_posture:(Some posture) posture
       with
-      | Ok dir -> dir
+      | Ok cwd -> cwd
       | Error err -> fail (Agent_core.Error.to_string err)
     in
     let private_folder =
@@ -754,13 +761,13 @@ let test_acp_read_and_full_run_in_the_keepers_private_folder () =
         [ "official-clients"; "acp-workspaces"
         ; Agent_core_sha256.(to_hex (digest_string keeper_name)) ]
     in
-    check string "read runs in the Keeper's private folder" private_folder
+    check host_cwd "read runs in the Keeper's private folder" (Acp.Keeper_folder private_folder)
       (cwd Runtime_native_tools.Native_read);
-    check string "full runs in the same folder" private_folder
+    check host_cwd "full runs in the same folder" (Acp.Keeper_folder private_folder)
       (cwd Runtime_native_tools.Native_full);
     check int "the folder is the current user's alone" 0o700
       ((Unix.lstat private_folder).Unix.st_perm land 0o777);
-    check string "none keeps base_path in the pool key" base_path
+    check host_cwd "none spawns in a new empty folder each time" Acp.Isolated_per_spawn
       (cwd Runtime_native_tools.Native_none))
 ;;
 
@@ -1697,7 +1704,7 @@ let test_hook_selected_surface_pins_the_session_and_bridge () =
           ~native_posture:Runtime_native_tools.Native_none ~claim_plan prepared))) previous;
     let key : Acp.pool_key =
       { keeper_name = "surface"; runtime_id = "muse.fixture"; tool_surface_sha256 = digest;
-        process_config_sha256 = "fixed"; cwd = "fixed"; dangerously_skip_permissions = false } in
+        process_config_sha256 = "fixed"; cwd = Acp.Keeper_folder "fixed"; dangerously_skip_permissions = false } in
     let cached = Acp.Pool.find_opt pool key in
     check bool "reuses the child with the same pinned catalog" reuse (Option.is_some cached);
     let bridge = match cached with
@@ -1800,7 +1807,7 @@ let test_cancelled_turn_evicts_entry_and_recovers () =
     ; runtime_id = "antigravity_acp.gemini_4_neon_high"
     ; tool_surface_sha256 = "sha-v1"
     ; process_config_sha256 = "cfg-v1"
-    ; cwd = "/tmp/alice"
+    ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/alice"
     ; dangerously_skip_permissions = false
     }
   in
@@ -1941,7 +1948,7 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
     ; runtime_id = "antigravity_acp.gemini_4_neon_high"
     ; tool_surface_sha256 = "sha-1"
     ; process_config_sha256 = "cfg-1"
-    ; cwd = "/tmp/alice-a"
+    ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/alice-a"
     ; dangerously_skip_permissions = false
     }
   in
@@ -1950,7 +1957,7 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
     ; runtime_id = "kimi_acp.k3_1_pro"
     ; tool_surface_sha256 = "sha-bob"
     ; process_config_sha256 = "cfg-bob"
-    ; cwd = "/tmp/bob"
+    ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/bob"
     ; dangerously_skip_permissions = false
     }
   in
@@ -1981,14 +1988,14 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
       , { alice_base with
           runtime_id = "kimi_acp.k3_1_pro"
         ; tool_surface_sha256 = "sha-2"
-        ; cwd = "/tmp/alice-b"
+        ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/alice-b"
         }
       , make_fake_entry 4 )
     ; ( "dangerously_skip_permissions"
       , { alice_base with
           runtime_id = "kimi_acp.k3_1_pro"
         ; tool_surface_sha256 = "sha-2"
-        ; cwd = "/tmp/alice-b"
+        ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/alice-b"
         ; dangerously_skip_permissions = true
         }
       , make_fake_entry 5 )
@@ -1997,7 +2004,7 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
           runtime_id = "kimi_acp.k3_1_pro"
         ; tool_surface_sha256 = "sha-2"
         ; process_config_sha256 = "cfg-2"
-        ; cwd = "/tmp/alice-b"
+        ; cwd = Keeper_acp_runtime.For_testing.Keeper_folder "/tmp/alice-b"
         ; dangerously_skip_permissions = true
         }
       , make_fake_entry 6 )

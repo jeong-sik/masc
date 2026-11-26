@@ -116,7 +116,13 @@ an isolated child process and loopback HTTP MCP bridge. At native posture
 runs where a Codex Keeper does, never in the base path: the Keeper's sandbox
 host tree when its sandbox mounts one, otherwise
 `<base-path>/.masc/official-clients/acp-workspaces/<SHA-256 of the Keeper
-name>`, a `0700` folder every ACP driver of that Keeper shares. `driver` and
+name>`, a `0700` folder every ACP driver of that Keeper shares. At `read` and
+`full` the host also gets the `skills-dirs` folders, and no other: Kimi as
+`--skills-dir`, Vibe as session folders, Muse and Antigravity as session
+folders when they announce `additionalDirectories`. Vibe works in a session
+folder as in its cwd: at `read` it reads there without asking, at `full` it
+also writes there. Keepers get MASC's skill catalog through `keeper_skill` at
+every posture. `driver` and
 `is-non-interactive = true` are required; `account-home` is refused. Use
 `strip-env` when a host API-key variable must be removed so the client uses its
 subscription login (for example, `strip-env = ["MISTRAL_API_KEY"]` on `vibe-acp`
